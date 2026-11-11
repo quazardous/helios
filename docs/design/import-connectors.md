@@ -1,7 +1,7 @@
 # Import connectors: sources beyond folders and cards
 
 Status: design study (2026-11-11), **not decided**. Documentation only;
-nothing here is built. Choices for the owner are in section 6, each
+nothing here is built. Choices for the owner are in section 10, each
 with options A, B, C and a recommendation.
 
 The request (2026-11-11):
@@ -50,6 +50,27 @@ this note turns into a contract), [../extensions.md](../extensions.md)
   are not guaranteed to be the uploaded bytes, carry no hash and no
   size. No automatic import, no change feed. Google Takeout remains the
   only route to the originals.
+- **Standards** (section 5): the protocols (PTP, MTP), the card layout
+  (DCF) and the metadata (Exif, XMP, IPTC, MWG's reconciliation) are
+  standard and adopted as they are; **no shared import-plugin interface
+  exists**, so the connector trait, its plugin service and the hooks
+  are Helios's own. Devices go through one back end per platform:
+  libgphoto2 and libmtp on Linux, `Windows.Media.Import` and WPD on
+  Windows, ImageCaptureCore on macOS.
+- **Camera bodies** (section 6): a vault record per model and per
+  serial carries the body's colour profile pointer, lens matching, a
+  default style and import settings; an import attaches them by the
+  device's or the files' serial, the body over the model, and never
+  guesses between two bodies that write no serial.
+- **Lifecycle and hooks** (section 7): ten named stages from session
+  start to session end; observers read the bus, participants answer
+  with data (annotations, skip, veto, follow-up jobs) inside the
+  import's transaction, so undo covers them; plugins and agents reach
+  the same stages. Filter, deduplication, tags, bodies, stacks, backup,
+  the map job and thumbnails become subscribers.
+- **Contributed connectors** (section 8): one registry; an in-tree
+  module contributes a connector as folders and cards do, a plugin
+  through `import.source`; module path first.
 
 ## 1. What exists today
 
@@ -633,7 +654,445 @@ incremental by **content and item id** rather than by name and date
 (all of them), backup after import by strategy, never delete from the
 source (digiKam offers it; Helios does not).
 
-## 5. Slices
+## 5. Standards and frameworks
+
+The owner's question (2026-11-11): do photo-import connector standards
+already exist? Checked on 2026-11-11 against the sources listed at the
+end. In short: **the protocols, the card layout and the metadata are
+standard; the connector interface is not.** No open "media source
+plugin" interface is shared by photo applications; each application
+wraps the same protocols in its own code.
+
+### 5.1 What each standard is, and what Helios does with it
+
+| Standard or framework | What it is | Verdict for Helios |
+|---|---|---|
+| **PTP** (ISO 15740:2013, confirmed 2023), USB Still Image class | the protocol cameras speak over USB. A session gives `DeviceInfo` (Manufacturer, Model, DeviceVersion, **SerialNumber**), storages, object handles and `ObjectInfo` (file name, format, size, capture date, a thumbnail), and optionally `GetPartialObject` (a byte range) | **Adopt** its vocabulary in the device connector: the device identity is `DeviceInfo`'s make, model and serial; `ObjectInfo` fills `Item` before any fetch; `caps.resume` when the camera has `GetPartialObject`. Object handles are only valid within a session, so the item id is the storage plus the DCF path, not the handle. No hash: `claims: None` |
+| **PTP/IP** (CIPA) | PTP over TCP/IP, cameras on Wi-Fi | **Later**, through libgphoto2 (which speaks it for some bodies). Pairing differs per maker; not worth a connector of its own now |
+| **MTP** (USB-IF, version 1.1, April 2011) | Microsoft's extension of PTP for phones and players: object properties, and a 128-bit persistent unique object identifier (PUOID) | **Adopt** through libmtp on Linux and WPD on Windows: the PUOID, when the phone fills it, is the stable item id. No content hash; listings are slow; one client at a time |
+| **DCF** (CIPA DC-009 and JEITA CP-3461B, version 2.0, 2010) | the card layout: `DCIM/` at the root, folders `100ABCDE` to `999ABCDE`, files `ABCD0001` to `ABCD9999`, one "DCF object" being the files sharing a base name (JPEG, RAW, THM) | **Adopt** directly, as `Scan` already starts at `DCIM`: the base-name rule fills `Item.group` (pairs and THM files), the folder and file numbers feed `{frame}`. Numbers wrap at 9999 and repeat across cards, so names are never identity (content is) |
+| **Windows Portable Devices** (WPD, COM) and **WIA** | WPD is Windows's API for cameras, phones and players over PTP and MTP; WIA is the older imaging API, kept through a WIA-WPD compatibility layer. Windows 10 also has the **Photo Import API** (`Windows.Media.Import`): sources with Manufacturer, Model and SerialNumber, items with their siblings (RAW+JPEG) and sidecars | **Use per platform** on Windows, where libgphoto2 goes through libusb and fights the system driver (digiKam's maintainers say the same). `Windows.Media.Import` first (it already pairs siblings and sidecars), WPD where it falls short; both reachable from Rust through the `windows` crate (MIT or Apache-2.0). Whether a desktop process may call `Windows.Media.Import` is to be checked on a real machine. WIA: **not relevant** |
+| **ImageCaptureCore** (macOS) | Apple's framework for cameras and phones: `ICDeviceBrowser`, `ICCameraDevice` (with `serialNumberString`, nil when the device gives none), files with thumbnails, sidecars and downloads | **Use per platform** on macOS: the system's own camera daemon claims PTP devices, which is why gphoto2 is fragile there. iPhones appear here with their camera roll |
+| **libgphoto2** (LGPL-2.1+) | the open driver library for thousands of cameras, PTP and vendor protocols, PTP/IP for some | **Use** on Linux (as darktable, digiKam and Shotwell do), and as a fallback elsewhere |
+| **GVfs** (`gvfsd-gphoto2`, `gvfsd-mtp` and their volume monitors) and **KIO** (`kio-extras`: the `mtp:/` and `camera:/` workers) | the GNOME and KDE desktops expose cameras and phones as virtual file systems, GVfs also through FUSE under `/run/user/<uid>/gvfs` | **Not as a connector.** Reading the FUSE path works as a folder but loses the device identity and holds the device; a desktop mount is mostly an **obstacle**: libgphoto2 and libmtp cannot open a device GVfs holds (darktable's manual asks to unmount first; Shotwell has the same issue open). The device connector says "held by the desktop: release it" with a button that unmounts through GIO |
+| **Android MediaStore, Storage Access Framework, Photo Picker** | APIs for an application **running on the phone** | **Not relevant** to a desktop import: from a computer a phone is an MTP or PTP device (in PTP mode it shows only `DCIM` and `Pictures`). They matter only for a future Helios companion on Android, which would push through sync, not import |
+| **Exif** (CIPA DC-008, JEITA CP-3451; version 3.0, 2023) | the camera's metadata. Since 2.3 (2010): `BodySerialNumber`, `LensMake`, `LensModel`, `LensSerialNumber`, `LensSpecification`, `CameraOwnerName` | **Adopt**: the body serial and the owner name identify a body (section 6); the lens fields feed lens matching. The loader already reads the serial (`helios_load::Shot::serial`); the lens fields are to add |
+| **XMP** (ISO 16684-1; Adobe's specification part 3 for storage in files) | the metadata model and its serialisation; a sidecar is looked for beside the file, same base name. Adobe names it `NAME.xmp`, darktable `NAME.EXT.xmp` | **Adopt** as the vocabulary of `Item.metadata`: keys are XMP property names (`exif:DateTimeOriginal`, `tiff:Model`, `exifEX:BodySerialNumber`, `dc:subject`, `Iptc4xmpCore:Location`…) rather than names of our own, so connectors, importer values and the XMP writer speak one language (option C14). Both sidecar namings are read; Helios writes darktable's |
+| **IPTC Photo Metadata** (version 2024.1, December 2024) | descriptive and rights metadata (creator, copyright, location shown, people, digital source type), as XMP and as the legacy IIM block | **Adopt** for what connectors bring that files lack (a Google description, an album's place): mapped to IPTC properties, written as importer values |
+| **MWG guidelines** (Metadata Working Group, version 2.0, 2010; the group is inactive and the document survives in archives) | how to reconcile Exif, IPTC-IIM and XMP when they disagree: native Exif over its XMP copy, IIM over XMP when the IPTC digest shows IIM changed since, XMP otherwise; hierarchical keywords and face regions | **Adopt** as the read rule after a fetch, with one addition the guidelines lack: a connector's opinion ranks last, under all three (2.2) |
+| **DNG and DCP** (Adobe) | DNG is the open raw format; a DCP is a camera profile, tied to a camera by `UniqueCameraModelRestriction` (and optionally `ProfileCalibrationSignature`) | **Adopt the keying**: Lightroom and Camera Raw list only the DCPs whose restriction matches the raw's camera model, and their **raw defaults** are set per camera model, optionally per **serial number** and per ISO. Helios's calibration already keys by model with `@serial` (calibration.md, section 6); section 6 below extends the same layering to everything a body carries |
+| **lensfun** (library LGPL-3, database CC BY-SA 3.0) | the open database of lens corrections: a camera entry is maker and model as Exif writes them, a variant, a mount and a crop factor; a lens entry is maker, model, mount and the crop factor it was measured on | **Adopt** its matching: a body's camera key maps to a lensfun camera (mount, crop factor), which narrows the lens search; a body record may pin the lensfun camera when the name does not match (6.3) |
+
+### 5.2 What other applications use
+
+| Application | Cameras and phones | Profiles and lens data |
+|---|---|---|
+| **darktable** | libgphoto2 on every platform ("copy & import from camera", tethering); the camera must not be mounted by the desktop; folders otherwise | rawspeed matrices, ICC from a folder, lensfun and embedded corrections |
+| **digiKam** | an Import tool over libgphoto2 on Linux and macOS, or USB mass storage; on Windows no native back end yet (a WIA one is planned in its bug tracker), so mass storage only | lensfun |
+| **Shotwell** | libgphoto2 directly; conflicts with a GVfs mount (an open issue asks to go through GVfs instead) | none |
+| **RawTherapee** | no import: a file browser over folders | DCP (matched by exact camera name), lensfun, LCP |
+| **Lightroom Classic** | the operating system's device access (Adobe does not document which API); devices first in the source list | DCP per camera model; raw defaults per model, serial and ISO |
+
+### 5.3 A shared import-plugin standard?
+
+**None exists.** The nearest things are:
+
+- **KIPI** (KDE Image Plugin Interface): plugins shared by digiKam,
+  Gwenview and KPhotoAlbum, mostly export and processing; digiKam left it
+  for its own DPlugins in 2019. Not an import-source interface, and not
+  maintained.
+- The **operating-system frameworks** (WPD and `Windows.Media.Import`,
+  ImageCaptureCore): shared by every application on one platform, but
+  each is one platform's API, not a plugin interface.
+- **libgphoto2**: a library many applications link, not an interface
+  they offer each other.
+- **Lightroom Classic's SDK** is proprietary and has **no import hooks**
+  at all (`catalog:addPhoto` imports one photo; a request for pre- and
+  post-import hooks has been open on Adobe's forum since 2012; plugins
+  such as Folder Watch poll).
+
+So Helios defines its own **`Connector` trait** (2.2) and its plugin
+form, the **`import.source` service** (2.6), and its own **lifecycle
+hooks** (section 7). Nothing standard covers: paged listing with a
+cursor and a change feed, claimed hashes and their check, accounts and
+quotas, the item-to-image identity, or saved and automatic imports.
+
+### 5.4 What the connector model adopts
+
+- **Device identity** from PTP `DeviceInfo` (make, model, serial), the
+  USB serial descriptor, `PhotoImportSource.SerialNumber` or
+  `ICDevice.serialNumberString`, whichever the back end gives, carried
+  on `SourceRef` as a new `device: Option<DeviceIdentity>` (make, model,
+  serial, `via`). A saved import matches a device by it (3.1's
+  `match: { serial }`), and a body record links it to the files' Exif
+  serial (6.1).
+- **DCF rules** for any source with a `DCIM` folder: groups by base
+  name, `{frame}` from the file number, never identity from names.
+- **Metadata as XMP properties**, reconciled by MWG's read rules, the
+  connector's values ranked last (C14).
+- **One back end per platform for devices**: libgphoto2 and libmtp on
+  Linux; `Windows.Media.Import` then WPD on Windows; ImageCaptureCore on
+  macOS. Each is one implementation of the same device connector, in a
+  plugin (C13). Cameras that mount as a disk keep going through the card
+  connector on every platform, which is the path most people use.
+- **Profile keying as Adobe and lensfun do**: camera model first, serial
+  as an optional refinement; never the serial alone.
+
+## 6. Camera bodies: profiles that follow the camera
+
+A connector that knows the camera (PTP `DeviceInfo`, or the Exif of the
+first files) lets an import attach what belongs to that camera:
+
+- the **colour profile** from a chart (calibration.md, section 6: keyed
+  by camera model, optional serial, nearest illuminant);
+- the **lens and camera matching** for lens corrections (lensfun, and the
+  order of camera-profiles-research.md, 5.6);
+- a **default style or preset** ("this body always gets X");
+- **import settings**: backup strategy, rename rule, tags.
+
+### 6.1 A body and its identity
+
+- **Key**: the camera key (the normalised make and model of
+  raw-corpus.md, section 4, as calibration uses) and, for one body, its
+  serial: `nikon z 6` for every Z 6, `nikon z 6@6012345` for one.
+- **Where the serial comes from**: Exif `BodySerialNumber` or the maker
+  note's serial (what `helios_load::Shot::serial` reads today), PTP
+  `DeviceInfo.SerialNumber`, the USB serial descriptor, or the platform
+  API's serial. These strings need not be equal for one camera (a USB
+  serial padded with zeros, a different number altogether), so a body
+  keeps **every identifier it was seen with** (`ids`, each with its
+  `via`). They are linked when they are seen together: a device
+  connector reads `DeviceInfo`, the first file fetched from it carries
+  an Exif serial, and both go on the same record.
+- **New bodies appear by themselves.** The first import of a model or
+  serial Helios has not seen creates its record, unnamed ("Nikon Z 6 ·
+  …2345") and with no defaults: nothing changes for that import, and the
+  summary notice says "New camera: Nikon Z 6 · …2345. Name it". No
+  question during an import.
+
+### 6.2 The record
+
+The vault's documents, namespace `cameras/bodies`. A **model record**
+(key without serial) holds what applies to every body of the model; a
+**body record** (key with serial) holds what one body overrides.
+
+```jsonc
+{
+  "format": 1,
+  "camera": { "make": "Nikon", "model": "Z 6", "key": "nikon z 6" },
+  "serial": "6012345",                     // null on a model record
+  "name": "Z 6 B",                         // the person's name; {body} in rename patterns
+  "ids": [
+    { "via": "exif", "value": "6012345" },
+    { "via": "ptp",  "value": "0006012345" }
+  ],
+  "tell": null,                            // how to tell it apart without a serial (6.4)
+  "colour": { "profiles": "calibration/defaults" },   // a pointer: calibration stays the source of truth
+  "lens": { "lensfun_camera": null, "prefer": "embedded" },
+  "edit": { "style": null, "presets": [] },          // style or module presets by id and version
+  "import": {
+    "saved": null,                         // a saved import used when this body is the source
+    "rename": "{date}-{body}-{seq}",
+    "tags": ["gear|Z 6 B"],
+    "backup": "strategy"
+  },
+  "retired": false
+}
+```
+
+- **Colour** is not copied: the record points to
+  `calibration/defaults`, whose keys already are `<camera key>` and
+  `<camera key>@<serial>`. Its pick (nearest illuminant within 0.02 in
+  `uv`) is unchanged.
+- **Lens**: `lensfun_camera` pins lensfun's camera entry (maker, model,
+  variant) when the Exif names do not match it, which gives the mount
+  and crop factor for the lens search; `prefer` says whether embedded
+  maker corrections or lensfun come first for this body.
+- **Edit**: a style or module presets, by vault id and version, once
+  styles live in the vault (ROADMAP 2.3). They are applied when the
+  image's edit is **created**, as the first history steps, named "from
+  Z 6 B", so an edit renders the same after the record changes (C12).
+- **Import**: what a saved import would say, used when this body is the
+  source and no saved import says otherwise.
+
+**Precedence**, from strongest: the saved import or the window's choice
+for this import, the body record, the model record, the library's
+defaults. The Choices column shows where a value comes from ("rename:
+from Z 6 B").
+
+### 6.3 How it attaches at import
+
+Through the lifecycle hooks of section 7, as one subscriber, the
+`camera-bodies` hook:
+
+- at **item discovered**, a device source's `DeviceIdentity` names the
+  body for every item, before any fetch, so the window shows "Z 6 B" in
+  the source and the rename example already uses `{body}`;
+- at **fetched and verified**, the file's Exif (make, model, serial,
+  owner name) confirms or finds the body, links new identifiers, and
+  creates a record for a new body;
+- at **before commit**, it annotates the image with the body link (a
+  vault field `camera.body`, searchable as `body:"Z 6 B"`), the body's
+  tags and importer values, and the **edit defaults** to apply at the
+  edit's creation (profile choice, lens, style), which are recorded, not
+  rendered.
+
+Undoing the import takes all of it back. A card from a known body
+matches by its files: the saved import of 3.1 gains
+`match: { body: "nikon z 6@6012345" }`, true for a device with that
+serial or a card whose first DCF files carry it.
+
+### 6.4 Two bodies of the same model
+
+- **Both write their serial** (most interchangeable-lens bodies): two
+  body records under one model record. Each may override any field;
+  what neither overrides comes from the model. A chart profile made on
+  body A is saved as `@serialA` when the person ticks "only this body"
+  (calibration's Save step), and as the model's default otherwise:
+  sensors of one model differ little, and one profile usually serves
+  both.
+- **No serial in the files** (phones, some compacts and older bodies,
+  JPEGs re-saved by an application): everything falls to the model
+  record, and Helios **does not guess**. The person may set a `tell`
+  rule on a body record, checked in this order: the Exif
+  `CameraOwnerName` or `Artist` set in the camera's menu, the file-name
+  prefix set in the camera (`ZB6_`), the device serial when it came over
+  USB, or the card (its volume id). A rule that matches both bodies, or
+  none, leaves the model record in charge and says so in the summary.
+- **Moving a body's files to another** (a serial read wrong, a repaired
+  body with a new board): "Merge into…" on the body record moves its
+  identifiers and its images' links, one undo step.
+
+## 7. Import lifecycle and hooks
+
+The owner's requirement (2026-11-11): the import process must have a
+lifecycle the rest of Helios can hook into. Today each after-import step
+is called by hand from `helios_library::import` or the desktop glue
+(stacks, backup trigger, map pause, thumbnails). This section names the
+stages, says what a hook may do at each, and moves those steps onto it.
+
+### 7.1 What Helios already has to build on
+
+| Piece | Where | What the hooks take from it |
+|---|---|---|
+| The event bus | `helios_core::Bus` (`crates/helios-core/src/bus.rs`) | typed events in the past tense, a journal, `seq` and `cause`: the **observer** side of every stage is a bus event |
+| Events for agents | `helios_events`, `helios_wait_event` (`crates/helios-node/src/mcp.rs`) | agents read import stages with the tools they already use |
+| The scheduler | `helios_core::scheduler` (`JobSpec`, `Priority`: batch, prefetch, interactive), job kinds `import`, `backup`, `map`, `stacks.suggest` | **follow-up work** is a job request, never a thread a hook starts |
+| The plugin broker | `crates/helios-plugin` (activation events `onStartup`, `onService:`, `onCommand:`, `onImporter:`; timeouts and `$/cancelRequest`; crash backoff) | out-of-process hooks: one more activation event and one more service |
+| The audit trail and undo | `helios_vault` catalog (`AuditEntry`, `vault.field_changed`), the import's one undo step (`library_by: import-<n>`) | what a hook writes goes through the import's transaction and its undo step |
+
+**Prior art.** darktable's Lua API has `pre-import` (the list of files,
+which a script may change), `post-import-image` (per image, blocking,
+handlers in sequence) and `post-import-film` (once, after the images).
+Scripts there write to the database directly, so undo does not see them,
+and a slow script stalls the import. Lightroom Classic has no import
+hooks (5.3). Helios keeps darktable's three moments and adds the ones a
+connector needs (listing, fetch, verify), with writes returned as data.
+
+### 7.2 The stages
+
+| # | Stage | A hook receives | A hook may |
+|---|---|---|---|
+| 1 | `session.started` | the session: id, machine, trigger (by hand, plugged, schedule…), sources, choices, saved import | observe; **veto** the session with a reason (a policy plugin) |
+| 2 | `source.listed` (per page, then complete) | the source, the page's counts, the cursor | observe |
+| 3 | `item.discovered` | the `Item` (id, path, size, metadata, claim, group), the source's `DeviceIdentity` | **annotate** (body, tags, values); **skip** with a reason |
+| 4 | `item.decided` | the item and the core's verdict: wanted, already in the Library, probably in the Library, filtered out | **skip** a wanted item, or **want** one the filter dropped; annotate |
+| 5 | `item.before_fetch` | the item, its destination name | skip (last chance before bytes move) |
+| 6 | `item.fetched` | the item, the staged file's path (read-only), its BLAKE3, the claim check, the file's own metadata | annotate from the bytes (Exif serial, a detector's tags); **veto** the item |
+| 7 | `item.before_commit` | the item, its image id, whether it is a duplicate and the policy's answer | annotate (tags, values, body link, edit defaults, stack hints); veto |
+| 8 | `item.imported` | the image id, its location, the annotations applied | observe; **schedule** follow-up work |
+| 9 | `batch.done` | the image ids of one vault transaction (a page) | observe; schedule |
+| 10 | `session.ended` (done, failed or cancelled) | the report: counts, failures, safety of cards, cursor reached | observe; schedule |
+
+Stages 3 to 8 are per item but **delivered in batches** (a page, up to
+500 items), so a hook costs one call per page, not per file.
+
+### 7.3 Two kinds of subscriber
+
+- **Observers** read the bus: every stage publishes an event
+  (`import.session_started`, `import.page_listed`, `import.batch_done`,
+  `import.session_ended`…; per-item stages are summarised per batch with
+  the item ids, so 50,000 items do not flood the journal). Asynchronous,
+  never wait for, never slow the import. Anyone may observe: desktop
+  panels, the Log, plugins, agents.
+- **Participants** are called in the import job, synchronously, at
+  stages 1 and 3 to 10, and **answer with data**: annotations, skip or
+  veto with a reason, follow-up job requests. A participant never writes
+  to the vault, the library folder or the source itself.
+
+```rust
+pub trait ImportHook: Send + Sync {
+    fn describe(&self) -> HookInfo;          // id, stages, band, priority, deadline, required?
+    fn on_items(&self, stage: Stage, session: &SessionInfo, items: &[HookItem], cancel: &Cancel)
+        -> Result<Vec<Answer>, HookError>;   // one answer per item
+    fn on_session(&self, stage: Stage, session: &SessionInfo, report: Option<&Report>)
+        -> Result<SessionAnswer, HookError>;
+}
+
+pub enum Answer {
+    Pass,
+    Annotate(Vec<Annotation>),               // tags, values, body, edit defaults, stack hint
+    Skip(String),                            // stages 3 to 5: not fetched, reported
+    Want,                                    // stage 4: take an item the filter dropped
+    Veto(String),                            // stages 6, 7: not imported, staged file removed
+}
+```
+
+### 7.4 Order, time and failure
+
+- **Order.** Participants run in three bands: `core.early` (the saved
+  import's filter, deduplication), `extensions` (bodies, plugins,
+  declarative rules), `core.late` (duplicate policy, history). Within a
+  band, by declared priority, then by id, so the order is the same on
+  every run. Annotations accumulate: tags and values add (add-only, as
+  importer values already are); for a single-valued field (the body
+  link) the earlier band wins, and a conflict is reported. A skip or a
+  veto stops the item; later hooks see it as skipped.
+- **Time.** Each participant declares a deadline per batch; the core
+  caps it (in process: 2 s per batch; plugins: 10 s per batch, with
+  `$/cancelRequest` when it passes). A hook past its deadline is
+  treated as having answered `Pass` for that batch and the report says
+  so.
+- **Failure is isolated.** An error, a timeout, a panic (in process,
+  caught at the call) or a plugin crash costs that hook's answer for
+  that batch and nothing else: the item goes on as if the hook had
+  passed (**fail open**). Three failures in a row suspend the hook for
+  the session, with a line in the report and the Log. A hook may
+  declare itself `required` (a compliance check): then its failure holds
+  the batch's items as failed rather than imported without it (C16).
+- **Undo covers it.** Annotations are applied by the import, in its own
+  vault transaction, audited as `import:<hook id>` under
+  `library_by: import-<n>`; undoing the import takes them back with the
+  images. Follow-up jobs on vault state (stack proposals, edit defaults)
+  are withdrawn by the undo; work outside the vault (a backup copy
+  already written) is not undone, and the undo says so ("2 backup copies
+  stay on Backup A").
+- **Cancellation.** A cancelled session stops calling participants,
+  runs `session.ended` (cancelled) for observers, and leaves what was
+  committed, as the import does today.
+
+### 7.5 Plugins and agents
+
+- **Plugins** declare hooks in their manifest and get a new activation
+  event, so a plugin starts only when an import reaches its stage:
+
+  ```toml
+  [[import.hooks]]
+  id = "gps-from-track"
+  stages = ["item.before_commit"]
+  band = "extensions"
+  priority = 100
+  deadline_ms = 5000
+  activation = "onImportStage:item.before_commit"
+  ```
+
+  The service `import.hook` (interface version 1) has one method,
+  `hook.call {stage, session, items}`, answered with one `Answer` per
+  item; the staged file is readable at stage 6 through the brokered
+  `images.read` capability. Observers among plugins get the bus events
+  as notifications.
+- **Agents** (MCP and the node) observe with `helios_events` and
+  `helios_wait_event` on the `import.*` kinds. An agent is too slow and
+  too uncertain to sit inside an import, so it participates in two other
+  ways (C17):
+  - **declarative rules**: a saved query and the annotations or skip it
+    leads to ("camera Z 6 and lens 105 mm: tag `macro`"), stored in the
+    vault (`import/rules`) and run by a core participant; an agent
+    proposes, dry-runs and saves them;
+  - **a review pause**: a session started with `review: true` stops after
+    stage 4 with the decided list; `import.review {session, answers}`
+    amends it (skips, wants, tags), then the session goes on. A deadline
+    ends the pause with the core's verdicts.
+
+### 7.6 What becomes a subscriber
+
+| Feature | Stage | How |
+|---|---|---|
+| Saved import's filter profile (3.1, C8) | 4 | core participant, `core.early`: wanted or filtered out |
+| Deduplication before download (2.7) | 4 | core participant, `core.early`: in the Library, probably in it |
+| Exact duplicates (skip, keep, ask) | 7 | core participant, `core.late`; `ask` holds the item for the Duplicates panel, as today |
+| Camera bodies (section 6) | 3, 6, 7 | `camera-bodies` participant: body link, its tags and values, edit defaults |
+| Colour profile, lens, style per body | 7 | annotations of the body hook, applied at the edit's creation (C12) |
+| Saved import's tags and album | 7 | core participant: add-only importer values under `import:<saved id>` |
+| Declarative rules (7.5) | 3 to 7 | core participant reading `import/rules` |
+| Stack proposals | 10 | schedules `stacks.suggest` over the imported ids |
+| Backup after import | 9, 10 | schedules the backup job when the strategy's trigger is `OnImport`; "safe to format" recomputed when it ends |
+| The map job | 1, 3, 10 | pauses at 1 (as now), records sightings from discovered items, resumes at 10 |
+| Cache warm-up | 8 | schedules thumbnails at `Prefetch` priority, the visible cells first, reusing the glance cache |
+| Health | 10 | re-checks backups and cards |
+| The history record (3.4) | 10 | core participant, `core.late`: writes `import/history` |
+
+## 8. Contributing a connector
+
+The owner's requirement (2026-11-11): a module, and if not too
+complicated a plugin, must be able to contribute a new connector.
+
+### 8.1 One registry, two ways in
+
+Helios's image modules are pure (`helios_core::Module`: no IO, no
+threads), so a connector is not an image module; it is a **sibling kind
+of module** built the same way: a crate in the tree with a manifest
+readable without running it and a trait implementation, listed in a
+static registry, as `helios_node::registry()` lists image modules.
+
+- **In process (a module).** A crate (for instance
+  `crates/helios-connect-<name>`) exports a `ConnectorProvider`:
+
+  ```rust
+  pub trait ConnectorProvider: Send + Sync {
+      fn manifest(&self) -> ConnectorManifest;            // data: readable without running
+      fn create(&self, settings: &Settings, services: &ConnectorServices)
+          -> Result<Box<dyn Connector>, ConnectorError>;
+  }
+  ```
+
+  and `helios_connect::registry()` lists it beside `folder` and `card`.
+  `helios-declarations` collects its texts as it collects modules', so
+  its label is translated like any other.
+- **Out of process (a plugin).** The manifest declares `[[sources]]`
+  with the same fields as `ConnectorManifest`; when the plugin is
+  enabled the broker registers a `PluginConnector` for each, in the same
+  registry, speaking `import.source` (2.6) and starting the plugin on
+  `onSource:<id>`. A disabled or removed plugin takes its connectors
+  away; their sources stay in the map as offline volumes.
+
+`ConnectorManifest`: id, version, label and description (text keys),
+`caps` (2.2), what it needs (an account and its OAuth endpoints and
+scopes, a USB device, the network), its settings schema, the platforms
+it runs on, and the interface version.
+
+### 8.2 In the import window
+
+The Sources column lists the registry, not a fixed set: detected
+sources (`caps.detect`) under Devices, signed-in accounts under their
+connector, and "Add a source…" for connectors that need setting up
+("Connect Google Photos…", "Add an S3 bucket…", with the settings form
+built from the manifest's schema). The folder and card connectors are
+two entries of the same registry, so nothing in the window is special
+to them.
+
+### 8.3 Shared and different
+
+| | Module (in process) | Plugin (out of process) |
+|---|---|---|
+| Registry, manifest, caps | same | same |
+| Lifecycle hooks (section 7) | same stages, same events | same |
+| Verification | Helios's `FetchSink`: BLAKE3 and the claim, size check, part files | same, on the staged file |
+| Bytes | written into the sink directly, hashed as they stream | written to the brokered staging folder, then read once by Helios |
+| Credentials | short-lived access tokens from the account service, in process | the same tokens per call (`params.auth`) through the brokered `account` capability; the refresh token never leaves Helios either way (C2) |
+| Isolation | none: in-tree code, reviewed and compiled in | its own process; a crash costs that call, restart with backoff |
+| Cancel and time | the `Cancel` token | `$/cancelRequest` and the broker's timeouts |
+| Who writes it | Helios's tree (and forks) | anyone; official ones under `plugins/sources/<name>` |
+
+**The plugin path is not much harder**: the broker, staging, paged
+notifications and crash handling exist for importers. What is harder is
+not the plugin but what such connectors need: accounts (S7) and device
+access. So the module path comes first (S1, where folder and card are
+its first users), the plugin path second (S3). Third-party in-process
+connectors are not offered: Rust has no stable ABI to load them, and
+loading them would lose crash isolation (C18).
+
+## 9. Slices
 
 Each slice builds, passes its tests headless (no network, no device, no
 owner), and leaves the application usable. The windows note's slice 4
@@ -642,8 +1101,9 @@ window's layout.
 
 1. **The trait, folders and cards behind it.** `Connector`, `Item`,
    `Page`, `Cursor` in a new crate (`helios-connect`), the contract
-   suite, and the folder and card connectors moved under it; `Scan`
-   lists through them. Nothing visible changes. Tests: the contract
+   suite, the connector registry and `ConnectorManifest` (8.1), and the
+   folder and card connectors moved under it as its first two modules;
+   `Scan` lists through them. Nothing visible changes. Tests: the contract
    suite on the folder connector over a temporary tree, the import
    window's existing kittests and snapshots unchanged.
 2. **Fetch, verify, place.** The `FetchSink` (BLAKE3 plus MD5, SHA-1,
@@ -686,8 +1146,37 @@ window's layout.
 9. **Google Takeout importer**, then **MTP**, then **remote storage**
    (`opendal`: S3, WebDAV, SFTP, SMB) as plugins, in the order the owner
    picks.
+10. **Lifecycle and hooks, in process.** The stages of 7.2 as bus
+    events and `ImportHook` participants, bands, deadlines, fail-open
+    isolation, annotations applied in the import's transaction and taken
+    back by its undo; today's after-import steps (stacks, backup trigger,
+    map pause, history) moved onto it. Lands right after S2, before S4,
+    so S4 to S6 are written as subscribers. Tests: a recording hook sees
+    the stages in order; a slow hook, a failing one and a panicking one
+    leave the import whole and are reported; undo removes a hook's tags.
+11. **Hooks for plugins and agents.** The `import.hook` service and the
+    `onImportStage:` activation event, `import/rules` with a dry run, the
+    review pause and `import.review`. Tests: a test plugin annotating a
+    batch, one crashing, one past its deadline; a rule dry-run; a session
+    paused and amended through the node.
+12. **Camera bodies.** `cameras/bodies` documents, body identity from
+    Exif (serial, owner name) and from `DeviceIdentity`, the
+    `camera-bodies` hook, the `camera.body` field and `body:` search,
+    `{body}` in rename patterns, edit defaults applied at the edit's
+    creation, Settings > Cameras (name, merge, `tell` rules), a saved
+    import's `match: { body }`. Tests: two bodies of one model with
+    serials get their own defaults; two without serials fall to the
+    model until a `tell` rule separates them; a new body is created
+    unnamed; undo removes the links.
+13. **Device identity and platform back ends.** `DeviceIdentity` on
+    `SourceRef` (PTP `DeviceInfo`, USB serial), the DCF grouping rule for
+    every `DCIM` source, metadata keyed by XMP property names with MWG's
+    read rules; then the device connector on `Windows.Media.Import`/WPD
+    and on ImageCaptureCore, as plugins, each checked on a real machine
+    by an agent before release. Tests: fixture `DeviceInfo` and DCF
+    trees; MWG precedence on files whose Exif, IIM and XMP disagree.
 
-## 6. Choices for the owner
+## 10. Choices for the owner
 
 Not decided. Each has options in key order and a recommendation.
 
@@ -777,6 +1266,102 @@ Recommended: **A** for rendered sources (fetching cannot prove anything
 and costs quota), **B** for exact-original sources without a claim
 (MTP), where the BLAKE3 settles it.
 
+**C10. Where per-camera settings live.**
+- A. A camera body record in the vault (`cameras/bodies`), model and
+  serial, holding everything that follows the camera.
+- B. In saved imports only: one saved import per body.
+- C. Both: the body record holds what belongs to the camera (profiles,
+  lens, style, default rename and tags); a saved import holds what
+  belongs to the job (source, destination, filter) and wins when both
+  set a field.
+
+Recommended: **C**: a body's profile and style apply however its photos
+arrive (card, cable, a folder), while a saved import stays a job.
+
+**C11. Two bodies of the same model.**
+- A. Model only: both share every default.
+- B. Serial only: each body separate; files without a serial get
+  nothing.
+- C. Layered: model record for all, body record per serial over it;
+  without a serial, the model applies unless the person sets a `tell`
+  rule (owner name, file prefix, device, card); never a guess.
+
+Recommended: **C**, as Lightroom's raw defaults (model, optionally
+serial) and calibration's `@serial` already do.
+
+**C12. When a body's edit defaults (profile, lens, style) apply.**
+- A. At import: an edit is written for every imported image.
+- B. Recorded at import, applied when the image's edit is created (first
+  open or first render), then frozen in the edit.
+- C. Live: the image follows the body record until the person touches
+  the module.
+
+Recommended: **B**: an import stays fast, an edit renders the same after
+the record changes (as calibration's pick is written into the edit), and
+"Apply body defaults again" is a command on a selection.
+
+**C13. Device back ends per platform.**
+- A. libgphoto2 everywhere.
+- B. One back end per platform: libgphoto2 and libmtp on Linux,
+  `Windows.Media.Import` then WPD on Windows, ImageCaptureCore on macOS,
+  libgphoto2 as a fallback.
+- C. Linux only for devices; elsewhere, cameras as mounted cards.
+
+Recommended: **B**, in that order (Linux first); until a platform's
+back end exists it is C there, which is what most users do anyway.
+
+**C14. The vocabulary of `Item.metadata`.**
+- A. Helios's own field names.
+- B. XMP property names (`exif:`, `tiff:`, `exifEX:`, `dc:`,
+  `Iptc4xmpCore:`…), reconciled after the fetch by MWG's read rules, the
+  connector last.
+
+Recommended: **B**: one vocabulary for connectors, importer values and
+the XMP writer, and a plugin author reads a standard, not our docs.
+
+**C15. Where a hook may block the import.**
+- A. Nowhere: observers on the bus only, plus declarative rules.
+- B. At every stage.
+- C. Participants at the stages listed in 7.2, delivered per batch, with
+  deadlines; observers everywhere.
+
+Recommended: **C**.
+
+**C16. A participant that fails or times out.**
+- A. Fail open always: the item goes on as if the hook passed; reported.
+- B. Fail closed always: the item is held as failed.
+- C. Fail open by default; a hook declared `required` fails closed.
+
+Recommended: **C**; `required` is shown on the hook in Settings, so a
+hook that can stop imports is never a surprise.
+
+**C17. How agents take part in an import.**
+- A. Observers only.
+- B. Observers, declarative rules they propose and save, and a review
+  pause after the decision stage.
+- C. Live participants over MCP at each stage.
+
+Recommended: **B**: an agent's latency stays out of the import loop,
+and what it decides is data the person can read.
+
+**C18. Who can contribute a connector.**
+- A. In-tree modules (Helios's own crates) and out-of-process plugins.
+- B. As A, plus third-party dynamic libraries loaded in process.
+- C. Plugins only, folders and cards excepted.
+
+Recommended: **A**: in-tree modules give the core a test bed with no
+broker, plugins give anyone else isolation; B has no stable ABI and
+loses crash isolation.
+
+**C19. The connector registry.**
+- A. Its own registry (`helios_connect::registry()`), built the way
+  `helios_node::registry()` is, with its own manifest type.
+- B. A new kind in the image module registry, with a source "family".
+
+Recommended: **A**: image modules are pure by contract and a connector
+does IO; sharing conventions (manifest first, static registry, collected
+texts) is enough.
+
 ## Sources
 
 - [Google Photos APIs: updates (Library API scope removal, 31 March 2025)](https://developers.google.com/photos/support/updates)
@@ -785,7 +1370,27 @@ and costs quota), **B** for exact-original sources without a claim
 - [Picker API: mediaItems (fields; no hash, no size)](https://developers.google.com/photos/picker/reference/rest/v1/mediaItems)
 - [Google Photos API limits and quotas](https://developers.google.com/photos/overview/api-limits-quotas)
 - [Adobe: import photos automatically (Lightroom Classic Auto Import)](https://helpx.adobe.com/lightroom/help/import-photos-automatically.html)
+- [ISO 15740:2013, Picture Transfer Protocol (confirmed 2023)](https://www.iso.org/standard/63602.html); [IS&T: PTP standards and PTP-IP](https://www.imaging.org/IST/IST/Standards/PTP_Standards.aspx)
+- [USB-IF: Media Transfer Protocol 1.1](https://usb.org/node/1677); [libmtp](https://android.googlesource.com/platform/external/libmtp/+/refs/heads/main/README)
+- [Design rule for Camera File system (DCF, CIPA DC-009, JEITA CP-3461B)](https://en.wikipedia.org/wiki/Design_rule_for_Camera_File_system)
+- [Windows Portable Devices: application overview](https://learn.microsoft.com/en-us/windows/win32/wpd_sdk/application-overview); [WIA camera support and the WIA-WPD layer](https://learn.microsoft.com/en-us/archive/blogs/wpdblog/wia-camera-support-in-windows-vista-part-1-of-2)
+- [Windows.Media.Import](https://learn.microsoft.com/en-us/uwp/api/windows.media.import); [PhotoImportSource (Manufacturer, Model, SerialNumber)](https://learn.microsoft.com/en-us/uwp/api/Windows.Media.Import.PhotoImportSource); [Import media from a device](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/import-media-from-a-device)
+- [ImageCaptureCore: ICDevice (serialNumberString, UUIDString)](https://developer.apple.com/documentation/imagecapturecore/icdevice)
+- [GVfs(7): the gphoto2 and MTP backends and volume monitors](https://man.archlinux.org/man/gvfs.7); [KIO and MTP](https://mail.kde.org/pipermail/kfm-devel/2015-December/016881.html); [Arch wiki: MTP](https://wiki.archlinux.org/title/MTP)
+- [Android: MediaStore](https://developer.android.com/training/data-storage/shared/media); [Storage Access Framework](https://developer.android.com/guide/topics/providers/document-provider)
+- [Adobe: XMP specifications (part 3, storage in files)](https://developer.adobe.com/xmp/docs/xmp-specifications/)
+- [IPTC Photo Metadata Standard](https://iptc.org/standards/photo-metadata/iptc-standard/); [version 2024.1](https://iptc.org/news/photo-metadata-standard-updated-to-version-2024-1/)
+- [Metadata Working Group](https://en.wikipedia.org/wiki/Metadata_Working_Group); [ExifTool's MWG tags (link to the archived guidelines)](https://exiftool.sourceforge.net/TagNames/MWG.html)
+- [ExifTool: Exif tags (BodySerialNumber, LensModel, CameraOwnerName)](https://exiftool.org/TagNames/EXIF.html)
+- [Adobe: raw defaults per camera model and serial number](https://helpx.adobe.com/au/lightroom-classic/desktop/help/raw-defaults.html); [a DCP matched by UniqueCameraModel (Adobe community report)](https://community.adobe.com/questions-563/xiaomi-17-ultra-telephoto-dng-is-not-correctly-identified-by-camera-raw-1630240)
+- [lensfun: adding a camera (Exif maker and model, mount, crop factor)](https://lensfun.github.io/manual/latest/addcamera.html); [lens calibration (crop factor of the measuring body)](https://lensfun.github.io/calibration-tutorial/lens-calibration.html)
+- [darktable: import module (copy & import from camera)](https://docs.darktable.org/usermanual/development/en/module-reference/utility-modules/lighttable/import/); [tethering through gphoto2](https://docs.darktable.org/usermanual/5.6/en/tethering/overview/)
+- [darktable Lua: pre-import](https://docs.darktable.org/lua/stable/lua.api.manual/events/pre-import), [post-import-image](https://docs.darktable.org/lua/stable/lua.api.manual/events/post-import-image), [post-import-film](https://docs.darktable.org/lua/stable/lua.api.manual/events/post-import-film)
+- [digiKam: no WIA back end yet on Windows](https://bugs.kde.org/show_bug.cgi?id=462225); [PTP and MTP cameras not supported on Windows, mass storage only](https://bugs.kde.org/show_bug.cgi?id=416392)
+- [Shotwell: use GVfs rather than libgphoto2](https://gitlab.gnome.org/GNOME/shotwell/-/issues/1643)
+- [Lightroom Classic: request for import hooks in the SDK](https://community.adobe.com/feature-requests-676/p-import-actions-666348); [Folder Watch plugin (polling)](https://regex.info/blog/lightroom-goodies/folder-watch)
+- [KIPI, the KDE Image Plugin Interface](https://en.wikipedia.org/wiki/KIPI)
 - Crates and licences as listed on crates.io (2026-11-11): `gphoto2`
   LGPL-2.1-only, `libmtp-rs` MIT, `opendal` Apache-2.0, `aws-sdk-s3`
   Apache-2.0, `keyring` MIT or Apache-2.0, `oauth2` MIT or Apache-2.0,
-  `notify` CC0-1.0, `smb` MIT.
+  `notify` CC0-1.0, `smb` MIT, `windows` MIT or Apache-2.0.
