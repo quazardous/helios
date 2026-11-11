@@ -7,6 +7,15 @@
     "background": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: around the image, the surround."},
     "backdrop": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: under the image until its tiles arrive, the surround too."}
   },
+  "palette": {
+    "axis": {
+      "$type": "color",
+      "$description": "A view's axes (red, green, blue for x, y, z), on the viewport's mid grey surround: pale enough to be seen at 3:1 on it.",
+      "x": {"$value": "#ffe0e0", "$description": "3.2:1 on the surround"},
+      "y": {"$value": "#d6ffd6", "$description": "3.6:1 on the surround"},
+      "z": {"$value": "#e0e6ff", "$description": "3.2:1 on the surround"}
+    }
+  },
   "state": {
     "$type": "color",
     "$description": "Helios component tokens: the state of a node in the graph.",
