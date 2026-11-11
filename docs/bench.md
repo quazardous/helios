@@ -481,7 +481,13 @@ or hoards blocks everyone for the length of its timeout. These rules come
 from incidents on the box; every agent prompt points here.
 
 **The next branch** (owner, 2026-11-08: Helios is alpha, so CI and tests
-run on `next` only; egui-pop and egui_stack work the same way, with PRs)
+run on `next` only; egui-pop, egui_stack, egui_fit and egui_hud work the
+same way). `next` is the merge zone: changes land there untested as a
+whole, and the full CI runs once per push of `next`, not once per branch
+or pull request, so no one waits for tests that do not concern their
+change and the same suite never runs several times over. Branches and
+pull requests get the quick checks only, and no workflow is run on a
+branch. `main` only ever moves by the promotion of a green `next`.
 
 How a change goes in:
 1. **Branch from `origin/next`**, in a worktree of its own. Never from main.
@@ -499,8 +505,9 @@ How a change goes in:
    "<cause, and what is done about it>"`; a reproduction meant to fail runs
    with `expect=fail`. `bench-remote failures` lists the unexplained ones.
 5. **Merge into `next`** and stop: Helios with `git push origin
-   <branch>:next` after rebasing on `origin/next`; egui-pop and egui_stack
-   with a PR into `next`, merged once its quick checks pass. Then delete the
+   <branch>:next` after rebasing on `origin/next` (or a PR into `next`);
+   egui-pop, egui_stack, egui_fit and egui_hud with a PR into `next`,
+   merged once its quick checks pass. Then delete the
    branch and the worktree. **Never push to `main`.**
 6. **Do not wait for CI.** It is asynchronous: once the change is on `next`,
    the work is done.
