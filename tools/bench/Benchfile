@@ -500,10 +500,13 @@ timeout = "1h"
 # and downloads the sources into the kept `flatpak` storage, then the job
 # builds the bundle into /out and smoke-tests it (installed for the user,
 # the command line in the sandbox imports and exports a picture, the
-# window's program says its version, uninstalled)
+# window's program says its version, uninstalled). `sandbox = true`:
+# flatpak-builder and flatpak run each step under bwrap, which mounts a
+# fresh /proc
 [jobs.flatpak]
 about = "the Flatpak bundle built from source with flatpak-builder, installed and smoke-tested"
 checkouts = ["helios"]
+sandbox = true
 cores = 5
 memory = "8g"
 cwd = "/work/${src:-helios}"
