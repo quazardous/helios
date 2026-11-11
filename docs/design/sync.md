@@ -180,29 +180,51 @@ same problem). **Cloning** a new replica is: copy a verified catalogue
 snapshot (what `snapshot.rs` already makes), give it a new id, then pull
 what came after the snapshot's vector.
 
-**Transport.** The node's endpoints speak JSON lines over a Unix socket
-or loopback TCP, never another machine (`transport.rs`). Sync adds a
-`sync` scope (`sync.hello`, `sync.changes`, `sync.want`, `sync.get`)
-served the same way, and a **stdio** form: `helios sync <remote>` runs
-`ssh <remote> helios sync-serve --stdio` and speaks the same lines over
-the pipe, so authentication, encryption and reaching the other machine
-are SSH's, as git and git-annex do. Object bytes go as a length-prefixed
-binary frame after a JSON header line, not inside JSON. The node's MCP
-server gets `helios_sync_status` and `helios_sync_now` so an agent can
-see and start a session.
+**Transport: an abstraction, several implementations.** The session
+(`hello`, `changes`, `want`, `get`) is one protocol; *how* its bytes reach
+the other machine is a `SyncTransport` chosen per peer, so the user picks
+what works on their network and none is required. The session layer
+never knows which one runs. A transport gives one of two shapes:
+
+- a **link**: a duplex stream to a live peer (JSON lines, object bytes as
+  a length-prefixed binary frame after a JSON header line, not inside
+  JSON);
+- a **mailbox**: a place both machines can write and read at different
+  times, holding **bundles** (the changes after a vector, plus chosen
+  objects, as git bundles do) and each side's last vector.
+
+Implementations, each behind the same trait and tested against the same
+contract (the session over an in-memory link and an in-memory mailbox):
+
+- **Folder** (mailbox): any folder both machines see: a USB disk, a NAS
+  share, a folder synced by Syncthing, Dropbox or OneDrive. Nothing to
+  configure but a path, nothing listening, works offline by nature.
+  Bundles are written to a part file and renamed, so a half-synced folder
+  is never read as complete.
+- **Local network** (link): the node's endpoint opened on the LAN with
+  TLS, device keys and a pairing code shown on one machine and typed on
+  the other, peers found by mDNS (Syncthing's model). No account, no
+  server, no SSH.
+- **SSH** (link): `ssh <remote> helios sync-serve --stdio`, for users who
+  already have SSH between their machines; authentication and encryption
+  are SSH's, as git and git-annex do.
+- Later, if wanted: a relay for machines on different networks.
+
+The node's MCP server gets `helios_sync_status` and `helios_sync_now` so
+an agent can see and start a session, whatever the transport.
 
 **Offline.** Nothing waits for the other side. Every replica writes to
-its own log and its own vault as today; a session happens when the other
-replica is reachable (by hand, at start, every few minutes while
-reachable). A removable disk can carry changes too, later: a
-**bundle** (the changes after a vector, plus chosen objects) written to
-a disk and read on the other machine, as git bundles do. The Health
-check reports each known replica's last session ("studio: last synced 12
-days ago, 340 photos only on this laptop").
+its own log and its own vault as today; a session happens when the peer
+is reachable (by hand, at start, every few minutes while reachable) or,
+with a mailbox, whenever the folder is there. The Health check reports
+each known replica's last session ("studio: last synced 12 days ago, 340
+photos only on this laptop").
 
 **Default.** Change log with counters and HLC stamps; frontiers as
-version vectors; SSH stdio as the first transport; sessions at start, by
-hand, and every five minutes while the peer answers.
+version vectors; the transport an abstraction (`SyncTransport`, link or
+mailbox) with the folder mailbox built first and the local-network link
+second (section 9); sessions at start, by hand, and every five minutes
+while the peer answers.
 
 **Rejected.**
 - *Comparing whole states* (send every record, or a Merkle tree of them):
@@ -214,13 +236,16 @@ hand, and every five minutes while the peer answers.
 - *Syncing the SQLite file or XMP sidecars with a file-sync tool*: one
   side's whole record wins, the other's changes are lost or left as a
   conflict copy.
-- *Opening the node's TCP endpoint to the network* with its own TLS and
-  pairing: more to build and to get right than SSH for a first target of
-  two machines one person owns (kept as an option, section 9).
+- *One fixed transport* (SSH only, or the network only): SSH is hard to
+  set up for many users, especially on Windows, and a network link fails
+  where a shared folder works (owner, 2026-11-11: the transport is an
+  abstraction with a choice of implementations).
 
 **To build.** The log table and its contract tests on both drivers; the
 HLC; the vectors and the session (in process first, between two vaults);
-the `sync` scope and stdio serving; the object frame; the Health check.
+the `SyncTransport` trait with its contract tests; the folder mailbox;
+the `sync` scope and the local-network link; the object frame; the
+Health check.
 
 ## 5. Merges
 
@@ -419,10 +444,13 @@ real network or a second machine.
    workstation diverge offline (imports, ratings, tags, two edits of one
    photo), reconcile, and every write is there on both, the two edits as
    two heads.
-5. **The `sync` scope and stdio.** `helios sync-serve --stdio`,
-   `helios sync <remote>`; the MCP tools. Tests: two nodes over a socket
-   pair; a session killed halfway resumes; SSH itself is not tested, only
-   the pipe.
+5. **The transport trait and the folder mailbox.** `SyncTransport`
+   (link and mailbox), its contract run over in-memory fakes, then the
+   folder implementation: bundles written as part files and renamed, the
+   peer's vector read back; the MCP tools. Tests: two vaults syncing
+   through a temporary folder; a bundle cut halfway is ignored.
+   Later slices add the local-network link (TLS, pairing, mDNS) and the
+   SSH link, each passing the same contract.
 6. **Objects.** `want` / `get` with the binary frame, part file, hash,
    read back, rename; the received copy recorded as a verified location.
    Tests: a corrupted frame is refused and leaves nothing; a resumed
@@ -449,14 +477,14 @@ work between two machines; 7 to 10 make it comfortable.
 
 Each option is listed in order; the recommendation is marked.
 
-1. **Transport between machines.**
-   - A. SSH running `helios sync-serve --stdio` on the other machine
-     (recommended: nothing to secure ourselves; both machines are the
-     same person's).
-   - B. The node's endpoint opened on the network, TLS with device keys
-     and pairing codes, discovery on the local network (Syncthing).
-   - C. No live link at first: bundles on a removable disk or a shared
-     folder only.
+1. **Which transport implementations first** (the transport is an
+   abstraction either way, owner 2026-11-11).
+   - A. The folder mailbox first (USB disk, NAS, a synced cloud folder:
+     a path and nothing else), then the local-network link with pairing
+     (recommended: works for everyone at once, no network setup).
+   - B. The local-network link first (live sync at home), then the
+     folder.
+   - C. SSH first, for users who already have it, then the others.
 2. **Two different ratings for one photo, set on two machines between
    two sessions.**
    - A. Last writer wins; the other value is in the photo's history

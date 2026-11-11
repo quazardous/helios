@@ -490,7 +490,9 @@ rule 1). Not decided.
 decisions, each with a default: a replica is a full vault plus partial
 objects (previews everywhere); replicas exchange a change log per
 replica by frontiers (version vectors), objects fetched on demand and
-verified by hash, over SSH first; fields merge per kind (last writer by
+verified by hash, over a transport abstraction (a shared folder, the
+local network with pairing, SSH: the user picks; owner, 2026-11-11);
+fields merge per kind (last writer by
 hybrid clock for single values, add-wins sets for labels and tags,
 versions never merged); pins say which originals a machine keeps; backup
 becomes continuous with scrubbing; reclaim never removes a copy without
