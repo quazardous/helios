@@ -246,6 +246,13 @@ impl Local {
             });
         }
         let complete = end >= files.len();
+        if complete {
+            // The listing is through: its walk is not kept.
+            let mut walked = self.walked.lock().unwrap_or_else(PoisonError::into_inner);
+            if walked.as_ref().is_some_and(|(_, f)| Arc::ptr_eq(f, &files)) {
+                *walked = None;
+            }
+        }
         Ok(Page {
             items,
             next: if complete { None } else { last.map(Cursor) },
