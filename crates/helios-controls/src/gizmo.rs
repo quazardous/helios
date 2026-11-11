@@ -103,12 +103,14 @@ impl Gizmo {
 
 /// The circle mask's case.
 pub const CIRCLE_MASK: &str = "circle-mask";
+/// The ellipse mask's case.
+pub const ELLIPSE_MASK: &str = "ellipse-mask";
 /// The gradient mask's case.
 pub const GRADIENT_MASK: &str = "gradient-mask";
 
 /// Every shape case with handles declared here.
 pub fn all() -> Vec<Gizmo> {
-    vec![circle_mask(), gradient_mask()]
+    vec![circle_mask(), ellipse_mask(), gradient_mask()]
 }
 
 /// The case of a module's nodes, if it has one here.
@@ -189,6 +191,72 @@ pub fn circle_mask() -> Gizmo {
                 apply: |p, to| {
                     let d = len(sub(to, centre_of(p)));
                     vec![("feather", (d - p.float("radius")).max(0.0))]
+                },
+            },
+        ],
+    }
+}
+
+/// The ellipse mask: its centre (a point, Shift along the axes), each
+/// radius with the rotation it sets (Shift to 15° steps around the
+/// centre, scaled by the wheel) and its feather past the first radius
+/// (in proportion to the larger radius when `proportional` is on; reset
+/// to none, scaled by the wheel).
+pub fn ellipse_mask() -> Gizmo {
+    Gizmo {
+        control: ELLIPSE_MASK,
+        module: "mask_ellipse",
+        handles: vec![
+            HandleSpec {
+                name: "centre",
+                part: "center",
+                writes: &["x", "y"],
+                shift: Some(Shift::Axes),
+                reset: None,
+                wheel: None,
+                apply: centre,
+            },
+            HandleSpec {
+                name: "radius_x",
+                part: "radii",
+                writes: &["radius_x", "rotation"],
+                shift: Some(Shift::Angle),
+                reset: None,
+                wheel: Some(Wheel::Scale),
+                apply: |p, to| {
+                    let d = sub(to, centre_of(p));
+                    vec![("radius_x", len(d)), ("rotation", degrees(d))]
+                },
+            },
+            HandleSpec {
+                name: "radius_y",
+                part: "radii",
+                writes: &["radius_y", "rotation"],
+                shift: Some(Shift::Angle),
+                reset: None,
+                wheel: Some(Wheel::Scale),
+                apply: |p, to| {
+                    let d = sub(to, centre_of(p));
+                    vec![("radius_y", len(d)), ("rotation", wrap(degrees(d) - 90.0))]
+                },
+            },
+            HandleSpec {
+                name: "feather",
+                part: "feather",
+                writes: &["feather"],
+                shift: None,
+                reset: Some(0.0),
+                wheel: Some(Wheel::Scale),
+                apply: |p, to| {
+                    let d = len(sub(to, centre_of(p)));
+                    let (a, b) = (p.float("radius_x"), p.float("radius_y"));
+                    let proportional = p.get("proportional").and_then(Value::as_bool) == Some(true);
+                    let feather = if proportional && a > 0.0 {
+                        (d / a - 1.0) * a.max(b)
+                    } else {
+                        d - a
+                    };
+                    vec![("feather", feather.max(0.0))]
                 },
             },
         ],
@@ -587,6 +655,29 @@ mod tests {
         assert_eq!(apply("feather", [70.0, 10.0]), [("feather", 30.0)]);
         // Inside the radius: no feather.
         assert_eq!(apply("feather", [101.0, 50.0]), [("feather", 0.0)]);
+    }
+
+    #[test]
+    fn an_ellipse_s_radii_set_its_rotation() {
+        let g = ellipse_mask();
+        let p = Params::new()
+            .with("x", Value::Float(0.0))
+            .with("y", Value::Float(0.0))
+            .with("radius_x", Value::Float(40.0))
+            .with("radius_y", Value::Float(20.0));
+        let apply = |h: &str, to| (g.handle(h).unwrap().apply)(&p, to);
+        assert_eq!(
+            apply("radius_x", [0.0, 30.0]),
+            [("radius_x", 30.0), ("rotation", 90.0)]
+        );
+        assert_eq!(
+            apply("radius_y", [0.0, 30.0]),
+            [("radius_y", 30.0), ("rotation", 0.0)]
+        );
+        assert_eq!(apply("feather", [-50.0, 0.0]), [("feather", 10.0)]);
+        let p = p.with("proportional", Value::Bool(true));
+        let f = (g.handle("feather").unwrap().apply)(&p, [-60.0, 0.0]);
+        assert_eq!(f, [("feather", 20.0)]);
     }
 
     #[test]

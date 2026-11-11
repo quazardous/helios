@@ -10,12 +10,12 @@
 //!   dashed. A path point's control lines are painted under the
 //!   overlays (the viewport's `under_overlays` hook), the path being
 //!   drawn above them (`after_paint`).
-//! - **The handles of a circle and a gradient** are their cases' image
+//! - **The handles of a circle, an ellipse and a gradient** are their cases' image
 //!   surface in `helios_controls::gizmo`: each handle names the
 //!   parameters it writes, its Shift snap, its reset and its wheel, and
 //!   its drag, reset and wheel turn go through the `controls.change` step
-//!   with the controls the panel's rows have. An ellipse's and a path's
-//!   handles are still written here, until their cases move there too.
+//!   with the controls the panel's rows have. A path's handles are still
+//!   written here, until its case moves there too.
 //! - **A drag** is one gesture of the value store: its Begin opens it,
 //!   each Update writes the parameters the handle moves (from the values
 //!   at the gesture's start), End closes it (one undo step), Cancel
@@ -276,16 +276,6 @@ fn lerp(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
     add(a, scale(sub(b, a), t))
 }
 
-/// An angle in degrees, in (-180, 180].
-fn degrees(d: [f64; 2]) -> f64 {
-    d[1].atan2(d[0]).to_degrees()
-}
-
-fn wrap(deg: f64) -> f64 {
-    let d = deg.rem_euclid(360.0);
-    if d > 180.0 { d - 360.0 } else { d }
-}
-
 /// Where a handle is drawn: where `outline()` puts it, except a
 /// gradient's rotation and feather handles, slid along the line to at
 /// least [`LINE_HANDLE`] points from the anchor so they never cover it.
@@ -400,8 +390,6 @@ pub fn drag_writes(
             .map(|(k, v)| (k.to_string(), f(v)))
             .collect());
     }
-    let c = centre_of(start);
-    let d = sub(to, c);
     let w = |pairs: &[(&str, f64)]| {
         pairs
             .iter()
@@ -440,20 +428,6 @@ pub fn drag_writes(
             vec![("points".into(), path_values(&points))]
         }
         (_, "centre") => w(&[("x", to[0]), ("y", to[1])]),
-        ("mask_ellipse", "radius_x") => w(&[("radius_x", len(d)), ("rotation", degrees(d))]),
-        ("mask_ellipse", "radius_y") => {
-            w(&[("radius_y", len(d)), ("rotation", wrap(degrees(d) - 90.0))])
-        }
-        ("mask_ellipse", "feather") => {
-            let (a, b) = (start.float("radius_x"), start.float("radius_y"));
-            let proportional = start.get("proportional").and_then(Value::as_bool) == Some(true);
-            let feather = if proportional && a > 0.0 {
-                (len(d) / a - 1.0) * a.max(b)
-            } else {
-                len(d) - a
-            };
-            w(&[("feather", feather.max(0.0))])
-        }
         (m, h) => return Err(format!("no handle `{h}` on `{m}`")),
     })
 }
@@ -668,7 +642,7 @@ impl Gestures {
 enum Drag {
     /// A handle of a case declared with the controls.
     Control(gizmo::Drag),
-    /// A handle written here (an ellipse's, a path's).
+    /// A handle written here (a path's).
     Hand {
         gesture: GestureId,
         node: String,
@@ -999,7 +973,6 @@ impl Masks {
                     (Some(g), _, n) => (g.handle(n).and_then(|s| s.shift), centre),
                     (None, _, "centre") => (Some(Shift::Axes), centre),
                     (None, _, n) if n.starts_with("corner.") => (Some(Shift::Axes), centre),
-                    (None, "mask_ellipse", "radius_x" | "radius_y") => (Some(Shift::Angle), centre),
                     (None, "mask_path", n) => {
                         // A Bézier handle turns around its corner.
                         let i: usize = n
@@ -1234,7 +1207,7 @@ impl Masks {
                 let p = handle.as_str();
                 (p, (params.float(p) * (k * 0.002).exp()).max(0.0))
             }
-            "rotation" => ("rotation", wrap(params.float("rotation") + k * 0.1)),
+            "rotation" => ("rotation", gizmo::wrap(params.float("rotation") + k * 0.1)),
             _ => return,
         };
         if matches!(self.wheel, Some(Wheel::Control { .. }))

@@ -1,11 +1,12 @@
-//! The circle's and the gradient's handles on the image, one by one: a
+//! The circle's, the ellipse's and the gradient's handles on the image, one by one: a
 //! drag writes what the handle shows and is one undo step, Shift snaps
 //! (15° for a rotation, the axes and diagonals for a centre), Ctrl moves
 //! a tenth of the pointer, a double click resets (a feather to none, a
 //! rotation to 0°), the wheel adjusts as one undo step, Escape cancels.
 //!
-//! Written against the hand-made editor first, so the controls' handles
-//! are held to the same behaviour.
+//! The circle's and the gradient's were written against the hand-made
+//! editor first, so the controls' handles are held to the same
+//! behaviour; the ellipse's checks its case's handles once moved.
 
 use egui::{Event, Key, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, Pos2};
 use egui::{TouchPhase, vec2};
@@ -397,6 +398,44 @@ fn gradient_feather_drags_resets_wheels_and_moves_finely() {
     assert_eq!(
         steps(&h),
         ["drag gradient feather", "adjust gradient feather"]
+    );
+    no_gesture_left(&h);
+}
+
+// ----------------------------------------------------------------- ellipse
+
+#[test]
+fn ellipse_radii_turn_it_and_its_feather_resets_and_wheels() {
+    let mut h = with("ellipse");
+    let ry = f(&h, "node/ellipse/radius_y");
+    let k = per_point(&h);
+    // The first radius dragged straight down: 90°, its length the
+    // distance to the centre.
+    let c = handle(&h, "centre");
+    let from = handle(&h, "radius_x");
+    let to = c + vec2(0.0, 80.0);
+    drag(&mut h, from, to, Modifiers::NONE);
+    assert!((f(&h, "node/ellipse/rotation") - 90.0).abs() < 0.5);
+    assert!((f(&h, "node/ellipse/radius_x") - 80.0 * k).abs() < 1.0);
+    assert_eq!(f(&h, "node/ellipse/radius_y"), ry);
+    assert_eq!(steps(&h), ["drag ellipse radius_x"]);
+    undo(&mut h);
+    assert_eq!(f(&h, "node/ellipse/rotation"), 0.0);
+    away(&mut h);
+    // The wheel over the second radius scales it alone.
+    let at = handle(&h, "radius_y");
+    wheel(&mut h, at, 2.0);
+    assert!(f(&h, "node/ellipse/radius_y") > ry);
+    assert_eq!(f(&h, "node/ellipse/rotation"), 0.0);
+    assert_eq!(steps(&h), ["adjust ellipse radius_y"]);
+    // A double click on the feather: none.
+    let at = handle(&h, "feather");
+    double_click_at(&mut h, at);
+    h.step();
+    assert_eq!(f(&h, "node/ellipse/feather"), 0.0);
+    assert_eq!(
+        steps(&h),
+        ["adjust ellipse radius_y", "reset ellipse feather"]
     );
     no_gesture_left(&h);
 }
