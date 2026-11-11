@@ -3,6 +3,20 @@
 Status: **study accepted** (2026-11-10). The four choices are decided in
 §9; where a decision changes a proposal above, §9 wins.
 
+**Built** (2026-11-11), the first slice: the contracts a module offers and
+the brick declaration (`helios_core::brick`, `Module::brick`,
+`Module::provides`, `ModuleRef::forms`); the `helios-bricks` crate with
+the `BrickRegistry` (checked registration, `catalogue` and `describe` as
+JSON), `core.affine@1` (CPU and WGSL forms), the core value bricks, and
+assemblies written as data (`Assembly`, checked into `Assembled`, a
+composite the engine expands). Exposure is assembled from them
+(`modules/exposure/src/exposure.bricks.json`, `from_bricks()`) and held
+bit for bit equal to the sealed module on the CPU and on the GPU; the
+sealed module is still the one served. Not built yet: the existing
+kernels and mask modules as aliased bricks, the MCP verbs and
+`helios_describe` entity, value ports in the engine and `space` checks at
+connection, the card's controls taken from the assembly, fusion.
+
 **The request.** Process bricks are the sub-layer of the box (node)
 diagram: the functions modules provide, in effect the public SDK. A
 module should be an **assembly** of registered process bricks and
