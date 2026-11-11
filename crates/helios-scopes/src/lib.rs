@@ -159,6 +159,29 @@ pub fn luminance(image: &Image, bins: usize, scale: Scale) -> Counts {
     counts
 }
 
+/// [`luminance`] of the pixels inside a zone: those whose `mask` (one
+/// channel, or the first of several, over the same region as `image`) is
+/// at least one half. None when the mask's region differs from the
+/// image's.
+pub fn luminance_where(image: &Image, mask: &Image, bins: usize, scale: Scale) -> Option<Counts> {
+    if mask.region() != image.region() {
+        return None;
+    }
+    let mut counts = Counts::new(bins);
+    let n = image.channels() as usize;
+    let m = mask.channels() as usize;
+    for (pixel, weight) in image
+        .data()
+        .chunks_exact(n)
+        .zip(mask.data().chunks_exact(m))
+    {
+        if weight[0] >= 0.5 {
+            counts.add(scale.bin(luma(pixel), bins));
+        }
+    }
+    Some(counts)
+}
+
 fn luma(p: &[f32]) -> f32 {
     if p.len() < 3 {
         p[0]
