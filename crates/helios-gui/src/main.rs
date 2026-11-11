@@ -382,6 +382,39 @@ fn seconds() -> u64 {
 /// closed and its vault is released, the restore applied at the opening.
 static RESTART: AtomicBool = AtomicBool::new(false);
 
+/// The window's context, once it is open: a request to end from the
+/// system (`helios_gui::ending`) closes it as Ctrl+Q does.
+static WINDOW: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+
+/// SIGTERM, SIGINT and SIGHUP (on Windows, the console's events and the
+/// session's end) close Helios as Ctrl+Q does; ended before the window
+/// opens or past the deadline, the session is marked clean all the same.
+fn listen_for_ending() -> Arc<helios_gui::ending::Ending> {
+    use helios_gui::ending::{DEADLINE, Ending};
+    let crashes = platform::crash_dir();
+    let ending = Ending::new(
+        Box::new(|| {
+            let Some(ctx) = WINDOW.get() else {
+                return false;
+            };
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            ctx.request_repaint();
+            true
+        }),
+        Box::new(move |code| {
+            if let Some(dir) = &crashes {
+                helios_gui::ending::mark_clean(dir);
+            }
+            std::process::exit(code);
+        }),
+        DEADLINE,
+    );
+    if let Err(e) = helios_gui::ending::listen(ending.clone()) {
+        warn(&format!("the system's requests to end are not heard: {e}"));
+    }
+    ending
+}
+
 /// Catalogue snapshots (`helios_gui::catalogue`): one taken by hand
 /// (copied to the backup disks on a thread of its own), the list, and a
 /// restore (asked of the vault, then Helios closes and starts again).
@@ -1554,6 +1587,7 @@ fn main() -> Result<(), String> {
         }
     };
     start::mark("instance check");
+    let ending = listen_for_ending();
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`): opened on a
     // thread while the settings, the vault and the shell are read, as
@@ -1802,6 +1836,7 @@ fn main() -> Result<(), String> {
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
+            let _ = WINDOW.set(cc.egui_ctx.clone());
             shell.library_mut().set_texture_budget(texture_budget);
             // The render cache's budget (`system.cache.budget` / `share`).
             helios_gui::caches::apply_settings(&shell, &settings);
@@ -2089,6 +2124,7 @@ fn main() -> Result<(), String> {
     for left in finisher.finish() {
         warn(&format!("quit: {left} was left unfinished"));
     }
+    ending.finish();
     // A catalogue restore was asked: the next Helios applies it as it
     // opens the library.
     if RESTART.load(Ordering::Relaxed) {

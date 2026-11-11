@@ -2417,6 +2417,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "signal-hook",
  "windows-sys 0.61.2",
  "winresource",
 ]

@@ -15,6 +15,7 @@ pub mod dialogs;
 pub mod display;
 pub mod duplicates;
 pub mod edit_snapshots;
+pub mod ending;
 pub mod engine_source;
 pub mod export;
 pub mod graph;

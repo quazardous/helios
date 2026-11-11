@@ -86,10 +86,16 @@ arboard = { version = "3.6", default-features = false, features = ["image-data"]
 # The rendered image copied as 8-bit sRGB, as an export writes it.
 helios-export.workspace = true
 
+# Unix: SIGTERM, SIGINT and SIGHUP close Helios as Ctrl+Q does (MIT OR
+# Apache-2.0, the node's choice for its own signals).
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.4"
+
 # Windows: the console a window program attaches to when started from a
-# terminal (MIT OR Apache-2.0, already in the tree).
+# terminal, its close events and the session's end (MIT OR Apache-2.0,
+# already in the tree).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
 
 # MIT: the icon, version information and application manifest embedded in
 # helios-gui.exe (build.rs; does nothing on other targets).
