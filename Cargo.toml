@@ -20,6 +20,7 @@ repository = "https://github.com/quazardous/helios"
 [workspace.dependencies]
 helios-ai = { path = "crates/helios-ai" }
 helios-core = { path = "crates/helios-core" }
+helios-bricks = { path = "crates/helios-bricks" }
 helios-testkit = { path = "crates/helios-testkit" }
 helios-inspect = { path = "crates/helios-inspect" }
 helios-config = { path = "crates/helios-config" }

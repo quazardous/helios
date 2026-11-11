@@ -1,0 +1,18 @@
+[package]
+name = "helios-bricks"
+description = "Helios process bricks: the registered, described functions modules are assembled from, their registry, and modules assembled from them as data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true
+
+[lints]
+workspace = true

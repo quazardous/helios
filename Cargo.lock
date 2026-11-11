@@ -2181,6 +2181,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-bricks"
+version = "0.75.0"
+dependencies = [
+ "helios-core",
+ "helios-testkit",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-colour"
 version = "0.75.0"
 dependencies = [
