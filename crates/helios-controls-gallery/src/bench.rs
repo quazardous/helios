@@ -111,7 +111,7 @@ fn sample() -> Preset {
 }
 
 /// Helios's kit: the catalogue (its tone controls under "Tone"), the
-/// scenarios' sample parameters and preset, the implicit controls by
+/// scenarios' sample parameters and preset, the generic controls by
 /// value type, and the photo tools.
 pub fn kit() -> Kit {
     Kit {

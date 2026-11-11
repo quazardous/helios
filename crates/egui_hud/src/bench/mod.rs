@@ -7,9 +7,13 @@
 //!
 //! - The [`Shelf`] lists what can go on the bench: the registered
 //!   controls by purpose, the kit's parameters, then (when the kit asks)
-//!   an implicit control per value type (a number, a toggle, a choice, a
-//!   curve, a colour, a text), each built from a descriptor as a module's
-//!   parameter would be.
+//!   under [`MISC_GROUP`] the generic controls, one per value type (a
+//!   number, a toggle, a choice, a curve, a colour, a text), each the
+//!   implicit control of a descriptor, as a module's parameter would get.
+//!   A checkbox stays a checkbox whatever its domain: a domain use of a
+//!   generic control is a kit parameter, not a control of its own; a
+//!   control is registered only when it adds something beyond its value
+//!   type (a unit and range, a variant set of its own).
 //! - A [`Composition`] is what is on the bench, in its logical order:
 //!   controls, and cases grouping some of them under a legend, with help
 //!   text and a closing separator as the case's chrome. It flattens into
@@ -91,7 +95,7 @@ pub struct ShelfEntry {
     /// The control's id in the bench's registry.
     pub control: String,
     pub label: String,
-    /// The shelf's group: a purpose, or the implicit controls.
+    /// The shelf's group: a purpose, or [`MISC_GROUP`].
     pub group: String,
     /// One line: the control's purpose, or its value type.
     pub hint: String,
@@ -111,11 +115,9 @@ impl ShelfEntry {
     }
 }
 
-/// The group of the implicit controls on the shelf.
-pub const IMPLICIT_GROUP: &str = "Implicit, by value type";
-
-/// The shelf group of a registered control the kit gives none.
-pub const OTHER_GROUP: &str = "Other purposes";
+/// The last shelf group: the generic controls, one per value type, and
+/// the registered controls the kit gives no group.
+pub const MISC_GROUP: &str = "Miscellaneous";
 
 /// A parameter the kit puts on the shelf, as the implicit control of its
 /// descriptor.
@@ -155,12 +157,13 @@ pub struct Kit {
     /// The host's controls.
     pub registry: Registry,
     /// The shelf group of each registered control, by id; the others go
-    /// under [`OTHER_GROUP`].
+    /// under [`MISC_GROUP`].
     pub groups: BTreeMap<String, String>,
     /// Parameters on the shelf as implicit controls, after the registered
     /// controls.
     pub parameters: Vec<ShelfParam>,
-    /// One implicit control per value type, last on the shelf.
+    /// The generic controls, one per value type, under [`MISC_GROUP`],
+    /// last on the shelf.
     pub implicit: bool,
     /// The benches it ships; the first is what `controls.bench.sample`
     /// loads.
@@ -170,8 +173,8 @@ pub struct Kit {
 }
 
 impl Kit {
-    /// A kit of a registry's controls, each in the other purposes, with
-    /// the implicit controls by value type and no presets.
+    /// A kit of a registry's controls, each under [`MISC_GROUP`] with
+    /// the generic controls, and no presets.
     pub fn of(registry: Registry) -> Self {
         Self {
             registry,
@@ -220,9 +223,9 @@ fn descriptor_of(control: &Control) -> ParamDescriptor {
     }
 }
 
-/// The implicit controls of the shelf: one parameter per value type, as a
+/// The generic controls of the shelf: one parameter per value type, as a
 /// module would declare it.
-fn implicit_descriptors() -> Vec<(&'static str, &'static str, ParamDescriptor)> {
+fn generic_descriptors() -> Vec<(&'static str, &'static str, ParamDescriptor)> {
     let list = |label: &str, default: Vec<f64>, widget| {
         let mut d = ParamDescriptor::new(ParamType::Floats, label, Value::Floats(default));
         d.widget = Some(widget);
@@ -271,8 +274,8 @@ fn implicit_descriptors() -> Vec<(&'static str, &'static str, ParamDescriptor)> 
 }
 
 /// What can go on the bench, in shelf order: registered controls grouped
-/// by purpose, the kit's parameters, then the implicit controls by value
-/// type.
+/// by purpose, the kit's parameters, then [`MISC_GROUP`]: the registered
+/// controls with no group and the generic controls, one per value type.
 #[derive(Clone, Debug)]
 pub struct Shelf {
     pub entries: Vec<ShelfEntry>,
@@ -280,14 +283,14 @@ pub struct Shelf {
 
 impl Shelf {
     /// The shelf of a kit, and the kit's registry with the shelf's
-    /// implicit controls added.
+    /// implicit controls (its parameters and generic controls) added.
     pub fn of(kit: &Kit) -> (Self, Registry) {
         let mut registry = kit.registry.clone();
         let group_of = |c: &Control| {
             kit.groups
                 .get(&c.id)
                 .cloned()
-                .unwrap_or_else(|| OTHER_GROUP.to_owned())
+                .unwrap_or_else(|| MISC_GROUP.to_owned())
         };
         let mut entries: Vec<ShelfEntry> = registry
             .controls()
@@ -301,7 +304,19 @@ impl Shelf {
                 descriptor: descriptor_of(c),
             })
             .collect();
-        entries.sort_by(|a, b| a.group.cmp(&b.group).then(a.label.cmp(&b.label)));
+        // By group, Miscellaneous last.
+        entries.sort_by(|a, b| {
+            (a.group == MISC_GROUP, &a.group, &a.label).cmp(&(
+                b.group == MISC_GROUP,
+                &b.group,
+                &b.label,
+            ))
+        });
+        let misc = entries
+            .iter()
+            .position(|e| e.group == MISC_GROUP)
+            .map(|i| entries.split_off(i))
+            .unwrap_or_default();
         for p in &kit.parameters {
             let control = crate::implicit(&format!("shelf/{}", p.name), &p.descriptor);
             entries.push(ShelfEntry {
@@ -314,19 +329,24 @@ impl Shelf {
             });
             let _ = registry.register(control);
         }
-        let implicit = if kit.implicit {
-            implicit_descriptors()
+        entries.extend(misc);
+        let generic = if kit.implicit {
+            generic_descriptors()
         } else {
             Vec::new()
         };
-        for (name, hint, d) in implicit {
+        for (name, hint, d) in generic {
+            // A kit parameter of the same name stands in for it.
+            if entries.iter().any(|e| e.name == name) {
+                continue;
+            }
             let control = crate::implicit(&format!("shelf/{name}"), &d);
             entries.push(ShelfEntry {
                 name: name.to_owned(),
                 control: control.id.clone(),
                 label: d.label.clone(),
-                group: IMPLICIT_GROUP.to_owned(),
-                hint: format!("Implicit control of {hint}"),
+                group: MISC_GROUP.to_owned(),
+                hint: format!("Generic control of {hint}"),
                 descriptor: d,
             });
             // Each value type once: the shelf is built once per registry.

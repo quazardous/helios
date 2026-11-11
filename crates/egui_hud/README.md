@@ -26,6 +26,16 @@ dependency. The `bench` feature adds the bench: a shelf of a host's
 controls, composed onto a card and tried live (context bar, modes,
 presets, undo and redo, and why each control takes its form).
 
+## Generic controls first
+
+A checkbox stays a checkbox whatever its domain. Register a control of
+its own only when it adds something beyond its value type: a unit and a
+range (a gain in decibels), a variant set of its own (a fader and a
+knob, a meter). Otherwise use the generic control of the value type: a
+domain use of it is a parameter (its label, description, default and
+choices in a `ParamDescriptor`), and the bench's shelf lists the generic
+controls, one per value type, under "Miscellaneous".
+
 ## Demo
 
 **[Try it in a browser](https://quazardous.github.io/helios/egui_hud/)**:
