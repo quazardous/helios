@@ -238,7 +238,17 @@
           "description": "The workspace opens in Compare: two or more photos side by side, the selection's until photos are chosen.",
           "type": "boolean"
         },
-        "export": { "$ref": "#/$defs/export" }
+        "export": { "$ref": "#/$defs/export" },
+        "sort": {
+          "description": "The order the library shows the photos in; by capture time, oldest first, when absent.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["by"],
+          "properties": {
+            "by": { "enum": ["captured", "imported", "name", "rating", "edited", "size"] },
+            "descending": { "type": "boolean" }
+          }
+        }
       }
     },
     "export": {

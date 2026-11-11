@@ -523,6 +523,37 @@ fn an_export_s_settings_are_checked() {
 }
 
 #[test]
+fn a_library_s_sort_is_checked_and_follows_the_schema() {
+    let mut bundle = batch_export();
+    let library = bundle.template.library.as_mut().unwrap();
+    library.sort = Some(helios_template::SortDesc {
+        by: "rating".into(),
+        descending: true,
+    });
+    assert!(bundle.validate(&catalogue()).is_ok());
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        json["library"]["sort"],
+        serde_json::json!({ "by": "rating", "descending": true })
+    );
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    bundle.template.library.as_mut().unwrap().sort = Some(helios_template::SortDesc {
+        by: "colour".into(),
+        descending: false,
+    });
+    let problems = bundle.validate(&catalogue()).problems;
+    assert!(
+        problems.iter().any(|p| p.starts_with("library.sort.by")),
+        "{problems:?}"
+    );
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert!(!schema::check(&schema::template(), &json).is_empty());
+}
+
+#[test]
 fn the_picture_templates_and_the_blank_workspace_take_a_picture_or_a_raw() {
     // Every built-in template but "Develop one image" (a raw only), and
     // the blank workspace: a raw goes through the raw front.

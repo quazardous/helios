@@ -13,7 +13,7 @@ use std::sync::Arc;
 use helios_core::{Bus, ContentHash, Describe};
 use serde_json::json;
 
-use crate::fields::{Command, LABELS, Op, Order, PICKED, Query, RATING, REJECTED, TAGS};
+use crate::fields::{Command, LABELS, Op, Order, PICKED, Query, RATING, REJECTED, Sort, TAGS};
 use crate::storage::VolumeId;
 use crate::{Image, ImageId, Location, Presence, Store, ToRead, Vault};
 
@@ -27,6 +27,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     fields_round_trip_and_come_in_one_batch(make());
     queries_filter_and_order(make());
     queries_filter_by_labels_flags_and_tags(make());
+    queries_sort_by_every_order_in_one_query(make());
     tags_are_a_free_set(make());
     commands_skip_unchanged_values_coalesce_and_audit(make());
     cursors_cost_one_query_and_report_deltas(make());
@@ -409,7 +410,7 @@ fn an_image_off_the_library_never_shows_in_a_library_read<S: Store>(s: S) {
         },
         Query {
             label: Some("red".into()),
-            order: Order::RatingDesc,
+            order: Order::desc(Sort::Rating),
             ..Query::default()
         },
         Query {
@@ -1462,7 +1463,7 @@ fn queries_filter_and_order<S: Store>(s: S) {
     };
     assert_eq!(s.select(&red).unwrap(), vec![ids[1], ids[3]]);
     let by_rating = Query {
-        order: Order::RatingDesc,
+        order: Order::desc(Sort::Rating),
         ..Query::default()
     };
     assert_eq!(
@@ -1470,6 +1471,95 @@ fn queries_filter_and_order<S: Store>(s: S) {
         vec![ids[1], ids[0], ids[2], ids[3]],
         "unrated counts as 0, then by id"
     );
+}
+
+/// Every sort, both ways, in the one query a cursor opens with: the
+/// photos without a value last whatever the direction, ties broken the
+/// same way (by file name for the capture time, then by id).
+fn queries_sort_by_every_order_in_one_query<S: Store>(s: S) {
+    let mut s = with_images(s, 5);
+    let id = |n: u8| image(n).id;
+    let root = Path::new(std::path::MAIN_SEPARATOR_STR);
+    let file = |dir: &str, name: &str| Location::seen(root.join(dir).join(name), 101, 5, 7);
+    // Names: 1 `e`, 2 `b`, 3 `a`, 4 none (no copy known), 5 `d` (a
+    // missing copy at a path before its present one is passed over).
+    s.put_location(&id(1), &file("p", "e.nef")).unwrap();
+    s.put_location(&id(2), &file("p", "b.nef")).unwrap();
+    s.put_location(&id(3), &file("p", "a.nef")).unwrap();
+    s.put_location(
+        &id(5),
+        &Location {
+            presence: Presence::Missing,
+            ..file("a", "x.nef")
+        },
+    )
+    .unwrap();
+    s.put_location(&id(5), &file("q", "d.nef")).unwrap();
+    // Taken: 2 and 3 in the same second, 4 never by a camera.
+    for (n, at) in [(1, 300), (2, 100), (3, 100), (5, 200)] {
+        s.set_field(&id(n), crate::capture::CAPTURED, Some(&json!(at)))
+            .unwrap();
+    }
+    // Imported: 3 at no known time, 4 and 5 at the same.
+    for (n, at) in [
+        (1, Some(50)),
+        (2, Some(10)),
+        (3, None),
+        (4, Some(30)),
+        (5, Some(30)),
+    ] {
+        let flag = crate::LibraryFlag {
+            in_library: true,
+            at,
+            by: Some("import".into()),
+        };
+        s.set_library_flag(&id(n), &flag).unwrap();
+    }
+    // Stars: 3 unrated, 5 at none (both 0), 1 and 4 the same.
+    for (n, stars) in [(1, 2), (2, 5), (4, 2), (5, 0)] {
+        s.set_field(&id(n), RATING, Some(&json!(stars))).unwrap();
+    }
+    // Edited: 2 last (its newest version), 3 and 4 never.
+    for (n, at) in [(1, 7), (2, 3), (2, 9), (5, 1)] {
+        let version = crate::Version::new(id(n), vec![], json!({ "at": at }), "user", at);
+        s.put_version(&version).unwrap();
+    }
+    let v = Vault::new(s);
+    let cases: [(Sort, [u8; 5], [u8; 5]); 7] = [
+        (Sort::Captured, [3, 2, 5, 1, 4], [1, 5, 3, 2, 4]),
+        (Sort::Imported, [2, 4, 5, 1, 3], [1, 4, 5, 2, 3]),
+        (Sort::Name, [3, 2, 5, 1, 4], [1, 5, 2, 3, 4]),
+        (Sort::Rating, [3, 5, 1, 4, 2], [2, 1, 4, 3, 5]),
+        (Sort::Edited, [5, 1, 2, 3, 4], [2, 1, 5, 3, 4]),
+        (Sort::Size, [1, 2, 3, 4, 5], [5, 4, 3, 2, 1]),
+        (Sort::Id, [1, 2, 3, 4, 5], [5, 4, 3, 2, 1]),
+    ];
+    for (by, ascending, descending) in cases {
+        assert_eq!(Sort::parse(by.name()), Some(by));
+        for (order, want) in [(Order::asc(by), ascending), (Order::desc(by), descending)] {
+            let q0 = v.reads().queries;
+            let cursor = v
+                .open_cursor(Query {
+                    order,
+                    ..Query::default()
+                })
+                .unwrap();
+            assert_eq!(v.reads().queries - q0, 1, "{order:?}: one query");
+            let got = v.cursor_ids(cursor.id, 0, 10).unwrap();
+            let want: Vec<ImageId> = want.into_iter().map(id).collect();
+            assert_eq!(got, want, "{order:?}");
+            v.close_cursor(cursor.id);
+        }
+    }
+    // A filter keeps the order.
+    let rated = Query {
+        min_rating: Some(1),
+        order: Order::asc(Sort::Rating),
+        ..Query::default()
+    };
+    let got = v.store.lock().unwrap().select(&rated).unwrap();
+    assert_eq!(got, [id(1), id(4), id(2)]);
+    assert_eq!(Order::default(), Order::ID);
 }
 
 fn queries_filter_by_labels_flags_and_tags<S: Store>(s: S) {
@@ -1639,7 +1729,7 @@ fn cursors_cost_one_query_and_report_deltas<S: Store>(s: S) {
     let cursor = v
         .open_cursor(Query {
             min_rating: Some(3),
-            order: Order::RatingDesc,
+            order: Order::desc(Sort::Rating),
             ..Query::default()
         })
         .unwrap();

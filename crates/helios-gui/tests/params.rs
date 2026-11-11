@@ -503,7 +503,14 @@ fn a_choice_s_list_opens_and_picks() {
         .run("helios.params.focus", json!(null), Origin::User)
         .unwrap();
     h.run();
-    let at = h.get(by().role(Role::ComboBox)).rect().center();
+    // The Parameters panel's list, not the Library's sort menu.
+    let params = h.state().target_rect("helios.params").unwrap();
+    let at = h
+        .query_all(by().role(Role::ComboBox))
+        .find(|n| params.contains(n.rect().center()))
+        .expect("the choice's list")
+        .rect()
+        .center();
     h.hover_at(at);
     h.run();
     press(&h, at, true);

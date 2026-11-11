@@ -36,7 +36,9 @@ use serde_json::Value;
 
 use helios_core::ContentHash;
 use helios_vault::capture::CAPTURED;
-use helios_vault::fields::{AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, TAGS};
+use helios_vault::fields::{
+    AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, Sort, TAGS,
+};
 use helios_vault::storage::VolumeId;
 use helios_vault::{
     Folder, FolderState, Image, ImageId, LibraryFlag, Location, Presence, Sighting, Store, ToRead,
@@ -664,13 +666,56 @@ fn image_known(db: &Connection, id: &ImageId) -> Result<Option<String>, String> 
     .map_err(err)
 }
 
+/// The file name a photo sorts by (on `i`): its first present copy's, by
+/// path, else its first copy's; the path's last part, cut at the
+/// platform's separator (SQLite has no such function: what is left once
+/// every character but the separator is trimmed from its end is its
+/// folder).
+fn sort_name() -> String {
+    let sep = std::path::MAIN_SEPARATOR;
+    format!(
+        "(SELECT substr(s.path, length(rtrim(s.path, replace(s.path, '{sep}', ''))) + 1)
+          FROM sightings s WHERE s.image = i.id
+          ORDER BY s.presence <> 'present', s.path LIMIT 1)"
+    )
+}
+
+/// The `ORDER BY` of a query's order (on `i`, `r` the rating and `c` the
+/// capture time): its key in its direction, the photos without one last,
+/// then the ties broken ascending, the same way every time (by file name
+/// for the capture time, then by id).
+fn order_by(order: Order) -> String {
+    let key = match order.by {
+        Sort::Id => "i.id".to_string(),
+        Sort::Captured => "c.number".to_string(),
+        Sort::Imported => "i.library_at".to_string(),
+        Sort::Name => sort_name(),
+        Sort::Rating => "COALESCE(r.number, 0)".to_string(),
+        Sort::Edited => "(SELECT MAX(v.at) FROM versions v WHERE v.image = i.id)".to_string(),
+        Sort::Size => "i.size".to_string(),
+    };
+    if order.by == Sort::Id && !order.descending {
+        return key;
+    }
+    let direction = if order.descending { "DESC" } else { "ASC" };
+    let tie = if order.by == Sort::Captured {
+        format!("{} ASC NULLS LAST, ", sort_name())
+    } else {
+        String::new()
+    };
+    format!("{key} {direction} NULLS LAST, {tie}i.id")
+}
+
 /// The statement a query selects with, and its arguments.
 fn select_sql(query: &Query) -> Result<(String, Vec<rusqlite::types::Value>), String> {
     use rusqlite::types::Value as Sql;
     query.check()?;
-    let order = match query.order {
-        Order::Id => "i.id",
-        Order::RatingDesc => "COALESCE(r.number, 0) DESC, i.id",
+    let order = order_by(query.order);
+    // The capture time, joined only to sort by it.
+    let captured = if query.order.by == Sort::Captured {
+        format!("LEFT JOIN fields c ON c.image = i.id AND c.name = '{CAPTURED}'")
+    } else {
+        String::new()
     };
     let mut args: Vec<Sql> = vec![
         query.min_rating.map_or(Sql::Null, Sql::Integer),
@@ -683,6 +728,7 @@ fn select_sql(query: &Query) -> Result<(String, Vec<rusqlite::types::Value>), St
              LEFT JOIN fields p ON p.image = i.id AND p.name = '{PICKED}'
              LEFT JOIN fields x ON x.image = i.id AND x.name = '{REJECTED}'
              LEFT JOIN fields t ON t.image = i.id AND t.name = '{TAGS}'
+             {captured}
              WHERE i.in_library = 1
                AND (?1 IS NULL OR COALESCE(r.number, 0) >= ?1)
                AND (?2 IS NULL OR EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value = ?2))"
@@ -731,7 +777,7 @@ fn select_sql(query: &Query) -> Result<(String, Vec<rusqlite::types::Value>), St
         sql.push(')');
     }
     sql.push_str(" ORDER BY ");
-    sql.push_str(order);
+    sql.push_str(&order);
     Ok((sql, args))
 }
 

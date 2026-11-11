@@ -1684,3 +1684,23 @@ gui-workspace-library-compare = s’ouvre dans Comparer, les photos côte à cô
 gui-library-compare = Comparer
 
 gui-library-compare-tip = Les photos sélectionnées côte à côte (C)
+
+gui-library-sort-captured = Date de prise de vue
+
+gui-library-sort-imported = Date d’import
+
+gui-library-sort-name = Nom de fichier
+
+gui-library-sort-rating = Note
+
+gui-library-sort-edited = Dernière retouche
+
+gui-library-sort-size = Taille du fichier
+
+gui-library-sort-id = Contenu
+
+gui-library-sort-tip = Trier par
+
+gui-library-sort-ascending = Croissant : la plus ancienne, la plus petite ou A d’abord
+
+gui-library-sort-descending = Décroissant : la plus récente, la plus grande ou Z d’abord

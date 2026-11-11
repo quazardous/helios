@@ -427,9 +427,9 @@ are read; see docs/darktable-library-import.md, "Status: implemented
 The library panels are egui-pop's photo library widgets (its
 `docs/library.md`) over the vault:
 
-- **Library**: the search field, the marks of the image under the cursor
-  (stars, colour labels, pick or reject, tags) and a virtualised thumbnail
-  grid. Thumbnails are the raws' embedded previews (a picture itself),
+- **Library**: the search field, the sort, the marks of the image under
+  the cursor (stars, colour labels, pick or reject, tags) and a
+  virtualised thumbnail grid. Thumbnails are the raws' embedded previews (a picture itself),
   read in the background, the cells in view first, and shown as they
   arrive.
 - **Filmstrip**: the same images in one row, sharing the grid's
@@ -449,6 +449,21 @@ The library panels are egui-pop's photo library widgets (its
   best, zoom and pan) belongs to the window's focus, not to the library
   view, so it can become a window of its own. File > New workspace
   offers "Compare", a workspace that opens there.
+
+**Sorting** (2026-11-11, see [design/library.md](design/library.md),
+L3): the grid shows the photos by capture time, oldest first, unless
+sorted otherwise. The Library toolbar's menu sorts by capture time,
+import time, file name, rating, last edit or file size, and the arrow
+beside it turns the order around; `library.sort` does the same for an
+agent (`by`, `descending`; without `by` it answers the sort in force).
+The vault sorts, in the query that reads the library: photos without a
+value (never taken by a camera, never edited) come last either way, and
+ties go by file name for the capture time, then by content, so the
+order is stable. A stack's members follow its top photo. The sort is the
+window's, kept with its workspace (`library.sort` in its template, one
+Edit > Undo step each) and back when the workspace opens again. A mark
+does not move a photo while culling: the order follows the next read
+(an import, a scan, a sort).
 
 Marks go to the vault as fields: `rating`, `labels`, `picked` and
 `rejected` (a reject wins over a pick; taking either back keeps the

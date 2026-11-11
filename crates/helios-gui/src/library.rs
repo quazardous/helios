@@ -730,6 +730,54 @@ pub struct Library {
     map_feed: Option<helios_library::map_job::Feed>,
     /// The ids in view in the grid and in Compare, as last fed.
     fed: (Vec<String>, Vec<String>),
+    /// The order the vault reads the photos in: this focus's sort.
+    sort: helios_vault::Order,
+    /// The sort the entries must be read again in, once it changed
+    /// ([`Library::take_resort`]).
+    resort: Option<helios_vault::Order>,
+}
+
+/// The library's sort when nothing chose one: by capture time, oldest
+/// first (`docs/design/library.md`, L-C1).
+pub const DEFAULT_SORT: helios_vault::Order =
+    helios_vault::Order::asc(helios_vault::Sort::Captured);
+
+/// The command that sorts the library (`by`, `descending`).
+pub const SORT_COMMAND: &str = "library.sort";
+
+/// The sort a template's library names (its default when it names none);
+/// `None` for a sort it does not know.
+pub fn sort_of(desc: Option<&helios_template::SortDesc>) -> Option<helios_vault::Order> {
+    let Some(d) = desc else {
+        return Some(DEFAULT_SORT);
+    };
+    let by = helios_vault::Sort::parse(&d.by).filter(|s| *s != helios_vault::Sort::Id)?;
+    Some(helios_vault::Order {
+        by,
+        descending: d.descending,
+    })
+}
+
+/// A sort as a template's library writes it (nothing for the default).
+pub fn sort_desc(order: helios_vault::Order) -> Option<helios_template::SortDesc> {
+    (order != DEFAULT_SORT).then(|| helios_template::SortDesc {
+        by: order.by.name().into(),
+        descending: order.descending,
+    })
+}
+
+/// A sort's name in the menu.
+fn sort_label(by: helios_vault::Sort) -> Message {
+    use helios_vault::Sort;
+    match by {
+        Sort::Captured => Message::new("gui-library-sort-captured", "Capture time"),
+        Sort::Imported => Message::new("gui-library-sort-imported", "Import time"),
+        Sort::Name => Message::new("gui-library-sort-name", "File name"),
+        Sort::Rating => Message::new("gui-library-sort-rating", "Rating"),
+        Sort::Edited => Message::new("gui-library-sort-edited", "Last edit"),
+        Sort::Size => Message::new("gui-library-sort-size", "File size"),
+        Sort::Id => Message::new("gui-library-sort-id", "Content"),
+    }
 }
 
 /// Whether something is drawn (a struct of many flags reads worse).
@@ -786,6 +834,8 @@ impl Default for Library {
             backup_badges: Shown::No,
             map_feed: None,
             fed: (Vec::new(), Vec::new()),
+            sort: DEFAULT_SORT,
+            resort: None,
         }
     }
 }
@@ -1357,6 +1407,31 @@ impl Library {
         self.filter = filter;
         self.matches = None;
         self.reorder();
+    }
+
+    /// The order the photos are read in: this focus's sort.
+    pub fn sort(&self) -> helios_vault::Order {
+        self.sort
+    }
+
+    /// Sorts the library: the host reads it again in that order
+    /// ([`Library::take_resort`]); the selection follows its photos.
+    pub fn set_sort(&mut self, sort: helios_vault::Order) {
+        if sort != self.sort {
+            self.sort = sort;
+            self.resort = Some(sort);
+        }
+    }
+
+    /// Asks the host to read the photos again in the sort (they were read
+    /// in another).
+    pub fn ask_resort(&mut self) {
+        self.resort = Some(self.sort);
+    }
+
+    /// Whether the photos must be read again in the sort, once.
+    pub fn take_resort(&mut self) -> bool {
+        self.resort.take().is_some()
     }
 
     /// The vault query the filter needs run, once.
@@ -2121,7 +2196,9 @@ impl Library {
         }
     }
 
-    /// The search field, auto-advance, the count.
+    /// The search field; the sort and the count; auto-advance and
+    /// Compare. Each group on a line of its own, so a narrow panel does
+    /// not wrap the count away from what it counts.
     fn toolbar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
@@ -2164,6 +2241,12 @@ impl Library {
                 field = field.app(app);
             }
             asked = field.show(ui, &mut self.search).changed;
+        });
+        ui.horizontal_wrapped(|ui| {
+            self.sort_menu(ui);
+            ui.weak(count);
+        });
+        ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut self.auto_advance, advance);
             if ui
                 .add_enabled(can_compare, egui::Button::new(compare))
@@ -2179,10 +2262,76 @@ impl Library {
                     ),
                 );
             }
-            ui.weak(count);
         });
         if let Some(filter) = asked {
             self.filtered(filter);
+        }
+    }
+
+    /// The sort's menu and its direction: a change runs
+    /// [`SORT_COMMAND`], which the workspace keeps.
+    fn sort_menu(&mut self, ui: &mut Ui) {
+        use helios_vault::{Order, Sort};
+        let ctx = ui.ctx().clone();
+        let word = |m: Message| crate::i18n::text(&ctx, m);
+        let mut chosen = self.sort;
+        let current = word(sort_label(self.sort.by));
+        let tip = word(Message::new("gui-library-sort-tip", "Sort by"));
+        let menu = egui::ComboBox::from_id_salt("helios.library.sort")
+            .selected_text(current.clone())
+            .show_ui(ui, |ui| {
+                for by in Sort::ALL.into_iter().filter(|s| *s != Sort::Id) {
+                    ui.selectable_value(
+                        &mut chosen,
+                        Order {
+                            by,
+                            descending: self.sort.descending,
+                        },
+                        word(sort_label(by)),
+                    );
+                }
+            })
+            .response
+            .on_hover_text(&tip);
+        // Named for screen readers (and tests): "Sort by", its value the
+        // sort chosen.
+        menu.widget_info(|| {
+            let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), &tip);
+            info.current_text_value = Some(current.clone());
+            info
+        });
+        let (arrow, tip) = if self.sort.descending {
+            (
+                "↓",
+                Message::new(
+                    "gui-library-sort-descending",
+                    "Descending: newest, largest or Z first",
+                ),
+            )
+        } else {
+            (
+                "↑",
+                Message::new(
+                    "gui-library-sort-ascending",
+                    "Ascending: oldest, smallest or A first",
+                ),
+            )
+        };
+        let tip = word(tip);
+        let flip = ui.add(egui::Button::new(arrow)).on_hover_text(&tip);
+        flip.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &tip));
+        if flip.clicked() {
+            chosen.descending = !chosen.descending;
+        }
+        if chosen != self.sort {
+            crate::dialogs::request(
+                ui.ctx(),
+                crate::dialogs::Request::Run(
+                    SORT_COMMAND.into(),
+                    serde_json::json!({ "by": chosen.by.name(), "descending": chosen.descending }),
+                    helios_shell::commands::Origin::User,
+                ),
+            );
         }
     }
 

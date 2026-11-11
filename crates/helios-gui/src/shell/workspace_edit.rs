@@ -22,7 +22,7 @@ use egui_pop::model::layout::Layout;
 use helios_core::Message;
 use helios_shell::commands::Origin;
 use helios_template::workspace::{self, Extract, Files, Part, Side, State, Translation};
-use helios_template::{Bundle, ExportDesc, ImportDesc, LibraryDesc, QueryDesc};
+use helios_template::{Bundle, ExportDesc, ImportDesc, LibraryDesc, QueryDesc, SortDesc};
 use serde_json::{Value, json};
 
 use super::{Shell, lock};
@@ -531,6 +531,13 @@ impl Shell {
             let mut lib = self.focus.library.borrow_mut();
             lib.auto_advance = t.library.as_ref().is_some_and(|l| l.auto_advance);
             lib.import_offered = self.focus.import_source.is_some();
+            // The workspace's sort (validation refused one it does not
+            // know).
+            if let Some(sort) =
+                crate::library::sort_of(t.library.as_ref().and_then(|l| l.sort.as_ref()))
+            {
+                lib.set_sort(sort);
+            }
             // The images shown change with the query only: a typed
             // search stays while the other settings change.
             let query = |s: &State| {
@@ -943,7 +950,18 @@ impl Shell {
                             .map_err(|e| format!("export: {e}"))?,
                     ),
                 };
-                let library = library_of(args, export)?;
+                // So is the sort, the Library toolbar's.
+                let sort = match &args["sort"] {
+                    Value::Null => self
+                        .workspace_state()
+                        .and_then(|s| s.bundle.template.library)
+                        .and_then(|l| l.sort),
+                    written => Some(
+                        serde_json::from_value::<SortDesc>(written.clone())
+                            .map_err(|e| format!("sort: {e}"))?,
+                    ),
+                };
+                let library = library_of(args, export, sort)?;
                 self.edit_workspace(&json!({ "library": library }), origin)
             }
             "workspace.reset" => {
@@ -1433,7 +1451,11 @@ fn text_field(key: &str, label: &str, value: &str) -> Field {
 
 /// The library settings a form or an agent gives; the query as the
 /// search field takes it (`flag:pick`) or written as in a template.
-fn library_of(args: &Value, export: Option<ExportDesc>) -> Result<Value, String> {
+fn library_of(
+    args: &Value,
+    export: Option<ExportDesc>,
+    sort: Option<SortDesc>,
+) -> Result<Value, String> {
     let t = |k: &str, default: &str| text(args, k).unwrap_or(default).to_string();
     let source = t("source", "none");
     let import = (source != "none").then(|| ImportDesc {
@@ -1458,7 +1480,13 @@ fn library_of(args: &Value, export: Option<ExportDesc>) -> Result<Value, String>
     };
     let auto_advance = args["auto_advance"].as_bool().unwrap_or(false);
     let compare = args["compare"].as_bool().unwrap_or(false);
-    if import.is_none() && query.is_none() && !auto_advance && !compare && export.is_none() {
+    if import.is_none()
+        && query.is_none()
+        && !auto_advance
+        && !compare
+        && export.is_none()
+        && sort.is_none()
+    {
         return Ok(Value::Null);
     }
     Ok(json!(LibraryDesc {
@@ -1467,6 +1495,7 @@ fn library_of(args: &Value, export: Option<ExportDesc>) -> Result<Value, String>
         auto_advance,
         compare,
         export,
+        sort,
     }))
 }
 

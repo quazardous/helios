@@ -110,6 +110,7 @@ command-library-importWindow.title 5cf073c01aa7d73f
 command-library-importWith.title 8da42d005844e0c1
 command-library-openFolder.title 79525ab3a42262e5
 command-library-pasteFiles.title 409587651f782f9a
+command-library-sort.title 31b0d3aa70f57a39
 command-library-storage.title 72ca240c73a1c7aa
 command-macro-dissolve.title e472cc526f105a70
 command-macro-fold.title 33ae65c670fa307a
@@ -558,6 +559,16 @@ gui-library-plug-in 58e5adccf754ef76
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
 gui-library-search fddceff6dbd31d81
+gui-library-sort-ascending a45193d290e560eb
+gui-library-sort-captured 9d016c2456a256d8
+gui-library-sort-descending e5c36b4e51371498
+gui-library-sort-edited 605eddd29245bcbf
+gui-library-sort-id a8b73b0e1bfcd0b0
+gui-library-sort-imported 43184ed1f7ab36ad
+gui-library-sort-name a461cba6b8059f30
+gui-library-sort-rating 36690a4e79cfa166
+gui-library-sort-size da247eb7d8a1f68e
+gui-library-sort-tip fdd935e0be790484
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
 gui-log-clear 238f7a82e564b550

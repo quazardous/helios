@@ -659,6 +659,26 @@ gui-library-reading = Reading the library…
 
 gui-library-search = Search images
 
+gui-library-sort-ascending = Ascending: oldest, smallest or A first
+
+gui-library-sort-captured = Capture time
+
+gui-library-sort-descending = Descending: newest, largest or Z first
+
+gui-library-sort-edited = Last edit
+
+gui-library-sort-id = Content
+
+gui-library-sort-imported = Import time
+
+gui-library-sort-name = File name
+
+gui-library-sort-rating = Rating
+
+gui-library-sort-size = File size
+
+gui-library-sort-tip = Sort by
+
 gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
