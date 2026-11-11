@@ -4,10 +4,11 @@
 //! docs/design/windows.md and the [`Core`](super::core::Core), what every
 //! window shares). It holds the window's workspace (its layout, its
 //! places and modes, its sub-workspaces), the views and tools the window
-//! shows (the library's grid and selection, the open image's viewport,
-//! its parameters, masks, network, scopes and decisions, the Queue and
-//! Workshops panels), the import window drawn in it, and what pictures of
-//! the window need (its named rectangles, scale and screenshots).
+//! shows (the library's grid and selection, the comparison of photos side
+//! by side, the open image's viewport, its parameters, masks, network,
+//! scopes and decisions, the Queue and Workshops panels), the import
+//! window drawn in it, and what pictures of the window need (its named
+//! rectangles, scale and screenshots).
 //!
 //! Today the process has one focus, the main window, which is the root
 //! viewport: the root window is always the first focus. A second focus
@@ -61,6 +62,12 @@ pub(super) struct Focus {
     /// The library as this window shows it: its grid, filter and
     /// selection, over the catalogue the host gives.
     pub(super) library: Rc<RefCell<crate::library::Library>>,
+    /// The comparison: its photos, the active one, its zoom and pan (the
+    /// Compare place names its photos; the Compare panel draws it).
+    pub(super) comparison: Rc<RefCell<crate::comparison::Comparison>>,
+    /// The workspace opens in Compare (its template says so): the place
+    /// is entered once the stack is read, when it shows the root.
+    pub(super) open_in_compare: bool,
     /// The open image's decisions, and the Decisions panel's cards.
     pub(super) decisions: Rc<RefCell<crate::decisions::Decisions>>,
     /// Where the workspace imports from, and how (its template's).
@@ -151,6 +158,8 @@ impl Focus {
             title: String::new(),
             scopes: Rc::default(),
             library: seed.library,
+            comparison: Rc::default(),
+            open_in_compare: false,
             decisions: Rc::default(),
             import_source: None,
             imported_ids: Vec::new(),

@@ -47,6 +47,9 @@ command-graph-view =
 frame-helios-compare =
     .title = Compare
 
+frame-helios-comparison =
+    .title = Compare
+
 frame-helios-culling =
     .title = Culling
 

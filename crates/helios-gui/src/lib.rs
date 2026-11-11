@@ -7,6 +7,7 @@ pub mod caches;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;
+pub mod comparison;
 pub mod config;
 pub mod contexts;
 pub mod controls;

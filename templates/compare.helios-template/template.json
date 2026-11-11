@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "id": "helios.compare",
+  "version": 1,
+  "meta": {
+    "name": "Compare",
+    "scenario": "Choose between similar photos: two or more side by side, each drawn from its edit, zoom and pan synchronised (a toggle), the arrow keys moving the active photo, its rating, flag and colour label at hand, then keep the best.",
+    "tags": ["compare", "culling", "survey"]
+  },
+  "network": {
+    "sources": ["source"],
+    "image_sources": ["source"],
+    "nodes": [
+      { "name": "exposure", "module": "exposure",
+        "raw_params": { "exposure": { "float": 0.7 }, "black": { "float": -0.000244140625 }, "compensate_bias": { "bool": true } } },
+      { "name": "sigmoid", "module": "sigmoid" }
+    ],
+    "connections": [
+      { "from": "source", "port": "image", "to": "exposure", "input": "input" },
+      { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
+    ],
+    "view": { "node": "sigmoid", "port": "output" }
+  },
+  "tools": {
+    "toolbox": ["vault.flag.pick", "vault.flag.reject", "vault.flag.none"]
+  },
+  "library": {
+    "compare": true
+  }
+}

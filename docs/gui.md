@@ -82,6 +82,7 @@ MCP server alike (`helios_gui::contexts` on the desktop).
 | `helios.darkroom` | place, payload `{"image": id}` or `{"file": path}` | an image edited: entered when one opens, under the place the user was in (the library, the root) | the `Darkroom` arrangement: the workspace's default layout (each panel open by default in its area), the image in the centre, wherever the image was opened from (the library's grid included); then what the user picks there |
 | `helios.workspace` | place, payload the workspace's key | the workspace's network, edited (`view.network`) | the `Network` arrangement |
 | `helios.sub-workspace` | place, payload `{"id": id}` | a sub-workspace of the network (`subworkspace.enter`), under its parent's place: its nodes only, shown and edited | the `Sub-workspace` arrangement (the network's), its own once changed |
+| `helios.comparison` | place, payload `{"images": [id, …]}` | two to four photos side by side (`library.compare`, `C` in the library, the Library's Compare button; a workspace whose template says `"compare": true` opens there), each drawn from its edit; none named: the selection's | the `Compare` arrangement: the Compare panel in the centre, the filmstrip under it |
 | `helios.culling` | mode of `orientation`, set | culling (`view.culling`): the vault's keys (0 to 5, P, X, U, R, 6 to 9, S, Left, Right) wherever the focus is, the mask keys off | the `Image` arrangement |
 | `helios.mask-editing` | mode of `tool`, pushed, transient | drawing a mask's path | the Masks panel shown |
 | `helios.compare` | mode of `compare`, pushed | before and after side by side | the image shown |
@@ -1012,7 +1013,9 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library, culling | `R`; `X` | toggle the reject (darktable); reject (Lightroom) |
 | library, culling | `P`, `U` | pick, take the flag off |
 | library, culling | `F2`–`F5`; `6`–`9` | yellow, green, blue, purple; red, yellow, green, blue |
-| library, culling | `Right`, `Left`, `S` | next, previous image; open or close a stack |
+| library, culling | `Right`, `Left`, `S` | next, previous image (not in Compare); open or close a stack |
+| library | `C` | compare the selected photos (`library.compare`) |
+| Compare place | `Right`, `Left` | the next, previous photo active (`compare.next`, `compare.previous`) |
 | culling | `Space`, `Backspace` | next, previous image (in the grid `Space` selects) |
 | image | `C`, `E`, `G`, `P`, `M` | circle, ellipse, gradient, path masks; the mask display |
 | image | `Enter`, `Escape`, `Delete` | close, stop the path; remove a point |

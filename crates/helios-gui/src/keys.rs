@@ -2,7 +2,7 @@
 //! default layer of egui-pop's keymap, every binding scoped by a `when`
 //! clause; [`crate::keymaps`] adds packages over it.
 
-use crate::contexts::{CULLING, DARKROOM, ORIENTATION, SUBWORKSPACE};
+use crate::contexts::{COMPARISON, CULLING, DARKROOM, ORIENTATION, SUBWORKSPACE};
 
 /// While the library has the focus (its grid, the filmstrip or Compare),
 /// anywhere but the darkroom: as in darktable's lighttable. egui-pop
@@ -11,6 +11,11 @@ pub fn library() -> String {
     format!(
         "(focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip' || focusedPanel == 'helios.compare') && place != '{DARKROOM}'"
     )
+}
+
+/// In the Compare place: the arrow keys move the active photo.
+pub fn comparison() -> String {
+    format!("place == '{COMPARISON}'")
 }
 
 /// While culling (a mode of the context stack): the culling keys work
@@ -90,11 +95,23 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // Not while egui-pop's in-app file picker is open (its context key
     // `filePickerEditPath`): its own keys (F5 reads the folder again)
     // win there, and an image is not rated behind it.
+    // In Compare, the arrows move the active photo instead (below).
+    let comparison = comparison();
     for (k, command) in &culling_keys {
         for when in [&library, &culling] {
-            bind(k, command, &behind_no_picker(when));
+            let when = if matches!(k.as_str(), "Left" | "Right") {
+                format!("({when}) && !({comparison})")
+            } else {
+                when.clone()
+            };
+            bind(k, command, &behind_no_picker(&when));
         }
     }
+    // Compare, as Lightroom's C in the library; in it, the arrows move
+    // the active photo, as in Lightroom's Survey view.
+    bind("C", crate::comparison::COMMAND, &behind_no_picker(&library));
+    bind("Right", "compare.next", &behind_no_picker(&comparison));
+    bind("Left", "compare.previous", &behind_no_picker(&comparison));
     // Next and previous image while culling; in the grid Space selects.
     bind("Space", "vault.next", &culling);
     bind("Backspace", "vault.previous", &culling);

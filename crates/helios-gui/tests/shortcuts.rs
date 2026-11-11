@@ -121,7 +121,8 @@ fn culling_keys_run_their_commands_in_the_library_and_nothing_in_the_darkroom() 
     let dir = temp("culling");
     let mut h = window(&dir);
     let keys = culling_keys();
-    assert!(keys.len() > 20, "{keys:?}");
+    // The arrows are not here: in Compare they move the active photo.
+    assert!(keys.len() >= 20, "{keys:?}");
     // In the library, the grid having the focus.
     run(&mut h, "view.library", json!(null));
     run(&mut h, "helios.vault.focus", json!(null));

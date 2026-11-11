@@ -470,6 +470,13 @@ driver, not a rewrite.
   de-duplicate" sets it up, its import source part of the template
   format. Not decided: whether stacks are proposed after every import by
   default (the template does, as a setting of its own).
+  (2026-11-11, implemented) **Compare is a focus**: two to four photos
+  side by side in a place of their own (Lightroom's Survey and Compare,
+  darktable's culling), each drawn from its edit, zoom and pan
+  synchronised by default, the arrows moving the active photo, its marks
+  at hand; opened by `C` on a selection or File > New workspace >
+  "Compare". Its state is the focus's, so it can become a window with
+  the multi-window work.
   (2026-11-06, decided) **"Library" is the only word users see.** The
   vault is an internal notion: the normal interface never shows it (at
   most an advanced settings section may give its path and engine) and

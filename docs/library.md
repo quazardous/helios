@@ -435,8 +435,20 @@ The library panels are egui-pop's photo library widgets (its
 - **Filmstrip**: the same images in one row, sharing the grid's
   selection.
 - **Compare** (closed by default): the two to four images selected side
-  by side, zoom and pan synced; mark one best, then **Keep the best**
-  picks it and rejects the others.
+  by side, each drawn from its edit, zoom and pan synced (a toggle); mark
+  one best, then **Keep the best** picks it and rejects the others. One
+  photo is active, outlined: a click or its name above makes another
+  active, and its stars, colour labels and flag show above the photos.
+- **The Compare place** (2026-11-11): the Library's **Compare** button,
+  `C` or `library.compare` on two to four selected photos opens them in
+  a place of their own (`helios.comparison`, the photos named in its
+  payload, so the workspace reopens on them): the Compare panel in the
+  centre, the filmstrip under it, as Lightroom's Survey view. The arrow
+  keys move the active photo, which is the selection there, so the
+  culling keys mark it. The comparison (its photos, the active one, the
+  best, zoom and pan) belongs to the window's focus, not to the library
+  view, so it can become a window of its own. File > New workspace
+  offers "Compare", a workspace that opens there.
 
 Marks go to the vault as fields: `rating`, `labels`, `picked` and
 `rejected` (a reject wins over a pick; taking either back keeps the

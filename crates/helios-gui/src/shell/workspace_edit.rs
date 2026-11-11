@@ -524,6 +524,10 @@ impl Shell {
         }
         if changed(&|b| b.bundle.template.library != t.library) {
             self.focus.import_source = t.library.as_ref().and_then(|l| l.import.clone());
+            // A Compare workspace opens in Compare (once, when opened).
+            if before.is_none() {
+                self.focus.open_in_compare = t.library.as_ref().is_some_and(|l| l.compare);
+            }
             let mut lib = self.focus.library.borrow_mut();
             lib.auto_advance = t.library.as_ref().is_some_and(|l| l.auto_advance);
             lib.import_offered = self.focus.import_source.is_some();
@@ -1140,6 +1144,14 @@ impl Shell {
                 )),
                 library.auto_advance,
             ),
+            boolean(
+                "compare",
+                self.text(Message::new(
+                    "gui-workspace-library-compare",
+                    "opens in Compare, photos side by side",
+                )),
+                library.compare,
+            ),
         ];
         let f = crate::dialogs::Form {
             title: self.text(Message::new(
@@ -1445,13 +1457,15 @@ fn library_of(args: &Value, export: Option<ExportDesc>) -> Result<Value, String>
         .filter(|q| !q.is_empty()),
     };
     let auto_advance = args["auto_advance"].as_bool().unwrap_or(false);
-    if import.is_none() && query.is_none() && !auto_advance && export.is_none() {
+    let compare = args["compare"].as_bool().unwrap_or(false);
+    if import.is_none() && query.is_none() && !auto_advance && !compare && export.is_none() {
         return Ok(Value::Null);
     }
     Ok(json!(LibraryDesc {
         import,
         query,
         auto_advance,
+        compare,
         export,
     }))
 }

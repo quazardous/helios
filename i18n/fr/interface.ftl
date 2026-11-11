@@ -44,6 +44,9 @@ command-graph-view =
 frame-helios-compare =
     .title = Comparaison
 
+frame-helios-comparison =
+    .title = Comparer
+
 frame-helios-culling =
     .title = Tri
 

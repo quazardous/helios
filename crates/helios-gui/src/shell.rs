@@ -211,6 +211,14 @@ enum Action {
     /// Goes to a place of the context stack at the workspace's top: the
     /// library, or the workspace's network.
     Place(crate::contexts::FrameId),
+    /// Compares photos side by side, in the Compare place (`images`, else
+    /// the selection: two or more).
+    ComparePhotos(Value),
+    /// Moves the comparison's active photo by a step.
+    CompareStep(i64),
+    /// Zoom and pan synchronised across the compared photos, or not
+    /// (toggled when `None`).
+    CompareSync(Option<bool>),
     /// Enters a sub-workspace (by id; without one, the one under the
     /// place shown that holds the selected node), as whom.
     EnterSubworkspace(Option<String>, Origin),
@@ -1077,12 +1085,13 @@ impl Shell {
         ] {
             if has(&shell, panel) {
                 let library = shell.focus.library.clone();
+                let comparison = shell.focus.comparison.clone();
                 shell.set_content(panel, move |ui| {
                     let mut library = library.borrow_mut();
                     match view {
                         0 => library.grid(ui),
                         1 => library.filmstrip(ui),
-                        _ => library.compare_ui(ui),
+                        _ => library.compare_ui(ui, &mut comparison.borrow_mut()),
                     }
                 });
             }
@@ -1395,6 +1404,12 @@ impl Shell {
     /// The library's state, to show what it holds.
     pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
         self.focus.library.borrow_mut()
+    }
+
+    /// The window's comparison: its photos, the active one, its zoom and
+    /// pan.
+    pub fn comparison(&self) -> std::cell::Ref<'_, crate::comparison::Comparison> {
+        self.focus.comparison.borrow()
     }
 
     /// Where an import's lines go, with its arguments (`library.import`'s),
@@ -2674,6 +2689,35 @@ impl Shell {
                 "View",
             ),
             Box::new(|_, _| Ok(Action::Place(crate::contexts::WORKSPACE))),
+        );
+        add(
+            CommandSpec::new(
+                crate::comparison::COMMAND,
+                "Compare photos side by side (`images`: ids, else the selection; two to four)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::ComparePhotos(a.clone()))),
+        );
+        for (id, title, step) in [
+            ("compare.next", "Compare: make the next photo active", 1),
+            (
+                "compare.previous",
+                "Compare: make the previous photo active",
+                -1,
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |_, _| Ok(Action::CompareStep(step))),
+            );
+        }
+        add(
+            CommandSpec::new(
+                "compare.sync",
+                "Compare: zoom and pan synchronised across the photos (`on`; toggled when absent)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::CompareSync(a.get("on").and_then(Value::as_bool)))),
         );
         add(
             CommandSpec::new(
@@ -3961,11 +4005,96 @@ impl Shell {
             return;
         };
         self.focus.import_source.clone_from(&l.import);
+        self.focus.open_in_compare = l.compare;
         let mut lib = self.focus.library.borrow_mut();
         lib.auto_advance = l.auto_advance;
         lib.import_offered = l.import.is_some();
         if let Some(q) = &l.query {
             lib.set_filter(crate::library::filter_of(q));
+        }
+    }
+
+    /// Compares photos side by side: the Compare place on `images` (ids),
+    /// else on the selection; two to four photos, the first active.
+    fn compare_photos(&mut self, args: &Value) -> Result<Value, String> {
+        use egui_pop::views::library::compare::MAX_PANES;
+        let mut ids: Vec<String> = match args.get("images").and_then(Value::as_array) {
+            Some(list) => list
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+            None => self.focus.library.borrow().targets().unwrap_or_default(),
+        };
+        let mut seen = std::collections::HashSet::new();
+        ids.retain(|id| seen.insert(id.clone()));
+        {
+            let library = self.focus.library.borrow();
+            if let Some(unknown) = ids.iter().find(|id| !library.holds(id)) {
+                return Err(format!("the library has no photo `{unknown}`"));
+            }
+        }
+        if ids.len() < 2 {
+            return Err(self.text(Message::new(
+                "gui-compare-too-few",
+                "Select two or more photos to compare them",
+            )));
+        }
+        if ids.len() > MAX_PANES {
+            ids.truncate(MAX_PANES);
+            self.note(
+                Message::new(
+                    "gui-compare-first",
+                    "Compare shows { $count } photos at most: the first { $count } are compared",
+                )
+                .with("count", MAX_PANES),
+            );
+        }
+        let payload = helios_template::contexts::images_payload(&ids);
+        let done = crate::contexts::go(
+            self.core.app.handle(),
+            crate::contexts::COMPARISON,
+            payload,
+            &egui_pop::model::commands::Origin::User,
+        )?;
+        self.follow_comparison();
+        Ok(json!({ "images": ids, "place": done }))
+    }
+
+    /// The comparison follows the Compare place: its photos are the
+    /// place's (none elsewhere: the Compare tab compares the selection);
+    /// entering it on photos selects the first, the active one. A
+    /// workspace that opens in Compare goes there once its stack is read.
+    fn follow_comparison(&mut self) {
+        let app = self.core.app.handle().clone();
+        if self.focus.open_in_compare && crate::contexts::at_root(&app) {
+            self.focus.open_in_compare = false;
+            let _ = crate::contexts::go(
+                &app,
+                crate::contexts::COMPARISON,
+                helios_template::contexts::images_payload(&[]),
+                &egui_pop::model::commands::Origin::User,
+            );
+        } else if egui_pop::api::contexts::state(&app).is_some() {
+            self.focus.open_in_compare = false;
+        }
+        let photos: Vec<String> = {
+            let library = self.focus.library.borrow();
+            crate::contexts::compared(&app)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|id| library.holds(id))
+                .collect()
+        };
+        let mut cmp = self.focus.comparison.borrow_mut();
+        if photos.as_slice() == cmp.photos() {
+            return;
+        }
+        cmp.set_photos(photos);
+        if let Some(first) = cmp.photos().first() {
+            self.focus
+                .library
+                .borrow_mut()
+                .select_ids(std::slice::from_ref(first));
         }
     }
 
@@ -4396,6 +4525,27 @@ impl Shell {
                     payload,
                     &egui_pop::model::commands::Origin::User,
                 );
+            }
+            Action::ComparePhotos(args) => return self.compare_photos(&args),
+            Action::CompareStep(step) => {
+                let selection = self.focus.library.borrow().selection();
+                let mut cmp = self.focus.comparison.borrow_mut();
+                let shown = cmp.shown(&selection);
+                if shown.len() < 2 {
+                    return Err("no photos are compared".into());
+                }
+                cmp.step(step, shown.len());
+                let active = cmp.active(&shown).cloned();
+                if !cmp.photos().is_empty()
+                    && let Some(active) = active
+                {
+                    self.focus.library.borrow_mut().select_ids(&[active]);
+                }
+            }
+            Action::CompareSync(on) => {
+                let mut cmp = self.focus.comparison.borrow_mut();
+                cmp.synced = on.unwrap_or(!cmp.synced);
+                return Ok(json!({ "synced": cmp.synced }));
             }
             Action::EnterSubworkspace(id, origin) => {
                 let id = if let Some(id) = id {
@@ -4836,6 +4986,7 @@ impl Shell {
         self.focus
             .follow
             .frame(self.core.app.handle(), &mut lock(&self.core.values));
+        self.follow_comparison();
         // An undo or a redo of the workspace's state, put in place.
         self.sync_workspace();
         // The theme asked for is installed here, before anything is drawn.

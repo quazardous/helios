@@ -1640,3 +1640,15 @@ gui-backup-wizard-on-import = Après chaque import
 gui-backup-wizard-on-connect = Quand un disque de sauvegarde est branché
 gui-backup-wizard-finish = Utiliser cette stratégie
 gui-backup-wizard-open = Configurer les sauvegardes…
+
+gui-compare-first = Comparer montre { $count } photos au plus : les { $count } premières sont comparées
+
+gui-compare-rating = Note de la photo active
+
+gui-compare-too-few = Sélectionnez deux photos ou plus pour les comparer
+
+gui-workspace-library-compare = s’ouvre dans Comparer, les photos côte à côte
+
+gui-library-compare = Comparer
+
+gui-library-compare-tip = Les photos sélectionnées côte à côte (C)

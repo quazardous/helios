@@ -53,6 +53,24 @@ const BUILTIN: &[&[(&str, &str)]] = &[
     &[
         (
             "template.json",
+            include_str!("../../../templates/compare.helios-template/template.json"),
+        ),
+        (
+            "layout.json",
+            include_str!("../../../templates/compare.helios-template/layout.json"),
+        ),
+        (
+            "i18n/en/template.ftl",
+            include_str!("../../../templates/compare.helios-template/i18n/en/template.ftl"),
+        ),
+        (
+            "i18n/fr/template.ftl",
+            include_str!("../../../templates/compare.helios-template/i18n/fr/template.ftl"),
+        ),
+    ],
+    &[
+        (
+            "template.json",
             include_str!("../../../templates/develop-preview.helios-template/template.json"),
         ),
         (

@@ -35,6 +35,10 @@ pub const IMAGE_FIRST: &str = "Image";
 /// and duplicates beside it, every other panel closed.
 pub const LIBRARY: &str = helios_template::contexts::LIBRARY_ARRANGEMENT;
 
+/// The comparison's arrangement: the photos side by side in the centre,
+/// the filmstrip under them, every other panel closed.
+pub const COMPARISON: &str = helios_template::contexts::COMPARISON_ARRANGEMENT;
+
 /// The workspace's arrangement: its network in the centre, the modules
 /// and parameters beside it, every other panel closed.
 pub const NETWORK: &str = helios_template::contexts::NETWORK_ARRANGEMENT;
@@ -88,6 +92,7 @@ impl Plugin for Panels {
         }
         ctx.arrangement(IMAGE_FIRST, image_first(&self.specs));
         ctx.arrangement(LIBRARY, library(&self.specs));
+        ctx.arrangement(COMPARISON, comparison(&self.specs));
         ctx.arrangement(NETWORK, network(&self.specs));
         ctx.arrangement(SUBWORKSPACE, network(&self.specs));
         ctx.arrangement(DARKROOM, darkroom(&self.specs));
@@ -201,6 +206,17 @@ pub fn library(specs: &[PanelSpec]) -> Layout {
         &[
             (Area::Center, "helios.vault"),
             (Area::EndSide, "helios.stacks"),
+        ],
+    )
+}
+
+/// The comparison's layout of these panels (see [`COMPARISON`]).
+pub fn comparison(specs: &[PanelSpec]) -> Layout {
+    only(
+        specs,
+        &[
+            (Area::Center, "helios.compare"),
+            (Area::Bottom, "helios.filmstrip"),
         ],
     )
 }

@@ -166,6 +166,10 @@ pub struct LibraryDesc {
     /// Culling moves to the next image after each mark.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_advance: bool,
+    /// The workspace opens in Compare: two or more photos side by side,
+    /// the selection's until photos are chosen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compare: bool,
     /// The export's settings, ready in the export dialog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<ExportDesc>,

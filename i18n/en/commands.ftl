@@ -1,6 +1,15 @@
 # Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
+command-compare-next =
+    .title = Compare: make the next photo active
+
+command-compare-previous =
+    .title = Compare: make the previous photo active
+
+command-compare-sync =
+    .title = Compare: zoom and pan synchronised across the photos (`on`; toggled when absent)
+
 command-controls-catalogue =
     .title = List the registered controls
 
@@ -228,6 +237,9 @@ command-keymap-package =
 
 command-keymap-package-remove =
     .title = Take a keymap package's keys away (`name`)
+
+command-library-compare =
+    .title = Compare photos side by side (`images`: ids, else the selection; two to four)
 
 command-library-copyFiles =
     .title = Copy files: the selected images' files, for a file manager or another application

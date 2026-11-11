@@ -596,3 +596,15 @@ command-health-ignore =
 
 command-health-checkNow =
     .title = Lancer le bilan de santé maintenant (Aide > Bilan de santé)
+
+command-compare-next =
+    .title = Comparer : rendre active la photo suivante
+
+command-compare-previous =
+    .title = Comparer : rendre active la photo précédente
+
+command-compare-sync =
+    .title = Comparer : zoom et déplacement synchronisés entre les photos (`on` ; basculé en son absence)
+
+command-library-compare =
+    .title = Comparer des photos côte à côte (`images` : identifiants, sinon la sélection ; de deux à quatre)
