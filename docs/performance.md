@@ -194,6 +194,15 @@ crate, used by the library (`helios_gui::thumbnails`):
   view changed, a screen's worth after and before them. The pool
   (`Loader::prefer`) moves those queued to the front and queues again
   those it read already: a cache hit, not a file read.
+- **Cached cells on the frame that draws them (2026-11-11):** the cells
+  drawn without a texture are read from the cache at the end of that
+  frame (`Library::set_thumb_cache`, `library::read_cached`): a few
+  threads, within `WARM_FRAME_BUDGET` (12 ms), never waiting for the
+  folder's listing, only entries of the current reader. What the budget
+  did not reach is read on the next frame; the misses go to the pool.
+  Before, every cell waited in the pool's queue, so a library opened
+  again showed its cells with their names alone, then their pictures one
+  after another. `thumbnails`'s `a_warm_cache_fills_*` tests hold it.
 - **The cache index off the interface thread:** `helios-gui` opens the
   cache with `ThumbCache::open_unlisted` (the folder made, not listed);
   the pool's threads list it first (`ThumbCache::list`), and every

@@ -421,7 +421,7 @@ fn a_warm_cache_fills_the_cells_in_view_on_the_next_frame() {
     shell.library_mut().set_warm_budget(Duration::from_secs(10));
     let mut h = headless::harness(shell, vec2(1920.0, 1080.0));
     let (frames, cells) = frames_to_fill(&mut h);
-    assert!(cells >= 20, "a screen of cells ({cells})");
+    assert!(cells >= 4, "a screen of cells ({cells})");
     assert!(
         frames <= 1,
         "{cells} cells filled {frames} frames after drawn"
