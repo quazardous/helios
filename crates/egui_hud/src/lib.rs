@@ -4,9 +4,15 @@
 //! [`value::ParamDescriptor`], and the `controls.*` commands are plain
 //! functions a host declares in its own command registry.
 //!
-//! - [`model`]: what a control is (purpose, value, units, ranges, feel,
-//!   detents, read-out), the rack standard (connectors, cases and their
-//!   chrome, variants, indicators), modes and representations. No egui.
+//! - [`model`]: what a control is: a value (type, range, unit,
+//!   default) and a behaviour (its connector: jacks, gestures, intents,
+//!   signals), with its feel, detents and read-out; the rack standard
+//!   (cases and their chrome, indicators), modes and representations.
+//!   Nothing about drawing. No egui.
+//! - [`face`]: the faces, ways of drawing a value type (a slider, a
+//!   fader, a knob, an endless knob, a switch, a menu), each with its
+//!   slot sizes per representation and the values it fits; the library
+//!   every control shares.
 //! - [`slot`]: what a control asks of a boxed surface: slots, size
 //!   policies per representation, orientations, integration levels.
 //! - [`card`]: a card or a case laid out on the slot engine
@@ -38,6 +44,7 @@ pub mod bench;
 pub mod card;
 pub mod commands;
 pub mod context;
+pub mod face;
 pub mod flow;
 pub mod model;
 pub mod registry;
@@ -48,6 +55,7 @@ pub mod slot;
 pub mod value;
 
 pub use context::{ContextKeys, Rule, Tier};
+pub use face::{Face, Fit};
 pub use model::{Control, Kind, Mode, Representation, Surface, Variant};
 pub use registry::{Patch, Registry, implicit};
 pub use resolve::{CardPlacement, Layout, Placement, Visibility, resolve};

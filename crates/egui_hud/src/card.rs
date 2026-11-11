@@ -481,11 +481,11 @@ pub fn layout_items(
                     .get(control)
                     .ok_or_else(|| format!("card item `{name}`: no control `{control}`"))?;
                 let v = match variant {
-                    Some(id) => c.variants.iter().find(|v| &v.id == id).ok_or_else(|| {
-                        format!("card item `{name}`: control `{control}` has no variant `{id}`")
+                    Some(id) => c.faces.iter().find(|v| &v.id == id).ok_or_else(|| {
+                        format!("card item `{name}`: control `{control}` has no face `{id}`")
                     })?,
-                    None => c.variants.first().ok_or_else(|| {
-                        format!("card item `{name}`: control `{control}` has no variant")
+                    None => c.faces.first().ok_or_else(|| {
+                        format!("card item `{name}`: control `{control}` has no face")
                     })?,
                 };
                 // The forms from the wanted representation down.

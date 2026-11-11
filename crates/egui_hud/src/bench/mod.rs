@@ -789,7 +789,7 @@ pub const COMMANDS: &[CommandInfo] = &[
     },
     CommandInfo {
         name: "controls.bench.part",
-        help: "Changes a control on the bench: {key}, optional {tier} (essential, standard, expert) and {variant} (its declaration), {visibility} (shown, hidden, or null) and {representation} (full, compact, simplified, or null), pinned in the person's layout",
+        help: "Changes a control on the bench: {key}, optional {tier} (essential, standard, expert) and {face} (one the control accepts, null for its default), {visibility} (shown, hidden, or null) and {representation} (full, compact, simplified, or null), pinned in the person's layout",
         read_only: false,
     },
     CommandInfo {
@@ -1349,8 +1349,8 @@ impl Bench {
             .map(|(p, _)| {
                 let c = self.registry.get(&p.control);
                 let v = c.and_then(|c| match &p.variant {
-                    Some(id) => c.variants.iter().find(|v| &v.id == id),
-                    None => c.variants.first(),
+                    Some(id) => c.faces.iter().find(|v| &v.id == id),
+                    None => c.faces.first(),
                 });
                 HudForm {
                     key: p.key.clone(),
@@ -1511,8 +1511,8 @@ impl Bench {
         self.store.redo().is_some()
     }
 
-    /// Changes a control on the bench: its tier and variant (its
-    /// declaration), and its visibility and representation pinned in the
+    /// Changes a control on the bench: its tier and face (one the control
+    /// accepts; `variant` is the older name), and its visibility and representation pinned in the
     /// person's layout (`null` unpins). Fields left out stay.
     pub fn part(&mut self, key: &str, args: &Json) -> Result<(), String> {
         let field = |k: &str| args.get(k);
@@ -1523,16 +1523,16 @@ impl Bench {
         if let Some(t) = field("tier") {
             piece.tier = serde_json::from_value(t.clone()).map_err(|e| format!("`tier`: {e}"))?;
         }
-        if let Some(v) = field("variant") {
+        if let Some(v) = field("face").or_else(|| field("variant")) {
             let id: Option<String> =
-                serde_json::from_value(v.clone()).map_err(|e| format!("`variant`: {e}"))?;
+                serde_json::from_value(v.clone()).map_err(|e| format!("`face`: {e}"))?;
             if let Some(id) = &id
                 && !self
                     .registry
                     .get(&piece.control)
-                    .is_some_and(|c| c.variants.iter().any(|v| &v.id == id))
+                    .is_some_and(|c| c.faces.iter().any(|v| &v.id == id))
             {
-                return Err(format!("`{}` has no variant `{id}`", piece.control));
+                return Err(format!("`{}` has no face `{id}`", piece.control));
             }
             piece.variant = id;
         }
@@ -1605,12 +1605,9 @@ impl Bench {
                 && !self
                     .registry
                     .get(&p.control)
-                    .is_some_and(|c| c.variants.iter().any(|v| &v.id == id))
+                    .is_some_and(|c| c.faces.iter().any(|v| &v.id == id))
             {
-                return Err(format!(
-                    "`{}`: `{}` has no variant `{id}`",
-                    p.key, p.control
-                ));
+                return Err(format!("`{}`: `{}` has no face `{id}`", p.key, p.control));
             }
             descriptors.push((p.key.clone(), e.descriptor.clone()));
         }

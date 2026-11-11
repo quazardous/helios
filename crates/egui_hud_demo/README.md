@@ -58,11 +58,15 @@ The model's tests run headless: `cargo test -p egui_hud_demo`.
 `kit.json` holds:
 
 - `controls`: egui_hud controls (`egui_hud::model::Control`) that add
-  something beyond their value type (the gain in decibels as a fader or
-  a knob, the level meter, pan, the light's intensity and temperature), each with its
-  value, connector, variants and their slot forms per representation,
-  orientations and integration (who draws it on which surface, and its
-  fallback), feel, detents and read-out;
+  something beyond their value type (the gain in decibels, the level
+  meter, pan, the light's intensity, temperature and hue), each with its
+  value and connector, feel, detents and read-out, and the faces it
+  accepts: references to egui_hud's face library (`"knob"`), or an
+  object naming one (`{"face": "fader", "integration": ...}`) for what
+  the control changes, here who draws it on which surface and its
+  fallback. A control naming no faces (the hue, a number that wraps)
+  accepts every face that fits its value: the endless knob and the
+  scrub field;
 - `groups`: each control's shelf group;
 - `parameters`: domain uses of the generic controls, from their
   descriptors (mute, power, the low cut: toggles; the colour tag and the

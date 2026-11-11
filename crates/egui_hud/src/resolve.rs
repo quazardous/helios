@@ -463,6 +463,9 @@ struct Draft {
     emphasised: bool,
     chip: bool,
     changed: bool,
+    /// A face the context picked instead of the default one (a slot
+    /// too small for it).
+    face: Option<String>,
     reasons: Vec<Reason>,
 }
 
@@ -573,6 +576,7 @@ pub fn resolve(
             emphasised: false,
             chip: false,
             changed: values.get(key).is_some_and(|v| differs_from_default(c, v)),
+            face: None,
             reasons: Vec::new(),
         };
         // 1. The declaration: the tier against the detail level.
@@ -657,8 +661,24 @@ pub fn resolve(
                 .push(Reason::new(Source::Changed, "Shown: its value is changed"));
             d.visibility = Visibility::Shown;
         }
-        // The physical limits: what the variant supports.
-        let v = item_variant(c, item)?;
+        // The physical limits: what the face supports.
+        let mut v = item_variant(c, item)?;
+        // A slot too small for the default face takes the next face the
+        // control accepts that fits it; a face the person picked stays.
+        if let (Some(s), CardItem::Control { variant: None, .. }) = (d.slot, item)
+            && !v.slots.iter().any(|f| fits(&f.policy, s))
+            && let Some(other) = c
+                .faces
+                .iter()
+                .find(|f| f.slots.iter().any(|f| fits(&f.policy, s)))
+        {
+            d.reasons.push(Reason::new(
+                Source::Fallback,
+                format!("{s} is too small for the {}: {}", v.label, other.label),
+            ));
+            d.face = Some(other.id.clone());
+            v = other;
+        }
         if let Some((rep, source)) = d.representation
             && v.form(rep).is_none()
         {
@@ -740,7 +760,7 @@ pub fn resolve(
                     CardItem::Control {
                         key: key.clone(),
                         control: control.clone(),
-                        variant: variant.clone(),
+                        variant: d.face.clone().or_else(|| variant.clone()),
                         orientation: d.orientation,
                         pin: d.position,
                         tier: *tier,
@@ -821,8 +841,15 @@ pub fn resolve(
                 let c = registry
                     .get(control)
                     .ok_or_else(|| format!("card item `{key}`: no control `{control}`"))?;
-                let v = item_variant(c, item)?;
                 let d = drafts.remove(&i).expect("every control was drafted");
+                let v = match &d.face {
+                    Some(id) => c
+                        .faces
+                        .iter()
+                        .find(|v| &v.id == id)
+                        .ok_or_else(|| format!("card item `{key}`: no face `{id}`"))?,
+                    None => item_variant(c, item)?,
+                };
                 let mut p = Placement {
                     key: key.clone(),
                     kind: match c.kind {
@@ -898,22 +925,21 @@ pub fn resolve(
     Ok(out)
 }
 
-/// The variant an item lays out (the person's pick or the default).
+/// The face an item lays out (the person's pick or the default).
 fn item_variant<'a>(c: &'a Control, item: &CardItem) -> Result<&'a crate::model::Variant, String> {
     let CardItem::Control { key, variant, .. } = item else {
         return Err("chrome has no variant".into());
     };
     match variant {
-        Some(id) => c.variants.iter().find(|v| &v.id == id).ok_or_else(|| {
-            format!(
-                "card item `{key}`: control `{}` has no variant `{id}`",
-                c.id
-            )
-        }),
+        Some(id) => c
+            .faces
+            .iter()
+            .find(|v| &v.id == id)
+            .ok_or_else(|| format!("card item `{key}`: control `{}` has no face `{id}`", c.id)),
         None => c
-            .variants
+            .faces
             .first()
-            .ok_or_else(|| format!("card item `{key}`: control `{}` has no variant", c.id)),
+            .ok_or_else(|| format!("card item `{key}`: control `{}` has no face", c.id)),
     }
 }
 

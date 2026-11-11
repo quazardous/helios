@@ -290,6 +290,10 @@ pub struct Detent {
 
 /// A number's ranges, steps and how it is shown.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent properties of a number, each a flag in its data"
+)]
 pub struct NumberSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
@@ -307,12 +311,39 @@ pub struct NumberSpec {
     pub signed: bool,
     #[serde(default)]
     pub integer: bool,
+    /// Cyclic: past one end of the hard range it comes back at the other
+    /// (an angle, a hue). It has no ends to show.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wraps: bool,
+    /// No bounds that mean anything: the hard range only keeps it finite.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
 }
 
 impl NumberSpec {
-    /// Kept to the soft range, or to the hard one when forced.
+    /// A closed range that does not wrap: a bar or an arc can show it.
+    pub fn bounded(&self) -> bool {
+        !self.wraps && !self.open
+    }
+
+    /// Kept to the soft range, or to the hard one when forced; a cyclic
+    /// value comes back around its hard range, an open one is kept to
+    /// the hard range only.
     pub fn clamp(&self, v: f64, force: bool) -> f64 {
-        let (lo, hi) = if force { self.hard } else { self.soft };
+        let (lo, hi) = if self.wraps {
+            let (lo, hi) = self.hard;
+            let span = hi - lo;
+            let v = if span > 0.0 {
+                lo + (v - lo).rem_euclid(span)
+            } else {
+                v
+            };
+            return if self.integer { v.round() } else { v };
+        } else if force || self.open {
+            self.hard
+        } else {
+            self.soft
+        };
         let v = v.clamp(lo.min(hi), hi.max(lo));
         if self.integer { v.round() } else { v }
     }
@@ -376,13 +407,20 @@ impl ValueSpec {
     }
 }
 
-/// A form of a control; variants of one control share its connector.
-/// A variant declares what it asks of each surface: its slot forms on
-/// boxed surfaces (a size policy per representation, largest first), the
-/// orientations it supports (preferred first), whether it has a HUD chip
-/// or an image gizmo, and who draws it where (managed unless said).
+/// A face as a control takes it ([`crate::face`]): what drawing the
+/// value asks of each surface. Its slot forms on boxed surfaces (a size
+/// policy per representation, largest first), the orientations it
+/// supports (preferred first), whether it has a HUD chip or an image
+/// gizmo, and who draws it where (managed unless said).
+///
+/// As data it is a face reference: the library face's id (`"fader"`),
+/// or an object naming it (`face`, formerly `id`) with what this control
+/// changes (its integration, say); what it does not give comes from the
+/// library. A face the library does not have is declared in full.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(from = "FaceDecl", into = "FaceDecl")]
 pub struct Variant {
+    /// The face's id (`slider`).
     pub id: String,
     pub label: String,
     /// Its forms on boxed surfaces: full, then the smaller ones.
@@ -486,6 +524,93 @@ impl Variant {
     }
 }
 
+/// A face reference as data: the library face's id, or an object naming
+/// it with what the control changes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum FaceDecl {
+    Face(String),
+    Full(FaceFields),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct FaceFields {
+    #[serde(alias = "id")]
+    face: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    slots: Vec<SlotForm>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    orientations: Vec<Orientation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chip: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    gizmo: Option<bool>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    integration: BTreeMap<Surface, Integration>,
+}
+
+impl From<FaceDecl> for Variant {
+    fn from(d: FaceDecl) -> Self {
+        match d {
+            FaceDecl::Face(id) => {
+                crate::face::face(&id).map_or_else(|| Variant::new(&id, &id), |f| f.variant.clone())
+            }
+            FaceDecl::Full(f) => {
+                let mut v = crate::face::face(&f.face)
+                    .map_or_else(|| Variant::new(&f.face, &f.face), |l| l.variant.clone());
+                if let Some(label) = f.label {
+                    v.label = label;
+                }
+                if !f.slots.is_empty() {
+                    v.slots = f.slots;
+                }
+                if !f.orientations.is_empty() {
+                    v.orientations = f.orientations;
+                }
+                if let Some(chip) = f.chip {
+                    v.chip = chip;
+                }
+                if let Some(gizmo) = f.gizmo {
+                    v.gizmo = gizmo;
+                }
+                v.integration.extend(f.integration);
+                v
+            }
+        }
+    }
+}
+
+impl From<Variant> for FaceDecl {
+    fn from(v: Variant) -> Self {
+        let library = crate::face::face(&v.id).map(|f| &f.variant);
+        if library == Some(&v) {
+            return FaceDecl::Face(v.id);
+        }
+        // What differs from the library face, or everything for a face
+        // of the control's own.
+        let differs = |same: bool| library.is_none() || !same;
+        FaceDecl::Full(FaceFields {
+            label: differs(library.is_some_and(|l| l.label == v.label)).then_some(v.label),
+            slots: if differs(library.is_some_and(|l| l.slots == v.slots)) {
+                v.slots
+            } else {
+                Vec::new()
+            },
+            orientations: if differs(library.is_some_and(|l| l.orientations == v.orientations)) {
+                v.orientations
+            } else {
+                Vec::new()
+            },
+            chip: differs(library.is_some_and(|l| l.chip == v.chip)).then_some(v.chip),
+            gizmo: differs(library.is_some_and(|l| l.gizmo == v.gizmo)).then_some(v.gizmo),
+            integration: v.integration,
+            face: v.id,
+        })
+    }
+}
+
 /// The HUD read-out: when it shows (always the value as the control
 /// formats it).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -573,8 +698,11 @@ pub struct Control {
     pub kind: Kind,
     pub value: ValueSpec,
     pub connector: Connector,
-    /// The first is the default.
-    pub variants: Vec<Variant>,
+    /// The faces it accepts, in order, the first the default
+    /// ([`crate::face`]). Empty: every face of the library that fits its
+    /// value, filled in when it is registered ([`Control::with_faces`]).
+    #[serde(default, alias = "variants")]
+    pub faces: Vec<Variant>,
     pub feel: Feel,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub detents: Vec<Detent>,
@@ -600,7 +728,7 @@ impl Control {
                 signals: vec![Signal::Preview, Signal::Commit, Signal::Cancel],
                 ..Connector::default()
             },
-            variants: Vec::new(),
+            faces: Vec::new(),
             feel: Feel::default(),
             detents: Vec::new(),
             readout: None,
@@ -635,8 +763,28 @@ impl Control {
         self
     }
 
+    /// A face it accepts, as declared in full or changed from the
+    /// library's (its integration, say).
     pub fn variant(mut self, variant: Variant) -> Self {
-        self.variants.push(variant);
+        self.faces.push(variant);
+        self
+    }
+
+    /// A face of the library it accepts, in order (the first is the
+    /// default). An unknown id is kept, and refused by [`Control::check`].
+    pub fn face(self, id: &str) -> Self {
+        let v = crate::face::face(id).map_or_else(|| Variant::new(id, id), |f| f.variant.clone());
+        self.variant(v)
+    }
+
+    /// With every fitting face of the library when it names none.
+    pub fn with_faces(mut self) -> Self {
+        if self.faces.is_empty() {
+            self.faces = crate::face::fitting(&self)
+                .into_iter()
+                .map(|f| f.variant.clone())
+                .collect();
+        }
         self
     }
 
@@ -660,10 +808,10 @@ impl Control {
         self
     }
 
-    /// The variant by id, or the default one.
-    pub fn variant_or_default(&self, id: Option<&str>) -> Option<&Variant> {
-        id.and_then(|id| self.variants.iter().find(|v| v.id == id))
-            .or_else(|| self.variants.first())
+    /// The face by id, or the default one.
+    pub fn face_or_default(&self, id: Option<&str>) -> Option<&Variant> {
+        id.and_then(|id| self.faces.iter().find(|v| v.id == id))
+            .or_else(|| self.faces.first())
     }
 
     /// What is wrong with the declaration, if anything.
@@ -671,12 +819,16 @@ impl Control {
         if self.id.is_empty() {
             return Err("a control needs an id".into());
         }
-        if self.variants.is_empty() {
-            return Err(format!("control `{}` has no variant", self.id));
+        if self.faces.is_empty() {
+            return Err(format!("control `{}` has no face", self.id));
         }
-        for v in &self.variants {
+        for v in &self.faces {
             self.check_variant(v)
-                .map_err(|e| format!("control `{}`, variant `{}`: {e}", self.id, v.id))?;
+                .map_err(|e| format!("control `{}`, face `{}`: {e}", self.id, v.id))?;
+            if let Some(f) = crate::face::face(&v.id) {
+                f.fits(self)
+                    .map_err(|e| format!("control `{}`: {e}", self.id))?;
+            }
         }
         let read_only = self.connector.jacks.iter().filter(|j| j.read_only).count();
         match self.kind {
@@ -760,15 +912,15 @@ impl Control {
                 Integration::Integrated {
                     fallback: Some(Fallback::Variant(id)),
                 } => {
-                    let Some(f) = self.variants.iter().find(|o| &o.id == id) else {
-                        return Err(format!("its fallback variant `{id}` does not exist"));
+                    let Some(f) = self.faces.iter().find(|o| &o.id == id) else {
+                        return Err(format!("its fallback face `{id}` does not exist"));
                     };
                     if f.id == v.id
                         || !f.shows_on(*surface)
                         || f.integration(*surface) != Integration::Managed
                     {
                         return Err(format!(
-                            "its fallback variant `{id}` is not managed on {surface:?}"
+                            "its fallback face `{id}` is not managed on {surface:?}"
                         ));
                     }
                 }
@@ -787,11 +939,11 @@ impl Control {
     /// variant with no managed fallback, per surface.
     pub fn warnings(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for v in &self.variants {
+        for v in &self.faces {
             for (surface, level) in &v.integration {
                 if *level == (Integration::Integrated { fallback: None }) {
                     out.push(format!(
-                        "control `{}`, variant `{}`: integrated on {} with no managed fallback",
+                        "control `{}`, face `{}`: integrated on {} with no managed fallback",
                         self.id,
                         v.id,
                         surface_name(*surface)
@@ -806,8 +958,8 @@ impl Control {
     /// orientations, chip and gizmo, and its integration level per
     /// surface with the fallback. What `controls.describe` reports.
     pub fn layout_report(&self) -> Json {
-        let variants: serde_json::Map<String, Json> = self
-            .variants
+        let faces: serde_json::Map<String, Json> = self
+            .faces
             .iter()
             .map(|v| {
                 let slots: serde_json::Map<String, Json> = v
@@ -852,7 +1004,7 @@ impl Control {
             .collect();
         json!({
             "kind": self.kind,
-            "variants": variants,
+            "faces": faces,
             "warnings": self.warnings(),
         })
     }
@@ -878,6 +1030,10 @@ impl Control {
         };
         let speed = self.feel.sensitivity * if fine { self.feel.fine } else { 1.0 };
         let v = self.detented(start + points * speed, free);
+        if !n.bounded() {
+            // Endless: around (cyclic) or on (open), never held at an end.
+            return n.clamp(v, true);
+        }
         let lo = n.soft.0.min(start);
         let hi = n.soft.1.max(start);
         let v = v.clamp(lo, hi);
@@ -900,23 +1056,23 @@ impl Control {
         let to = v + n as f64 * step;
         // Back on the grid of the step, so 0 is reached exactly.
         let to = (to / step).round() * step;
-        spec.clamp(to, false)
+        spec.clamp(to, !spec.bounded())
     }
 
     /// The JSON schema of what a person may set for this control (its
     /// variant, its feel, its detents on or off): customisation within
     /// its purpose.
     pub fn config_schema(&self) -> Json {
-        let variants: Vec<&str> = self.variants.iter().map(|v| v.id.as_str()).collect();
+        let faces: Vec<&str> = self.faces.iter().map(|v| v.id.as_str()).collect();
         json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": format!("{} settings", self.label),
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "variant": {
-                    "enum": variants,
-                    "default": variants.first(),
+                "face": {
+                    "enum": faces,
+                    "default": faces.first(),
                 },
                 "sensitivity": {
                     "type": "number",

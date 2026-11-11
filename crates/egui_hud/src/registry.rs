@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
 use crate::model::{
-    Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, Surface, ValueSpec,
-    ValueType, Variant,
+    Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, ValueSpec,
+    ValueType,
 };
-use crate::slot::{Fallback, Grow, Integration, Orientation, Size, SizePolicy, Slot};
+use crate::slot::{Grow, Size, SizePolicy, Slot};
 use crate::value::{ParamDescriptor, ParamType, Value, Widget};
 
 /// A slider's full form: a row, growing across up to four units (the
@@ -79,9 +79,11 @@ impl Registry {
         Ok(r)
     }
 
-    /// Adds a control; an invalid one or a second one with the same id
-    /// is refused.
+    /// Adds a control, with every fitting face of the library when it
+    /// names none; an invalid one or a second one with the same id is
+    /// refused.
     pub fn register(&mut self, control: Control) -> Result<(), String> {
+        let control = control.with_faces();
         control.check()?;
         if self.controls.contains_key(&control.id) {
             return Err(format!("control `{}` is already registered", control.id));
@@ -172,13 +174,13 @@ fn summary(c: &Control) -> Json {
         "purpose": c.purpose,
         "kind": c.kind,
         "slot": c
-            .variants
+            .faces
             .first()
             .and_then(|v| v.form(Representation::Full))
             .map(|f| f.policy.size),
         "warnings": c.warnings().len(),
         "connector": c.connector.jacks.iter().map(Jack::signature).collect::<Vec<_>>(),
-        "variants": c.variants.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+        "faces": c.faces.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
         "case": c.case.is_some(),
     })
 }
@@ -194,78 +196,27 @@ pub fn describe(c: &Control, patches: &[&Patch]) -> Json {
         "connector": c.connector.jacks.iter().map(Jack::signature).collect::<Vec<_>>(),
         "layout": c.layout_report(),
         "surfaces": c
-            .variants
+            .faces
             .iter()
             .map(|v| (v.id.clone(), v.surfaces()))
             .collect::<BTreeMap<_, _>>(),
         "gestures": c.connector.gestures,
         "detents": c.detents,
-        "variants": c.variants.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+        "faces": c.faces.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
         "config_schema": c.config_schema(),
         "patches": patches,
     })
 }
 
-/// What an implicit control's one variant asks of the surfaces.
+/// The faces an implicit control accepts: every fitting one of its value
+/// type, or one editor for a list of numbers or a text.
 enum Shape {
-    /// A slider: a row growing across, a value field, a read-out; turns
-    /// vertical in a strip.
-    Slider,
-    /// A toggle: half a unit, a quarter when simplified.
-    Toggle,
-    /// A drop-down: a row growing across, half a unit compact.
-    Choice,
-    /// A field one row high, growing across.
-    Field,
-    /// An editor that draws itself in a block of `n` rows (a curve in
-    /// six, a colour wheel in four), a row when compact, its values as
-    /// the value type's managed rows where its drawing cannot go.
-    Drawn(u32),
+    /// Every face of the library that fits its value.
+    Fitting,
+    /// One face of the library (`curve`, `colour-wheel`, `point-list`,
+    /// `text-field`).
+    Face(&'static str),
 }
-
-impl Shape {
-    fn variant(self) -> Variant {
-        let v = Variant::new("default", "Default");
-        let third = Slot::new(Size::THIRD, Size::ONE);
-        let quarter = Slot::new(Size::QUARTER, Size::ONE);
-        match self {
-            Shape::Slider => v
-                .slot(Representation::Full, slider_policy())
-                .slot(Representation::Compact, SizePolicy::fixed(Slot::HALF))
-                .slot(Representation::Simplified, SizePolicy::fixed(third))
-                .orientations(&[Orientation::Horizontal, Orientation::Vertical]),
-            Shape::Toggle => v
-                .slot(Representation::Full, SizePolicy::fixed(Slot::HALF))
-                .slot(Representation::Simplified, SizePolicy::fixed(quarter)),
-            Shape::Choice => v
-                .slot(Representation::Full, slider_policy())
-                .slot(Representation::Compact, SizePolicy::fixed(Slot::HALF))
-                .orientations(&[Orientation::Horizontal]),
-            Shape::Field => v
-                .slot(
-                    Representation::Full,
-                    SizePolicy::growable(FULL_MIN, Slot::ROW, Slot::wide(4), Grow::Width),
-                )
-                .orientations(&[Orientation::Horizontal]),
-            // Down to three quarters of a unit wide, as a slider.
-            Shape::Drawn(rows) => v
-                .slot(
-                    Representation::Full,
-                    SizePolicy::growable(
-                        Slot::new(Size::THREE_QUARTERS, Slot::block(rows).height),
-                        Slot::block(rows),
-                        Slot::block(rows),
-                        Grow::Width,
-                    ),
-                )
-                .slot(Representation::Compact, SizePolicy::fixed(Slot::ROW))
-                .integrated(Surface::Panel, Integration::integrated(Fallback::ValueType))
-                .integrated(Surface::Dock, Integration::integrated(Fallback::ValueType))
-                .integrated(Surface::Float, Integration::integrated(Fallback::ValueType)),
-        }
-    }
-}
-
 /// The points of drag a scrub takes to cross a parameter's soft range.
 pub const SCRUB_TRAVEL: f64 = 300.0;
 
@@ -324,8 +275,11 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
                     display_scale: d.display_scale,
                     signed: d.unit.as_deref() == Some("EV"),
                     integer: d.ty == ParamType::Int,
+                    wraps: false,
+                    // No range declared at all: nothing to draw a bar on.
+                    open: d.hard.is_none() && d.soft.is_none(),
                 }),
-                Shape::Slider,
+                Shape::Fitting,
                 &[
                     Gesture::Drag,
                     Gesture::Wheel,
@@ -339,7 +293,7 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
             ValueSpec::Bool {
                 default: d.default == Value::Bool(true),
             },
-            Shape::Toggle,
+            Shape::Fitting,
             &[],
         ),
         ParamType::Choice => (
@@ -350,7 +304,7 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
                     _ => String::new(),
                 },
             },
-            Shape::Choice,
+            Shape::Fitting,
             &[Gesture::Keys],
         ),
         ParamType::Floats => (
@@ -362,25 +316,25 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
                     ValueType::Points
                 },
             },
-            match d.widget {
-                Some(Widget::Curve) => Shape::Drawn(6),
-                Some(Widget::Wheel) => Shape::Drawn(4),
-                None => Shape::Field,
-            },
+            Shape::Face(match d.widget {
+                Some(Widget::Curve) => "curve",
+                Some(Widget::Wheel) => "colour-wheel",
+                None => "point-list",
+            }),
             &[],
         ),
         ParamType::Ints => (
             ValueSpec::Other {
                 stored: ValueType::Points,
             },
-            Shape::Field,
+            Shape::Face("point-list"),
             &[],
         ),
         ParamType::Text => (
             ValueSpec::Other {
                 stored: ValueType::Text,
             },
-            Shape::Field,
+            Shape::Face("text-field"),
             &[Gesture::Typed],
         ),
     };
@@ -392,7 +346,6 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
         .jack(jack)
         .gestures(gestures)
         .intents(&[Intent::Nudge, Intent::Set, Intent::Reset])
-        .variant(shape.variant())
         .feel(Feel {
             sensitivity: d
                 .sensitivity
@@ -404,7 +357,18 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
             },
             ..Feel::default()
         });
+    if let Shape::Face(id) = shape {
+        c = c.face(id);
+    } else if c.value.number().is_some_and(|n| n.open) {
+        // No range to draw: a field first, the endless knob as the other.
+        c = c.face("scrub").face("endless-knob");
+    }
     c.implicit = true;
+    let mut c = c.with_faces();
+    // A parameter nothing is patched to stays off the HUD: no chip.
+    for f in &mut c.faces {
+        f.chip = false;
+    }
     c
 }
 

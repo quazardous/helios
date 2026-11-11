@@ -224,7 +224,7 @@ fn control_of(registry: &Registry, path: &str, d: &Descriptor, operator: bool) -
         || (matches!(d.ty, Type::Floats | Type::Ints) && d.widget.is_none());
     if own {
         let integrated = Integration::integrated(Fallback::ValueType);
-        for v in &mut c.variants {
+        for v in &mut c.faces {
             *v = v
                 .clone()
                 .integrated(Surface::Panel, integrated.clone())

@@ -1066,7 +1066,17 @@ fn managed(
             } else {
                 ""
             };
-            let r = egui_pop::core::widgets::checkbox(ui, &mut on, shown);
+            let face = control
+                .face_or_default(look.variant.as_deref())
+                .map_or("checkbox", |v| v.id.as_str());
+            let r = match face {
+                "push-button" => {
+                    ui.toggle_value(&mut on, if shown.is_empty() { "●" } else { shown })
+                }
+                "lamp" => lamp(ui, on, shown),
+                // The switch's stand-in: the checkbox, until egui-pop has one.
+                _ => egui_pop::core::widgets::checkbox(ui, &mut on, shown),
+            };
             let r = if shown.is_empty() {
                 r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, label));
                 r.on_hover_text(label)
@@ -1101,15 +1111,39 @@ fn managed(
                 .iter()
                 .position(|c| *c == chosen)
                 .map_or_else(|| chosen.clone(), |i| words[i].clone());
-            let r = egui::ComboBox::from_id_salt(("hud-choice", key))
-                .selected_text(shown)
-                .width(width)
-                .show_ui(ui, |ui| {
-                    for (c, w) in choices.iter().zip(&words) {
-                        ui.selectable_value(&mut chosen, c.clone(), w);
-                    }
-                })
-                .response;
+            let face = control
+                .face_or_default(look.variant.as_deref())
+                .map_or("menu", |v| v.id.as_str());
+            let r = match face {
+                "segmented" => {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 1.0;
+                        for (c, w) in choices.iter().zip(&words) {
+                            ui.selectable_value(&mut chosen, c.clone(), w);
+                        }
+                    })
+                    .response
+                }
+                "radio" => {
+                    ui.vertical(|ui| {
+                        for (c, w) in choices.iter().zip(&words) {
+                            ui.radio_value(&mut chosen, c.clone(), w);
+                        }
+                    })
+                    .response
+                }
+                _ => {
+                    egui::ComboBox::from_id_salt(("hud-choice", key))
+                        .selected_text(shown)
+                        .width(width)
+                        .show_ui(ui, |ui| {
+                            for (c, w) in choices.iter().zip(&words) {
+                                ui.selectable_value(&mut chosen, c.clone(), w);
+                            }
+                        })
+                        .response
+                }
+            };
             let r = match &label_r {
                 Some(l) => r.labelled_by(l.id),
                 None => r.on_hover_text(label),
@@ -1150,6 +1184,34 @@ fn managed(
             }
         },
     }
+}
+
+/// The `lamp` face: a light, lit when the value is on, and its label;
+/// read only.
+fn lamp(ui: &mut Ui, on: bool, label: &str) -> egui::Response {
+    let side = ui.spacing().interact_size.y;
+    let r = ui
+        .horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+            let v = ui.visuals();
+            let fill = if on {
+                v.selection.bg_fill
+            } else {
+                v.extreme_bg_color
+            };
+            ui.painter().circle(
+                rect.center(),
+                side * 0.3,
+                fill,
+                egui::Stroke::new(1.0, v.widgets.inactive.fg_stroke.color),
+            );
+            if !label.is_empty() {
+                ui.label(label);
+            }
+        })
+        .response;
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, false, on, label));
+    r
 }
 
 /// The `points` value type's standard renderer: one numbered row per
@@ -1336,8 +1398,8 @@ fn number_with(
     value: &mut f64,
     drawings: &mut dyn Drawings,
 ) -> (Output, bool) {
-    let variant = control
-        .variant_or_default(look.variant.as_deref())
+    let face = control
+        .face_or_default(look.variant.as_deref())
         .map_or("slider", |v| v.id.as_str());
     let row = ui.spacing().interact_size.y;
     let vertical = look.orientation == Orientation::Vertical;
@@ -1361,7 +1423,13 @@ fn number_with(
     let mut child = ui.new_child(UiBuilder::new().max_rect(bar(row.max(HIT_AREA))));
     let ui = &mut child;
     let ctx = ui.ctx().clone();
-    match (variant, look.representation) {
+    match (face, look.representation) {
+        ("meter", Representation::Full) => (
+            meter(ui, control, label, *value, rect.size(), vertical),
+            false,
+        ),
+        // A meter in less room reads its value.
+        ("readout" | "meter", _) => (readout(ui, control, label, *value, rect.width()), false),
         ("scrub", Representation::Full) => (
             scrub_named(ui, control, Some(label), label, value, rect.width()),
             false,
@@ -1370,7 +1438,8 @@ fn number_with(
             scrub_named(ui, control, None, label, value, rect.width()),
             false,
         ),
-        ("knob", _) => (
+        // The endless knob's stand-in: the knob, until egui-pop has one.
+        ("knob" | "endless-knob", _) => (
             knob_in(ui, key, control, label, rect, value, drawings),
             false,
         ),
@@ -1397,6 +1466,80 @@ fn number_with(
             let quad = out.quad_clicked();
             (slider_output(out.response, &out.changes, *value), quad)
         }
+    }
+}
+
+/// The `readout` face: the value as the control formats it, read only.
+fn readout(ui: &mut Ui, control: &Control, label: &str, value: f64, width: f32) -> Output {
+    let text = control
+        .value
+        .number()
+        .map_or_else(|| value.to_string(), |n| n.format(value));
+    let height = ui.spacing().interact_size.y.max(HIT_AREA);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let v = ui.visuals();
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        &text,
+        egui::TextStyle::Button.resolve(ui.style()),
+        v.text_color(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Label, true, format!("{label} {text}"))
+    });
+    Output {
+        response: response.on_hover_text(label),
+        changes: Vec::new(),
+    }
+}
+
+/// The `meter` face: a bar filled to the value over the soft range, read
+/// only, along its orientation.
+fn meter(
+    ui: &mut Ui,
+    control: &Control,
+    label: &str,
+    value: f64,
+    size: egui::Vec2,
+    vertical: bool,
+) -> Output {
+    let (lo, hi) = control.value.number().map_or((0.0, 1.0), |n| n.soft);
+    let share = if hi > lo {
+        ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let v = ui.visuals();
+    let painter = ui.painter();
+    painter.rect_filled(rect, 2.0, v.extreme_bg_color);
+    let fill = if vertical {
+        Rect::from_min_max(
+            pos2(rect.left(), rect.bottom() - rect.height() * share),
+            rect.max,
+        )
+    } else {
+        Rect::from_min_max(
+            rect.min,
+            pos2(rect.left() + rect.width() * share, rect.bottom()),
+        )
+    };
+    painter.rect_filled(fill, 2.0, v.selection.bg_fill);
+    let text = control
+        .value
+        .number()
+        .map_or_else(|| value.to_string(), |n| n.format(value));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::ProgressIndicator,
+            true,
+            format!("{label} {text}"),
+        )
+    });
+    Output {
+        response: response.on_hover_text(format!("{label}: {text}")),
+        changes: Vec::new(),
     }
 }
 

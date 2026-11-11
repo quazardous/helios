@@ -53,41 +53,9 @@
           "cancel"
         ]
       },
-      "variants": [
+      "faces": [
         {
-          "id": "fader",
-          "label": "Fader",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "3x1",
-                "size": "3x1",
-                "max": "3x1"
-              }
-            },
-            {
-              "representation": "compact",
-              "policy": {
-                "min": "3/4x1",
-                "size": "3/4x1",
-                "max": "3/4x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            }
-          ],
-          "orientations": [
-            "vertical",
-            "horizontal"
-          ],
-          "chip": true,
+          "face": "fader",
           "integration": {
             "panel": {
               "level": "integrated",
@@ -112,32 +80,7 @@
             }
           }
         },
-        {
-          "id": "knob",
-          "label": "Knob",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ],
-          "chip": true
-        }
+        "knob"
       ],
       "feel": {
         "sensitivity": 0.1,
@@ -206,68 +149,9 @@
           "cancel"
         ]
       },
-      "variants": [
-        {
-          "id": "knob",
-          "label": "Knob",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ],
-          "chip": true
-        },
-        {
-          "id": "slider",
-          "label": "Slider",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "3/4x1",
-                "size": "1x1",
-                "max": "4x1",
-                "grow": "width"
-              }
-            },
-            {
-              "representation": "compact",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ],
-          "chip": true
-        }
+      "faces": [
+        "knob",
+        "slider"
       ],
       "feel": {
         "sensitivity": 0.005,
@@ -325,33 +209,9 @@
           "cancel"
         ]
       },
-      "variants": [
+      "faces": [
         {
-          "id": "meter",
-          "label": "Meter",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "2x1/2",
-                "size": "2x1/2",
-                "max": "2x1/2"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "vertical",
-            "horizontal"
-          ],
-          "chip": true,
+          "face": "meter",
           "integration": {
             "panel": {
               "level": "integrated",
@@ -441,69 +301,9 @@
           "cancel"
         ]
       },
-      "variants": [
-        {
-          "id": "slider",
-          "label": "Slider",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "3/4x1",
-                "size": "1x1",
-                "max": "4x1",
-                "grow": "width"
-              }
-            },
-            {
-              "representation": "compact",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal",
-            "vertical"
-          ],
-          "chip": true
-        },
-        {
-          "id": "knob",
-          "label": "Knob",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ],
-          "chip": true
-        }
+      "faces": [
+        "slider",
+        "knob"
       ],
       "feel": {
         "sensitivity": 0.004,
@@ -567,69 +367,9 @@
           "cancel"
         ]
       },
-      "variants": [
-        {
-          "id": "slider",
-          "label": "Slider",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "3/4x1",
-                "size": "1x1",
-                "max": "4x1",
-                "grow": "width"
-              }
-            },
-            {
-              "representation": "compact",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal",
-            "vertical"
-          ],
-          "chip": true
-        },
-        {
-          "id": "scrub",
-          "label": "Scrub field",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/3x1",
-                "size": "1/3x1",
-                "max": "1/3x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ],
-          "chip": true
-        }
+      "faces": [
+        "slider",
+        "scrub"
       ],
       "feel": {
         "sensitivity": 10.0,
@@ -645,6 +385,69 @@
       "readout": {
         "when": "active"
       }
+    },
+    {
+      "id": "hue",
+      "label": "Hue",
+      "purpose": "Turn the light's colour round the colour circle, in degrees",
+      "value": {
+        "type": "number",
+        "hard": [
+          0.0,
+          360.0
+        ],
+        "soft": [
+          0.0,
+          360.0
+        ],
+        "step": 1.0,
+        "coarse": 15.0,
+        "default": 0.0,
+        "precision": 0,
+        "display_scale": 1.0,
+        "signed": false,
+        "integer": false,
+        "wraps": true,
+        "unit": "°"
+      },
+      "connector": {
+        "jacks": [
+          {
+            "name": "value",
+            "type": "number",
+            "unit": "°"
+          }
+        ],
+        "gestures": [
+          "drag",
+          "scrub",
+          "wheel",
+          "keys",
+          "typed",
+          "double-click-reset"
+        ],
+        "intents": [
+          "nudge",
+          "set",
+          "reset",
+          "begin",
+          "end",
+          "cancel"
+        ],
+        "signals": [
+          "preview",
+          "commit",
+          "cancel"
+        ]
+      },
+      "feel": {
+        "sensitivity": 1.0,
+        "fine": 0.1,
+        "response": "linear"
+      },
+      "readout": {
+        "when": "active"
+      }
     }
   ],
   "groups": {
@@ -652,7 +455,8 @@
     "pan": "Mixer channel",
     "meter": "Mixer channel",
     "intensity": "Light",
-    "temperature": "Light"
+    "temperature": "Light",
+    "hue": "Light"
   },
   "parameters": [
     {

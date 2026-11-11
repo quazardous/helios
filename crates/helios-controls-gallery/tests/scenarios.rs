@@ -479,7 +479,7 @@ fn below_minimum(b: &Bench, p: &CardPlacement) -> Vec<String> {
             .and_then(|id| b.registry.get(id))
             .unwrap();
         let v = control
-            .variants
+            .faces
             .iter()
             .find(|v| Some(&v.id) == c.variant.as_ref())
             .unwrap();

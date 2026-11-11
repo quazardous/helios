@@ -35,6 +35,8 @@ fn gain() -> Control {
             display_scale: 1.0,
             signed: true,
             integer: false,
+            wraps: false,
+            open: false,
         }),
     )
     .jack(Jack::new("value", ValueType::Number).unit("dB"))
@@ -186,11 +188,11 @@ fn implicit_controls_follow_the_descriptor() {
     assert!(r.control_at(LEVEL, level.module.as_deref()).is_none());
     let c = implicit(LEVEL, level);
     assert!(c.implicit);
-    let full = c.variants[0].form(Representation::Full).unwrap();
+    let full = c.faces[0].form(Representation::Full).unwrap();
     assert_eq!(full.policy.size, Slot::ROW);
     assert_eq!(full.policy.grow, Grow::Width);
-    assert!(c.variants[0].shows_on(Surface::Panel));
-    assert!(!c.variants[0].shows_on(Surface::Hud));
+    assert!(c.faces[0].shows_on(Surface::Panel));
+    assert!(!c.faces[0].shows_on(Surface::Hud));
     assert_eq!(c.value.number().unwrap().format(0.25), "25.00 %");
     let g = &s.params(GAIN)[0].descriptor;
     assert_eq!(r.control_at(GAIN, g.module.as_deref()).unwrap().id, "gain");
@@ -198,7 +200,7 @@ fn implicit_controls_follow_the_descriptor() {
     let mut curve = ParamDescriptor::new(ParamType::Floats, "curve", Value::Floats(vec![]));
     curve.widget = Some(Widget::Curve);
     let c = implicit("node/amp/curve", &curve);
-    let full = c.variants[0].form(Representation::Full).unwrap();
+    let full = c.faces[0].form(Representation::Full).unwrap();
     assert_eq!(full.policy.size, Slot::block(6));
 }
 

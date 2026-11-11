@@ -434,6 +434,38 @@ impl BenchPage {
                 if let Some(t) = pick(ui, "Tier", p.tier, &tiers) {
                     p.tier = t;
                 }
+                // The faces the control accepts: the person's A/B.
+                let faces: Vec<(String, String)> = self
+                    .bench
+                    .registry
+                    .get(&p.control)
+                    .map(|c| {
+                        c.faces
+                            .iter()
+                            .map(|f| (f.id.clone(), f.label.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if faces.len() > 1 {
+                    let mut face = p.variant.clone();
+                    let shown = face.as_ref().map_or("Default", |id| {
+                        faces
+                            .iter()
+                            .find(|(f, _)| f == id)
+                            .map_or(id.as_str(), |(_, l)| l.as_str())
+                    });
+                    let r = egui::ComboBox::from_id_salt(("bench-face", one))
+                        .selected_text(shown.to_owned())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut face, None, "Default");
+                            for (id, label) in &faces {
+                                ui.selectable_value(&mut face, Some(id.clone()), label);
+                            }
+                        })
+                        .response;
+                    r.on_hover_text("Face: how the control is drawn");
+                    p.variant = face;
+                }
                 let pinned = self.bench.layout.parts.get(one).and_then(|l| l.visibility);
                 let mut hidden = pinned == Some(crate::resolve::Pinned::Hidden);
                 if ui.checkbox(&mut hidden, "Hidden in the layout").changed() {
@@ -1175,7 +1207,7 @@ fn target_spot(
 fn paint_preview(ui: &Ui, control: &Control, rect: Rect) {
     let v = ui.visuals();
     let width = control
-        .variants
+        .faces
         .first()
         .and_then(|x| x.form(Representation::Full))
         .map_or(12, |f| f.policy.size.width.twelfths().min(12)) as f32;

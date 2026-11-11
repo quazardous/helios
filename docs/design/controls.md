@@ -106,8 +106,22 @@ addition; the controls themselves never move into egui-pop.
   read-out and handles. It draws through egui-pop's visual parts.
 - A **composite**, or **case**, is a control made of other controls (its
   **parts**), wired inside.
-- A **variant** is one form of a control (a slider or a knob exposure);
-  variants of one purpose share a connector and swap freely.
+- A **face** is a way to draw a value type, shared by every control:
+  its slot sizes per representation, its orientations, its chip. The
+  library (`egui_hud::face`) has, for a bool, a checkbox, a switch, a
+  push button and a lamp (read-only); for a number, a slider, a fader,
+  a knob, an endless knob, a scrub field, a meter and a read-out (both
+  read-only); for a one-of, a menu, segmented buttons and a radio list;
+  for a curve, a colour and a text, their editors. A face fits values,
+  not only a type: the bounded slider, fader and knob need a bounded
+  number, the endless knob a number that wraps or is open, nudged by
+  relative steps. A control (value and behaviour, nothing about
+  drawing) may restrict and order the faces it accepts (a gain: fader
+  then knob); otherwise it accepts every face that fits its value.
+  Which one shows is presentation: the kit's default, the context (a
+  slot too small for it takes the next accepted face that fits), or the
+  person on the bench (2026-11-11). A **variant**, in older sections, is
+  a face as one control takes it.
 - A **surface** is where a control appears: the **panel** (the module's
   card), the **HUD** (read-outs and small controls over the image, near
   the pointer), the **handles** (gizmos on the image).
@@ -336,7 +350,7 @@ one.
 control  id: "exposure"                       # the purpose, stable
   value:   number  unit: EV  hard: -18..=18  soft: -3..=4
            step: 0.01  fine: 0.001  coarse: 1/3 stop  default: 0
-  variants: [slider*, knob, scrub]           # * the default; same connector
+  faces:   [slider*, knob, scrub]            # * the default; from the face library
   hud:     readout "{+0.00} EV"  when: active
   image:   scrub  axis: horizontal  speed: 1 EV per 200 pt
   gestures: double-click: reset;  wheel: step

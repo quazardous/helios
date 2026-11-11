@@ -448,7 +448,7 @@ impl Gallery {
     pub fn views_of(control: &Control) -> Vec<&'static View> {
         VIEWS
             .iter()
-            .filter(|v| control.variants.iter().any(|x| x.id == v.variant))
+            .filter(|v| control.faces.iter().any(|x| x.id == v.variant))
             .collect()
     }
 
