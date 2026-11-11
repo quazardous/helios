@@ -137,7 +137,7 @@ impl<S: Store> Vault<S> {
             Ok(done)
         })?;
         if done.removed + done.restored + done.changed > 0 {
-            self.catalog.lock().expect("catalog lock").version += 1;
+            self.placed(changes.images.iter().map(|c| c.image));
         }
         Ok(done)
     }

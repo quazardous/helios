@@ -33,14 +33,16 @@
 //!   pinned snapshots are kept in the vault; they are read back, with
 //!   the values of their versions, when the image opens.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
-use helios_vault::{EditSession, ImageId, Location, Presence, Store, Vault, Version, edit};
+use helios_vault::{
+    CursorId, EditSession, ImageId, LibraryRow, Location, Presence, Store, Vault, Version, edit,
+};
 use serde_json::Value;
 
 use crate::Shell;
@@ -77,6 +79,8 @@ pub struct Persist<S: Store> {
     /// A scan changed where copies are (a disk plugged in or out): the
     /// library is to be read again ([`Persist::take_locations_changed`]).
     locations_changed: bool,
+    /// The library shown, refreshed by its cursor's delta.
+    shown: Mutex<Option<Shown>>,
 }
 
 /// The edit of the image shown.
@@ -95,12 +99,19 @@ struct Editing {
     unsaved: bool,
 }
 
+/// How many images one window of the library's cursor holds: each window
+/// is one store query, fields and locations together.
+pub const PAGE: usize = 2_000;
+
 /// The library as the vault holds it: its entries (each with its
 /// presence: present, offline or missing), and where each image can be
 /// read (its first present copy), for thumbnails.
 pub struct LibraryRows {
     entries: Vec<Entry>,
     files: Vec<(String, PathBuf)>,
+    /// The cursor it was read through, kept open so the library shown is
+    /// refreshed by its delta ([`Persist::fill_library`]).
+    cursor: Option<CursorId>,
 }
 
 impl LibraryRows {
@@ -112,64 +123,106 @@ impl LibraryRows {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// The entries read, in the library's order.
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
 }
 
-/// Reads the library from the vault: a query, then each image's copies and
-/// its file's size and date. Nothing of the window: a thread of its own can
-/// read it while the window opens ([`Persist::show_library`] shows it).
+/// Reads the library from the vault through a cursor, a window of
+/// [`PAGE`] images at a time: one query opens it, one query per window
+/// reads the images' fields and locations, one more the photos changed
+/// outside Helios. Nothing is asked of the files: presence (present,
+/// offline, missing) is what the scans stored, and the file's size and
+/// date are those of its location. Nothing of the window either: a thread
+/// of its own can read it while the window opens
+/// ([`Persist::show_library`] shows it).
 pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
     let cursor = vault.open_cursor(Query::default())?;
-    let rows = vault.fetch(cursor.id, 0, cursor.count, &SHOWN);
-    vault.close_cursor(cursor.id);
-    let mut entries = Vec::new();
-    let mut files = Vec::new();
-    // The photos another application changed, until acknowledged.
-    let changed: std::collections::HashMap<_, _> =
-        vault.changed_outside_images()?.into_iter().collect();
-    for row in rows? {
-        let locations = vault.locations(&row.id)?;
-        let presence = Presence::of(&locations);
-        // The volume to plug in, for an image with no copy at hand.
-        let offline_on = locations
-            .iter()
-            .find(|l| l.presence == Presence::Offline)
-            .and_then(|l| l.volume.as_ref())
-            .map(|v| v.as_str().to_string());
-        let path = locations
-            .into_iter()
-            .find(Location::present)
-            .map(|l| l.path);
-        let id = row.id.hex();
-        let mut entry = Entry {
-            id: id.clone(),
-            presence,
-            offline_on,
-            changed_outside: changed.get(&row.id).copied(),
-            name: path
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
-            ..Entry::default()
-        };
-        // The file's size and date, for the library's details.
-        if let Some(meta) = path.as_ref().and_then(|p| std::fs::metadata(p).ok()) {
-            entry.bytes = Some(meta.len());
-            entry.modified = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .and_then(|d| i64::try_from(d.as_secs()).ok());
-            entry.day = entry.modified.and_then(crate::library::day_text);
-        }
-        for field in SHOWN {
-            entry.show(field, row.fields.get(field));
-        }
-        entries.push(entry);
-        if let Some(path) = path {
-            files.push((id, path));
+    let read = read_cursor(vault, cursor.id, cursor.count);
+    if read.is_err() {
+        vault.close_cursor(cursor.id);
+    }
+    let (entries, files) = read?;
+    Ok(LibraryRows {
+        entries,
+        files,
+        cursor: Some(cursor.id),
+    })
+}
+
+/// Where each image can be read, by id.
+type Files = Vec<(String, PathBuf)>;
+
+/// Every image of a cursor as the library shows it, window by window.
+fn read_cursor<S: Store>(
+    vault: &Vault<S>,
+    cursor: CursorId,
+    count: usize,
+) -> Result<(Vec<Entry>, Files), String> {
+    let changed = changed_outside(vault)?;
+    let mut entries = Vec::with_capacity(count);
+    let mut files = Vec::with_capacity(count);
+    for offset in (0..count).step_by(PAGE) {
+        for row in vault.fetch_library(cursor, offset, PAGE, &SHOWN)? {
+            let (entry, path) = entry_of(row, &changed);
+            if let Some(path) = path {
+                files.push((entry.id.clone(), path));
+            }
+            entries.push(entry);
         }
     }
-    Ok(LibraryRows { entries, files })
+    Ok((entries, files))
+}
+
+/// The photos another application changed, until acknowledged.
+fn changed_outside<S: Store>(vault: &Vault<S>) -> Result<HashMap<ImageId, u64>, String> {
+    Ok(vault.changed_outside_images()?.into_iter().collect())
+}
+
+/// An image as the library shows it, and where it can be read (its first
+/// present copy).
+fn entry_of(row: LibraryRow, changed: &HashMap<ImageId, u64>) -> (Entry, Option<PathBuf>) {
+    let presence = Presence::of(&row.locations);
+    // The volume to plug in, for an image with no copy at hand.
+    let offline_on = row
+        .locations
+        .iter()
+        .find(|l| l.presence == Presence::Offline)
+        .and_then(|l| l.volume.as_ref())
+        .map(|v| v.as_str().to_string());
+    let present = row.locations.into_iter().find(Location::present);
+    let id = row.id.hex();
+    let mut entry = Entry {
+        id: id.clone(),
+        presence,
+        offline_on,
+        changed_outside: changed.get(&row.id).copied(),
+        name: present
+            .as_ref()
+            .and_then(|l| l.path.file_name())
+            .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
+        ..Entry::default()
+    };
+    // The file's size and date as its location holds them (what the
+    // import or the last scan saw), for the library's details.
+    if let Some(l) = &present {
+        entry.bytes = Some(l.size);
+        entry.modified = i64::try_from(l.modified).ok().filter(|&m| m > 0);
+        entry.day = entry.modified.and_then(crate::library::day_text);
+    }
+    for field in SHOWN {
+        entry.show(field, row.fields.get(field));
+    }
+    (entry, present.map(|l| l.path))
+}
+
+/// The library shown: the cursor it was read through and where each of
+/// its images can be read.
+struct Shown {
+    cursor: CursorId,
+    files: BTreeMap<String, PathBuf>,
 }
 
 impl<S: Store> Persist<S> {
@@ -182,6 +235,7 @@ impl<S: Store> Persist<S> {
             events,
             editing: None,
             locations_changed: false,
+            shown: Mutex::new(None),
         }
     }
 
@@ -202,8 +256,21 @@ impl<S: Store> Persist<S> {
     }
 
     /// Fills the library with the vault's images; returns where each one
-    /// can be read (its first present copy), for thumbnails.
+    /// can be read (its first present copy), for thumbnails. Once shown,
+    /// the library is brought up to date by its cursor's delta: nothing is
+    /// read when the catalog did not change, else the images added and
+    /// those whose copies moved (an import, a scan, an undo), in windows
+    /// of [`PAGE`]; the others keep their entries as shown.
     pub fn fill_library(&self, shell: &mut Shell) -> Result<Vec<(String, PathBuf)>, String> {
+        let shown = self.shown.lock().expect("library lock").take();
+        if let Some(shown) = shown {
+            let cursor = shown.cursor;
+            match self.refresh_library(shell, shown) {
+                Ok(files) => return Ok(files),
+                // Read whole again, through a new cursor.
+                Err(_) => self.vault.close_cursor(cursor),
+            }
+        }
         let rows = read_library(&self.vault)?;
         self.show_library(shell, rows)
     }
@@ -217,9 +284,85 @@ impl<S: Store> Persist<S> {
         rows: LibraryRows,
     ) -> Result<Vec<(String, PathBuf)>, String> {
         shell.set_library(rows.entries);
+        let old = match rows.cursor {
+            Some(cursor) => self.shown.lock().expect("library lock").replace(Shown {
+                cursor,
+                files: rows.files.iter().cloned().collect(),
+            }),
+            None => None,
+        };
+        if let Some(old) = old {
+            self.vault.close_cursor(old.cursor);
+        }
         self.show_stacks(shell)?;
         self.show_decisions(shell)?;
         Ok(rows.files)
+    }
+
+    /// Brings the library shown up to date by its cursor's delta.
+    fn refresh_library(
+        &self,
+        shell: &mut Shell,
+        mut shown: Shown,
+    ) -> Result<Vec<(String, PathBuf)>, String> {
+        let delta = self.vault.refresh(shown.cursor)?;
+        if delta.changed {
+            // The entries shown, their fields kept up to date by the
+            // vault's events.
+            let mut entries: HashMap<String, Entry> = shell
+                .library()
+                .entries
+                .iter()
+                .map(|e| (e.id.clone(), e.clone()))
+                .collect();
+            for id in &delta.removed {
+                entries.remove(&id.hex());
+                shown.files.remove(&id.hex());
+            }
+            let order = self.vault.cursor_ids(shown.cursor, 0, delta.count)?;
+            // The images added, those whose copies moved, and any the
+            // library does not show (it was filled from elsewhere).
+            let mut read: Vec<ImageId> = delta.inserted.clone();
+            read.extend(&delta.replaced);
+            read.extend(
+                order
+                    .iter()
+                    .filter(|id| !entries.contains_key(&id.hex()) && !delta.inserted.contains(id)),
+            );
+            let changed = changed_outside(&self.vault)?;
+            for ids in read.chunks(PAGE) {
+                for row in self.vault.library_rows(ids, &SHOWN)? {
+                    let (entry, path) = entry_of(row, &changed);
+                    match path {
+                        Some(path) => shown.files.insert(entry.id.clone(), path),
+                        None => shown.files.remove(&entry.id),
+                    };
+                    entries.insert(entry.id.clone(), entry);
+                }
+            }
+            let entries = order
+                .iter()
+                .filter_map(|id| {
+                    let mut entry = entries.remove(&id.hex())?;
+                    entry.changed_outside = changed.get(id).copied();
+                    Some(entry)
+                })
+                .collect();
+            shell.set_library(entries);
+        } else {
+            // The backups are read again all the same (a strategy saved,
+            // a copy verified: no catalog change), as a whole read does.
+            shell.refresh_backups();
+        }
+        let files = shown
+            .files
+            .iter()
+            .map(|(id, path)| (id.clone(), path.clone()))
+            .collect();
+        *self.shown.lock().expect("library lock") = Some(shown);
+        self.show_stacks(shell)?;
+        self.show_decisions(shell)?;
+        Ok(files)
     }
 
     /// Shows the vault's stacks in the library.

@@ -267,7 +267,12 @@ impl<S: Store> Vault<S> {
         self.store
             .lock()
             .expect("store lock")
-            .put_sighting(sighting)
+            .put_sighting(sighting)?;
+        // A copy of an image: its library row changes.
+        if let Some(id) = sighting.image {
+            self.placed([id]);
+        }
+        Ok(())
     }
 
     /// Records what a listing found, in one transaction: each file at its
@@ -277,17 +282,23 @@ impl<S: Store> Vault<S> {
         for s in listed {
             s.check()?;
         }
-        self.transaction(|store| {
+        let (written, images) = self.transaction(|store| {
             let mut written = 0;
+            let mut images = Vec::new();
             for s in listed {
                 let old = store.sighting_at(s.volume.as_ref(), s.rel_path.as_deref(), &s.path)?;
                 if let Some(new) = s.clone().listed_again(old.as_ref()) {
                     store.put_sighting(&new)?;
+                    images.extend(new.image);
                     written += 1;
                 }
             }
-            Ok(written)
-        })
+            Ok((written, images))
+        })?;
+        if !images.is_empty() {
+            self.placed(images);
+        }
+        Ok(written)
     }
 
     /// The sighting at a place, if any.

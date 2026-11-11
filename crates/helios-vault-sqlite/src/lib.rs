@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -1118,6 +1118,85 @@ impl Store for SqliteStore {
         for (image, name, value) in rows {
             let value = serde_json::from_str(&value).map_err(|e| e.to_string())?;
             by_image.entry(image).or_default().insert(name, value);
+        }
+        Ok(ids
+            .iter()
+            .map(|id| by_image.remove(&id.hex()).unwrap_or_default())
+            .collect())
+    }
+
+    /// One statement: the images joined with their sightings, each row
+    /// carrying the image's asked fields as a JSON array of name and
+    /// stored value.
+    fn library_rows(
+        &self,
+        ids: &[ImageId],
+        names: &[&str],
+    ) -> Result<Vec<helios_vault::LibraryRows>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let columns = SIGHTING_COLUMNS
+            .split(',')
+            .map(|c| format!("s.{}", c.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let image_marks = vec!["?"; ids.len()].join(", ");
+        // No name asked: the fields' subquery selects nothing.
+        let name_marks = if names.is_empty() {
+            "NULL".to_string()
+        } else {
+            vec!["?"; names.len()].join(", ")
+        };
+        let sql = format!(
+            "SELECT {columns}, i.id, \
+                 (SELECT json_group_array(json_array(f.name, f.value)) FROM fields f \
+                  WHERE f.image = i.id AND f.name IN ({name_marks})) \
+             FROM images i LEFT JOIN sightings s ON s.image = i.id \
+             WHERE i.id IN ({image_marks}) \
+             ORDER BY i.id, s.path, s.id"
+        );
+        let mut statement = self.db.prepare(&sql).map_err(err)?;
+        // The names' marks come first in the statement.
+        let args: Vec<String> = names
+            .iter()
+            .map(std::string::ToString::to_string)
+            .chain(ids.iter().map(ImageId::hex))
+            .collect();
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                let seen = r.get::<_, Option<String>>(2)?.is_some();
+                Ok((
+                    r.get::<_, String>(15)?,
+                    r.get::<_, Option<String>>(16)?,
+                    seen.then(|| sighting(r)).transpose()?,
+                ))
+            })
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        let mut by_image: HashMap<String, helios_vault::LibraryRows> = HashMap::new();
+        for (image, fields, seen) in rows {
+            let entry = match by_image.entry(image) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let mut values = BTreeMap::new();
+                    let pairs: Vec<(String, String)> = match fields {
+                        Some(json) => serde_json::from_str(&json).map_err(|e| e.to_string())?,
+                        None => Vec::new(),
+                    };
+                    for (name, value) in pairs {
+                        let value = serde_json::from_str(&value).map_err(|e| e.to_string())?;
+                        values.insert(name, value);
+                    }
+                    e.insert((values, Vec::new()))
+                }
+            };
+            if let Some(seen) = seen
+                && let Some((_, location)) = to_sighting(seen)?.location()
+            {
+                entry.1.push(location);
+            }
         }
         Ok(ids
             .iter()

@@ -113,7 +113,8 @@ What it could not measure, and why:
   50,000 images, but how far the wheel moved it is not recorded in this
   run (the fixed benchmark records it).
 - **The vault's read** of the library's rows: not in the benchmark (a
-  vault holds each file once, so the corpus cannot be repeated in one).
+  vault holds each file once, so the corpus cannot be repeated in one);
+  measured on a synthetic vault since (see "The library read" below).
 
 The bottlenecks, in order:
 
@@ -254,3 +255,40 @@ thumbnails are still the embedded previews, not renders of the edit
 their version's key and takes over the pool's ordering). Cache keys go
 through `helios_thumbs::key_of`, to move to the image map's content
 identity.
+
+## The library read
+
+How the Library's rows (marks, presence, file name, size and date) are
+read from the vault when the window opens and after each import, scan or
+undo. No budget is set yet; the slice that changed it is L1 of
+[design/library.md](design/library.md).
+
+`helios-gui`'s `library_scale` tests build a synthetic vault (SQLite, one
+file, photos on disk as hard links to one small file: present, offline,
+missing, or missing at one path and present at another; marks on some),
+then read it with `persist::read_library`. Each read prints its time, the
+store queries it made and how many entries took their size from the file
+on disk (a `stat`, told apart because the vault holds a different size).
+`the_library_read_at_scale_is_a_query_per_window_and_no_stat` fails when
+the read makes more than one query per window of 2,000 photos plus the
+cursor's, stats a file, or passes 30 s at 50,000 photos.
+
+### 2026-11-11, before and after L1
+
+On the box (`test-crate`, a debug build with SQLite optimized, other jobs
+beside it: indicative only). Before: box job 20261111-184637-88bf; after:
+20261111-184852-f232.
+
+| Photos | Before | After |
+| --- | --- | --- |
+| 30,000 | 2.0 s, 30,002 queries, 24,000 stats | 1.3 s, 16 queries, no stat |
+| 100,000 | **fails**: "too many SQL variables" (one query for every photo's fields, past SQLite's 32,766 parameters) | 3.8 s, 51 queries, no stat |
+
+Before, the read fetched every photo's fields in one statement (so a
+Library past about 32,000 photos could not be read at all), then asked
+each photo's locations (one query each) and stat-ed its first present
+copy, every time the Library was filled again. After, a cursor is read
+2,000 photos at a time, fields and locations in one statement, sizes and
+dates from the locations; the cursor stays open, and a refresh reads
+nothing when the catalog did not change, else only the photos added and
+those whose copies moved (`Delta::replaced`).

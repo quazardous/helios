@@ -11,7 +11,12 @@
 //! - **Cursors** are server-side snapshots of a query: opening one is one
 //!   store query, reading a window of rows with chosen fields is one more,
 //!   and refreshing costs nothing unless the catalog changed, then returns
-//!   what was inserted and removed.
+//!   what was inserted and removed, and the images still there whose
+//!   copies changed (a location added, moved, found missing or offline).
+//! - **Library rows** ([`Vault::fetch_library`]) are a cursor window with
+//!   each image's locations beside its fields, in one store query: what a
+//!   library view shows (presence, the volume to plug in, the file's name,
+//!   size and date) without a query or a file system call per image.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -21,7 +26,7 @@ use serde_json::{Value, json};
 use helios_core::Event;
 
 use crate::fields::{self, AuditEntry, Command, Query};
-use crate::{ImageId, Store, Vault};
+use crate::{ImageId, Location, Store, Vault};
 
 /// What the vault remembers between calls.
 #[derive(Default)]
@@ -30,6 +35,8 @@ pub(crate) struct State {
     pub(crate) version: u64,
     next_cursor: u64,
     cursors: HashMap<u64, Cursor>,
+    /// The version at which each image's copies last changed.
+    placed: HashMap<ImageId, u64>,
 }
 
 struct Cursor {
@@ -61,6 +68,15 @@ pub struct Row {
     pub fields: BTreeMap<String, Value>,
 }
 
+/// One image of a library window: the fields asked for, and where its
+/// copies are (its locations, by path), as stored: no file is read.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LibraryRow {
+    pub id: ImageId,
+    pub fields: BTreeMap<String, Value>,
+    pub locations: Vec<Location>,
+}
+
 /// What changed in a cursor since it was opened or last refreshed.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Delta {
@@ -69,6 +85,9 @@ pub struct Delta {
     pub count: usize,
     pub inserted: Vec<ImageId>,
     pub removed: Vec<ImageId>,
+    /// Images in the cursor before and after whose copies changed since:
+    /// a library reads their rows again.
+    pub replaced: Vec<ImageId>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -100,6 +119,18 @@ impl Event for FieldChanged {
 impl<S: Store> Vault<S> {
     fn count_query(&self) {
         self.reads.lock().expect("reads lock").queries += 1;
+    }
+
+    /// Notes that the copies of `images` changed (a location added, moved,
+    /// verified, found missing or offline): the catalog's version moves,
+    /// and a cursor's next [`Vault::refresh`] lists them as replaced.
+    pub(crate) fn placed(&self, images: impl IntoIterator<Item = ImageId>) {
+        let mut catalog = self.catalog.lock().expect("catalog lock");
+        catalog.version += 1;
+        let version = catalog.version;
+        for id in images {
+            catalog.placed.insert(id, version);
+        }
     }
 
     /// Applies a batch of commands, all or nothing: the checks, the reads
@@ -228,7 +259,8 @@ impl<S: Store> Vault<S> {
         })
     }
 
-    fn cursor_ids(
+    /// The images of a cursor window, in its order: no store query.
+    pub fn cursor_ids(
         &self,
         cursor: CursorId,
         offset: usize,
@@ -268,6 +300,42 @@ impl<S: Store> Vault<S> {
             .collect())
     }
 
+    /// A window of a cursor as a library shows it: the asked fields and
+    /// each image's locations, in one store query however many rows.
+    pub fn fetch_library(
+        &self,
+        cursor: CursorId,
+        offset: usize,
+        n: usize,
+        names: &[&str],
+    ) -> Result<Vec<LibraryRow>, String> {
+        let ids = self.cursor_ids(cursor, offset, n)?;
+        self.library_rows(&ids, names)
+    }
+
+    /// Some images as a library shows them ([`Vault::fetch_library`]), in
+    /// the order of `ids`: one store query.
+    pub fn library_rows(&self, ids: &[ImageId], names: &[&str]) -> Result<Vec<LibraryRow>, String> {
+        for name in names {
+            fields::spec(name)?;
+        }
+        let rows = self
+            .store
+            .lock()
+            .expect("store lock")
+            .library_rows(ids, names)?;
+        self.count_query();
+        Ok(ids
+            .iter()
+            .zip(rows)
+            .map(|(id, (fields, locations))| LibraryRow {
+                id: *id,
+                fields,
+                locations,
+            })
+            .collect())
+    }
+
     /// The position of an image in a cursor; no store query.
     pub fn rank_of(&self, cursor: CursorId, image: &ImageId) -> Result<Option<usize>, String> {
         let catalog = self.catalog.lock().expect("catalog lock");
@@ -302,10 +370,21 @@ impl<S: Store> Vault<S> {
         let mut catalog = self.catalog.lock().expect("catalog lock");
         let c = catalog
             .cursors
-            .get_mut(&cursor.0)
+            .get(&cursor.0)
             .ok_or_else(|| format!("no cursor {}", cursor.0))?;
         let before: BTreeSet<ImageId> = c.ids.iter().copied().collect();
         let after: BTreeSet<ImageId> = ids.iter().copied().collect();
+        let since = c.version;
+        let replaced = ids
+            .iter()
+            .filter(|id| before.contains(id))
+            .filter(|id| catalog.placed.get(id).is_some_and(|&v| v > since))
+            .copied()
+            .collect();
+        let c = catalog
+            .cursors
+            .get_mut(&cursor.0)
+            .ok_or_else(|| format!("no cursor {}", cursor.0))?;
         let delta = Delta {
             changed: true,
             version,
@@ -321,6 +400,7 @@ impl<S: Store> Vault<S> {
                 .filter(|id| !after.contains(id))
                 .copied()
                 .collect(),
+            replaced,
         };
         c.ids = ids;
         c.version = version;
