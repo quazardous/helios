@@ -2020,7 +2020,7 @@ fn queries_filter_by_every_library_term_in_one_query<S: Store>(s: S) {
         got
     };
     let words = |w: &[&str]| {
-        let w: Vec<String> = w.iter().map(|s| s.to_string()).collect();
+        let w: Vec<String> = w.iter().map(ToString::to_string).collect();
         run(&|q| q.words.clone_from(&w))
     };
     assert_eq!(words(&["img"]), pick(&[0]), "the name, whatever its case");
