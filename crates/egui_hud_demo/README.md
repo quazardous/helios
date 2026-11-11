@@ -57,13 +57,18 @@ The model's tests run headless: `cargo test -p egui_hud_demo`.
 
 `kit.json` holds:
 
-- `controls`: egui_hud controls (`egui_hud::model::Control`), each with its
+- `controls`: egui_hud controls (`egui_hud::model::Control`) that add
+  something beyond their value type (the gain in decibels as a fader or
+  a knob, the level meter, pan, the light's intensity and temperature), each with its
   value, connector, variants and their slot forms per representation,
   orientations and integration (who draws it on which surface, and its
   fallback), feel, detents and read-out;
 - `groups`: each control's shelf group;
-- `parameters`: parameters offered as implicit controls, from their
-  descriptors (the EQ curve, the colour wheel, a toggle, a text field);
+- `parameters`: domain uses of the generic controls, from their
+  descriptors (mute, power, the low cut: toggles; the colour tag and the
+  effect: choices; the EQ curve, the colour wheel, a text field);
+- `implicit`: whether the shelf lists the generic controls, one per
+  value type, under "Miscellaneous";
 - `presets`: benches as data (composition, rules, context, mode, width);
 - `tools`: the tools the context bar offers.
 

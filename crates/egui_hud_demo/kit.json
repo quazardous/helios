@@ -285,65 +285,6 @@
       }
     },
     {
-      "id": "mute",
-      "label": "Mute",
-      "purpose": "Silence the channel without losing its level",
-      "value": {
-        "type": "bool",
-        "default": false
-      },
-      "connector": {
-        "jacks": [
-          {
-            "name": "value",
-            "type": "bool"
-          }
-        ],
-        "gestures": [
-          "keys"
-        ],
-        "intents": [
-          "set",
-          "reset"
-        ],
-        "signals": [
-          "preview",
-          "commit",
-          "cancel"
-        ]
-      },
-      "variants": [
-        {
-          "id": "toggle",
-          "label": "Toggle",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/4x1",
-                "size": "1/4x1",
-                "max": "1/4x1"
-              }
-            }
-          ],
-          "chip": true
-        }
-      ],
-      "feel": {
-        "sensitivity": 0.01,
-        "fine": 0.1,
-        "response": "linear"
-      }
-    },
-    {
       "id": "meter",
       "label": "Level",
       "purpose": "Show the channel's level as it plays, in decibels",
@@ -446,77 +387,6 @@
       },
       "readout": {
         "when": "active"
-      }
-    },
-    {
-      "id": "tag",
-      "label": "Colour tag",
-      "purpose": "Mark the channel with a colour, to find it on a large desk",
-      "value": {
-        "type": "one-of",
-        "choices": [
-          "None",
-          "Red",
-          "Orange",
-          "Yellow",
-          "Green",
-          "Blue",
-          "Purple"
-        ],
-        "default": "None"
-      },
-      "connector": {
-        "jacks": [
-          {
-            "name": "value",
-            "type": "one-of"
-          }
-        ],
-        "gestures": [
-          "keys"
-        ],
-        "intents": [
-          "set",
-          "reset"
-        ],
-        "signals": [
-          "preview",
-          "commit",
-          "cancel"
-        ]
-      },
-      "variants": [
-        {
-          "id": "menu",
-          "label": "Menu",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "3/4x1",
-                "size": "1x1",
-                "max": "2x1",
-                "grow": "width"
-              }
-            },
-            {
-              "representation": "compact",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ]
-        }
-      ],
-      "feel": {
-        "sensitivity": 0.01,
-        "fine": 0.1,
-        "response": "linear"
       }
     },
     {
@@ -775,147 +645,40 @@
       "readout": {
         "when": "active"
       }
-    },
-    {
-      "id": "power",
-      "label": "Power",
-      "purpose": "Switch the light on or off",
-      "value": {
-        "type": "bool",
-        "default": true
-      },
-      "connector": {
-        "jacks": [
-          {
-            "name": "value",
-            "type": "bool"
-          }
-        ],
-        "gestures": [
-          "keys"
-        ],
-        "intents": [
-          "set",
-          "reset"
-        ],
-        "signals": [
-          "preview",
-          "commit",
-          "cancel"
-        ]
-      },
-      "variants": [
-        {
-          "id": "toggle",
-          "label": "Toggle",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            },
-            {
-              "representation": "simplified",
-              "policy": {
-                "min": "1/4x1",
-                "size": "1/4x1",
-                "max": "1/4x1"
-              }
-            }
-          ],
-          "chip": true
-        }
-      ],
-      "feel": {
-        "sensitivity": 0.01,
-        "fine": 0.1,
-        "response": "linear"
-      }
-    },
-    {
-      "id": "effect",
-      "label": "Effect",
-      "purpose": "Animate the light: steady, a slow fade, a pulse or a strobe",
-      "value": {
-        "type": "one-of",
-        "choices": [
-          "Steady",
-          "Fade",
-          "Pulse",
-          "Strobe"
-        ],
-        "default": "Steady"
-      },
-      "connector": {
-        "jacks": [
-          {
-            "name": "value",
-            "type": "one-of"
-          }
-        ],
-        "gestures": [
-          "keys"
-        ],
-        "intents": [
-          "set",
-          "reset"
-        ],
-        "signals": [
-          "preview",
-          "commit",
-          "cancel"
-        ]
-      },
-      "variants": [
-        {
-          "id": "menu",
-          "label": "Menu",
-          "slots": [
-            {
-              "representation": "full",
-              "policy": {
-                "min": "3/4x1",
-                "size": "1x1",
-                "max": "2x1",
-                "grow": "width"
-              }
-            },
-            {
-              "representation": "compact",
-              "policy": {
-                "min": "1/2x1",
-                "size": "1/2x1",
-                "max": "1/2x1"
-              }
-            }
-          ],
-          "orientations": [
-            "horizontal"
-          ]
-        }
-      ],
-      "feel": {
-        "sensitivity": 0.01,
-        "fine": 0.1,
-        "response": "linear"
-      }
     }
   ],
   "groups": {
     "gain": "Mixer channel",
     "pan": "Mixer channel",
-    "mute": "Mixer channel",
     "meter": "Mixer channel",
-    "tag": "Mixer channel",
     "intensity": "Light",
-    "temperature": "Light",
-    "power": "Light",
-    "effect": "Light"
+    "temperature": "Light"
   },
   "parameters": [
+    {
+      "name": "mute",
+      "group": "Mixer channel",
+      "hint": "A toggle, from its descriptor",
+      "descriptor": {
+        "ty": "bool",
+        "label": "Mute",
+        "description": "Silence the channel without losing its level",
+        "default": {
+          "Bool": false
+        },
+        "hard": null,
+        "soft": null,
+        "step": 0.01,
+        "coarse": 0.1,
+        "unit": null,
+        "display_scale": 1.0,
+        "precision": 2,
+        "choices": [],
+        "logarithmic": false,
+        "widget": null,
+        "module": null
+      }
+    },
     {
       "name": "eq",
       "group": "Mixer channel",
@@ -1000,7 +763,63 @@
       }
     },
     {
-      "name": "colour",
+      "name": "tag",
+      "group": "Mixer channel",
+      "hint": "A choice, from its descriptor",
+      "descriptor": {
+        "ty": "choice",
+        "label": "Colour tag",
+        "description": "Mark the channel with a colour, to find it on a large desk",
+        "default": {
+          "Choice": "None"
+        },
+        "hard": null,
+        "soft": null,
+        "step": 0.01,
+        "coarse": 0.1,
+        "unit": null,
+        "display_scale": 1.0,
+        "precision": 2,
+        "choices": [
+          "None",
+          "Red",
+          "Orange",
+          "Yellow",
+          "Green",
+          "Blue",
+          "Purple"
+        ],
+        "logarithmic": false,
+        "widget": null,
+        "module": null
+      }
+    },
+    {
+      "name": "power",
+      "group": "Light",
+      "hint": "A toggle, from its descriptor",
+      "descriptor": {
+        "ty": "bool",
+        "label": "Power",
+        "description": "Switch the light on or off",
+        "default": {
+          "Bool": true
+        },
+        "hard": null,
+        "soft": null,
+        "step": 0.01,
+        "coarse": 0.1,
+        "unit": null,
+        "display_scale": 1.0,
+        "precision": 2,
+        "choices": [],
+        "logarithmic": false,
+        "widget": null,
+        "module": null
+      }
+    },
+    {
+      "name": "light-colour",
       "group": "Light",
       "hint": "A colour wheel, drawn by egui-pop; a swatch and its channels where it does not fit",
       "descriptor": {
@@ -1026,9 +845,38 @@
         "widget": "wheel",
         "module": null
       }
+    },
+    {
+      "name": "effect",
+      "group": "Light",
+      "hint": "A choice, from its descriptor",
+      "descriptor": {
+        "ty": "choice",
+        "label": "Effect",
+        "description": "Animate the light: steady, a slow fade, a pulse or a strobe",
+        "default": {
+          "Choice": "Steady"
+        },
+        "hard": null,
+        "soft": null,
+        "step": 0.01,
+        "coarse": 0.1,
+        "unit": null,
+        "display_scale": 1.0,
+        "precision": 2,
+        "choices": [
+          "Steady",
+          "Fade",
+          "Pulse",
+          "Strobe"
+        ],
+        "logarithmic": false,
+        "widget": null,
+        "module": null
+      }
     }
   ],
-  "implicit": false,
+  "implicit": true,
   "tools": [
     "",
     "eq",
@@ -1060,7 +908,7 @@
           {
             "kind": "control",
             "key": "mute",
-            "control": "mute",
+            "control": "implicit:shelf/mute",
             "tier": "essential"
           },
           {
@@ -1083,7 +931,7 @@
           {
             "kind": "control",
             "key": "tag",
-            "control": "tag",
+            "control": "implicit:shelf/tag",
             "tier": "expert"
           },
           {
@@ -1137,7 +985,7 @@
           {
             "kind": "control",
             "key": "mute",
-            "control": "mute"
+            "control": "implicit:shelf/mute"
           }
         ]
       },
@@ -1172,7 +1020,7 @@
           {
             "kind": "control",
             "key": "mute",
-            "control": "mute"
+            "control": "implicit:shelf/mute"
           }
         ]
       },
@@ -1207,7 +1055,7 @@
           {
             "kind": "control",
             "key": "mute",
-            "control": "mute"
+            "control": "implicit:shelf/mute"
           }
         ]
       },
@@ -1244,7 +1092,7 @@
           {
             "kind": "control",
             "key": "mute",
-            "control": "mute",
+            "control": "implicit:shelf/mute",
             "tier": "essential"
           },
           {
@@ -1267,7 +1115,7 @@
           {
             "kind": "control",
             "key": "tag",
-            "control": "tag",
+            "control": "implicit:shelf/tag",
             "tier": "expert"
           },
           {
@@ -1311,7 +1159,7 @@
             "parts": [
               {
                 "key": "power",
-                "control": "power",
+                "control": "implicit:shelf/power",
                 "tier": "essential"
               },
               {
@@ -1325,11 +1173,11 @@
               },
               {
                 "key": "colour",
-                "control": "implicit:shelf/colour"
+                "control": "implicit:shelf/light-colour"
               },
               {
                 "key": "effect",
-                "control": "effect",
+                "control": "implicit:shelf/effect",
                 "tier": "expert"
               }
             ]
@@ -1368,7 +1216,7 @@
             "parts": [
               {
                 "key": "power",
-                "control": "power",
+                "control": "implicit:shelf/power",
                 "tier": "essential"
               },
               {
@@ -1382,11 +1230,11 @@
               },
               {
                 "key": "colour",
-                "control": "implicit:shelf/colour"
+                "control": "implicit:shelf/light-colour"
               },
               {
                 "key": "effect",
-                "control": "effect",
+                "control": "implicit:shelf/effect",
                 "tier": "expert"
               }
             ]
@@ -1425,7 +1273,7 @@
             "parts": [
               {
                 "key": "power",
-                "control": "power",
+                "control": "implicit:shelf/power",
                 "tier": "essential"
               },
               {
@@ -1439,11 +1287,11 @@
               },
               {
                 "key": "colour",
-                "control": "implicit:shelf/colour"
+                "control": "implicit:shelf/light-colour"
               },
               {
                 "key": "effect",
-                "control": "effect",
+                "control": "implicit:shelf/effect",
                 "tier": "expert"
               }
             ]

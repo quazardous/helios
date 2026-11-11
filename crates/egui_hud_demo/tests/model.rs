@@ -9,19 +9,25 @@ use egui_hud::bench::BenchMode;
 use egui_hud::flow::Cause;
 use egui_hud::render::{Change, Drawn, Edit};
 use egui_hud::slot::{Fallback, Orientation};
-use egui_hud_demo::{Demo, GAIN, METER, SILENCE, bench, kit, signal};
+use egui_hud_demo::{Demo, GAIN, METER, MUTE, SILENCE, bench, kit, signal};
 use egui_kittest::Harness;
 
 #[test]
 fn the_catalogue_loads_and_every_preset_resolves_with_every_part_reachable() {
     let kit = kit().unwrap();
-    for id in [GAIN, "pan", "mute", METER, "tag", "intensity", "power"] {
+    for id in [GAIN, "pan", METER, "intensity", "temperature"] {
         assert!(kit.registry.get(id).is_some(), "{id} registered");
+    }
+    // A plain toggle or choice is the generic control, as a parameter.
+    for id in ["mute", "tag", "power", "effect"] {
+        assert!(kit.registry.get(id).is_none(), "{id} not registered");
+        assert!(kit.parameters.iter().any(|p| p.name == id), "{id} offered");
     }
     assert!(kit.presets.len() >= 5);
     let mut b = bench().unwrap();
     let shelf: Vec<String> = b.shelf.groups("").into_iter().map(|(g, _)| g).collect();
-    assert_eq!(shelf, ["Light", "Mixer channel"]);
+    assert_eq!(shelf, ["Light", "Mixer channel", "Miscellaneous"]);
+    assert!(b.shelf.get(MUTE).is_some());
     for p in kit.presets.clone() {
         b.load_preset(&p.name)
             .unwrap_or_else(|e| panic!("{}: {e}", p.name));

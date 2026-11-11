@@ -2,9 +2,13 @@
 //! a light, declared as data ([`KIT`]), put on `egui_hud`'s bench and laid
 //! out by its slot engine (`egui_gridflow`).
 //!
-//! - [`kit`] reads the catalogue: the controls, their shelf groups, the
-//!   parameters offered as implicit controls (an EQ curve, a colour
-//!   wheel), the presets and the tools of the context bar.
+//! - [`kit`] reads the catalogue: the controls that specialise their
+//!   value type (the gain in decibels, the meter, pan, the light's
+//!   intensity and temperature) and their shelf groups, the domain uses
+//!   of the generic controls as parameters (mute and power toggles, the
+//!   colour tag and effect choices, an EQ curve, a colour wheel), the
+//!   presets and the tools of the context bar. The generic controls, one
+//!   per value type, are on the shelf under "Miscellaneous".
 //! - [`DemoDrawings`] draws the integrated controls: the gain's fader,
 //!   the level meter, and (through `egui_hud`'s editor drawings) the curve
 //!   and the wheel. Where a drawing cannot go, `egui_hud` draws the
@@ -37,8 +41,8 @@ pub const KIT: &str = include_str!("../kit.json");
 
 /// The gain control's id: drawn as a fader where it has room.
 pub const GAIN: &str = "gain";
-/// The mute control's id.
-pub const MUTE: &str = "mute";
+/// The mute toggle's control id: the generic toggle, as a kit parameter.
+pub const MUTE: &str = "implicit:shelf/mute";
 /// The level meter's id: an indicator, drawn as a bar.
 pub const METER: &str = "meter";
 
