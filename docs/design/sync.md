@@ -205,10 +205,18 @@ contract (the session over an in-memory link and an in-memory mailbox):
   TLS, device keys and a pairing code shown on one machine and typed on
   the other, peers found by mDNS (Syncthing's model). No account, no
   server, no SSH.
+- **Tailscale or another mesh VPN** (link): the same network link,
+  reached at the peer's tailnet address (MagicDNS name) instead of found
+  by mDNS, so two machines on different networks (home and travel) sync
+  live with no port opened and no relay of ours; Tailscale's WireGuard
+  already authenticates the machines, so pairing only binds the two
+  Helios replicas. Nothing Tailscale-specific in the protocol: a peer
+  address the user types or picks from `tailscale status`.
 - **SSH** (link): `ssh <remote> helios sync-serve --stdio`, for users who
   already have SSH between their machines; authentication and encryption
   are SSH's, as git and git-annex do.
-- Later, if wanted: a relay for machines on different networks.
+- Later, if wanted: a relay of our own, only if a mesh VPN does not cover
+  the case.
 
 The node's MCP server gets `helios_sync_status` and `helios_sync_now` so
 an agent can see and start a session, whatever the transport.
@@ -480,10 +488,11 @@ Each option is listed in order; the recommendation is marked.
 1. **Which transport implementations first** (the transport is an
    abstraction either way, owner 2026-11-11).
    - A. The folder mailbox first (USB disk, NAS, a synced cloud folder:
-     a path and nothing else), then the local-network link with pairing
-     (recommended: works for everyone at once, no network setup).
-   - B. The local-network link first (live sync at home), then the
-     folder.
+     a path and nothing else), then the network link with pairing, which
+     also runs over Tailscale (recommended: works for everyone at once,
+     no network setup).
+   - B. The local-network link first (live sync at home, and across
+     networks through Tailscale), then the folder.
    - C. SSH first, for users who already have it, then the others.
 2. **Two different ratings for one photo, set on two machines between
    two sessions.**
