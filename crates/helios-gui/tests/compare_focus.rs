@@ -127,6 +127,8 @@ fn compare_three_photos_sync_their_zoom_and_rate_the_active_one() {
     h.run();
     assert!(h.state().comparison().synced);
     // The arrow keys move the active photo, the selection with it.
+    run(&mut h, "helios.compare.focus", json!(null));
+    h.run();
     h.key_press(Key::ArrowRight);
     h.run();
     h.run();
@@ -157,19 +159,16 @@ fn compare_three_photos_sync_their_zoom_and_rate_the_active_one() {
 }
 
 #[test]
-fn compare_needs_two_photos_and_shows_four_at_most() {
+fn compare_needs_two_known_photos_and_leaves_with_its_place() {
     let mut h = library("needs-two", 1.0);
     h.state().library_mut().select_ids(&["a".to_string()]);
-    let refused = h
-        .state_mut()
-        .run("library.compare", json!(null), Origin::User);
-    assert!(refused.is_err(), "{refused:?}");
-    let refused = h.state_mut().run(
-        "library.compare",
-        json!({ "images": ["a", "zz"] }),
-        Origin::User,
-    );
-    assert!(refused.unwrap_err().contains("zz"));
+    // Refused (its error goes to the notes): one photo, an unknown one.
+    for args in [json!(null), json!({ "images": ["a", "zz"] })] {
+        run(&mut h, "library.compare", args);
+        h.run();
+        assert!(h.state().comparison().photos().is_empty());
+        assert_ne!(place(&h), "helios.comparison");
+    }
     // By ids, as an agent asks; the first is active.
     run(&mut h, "library.compare", json!({ "images": ["c", "a"] }));
     h.run();
@@ -195,8 +194,8 @@ fn new_workspace_offers_compare_and_a_compare_workspace_opens_in_it() {
         .find(|o| o["value"] == json!("helios.compare"))
         .unwrap_or_else(|| panic!("Compare is offered: {picker}"));
     assert_eq!(option["label"], json!("Compare"));
-    run(&mut h, "dialog.cancel", json!(null));
     // The template's library says the workspace opens in Compare.
+    let mut h = library("template-opened", 1.0);
     let compare = helios_gui::templates::find("helios.compare").unwrap();
     h.state_mut()
         .apply_template_library(compare.template.library.as_ref());
