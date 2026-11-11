@@ -318,9 +318,7 @@ pub fn restore(path: &Path, from: &Path, now: u64) -> Result<Restored, String> {
     let _ = std::fs::remove_file(&incoming);
     let copied = (|| {
         std::fs::copy(from, &incoming).map_err(|e| at(&incoming, e))?;
-        std::fs::File::open(&incoming)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| at(&incoming, e))?;
+        sync_file(&incoming).map_err(|e| at(&incoming, e))?;
         verify(&incoming)
     })();
     if let Err(e) = copied {
@@ -410,7 +408,15 @@ fn copy(db: &Connection, to: &Path, options: &Options) -> Result<(), String> {
         return Err(format!("the copy fails its check: {}", problems.join("; ")));
     }
     dest.close().map_err(|(_, e)| err(e))?;
-    std::fs::File::open(to)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| format!("{}: {e}", to.display()))
+    sync_file(to).map_err(|e| format!("{}: {e}", to.display()))
+}
+
+/// Flushes the file at `path` to the disk. It is opened for writing:
+/// Windows refuses to flush a handle opened read-only ("Access is
+/// denied").
+fn sync_file(path: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .sync_all()
 }
