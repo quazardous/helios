@@ -109,7 +109,7 @@ fn about_description() -> Message {
 /// Report a problem): a new issue, prefilled with the version and the
 /// platform.
 fn about_info() -> egui_pop::api::about::AppInfo {
-    let mut info = egui_pop::api::about::AppInfo::new("Helios", env!("CARGO_PKG_VERSION"))
+    let mut info = egui_pop::api::about::AppInfo::new("Helios", env!("HELIOS_VERSION"))
         .description(&about_description().english)
         .licence(env!("CARGO_PKG_LICENSE"))
         .repository(env!("CARGO_PKG_REPOSITORY"))

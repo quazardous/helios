@@ -1558,7 +1558,7 @@ fn main() -> Result<(), String> {
     if let [flag] = args.as_slice()
         && (flag == "--version" || flag == "-V")
     {
-        println!("helios-gui {}", env!("CARGO_PKG_VERSION"));
+        println!("helios-gui {}", env!("HELIOS_VERSION"));
         return Ok(());
     }
     start::begin();

@@ -554,7 +554,7 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     if let Some(dir) = log_dir() {
         logs = logs.logs(Logs::new(dir, STATE_NAME));
     }
-    let mut crashes = CrashPlugin::new("Helios", env!("CARGO_PKG_VERSION"));
+    let mut crashes = CrashPlugin::new("Helios", env!("HELIOS_VERSION"));
     if let Some(dir) = crash_dir() {
         crashes = crashes.dir(dir);
     }
