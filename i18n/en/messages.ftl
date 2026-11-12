@@ -507,6 +507,10 @@ gui-import-window-layout-year = By year
 
 gui-import-window-library-folder = The Library folder
 
+gui-import-window-menu-file = File
+
+gui-import-window-menu-window = Window
+
 gui-import-window-more = More
 
 gui-import-window-more-note = Metadata templates and time offsets come later.
@@ -796,6 +800,8 @@ gui-macro-publish-title = Publish { $name } to your library?
 gui-macro-publish-verb = Publish
 
 gui-macro-published = { $composite } published to { $file }: undo does not take it back
+
+gui-main-window-in-use = The main window shows this window now; it comes back when this window closes
 
 gui-mask-display = Show mask
 
@@ -1108,6 +1114,12 @@ gui-quick-open-subworkspace = sub-workspace
 gui-quick-open-title = Go to a module, a sub-workspace, an image or a workspace
 
 gui-quick-open-workspace = workspace { $path }
+
+gui-quit-jobs-detail = { $count } jobs are running; quitting cancels them
+
+gui-quit-title = Quit Helios?
+
+gui-quit-verb = Quit
 
 gui-recording-saved = recording saved to { $path }
 
