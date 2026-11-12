@@ -528,7 +528,8 @@ pub(crate) fn accounts_ui(
 /// plugin's name and id, each capability it lacks with the reason its
 /// manifest gives, Allow and Don't allow. Allow grants them all and gives
 /// back the action held, to run again; Don't allow says calmly that
-/// nothing ran and where to allow them later.
+/// nothing ran and where to allow them later; Escape closes it, nothing
+/// granted.
 pub(crate) fn consent_dialog(
     ctx: &egui::Context,
     accounts: &mut Accounts,
@@ -536,7 +537,7 @@ pub(crate) fn consent_dialog(
 ) -> Option<Asked> {
     let consent = accounts.consent.as_mut()?;
     let (mut allow, mut close) = (false, false);
-    egui::Modal::new(egui::Id::unique("helios.plugin.consent")).show(ctx, |ui| {
+    let shown = egui::Modal::new(egui::Id::unique("helios.plugin.consent")).show(ctx, |ui| {
         ui.set_width(400.0);
         ui.heading(t(Message::new("gui-consent-title", "Allow { $plugin }?")
             .with("plugin", consent.title.clone())));
@@ -589,6 +590,11 @@ pub(crate) fn consent_dialog(
             }
         });
     });
+    // Escape or a click beside it closes it as Don't allow would, without
+    // its word: nothing granted, nothing run.
+    if !allow && shown.should_close() {
+        close = true;
+    }
     // What the answer changed is drawn at once: the window repaints only
     // when asked.
     if close || allow {

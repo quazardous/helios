@@ -1,8 +1,8 @@
 //! A plugin's capabilities asked for at the moment of need: "Add a
 //! source…" on a source plugin that lacks some shows the consent dialog
 //! (each capability with its manifest's reason); Allow grants them and
-//! starts the connection, Don't allow starts nothing. Settings > Plugins'
-//! commands list the capabilities and take one back.
+//! starts the connection, Don't allow and Escape start nothing; each
+//! answer closes it. Settings > Plugins' commands list the capabilities and take one back.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,6 +35,49 @@ fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, 
 
 fn shown(h: &Harness<'_, Shell>, label: &str) -> bool {
     h.query_all_by_label(label).next().is_some()
+}
+
+/// Whether the consent dialog is in the tree of the window it was shown
+/// in (kittest embeds the import window in the main one, so the root
+/// tree holds both).
+fn consent_shown(h: &Harness<'_, Shell>) -> bool {
+    shown(h, "Allow Fake source?")
+        || shown(h, "Don't allow")
+        || shown(h, REASON)
+        || h.query_all_by_label_contains("allow them later in Settings > Plugins")
+            .next()
+            .is_some()
+}
+
+/// Steps frames and checks the consent dialog stays gone at each.
+fn stays_closed(h: &mut Harness<'_, Shell>, what: &str) {
+    for _ in 0..20 {
+        h.step();
+        assert!(
+            !consent_shown(h),
+            "{what}: the consent dialog is still shown\n{:#?}",
+            h.root()
+        );
+    }
+}
+
+/// Clicks `label` once the dialog holding it has settled: a dialog whose
+/// content changed (Don't allow's word replacing the question) is
+/// centred again on its new size a frame later, and a click at the
+/// button's place of the frame before misses it.
+fn click_settled(h: &mut Harness<'_, Shell>, label: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut was = h.get_by_label(label).rect();
+    loop {
+        h.step();
+        let now = h.get_by_label(label).rect();
+        if now == was {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{label} never settled");
+        was = now;
+    }
+    h.get_by_label(label).click();
 }
 
 fn run(h: &mut Harness<'_, Shell>, id: &str, args: Value) -> Result<Value, String> {
@@ -126,11 +169,21 @@ fn an_ungranted_capability_is_asked_for_and_allow_starts_the_connection() {
         shown(h, "Allow Fake source?") && shown(h, REASON)
     });
     assert!(connection(&mut h).is_null(), "held until the person allows");
-    h.get_by_label("Allow").click();
+    click_settled(&mut h, "Allow");
     until(&mut h, "the connection's form", |h| {
         connection(h)["state"] == "form"
     });
     assert!(granted(&broker));
+    // The dialog is gone, and the action ran again exactly once: the
+    // connection's account stays the one it started with.
+    let account = connection(&mut h)["account"].clone();
+    assert!(!account.is_null());
+    stays_closed(&mut h, "after Allow");
+    assert_eq!(
+        connection(&mut h)["account"],
+        account,
+        "the action ran again"
+    );
 }
 
 #[test]
@@ -143,7 +196,7 @@ fn dont_allow_starts_nothing_and_says_where_to_allow_later() {
     )
     .unwrap();
     until(&mut h, "the consent dialog", |h| shown(h, "Don't allow"));
-    h.get_by_label("Don't allow").click();
+    click_settled(&mut h, "Don't allow");
     until(&mut h, "the calm word", |h| {
         h.query_all_by_label_contains("allow them later in Settings > Plugins")
             .next()
@@ -152,8 +205,10 @@ fn dont_allow_starts_nothing_and_says_where_to_allow_later() {
     assert!(connection(&mut h).is_null());
     assert!(!granted(&broker));
     // Asked again later, it asks afresh.
-    h.get_by_label("Close").click();
-    h.run_steps(2);
+    click_settled(&mut h, "Close");
+    until(&mut h, "the dialog closed", |h| !consent_shown(h));
+    stays_closed(&mut h, "after Close");
+    assert!(connection(&mut h).is_null());
     run(
         &mut h,
         "import.addSource",
@@ -162,6 +217,23 @@ fn dont_allow_starts_nothing_and_says_where_to_allow_later() {
     .unwrap();
     until(&mut h, "asked again", |h| shown(h, "Don't allow"));
     assert!(connection(&mut h).is_null());
+}
+
+#[test]
+fn escape_closes_it_and_runs_nothing() {
+    let (broker, mut h) = world();
+    run(
+        &mut h,
+        "import.addSource",
+        json!({ "connector": "fake-source" }),
+    )
+    .unwrap();
+    until(&mut h, "the consent dialog", |h| shown(h, "Don't allow"));
+    h.key_press(egui::Key::Escape);
+    until(&mut h, "the dialog closed", |h| !consent_shown(h));
+    stays_closed(&mut h, "after Escape");
+    assert!(connection(&mut h).is_null());
+    assert!(!granted(&broker));
 }
 
 #[test]
