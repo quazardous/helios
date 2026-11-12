@@ -2222,3 +2222,107 @@ fn closing_the_last_window_quits() {
     assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
     assert!(h.state().quitting());
 }
+
+/// The painted bounds of every shape a pass drew, nested ones apart, each
+/// cut to its clip rect; shapes clipped away entirely are left out.
+fn painted_rects(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<egui::Rect>) {
+        if let egui::Shape::Vec(v) = shape {
+            for s in v {
+                walk(s, clip, out);
+            }
+            return;
+        }
+        let r = shape.visual_bounding_rect().intersect(clip);
+        if r.is_positive() {
+            out.push(r);
+        }
+    }
+    let mut out = Vec::new();
+    for s in shapes {
+        walk(&s.shape, s.clip_rect, &mut out);
+    }
+    out
+}
+
+/// Whether `a` and `b` share more than a hairline.
+fn overlap(a: egui::Rect, b: egui::Rect) -> bool {
+    let i = a.intersect(b);
+    i.width() > 0.5 && i.height() > 0.5
+}
+
+#[test]
+fn the_carousel_cells_never_overlap_whatever_the_window_and_the_thumbnail_size() {
+    let dir = temp("carousel");
+    let folder = dir.join("Shoot");
+    photos(&folder, 9, 320, 240);
+    for window in [vec2(1280.0, 800.0), vec2(900.0, 640.0)] {
+        for side in [64.0, 256.0] {
+            let at = format!("window {window:?}, thumbnails of {side}");
+            let mut h = headless::harness(Shell::new(helios_panels(), None), window);
+            h.run();
+            h.state_mut()
+                .run(
+                    "library.importWindow",
+                    json!({ "source": folder.display().to_string() }),
+                    Origin::User,
+                )
+                .unwrap();
+            read_through(&mut h);
+            {
+                let mut b = h.state_mut().import_browser_mut().unwrap();
+                assert!(b.set_mode("carousel"));
+                b.set_thumbnail_size(side);
+                // The middle one has neighbours on both sides.
+                b.focus_on(&folder.join("IMG_0004.JPG"), false);
+            }
+            h.run_steps(3);
+            fill_in_view(&mut h, Duration::from_millis(5), Duration::from_secs(30));
+            h.run_steps(3);
+            let cells: Vec<(String, egui::Rect)> = h
+                .query_all_by_role(egui::accesskit::Role::ListBoxOption)
+                .filter_map(|n| {
+                    let label = n.accesskit_node().label()?;
+                    label.starts_with("IMG_").then(|| (label, n.rect()))
+                })
+                .collect();
+            assert!(cells.len() >= 3, "{at}: a middle and neighbours: {cells:?}");
+            // The cells themselves are apart.
+            for (i, (a, ra)) in cells.iter().enumerate() {
+                for (b, rb) in &cells[i + 1..] {
+                    assert!(!overlap(*ra, *rb), "{at}: {a} {ra:?} over {b} {rb:?}");
+                }
+            }
+            // Nothing the import window paints spills from one cell over
+            // another: a shape over two cells or more is one that holds
+            // them all (the browser's background). The main window's panels
+            // behind the import window are painted before its frame and
+            // left out: what counts is painted from the frame on.
+            let window = h
+                .get_by_role_and_label(egui::accesskit::Role::Window, "Import photos")
+                .rect();
+            let shapes = &h.output().shapes;
+            let frame = shapes
+                .iter()
+                .position(|s| {
+                    painted_rects(std::slice::from_ref(s)).iter().any(|r| {
+                        (r.min - window.min).length() < 1.0 && (r.max - window.max).length() < 1.0
+                    })
+                })
+                .unwrap_or_else(|| panic!("{at}: the import window's frame is painted"));
+            for r in painted_rects(&shapes[frame..]) {
+                let over: Vec<&(String, egui::Rect)> =
+                    cells.iter().filter(|(_, c)| overlap(r, *c)).collect();
+                if over.len() >= 2 {
+                    assert!(
+                        over.iter().all(|(_, c)| r.expand(0.5).contains_rect(*c)),
+                        "{at}: a shape painted at {r:?} spills over {:?}",
+                        over.iter().map(|(n, c)| (n, c)).collect::<Vec<_>>()
+                    );
+                }
+            }
+            eprintln!("{at}: {cells:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
