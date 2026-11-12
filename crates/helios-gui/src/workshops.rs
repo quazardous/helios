@@ -211,6 +211,9 @@ pub struct Panel {
     pub session_writes: Vec<(String, Option<serde_json::Value>)>,
     /// The vault image the edit is saved to, as the host said.
     pub image: Option<String>,
+    /// "Make it automatic"'s rows, waiting for the user's Confirm; the
+    /// choices are edited here.
+    pub generalised: Option<crate::shell::Generalised>,
 }
 
 impl Default for Panel {
@@ -227,6 +230,7 @@ impl Default for Panel {
             pilot: None,
             session_writes: Vec::new(),
             image: None,
+            generalised: None,
         }
     }
 }
@@ -495,7 +499,7 @@ impl Panel {
 
     /// The session recorded: its steps, Keep (a session not kept is
     /// dropped when it ends), and the AI's proposals as ghost values.
-    fn session_ui(&self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
+    fn session_ui(&mut self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
         let Some(p) = &self.pilot else {
             return;
         };
@@ -522,6 +526,19 @@ impl Panel {
                 *run = Some(("workshop.session", json!({ "action": "keep" })));
             }
         });
+        if ui
+            .button(text(Message::new(
+                "gui-workshops-automatic",
+                "Make it automatic",
+            )))
+            .on_hover_text(text(Message::new(
+                "gui-workshops-automatic-hint",
+                "Turn what you set into a workshop for other photos: a target where a measure explains a value, else the same value; you confirm each row",
+            )))
+            .clicked()
+        {
+            *run = Some(("workshop.generalise", json!({})));
+        }
         // The AI's proposals not answered yet: ghost values, each with
         // Accept and Reject; moving the slider overrides it.
         for (of, param, value) in p.record.open_proposals() {
@@ -571,6 +588,109 @@ impl Panel {
             if let Some(aim) = step.and_then(|r| r.aim.as_deref()) {
                 ui.weak(aim);
             }
+        }
+        self.generalised_ui(ui, run);
+    }
+
+    /// "Make it automatic"'s rows: each one's note and its choice, the AI
+    /// left (`J`, `A`), Confirm (the next version) and Cancel.
+    fn generalised_ui(&mut self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
+        use helios_template::generalise::{Choice, ZoneChoice};
+        let session = self.pilot.as_ref().map(|p| p.record.session.clone());
+        let Some(g) = self.generalised.as_mut() else {
+            return;
+        };
+        if Some(&g.session) != session.as_ref() {
+            self.generalised = None;
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let text = |m: Message| crate::i18n::text(&ctx, m);
+        ui.separator();
+        for row in &mut g.rows {
+            ui.label(&row.note);
+            ui.horizontal_wrapped(|ui| {
+                if row.target.is_some() {
+                    ui.radio_value(
+                        &mut row.default,
+                        Choice::Target,
+                        text(Message::new("gui-workshops-row-target", "Same target")),
+                    );
+                }
+                ui.radio_value(
+                    &mut row.default,
+                    Choice::Fixed,
+                    text(
+                        Message::new("gui-workshops-row-fixed", "Same value { $value }")
+                            .with("value", format!("{}", row.fixed)),
+                    ),
+                );
+                ui.radio_value(
+                    &mut row.default,
+                    Choice::Ai,
+                    text(Message::new("gui-workshops-row-ai", "Keep as AI")),
+                );
+            });
+        }
+        for zone in &mut g.zones {
+            ui.label(&zone.note);
+            ui.horizontal_wrapped(|ui| {
+                if zone.fit.is_some() || !zone.candidates.is_empty() {
+                    ui.radio_value(
+                        &mut zone.default,
+                        ZoneChoice::Parametric,
+                        text(Message::new(
+                            "gui-workshops-zone-parametric",
+                            "Parametric mask",
+                        )),
+                    );
+                }
+                ui.radio_value(
+                    &mut zone.default,
+                    ZoneChoice::Ai,
+                    text(Message::new("gui-workshops-row-ai", "Keep as AI")),
+                );
+            });
+        }
+        g.minimum = helios_template::generalise::minimum(&g.rows, &g.zones);
+        let junctions = g.minimum.junctions;
+        ui.weak(if junctions == 0 {
+            text(Message::new("gui-workshops-ai-none", "AI per photo: none"))
+        } else {
+            text(
+                Message::new(
+                    "gui-workshops-ai-left",
+                    "AI per photo: { $junctions } junctions, { $calls } calls",
+                )
+                .with("junctions", junctions)
+                .with("calls", format!("{}", g.minimum.calls_per_photo)),
+            )
+        });
+        let choices = g.choices();
+        let mut cancel = false;
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    junctions == 0,
+                    egui::Button::new(text(Message::new("gui-workshops-confirm", "Confirm"))),
+                )
+                .on_hover_text(text(Message::new(
+                    "gui-workshops-confirm-hint",
+                    "Write the workshop's next version with these choices, as one undo step; a row kept as AI cannot be written yet",
+                )))
+                .clicked()
+            {
+                *run = Some((
+                    "workshop.generalise",
+                    json!({ "rows": choices, "confirm": true }),
+                ));
+            }
+            cancel = ui
+                .small_button(text(Message::new("gui-workshops-design-cancel", "Cancel")))
+                .clicked();
+        });
+        if cancel {
+            self.generalised = None;
         }
     }
 

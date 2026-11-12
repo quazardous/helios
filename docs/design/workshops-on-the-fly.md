@@ -413,9 +413,25 @@ parametric mask when the best overlaps at least 0.9 on every one, else
 to the AI junction ("sky: the parametric mask overlaps 0.86 on the test
 photo; kept as AI, 1 call per photo"). `keep_ai_values` keeps a value the
 AI proposed as a junction when no target explains it and its values
-spread more than the tolerance. Not built yet: `J` and `A`,
-`workshop.generalise` and the panel's Make it automatic, `confirm`
-writing the next version, a second test photo in the session.
+spread more than the tolerance.
+
+Built (slice 7, third part). `workshop.generalise`
+(`helios_workshop_generalise`) runs the rules on the session going on:
+the sliders it set (a value accepted from the AI counts as the AI's), the
+zones drawn by `mask_object`, and answers the rows with `J` and `A`
+(`A = J` for now: each junction asked once per photo). `rows` amends the
+choices by name (`target`, `fixed`, `ai`; `parametric`, `ai`). The
+Workshops panel has **Make it automatic**: the rows with their notes and
+a choice each (Same target, Same value, Keep as AI; Parametric mask),
+"AI per photo: none" or the junctions and calls, Confirm and Cancel.
+`confirm`, the user's alone, writes the next version as one undo step: a
+target row's target replaces its slider's, a fixed row's value becomes
+the slider's default (its target dropped), a fitted zone is drawn by its
+`mask_parametric`; the session is kept and goes on with that version, so
+the edit's version saved next carries its id. Not built yet: a junction
+written into the workshop (a row left on the AI is refused at confirm),
+the cache's share in `A`, and a second test photo in the session (rules
+1 to 4 already take several).
 
 ### Limits
 
@@ -688,7 +704,7 @@ included.
 6. **Proposals while piloting** (S, built 2026-11-11). `workshop.propose`, ghost values,
    Accept, Override, Reject recorded. Test: the fake agent proposes, the
    script overrides; the record holds proposal and override.
-7. **Generalisation** (L, rules 1 and 2 built 2026-11-12). The rules (targets that explain a value,
+7. **Generalisation** (L, rules 1 to 4, `J` and `A`, Make it automatic and `confirm` built 2026-11-12; a second test photo in the session left). The rules (targets that explain a value,
    fixed values, parametric fits of AI zones, junctions kept), the rows
    with evidence, `J` and `A`, `confirm` writing the next version. Test:
    the scripted session on two synthetic test images gives "Backlight

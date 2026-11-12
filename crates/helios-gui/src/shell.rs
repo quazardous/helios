@@ -61,6 +61,7 @@ pub use storage::{
     BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage,
     role_text,
 };
+pub use workshop_generalise::{Generalised, choice_word};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod accounts_admin;
@@ -93,6 +94,7 @@ mod macro_edit;
 mod network_edit;
 mod workshop_design;
 mod workshop_edit;
+mod workshop_generalise;
 mod workshop_session;
 mod workspace_edit;
 mod workspace_live;

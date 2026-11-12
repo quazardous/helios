@@ -1332,6 +1332,16 @@ gui-workshops-session = Session enregistrée : { $steps } étapes
 gui-workshops-session-keep = Garder
 
 gui-workshops-session-keep-hint = Garder l’enregistrement de cette session : qui a réglé quoi, pourquoi, et ce que mesurait l’image. Non gardée, elle est abandonnée à sa fin
+gui-workshops-automatic = Rendre automatique
+gui-workshops-automatic-hint = Faire de vos réglages un atelier pour d’autres photos : une cible là où une mesure explique une valeur, sinon la même valeur ; vous confirmez chaque ligne
+gui-workshops-row-target = Même cible
+gui-workshops-row-fixed = Même valeur { $value }
+gui-workshops-row-ai = Garder l’IA
+gui-workshops-zone-parametric = Masque paramétrique
+gui-workshops-ai-none = IA par photo : aucune
+gui-workshops-ai-left = IA par photo : { $junctions } jonctions, { $calls } appels
+gui-workshops-confirm = Confirmer
+gui-workshops-confirm-hint = Écrire la version suivante de l’atelier avec ces choix, en une seule étape d’annulation ; une ligne gardée en IA ne peut pas encore être écrite
 
 gui-workshops-session-kept = Gardée
 

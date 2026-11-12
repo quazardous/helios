@@ -705,6 +705,21 @@ impl State {
         workshop: &Workshop,
         values: &Values,
     ) -> Result<Step, String> {
+        self.workshop_written(catalogue, node, workshop, &Params::new(), values)
+    }
+
+    /// [`State::workshop_saved`] with new `defaults` for some exposed
+    /// parameters, by name: what generalising writes for the sliders
+    /// that keep one value on every photo. Refused for a name the macro
+    /// does not expose.
+    pub fn workshop_written(
+        &self,
+        catalogue: &Catalogue,
+        node: &str,
+        workshop: &Workshop,
+        defaults: &Params,
+        values: &Values,
+    ) -> Result<Step, String> {
         let cat = self.bundle.catalogue(catalogue);
         let (i, desc, r) = self.macro_node(node)?;
         if desc.open {
@@ -713,7 +728,7 @@ impl State {
         let file = cat
             .get_composite(&r)
             .ok_or_else(|| format!("unknown composite `{r}`"))?;
-        if file.workshop.as_ref() == Some(workshop) {
+        if file.workshop.as_ref() == Some(workshop) && defaults.iter().next().is_none() {
             return Err(format!("`{node}` is already this workshop"));
         }
         if workshop.intent.trim().is_empty() {
@@ -724,6 +739,14 @@ impl State {
         next_file.id.clone_from(&to.id);
         next_file.version = to.version;
         next_file.workshop = Some(workshop.clone());
+        for (name, value) in defaults.iter() {
+            let x = next_file
+                .exposed
+                .iter_mut()
+                .find(|x| x.name == name)
+                .ok_or_else(|| format!("`{node}` exposes no `{name}`"))?;
+            x.default = Some(value.clone());
+        }
         crate::catalogue::build(&next_file, &cat, 0)?;
         let mut next = self.clone();
         next.bundle.template.network.nodes[i].composite = Some(to.clone());

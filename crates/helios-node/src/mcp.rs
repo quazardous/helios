@@ -895,6 +895,33 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workshop_generalise",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.generalise",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): \"Make it automatic\" for the workshop session going on. From the values the session ended with on its test photo, one row per slider it set: a relative target where a measure explains the value (`target`, with every candidate tried and its error as evidence), else a fixed value (`fixed`), or kept as AI (`ai`, a value the AI proposed that nothing explains); and one row per zone the AI draws: a fitted parametric mask (`parametric`, its overlap per photo) or kept as AI. Each row has a `default` and a `note`. `J` is the junctions left, `A` the AI calls expected per photo. The rows are shown in the Workshops panel. `rows` amends the choices; `confirm` writes the workshop's next version (the targets, the fixed values as the sliders' defaults, the fitted zones) as one undoable step and keeps the session: the user's alone, an agent proposes. A row left as AI cannot be written yet. Refused on the files: it needs the desktop holding the workspace, with an image open",
+        params: &[
+            WORKSPACE,
+            optional(
+                "rows",
+                optional_object,
+                "The choices to amend, by slider or zone name: {\"backlight_lift\": \"target\", \"haze\": \"fixed\", \"sky\": \"parametric\"}; each row's default when null",
+            ),
+            Param {
+                name: "confirm",
+                schema: boolean,
+                description: "Write the next version with these choices (the user's alone; refused for an agent)",
+                default: Some(no),
+            },
+            optional(
+                "session",
+                optional_string,
+                "The session it is for; the one going on when null",
+            ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_network_connect",
         endpoint: Endpoint::Workspace,
         cmd: "network.connect",
@@ -3483,6 +3510,7 @@ mod tests {
             ("helios_workshop_design", "workshop.design"),
             ("helios_workshop_session", "workshop.session"),
             ("helios_workshop_propose", "workshop.propose"),
+            ("helios_workshop_generalise", "workshop.generalise"),
         ] {
             let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
             assert_eq!(tool.cmd, cmd);
