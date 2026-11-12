@@ -4,7 +4,8 @@
 //!
 //! - [`Backups`] runs the library's backups (`helios_library::backup`) on
 //!   threads of the node's, never a window's: what the strategy's triggers
-//!   start (after an import, a backup disk plugged in) and what a window's
+//!   start (after an import, a backup disk plugged in: [`Backups::follow`]
+//!   hears it from the node's volume watch) and what a window's
 //!   command asks (`library.backupNow`). Each run is a `backup` job in the
 //!   jobs API (the Queue panel). Closing the window that started one leaves
 //!   it running; the quit question counts it; the node's stop waits for
@@ -32,6 +33,7 @@ use helios_storage::strategy::{self, Scope, Trigger};
 use helios_vault::{Store, Vault};
 
 use crate::node::{Link, NodeJobs};
+use crate::node_volumes::{Change, VolumeWatch};
 
 /// How long the node's stop waits for a cancelled backup to stop: it
 /// stops before its next photo, so one copy at most.
@@ -151,6 +153,21 @@ where
             return false;
         }
         true
+    }
+
+    /// The strategy's "when a backup disk is plugged in": each volume
+    /// `watch` sees mounted after its first look starts a run on
+    /// [`Trigger::OnConnect`] (what is short goes to it; a strategy that
+    /// does not run on it copies nothing).
+    pub fn follow(self: &Arc<Self>, watch: &VolumeWatch) {
+        let me = Arc::downgrade(self);
+        watch.on_change(move |change| {
+            if matches!(change, Change::Mounted(m) if !m.at_start)
+                && let Some(me) = me.upgrade()
+            {
+                me.start(Trigger::OnConnect, None);
+            }
+        });
     }
 
     /// "Back up now" (`library.backupNow`): the errors a person must see

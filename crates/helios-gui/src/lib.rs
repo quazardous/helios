@@ -42,6 +42,7 @@ pub mod modules;
 pub mod navigator;
 pub mod node;
 pub mod node_jobs;
+pub mod node_volumes;
 pub mod params;
 pub mod persist;
 pub mod platform;

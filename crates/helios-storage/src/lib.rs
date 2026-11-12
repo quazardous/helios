@@ -10,9 +10,8 @@
 //!   (Linux reads `/proc/mounts`, `/dev/disk` and `/sys`, see [`detect`];
 //!   other systems list none for now, behind the same trait). Its
 //!   [`Volumes::cards`] keeps the cards and cameras, for the import window.
-//! - [`Watch`] polls a [`Volumes`] about once a second on a thread of its
-//!   own and keeps the last list of cards, with those inserted since; it
-//!   tells [`Watch::on_volumes`] listeners when a volume appears or goes.
+//!   Watching them come and go is the node's (`helios-gui`'s
+//!   `node_volumes`), on the machine the volumes are plugged into.
 //! - [`marker`] reads and writes the identity file `.helios/volume.json`.
 //! - [`registry`] keeps the volumes Helios has seen in the vault, offline
 //!   ones included.
@@ -33,9 +32,7 @@ pub mod strategy;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -215,7 +212,7 @@ impl Volume {
 
 /// A card or a camera as the import window shows it: a mounted volume
 /// with a `DCIM` folder.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Card {
     /// Its label (the folder it is mounted on, for udisks).
     pub label: String,
@@ -330,120 +327,6 @@ pub fn capacity_text(bytes: u64) -> String {
     }
 }
 
-#[derive(Default)]
-struct Seen {
-    cards: Vec<Card>,
-    /// Whether a first list came.
-    listed: bool,
-    /// Cards inserted since the first list, not taken yet.
-    inserted: Vec<Card>,
-}
-
-/// Called when a volume appears or goes.
-type Listener = Box<dyn Fn() + Send>;
-
-/// The cards, polled on a thread of their own (about once a second), and
-/// the volumes' comings and goings.
-pub struct Watch {
-    seen: Arc<Mutex<Seen>>,
-    listeners: Arc<Mutex<Vec<Listener>>>,
-    stop: Arc<AtomicBool>,
-}
-
-impl Watch {
-    /// Starts polling `volumes`; `changed` is called (from the thread)
-    /// when the list of cards changes, to ask the interface for a frame.
-    pub fn start(volumes: Arc<dyn Volumes>, changed: impl Fn() + Send + 'static) -> Self {
-        let seen: Arc<Mutex<Seen>> = Arc::default();
-        let listeners: Arc<Mutex<Vec<Listener>>> = Arc::default();
-        let stop = Arc::new(AtomicBool::new(false));
-        let (s, l, halt) = (seen.clone(), listeners.clone(), stop.clone());
-        let spawned = std::thread::Builder::new()
-            .name("helios-cards".into())
-            .spawn(move || {
-                // Which volume is mounted where, as last polled.
-                let mut mounted: Option<Vec<(VolumeId, PathBuf)>> = None;
-                while !halt.load(Ordering::Relaxed) {
-                    let all = volumes.volumes();
-                    let now = volumes.cards_of(&all);
-                    let mut mounts: Vec<(VolumeId, PathBuf)> = all
-                        .into_iter()
-                        .filter_map(|v| Some((v.id, v.mount?)))
-                        .collect();
-                    mounts.sort();
-                    let came_or_went = mounted.as_ref().is_some_and(|m| *m != mounts);
-                    mounted = Some(mounts);
-                    let moved = {
-                        let mut seen = s.lock().unwrap_or_else(PoisonError::into_inner);
-                        let moved = !seen.listed || seen.cards != now;
-                        if seen.listed {
-                            let new: Vec<Card> = now
-                                .iter()
-                                .filter(|c| !seen.cards.iter().any(|o| o.root == c.root))
-                                .cloned()
-                                .collect();
-                            seen.inserted.extend(new);
-                        }
-                        seen.cards = now;
-                        seen.listed = true;
-                        moved
-                    };
-                    if moved {
-                        changed();
-                    }
-                    if came_or_went {
-                        for listener in l.lock().unwrap_or_else(PoisonError::into_inner).iter() {
-                            listener();
-                        }
-                    }
-                    std::thread::sleep(Duration::from_secs(1));
-                }
-            });
-        if let Err(e) = spawned {
-            log::warn!("cards: no thread to watch them: {e}");
-        }
-        Self {
-            seen,
-            listeners,
-            stop,
-        }
-    }
-
-    /// Calls `f` (from the watching thread) each time a volume appears,
-    /// goes or changes mount point: the background scan's cue.
-    pub fn on_volumes(&self, f: impl Fn() + Send + 'static) {
-        self.listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(Box::new(f));
-    }
-
-    fn seen(&self) -> std::sync::MutexGuard<'_, Seen> {
-        self.seen.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The cards mounted, as last polled.
-    pub fn cards(&self) -> Vec<Card> {
-        self.seen().cards.clone()
-    }
-
-    /// Whether a first list came.
-    pub fn listed(&self) -> bool {
-        self.seen().listed
-    }
-
-    /// The cards inserted since the last call (not those there at start).
-    pub fn take_inserted(&self) -> Vec<Card> {
-        std::mem::take(&mut self.seen().inserted)
-    }
-}
-
-impl Drop for Watch {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,36 +351,5 @@ mod tests {
         assert_eq!(Card::of(&volumes[0]).as_ref(), cards.first());
         // Through the trait's own filter too.
         assert_eq!(volumes.cards(), cards);
-    }
-
-    struct Shared(Mutex<Vec<Volume>>);
-
-    impl Volumes for Shared {
-        fn volumes(&self) -> Vec<Volume> {
-            self.0.lock().unwrap().clone()
-        }
-    }
-
-    #[test]
-    fn the_watch_tells_when_a_volume_comes_or_goes() {
-        let mut disk = detect::weak("Backup", Some(5));
-        disk.kind = VolumeKind::External;
-        disk.mount = Some("/media/Backup".into());
-        let shared = Arc::new(Shared(Mutex::new(Vec::new())));
-        let (listed, first) = std::sync::mpsc::channel();
-        let watch = Watch::start(shared.clone(), move || {
-            let _ = listed.send(());
-        });
-        first.recv_timeout(Duration::from_secs(10)).unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
-        watch.on_volumes(move || {
-            let _ = tx.send(());
-        });
-        shared.0.lock().unwrap().push(disk);
-        rx.recv_timeout(Duration::from_secs(10))
-            .expect("told it came");
-        shared.0.lock().unwrap().clear();
-        rx.recv_timeout(Duration::from_secs(10))
-            .expect("told it went");
     }
 }
