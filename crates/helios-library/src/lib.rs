@@ -5,6 +5,10 @@
 //!   copied into the library folder, renamed by a [`rename::Pattern`],
 //!   their sidecars kept, exact duplicates found by content and handled
 //!   by a policy, run as a job announced on the bus;
+//! - [`fetch`]: import from a connector whose items are fetched (a remote
+//!   source): bytes landed in part files with resume, hashed in BLAKE3 and
+//!   the claimed algorithm, always a verified copy in the library folder,
+//!   duplicates found before download, sightings on the source's volume;
 //! - [`capture`]: capture metadata (time, camera, lens, settings, size)
 //!   kept as the vault's read-only fields, at import and by a resumable
 //!   backfill job over the images imported before;
@@ -29,6 +33,7 @@ pub mod backup;
 pub mod capture;
 pub mod darktable;
 pub mod export;
+pub mod fetch;
 pub mod import;
 pub mod map;
 pub mod map_job;

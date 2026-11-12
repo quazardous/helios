@@ -26,7 +26,7 @@ use helios_vault::{ImageId, Location, Presence, Store, Vault};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{Identity, Role, Volume, VolumeId};
+use crate::{Identity, Role, Volume, VolumeId, VolumeKind};
 
 /// The folder backup copies go to, at a volume's root.
 pub const BACKUP_FOLDER: &str = "Helios Backup";
@@ -232,6 +232,7 @@ pub fn drive_of(volume: &Volume) -> String {
 fn counts_on(volume: &Volume) -> bool {
     (volume.roles.contains(&Role::Backup) || volume.roles.contains(&Role::Archive))
         && volume.identified_by != Identity::Weak
+        && volume.kind != VolumeKind::Remote
 }
 
 /// An image's backup status from its `locations`, the volumes known and
@@ -339,6 +340,14 @@ pub fn statuses<S: Store>(
 /// Whether Helios may write backup copies to `volume`: a backup, archive
 /// or scratch role, never a card or an ingest volume.
 pub fn may_back_up_to(volume: &Volume) -> Result<(), String> {
+    if volume.kind == VolumeKind::Remote {
+        // Helios cannot verify later what a remote holds, and a
+        // re-encoding service never holds the original.
+        return Err(format!(
+            "{}: a remote source is never a backup or archive",
+            volume.name
+        ));
+    }
     if volume.is_card() || volume.has_dcim || volume.roles.contains(&Role::Ingest) {
         return Err(format!("{}: Helios never writes to a card", volume.name));
     }
