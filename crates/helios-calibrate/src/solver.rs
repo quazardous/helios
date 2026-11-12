@@ -21,6 +21,10 @@
 //! of the plane orthogonal to `n`, keeps `P n = n` exactly and leaves six
 //! unknowns. Stage 1 minimises `Σ w_k ‖A P x_k − A t_k‖²`, linear in `U`.
 //!
+//! Stage 2 ([`Stage::DeltaE2000`]) starts from stage 1's `U` and minimises
+//! `Σ w_k ΔE00(Lab(A P x_k), L_k)²` by Levenberg-Marquardt, in the same
+//! unknowns, so the neutral is kept exactly when stage 1 kept it.
+//!
 //! [`solve_oriented`] tries the eight ways the corners may have been given
 //! (four rotations, mirrored or not) and keeps the one with the lowest mean
 //! Delta E 2000.
@@ -59,6 +63,8 @@ pub struct Problem<'a> {
     /// Whether `P n = n` is imposed (the plan's choice); without it all nine
     /// coefficients are free, as in darktable's checker.
     pub keep_neutral: bool,
+    /// Where the solve stops: stage 1 alone, or stage 1 refined by stage 2.
+    pub stage: Stage,
 }
 
 /// Why a problem has no solution.
@@ -124,7 +130,16 @@ pub struct Solution {
 pub enum Stage {
     /// Linear weighted least squares in RGB.
     Linear,
+    /// Stage 1, then Levenberg-Marquardt on the weighted Delta E 2000.
+    DeltaE2000,
 }
+
+/// Stage 2 stops when an accepted step lowers the cost by less than this
+/// fraction of it.
+pub const REFINE_TOLERANCE: f64 = 1e-10;
+
+/// Stage 2 stops after this many accepted or refused steps.
+pub const REFINE_ITERATIONS: usize = 100;
 
 impl Solution {
     /// The profile's camera matrix `M_c = P M_s`, from `colorin`'s standard
@@ -225,8 +240,100 @@ fn summarise(patches: &[PatchResult], delta: impl Fn(&PatchResult) -> f64) -> Su
     }
 }
 
-/// Stage 1: the weighted linear least squares, under the neutral
-/// constraint when the problem asks for it.
+/// `P = P0 + U Bᵀ` from the unknowns, `U` row-major (3 × the basis'
+/// length).
+fn assemble(base: &Mat3, basis: &[[f64; 3]], u: &[f64]) -> Mat3 {
+    let m = basis.len();
+    let mut matrix = *base;
+    for (i, row) in matrix.iter_mut().enumerate() {
+        for (j, b) in basis.iter().enumerate() {
+            for (c, cell) in row.iter_mut().enumerate() {
+                *cell += u[i * m + j] * b[c];
+            }
+        }
+    }
+    matrix
+}
+
+fn cost(residuals: &[f64]) -> f64 {
+    residuals.iter().map(|r| r * r).sum()
+}
+
+/// Minimises `Σ r_i(u)²` from `start`: a central-difference Jacobian,
+/// Marquardt's damping of the normal equations' diagonal, adapted per step
+/// (eased after a step that lowers the cost, stiffened after one that does
+/// not, which is refused). Never returns worse than `start`.
+fn levenberg_marquardt(residuals: impl Fn(&[f64]) -> Vec<f64>, start: Vec<f64>) -> Vec<f64> {
+    let unknowns = start.len();
+    let mut u = start;
+    let mut r = residuals(&u);
+    let mut current = cost(&r);
+    let mut damping = 1e-3;
+    for _ in 0..REFINE_ITERATIONS {
+        if current == 0.0 || !current.is_finite() {
+            break;
+        }
+        // jacobian[p][i] = ∂r_i/∂u_p.
+        let jacobian: Vec<Vec<f64>> = (0..unknowns)
+            .map(|p| {
+                let step = 1e-6 * u[p].abs().max(1.0);
+                let mut ahead = u.clone();
+                let mut behind = u.clone();
+                ahead[p] += step;
+                behind[p] -= step;
+                residuals(&ahead)
+                    .iter()
+                    .zip(residuals(&behind))
+                    .map(|(a, b)| (a - b) / (2.0 * step))
+                    .collect()
+            })
+            .collect();
+        let gram: Vec<Vec<f64>> = jacobian
+            .iter()
+            .map(|jp| {
+                jacobian
+                    .iter()
+                    .map(|jq| jp.iter().zip(jq).map(|(a, b)| a * b).sum())
+                    .collect()
+            })
+            .collect();
+        let gradient: Vec<f64> = jacobian
+            .iter()
+            .map(|jp| -jp.iter().zip(&r).map(|(a, b)| a * b).sum::<f64>())
+            .collect();
+        let mut damped = gram.clone();
+        for (p, row) in damped.iter_mut().enumerate() {
+            row[p] += damping * (gram[p][p] + 1e-12);
+        }
+        let Some(delta) = cholesky_solve(&damped, &gradient) else {
+            damping *= 10.0;
+            continue;
+        };
+        let trial: Vec<f64> = u.iter().zip(&delta).map(|(a, d)| a + d).collect();
+        let trial_r = residuals(&trial);
+        let trial_cost = cost(&trial_r);
+        if trial_cost < current {
+            let decrease = (current - trial_cost) / current;
+            u = trial;
+            r = trial_r;
+            current = trial_cost;
+            damping = (damping / 3.0).max(1e-12);
+            if decrease < REFINE_TOLERANCE {
+                break;
+            }
+        } else {
+            damping *= 4.0;
+            if damping > 1e12 {
+                break;
+            }
+        }
+    }
+    u
+}
+
+/// Stage 1, the weighted linear least squares, under the neutral
+/// constraint when the problem asks for it; then stage 2 when
+/// `problem.stage` is [`Stage::DeltaE2000`].
 pub fn solve(problem: &Problem<'_>) -> Result<Solution, SolveError> {
     let chart = problem.chart;
     if problem.measured.len() != chart.len() || problem.weights.len() != chart.len() {
@@ -314,16 +421,23 @@ pub fn solve(problem: &Problem<'_>) -> Result<Solution, SolveError> {
     }
     let u = cholesky_solve(&normal, &rhs).ok_or(SolveError::Underdetermined)?;
 
-    let mut matrix = base;
-    for (i, row) in matrix.iter_mut().enumerate() {
-        for (j, b) in basis.iter().enumerate() {
-            for (c, cell) in row.iter_mut().enumerate() {
-                *cell += u[i * m + j] * b[c];
-            }
-        }
-    }
-
     let lab = |v: [f64; 3]| xyz_to_lab(apply(&forward, v));
+    let matrix = match problem.stage {
+        Stage::Linear => assemble(&base, &basis, &u),
+        Stage::DeltaE2000 => {
+            let kept: Vec<usize> = (0..chart.len()).filter(|&k| weight(k) > 0.0).collect();
+            let residuals = |u: &[f64]| -> Vec<f64> {
+                let p = assemble(&base, &basis, u);
+                kept.iter()
+                    .map(|&k| {
+                        weight(k).sqrt() * delta_e_2000(lab(apply(&p, x[k])), chart.patches[k].lab)
+                    })
+                    .collect()
+            };
+            assemble(&base, &basis, &levenberg_marquardt(residuals, u))
+        }
+    };
+
     let patches: Vec<PatchResult> = chart
         .patches
         .iter()
@@ -344,7 +458,7 @@ pub fn solve(problem: &Problem<'_>) -> Result<Solution, SolveError> {
         before: summarise(&patches, |p| p.before),
         after: summarise(&patches, |p| p.after),
         patches,
-        stage: Stage::Linear,
+        stage: problem.stage,
     })
 }
 
@@ -523,6 +637,7 @@ mod tests {
             adaptation: ADAPTATION,
             to_xyz: to_xyz(),
             keep_neutral: true,
+            stage: Stage::Linear,
         }
     }
 
@@ -598,30 +713,35 @@ mod tests {
         assert_eq!(solution.stage, Stage::Linear);
     }
 
-    #[test]
-    fn with_noise_stays_close() {
-        let shot = shot(1.0);
-        // A deterministic generator: a small LCG, then Box-Muller.
-        let mut state: u64 = 0x2545_f491_4f6c_dd1d;
-        let mut uniform = || {
+    /// A deterministic standard normal draw from `seed`.
+    fn gaussian(seed: u64) -> impl FnMut() -> f64 {
+        let mut state = seed;
+        let mut uniform = move || {
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);
             ((state >> 11) as f64 + 0.5) / (1u64 << 53) as f64
         };
-        let mut gauss = || {
+        move || {
             let (u, v) = (uniform(), uniform());
             (-2.0 * u.ln()).sqrt() * (std::f64::consts::TAU * v).cos()
-        };
-        let noisy: Vec<[f64; 3]> = shot
-            .camera
+        }
+    }
+
+    /// The shot with Gaussian noise of 0.5 % on each `c_k` (a small LCG,
+    /// then Box-Muller, so the draw is the same on every run).
+    fn noisy(shot: &Shot) -> Vec<[f64; 3]> {
+        let mut gauss = gaussian(0x2545_f491_4f6c_dd1d);
+        shot.camera
             .iter()
             .map(|c| c.map(|v| v * (1.0 + 0.005 * gauss())))
             .map(|c| apply(&shot.standard, c))
-            .collect();
-        let weights = vec![1.0; CHART.len()];
-        let solution = solve(&problem(&noisy, &weights)).unwrap();
-        assert_neutral_kept(&solution);
+            .collect()
+    }
+
+    /// Test 2's bounds: mean Delta E below 0.5, max below 1.5, the camera
+    /// matrix within 1 % per coefficient.
+    fn assert_close_under_noise(solution: &Solution, shot: &Shot) {
         assert!(solution.after.mean < 0.5, "{:?}", solution.after);
         assert!(solution.after.max < 1.5, "{:?}", solution.after);
         let found = solution.camera_matrix(&shot.standard);
@@ -630,6 +750,81 @@ mod tests {
                 assert!((found[r][c] - shot.truth[r][c]).abs() < 0.01, "{found:?}");
             }
         }
+    }
+
+    #[test]
+    fn with_noise_stays_close() {
+        let shot = shot(1.0);
+        let noisy = noisy(&shot);
+        let weights = vec![1.0; CHART.len()];
+        let solution = solve(&problem(&noisy, &weights)).unwrap();
+        assert_neutral_kept(&solution);
+        assert_close_under_noise(&solution, &shot);
+    }
+
+    /// The weighted sum of squared Delta E 2000 stage 2 minimises.
+    fn delta_e_cost(solution: &Solution) -> f64 {
+        solution
+            .patches
+            .iter()
+            .map(|p| p.weight * p.after * p.after)
+            .sum()
+    }
+
+    #[test]
+    fn refined_with_noise_stays_close_and_lowers_delta_e() {
+        let shot = shot(1.0);
+        let noisy = noisy(&shot);
+        let weights = vec![1.0; CHART.len()];
+        let linear = solve(&problem(&noisy, &weights)).unwrap();
+        let mut refine = problem(&noisy, &weights);
+        refine.stage = Stage::DeltaE2000;
+        let refined = solve(&refine).unwrap();
+        assert_eq!(refined.stage, Stage::DeltaE2000);
+        assert_neutral_kept(&refined);
+        assert_close_under_noise(&refined, &shot);
+        assert!(delta_e_cost(&refined) < delta_e_cost(&linear));
+        assert!(
+            refined.after.mean <= linear.after.mean,
+            "{:?} {:?}",
+            refined.after,
+            linear.after
+        );
+        // Free of the constraint, stage 2 lowers the cost further still.
+        refine.keep_neutral = false;
+        let free = solve(&refine).unwrap();
+        assert!(delta_e_cost(&free) <= delta_e_cost(&refined));
+    }
+
+    #[test]
+    fn refined_keeps_an_exact_solution() {
+        let shot = shot(0.7);
+        let measured = shot.measured();
+        let weights = vec![1.0; CHART.len()];
+        let mut refine = problem(&measured, &weights);
+        refine.stage = Stage::DeltaE2000;
+        let solution = solve(&refine).unwrap();
+        assert_neutral_kept(&solution);
+        let found = solution.camera_matrix(&shot.standard);
+        for (f, t) in found.iter().flatten().zip(shot.truth.iter().flatten()) {
+            assert!((f - t).abs() < 1e-6, "{found:?} vs {:?}", shot.truth);
+        }
+        assert!(solution.after.max < 1e-4, "{:?}", solution.after);
+    }
+
+    #[test]
+    fn refined_ignores_excluded_patches() {
+        let shot = shot(1.0);
+        let noisy = noisy(&shot);
+        let mut weights = vec![1.0; CHART.len()];
+        weights[8] = 0.0;
+        let mut refine = problem(&noisy, &weights);
+        refine.stage = Stage::DeltaE2000;
+        let reference = solve(&refine).unwrap();
+        let mut moved = noisy.clone();
+        moved[8] = [5.0, -3.0, 1e6];
+        refine.measured = &moved;
+        assert_eq!(solve(&refine).unwrap().matrix, reference.matrix);
     }
 
     #[test]
@@ -773,5 +968,204 @@ mod tests {
             assert_neutral_kept(&found.solution);
             assert!(found.solution.after.max < 1e-4, "{given:?}");
         }
+    }
+
+    // Test 6: stage 1 without the constraint against darktable's checker
+    // (`src/iop/channelmixerrgb.c`, `_extract_patches` and
+    // `_extract_color_checker`), ported below in f64 step by step.
+
+    /// darktable's CAT16 matrices and D50 in CAT16 LMS
+    /// (`src/common/chromatic_adaptation.h`), as written there: the second
+    /// is the first's inverse rounded to six decimals.
+    const XYZ_TO_CAT16: Mat3 = [
+        [0.401288, 0.650173, -0.051461],
+        [-0.250268, 1.204414, 0.045854],
+        [-0.002079, 0.048952, 0.953127],
+    ];
+    const CAT16_TO_XYZ: Mat3 = [
+        [1.862068, -1.011255, 0.149187],
+        [0.38752, 0.621447, -0.008974],
+        [-0.015841, -0.034123, 1.049964],
+    ];
+    const CAT16_D50: [f64; 3] = [0.994535, 1.000997, 0.833036];
+    /// darktable's `D50xyY` (`src/common/colorspaces.h`).
+    const D50_XY: [f64; 2] = [0.34567, 0.35850];
+    /// darktable's white patch for the ColorChecker 24 (`colorchecker.h`).
+    const CHECKER_WHITE: usize = 18;
+
+    /// What darktable's checker gives.
+    struct Checker {
+        /// The patches after its exposure normalisation (XYZ, before the
+        /// adaptation): what its mix is solved on.
+        normalised: Vec<[f64; 3]>,
+        /// Its adaptation, as an XYZ matrix: `LMS⁻¹ diag(D50 / illuminant)
+        /// LMS`, the illuminant found from the middle grey.
+        adaptation: Mat3,
+        /// The mix, CAT16 LMS to CAT16 LMS.
+        mix: Mat3,
+        /// The mean Delta E 2000 of its report's "output" line.
+        mean: f64,
+    }
+
+    fn darktable_checker(measured_xyz: &[[f64; 3]]) -> Checker {
+        let norm = |v: [f64; 3]| dot(v, v).sqrt();
+        let lms = |v: [f64; 3]| apply(&XYZ_TO_CAT16, v);
+        let refs: Vec<[f64; 3]> = CHART.patches.iter().map(|p| lab_to_xyz(p.lab)).collect();
+
+        // _extract_patches, normalize_exposure: every patch brought to its
+        // reference's luminance relative to the white patch.
+        let white_ref = norm(refs[CHECKER_WHITE]);
+        let white_test = norm(measured_xyz[CHECKER_WHITE]);
+        let exposure = white_ref / white_test;
+        let normalised: Vec<[f64; 3]> = measured_xyz
+            .iter()
+            .zip(&refs)
+            .map(|(test, reference)| {
+                let correction = (norm(*reference) / white_ref) / (norm(*test) / white_test);
+                test.map(|c| c * correction * exposure)
+            })
+            .collect();
+
+        // The illuminant from the middle grey, each normalised to Y = 1.
+        let grey = CHART.middle_grey;
+        let grey_ref = refs[grey].map(|c| c / refs[grey][1]);
+        let grey_test = normalised[grey].map(|c| c / normalised[grey][1]);
+        let d50 = [
+            D50_XY[0] / D50_XY[1],
+            1.0,
+            (1.0 - D50_XY[0] - D50_XY[1]) / D50_XY[1],
+        ];
+        let (d50_lms, ref_lms, test_lms) = (lms(d50), lms(grey_ref), lms(grey_test));
+        let illuminant: [f64; 3] = std::array::from_fn(|c| d50_lms[c] * test_lms[c] / ref_lms[c]);
+        let illuminant_xyz = apply(&CAT16_TO_XYZ, illuminant).map(|c| c.max(0.0));
+        // Through xy and back to XYZ at Y = 1, then LMS again.
+        let illuminant = lms(illuminant_xyz.map(|c| c / illuminant_xyz[1]));
+        let gain: Mat3 = std::array::from_fn(|r| {
+            std::array::from_fn(|c| {
+                if r == c {
+                    CAT16_D50[c] / illuminant[c]
+                } else {
+                    0.0
+                }
+            })
+        });
+        let adaptation = mul(&CAT16_TO_XYZ, &mul(&gain, &XYZ_TO_CAT16));
+
+        // The mix: least squares from the adapted patches' LMS to the
+        // references', every weight equal (no optimisation). Its 27 x 9
+        // system is three independent 3-unknown rows.
+        let adapted: Vec<[f64; 3]> = normalised
+            .iter()
+            .map(|v| lms(apply(&adaptation, *v)))
+            .collect();
+        let targets: Vec<[f64; 3]> = refs.iter().map(|v| lms(*v)).collect();
+        let outer = |a: [f64; 3], b: [f64; 3]| -> Mat3 {
+            std::array::from_fn(|r| std::array::from_fn(|c| a[r] * b[c]))
+        };
+        let add = |a: Mat3, b: Mat3| -> Mat3 {
+            std::array::from_fn(|r| std::array::from_fn(|c| a[r][c] + b[r][c]))
+        };
+        let gram = adapted
+            .iter()
+            .fold([[0.0; 3]; 3], |acc, z| add(acc, outer(*z, *z)));
+        let cross = adapted
+            .iter()
+            .zip(&targets)
+            .fold([[0.0; 3]; 3], |acc, (z, t)| add(acc, outer(*t, *z)));
+        let mix = mul(&cross, &inverse(&gram).unwrap());
+
+        let mean = adapted
+            .iter()
+            .zip(CHART.patches)
+            .map(|(z, p)| delta_e_2000(xyz_to_lab(apply(&CAT16_TO_XYZ, apply(&mix, *z))), p.lab))
+            .sum::<f64>()
+            / CHART.len() as f64;
+        Checker {
+            normalised,
+            adaptation,
+            mix,
+            mean,
+        }
+    }
+
+    /// The synthetic shot of test 6, in XYZ: under a warm light (CIE A's
+    /// chromaticity), through a camera error that does not keep the
+    /// neutral, with 0.5 % noise.
+    fn warm_shot() -> Vec<[f64; 3]> {
+        let light = [0.44757 / 0.40745, 1.0, (1.0 - 0.44757 - 0.40745) / 0.40745];
+        let light_lms = apply(&XYZ_TO_CAT16, light);
+        let gain: Mat3 = std::array::from_fn(|r| {
+            std::array::from_fn(|c| {
+                if r == c {
+                    CAT16_D50[c] / light_lms[c]
+                } else {
+                    0.0
+                }
+            })
+        });
+        let adapt = mul(&CAT16_TO_XYZ, &mul(&gain, &XYZ_TO_CAT16));
+        let error: Mat3 = [[1.06, -0.04, 0.02], [0.03, 0.95, 0.04], [-0.02, 0.05, 1.08]];
+        let back = mul(&inverse(&adapt).unwrap(), &error);
+        let mut gauss = gaussian(0x9e37_79b9_7f4a_7c15);
+        CHART
+            .patches
+            .iter()
+            .map(|p| apply(&back, lab_to_xyz(p.lab)).map(|c| 0.6 * c * (1.0 + 0.005 * gauss())))
+            .collect()
+    }
+
+    #[test]
+    fn free_stage_one_matches_darktables_checker() {
+        let measured_xyz = warm_shot();
+        let checker = darktable_checker(&measured_xyz);
+        let w = to_xyz();
+        let w_inv = inverse(&w).unwrap();
+        let adaptation = mul(&w_inv, &mul(&checker.adaptation, &w));
+        // The same patches darktable solves on, in the working space.
+        let measured: Vec<[f64; 3]> = checker
+            .normalised
+            .iter()
+            .map(|v| apply(&w_inv, *v))
+            .collect();
+        let weights = vec![1.0; CHART.len()];
+        let problem = Problem {
+            chart: CHART,
+            measured: &measured,
+            weights: &weights,
+            adaptation,
+            to_xyz: w,
+            keep_neutral: false,
+            stage: Stage::Linear,
+        };
+        let solution = solve(&problem).unwrap();
+
+        // darktable's mix as a working-space matrix after the adaptation,
+        // against Helios's `A s P A⁻¹` (P applies to the patches scaled by
+        // s; darktable's mix to them unscaled).
+        let darktable = mul(
+            &w_inv,
+            &mul(&CAT16_TO_XYZ, &mul(&checker.mix, &mul(&XYZ_TO_CAT16, &w))),
+        );
+        let s = solution.exposure_ev.exp2();
+        let helios = mul(
+            &adaptation,
+            &mul(
+                &solution.matrix.map(|row| row.map(|v| v * s)),
+                &inverse(&adaptation).unwrap(),
+            ),
+        );
+        let gap = darktable
+            .iter()
+            .flatten()
+            .zip(helios.iter().flatten())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+        assert!(gap < 1e-4, "{gap:e}: {darktable:?} vs {helios:?}");
+        assert!(
+            (solution.after.mean - checker.mean).abs() < 1e-3,
+            "{} vs {}",
+            solution.after.mean,
+            checker.mean
+        );
     }
 }

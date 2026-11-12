@@ -378,7 +378,8 @@ both results. Solved by conjugate gradients on the sparse system.
 6. **Stage 1 against darktable.** The linear stage without the
    constraint matches darktable's checker on the same patches
    (`channelmixerrgb`'s LMS mix converted to a working-space matrix)
-   within 1e-4.
+   within 1e-4. darktable normalises each patch's luminance before it
+   solves; the test hands Helios the same normalised patches.
 7. **Delta E 2000.** Sharma, Wu and Dalal's 34 published pairs, to four
    decimals (for `helios_photo::compare::delta_e_2000`, today tested
    only on simple cases).
@@ -527,6 +528,23 @@ usable. Slices 1 to 5 need no GUI.
    from stage 1's `U`, `Stage::DeltaE2000`, test 2 re-run on it) and test 6
    (stage 1 without the constraint against darktable's checker, its LMS
    mix converted to a working-space matrix, on the same patches).
+   **Built** (2026-11-12): `Problem::stage` picks stage 1 alone or stage
+   2 after it, in the same unknowns (the neutral stays kept exactly when
+   the constraint is on); a step is kept only when it lowers the cost, so
+   stage 2 never ends worse than stage 1. Test 2 re-run on stage 2: on the
+   same 0.5 % noise, mean Delta E 0.346 to 0.318, max 1.26 to 1.24, the
+   matrix still within 1 %; an exact solution stays exact (1e-6); an
+   excluded patch still changes nothing. Test 6 ports darktable's checker
+   in the test, in f64 (each patch brought to its reference's luminance
+   relative to the white patch, the illuminant from the middle grey,
+   CAT16, the LMS mix by least squares): on its normalised patches and
+   with its adaptation, the free stage 1 gives darktable's mix, converted
+   to a working-space matrix, within 6.2e-6 (darktable's rounded CAT16
+   inverse; asserted below 1e-4), and its mean Delta E within 7.2e-5
+   (2.5097 against 2.5096). On that warm, noisy synthetic shot the
+   per-patch luminance normalisation costs most of the error: without it,
+   with the same adaptation, Helios's free stage 1 gives a mean of 0.53
+   (0.52 after stage 2), the neutral-keeping one 0.60 (0.58).
 4. **`calibrate.chart` dry run:** the measurement graph (raw front
    without `colorin`, regions of the patches), the control request, the
    MCP tool, the shell command. Tested on a synthetic mosaic made from
