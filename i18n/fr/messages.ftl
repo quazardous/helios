@@ -221,6 +221,11 @@ gui-graph-wires-straight = Droites
 
 gui-history-batch = { $label } ({ $count } valeurs)
 gui-history-import = Importer { $count } photos
+gui-history-album-new = Nouvel album « { $name } »
+gui-history-album-rename = Renommer l’album « { $name } »
+gui-history-album-delete = Supprimer l’album « { $name } »
+gui-history-album-add = Ajouter { $count } photos à « { $name } »
+gui-history-album-remove = Retirer { $count } photos de « { $name } »
 
 gui-history-preview-applied = appliqué
 
@@ -904,6 +909,19 @@ gui-library-volume-offline = { $volume } { $count }, hors ligne, vu pour la dern
 gui-library-folder-show = Afficher dans le gestionnaire de fichiers
 gui-library-folder-scan = Analyser ce dossier
 gui-library-folder-import = Importer les nouvelles photos d’ici
+gui-library-albums = Albums
+gui-library-albums-none = Aucun album pour l’instant
+gui-library-album-new = Nouvel album…
+gui-library-album-add = Ajouter les photos sélectionnées
+gui-library-album-remove = Retirer les photos sélectionnées
+gui-library-album-rename = Renommer…
+gui-library-album-delete = Supprimer l’album
+gui-library-album-new-title = Nouvel album
+gui-library-album-new-verb = Créer
+gui-library-album-rename-title = Renommer l’album
+gui-library-album-rename-verb = Renommer
+gui-library-album-name = nom
+gui-album-not-changed = L’album n’a pas été modifié : { $error }
 
 gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre
 

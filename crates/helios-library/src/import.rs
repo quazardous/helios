@@ -797,7 +797,10 @@ impl<S: Store> Run<'_, S> {
                 change.changed().then_some(change)
             })
             .collect();
-        Changes { images }
+        Changes {
+            images,
+            ..Changes::default()
+        }
     }
 
     /// The image of the file at `path` when it was seen before, unchanged

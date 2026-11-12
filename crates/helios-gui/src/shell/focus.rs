@@ -69,6 +69,9 @@ pub(super) struct Focus {
     /// The workspace opens in Compare (its template says so): the place
     /// is entered once the stack is read, when it shows the root.
     pub(super) open_in_compare: bool,
+    /// The album a rename form was opened for (`library.collection.rename`
+    /// without `id` renames it).
+    pub(super) album_renamed: Option<String>,
     /// The open image's decisions, and the Decisions panel's cards.
     pub(super) decisions: Rc<RefCell<crate::decisions::Decisions>>,
     /// Where the workspace imports from, and how (its template's).
@@ -158,6 +161,7 @@ impl Focus {
             library: seed.library,
             comparison: Rc::default(),
             open_in_compare: false,
+            album_renamed: None,
             decisions: Rc::default(),
             import_source: None,
             imported_ids: Vec::new(),

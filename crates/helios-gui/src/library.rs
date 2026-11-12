@@ -540,7 +540,7 @@ impl Change {
 /// dates (a date being the capture day by the camera's clock:
 /// `date:2024-06-01..2024-06-30` takes both days whole), and in its text
 /// Helios's own keys ([`helios_terms`]): `camera:`, `lens:`, `type:`,
-/// `folder:`, `presence:` and `backup:`; the other words are looked for
+/// `folder:`, `collection:`, `presence:` and `backup:`; the other words are looked for
 /// in the photo's name and tags. A `backup:` term is measured against no
 /// volume until the library sets its rule ([`Library::set_backup_rule`]).
 pub fn query_of(filter: &Filter) -> Query {
@@ -558,6 +558,7 @@ pub fn query_of(filter: &Filter) -> Query {
         lenses: terms.lenses,
         file_types: terms.file_types,
         folder: terms.folder,
+        album: terms.collection,
         presence: terms.presence,
         backup: terms.backup.map(|states| helios_vault::BackupFilter {
             rule: helios_vault::Backups::default(),
@@ -575,6 +576,8 @@ pub struct Terms {
     pub lenses: Vec<String>,
     pub file_types: Vec<String>,
     pub folder: Option<String>,
+    /// The collection the photos are in (its id): an album for now.
+    pub collection: Option<String>,
     pub presence: Vec<helios_vault::Presence>,
     /// The backup states every `backup:` term allows (`None`: no term).
     pub backup: Option<Vec<helios_vault::BackupState>>,
@@ -629,7 +632,7 @@ pub fn quoted(value: &str) -> String {
 /// Helios's own keys in a filter's text (the words egui-pop's grammar
 /// leaves): `camera:<model>`, `lens:<lens>`, `type:<cr3>` (each exact;
 /// several of one key take any of them), `folder:<path>` (a copy there
-/// or below), `presence:present|offline|missing` and `backup:<state>`
+/// or below), `collection:<id>` (in that album), `presence:present|offline|missing` and `backup:<state>`
 /// (several: every one holds). A key with a value it does not know stays
 /// a word, as before.
 pub fn helios_terms(text: &str) -> Terms {
@@ -650,6 +653,8 @@ pub fn helios_terms(text: &str) -> Terms {
             t.file_types.push(v.to_lowercase());
         } else if let Some(v) = value("folder:") {
             t.folder = Some(v);
+        } else if let Some(v) = value("collection:") {
+            t.collection = Some(v);
         } else if let Some(p) = value("presence:").and_then(|v| match v.to_lowercase().as_str() {
             "present" => Some(helios_vault::Presence::Present),
             "offline" => Some(helios_vault::Presence::Offline),
@@ -1008,6 +1013,108 @@ fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
     );
 }
 
+/// The command that scopes the library to a collection (`id`; null: the
+/// whole library), kept with the workspace.
+pub const COLLECTION_COMMAND: &str = "library.collection";
+/// Makes an album (`name`; `images`, else the selection); without
+/// `name`, asks it.
+pub const COLLECTION_CREATE_COMMAND: &str = "library.collection.create";
+/// Renames an album (`id`, `name`); without `name`, asks it.
+pub const COLLECTION_RENAME_COMMAND: &str = "library.collection.rename";
+/// Forgets an album (`id`); its photos stay in the Library.
+pub const COLLECTION_DELETE_COMMAND: &str = "library.collection.delete";
+/// Puts photos in an album (`id`; `images`, else the selection).
+pub const COLLECTION_ADD_COMMAND: &str = "library.collection.add";
+/// Takes photos out of an album (`id`; `images`, else the selection).
+pub const COLLECTION_REMOVE_COMMAND: &str = "library.collection.remove";
+/// Lists the albums, with how many photos each holds.
+pub const COLLECTION_LIST_COMMAND: &str = "library.collection.list";
+
+/// Whether something is to be read again by the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wanted {
+    Yes,
+    No,
+}
+
+/// An album change the Library asks the host to make in the vault, one
+/// undo step each (`docs/design/library.md`, L6). Images by id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AlbumEdit {
+    Create {
+        id: String,
+        name: String,
+        images: Vec<String>,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
+    Delete {
+        id: String,
+    },
+    Add {
+        id: String,
+        images: Vec<String>,
+    },
+    Remove {
+        id: String,
+        images: Vec<String>,
+    },
+}
+
+impl AlbumEdit {
+    /// The album it changes.
+    pub fn id(&self) -> &str {
+        match self {
+            AlbumEdit::Create { id, .. }
+            | AlbumEdit::Rename { id, .. }
+            | AlbumEdit::Delete { id }
+            | AlbumEdit::Add { id, .. }
+            | AlbumEdit::Remove { id, .. } => id,
+        }
+    }
+}
+
+/// An album's context menu in the Albums section, through the shell's
+/// menus: add or remove the selected photos (greyed with none), rename,
+/// delete.
+fn album_menu(row: &egui::Response, id: &str, selection: bool) {
+    use crate::dialogs::MenuItem;
+    if !row.secondary_clicked() {
+        return;
+    }
+    let ctx = &row.ctx;
+    let word = |m: Message| crate::i18n::text(ctx, m);
+    let args = serde_json::json!({ "id": id });
+    let item =
+        |command: &str, label: Message| MenuItem::run(command, args.clone()).labeled(word(label));
+    crate::dialogs::context_menu(
+        row,
+        vec![
+            item(
+                COLLECTION_ADD_COMMAND,
+                Message::new("gui-library-album-add", "Add the selected photos"),
+            )
+            .enabled(selection),
+            item(
+                COLLECTION_REMOVE_COMMAND,
+                Message::new("gui-library-album-remove", "Remove the selected photos"),
+            )
+            .enabled(selection),
+            MenuItem::Separator,
+            item(
+                COLLECTION_RENAME_COMMAND,
+                Message::new("gui-library-album-rename", "Rename…"),
+            ),
+            item(
+                COLLECTION_DELETE_COMMAND,
+                Message::new("gui-library-album-delete", "Delete the album"),
+            ),
+        ],
+    );
+}
+
 /// The longest side of a thumbnail, in pixels.
 pub const THUMB: u32 = 256;
 
@@ -1077,6 +1184,14 @@ pub struct Library {
     /// with a copy in each folder or below, for the whole Library, as the
     /// vault last counted them; none until the Folders section is open.
     folders: FolderCounts,
+    /// The vault's albums (`docs/design/library.md`, L6), as last read;
+    /// none until the host reads them.
+    albums: Option<Vec<helios_vault::collections::Album>>,
+    /// Whether the albums must be read again
+    /// ([`Library::take_albums_wanted`]).
+    albums_wanted: Wanted,
+    /// Album changes asked, for the host to make in the vault.
+    album_edits: Vec<AlbumEdit>,
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
@@ -1204,6 +1319,9 @@ impl Default for Library {
             backup_rule: helios_vault::Backups::default(),
             facets: None,
             folders: FolderCounts::Unread,
+            albums: None,
+            albums_wanted: Wanted::Yes,
+            album_edits: Vec::new(),
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
@@ -1608,6 +1726,74 @@ impl Library {
             ..self.filter.clone()
         };
         self.set_filter(filter);
+    }
+
+    /// The collection the filter is scoped to (its `collection:` term).
+    pub fn collection(&self) -> Option<String> {
+        helios_terms(&self.filter.text).collection
+    }
+
+    /// Scopes the library to a collection (its `collection:` term in the
+    /// filter, in place of any other), or to none; the rest of the filter
+    /// is kept.
+    pub fn set_collection(&mut self, id: Option<&str>) {
+        let mut words: Vec<String> = tokens(&self.filter.text)
+            .into_iter()
+            .filter(|t| !t.to_lowercase().starts_with("collection:"))
+            .collect();
+        if let Some(id) = id {
+            words.push(format!("collection:{}", quoted(id)));
+        }
+        let filter = Filter {
+            text: words.join(" "),
+            ..self.filter.clone()
+        };
+        self.set_filter(filter);
+    }
+
+    /// The vault's albums, as last read (none before the host reads them).
+    pub fn albums(&self) -> Option<&[helios_vault::collections::Album]> {
+        self.albums.as_deref()
+    }
+
+    /// How many photos of the Library an album holds (a photo taken out
+    /// of the Library since does not count).
+    pub fn album_count(&self, album: &helios_vault::collections::Album) -> usize {
+        album
+            .images
+            .iter()
+            .filter(|i| self.index.contains_key(*i))
+            .count()
+    }
+
+    /// Whether the host must read the albums ([`Library::set_albums`]),
+    /// once.
+    pub fn take_albums_wanted(&mut self) -> bool {
+        std::mem::replace(&mut self.albums_wanted, Wanted::No) == Wanted::Yes
+    }
+
+    /// The albums as the vault holds them; the photos of the album shown
+    /// are asked again.
+    pub fn set_albums(&mut self, albums: Vec<helios_vault::collections::Album>) {
+        self.albums = Some(albums);
+        if self.collection().is_some() {
+            self.ask_query();
+        }
+    }
+
+    /// Asks the host to read the albums again (an undo, a redo).
+    pub fn ask_albums(&mut self) {
+        self.albums_wanted = Wanted::Yes;
+    }
+
+    /// Queues an album change for the host ([`Library::take_album_edits`]).
+    pub fn edit_album(&mut self, edit: AlbumEdit) {
+        self.album_edits.push(edit);
+    }
+
+    /// The album changes asked since, in order.
+    pub fn take_album_edits(&mut self) -> Vec<AlbumEdit> {
+        std::mem::take(&mut self.album_edits)
     }
 
     /// The vault query of the filter in force, its backup rule set.
@@ -2866,6 +3052,76 @@ impl Library {
         }
     }
 
+    /// The Albums section (`docs/design/library.md`, L6): the vault's
+    /// albums by name with how many photos each holds, "New album…"
+    /// (from the selection, when there is one); a click scopes the grid to
+    /// an album (its `collection:` term), a click on it again drops the
+    /// scope; each row's menu adds or removes the selected photos,
+    /// renames or deletes the album.
+    fn albums_section(&mut self, ui: &mut Ui) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let word = |m: Message| crate::i18n::text(&ctx, m);
+        let selected = self.collection();
+        let selection = self.targets().is_ok();
+        let mut chosen = None;
+        let mut create = false;
+        egui::CollapsingHeader::new(word(Message::new("gui-library-albums", "Albums")))
+            .id_salt("helios.library.albums")
+            .show(ui, |ui| {
+                create = ui
+                    .button(word(Message::new("gui-library-album-new", "New album…")))
+                    .clicked();
+                let Some(albums) = self.albums.as_deref() else {
+                    return;
+                };
+                if albums.is_empty() {
+                    ui.weak(word(Message::new(
+                        "gui-library-albums-none",
+                        "No album yet",
+                    )));
+                    return;
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.library.albums.scroll")
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        for album in albums {
+                            let text = format!("{} {}", album.name, self.album_count(album));
+                            let on = selected.as_deref() == Some(album.id.as_str());
+                            let r = ui.selectable_label(on, text);
+                            album_menu(&r, &album.id, selection);
+                            if r.clicked() {
+                                chosen = Some(album.id.clone());
+                            }
+                        }
+                    });
+            });
+        let run = |command: &str, args: serde_json::Value| {
+            crate::dialogs::request(
+                ui.ctx(),
+                crate::dialogs::Request::Run(
+                    command.into(),
+                    args,
+                    helios_shell::commands::Origin::User,
+                ),
+            );
+        };
+        if create {
+            run(COLLECTION_CREATE_COMMAND, serde_json::json!({}));
+        }
+        if let Some(id) = chosen {
+            // Through the shell: the album is kept with the workspace.
+            let same = selected.as_deref() == Some(id.as_str());
+            run(
+                COLLECTION_COMMAND,
+                serde_json::json!({ "id": (!same).then_some(id) }),
+            );
+        }
+    }
+
     /// The sort's menu and its direction: a change runs
     /// [`SORT_COMMAND`], which the workspace keeps.
     fn sort_menu(&mut self, ui: &mut Ui) {
@@ -3002,6 +3258,7 @@ impl Library {
         self.toolbar(ui);
         self.facets_bar(ui);
         self.folders_section(ui);
+        self.albums_section(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
             let text = crate::i18n::text(

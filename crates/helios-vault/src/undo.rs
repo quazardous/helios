@@ -18,6 +18,9 @@
 //!   image's (or free); a version only when no later version names it as
 //!   a parent.
 //!
+//! A step may also change documents (the Library's collections): each is
+//! set back only where it still holds what the step left.
+//!
 //! Audit rows stay: they are a record, not state.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -70,15 +73,26 @@ impl Change {
     }
 }
 
-/// What a step changed, image by image.
+/// A document before and after a step (`None`: not there), as the
+/// Library's collections change ([`crate::collections`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DocumentChange {
+    pub ns: String,
+    pub key: String,
+    pub before: Option<Value>,
+    pub after: Option<Value>,
+}
+
+/// What a step changed, image by image, and the documents it changed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Changes {
     pub images: Vec<Change>,
+    pub documents: Vec<DocumentChange>,
 }
 
 impl Changes {
     pub fn is_empty(&self) -> bool {
-        self.images.is_empty()
+        self.images.is_empty() && self.documents.is_empty()
     }
 
     /// Images the step brought into the Library (new to the vault, or
@@ -133,6 +147,20 @@ impl<S: Store> Vault<S> {
                     (c.after.as_ref(), c.before.as_ref())
                 };
                 move_rows(store, &c.image, from, to, &mut done)?;
+            }
+            // A document is set back only where it still holds the step's.
+            for d in &changes.documents {
+                let (from, to) = if forward {
+                    (&d.before, &d.after)
+                } else {
+                    (&d.after, &d.before)
+                };
+                if store.document(&d.ns, &d.key)? == *from {
+                    store.set_document(&d.ns, &d.key, to.as_ref())?;
+                    done.changed += 1;
+                } else {
+                    done.kept += 1;
+                }
             }
             Ok(done)
         })?;

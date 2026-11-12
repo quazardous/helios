@@ -229,6 +229,7 @@ What the workspace sets for the library (optional):
   "auto_advance": true,
   "sort": { "by": "rating", "descending": true },
   "folder": "/home/me/Pictures/2024",
+  "collection": "trip-2024",
   "export": { "format": "jpeg", "quality": 92, "folder": "~/Pictures/Export",
               "pattern": "{date}-{seq}", "clash": "number" }
 }
@@ -271,6 +272,11 @@ What the workspace sets for the library (optional):
   Absent, the whole library. A click in the Library panel's folders
   tree and `library.folder` write it (one undo step); validation
   refuses a path that is not absolute.
+- `collection` (2026-11-12) is the collection the library is scoped to
+  (the `collection:` term of the search): an album, by its id in the
+  vault. Absent, the whole library. A click in the Library panel's
+  Albums section and `library.collection` write it (one undo step); an
+  album deleted since shows no photo.
 - `export` (2026-11-07) is what the export dialog (`library.export`,
   File > Export…) starts from, written as `library.export` takes its
   arguments: `format` (`jpeg`, `png`, `tiff`), `quality` (JPEG, 1 to

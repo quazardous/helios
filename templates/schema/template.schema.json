@@ -253,6 +253,11 @@
           "description": "The folder the library is scoped to (an absolute path), with those below it; the whole library when absent.",
           "type": "string",
           "minLength": 1
+        },
+        "collection": {
+          "description": "The collection the library is scoped to (an album, by its id in the vault); the whole library when absent.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },

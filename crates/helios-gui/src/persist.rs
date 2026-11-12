@@ -84,6 +84,11 @@ pub struct Persist<S: Store> {
     locations_changed: bool,
     /// The library shown, refreshed by its cursor's delta.
     shown: Mutex<Option<Shown>>,
+    /// The library's history as last seen ([`LibraryHistory::rev`]): when
+    /// it moves, the albums are read again.
+    ///
+    /// [`LibraryHistory::rev`]: crate::library_history::LibraryHistory::rev
+    history_rev: u64,
 }
 
 /// The edit of the image shown.
@@ -255,6 +260,7 @@ impl<S: Store> Persist<S> {
             editing: None,
             locations_changed: false,
             shown: Mutex::new(None),
+            history_rev: 0,
         }
     }
 
@@ -642,6 +648,70 @@ impl<S: Store> Persist<S> {
         self.editing.as_ref().map(|e| &e.session)
     }
 
+    /// Makes the album changes the library asked, each one step of the
+    /// library's history; reads the albums again when that history moved
+    /// (a change, an undo, a redo, an import).
+    fn edit_albums(&mut self, shell: &mut Shell, now: f64) {
+        use crate::library::AlbumEdit as E;
+        let edits = shell.library_mut().take_album_edits();
+        let history = shell.library_history();
+        for edit in edits {
+            let ids = |images: &[String]| -> Result<Vec<ImageId>, String> {
+                images.iter().map(|i| ImageId::from_hex(i)).collect()
+            };
+            let before = self.vault.album(edit.id()).ok().flatten();
+            let name = before.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+            let done = match &edit {
+                E::Create { id, name, images } => ids(images)
+                    .and_then(|i| self.vault.create_album(Some(id), name, &i))
+                    .map(|(a, c)| (a.name, a.images.len(), c)),
+                E::Rename { id, name: to } => self
+                    .vault
+                    .rename_album(id, to)
+                    .map(|c| (name.clone(), 0, c)),
+                E::Delete { id } => self.vault.delete_album(id).map(|c| (name.clone(), 0, c)),
+                E::Add { id, images } => ids(images)
+                    .and_then(|i| self.vault.add_to_album(id, &i))
+                    .map(|c| (name.clone(), images.len(), c)),
+                E::Remove { id, images } => ids(images)
+                    .and_then(|i| self.vault.remove_from_album(id, &i))
+                    .map(|c| (name.clone(), images.len(), c)),
+            };
+            match done {
+                Ok((name, count, changes)) => {
+                    let label = crate::library_history::album_label(&edit, &name, count);
+                    history.record(label, changes, now);
+                }
+                Err(e) => shell.notify(
+                    Level::Error,
+                    Message::new(
+                        "gui-album-not-changed",
+                        "The album was not changed: { $error }",
+                    )
+                    .with("error", e),
+                ),
+            }
+        }
+        let rev = history.rev();
+        if rev != self.history_rev {
+            self.history_rev = rev;
+            shell.library_mut().ask_albums();
+        }
+        if shell.library_mut().take_albums_wanted() {
+            match self.vault.albums() {
+                Ok(albums) => shell.library_mut().set_albums(albums),
+                Err(e) => shell.notify(
+                    Level::Error,
+                    Message::new(
+                        "gui-vault-unreadable",
+                        "Cannot read the library: { $error }",
+                    )
+                    .with("error", e),
+                ),
+            }
+        }
+    }
+
     /// Writes what the user changed and shows what other writers did;
     /// `now` is the time in seconds (since the epoch for a real clock).
     pub fn frame(&mut self, shell: &mut Shell, now: f64) {
@@ -691,6 +761,7 @@ impl<S: Store> Persist<S> {
                 ),
             }
         }
+        self.edit_albums(shell, now);
         let query = shell.library_mut().take_query();
         if let Some(query) = query {
             // The photos it takes, then how many carry each value of each

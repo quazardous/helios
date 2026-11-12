@@ -588,6 +588,24 @@ so the profile decides). Undoable steps; agent commands
 makes an album from a selection. Focus: the collections are shared;
 which one is shown is the focus's.
 
+Built (2026-11-12), first part: **albums**. Each is a vault document in
+`library/collections` (`{kind: "album", name, images}`, keyed by an id
+made from its first name, kept when it is renamed; names unique whatever
+the case); `Query::album` selects its photos in the cursor's statement
+(the ids the document holds, `json_each` in SQLite). The Library panel's
+Albums section lists them by name with how many photos of the Library
+each holds; "New album…" asks a name and takes the selection; each row's
+menu adds or removes the selected photos, renames, deletes. A click runs
+`library.collection`, which scopes this focus's library with the
+`collection:` term and writes the workspace's `library.collection` (one
+undo step, as the folder). Each change is a command
+(`library.collection.create`, `.rename`, `.delete`, `.add`, `.remove`,
+`.list`) the host makes in the vault as one step of the library's
+history, holding the document before and after (`Changes::documents`;
+an undo leaves a document changed since alone). Not built yet: smart
+albums (the rule tree compiled to a `Query`), the quick collection and
+B, Ctrl+K recent filters, album sets, drag and drop onto an album.
+
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste
 marks (rating, labels, tags, title) between photos, merge or overwrite,

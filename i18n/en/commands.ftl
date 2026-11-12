@@ -250,6 +250,27 @@ command-keymap-package =
 command-keymap-package-remove =
     .title = Take a keymap package's keys away (`name`)
 
+command-library-collection =
+    .title = Scope the library to an album (`id`; null: the whole library); kept with the workspace. Without `id`, says the album
+
+command-library-collection-add =
+    .title = Add photos to an album (`id`; `images`: ids, else the selection)
+
+command-library-collection-create =
+    .title = New album (`name`; `images`: ids, else the selection); without `name`, asks it. Answers its `id`
+
+command-library-collection-delete =
+    .title = Delete an album (`id`); its photos stay in the library
+
+command-library-collection-list =
+    .title = List the albums: `id`, `name` and how many photos each holds
+
+command-library-collection-remove =
+    .title = Remove photos from an album (`id`; `images`: ids, else the selection); they stay in the library
+
+command-library-collection-rename =
+    .title = Rename an album (`id`, `name`); without `name`, asks it
+
 command-library-compare =
     .title = Compare photos side by side (`images`: ids, else the selection; two to four)
 

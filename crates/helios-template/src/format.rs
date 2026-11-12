@@ -182,6 +182,10 @@ pub struct LibraryDesc {
     /// when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// The collection the library is scoped to (an album: its id in the
+    /// vault; the Albums section's choice); the whole library when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
 }
 
 /// How the library orders its photos: what by ([`SORTS`]), and which way.

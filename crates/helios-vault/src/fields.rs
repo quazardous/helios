@@ -512,6 +512,9 @@ pub struct Query {
     /// With a copy in this folder or below (an absolute path, present or
     /// not).
     pub folder: Option<String>,
+    /// In this album (its id in [`crate::collections::COLLECTIONS`]); an
+    /// album that is not there holds no photo.
+    pub album: Option<String>,
     /// Present, offline or missing as one of these ([`Presence::of`]).
     pub presence: Vec<Presence>,
     /// Backed up in one of these states against a strategy.
