@@ -182,9 +182,13 @@ fn closing_while_a_card_comes_and_goes_comes_back_at_once() {
     h.state_mut()
         .run("library.importWindow", Value::Null, Origin::User)
         .unwrap();
+    // The window drawn, the card's photos coming in (`import_read` alone
+    // holds before the card is ticked).
     until(&mut h, "the card read", |h| {
         let g = h.state().import_glances();
-        g.read + g.cached > 0 || h.state().import_read()
+        h.query_by_role_and_label(Role::Button, "Close window")
+            .is_some()
+            && (g.read + g.cached > 0 || h.state().import_counts().photos > 0)
     });
     // Pulled out while it is read, and the window closed meanwhile.
     volumes.0.lock().unwrap().clear();
