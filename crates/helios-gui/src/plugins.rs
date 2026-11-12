@@ -465,6 +465,56 @@ impl Plugin for Frame {
     }
 }
 
+pub const WINDOW_MENU: PluginId = PluginId::from_static("helios.windowMenu");
+
+/// egui-pop's window switcher, which Helios does not offer: Switch to
+/// window… (`window.pick`) leaves the Window menu, and it and
+/// `window.switch` leave the palette. The Window menu keeps Helios's
+/// windows and the list of open ones (whose entries run `window.switch`,
+/// still there for them and for agents).
+pub struct WindowMenu;
+
+/// The switcher's commands, kept out of Helios's menus and palette.
+pub const SWITCHER: [CommandId; 2] = [
+    egui_pop::api::windows::CMD_PICK,
+    egui_pop::api::windows::CMD_SWITCH,
+];
+
+impl Plugin for WindowMenu {
+    fn id(&self) -> PluginId {
+        WINDOW_MENU
+    }
+
+    fn title(&self) -> String {
+        "Helios window menu".into()
+    }
+
+    fn requires(&self) -> Vec<PluginId> {
+        vec![egui_pop::api::windows::WindowsPlugin.id()]
+    }
+
+    fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+        use egui_pop::api::hooks::Hook;
+        use egui_pop::api::windows::{CMD_PICK, MENU_WINDOW};
+        use egui_pop::model::ids::HookId;
+        use egui_pop::model::menus::Item;
+        ctx.hook(Hook::menu(
+            HookId::from_static("helios.windowMenu.noSwitcher"),
+            MENU_WINDOW,
+            |items| {
+                items.retain(
+                    |item| !matches!(&item.item, Item::Command { id, .. } if *id == CMD_PICK),
+                );
+            },
+        ))?;
+        ctx.hook(Hook::palette(
+            HookId::from_static("helios.palette.noSwitcher"),
+            |entries| entries.retain(|e| !SWITCHER.contains(&e.command)),
+        ))?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::COMMAND_ICONS;

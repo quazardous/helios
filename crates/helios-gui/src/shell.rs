@@ -672,9 +672,11 @@ impl Shell {
             // asked for) and the agents' `history.*` commands, over
             // Helios's history owner (`crate::history::HeliosHistory`).
             .plugin(egui_pop::api::history_view::HistoryPlugin::default())
-            // The Window menu, Close window and Switch to window…: every
-            // window has them (docs/design/windows.md, section 7).
+            // The Window menu and Close window: every window has them
+            // (docs/design/windows.md, section 7). Its switcher (Switch
+            // to window…) is not offered (`plugins::WindowMenu`).
             .plugin(egui_pop::api::windows::WindowsPlugin)
+            .plugin(plugins::WindowMenu)
             // Copy and paste: egui-pop's clipboard (its default owner,
             // the Edit commands, the agents' `clipboard.*`), Helios's
             // types and sanitiser over it.

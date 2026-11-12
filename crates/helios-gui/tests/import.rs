@@ -1862,14 +1862,27 @@ fn window_pass(
     window: egui::ViewportId,
     close: bool,
 ) -> Vec<String> {
+    window_pass_at(h, window, close, vec2(1000.0, 700.0), None)
+}
+
+/// [`window_pass`] with the window's size and, where the platform tells
+/// it, its outer position on the screen.
+fn window_pass_at(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    close: bool,
+    size: egui::Vec2,
+    at: Option<egui::Pos2>,
+) -> Vec<String> {
     use egui::{Pos2, RawInput, Rect, ViewportEvent, ViewportId, ViewportInfo};
     let cb = h.output().viewport_output[&window]
         .viewport_ui_cb
         .clone()
         .expect("the window is declared by the main window's last pass");
-    let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+    let rect = Rect::from_min_size(Pos2::ZERO, size);
     let mut info = ViewportInfo {
         inner_rect: Some(rect),
+        outer_rect: at.map(|p| Rect::from_min_size(p, size)),
         focused: Some(true),
         ..Default::default()
     };
@@ -2049,11 +2062,23 @@ fn a_card_plugged_in_again_shows_its_glances_from_disk_and_reads_only_a_changed_
 /// on the desktop), its sources read: the harness and the window's
 /// viewport.
 fn import_in_its_own_window(name: &str) -> (Harness<'static, Shell>, egui::ViewportId, PathBuf) {
+    import_in_its_own_window_framed(name, false)
+}
+
+/// [`import_in_its_own_window`], Helios drawing the windows' frames
+/// (`own_frame`, as on the desktop) or the system drawing them.
+fn import_in_its_own_window_framed(
+    name: &str,
+    own_frame: bool,
+) -> (Harness<'static, Shell>, egui::ViewportId, PathBuf) {
     let dir = temp(name);
     let folder = dir.join("Shoot");
     photos(&folder, 4, 400, 300);
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.ctx.set_embed_viewports(false);
+    if own_frame {
+        h.state_mut().draw_frame(true);
+    }
     h.run();
     h.state_mut()
         .run(
@@ -2251,6 +2276,120 @@ fn closing_the_main_window_keeps_the_import_window_and_window_main_brings_it_bac
     assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
     assert!(h.state().quitting());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With Helios's own frame (as on the desktop), the import window opens
+/// without the system's decorations and draws Helios's title bar. Closing
+/// the main window moves it into the main window with its size and place
+/// (not the main window's), and its title bar comes along: its title and
+/// the window's buttons.
+#[test]
+fn closing_the_main_window_moves_the_import_window_with_its_geometry_and_title_bar() {
+    use egui::ViewportCommand;
+    let (mut h, window, dir) = import_in_its_own_window_framed("moved-chrome", true);
+    let decorations = h.output().viewport_output[&window].builder.decorations;
+    assert_eq!(decorations, Some(false), "no system title bar");
+    let import_title = h.state().app().handle().windows()[1].title.clone();
+    // Worked in at its own size and place.
+    let drawn = window_pass_at(
+        &mut h,
+        window,
+        false,
+        vec2(900.0, 640.0),
+        Some(egui::pos2(300.0, 120.0)),
+    );
+    assert!(
+        drawn.iter().any(|t| t.starts_with(&import_title)),
+        "its title bar names it: {drawn:?}"
+    );
+    let ctx = h.ctx.clone();
+    assert_eq!(
+        h.state_mut().main_window_closing(&ctx),
+        helios_gui::shell::Closing::Moved
+    );
+    h.input_mut()
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .events
+        .push(egui::ViewportEvent::Close);
+    h.step();
+    let sent = h.output().viewport_output[&egui::ViewportId::ROOT]
+        .commands
+        .clone();
+    assert!(sent.contains(&ViewportCommand::CancelClose), "{sent:?}");
+    assert!(
+        sent.contains(&ViewportCommand::InnerSize(vec2(900.0, 640.0))),
+        "{sent:?}"
+    );
+    assert!(
+        sent.contains(&ViewportCommand::OuterPosition(egui::pos2(300.0, 120.0))),
+        "{sent:?}"
+    );
+    h.run_steps(2);
+    assert!(h.state().import_window_open(), "the import window stays");
+    // The main window's title bar is the import window's now.
+    // The main window's accessible names (as `MultiWindow::names` reads
+    // them): a button's label, a text's words.
+    let names: Vec<String> = h
+        .root()
+        .children_recursive()
+        .filter_map(|n| {
+            let node = n.accesskit_node();
+            node.label().or_else(|| node.value())
+        })
+        .collect();
+    for name in ["Minimize", "Maximize", "Close"] {
+        assert!(names.iter().any(|n| n == name), "{name} in {names:?}");
+    }
+    assert!(
+        names.iter().any(|n| n.starts_with(&import_title)),
+        "{import_title} in {names:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Helios does not offer egui-pop's window switcher: Switch to window…
+/// is neither in the Window menu nor in the palette, nor is
+/// `window.switch`; the Window menu keeps Helios's windows and the list
+/// of those open.
+#[test]
+fn the_window_switcher_is_neither_in_the_window_menu_nor_in_the_palette() {
+    use egui_pop::api::windows::{CMD_PICK, CMD_SWITCH, MENU_WINDOW};
+    use egui_pop::model::menus::Item;
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    // Its menu as every window shows it (`menus::show` reads it).
+    let items = app.menu(&MENU_WINDOW);
+    let commands: Vec<String> = items
+        .iter()
+        .filter_map(|i| match &i.item {
+            Item::Command { id, .. } => Some(id.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(!commands.contains(&CMD_PICK.to_string()), "{commands:?}");
+    assert!(!commands.contains(&CMD_SWITCH.to_string()), "{commands:?}");
+    for kept in ["window.close", "library.importWindow"] {
+        assert!(commands.iter().any(|c| c == kept), "{kept} in {commands:?}");
+    }
+    assert!(
+        items.iter().any(|i| matches!(&i.item, Item::List { .. })),
+        "the open windows' list stays"
+    );
+    let palette: Vec<String> = app
+        .palette()
+        .into_iter()
+        .map(|e| e.command.to_string())
+        .collect();
+    assert!(palette.iter().any(|c| c == "window.close"), "{palette:?}");
+    for gone in [CMD_PICK, CMD_SWITCH] {
+        assert!(
+            !palette.contains(&gone.to_string()),
+            "{gone} in the palette"
+        );
+    }
 }
 
 /// The main window alone, closed: Helios quits.

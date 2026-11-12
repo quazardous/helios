@@ -137,6 +137,9 @@ plugin-helios-platform =
 plugin-helios-theme-editor =
     .title = Theme editor
 
+plugin-helios-windowMenu =
+    .title = Helios window menu
+
 plugin-helios-workbench =
     .title = Helios areas
 
