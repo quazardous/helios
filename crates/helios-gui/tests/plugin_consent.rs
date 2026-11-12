@@ -3,6 +3,8 @@
 //! (each capability with its manifest's reason); Allow grants them and
 //! starts the connection, Don't allow and Escape start nothing; each
 //! answer closes it. Settings > Plugins' commands list the capabilities and take one back.
+//! Allow on a running plugin whose stop takes its whole grace never holds
+//! a frame: the grant runs off the interface's thread.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +22,8 @@ use serde_json::{Value, json};
 
 const PLUGIN: &str = "org.example.fake-source";
 const REASON: &str = "Talks to the fake service";
+/// The plugin slow to stop.
+const SLOW: &str = "org.example.slow-source";
 
 fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, Shell>) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -260,4 +264,132 @@ fn settings_plugins_lists_the_capabilities_and_takes_one_back() {
     });
     run(&mut h, "plugin.grant", args(false)).unwrap();
     assert!(!granted(&broker));
+}
+
+/// A source plugin that runs, answers its handshake, and neither answers
+/// `shutdown` nor leaves when told: its stop takes the broker's whole
+/// grace, twice over.
+fn slow_plugin_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("helios-gui-consent-slow-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("slow.py"),
+        r#"import json, sys, time
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("method") == "initialize":
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": {}}) + "\n")
+        sys.stdout.flush()
+    elif "id" in message and message.get("method") != "shutdown":
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": None}) + "\n")
+        sys.stdout.flush()
+time.sleep(30)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("helios-plugin.toml"),
+        format!(
+            r#"
+id = "org.example.slow-source"
+name = "Slow source"
+version = "1.0.0"
+license = "GPL-3.0-or-later"
+command = ["python3", "slow.py"]
+services = ["import.source"]
+activation = ["onService:import.source"]
+
+[compat]
+helios = ">=0.0.1"
+interfaces = {{ protocol = 1, "import.source" = 1 }}
+
+[[connect]]
+id = "who"
+kind = "form"
+schema = {{ fields = [{{ id = "user" }}] }}
+
+[[capabilities]]
+name = "network"
+reason = "Talks to the slow service"
+
+[[capabilities]]
+name = "images.read"
+reason = "{REASON}"
+"#
+        ),
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn allow_on_a_plugin_slow_to_stop_holds_no_frame() {
+    if std::process::Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("python3 is not installed: skipped");
+        return;
+    }
+    let mut broker = Broker::new(Policy {
+        grace: Duration::from_secs(2),
+        ..Policy::default()
+    });
+    broker.add(&slow_plugin_dir(), Scope::User).unwrap();
+    // Allowed to run, and running: Allow's grant stops it.
+    broker.grant(SLOW, "network").unwrap();
+    broker
+        .call(SLOW, "onService:import.source", "ping", json!({}))
+        .unwrap();
+    assert!(broker.running(SLOW));
+    let broker = Arc::new(broker);
+    let mut shell = Shell::new(helios_panels(), None);
+    for p in helios_plugin::source::providers(&broker) {
+        shell.add_import_connector(Arc::new(p));
+    }
+    shell.set_plugins(broker.clone());
+    shell.set_import_accounts(
+        Arc::new(MemoryAccounts::default()),
+        Arc::new(MemorySecrets::default()),
+    );
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(
+        &mut h,
+        "import.addSource",
+        json!({ "connector": "slow-source" }),
+    )
+    .unwrap();
+    until(&mut h, "the consent dialog", |h| {
+        shown(h, "Allow Slow source?") && shown(h, REASON)
+    });
+    click_settled(&mut h, "Allow");
+    let allowed = Instant::now();
+    // Each frame in time while the plugin stops; the connection starts
+    // once the grant is done.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let at = Instant::now();
+        h.step();
+        let took = at.elapsed();
+        assert!(took < Duration::from_millis(500), "a frame took {took:?}");
+        if connection(&mut h)["state"] == "form" {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the connection never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The stop did take its grace: the frames above went on meanwhile.
+    assert!(
+        allowed.elapsed() >= Duration::from_secs(2),
+        "the plugin stopped at once ({:?}): the test proves nothing",
+        allowed.elapsed()
+    );
+    assert!(!broker.running(SLOW), "stopped by the grant");
+    assert_eq!(
+        broker.list()["plugins"][0]["capabilities"][1]["granted"],
+        true
+    );
 }

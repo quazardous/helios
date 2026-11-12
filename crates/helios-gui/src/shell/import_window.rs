@@ -432,7 +432,7 @@ impl ImportWindow {
 
     /// Asks a frame of the window from another thread: of its own OS
     /// window, or of the main one while embedded or not drawn yet.
-    fn waker(&self) -> impl Fn() + Send + Sync + 'static {
+    pub(super) fn waker(&self) -> impl Fn() + Send + Sync + 'static {
         let (ctx, drawn_in) = (self.ctx.clone(), self.drawn_in.clone());
         move || {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
@@ -929,10 +929,17 @@ impl Shell {
     pub(super) fn import_window_frame(&mut self, ctx: &Egui) {
         let _stall = crate::stall::section("import window: the main window's part");
         {
-            let w = self.import.get();
-            let mut held = w.ctx.lock().unwrap_or_else(PoisonError::into_inner);
-            if held.is_none() {
-                *held = Some(ctx.clone());
+            let mut w = self.import.get_mut();
+            {
+                let mut held = w.ctx.lock().unwrap_or_else(PoisonError::into_inner);
+                if held.is_none() {
+                    *held = Some(ctx.clone());
+                }
+            }
+            // The answers that come off the interface's thread (the
+            // accounts read, a plugin's consent) ask for the window's pass.
+            if w.accounts.wake.is_none() {
+                w.accounts.wake = Some(Arc::new(w.waker()));
             }
         }
         let (open, inserted) = {
@@ -1013,10 +1020,26 @@ impl Shell {
                             window.set_title(title);
                         }
                         if frame.close {
-                            window.close();
+                            let app = window.app().clone();
+                            if holds_main_window(&app) {
+                                // Moved into the main window (closed while
+                                // it was open): the shell comes back there,
+                                // and the window closes at the next pass.
+                                app.raise_window(&WindowId::main());
+                            } else {
+                                window.close();
+                            }
                         }
                     }
                 });
+            }
+            // Moved into the main window (closed while it was open): the
+            // main window draws the shell again, rather than closing as
+            // the last window would (Helios quitting); its own window is
+            // closed at the next pass.
+            (false, true) if holds_main_window(&app) => {
+                drop(w);
+                app.raise_window(&WindowId::main());
             }
             (false, true) => {
                 w.shown = None;
@@ -1191,6 +1214,12 @@ impl Shell {
         w.open = false;
         w.clear_contents();
     }
+}
+
+/// Whether the import window's content holds the main window: moved
+/// into it when the main window was closed while it was open.
+fn holds_main_window(app: &egui_pop::api::app::AppHandle) -> bool {
+    app.window_viewport(&WindowId::new(WINDOW)) == Some(ViewportId::ROOT)
 }
 
 /// The window's title.
@@ -1468,7 +1497,7 @@ impl ImportWindow {
             if let Some(again) =
                 super::import_accounts::consent_dialog(&ctx, &mut self.accounts, &|m| texts(m))
             {
-                self.account_asked(again);
+                self.account_run(again);
             }
             super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
             if let Some(again) =
@@ -1485,11 +1514,16 @@ impl ImportWindow {
     /// Adds, reconnects or signs out an account, as the Sources column
     /// asked; what fails is said in the window's toasts.
     pub(super) fn account_asked(&mut self, asked: super::import_accounts::Asked) {
-        use super::import_accounts::Asked;
         // A plugin's capabilities not granted yet are asked for first.
         if self.accounts.ask_consent(&asked).is_some() {
             return;
         }
+        self.account_run(asked);
+    }
+
+    /// Runs what the Sources column asked, its plugin's consent settled.
+    pub(super) fn account_run(&mut self, asked: super::import_accounts::Asked) {
+        use super::import_accounts::Asked;
         let done = match asked {
             Asked::Select(id) => {
                 self.select_account(id);

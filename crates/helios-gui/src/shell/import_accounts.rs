@@ -25,7 +25,9 @@
 //! allow (nothing runs).
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
+use std::time::{Duration, Instant};
 
 use helios_connect::Text;
 use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
@@ -46,6 +48,11 @@ pub(crate) struct Accounts {
     pub(crate) web: Option<Arc<dyn WebSteps>>,
     /// The accounts as last read.
     listed: Vec<Account>,
+    /// Reads them off the interface's thread: the vault may be held by
+    /// another writer, and a frame never waits for it.
+    reader: Reader,
+    /// Asks the window for a pass: an answer came after its frame.
+    pub(crate) wake: Option<Wake>,
     /// The connection running, shown in the window's dialog.
     pub(crate) connecting: Option<Connecting>,
     /// The same session, for the commands that read and answer it off
@@ -94,10 +101,41 @@ pub(crate) fn system_opener() -> Opener {
     })
 }
 
-/// A plugin's capabilities asked for before one of its actions runs.
-pub(crate) struct Consent {
+/// Asks the import window for a pass, from any thread.
+pub(crate) type Wake = Arc<dyn Fn() + Send + Sync>;
+
+/// How long a frame waits for the accounts' read before it shows them as
+/// last read (the read's answer then asks for a pass of its own).
+const READ_WAIT: Duration = Duration::from_millis(30);
+
+/// How long looking up a plugin's consent waits before the action is held
+/// and the answer awaited at the next passes.
+const LOOK_WAIT: Duration = Duration::from_millis(30);
+
+/// A plugin's capabilities asked for before one of its actions runs. The
+/// broker's answers (what the plugin lacks, a grant that stops the plugin
+/// running) come from a thread of their own: a plugin's lock is held
+/// through its handshake, and a grant waits for its stop.
+pub(crate) enum Consent {
+    /// What the plugin lacks is being looked up; the action is held.
+    Looking {
+        then: Asked,
+        answer: Receiver<Option<Asking>>,
+    },
+    /// The dialog asks the person.
+    Asking(Asking),
+    /// Allowed: the capabilities are being granted (the plugin running is
+    /// stopped meanwhile); the action runs again once they are.
+    Granting {
+        then: Asked,
+        answer: Receiver<Result<(), String>>,
+    },
+}
+
+/// What the consent dialog asks.
+pub(crate) struct Asking {
     /// The plugin's id.
-    pub(crate) plugin: String,
+    plugin: String,
     /// Its name, as shown.
     title: String,
     /// What it lacks, each with its manifest's reason.
@@ -106,6 +144,117 @@ pub(crate) struct Consent {
     then: Asked,
     /// The person said no: the calm word is shown until closed.
     declined: bool,
+}
+
+/// The accounts' read, on a thread of its own: each pass asks for one,
+/// and waits for it at most [`READ_WAIT`].
+#[derive(Default)]
+struct Reader {
+    shared: Arc<(Mutex<Read>, Condvar)>,
+    started: bool,
+}
+
+#[derive(Default)]
+struct Read {
+    /// Where the accounts are read from.
+    book: Option<Arc<dyn AccountBook>>,
+    /// The reads asked, and the last one answered.
+    asked: u64,
+    done: u64,
+    /// The accounts the last read found.
+    list: Vec<Account>,
+    /// Asks the window for a pass.
+    wake: Option<Wake>,
+    /// A pass stopped waiting for the read going: its answer asks for a
+    /// pass of its own.
+    late: bool,
+    /// The window is gone: the thread ends.
+    stop: bool,
+}
+
+impl Reader {
+    /// The accounts in `book`, read again unless a read already runs late:
+    /// as read within [`READ_WAIT`], else as last read.
+    fn read(&mut self, book: &Arc<dyn AccountBook>, wake: Option<&Wake>) -> Vec<Account> {
+        let (lock, ready) = &*self.shared;
+        let mut read = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        read.book = Some(book.clone());
+        read.wake = wake.cloned();
+        if read.late {
+            return read.list.clone();
+        }
+        if !self.started {
+            self.started = true;
+            let shared = self.shared.clone();
+            let spawned = std::thread::Builder::new()
+                .name("import-accounts".into())
+                .spawn(move || read_accounts(&shared));
+            if let Err(e) = spawned {
+                log::warn!("import accounts: {e}");
+                return read.list.clone();
+            }
+        }
+        read.asked += 1;
+        let asked = read.asked;
+        ready.notify_all();
+        let deadline = Instant::now() + READ_WAIT;
+        while read.done < asked {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                read.late = true;
+                break;
+            }
+            read = ready
+                .wait_timeout(read, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        read.list.clone()
+    }
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        let (lock, ready) = &*self.shared;
+        lock.lock().unwrap_or_else(PoisonError::into_inner).stop = true;
+        ready.notify_all();
+    }
+}
+
+/// The reading thread: reads the accounts each time a pass asks (the asks
+/// that came during a read answered by the next one), never holding the
+/// shared state while the vault is read.
+fn read_accounts(shared: &(Mutex<Read>, Condvar)) {
+    let (lock, ready) = shared;
+    loop {
+        let (book, asked) = {
+            let mut read = lock.lock().unwrap_or_else(PoisonError::into_inner);
+            while read.done == read.asked && !read.stop {
+                read = ready.wait(read).unwrap_or_else(PoisonError::into_inner);
+            }
+            if read.stop {
+                return;
+            }
+            (read.book.clone(), read.asked)
+        };
+        let found = book.map(|b| b.accounts());
+        let late = {
+            let mut read = lock.lock().unwrap_or_else(PoisonError::into_inner);
+            read.done = asked;
+            match found {
+                Some(Ok(list)) => read.list = list,
+                Some(Err(e)) => log::warn!("import accounts: {e}"),
+                None => {}
+            }
+            ready.notify_all();
+            std::mem::take(&mut read.late)
+                .then(|| read.wake.clone())
+                .flatten()
+        };
+        if let Some(wake) = late {
+            wake();
+        }
+    }
 }
 
 /// Imports the items a connector listed under a source: the items added.
@@ -183,6 +332,8 @@ impl Default for Accounts {
             secrets: Arc::new(MemorySecrets::default()),
             web: None,
             listed: Vec::new(),
+            reader: Reader::default(),
+            wake: None,
             connecting: None,
             current: Current::default(),
             labels: Labels::default(),
@@ -208,8 +359,6 @@ pub(crate) struct Connecting {
 }
 
 impl Accounts {
-    /// The accounts, read again (a pass of the window: a connection or a
-    /// command may have changed them).
     /// An account's name as last read.
     pub(crate) fn label_of(&self, id: &str) -> Option<String> {
         self.listed
@@ -218,13 +367,14 @@ impl Accounts {
             .map(|a| a.label.clone())
     }
 
+    /// The accounts, read again off the interface's thread: as the read
+    /// finds them when it answers within [`READ_WAIT`], else as last read
+    /// (a vault held by another writer never holds a frame; the late
+    /// answer asks for a pass).
     pub(crate) fn listed(&mut self) -> &[Account] {
         let _stall = crate::stall::section("import window: the accounts read");
         if let Some(book) = &self.book {
-            match book.accounts() {
-                Ok(list) => self.listed = list,
-                Err(e) => log::warn!("import accounts: {e}"),
-            }
+            self.listed = self.reader.read(book, self.wake.as_ref());
         }
         &self.listed
     }
@@ -404,42 +554,110 @@ impl Accounts {
     /// plugin lacks capabilities it declares, so the consent dialog asks
     /// for them and the action is held until Allow. The plugin's id when
     /// it waits.
+    ///
+    /// The broker is asked on a thread of its own (a plugin's lock is held
+    /// through its handshake): an answer within [`LOOK_WAIT`] is used at
+    /// once; a later one holds the action until it comes, and the window's
+    /// pass then asks or runs it ([`consent_dialog`]).
     pub(crate) fn ask_consent(&mut self, asked: &Asked) -> Option<String> {
         let _stall = crate::stall::section("import window: a plugin's consent looked up");
         let broker = self.plugins.clone()?;
         let connector = self.connector_of(asked)?;
-        let plugin = helios_plugin::source::plugin_of(&broker, &connector)?;
-        let capabilities = broker.missing(&plugin).ok()?;
-        if capabilities.is_empty() {
+        let plugin = plugin_serving(&broker, &connector)?;
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (then, wake) = (asked.clone(), self.wake.clone());
+        let spawned = std::thread::Builder::new()
+            .name("plugin-consent".into())
+            .spawn(move || {
+                let asking = look_up(&broker, &connector, then);
+                let _ = tx.send(asking);
+                if let Some(wake) = wake {
+                    wake();
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("plugin consent: {e}");
             return None;
         }
-        let title = broker
-            .manifest(&plugin)
-            .map_or_else(|| plugin.clone(), |m| m.title().to_owned());
-        self.consent = Some(Consent {
-            plugin: plugin.clone(),
-            title,
-            capabilities,
-            then: asked.clone(),
-            declined: false,
-        });
-        Some(plugin)
+        match rx.recv_timeout(LOOK_WAIT) {
+            Ok(Some(asking)) => {
+                let plugin = asking.plugin.clone();
+                self.consent = Some(Consent::Asking(asking));
+                Some(plugin)
+            }
+            Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => None,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                self.consent = Some(Consent::Looking {
+                    then: asked.clone(),
+                    answer: rx,
+                });
+                Some(plugin)
+            }
+        }
     }
 
     /// The person allowed the consent asked: its capabilities granted
-    /// (and kept, by the broker's keeper), the action it held given back
-    /// to run again.
-    fn allow(&mut self) -> Option<Asked> {
+    /// (and kept, by the broker's keeper) on a thread of their own, as a
+    /// grant stops the plugin running and waits for it; the action held
+    /// runs once they are ([`consent_dialog`]).
+    fn allow(&mut self) {
         let _stall = crate::stall::section("import window: a plugin's capabilities granted");
-        let consent = self.consent.take()?;
-        let broker = self.plugins.clone()?;
-        for c in &consent.capabilities {
-            if let Err(e) = broker.grant(&consent.plugin, &c.name) {
-                log::warn!("plugin consent: {e}");
-                return None;
+        let Some(Consent::Asking(asking)) = self.consent.take() else {
+            return;
+        };
+        let Some(broker) = self.plugins.clone() else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let wake = self.wake.clone();
+        let Asking {
+            plugin,
+            capabilities,
+            then,
+            ..
+        } = asking;
+        let spawned = std::thread::Builder::new()
+            .name("plugin-grant".into())
+            .spawn(move || {
+                let granted = capabilities
+                    .iter()
+                    .try_for_each(|c| broker.grant(&plugin, &c.name));
+                let _ = tx.send(granted);
+                if let Some(wake) = wake {
+                    wake();
+                }
+            });
+        match spawned {
+            Ok(_) => {
+                self.consent = Some(Consent::Granting { then, answer: rx });
             }
+            Err(e) => log::warn!("plugin consent: {e}"),
         }
-        Some(consent.then)
+    }
+
+    /// The broker's answer to the consent going, when it came: the action
+    /// to run (nothing lacking, or granted), else nothing; the dialog asks
+    /// when the plugin lacks something.
+    fn follow_consent(&mut self) -> Option<Asked> {
+        let (ran, next) = match self.consent.take()? {
+            Consent::Looking { then, answer } => match answer.try_recv() {
+                Ok(Some(asking)) => (None, Some(Consent::Asking(asking))),
+                Ok(None) | Err(TryRecvError::Disconnected) => (Some(then), None),
+                Err(TryRecvError::Empty) => (None, Some(Consent::Looking { then, answer })),
+            },
+            Consent::Granting { then, answer } => match answer.try_recv() {
+                Ok(Ok(())) => (Some(then), None),
+                Ok(Err(e)) => {
+                    log::warn!("plugin consent: {e}");
+                    (None, None)
+                }
+                Err(TryRecvError::Disconnected) => (None, None),
+                Err(TryRecvError::Empty) => (None, Some(Consent::Granting { then, answer })),
+            },
+            asking @ Consent::Asking(_) => (None, Some(asking)),
+        };
+        self.consent = next;
+        ran
     }
 
     /// The import window closed: the connection running gives up (its
@@ -505,6 +723,44 @@ fn browser_link(ui: &mut egui::Ui, url: &str, opener: &Opener, t: &dyn Fn(Messag
             ui.ctx().copy_text(url.to_owned());
         }
     });
+}
+
+/// What the consent dialog asks before `then`: the capabilities the
+/// plugin serving `connector` lacks; nothing when it lacks none (or is
+/// not enabled). Takes the plugin's lock: never on the interface's thread.
+fn look_up(broker: &helios_plugin::Broker, connector: &str, then: Asked) -> Option<Asking> {
+    let plugin = helios_plugin::source::plugin_of(broker, connector)?;
+    let capabilities = broker.missing(&plugin).ok()?;
+    if capabilities.is_empty() {
+        return None;
+    }
+    let title = broker
+        .manifest(&plugin)
+        .map_or_else(|| plugin.clone(), |m| m.title().to_owned());
+    Some(Asking {
+        plugin,
+        title,
+        capabilities,
+        then,
+        declined: false,
+    })
+}
+
+/// The plugin serving `connector`, from the manifests alone (no plugin's
+/// lock taken: whether it is enabled is the broker's answer, asked off
+/// the interface's thread).
+fn plugin_serving(broker: &helios_plugin::Broker, connector: &str) -> Option<String> {
+    broker
+        .ids()
+        .find(|id| {
+            id.rsplit('.').next() == Some(connector)
+                && broker.manifest(id).is_some_and(|m| {
+                    m.services
+                        .iter()
+                        .any(|s| s == helios_plugin::source::SERVICE)
+                })
+        })
+        .map(String::from)
 }
 
 /// A connector's text in the interface's language.
@@ -626,16 +882,23 @@ pub(crate) fn accounts_ui(
 
 /// The consent dialog, while a plugin's capabilities are asked for: the
 /// plugin's name and id, each capability it lacks with the reason its
-/// manifest gives, Allow and Don't allow. Allow grants them all and gives
-/// back the action held, to run again; Don't allow says calmly that
-/// nothing ran and where to allow them later; Escape closes it, nothing
-/// granted.
+/// manifest gives, Allow and Don't allow. Allow grants them all off the
+/// interface's thread; Don't allow says calmly that nothing ran and where
+/// to allow them later; Escape closes it, nothing granted. The action held
+/// is given back, to run without asking again, once the broker says the
+/// plugin lacks nothing or the grants are done.
 pub(crate) fn consent_dialog(
     ctx: &egui::Context,
     accounts: &mut Accounts,
     t: &dyn Fn(Message) -> String,
 ) -> Option<Asked> {
-    let consent = accounts.consent.as_mut()?;
+    if let Some(ran) = accounts.follow_consent() {
+        ctx.request_repaint();
+        return Some(ran);
+    }
+    let Some(Consent::Asking(consent)) = accounts.consent.as_mut() else {
+        return None;
+    };
     let (mut allow, mut close) = (false, false);
     let shown = egui::Modal::new(egui::Id::unique("helios.plugin.consent")).show(ctx, |ui| {
         ui.set_width(400.0);
@@ -704,7 +967,7 @@ pub(crate) fn consent_dialog(
         accounts.consent = None;
     }
     if allow {
-        return accounts.allow();
+        accounts.allow();
     }
     None
 }

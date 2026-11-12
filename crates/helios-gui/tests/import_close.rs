@@ -2,9 +2,12 @@
 //! window left going (a cold folder being glanced, a source's connection
 //! waiting, a card coming and going, a source's choices being written to
 //! a busy node), the next frame comes within a deadline and the work is
-//! cancelled or left to its own thread, never waited for.
+//! cancelled or left to its own thread, never waited for. A vault held by
+//! another writer never holds the window's frames either: its accounts
+//! are read off the interface's thread.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -12,7 +15,7 @@ use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
-use helios_connect::account::{MemoryAccounts, MemorySecrets};
+use helios_connect::account::{Account, AccountBook, MemoryAccounts, MemorySecrets};
 use helios_connect::fake::FakeProvider;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -137,6 +140,12 @@ fn closing_while_a_sources_connection_waits_gives_it_up_and_comes_back_at_once()
         h.query_by_label("Test server").is_some()
     });
     h.get_by_label("Test server").click();
+    h.run_steps(2);
+    h.get_by_label("Next").click();
+    until(&mut h, "the account step", |h| {
+        h.query_by_label("Sign in to an account…").is_some()
+    });
+    h.get_by_label("Sign in to an account…").click();
     // The connection's thread waits for the form's answer.
     until(&mut h, "the form", |h| connection(h)["state"] == "form");
     // Closed by the system's close button: the connection's dialog over
@@ -249,4 +258,68 @@ fn a_sources_choices_written_to_a_busy_node_hold_neither_a_frame_nor_the_close()
         std::thread::sleep(Duration::from_millis(20));
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A vault another writer may hold: while `held`, each read waits 3 s.
+#[derive(Default)]
+struct HeldVault {
+    accounts: MemoryAccounts,
+    held: AtomicBool,
+}
+
+impl AccountBook for HeldVault {
+    fn accounts(&self) -> Result<Vec<Account>, String> {
+        if self.held.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_secs(3));
+        }
+        self.accounts.accounts()
+    }
+
+    fn save(&self, account: &Account) -> Result<(), String> {
+        self.accounts.save(account)
+    }
+
+    fn remove(&self, id: &str) -> Result<(), String> {
+        self.accounts.remove(id)
+    }
+}
+
+#[test]
+fn a_held_vault_holds_no_frame_of_the_window_and_its_accounts_stay_shown() {
+    let vault = Arc::new(HeldVault::default());
+    vault
+        .save(&Account::new(
+            helios_connect::fake::ID,
+            "Holiday server",
+            &[],
+        ))
+        .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(FakeProvider));
+    shell.set_import_accounts(vault.clone(), Arc::new(MemorySecrets::default()));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run("library.importWindow", Value::Null, Origin::User)
+        .unwrap();
+    until(&mut h, "the account listed", |h| {
+        h.query_by_label("Holiday server").is_some()
+    });
+    // Held for 3 s at each read: the frames go on, the account shown as
+    // last read.
+    vault.held.store(true, Ordering::SeqCst);
+    let end = Instant::now() + Duration::from_millis(3500);
+    while Instant::now() < end {
+        let at = Instant::now();
+        h.step();
+        let took = at.elapsed();
+        assert!(took < DEADLINE, "a frame took {took:?} with the vault held");
+        assert!(
+            h.query_by_label("Holiday server").is_some(),
+            "the account no longer shown"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    vault.held.store(false, Ordering::SeqCst);
+    close_in_time(&mut h, "a held vault");
 }
