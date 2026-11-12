@@ -1387,6 +1387,14 @@ gui-settings-display = Display
 
 gui-settings-experimental = Experimental
 
+gui-settings-for-library = This library
+
+gui-settings-for-library-about = while this library is open
+
+gui-settings-for-workspace = This workspace
+
+gui-settings-for-workspace-about = while this workspace is open
+
 gui-settings-hardware = Hardware
 
 gui-settings-health = Health

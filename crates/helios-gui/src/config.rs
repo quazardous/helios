@@ -44,10 +44,11 @@ use egui_pop::api::admin::model::{
     Action, Clauses as _, Confirmation, FORMAT, Field, FieldKind, Manifest, Records, RowField,
     SectionBuilder, Status, ValueScope, Wizard,
 };
-use egui_pop::api::admin::{ADMIN, Admin};
+use egui_pop::api::admin::{ADMIN, Admin, ExtraScope};
 use egui_pop::api::hooks::On;
 use egui_pop::api::services::ServiceToken;
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
+use egui_pop::core::strings::StrKey;
 use egui_pop::model::commands::Origin;
 use egui_pop::model::ids::{OwnerId, PluginId, SettingId};
 use egui_pop::model::values::{Change, Descriptor, Set, Value as PopValue};
@@ -412,11 +413,39 @@ fn from_json(kind: &Kind, j: &Json) -> Option<Value> {
     }
 }
 
-/// The value scopes a concern's settings may be set in.
+/// The value scope of the open library: a value set for it wins over
+/// the app's while that library is open.
+pub const LIBRARY: ExtraScope = ExtraScope::new(
+    "library",
+    StrKey::new("gui-settings-for-library", "This library"),
+    StrKey::new(
+        "gui-settings-for-library-about",
+        "while this library is open",
+    ),
+);
+
+/// The value scope of the open workspace: a value set for it wins over
+/// the library's and the app's while that workspace is open.
+pub const WORKSPACE: ExtraScope = ExtraScope::new(
+    "workspace",
+    StrKey::new("gui-settings-for-workspace", "This workspace"),
+    StrKey::new(
+        "gui-settings-for-workspace-about",
+        "while this workspace is open",
+    ),
+);
+
+/// The value scopes Helios declares above the app's, lowest first (a
+/// later one wins). A setting is app-wide unless it opts into one.
+pub const SCOPES: [ExtraScope; 2] = [LIBRARY, WORKSPACE];
+
+/// The value scopes above the app's a concern's settings opt into: a
+/// library's defaults may differ per library; everything else is
+/// app-wide.
 pub fn scopes(concern: Concern) -> &'static [ValueScope] {
     match concern {
-        Concern::Machine | Concern::User => &[ValueScope::App],
-        Concern::Project => &[ValueScope::App, ValueScope::Library],
+        Concern::Machine | Concern::User => &[],
+        Concern::Project => &[LIBRARY.scope],
     }
 }
 
@@ -1315,6 +1344,9 @@ impl Plugin for BridgePlugin {
             Some(i) => helios_i18n::message(i, &m),
             None => m.english,
         };
+        for scope in SCOPES {
+            admin.declare_scope(scope);
+        }
         admin.manifest(manifest(&schema, &t));
         let bridge = Bridge::default();
         let dirty = bridge.dirty.clone();
@@ -1377,8 +1409,8 @@ pub fn install(app: &AppHandle, settings: Settings, vault: Option<VaultWriter>, 
         write_store(app, key, &v);
     }
     let project = settings.project().is_some();
-    admin.offer(ValueScope::Library, project);
-    admin.load_layer(app, ValueScope::Library, library_values(&settings));
+    admin.offer(LIBRARY.scope, project);
+    load_scope(app, &admin, LIBRARY.scope, library_values(&settings));
     for s in schema.iter() {
         if let Some(v) = settings.config().value_in(Layer::Run, s.key)
             && let Ok(id) = SettingId::new(s.key)
@@ -1393,6 +1425,46 @@ pub fn install(app: &AppHandle, settings: Settings, vault: Option<VaultWriter>, 
     st.config_dir = Some(config_dir.to_path_buf());
     drop(st);
     bridge.dirty.store(false, Ordering::Relaxed);
+}
+
+/// Fills a value scope's layer with `values`. A value stored for a
+/// setting that does not opt into the scope (one made app-wide since it
+/// was saved) moves to the app's value, with a note in the log, so
+/// nobody silently loses a setting; the layer is loaded without it, and
+/// saved without it on the next write. Returns the keys moved.
+pub fn load_scope(
+    app: &AppHandle,
+    admin: &Admin,
+    scope: ValueScope,
+    values: BTreeMap<String, Json>,
+) -> Vec<String> {
+    let known = |key: &str| {
+        SettingId::new(key)
+            .ok()
+            .filter(|id| egui_pop::core::lock(&app.store()).get(&id.path()).is_some())
+    };
+    let (kept, stray): (BTreeMap<_, _>, BTreeMap<_, _>) = values
+        .into_iter()
+        .partition(|(k, _)| known(k).is_none_or(|id| admin.allows(app, &id, scope)));
+    admin.load_layer(app, scope, kept);
+    let mut moved = Vec::new();
+    for (key, v) in stray {
+        let Some(id) = known(&key) else { continue };
+        // Under a layer that still holds it (the command line), the
+        // app's value is kept aside by the Settings app.
+        if admin.layers().origin(&id.path()) == ValueScope::App {
+            write_store(app, &key, &v);
+        } else if let Err(e) = admin.set_in(app, ValueScope::App, &id, v) {
+            log::warn!("settings: `{key}` set for the {}: {e}", scope.name());
+            continue;
+        }
+        log::info!(
+            "settings: `{key}` is no longer set per {}: its value there moved to the app's",
+            scope.name()
+        );
+        moved.push(key);
+    }
+    moved
 }
 
 /// Every setting's `app` value, as the Settings app holds it.
@@ -1504,7 +1576,7 @@ fn reload_followed(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
         }
     }
     if let Some(values) = library {
-        admin.load_layer(app, ValueScope::Library, values);
+        load_scope(app, admin, LIBRARY.scope, values);
     }
 }
 
@@ -1519,8 +1591,12 @@ pub fn open_workspace(app: &AppHandle, file: Option<PathBuf>) {
         .and_then(|f| std::fs::read_to_string(f).ok())
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default();
-    admin.offer(ValueScope::Workspace, file.is_some());
-    admin.load_layer(app, ValueScope::Workspace, values.clone());
+    admin.offer(WORKSPACE.scope, file.is_some());
+    // What was saved: a value moved out of it is written away on the
+    // next pass.
+    if !load_scope(app, &admin, WORKSPACE.scope, values.clone()).is_empty() {
+        bridge.dirty.store(true, Ordering::Relaxed);
+    }
     lock(&bridge.state).workspace = file.map(|f| (f, values));
 }
 
@@ -1557,7 +1633,7 @@ fn sync(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
             }
             if s.concern == Concern::Project && library {
                 let lib_v = layers
-                    .value_in(ValueScope::Library, &path, &now)
+                    .value_in(LIBRARY.scope, &path, &now)
                     .and_then(|j| from_json(&s.kind, &j));
                 if let Err(e) = settings.set(Layer::Project, s.key, lib_v) {
                     problems.push(e);
@@ -1591,7 +1667,7 @@ fn sync(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
             }
         }
     }
-    let workspace = admin.export_layer(ValueScope::Workspace);
+    let workspace = admin.export_layer(WORKSPACE.scope);
     if let Some((file, saved)) = st.workspace.as_mut()
         && *saved != workspace
     {
@@ -1709,7 +1785,7 @@ mod tests {
                 }
                 _ => None,
             });
-        assert_eq!(decisions, Some(vec![ValueScope::App, ValueScope::Library]));
+        assert_eq!(decisions, Some(vec![LIBRARY.scope]));
         // Every descriptor reads its own default back.
         for s in schema.iter() {
             let d = descriptor(s);

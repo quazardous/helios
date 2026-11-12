@@ -1973,3 +1973,11 @@ gui-settings-client-used = Client utilisé
 gui-settings-clients-about = Helios se connecte à ces services avec son propre client OAuth. Pour utiliser le vôtre à la place (une application de bureau que vous avez enregistrée auprès du service), donnez son ID client et son code secret : ils restent dans le trousseau de cet ordinateur. Reconnectez-vous ensuite.
 
 gui-settings-clients-none = Aucun service se connectant par OAuth n’est installé.
+
+gui-settings-for-library = Cette bibliothèque
+
+gui-settings-for-library-about = tant que cette bibliothèque est ouverte
+
+gui-settings-for-workspace = Cet espace de travail
+
+gui-settings-for-workspace-about = tant que cet espace de travail est ouvert

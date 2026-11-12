@@ -2,7 +2,9 @@
 //! once in Helios's scopes, each with the value scopes of its concern,
 //! read from their layers (the library's as `library`, `--set` as the
 //! command line's) and written back to the layer they belong to; a
-//! layer another client of the node changes is read again.
+//! layer another client of the node changes is read again. A setting is
+//! app-wide unless it opts into Helios's library or workspace scope, and
+//! a value stored at a scope it no longer allows moves to the app's.
 
 use std::sync::{Arc, Mutex};
 
@@ -11,6 +13,7 @@ use egui_kittest::kittest::Queryable;
 use egui_pop::api::admin::ADMIN;
 use egui_pop::api::admin::model::ValueScope;
 use egui_pop::model::ids::SettingId;
+use helios_gui::config::LIBRARY;
 use helios_gui::config::{self, Settings, Sources};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -102,13 +105,13 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
     let layers = admin.layers();
     assert_eq!(
         layers.origin("settings/project.decisions.mode"),
-        ValueScope::Library
+        LIBRARY.scope
     );
     assert_eq!(
         layers.origin("settings/system.scheduler.workers"),
         ValueScope::Run
     );
-    assert!(admin.offered().contains(&ValueScope::Library));
+    assert!(admin.offered().contains(&LIBRARY.scope));
     assert!(
         written.lock().unwrap().is_empty(),
         "nothing written by reading"
@@ -300,7 +303,7 @@ fn a_layer_another_client_of_the_node_changes_is_read_again() {
     let admin = app.service(&ADMIN).unwrap();
     assert_eq!(
         admin.layers().origin("settings/project.decisions.mode"),
-        ValueScope::Library
+        LIBRARY.scope
     );
     assert!(
         written.lock().unwrap().is_empty(),
@@ -312,5 +315,118 @@ fn a_layer_another_client_of_the_node_changes_is_read_again() {
         "the other client's change stays"
     );
     node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn only_a_setting_that_opts_into_a_scope_offers_set_for_and_a_stray_value_moves_to_the_app() {
+    let shell = Shell::new(helios_panels(), None);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let dir = std::env::temp_dir().join(format!("helios-settings-scopes-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = Settings::resolve(&Sources {
+        project: Some(("project//photos".into(), None)),
+        ..Sources::default()
+    });
+    let app = h.state().app().handle().clone();
+    config::install(&app, settings, None, &dir);
+    // A workspace saved when every setting could be set per workspace.
+    let file = dir.join("workspace-settings.json");
+    std::fs::write(
+        &file,
+        json!({ "system.cache.share": 12.5, "project.decisions.mode": "human" }).to_string(),
+    )
+    .unwrap();
+    config::open_workspace(&app, Some(file.clone()));
+    h.run();
+    h.run();
+    let admin = app.service(&ADMIN).unwrap();
+    assert_eq!(admin.extra_scopes(), config::SCOPES.to_vec());
+    let id = |k: &str| SettingId::new(k).unwrap();
+    assert!(admin.allows(&app, &id("project.decisions.mode"), LIBRARY.scope));
+    assert!(!admin.allows(&app, &id("project.decisions.mode"), config::WORKSPACE.scope));
+    assert!(!admin.allows(&app, &id("system.ai.calls"), LIBRARY.scope));
+
+    // The stray workspace values moved to the app's, out of the file.
+    assert!(admin.export_layer(config::WORKSPACE.scope).is_empty());
+    assert_eq!(app.setting::<f64>(&id("system.cache.share")), Some(12.5));
+    assert_eq!(
+        app.setting::<String>(&id("project.decisions.mode"))
+            .as_deref(),
+        Some("human")
+    );
+    assert_eq!(
+        admin.layers().origin("settings/system.cache.share"),
+        ValueScope::App
+    );
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved, json!({}), "the workspace saved without them");
+
+    // A library value of an app-wide setting moves the same way; the
+    // library's own defaults stay in its layer.
+    let moved = config::load_scope(
+        &app,
+        &admin,
+        LIBRARY.scope,
+        [
+            ("system.ai.calls".to_string(), json!(5)),
+            ("project.decisions.mode".to_string(), json!("full_ai")),
+        ]
+        .into(),
+    );
+    assert_eq!(moved, ["system.ai.calls"]);
+    assert_eq!(app.setting::<i64>(&id("system.ai.calls")), Some(5));
+    assert_eq!(
+        admin.layers().origin("settings/system.ai.calls"),
+        ValueScope::App
+    );
+    assert_eq!(
+        admin.layers().origin("settings/project.decisions.mode"),
+        LIBRARY.scope
+    );
+    assert!(
+        admin
+            .set_in(&app, LIBRARY.scope, &id("system.ai.calls"), json!(3))
+            .is_err(),
+        "an app-wide setting is refused a library value"
+    );
+
+    // An app-wide setting: its editor, no "Set for".
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "key": "system.ai.calls" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    h.run();
+    h.get_by_role_and_label(egui::accesskit::Role::Slider, "Model calls at once");
+    h.get_by_label("Reset Model calls at once");
+    assert!(
+        h.query_by_label("Where Model calls at once is set")
+            .is_none()
+    );
+    // A library default: "Set for", with Helios's label for the library
+    // and none for the workspace it did not opt into.
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "key": "project.decisions.mode" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    h.run();
+    h.get_by_label("Where Decision nodes is set").click();
+    h.run();
+    h.run();
+    // The library holds its value: the choice shows it, and the list
+    // offers it.
+    assert!(h.query_all_by_label("This library").count() >= 2);
+    assert!(h.query_by_label("This workspace").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

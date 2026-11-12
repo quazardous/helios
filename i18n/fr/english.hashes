@@ -902,6 +902,10 @@ gui-settings-client-secret-help ff6bef489d9fb945
 gui-settings-client-used d70743dff9830cdb
 gui-settings-clients-about 4f89dc59e77824ec
 gui-settings-clients-none fb198b093026243f
+gui-settings-for-library 675618c602c695ec
+gui-settings-for-library-about fc084d12ec9c6881
+gui-settings-for-workspace fd397a7452b7fe8e
+gui-settings-for-workspace-about 74fc5dad0d4c8b3b
 gui-settings-health 7633e8a1583e45e7
 gui-settings-health-check c1e913ce62823067
 gui-settings-plugin-granted 2c8c84258a75df83
