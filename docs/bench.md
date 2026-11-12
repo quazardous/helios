@@ -591,12 +591,13 @@ What happens on `next`:
   a time.
 
 **Before queuing**
-- Run the narrowest job first. A Helios fix loop runs `test-crate
-  crate=<crate> test=<target> filter=<name>` (seconds of tests); before the
-  merge, `test-affected` once. A green `test-affected` is not followed by
-  `test` on the same branch: on Helios it reaches nearly the whole suite
-  (2026-11-08: 1,370 to 1,440 of 1,440 tests), so `test` would run it
-  twice. `test` is for the daily run and releases.
+- Run the narrowest job first. A Helios change is tested with `test-crate
+  crate=<crate> test=<target> filter=<name>` on the crates and targets it
+  touched, and nothing wider: no `test-affected` and no `--affected`
+  before a merge (rule 3 of "The next branch"). On Helios they reach
+  nearly the whole suite (2026-11-08: 1,370 to 1,440 of 1,440 tests),
+  which `next`'s CI already runs. `test-affected` and `test` are for the
+  daily run and releases.
 - A test that fails, then passes on nextest's retry (`retries = 1` in the
   `ci` profile), is reported FLAKY and the run stays green; each flaky test
   gets a ticket and a fix, never a lasting place in the suite.
@@ -611,9 +612,8 @@ What happens on `next`:
 - The GPU and timing jobs (`gpu`, `gpu-intel`, `egui-pop-gpu-tiles`,
   `egui-pop-threading`, `egui-pop-perf`, `start-timing`, `quit-timing`, `test-times`, `thumb-bench`, the
   parity and bench jobs) run before a release only, queued by one agent
-  given that job, never by the agents writing code. Helios's own
-  suite still runs on the box (`test-affected`, `test`): its GitHub CI runs
-  format and clippy only.
+  given that job, never by the agents writing code. Helios's whole suite
+  runs in `next`'s CI (nextest on the workspace, survival, Windows).
 - A new test has a deadline on every wait (a child process, a window, a
   file, a socket reply) and fails fast. Tests run under nextest, which stops
   a test after 120 s; `cargo survival` runs under nextest too.
