@@ -235,6 +235,17 @@ panels, activity and status bars), panels declared rather than hard-coded,
 every action a named command reachable from menus, shortcuts, the palette,
 agents and tests. Shortcuts follow darktable's where they fit a clear
 credo (decided 2026-10-21, see docs/gui.md, "Keyboard shortcuts").
+**The node and its windows** (2026-11-12, decided by the owner): the
+headless core (the library, the vault, the jobs, the kernel) is the
+Helios node, the same one that can run on a server; every OS window, the
+main one included, is a GUI client view of it. Quitting is the node's
+policy, not a window's: Ctrl+Q quits from any window, Ctrl+W closes one
+window, Helios stays open while any of its windows exists, and closing
+the last window follows the same rule as Ctrl+Q. Ctrl+Q stops the local
+node only when the desktop started it; a remote node and its jobs keep
+running. Every window has a menu bar with at least a Window menu. See
+docs/design/windows.md, section 7; the full node and client split is
+still to be analysed (not decided).
 
 **Helios makes darktable and vkdt meet** (2026-10-11, decided as the
 long-term goal). darktable brings compatibility (edits, workflow, users) and
