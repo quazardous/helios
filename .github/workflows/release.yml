@@ -348,3 +348,35 @@ jobs:
           fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Helios $VERSION" --notes-file dist/release-notes.md "${files[@]}"
+
+  # The new version on winget (docs/releases.md, "winget"): a pull request
+  # on microsoft/winget-pkgs from the quazardous fork, opened by
+  # winget-releaser (komac) from the installer just published and the
+  # manifests of the version before it. Needs the WINGET_TOKEN secret (a
+  # classic token with public_repo); without it the job says so and ends.
+  # A failure here never fails the release: the Release is already out.
+  winget:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      HAS_WINGET_TOKEN: ${{ secrets.WINGET_TOKEN != '' }}
+    steps:
+      - name: token
+        if: env.HAS_WINGET_TOKEN != 'true'
+        run: |
+          msg="WINGET_TOKEN is not set: no winget-pkgs pull request for $TAG (docs/releases.md, \"winget\")"
+          echo "::notice::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main, 2026-10-07
+        if: env.HAS_WINGET_TOKEN == 'true'
+        with:
+          identifier: Quazardous.Helios
+          release-tag: ${{ env.TAG }}
+          installers-regex: '-windows-x86_64-setup\.exe$'
+          release-notes-url: https://github.com/quazardous/helios/releases/tag/${{ env.TAG }}
+          fork-user: quazardous
+          token: ${{ secrets.WINGET_TOKEN }}
