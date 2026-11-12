@@ -37,6 +37,7 @@ use storage::VolumeId;
 pub mod capture;
 pub mod catalog;
 pub mod changed;
+pub mod claims;
 pub mod contract;
 pub mod edit;
 pub mod fields;
