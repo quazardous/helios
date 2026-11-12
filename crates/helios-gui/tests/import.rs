@@ -2058,6 +2058,43 @@ fn a_card_plugged_in_again_shows_its_glances_from_disk_and_reads_only_a_changed_
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn a_folder_opened_again_after_a_restart_reads_its_glances_from_disk_and_nothing_else() {
+    const N: usize = 12;
+    let dir = temp("folder-disk");
+    let folder = dir.join("Shoot");
+    photos(&folder, N, 320, 240);
+    let glances = helios_gui::import_scan::GlanceCache::global();
+    let cache = dir.join("cache");
+    glances.open_disk(&cache).unwrap();
+    let open = || {
+        let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+        h.run();
+        let source = json!({ "source": folder.display().to_string() });
+        h.state_mut()
+            .run("library.importWindow", source, Origin::User)
+            .unwrap();
+        read_through(&mut h);
+        h
+    };
+    // First opened: every file read, its glance kept on disk under the
+    // folder's source.
+    let h = open();
+    let first = h.state().import_glances();
+    assert_eq!((first.read, first.from_disk), (N, 0), "{first:?}");
+    assert_eq!(glances.disk().unwrap().usage().1, N);
+    drop(h);
+    // A restart: RAM empty, the disk tier listed anew.
+    glances.forget_ram();
+    glances.open_disk(&cache).unwrap();
+    let h = open();
+    let again = h.state().import_glances();
+    assert_eq!(again.read, 0, "opened again, files were read: {again:?}");
+    assert_eq!((again.cached, again.from_disk), (N, N), "{again:?}");
+    assert_eq!(h.state().import_cells().len(), N);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Opens the import window in an OS window of its own (real viewports, as
 /// on the desktop), its sources read: the harness and the window's
 /// viewport.

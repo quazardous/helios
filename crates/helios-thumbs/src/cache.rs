@@ -520,6 +520,7 @@ impl Store for ThumbCache {
             bytes: 0,
             pinned: 0,
             budget: Some(self.limit),
+            shown: None,
         });
         for (rel, bytes) in index.entries.iter() {
             let u = &mut usage[usize::from(kind_of(rel).id == THUMB_LARGE.id)];

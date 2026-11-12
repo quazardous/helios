@@ -11,13 +11,17 @@
 //!   one's glance (its smallest embedded preview at the cell's size and its
 //!   capture time, [`helios_load::glance_at`], never a raw decoded), read
 //!   on a few threads ([`glancers`]), the files the window wants first
-//!   (the cells in view, then the next screen), then the rest in order.
+//!   (the cells in view, then the next screen), then the rest in order
+//!   while the glance cache has room for it without evicting a glance
+//!   shown.
 //! - [`GlanceCache`]: the glances kept in RAM by path, size and
 //!   modification time (the cache service's `import.glance`, with a
-//!   budget), so a window opened again or scrolled back reads nothing; a
-//!   card's also on disk by the card's volume, the path on it, size and
-//!   modification time, so a card plugged in again (after a restart, at
-//!   another mount point) shows its glances without a read.
+//!   budget), so a window opened again or scrolled back reads nothing;
+//!   also on disk by the source (a card's volume, a folder's path), the
+//!   path in it, size and modification time, so a card plugged in again
+//!   (after a restart, at another mount point) or a folder opened again
+//!   shows its glances without a read. The glances shown in a cell are
+//!   kept longest; those only read ahead go first.
 //! - [`Prefilter`]: whether a file is probably in the Library already, a
 //!   lookup on the image map first (a Library image's file seen at that
 //!   path, unchanged since: known without a read), then by size, then by
@@ -31,13 +35,13 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use chrono::{NaiveDate, NaiveDateTime, TimeZone};
 use egui::ColorImage;
-use helios_cache::{Counters, Disk, IMPORT_GLANCE, Scope, Service, Store, Tier, Usage};
+use helios_cache::{Counters, Disk, IMPORT_GLANCE, Lru, Scope, Service, Store, Tier, Usage};
 use helios_connect::{
     Access, Cancel, Connector, ConnectorError, ConnectorServices, Cursor, Item, ItemRef, PAGE,
     ProviderRef, Settings, SourceRef, Text,
@@ -481,6 +485,17 @@ struct Stats {
     busy: AtomicUsize,
     /// The most files read at once.
     peak: AtomicUsize,
+    /// The bytes its prefetched glances added to the cache's RAM tier and
+    /// to its disk tier, and the last one's in each: what the budget rule
+    /// counts ([`GlanceCache::room`]).
+    own_ram: AtomicU64,
+    own_disk: AtomicU64,
+    last_ram: AtomicU64,
+    last_disk: AtomicU64,
+    /// The rest of the source waits for room in the cache.
+    paused: AtomicBool,
+    /// The cache's generation its own glances were counted in.
+    generation: AtomicU64,
 }
 
 /// What a scan's glances did, so far.
@@ -494,6 +509,9 @@ pub struct Glances {
     pub from_disk: usize,
     /// The most files read at once.
     pub peak: usize,
+    /// The rest of the source waits for room in the glance cache: reading
+    /// it on would evict a glance shown.
+    pub paused: bool,
 }
 
 impl std::ops::Add for Glances {
@@ -504,6 +522,7 @@ impl std::ops::Add for Glances {
             cached: self.cached + o.cached,
             from_disk: self.from_disk + o.from_disk,
             peak: self.peak.max(o.peak),
+            paused: self.paused || o.paused,
         }
     }
 }
@@ -531,32 +550,53 @@ impl Picking {
         }
     }
 
+    #[cfg(test)]
     fn pick(&mut self, wanted: &[PathBuf]) -> Option<usize> {
+        self.pick_within(wanted, true).map(|(at, _)| at)
+    }
+
+    /// The next file, and whether it is wanted; the rest in order only
+    /// when `rest` (the cache has room for it).
+    fn pick_within(&mut self, wanted: &[PathBuf], rest: bool) -> Option<(usize, bool)> {
         let first = wanted
             .iter()
             .filter_map(|p| self.index.get(p).copied())
             .find(|&i| !self.taken[i]);
-        let at = first.or_else(|| {
-            while self.next < self.taken.len() && self.taken[self.next] {
-                self.next += 1;
-            }
-            (self.next < self.taken.len()).then_some(self.next)
-        })?;
+        let (at, wanted) = match first {
+            Some(at) => (at, true),
+            None if rest => (self.first_left()?, false),
+            None => return None,
+        };
         self.taken[at] = true;
-        Some(at)
+        Some((at, wanted))
+    }
+
+    /// The first file in order not taken yet.
+    fn first_left(&mut self) -> Option<usize> {
+        while self.next < self.taken.len() && self.taken[self.next] {
+            self.next += 1;
+        }
+        (self.next < self.taken.len()).then_some(self.next)
+    }
+
+    /// Every file taken.
+    fn done(&mut self) -> bool {
+        self.first_left().is_none()
     }
 }
 
-/// A file's glance, read or from the cache: its RAM tier, then, for a
-/// card's file (`on_disk`, its key there), its disk tier.
+/// A file's glance, read or from the cache: its RAM tier, then (`on_disk`,
+/// its key there) its disk tier. A glance read is put in both, prefetched;
+/// one `prefetch`ed (the rest of the source, not a cell wanted) counts in
+/// what the scan added to the cache.
 fn glance_one(
+    cache: &GlanceCache,
     path: &Path,
     bytes: u64,
     modified: Option<i64>,
     on_disk: Option<&str>,
-    stats: &Stats,
+    (stats, prefetch): (&Stats, bool),
 ) -> Arc<Glanced> {
-    let cache = GlanceCache::global();
     let key = (path.to_path_buf(), bytes, modified);
     if let Some(hit) = cache.get(&key) {
         stats.cached.fetch_add(1, Ordering::Relaxed);
@@ -565,6 +605,9 @@ fn glance_one(
     if let Some(hit) = on_disk.and_then(|k| cache.disk_glance(k, key.clone())) {
         stats.cached.fetch_add(1, Ordering::Relaxed);
         stats.from_disk.fetch_add(1, Ordering::Relaxed);
+        if prefetch {
+            stats.own(hit.bytes(), 0);
+        }
         return hit;
     }
     let busy = stats.busy.fetch_add(1, Ordering::SeqCst) + 1;
@@ -588,29 +631,68 @@ fn glance_one(
     stats.busy.fetch_sub(1, Ordering::SeqCst);
     stats.read.fetch_add(1, Ordering::Relaxed);
     let glanced = Arc::new(glanced);
-    cache.put(key, glanced.clone(), started.elapsed());
-    if let Some(k) = on_disk {
-        cache.keep_on_disk(k, &glanced);
+    cache.put_as(
+        key,
+        glanced.clone(),
+        started.elapsed(),
+        on_disk.map(str::to_owned),
+    );
+    let written = on_disk.map_or(0, |k| cache.keep_on_disk(k, &glanced));
+    if prefetch {
+        stats.own(glanced.bytes(), written);
     }
     glanced
 }
 
-/// The disk key of a card's file: the card's volume, the file's path on
-/// it, its size and modification time. The same card mounted elsewhere,
-/// or after a restart, finds it; a file changed has another.
+impl Stats {
+    /// Counts a glance this scan put in the cache: `ram` bytes in RAM,
+    /// `disk` written on disk.
+    fn own(&self, ram: u64, disk: u64) {
+        self.own_ram.fetch_add(ram, Ordering::Relaxed);
+        self.last_ram.store(ram, Ordering::Relaxed);
+        if disk > 0 {
+            self.own_disk.fetch_add(disk, Ordering::Relaxed);
+            self.last_disk.store(disk, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether the cache has room for the next prefetched glance. Once
+    /// the cache was cleared, what this scan put before is gone: counted
+    /// anew.
+    fn room(&self, cache: &GlanceCache, on_disk: bool) -> bool {
+        let generation = cache.generation();
+        if self.generation.swap(generation, Ordering::Relaxed) != generation {
+            self.own_ram.store(0, Ordering::Relaxed);
+            self.own_disk.store(0, Ordering::Relaxed);
+        }
+        let get = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        cache.room(
+            (get(&self.own_ram), get(&self.last_ram)),
+            on_disk.then(|| (get(&self.own_disk), get(&self.last_disk))),
+        )
+    }
+}
+
+/// The disk key of a source's file: the source (a card's volume, else the
+/// connector and the source's id: a saved folder's path), the file's path
+/// in it, its size and modification time. The same card mounted
+/// elsewhere, or a source opened again after a restart, finds it; a file
+/// changed has another.
 pub fn disk_key(volume: &str, on_card: &Path, bytes: u64, modified: Option<i64>) -> String {
     let path = on_card.to_string_lossy();
     let modified = modified.map_or_else(String::new, |m| m.to_string());
     format!("{volume}\n{path}\n{bytes}\n{modified}")
 }
 
-/// The volume a scanned source is and its mount point, for a card: the
-/// key its glances are kept under on disk.
-fn card_volume(source: &SourceRef) -> Option<(String, PathBuf)> {
-    if source.connector != helios_connect::card::ID {
-        return None;
-    }
+/// What a scanned source's glances are kept under on disk, and its root
+/// (the paths in it are relative to it): a card's volume, so a card
+/// mounted elsewhere finds them; any other source read in place by its
+/// connector and id (a folder: its path, as the saved sources keep it).
+fn disk_place(source: &SourceRef) -> Option<(String, PathBuf)> {
     let root = source.root.clone()?;
+    if source.connector != helios_connect::card::ID {
+        return Some((format!("{}:{}", source.connector, source.id), root));
+    }
     let card = Card {
         label: source.label.clone(),
         root: root.clone(),
@@ -761,23 +843,57 @@ type GlanceKey = (PathBuf, u64, Option<i64>);
 /// The RAM budget of the glances: 192 MiB, about a thousand previews.
 pub const GLANCE_BUDGET: u64 = 192 << 20;
 
+/// How much later a glance shown goes than one only prefetched put at the
+/// same time, on the cache's clock: every prefetched glance goes first.
+const SHOWN: u64 = 1 << 62;
+
 #[derive(Default)]
 struct GlanceIndex {
-    entries: HashMap<GlanceKey, (Arc<Glanced>, u64)>,
+    /// Each glance and its key on disk, when kept there too.
+    entries: HashMap<GlanceKey, (Arc<Glanced>, Option<String>)>,
+    /// The eviction order: prefetched glances first, then the ones shown,
+    /// least recently shown first.
+    order: Lru<GlanceKey>,
+    /// The glances shown in a cell.
+    shown: HashSet<GlanceKey>,
+    shown_bytes: u64,
     clock: u64,
-    bytes: u64,
+}
+
+impl GlanceIndex {
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+}
+
+/// How much of the glance cache is shown and prefetched.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GlanceSplit {
+    /// Glances shown in a cell: bytes and count.
+    pub shown: (u64, usize),
+    /// Glances only prefetched (the rest of a source): bytes and count.
+    pub prefetched: (u64, usize),
 }
 
 /// The import window's glances, kept in RAM within a budget (the cache
-/// service's kind `import.glance`), least recently used first out. Keyed
-/// by path, size and modification time: a file changed is read again.
+/// service's kind `import.glance`). Keyed by path, size and modification
+/// time: a file changed is read again.
+///
+/// Two kinds of use: a glance a scan reads (the rest of a source,
+/// prefetched) enters cold, and goes before every glance shown in a cell
+/// ([`GlanceCache::show`]), which go least recently shown first. A
+/// prefetched glance shown joins them. Its disk tier, once opened, keeps
+/// the same two kinds ([`Disk::put_cold`], [`Disk::warm`]).
 pub struct GlanceCache {
     index: Mutex<GlanceIndex>,
     budget: u64,
     counters: Arc<Counters>,
-    /// Its disk tier, once opened ([`GlanceCache::open_disk`]): the
-    /// cards' glances.
+    /// Its disk tier, once opened ([`GlanceCache::open_disk`]).
     disk: Mutex<Option<Arc<Disk>>>,
+    /// Bumped when it is cleared or forgotten: room came back, the scans
+    /// waiting for it count their own glances anew.
+    generation: AtomicU64,
 }
 
 impl GlanceCache {
@@ -787,6 +903,7 @@ impl GlanceCache {
             budget,
             counters: Service::global().counters(&Scope::Shared, &IMPORT_GLANCE),
             disk: Mutex::default(),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -798,11 +915,19 @@ impl GlanceCache {
     /// # Errors
     /// The folder cannot be made.
     pub fn open_disk(&self, root: &Path) -> std::io::Result<()> {
+        self.open_disk_within(root, GLANCE_DISK_BUDGET)
+    }
+
+    /// [`GlanceCache::open_disk`] with a budget of `limit` bytes.
+    ///
+    /// # Errors
+    /// The folder cannot be made.
+    pub fn open_disk_within(&self, root: &Path, limit: u64) -> std::io::Result<()> {
         let disk = Arc::new(Disk::open(
             root,
             IMPORT_GLANCE,
             Scope::Shared,
-            GLANCE_DISK_BUDGET,
+            limit,
             std::time::SystemTime::now(),
         )?);
         disk.attach();
@@ -815,31 +940,75 @@ impl GlanceCache {
         lock(&self.disk).clone()
     }
 
-    /// Forgets its RAM tier, the disk tier kept: what a restart leaves.
-    pub fn forget_ram(&self) {
-        let mut index = lock(&self.index);
-        index.entries.clear();
-        index.bytes = 0;
+    /// Its RAM budget.
+    pub fn budget(&self) -> u64 {
+        self.budget
     }
 
-    /// The glance kept on disk under `on_disk`, put in RAM under `key`.
+    /// Forgets its RAM tier, the disk tier kept: what a restart leaves.
+    pub fn forget_ram(&self) {
+        *lock(&self.index) = GlanceIndex::default();
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Changes when it is cleared or forgotten (room came back).
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    /// How much of its RAM tier is shown and prefetched.
+    pub fn split(&self) -> GlanceSplit {
+        let index = lock(&self.index);
+        GlanceSplit {
+            shown: (index.shown_bytes, index.shown.len()),
+            prefetched: (
+                index.order.bytes() - index.shown_bytes,
+                index.entries.len() - index.shown.len(),
+            ),
+        }
+    }
+
+    /// Whether a scan may prefetch one more glance: its RAM tier (and its
+    /// disk tier, `on_disk`) takes `next` bytes more on top of the glances
+    /// shown and the `own` the scan prefetched, without evicting a glance
+    /// shown. Each is (own, next) in bytes.
+    fn room(&self, ram: (u64, u64), on_disk: Option<(u64, u64)>) -> bool {
+        let shown = lock(&self.index).shown_bytes;
+        let fits = |used: u64, (own, next): (u64, u64), budget: u64| {
+            used.saturating_add(own).saturating_add(next) <= helios_cache::eviction_target(budget)
+        };
+        fits(shown, ram, self.budget)
+            && match (on_disk, self.disk()) {
+                (Some(d), Some(disk)) => fits(disk.used_bytes(), d, disk.limit()),
+                _ => true,
+            }
+    }
+
+    /// The glance kept on disk under `on_disk`, put in RAM under `key`;
+    /// read, not used: a prefetched glance stays prefetched.
     fn disk_glance(&self, on_disk: &str, key: GlanceKey) -> Option<Arc<Glanced>> {
         let disk = self.disk()?;
-        let bytes = disk.get(on_disk.as_bytes())?;
+        let bytes = disk.read(on_disk.as_bytes())?;
         let Some(glanced) = decode_glance(&bytes) else {
             disk.remove(on_disk.as_bytes());
             return None;
         };
         let glanced = Arc::new(glanced);
-        self.put(key, glanced.clone(), std::time::Duration::ZERO);
+        self.put_as(
+            key,
+            glanced.clone(),
+            std::time::Duration::ZERO,
+            Some(on_disk.to_owned()),
+        );
         Some(glanced)
     }
 
-    /// Keeps `glanced` on disk under `on_disk`; an entry already there is
-    /// replaced only by a better one (a larger preview, a capture time or
-    /// a camera it lacks).
-    fn keep_on_disk(&self, on_disk: &str, glanced: &Glanced) {
-        let Some(disk) = self.disk() else { return };
+    /// Keeps `glanced` on disk under `on_disk`, prefetched (a glance
+    /// already shown stays shown); an entry already there is replaced only
+    /// by a better one (a larger preview, a capture time or a camera it
+    /// lacks). The bytes written.
+    fn keep_on_disk(&self, on_disk: &str, glanced: &Glanced) -> u64 {
+        let Some(disk) = self.disk() else { return 0 };
         let key = on_disk.as_bytes();
         if let Some(old) = disk.peek(key).as_deref().and_then(glance_header) {
             let rank_old = glance_rank(old.size, old.taken.is_some(), old.camera.is_some());
@@ -849,15 +1018,19 @@ impl GlanceCache {
                 glanced.camera.is_some(),
             );
             if rank_new <= rank_old {
-                return;
+                return 0;
             }
         }
         let bytes = encode_glance(glanced);
         if bytes.is_empty() {
-            return;
+            return 0;
         }
-        if let Err(e) = disk.put(key, &bytes) {
-            log::debug!("import glances on disk: {e}");
+        match disk.put_cold(key, &bytes) {
+            Ok(()) => bytes.len() as u64,
+            Err(e) => {
+                log::debug!("import glances on disk: {e}");
+                0
+            }
         }
     }
 
@@ -874,28 +1047,55 @@ impl GlanceCache {
 
     /// The glance of the file at `path` of `bytes`, changed at `modified`,
     /// when kept: what the window shows with the file's cell, on the frame
-    /// that draws it (a miss is not counted: the scan asks again).
+    /// that draws it (a miss is not counted: the scan asks again). Not a
+    /// showing: [`GlanceCache::show`] says the cell is in view.
     pub fn cached(&self, path: &Path, bytes: u64, modified: Option<i64>) -> Option<Arc<Glanced>> {
         let key = (path.to_path_buf(), bytes, modified);
         let mut index = lock(&self.index);
-        index.clock += 1;
-        let now = index.clock;
-        let (glanced, used) = index.entries.get_mut(&key)?;
-        *used = now;
-        let hit = glanced.clone();
+        let now = index.tick();
+        let hit = index.entries.get(&key)?.0.clone();
+        index.order.touch(&key, now);
         drop(index);
         Counters::add(&self.counters.hits, 1);
         Some(hit)
     }
 
+    /// The glance of the file at `path` of `bytes`, changed at `modified`,
+    /// shown in a cell now: it goes after every prefetched glance and
+    /// every glance shown before. `None` when it is not kept; else its key
+    /// on disk when it was not shown before (to [`GlanceCache::warm`] off
+    /// the interface thread).
+    pub fn show(&self, path: &Path, bytes: u64, modified: Option<i64>) -> Option<Option<String>> {
+        let key = (path.to_path_buf(), bytes, modified);
+        let mut index = lock(&self.index);
+        let now = index.tick();
+        let on_disk = index.entries.get(&key)?.1.clone();
+        index.order.touch_with(&key, now, SHOWN);
+        if !index.shown.insert(key.clone()) {
+            return Some(None);
+        }
+        index.shown_bytes += index.order.size(&key).unwrap_or(0);
+        Some(on_disk)
+    }
+
+    /// Marks the glances kept on disk under `keys` shown there too: they
+    /// outlive the prefetched ones across a restart. Writes to disk: never
+    /// on the interface thread.
+    pub fn warm(&self, keys: &[String]) {
+        if let Some(disk) = self.disk() {
+            for k in keys {
+                disk.warm(k.as_bytes());
+            }
+        }
+    }
+
     fn get(&self, key: &GlanceKey) -> Option<Arc<Glanced>> {
         let mut index = lock(&self.index);
-        index.clock += 1;
-        let now = index.clock;
-        let hit = index.entries.get_mut(key).map(|(g, used)| {
-            *used = now;
-            g.clone()
-        });
+        let now = index.tick();
+        let hit = index.entries.get(key).map(|(g, _)| g.clone());
+        if hit.is_some() {
+            index.order.touch(key, now);
+        }
         let counter = if hit.is_some() {
             &self.counters.hits
         } else {
@@ -905,7 +1105,21 @@ impl GlanceCache {
         hit
     }
 
+    #[cfg(test)]
     fn put(&self, key: GlanceKey, glanced: Arc<Glanced>, took: std::time::Duration) {
+        self.put_as(key, glanced, took, None);
+    }
+
+    /// Keeps `glanced` under `key`, prefetched (a glance shown before
+    /// stays shown), with its key on disk; then evicts down to 90 % of the
+    /// budget when over it, prefetched glances first.
+    fn put_as(
+        &self,
+        key: GlanceKey,
+        glanced: Arc<Glanced>,
+        took: std::time::Duration,
+        on_disk: Option<String>,
+    ) {
         let bytes = glanced.bytes();
         Counters::add(&self.counters.bytes_written, bytes);
         Counters::add(
@@ -913,30 +1127,29 @@ impl GlanceCache {
             u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
         );
         let mut index = lock(&self.index);
-        index.clock += 1;
-        let now = index.clock;
-        if let Some((old, _)) = index.entries.insert(key, (glanced, now)) {
-            index.bytes -= old.bytes();
+        let now = index.tick();
+        let shown = index.shown.contains(&key);
+        let on_disk = on_disk.or_else(|| index.entries.get(&key).and_then(|e| e.1.clone()));
+        if let Some(old) =
+            index
+                .order
+                .insert(key.clone(), bytes, now, if shown { SHOWN } else { 0 })
+            && shown
+        {
+            index.shown_bytes = index.shown_bytes - old + bytes;
         }
-        index.bytes += bytes;
-        if index.bytes > self.budget {
+        index.entries.insert(key.clone(), (glanced, on_disk));
+        if index.order.bytes() > self.budget {
             // Down to 90 % at once, so a full cache does not evict at
             // every write.
             let target = helios_cache::eviction_target(self.budget);
-            let mut by_age: Vec<(u64, GlanceKey)> = index
-                .entries
-                .iter()
-                .map(|(k, (_, used))| (*used, k.clone()))
-                .collect();
-            by_age.sort_unstable_by_key(|(used, _)| *used);
-            for (_, k) in by_age {
-                if index.bytes <= target {
-                    break;
+            let gone = index.order.evict(target, |k| *k == key);
+            for (k, bytes) in gone {
+                index.entries.remove(&k);
+                if index.shown.remove(&k) {
+                    index.shown_bytes -= bytes;
                 }
-                if let Some((g, _)) = index.entries.remove(&k) {
-                    index.bytes -= g.bytes();
-                    Counters::add(&self.counters.evictions, 1);
-                }
+                Counters::add(&self.counters.evictions, 1);
             }
         }
     }
@@ -950,9 +1163,10 @@ impl Store for GlanceCache {
             kind: IMPORT_GLANCE,
             tier: Tier::Ram,
             entries: index.entries.len() as u64,
-            bytes: index.bytes,
+            bytes: index.order.bytes(),
             pinned: 0,
             budget: Some(self.budget),
+            shown: Some(index.shown_bytes),
         }]
     }
 
@@ -961,10 +1175,10 @@ impl Store for GlanceCache {
             return 0;
         }
         let mut index = lock(&self.index);
-        let freed = index.bytes;
+        let freed = index.order.bytes();
         Counters::add(&self.counters.cleared, index.entries.len() as u64);
-        index.entries.clear();
-        index.bytes = 0;
+        *index = GlanceIndex::default();
+        self.generation.fetch_add(1, Ordering::SeqCst);
         freed
     }
 }
@@ -973,12 +1187,34 @@ impl Scan {
     /// Starts reading `source`; `wake` is called (from the threads) when
     /// something was sent. With `map`, what is listed and glanced is
     /// recorded in the image map as `seen_by` (no file is read for it).
-    /// The files in `wanted` are glanced at first.
+    /// The files in `wanted` are glanced at first, then the rest in order
+    /// while the glance cache has room for it without evicting a glance
+    /// shown: else the rest waits (the scan says [`Scanned::Done`]) and
+    /// goes on when room comes back.
     pub fn start(
-        (connector, listed_source): (Arc<dyn Connector>, SourceRef),
+        listed: (Arc<dyn Connector>, SourceRef),
         source: PathBuf,
         known: Option<Known>,
         map: Option<(MapRecorder, &'static str)>,
+        wanted: Wanted,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        Self::start_in(
+            GlanceCache::global().clone(),
+            listed,
+            source,
+            (known, map),
+            wanted,
+            wake,
+        )
+    }
+
+    /// [`Scan::start`] with its glances kept in `cache`.
+    pub fn start_in(
+        cache: Arc<GlanceCache>,
+        (connector, listed_source): (Arc<dyn Connector>, SourceRef),
+        source: PathBuf,
+        (known, map): (Option<Known>, Option<(MapRecorder, &'static str)>),
         wanted: Wanted,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
@@ -1002,8 +1238,8 @@ impl Scan {
                     }
                 };
                 let prefilter = known.map(|k| Prefilter::of(k())).unwrap_or_default();
-                // A card's glances are kept on disk too, by its volume.
-                let volume = card_volume(&listed_source);
+                // The glances are kept on disk too, by the source.
+                let volume = disk_place(&listed_source);
                 let mut recorder = map.and_then(|(make, seen_by)| make(seen_by));
                 let mut listed = Vec::with_capacity(items.len());
                 for item in items {
@@ -1052,6 +1288,16 @@ impl Scan {
                 // The glances, on a few threads, the files wanted first.
                 let picking = Mutex::new(Picking::new(listed.iter().map(|f| &f.0)));
                 let recorder = Mutex::new(recorder);
+                let on_disk = volume.is_some();
+                // Said once: every file glanced, or the rest waiting for
+                // room in the cache.
+                let said_done = AtomicBool::new(false);
+                let say_done = |sender: &std::sync::mpsc::Sender<Scanned>| {
+                    if !said_done.swap(true, Ordering::SeqCst) {
+                        let _ = sender.send(Scanned::Done);
+                        wake();
+                    }
+                };
                 let (listed, picking, recorder, wanted, wake, stopped, stats, now_reading) = (
                     &listed,
                     &picking,
@@ -1062,6 +1308,7 @@ impl Scan {
                     &counted,
                     &now_reading,
                 );
+                let (cache, say_done, source) = (&cache, &say_done, &source);
                 std::thread::scope(|threads| {
                     for _ in 0..glancers().min(listed.len()) {
                         let sender = sender.clone();
@@ -1070,15 +1317,48 @@ impl Scan {
                                 if stopped.load(Ordering::Relaxed) {
                                     return;
                                 }
+                                let room = stats.room(cache, on_disk);
                                 let next = {
                                     let wanted = lock(wanted);
-                                    lock(picking).pick(&wanted)
+                                    let mut picking = lock(picking);
+                                    match picking.pick_within(&wanted, room) {
+                                        Some(next) => Ok(next),
+                                        None => Err(picking.done()),
+                                    }
                                 };
-                                let Some(i) = next else { return };
+                                let (i, was_wanted) = match next {
+                                    Ok(next) => next,
+                                    Err(true) => return,
+                                    Err(false) => {
+                                        // No room for the rest: it waits,
+                                        // the cells wanted still read.
+                                        if !stats.paused.swap(true, Ordering::Relaxed) {
+                                            log::debug!(
+                                                "import scan: the rest of {} waits for room in the glance cache",
+                                                source.display()
+                                            );
+                                            // What was glanced so far is
+                                            // recorded while it waits.
+                                            if let Some(r) = lock(recorder).as_mut() {
+                                                r.flush();
+                                            }
+                                        }
+                                        say_done(&sender);
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        continue;
+                                    }
+                                };
+                                stats.paused.store(false, Ordering::Relaxed);
                                 let (path, bytes, modified, on_disk) = &listed[i];
                                 lock(now_reading).clone_from(path);
-                                let g =
-                                    glance_one(path, *bytes, *modified, on_disk.as_deref(), stats);
+                                let g = glance_one(
+                                    cache,
+                                    path,
+                                    *bytes,
+                                    *modified,
+                                    on_disk.as_deref(),
+                                    (stats, !was_wanted),
+                                );
                                 if let Some(r) = lock(recorder).as_mut() {
                                     // The camera's local time, kept as if it
                                     // were UTC.
@@ -1105,8 +1385,7 @@ impl Scan {
                 if let Some(r) = lock(recorder).take() {
                     r.finish();
                 }
-                let _ = sender.send(Scanned::Done);
-                wake();
+                say_done(&sender);
             });
         if let Err(e) = spawned {
             log::warn!("import scan: no thread: {e}");
@@ -1133,6 +1412,7 @@ impl Scan {
             cached: self.stats.cached.load(Ordering::Relaxed),
             from_disk: self.stats.from_disk.load(Ordering::Relaxed),
             peak: self.stats.peak.load(Ordering::Relaxed),
+            paused: self.stats.paused.load(Ordering::Relaxed),
         }
     }
 
@@ -1313,6 +1593,8 @@ pub struct Contents {
     /// A cell by (folder, stem) for pairs, or by path.
     by_key: HashMap<PathBuf, usize>,
     by_path: HashMap<PathBuf, usize>,
+    /// Each file's size and modification time: its glance's key.
+    files: HashMap<PathBuf, (u64, Option<i64>)>,
     pub types: Types,
     /// Images already in the Library are greyed and left out.
     pub new_only: bool,
@@ -1401,6 +1683,8 @@ impl Contents {
         if found.key.is_some() {
             cell.key = found.key;
         }
+        self.files
+            .insert(found.path.clone(), (found.bytes, found.modified));
         self.by_path.insert(found.path, at);
         self.order = None;
         self.revision += 1;
@@ -1444,6 +1728,11 @@ impl Contents {
         self.by_path.get(path).copied()
     }
 
+    /// The size and modification time of the file at `path`, as listed.
+    pub fn file_facts(&self, path: &Path) -> Option<(u64, Option<i64>)> {
+        self.files.get(path).copied()
+    }
+
     /// Removes the cells of the sources not in `sources`.
     pub fn keep_sources(&mut self, sources: &[PathBuf]) {
         if self.cells.iter().all(|c| sources.contains(&c.source)) {
@@ -1460,6 +1749,8 @@ impl Contents {
             }
             self.cells.push(cell);
         }
+        let by_path = &self.by_path;
+        self.files.retain(|p, _| by_path.contains_key(p));
         self.order = None;
         self.revision += 1;
     }
@@ -1625,6 +1916,124 @@ mod tests {
         assert_eq!(usage[0].kind.id, "import.glance");
         assert!(cache.clear(Some("import.glance")) > 0);
         assert!(cache.get(&key(0)).is_none());
+    }
+
+    #[test]
+    fn a_shown_glance_outlives_prefetched_ones_at_eviction() {
+        let glanced = || {
+            Arc::new(Glanced {
+                thumb: Some(ColorImage::filled([16, 16], egui::Color32::GRAY)),
+                ..Glanced::default()
+            })
+        };
+        let each = glanced().bytes();
+        let cache = GlanceCache::new(each * 3);
+        let key = |i: u64| (PathBuf::from(format!("/g/{i}.jpg")), i, Some(1));
+        let took = std::time::Duration::ZERO;
+        // The oldest is shown; then two prefetched, used again after it.
+        cache.put(key(0), glanced(), took);
+        assert_eq!(cache.show(&key(0).0, 0, Some(1)), Some(None));
+        cache.put(key(1), glanced(), took);
+        cache.put(key(2), glanced(), took);
+        assert!(cache.get(&key(1)).is_some());
+        assert_eq!(cache.show(Path::new("/g/9.jpg"), 9, Some(1)), None);
+        assert_eq!(
+            cache.split(),
+            GlanceSplit {
+                shown: (each, 1),
+                prefetched: (each * 2, 2)
+            }
+        );
+        // Over the budget: the prefetched go, the shown one stays.
+        cache.put(key(3), glanced(), took);
+        assert!(cache.get(&key(0)).is_some(), "the shown glance evicted");
+        assert!(cache.get(&key(1)).is_none() && cache.get(&key(2)).is_none());
+        // A prefetched glance shown joins the shown ones; prefetched
+        // again, it stays shown.
+        assert_eq!(cache.show(&key(3).0, 3, Some(1)), Some(None));
+        cache.put(key(3), glanced(), took);
+        assert_eq!(cache.split().shown, (each * 2, 2));
+        // Then the shown go, least recently shown first.
+        cache.show(&key(0).0, 0, Some(1));
+        cache.put(key(4), glanced(), took);
+        cache.put(key(5), glanced(), took);
+        assert!(cache.get(&key(4)).is_none(), "a prefetched one first");
+        assert!(
+            cache.get(&key(3)).is_none(),
+            "the least recently shown kept"
+        );
+        assert!(cache.get(&key(0)).is_some() && cache.get(&key(5)).is_some());
+    }
+
+    /// Steps until `done` holds, at most `within`.
+    fn wait_for(within: std::time::Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = std::time::Instant::now() + within;
+        while std::time::Instant::now() < deadline {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        done()
+    }
+
+    #[test]
+    fn prefetch_stops_at_the_budget_without_evicting_a_shown_glance_and_resumes() {
+        const N: usize = 24;
+        let dir = temp("budget");
+        for i in 0..N {
+            let img = image::RgbImage::from_pixel(96, 64, image::Rgb([i as u8 * 9, 80, 160]));
+            img.save(dir.join(format!("IMG_{i:04}.JPG"))).unwrap();
+        }
+        // One glance's size, as read.
+        let first = dir.join("IMG_0000.JPG");
+        let read = glance_one(
+            &GlanceCache::new(GLANCE_BUDGET),
+            &first,
+            std::fs::metadata(&first).unwrap().len(),
+            None,
+            None,
+            (&Stats::default(), false),
+        );
+        let each = read.bytes();
+        assert!(each > 1_000, "no preview read: {each} bytes");
+        // Room for about eight glances on top of the one shown.
+        let cache = Arc::new(GlanceCache::new(each * 11));
+        let shown = PathBuf::from("/elsewhere/shown.jpg");
+        cache.put((shown.clone(), 1, Some(1)), read, std::time::Duration::ZERO);
+        assert!(cache.show(&shown, 1, Some(1)).is_some());
+        let listed = Connectors::default().for_path(&dir).unwrap();
+        let scan = Scan::start_in(
+            cache.clone(),
+            listed,
+            dir.clone(),
+            (None, None),
+            Wanted::default(),
+            || {},
+        );
+        let deadline = std::time::Duration::from_secs(30);
+        assert!(
+            wait_for(deadline, || scan.glances().paused),
+            "never paused: {:?}",
+            scan.glances()
+        );
+        let paused = scan.glances();
+        assert!(paused.read < N, "read the whole source: {paused:?}");
+        assert!(paused.read >= 4, "stopped early: {paused:?}");
+        // Paused: said done for now, nothing evicted that was shown.
+        assert!(scan.take().iter().any(|s| matches!(s, Scanned::Done)));
+        assert!(cache.cached(&shown, 1, Some(1)).is_some());
+        assert_eq!(cache.split().shown.1, 1);
+        assert!(cache.usage()[0].bytes <= each * 11);
+        // Room comes back (the cache cleared): the rest goes on.
+        cache.clear(None);
+        assert!(
+            wait_for(deadline, || scan.glances().read > paused.read),
+            "never resumed: {:?}",
+            scan.glances()
+        );
+        drop(scan);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

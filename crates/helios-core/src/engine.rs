@@ -671,6 +671,7 @@ impl helios_cache::Store for RenderStore {
             bytes: cache.order.bytes(),
             pinned: cache.pins.len() as u64,
             budget: None,
+            shown: None,
         }]
     }
 

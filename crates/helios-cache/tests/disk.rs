@@ -97,3 +97,39 @@ fn an_older_versions_folder_is_deleted_and_clearing_empties_the_tier() {
     assert!(!disk.file_of(b"k").exists());
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_shown_entry_outlives_prefetched_ones_even_newer_and_across_a_reopening() {
+    let root = temp("shown");
+    let disk = open(&root, 100, SystemTime::now());
+    // Shown first (the oldest), then three prefetched after it.
+    disk.put(b"shown", &[0; 30]).unwrap();
+    for i in 0..2u8 {
+        std::thread::sleep(Duration::from_millis(2));
+        disk.put_cold(&[i], &[i; 30]).unwrap();
+    }
+    assert!(disk.is_used(b"shown") && !disk.is_used(&[0]));
+    assert_eq!(disk.split(), ((30, 1), (60, 2)));
+    // A prefetched entry read back is not used by it.
+    assert!(disk.read(&[0]).is_some() && !disk.is_used(&[0]));
+    drop(disk);
+    let disk = open(&root, 100, SystemTime::now());
+    assert_eq!(disk.split(), ((30, 1), (60, 2)), "kinds kept on disk");
+    // Over the budget: the prefetched go first, oldest first, never the
+    // shown one although it is the oldest.
+    std::thread::sleep(Duration::from_millis(2));
+    disk.put_cold(&[2], &[2; 30]).unwrap();
+    assert!(disk.contains(b"shown"));
+    assert!(!disk.contains(&[0]) && disk.contains(&[1]) && disk.contains(&[2]));
+    // Shown, a prefetched one joins the shown ones: the next prefetch
+    // takes the other.
+    assert!(disk.warm(&[1]));
+    assert!(disk.file_of(&[1]).extension().is_some_and(|e| e == "entry"));
+    std::thread::sleep(Duration::from_millis(2));
+    disk.put_cold(&[3], &[3; 30]).unwrap();
+    assert!(disk.contains(b"shown") && disk.contains(&[1]) && !disk.contains(&[2]));
+    // Prefetched again, a shown entry stays shown.
+    disk.put_cold(&[1], &[9; 30]).unwrap();
+    assert!(disk.is_used(&[1]));
+    let _ = std::fs::remove_dir_all(&root);
+}

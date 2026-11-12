@@ -41,7 +41,7 @@ limit and its default. "None" means nothing bounds it.
 | 10 | Large thumbnails (`Library::large_textures`) | VRAM | image id | **none** (freed when a render lands) | explicit | none | pool `Loader::large` / Compare | render lands | none | `thumbnails.rs` |
 | 11 | Loupe stand-in (`Viewport::stand_in`) | VRAM | the image opened | one texture | replaced when the render is complete | none | `Shell::open_from_library` / viewport | render complete | none | `thumbnails.rs` |
 | 12 | Head renders (`Library::Heads`) | VRAM (texture) + the render's `Image` in RAM via the render cache | image id + version + size | **none** | stale entries replaced; never evicted | none | `head_render::spawn` on the viewport's engine / Compare | generation per image (edit or network change) | none | `compare_heads.rs` |
-| 13 | Import window glances (`import_scan::GlanceCache`, kind `import.glance`), then its textures (`import_browser`) | RAM (`ColorImage` at 256 px), a card's also on disk (`$XDG_CACHE_HOME/helios/import.glance`), then VRAM | RAM: path + size + mtime; disk: the card's volume + path on it + size + mtime (a Library file seen unchanged: its image's `thumb.256` entry) | 192 MiB in RAM, 256 MiB on disk (LRU, down to 90 %); a frame's upload count is capped for the textures | LRU; on disk also pruned when unused for 30 days; textures removed when a path leaves the listing | none | scan glance (embedded preview, scaled in 8 bits first), the library thumbnail cache / import grid | a changed file has another key | `usage()` (bytes, count), hits and misses | `import.rs`, `import_snapshots.rs`, `helios-cache/tests/disk.rs` |
+| 13 | Import window glances (`import_scan::GlanceCache`, kind `import.glance`), then its textures (`import_browser`) | RAM (`ColorImage` at 256 px), also on disk for every source read in place (`$XDG_CACHE_HOME/helios/import.glance`), then VRAM | RAM: path + size + mtime; disk: the source (a card's volume, else connector + source id: a folder's path) + path in it + size + mtime (a Library file seen unchanged: its image's `thumb.256` entry) | 192 MiB in RAM, 256 MiB on disk (down to 90 %); a frame's upload count is capped for the textures | prefetched glances first (oldest first), then the shown ones least recently shown first (on disk: `.cold` vs `.entry`); a scan's read-ahead stops rather than evict a shown glance; on disk also pruned when unused for 30 days; textures removed when a path leaves the listing | none | scan glance (embedded preview, scaled in 8 bits first), the library thumbnail cache / import grid | a changed file has another key | `usage()` (bytes, count), hits and misses | `import.rs`, `import_snapshots.rs`, `helios-cache/tests/disk.rs` |
 | 14 | Import scan memo (`import_scan`: `seen`, `by_size`) | RAM | path → (size, mtime); size → hashes | none, one scan | dropped with the scan | none | the scan | per scan | none | `import.rs` |
 | 15 | Image map (sightings) | disk (the vault file) | path + size + mtime → content hash | `system.map.limit` | forgetting rules (`system.map.keepMissing`) | `system.map.*` | import scans, `thumb_check` / import window, thumbnail keys | re-check | rows | `helios-library` unit tests |
 | 16 | Resolver memo (`helios_resolve::Cached`) | RAM, in `helios-node` | `Request::key` (pixels + brief) | **none** | never | none | AI and HTTP resolvers / decision nodes | none (same question, same answer) | none | `helios-resolve` tests |
@@ -505,9 +505,22 @@ measured where speed is at stake (`thumb-bench`, the engine's
    (`helios_cache::Disk`, see "The disk tier"), keyed by the card's
    volume, the path on it, size and modification time, pruned when
    unused for 30 days: a card plugged in again reads only the files that
-   changed. Not done yet: linking a glance to the content hash once the
-   file is hashed, an offline card's cells shown from its disk glances,
-   and folders' glances on disk.
+   changed. 2026-11-12, later: two kinds of use. A glance shown in a cell
+   is used (last use now); one only read ahead for the rest of a source
+   enters cold and goes before every shown one, then the shown ones by
+   last showing; showing a cold glance warms it, on disk too (the file
+   renamed from `.cold` to `.entry`, so it holds across a restart). A
+   scan reads the rest of a source only while the RAM tier (and the disk
+   tier) hold the shown glances, what the scan read ahead and one more
+   under 90 % of the budget; else the rest waits, the cells in view still
+   read, and goes on once the cache is cleared. Every source read in
+   place keeps its glances on disk (a folder by its connector and path,
+   the saved source's key); the Caches page says how much is shown and
+   read ahead. Not done yet: remote sources' glances (a connector's
+   thumbnails, keyed by connector, account, item id and revision, read
+   within the connector's own limits), linking a glance to the content
+   hash once the file is hashed, and an offline card's cells shown from
+   its disk glances.
 7. **The small stores.** `resolve.answer` (16, bounded), `kit.compiled`
    (17), `plugin.bundle` (18), `ai.download` (19) registered in the user
    cache scope, so the page lists and clears them; the plugin protocol's

@@ -131,6 +131,7 @@ impl Store for Fake {
                 bytes: entries.iter().filter(|e| e.0 == kind.id).map(|e| e.1).sum(),
                 pinned: 0,
                 budget: None,
+                shown: None,
             })
             .collect()
     }

@@ -168,10 +168,12 @@ pub const GLANCE_UNUSED: Duration = Duration::from_hours(30 * 24);
 /// The import window's glances of files not yet in the Library: each
 /// file's small preview, capture time and camera, kept in RAM by path,
 /// size and modification time (no content hash is read before an import),
-/// so the window opened again or scrolled back reads nothing; a card's
-/// also on disk by the card's volume, the path on it, size and
-/// modification time, so a card plugged in again, even after a restart or
-/// at another mount point, shows its previews without a read.
+/// so the window opened again or scrolled back reads nothing; also on disk
+/// by the source (a card's volume, a folder's path), the path in it, size
+/// and modification time, so a card plugged in again, even after a
+/// restart or at another mount point, or a folder opened again shows its
+/// previews without a read. The previews shown are kept longest, those
+/// only read ahead go first.
 pub const IMPORT_GLANCE: Kind = Kind {
     id: "import.glance",
     title: "Import previews",
@@ -219,6 +221,9 @@ pub struct Usage {
     pub pinned: u64,
     /// The scope's own budget in this tier, for a silo with one.
     pub budget: Option<u64>,
+    /// Of its bytes, those shown, for a kind that tells them from the
+    /// ones only prefetched (import glances): the prefetched go first.
+    pub shown: Option<u64>,
 }
 
 /// A cache attached to the service: it says what it holds and clears it.
@@ -400,6 +405,10 @@ impl Service {
                     u.bytes += usage.bytes;
                     u.pinned += usage.pinned;
                     u.budget = u.budget.or(usage.budget);
+                    u.shown = match (u.shown, usage.shown) {
+                        (None, None) => None,
+                        (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+                    };
                 }
             }
         }
@@ -449,6 +458,7 @@ impl Service {
                     "bytes": u.bytes,
                     "pinned": u.pinned,
                     "budget": u.budget,
+                    "shown": u.shown,
                     "identity": match u.kind.identity {
                         Identity::Content => "content",
                         Identity::Path => "path",
