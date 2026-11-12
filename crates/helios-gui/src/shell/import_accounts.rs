@@ -140,7 +140,10 @@ impl Accounts {
     /// Signs an account out: its secrets forgotten, "not connected".
     pub(crate) fn sign_out(&mut self, id: &str) -> Result<(), String> {
         let book = self.book.clone().ok_or("accounts need a library open")?;
-        helios_connect::account::sign_out(book.as_ref(), self.secrets.as_ref(), id)?;
+        match &self.web {
+            Some(web) => web.sign_out(book.as_ref(), self.secrets.as_ref(), id)?,
+            None => helios_connect::account::sign_out(book.as_ref(), self.secrets.as_ref(), id)?,
+        };
         Ok(())
     }
 

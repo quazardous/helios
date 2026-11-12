@@ -24,7 +24,7 @@ use std::sync::{Arc, PoisonError};
 
 use helios_connect::ProviderRef;
 use helios_connect::account::{Account, AccountBook, AccountState, Secrets};
-use helios_connect::connect::{FieldKind, Session, Status};
+use helios_connect::connect::{FieldKind, Session, Status, WebSteps};
 use helios_core::Message;
 use helios_shell::commands::{CommandSpec, Origin};
 use serde_json::{Value, json};
@@ -57,7 +57,7 @@ impl Shell {
     /// secrets in `secrets` (the system keyring), and declares the
     /// commands that read and change them.
     pub fn set_import_accounts(&mut self, book: Arc<dyn AccountBook>, secrets: Arc<dyn Secrets>) {
-        let (current, labels) = {
+        let (current, labels, web) = {
             let mut w = self.import.get_mut();
             w.accounts.book = Some(book.clone());
             w.accounts.secrets = secrets.clone();
@@ -68,9 +68,16 @@ impl Shell {
                     .unwrap_or_else(PoisonError::into_inner)
                     .insert(id, label);
             }
-            (w.accounts.current.clone(), labels)
+            (w.accounts.current.clone(), labels, w.accounts.web.clone())
         };
-        self.register_account_commands(&book, &secrets, &current, &labels);
+        self.register_account_commands(&book, &secrets, web, &current, &labels);
+    }
+
+    /// Runs the steps that reach a service (`oauth`: the browser sign-in,
+    /// its tokens renewed and revoked) through `web`. Called before
+    /// [`Shell::set_import_accounts`], so signing out revokes too.
+    pub fn set_import_sign_in(&mut self, web: Arc<dyn WebSteps>) {
+        self.import.get_mut().accounts.web = Some(web);
     }
 
     /// Adds an import connector (a plugin's, a test's): its sources join
@@ -95,6 +102,7 @@ impl Shell {
         &mut self,
         book: &Arc<dyn AccountBook>,
         secrets: &Arc<dyn Secrets>,
+        web: Option<Arc<dyn WebSteps>>,
         current: &Current,
         labels: &Labels,
     ) {
@@ -129,7 +137,10 @@ impl Shell {
             ),
             move |args, _| {
                 let id = arg(args, "account")?;
-                let account = helios_connect::account::sign_out(b.as_ref(), s.as_ref(), id)?;
+                let account = match &web {
+                    Some(web) => web.sign_out(b.as_ref(), s.as_ref(), id)?,
+                    None => helios_connect::account::sign_out(b.as_ref(), s.as_ref(), id)?,
+                };
                 Ok(json!({ "account": account.id, "state": account.state.name() }))
             },
         );

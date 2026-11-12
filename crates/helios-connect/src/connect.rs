@@ -171,6 +171,17 @@ pub trait WebSteps: Send + Sync {
         browser: &dyn Fn(&str),
         cancel: &Cancel,
     ) -> Result<(), String>;
+
+    /// Signs the account `id` out: its tokens revoked where the service
+    /// can, then forgotten ([`crate::account::sign_out`]).
+    fn sign_out(
+        &self,
+        book: &dyn AccountBook,
+        secrets: &dyn Secrets,
+        id: &str,
+    ) -> Result<Account, String> {
+        crate::account::sign_out(book, secrets, id)
+    }
 }
 
 struct Shared {
