@@ -28,7 +28,8 @@
 //! - [`workshop`] (experimental): workshops' measures, zones and
 //!   aiming; [`draft`]: a workshop an AI proposes, checked on a proxy of
 //!   the image and applied as one step; [`session`]: the record of a
-//!   workshop piloted on a test photo.
+//!   workshop piloted on a test photo; [`generalise`]: the rows "Make it
+//!   automatic" proposes from it.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
 //!   stack, shared by the desktop and the MCP server, and the tools
 //!   agents move a workspace's stack with.
@@ -39,6 +40,7 @@ pub mod catalogue;
 pub mod contexts;
 pub mod draft;
 pub mod format;
+pub mod generalise;
 pub mod library;
 pub mod macros;
 pub mod network;
