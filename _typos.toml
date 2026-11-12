@@ -24,6 +24,9 @@ extend-ignore-re = ["PNGs", '"/FO"']
 # THM, the small thumbnail file some cameras write beside a video (DCF).
 THM = "THM"
 thm = "thm"
+# ISO BMFF's track box (`trak`), as the mp4 crates name it.
+trak = "trak"
+traks = "traks"
 # Hald CLUT, the identity-image format of colour lookup tables.
 hald = "hald"
 # Integer pixel coordinates next to `ix`, as in vkdt's shaders.
