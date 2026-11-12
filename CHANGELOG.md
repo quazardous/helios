@@ -24,6 +24,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.80.0] - 2026-11-12
+
+### Added
+
+- Pick photos from a source plugin in the import window: a connected Google Photos account shows "Pick photos…", which opens Google's picker in your browser, waits until you press Done (Cancel stops it), then imports what you picked as copies. A sign-in Google refuses marks the account "needs attention" with Reconnect.
+- A Google Photos source plugin, bundled with Helios: sign in with your own Google OAuth client, pick photos in Google's Photos Picker, and Helios lists, downloads and imports them as copies (Google keeps Exif but drops the location). A refused or revoked access asks to reconnect the account. Setup is in docs/google-photos.md.
+- A right click on a folder or a volume in the Library's Folders section offers "Show in file manager", "Scan this folder" (the folder is read again for new or changed files) and "Import new photos here" (the import window opens on it); greyed for a disk not plugged in. The folder chosen in the tree is kept with the workspace: it is there again when the workspace opens.
+- The Library's Folders section starts at the volumes the photos are on (each disk or card by its name, with how many photos it holds), their folders below. A volume not plugged in is greyed and says when it was last seen; its folders still show their photos, from the thumbnails Helios keeps.
+- Sources that sign in with an online account (OAuth) open the system browser on the service's consent page and get the answer back on a local port, with PKCE. The tokens are kept in the system keyring, renewed when they expire, and revoked on signing out; an access the service no longer honours shows the account as needing attention. The client id comes from the environment (`HELIOS_<SOURCE>_CLIENT_ID`), never built in.
+
+### Changed
+
+- Settings has two panes: a tree of sections on the left, the page on the right, with a divider you can drag and whose width is kept. The import window's carousel follows the thumbnail size control, its middle photo no longer drawn over its neighbours. A folded side bar unfolds on a click anywhere on its strip, and cards, tips and popups stay in a steady order over the panels.
+
+### Fixed
+
+- A backup keeps running when its window closes: it finishes, and any other window's Queue panel shows it. Quitting while a backup runs asks first; confirming cancels it, and the copy under way is recorded before Helios closes the library. The health check keeps its schedule with or without a window.
+- An export keeps running when its window closes: it finishes, and any other window's Queue panel shows it. Quitting while an export runs asks first; confirming cancels it before Helios closes the library.
+- A card or disk plugged in is noticed with the import window closed: the library's node watches the volumes, so the card's toast comes, the import window opened afterwards lists the card, and a backup disk plugged in is backed up, whatever window is open.
+- Ctrl+Q quits Helios from any window, asking first only when jobs are running. Ctrl+W closes the window in front, as its close button does. Closing the main window while the Import window is open no longer quits: the Import window takes its place, and closing the last window quits. The Import window has a short menu bar, with File and a Window menu listing Helios's windows.
+- Window > Main window brings the main window back after it was closed while the Import window was open: the Import window goes back to a window of its own, and the main window shows the library again.
+
 ## [0.79.0] - 2026-11-12
 
 ### Added
