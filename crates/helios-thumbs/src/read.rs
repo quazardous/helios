@@ -162,6 +162,12 @@ pub fn fit(image: RgbImage, long: u32) -> Rgb8 {
 /// # Errors
 /// The file cannot be read.
 pub fn read(path: &Path, long: u32) -> Result<Option<Rgb8>, String> {
+    if Kind::of(path) == Kind::Raw {
+        // A raw's sensor data is left out: its previews and tags are read.
+        let bytes = helios_load::preview_bytes(path)?;
+        let tag = helios_load::raw_orientation(bytes.clone());
+        return Ok(from_bytes_tagged(bytes, Kind::Raw, long, tag));
+    }
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     Ok(from_bytes(bytes, Kind::of(path), long))
 }

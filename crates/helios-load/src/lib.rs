@@ -22,6 +22,7 @@
 
 pub mod capture;
 mod colour;
+pub mod sparse;
 
 pub use colour::{Colour, ColourTag};
 
@@ -93,6 +94,18 @@ fn read(path: &Path) -> Result<(String, Arc<Vec<u8>>), String> {
     Ok((blake3::hash(&bytes).to_hex().to_string(), Arc::new(bytes)))
 }
 
+/// A raw file's bytes for its previews and metadata: its sensor data
+/// left out when its layout allows ([`sparse::read`]), else the whole
+/// file. Not for decoding the mosaic, nor for hashing.
+///
+/// # Errors
+/// The file cannot be read.
+pub fn preview_bytes(path: &Path) -> Result<Arc<Vec<u8>>, String> {
+    let cannot = |e: std::io::Error| format!("cannot read {}: {e}", path.display());
+    let mut file = std::fs::File::open(path).map_err(cannot)?;
+    sparse::read(&mut file).map(Arc::new).map_err(cannot)
+}
+
 /// Loads a file: a raw mosaic with its camera, or a picture in the working space.
 pub fn load(path: &Path) -> Result<Loaded, String> {
     let (hash, bytes) = read(path)?;
@@ -133,7 +146,7 @@ pub fn preview(path: &Path) -> Result<Option<Image>, String> {
 /// # Errors
 /// The file cannot be read, or its format is unknown.
 pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
-    let (_, bytes) = read(path)?;
+    let bytes = preview_bytes(path)?;
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| format!("{}: {e}", path.display()))?;
     let params = RawDecodeParams::default();
@@ -203,11 +216,10 @@ pub fn glance_at(path: &Path, max: Option<u32>) -> Result<Glance, String> {
         Some(m) if img.width().max(img.height()) > m => img.thumbnail(m, m),
         _ => img,
     };
-    // Not hashed: a glance identifies nothing.
-    let bytes =
-        Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?);
     let named = |e: String| format!("{}: {e}", path.display());
+    // Not hashed: a glance identifies nothing.
     if Kind::of(path) == Kind::Raw {
+        let bytes = preview_bytes(path)?;
         let source = RawSource::new_from_shared_vec(bytes);
         let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
         let params = RawDecodeParams::default();
@@ -240,6 +252,8 @@ pub fn glance_at(path: &Path, max: Option<u32>) -> Result<Glance, String> {
             camera,
         });
     }
+    let bytes =
+        Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?);
     let reader = image::ImageReader::new(Cursor::new(&bytes[..]))
         .with_guessed_format()
         .map_err(|e| named(e.to_string()))?;
@@ -304,7 +318,7 @@ pub fn look(path: &Path) -> Result<Look, String> {
             shot: None,
         });
     }
-    let (_, bytes) = read(path)?;
+    let bytes = preview_bytes(path)?;
     let named = |e: String| format!("{}: {e}", path.display());
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
