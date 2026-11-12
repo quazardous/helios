@@ -27,6 +27,7 @@ helios-testkit = { path = "crates/helios-testkit" }
 helios-inspect = { path = "crates/helios-inspect" }
 helios-config = { path = "crates/helios-config" }
 helios-photo = { path = "crates/helios-photo" }
+helios-calibrate = { path = "crates/helios-calibrate" }
 helios-export = { path = "crates/helios-export" }
 helios-decision = { path = "crates/helios-decision" }
 helios-load = { path = "crates/helios-load" }

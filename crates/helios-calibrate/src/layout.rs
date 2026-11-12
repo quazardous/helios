@@ -132,6 +132,39 @@ impl Layout {
         out
     }
 
+    /// The chart drawn as placed, three channels row by row in a `width` ×
+    /// `height` image: each patch's whole square filled with its value in
+    /// `values` (one per patch, in the chart's order), the rest
+    /// `background`. A synthetic shot, for tests and demonstrations.
+    pub fn draw(
+        &self,
+        width: usize,
+        height: usize,
+        values: &[[f64; 3]],
+        background: f32,
+    ) -> Vec<f32> {
+        let chart = self.chart;
+        let half = 0.5 * chart.patch_side;
+        let mut rgb = vec![background; width * height * 3];
+        for y in 0..height {
+            for x in 0..width {
+                let [u, v] = self.to_chart.apply([x as f64 + 0.5, y as f64 + 0.5]);
+                let (i, j) = (u.round(), v.round());
+                if i < 0.0 || j < 0.0 || i >= chart.columns as f64 || j >= chart.rows as f64 {
+                    continue;
+                }
+                if (u - i).abs() > half || (v - j).abs() > half {
+                    continue;
+                }
+                let k = chart.index(i as usize, j as usize);
+                for c in 0..3 {
+                    rgb[(y * width + x) * 3 + c] = values[k][c] as f32;
+                }
+            }
+        }
+        rgb
+    }
+
     /// Patch `k`'s robust statistics in `image` (trimmed at
     /// [`THRESHOLDS`]' rate); `None` when no pixel of the image falls in
     /// its sampling area.
