@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.82.0] - 2026-11-12
+
+### Added
+
+- The person's and the library's settings follow live: when another client of the node changes them, the desktop reads them again and the Settings app shows the new values without a restart. `helios-node --vault` reads and writes these settings through its control endpoints (`helios control settings-get LAYER`, `helios control settings-set LAYER TOML-FILE`, the `settings.layer.get` and `settings.layer.set` requests, also on the batch endpoint), each change announced on its bus as `settings.layerChanged`.
+
 ## [0.81.0] - 2026-11-12
 
 ### Added
