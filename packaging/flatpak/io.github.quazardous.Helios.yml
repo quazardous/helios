@@ -1,8 +1,7 @@
 # The Flatpak of Helios, built from this source tree with no network: the
 # crates come from cargo-sources.json, generated from Cargo.lock by
 # flatpak-builder-tools' cargo generator (packaging/flatpak/build.sh does
-# both). Flathub's copy of this manifest takes the sources from a release
-# tag instead of the tree (docs/flathub.md).
+# both). The bundle it makes ships on each GitHub release.
 app-id: io.github.quazardous.Helios
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
