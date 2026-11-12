@@ -57,6 +57,18 @@ pub fn stats(service: &Service, t: &dyn Fn(Message) -> String) -> Value {
                 "{} · {tier}",
                 k["kind"].as_str().unwrap_or_default()
             ));
+            // A kind that tells shown entries from prefetched ones (the
+            // import previews): how much of each.
+            let size = match k["shown"].as_u64() {
+                Some(shown) => t(Message::new(
+                    "gui-caches-size-shown",
+                    "{ $size }: { $shown } shown, { $prefetched } read ahead",
+                )
+                .with("size", size)
+                .with("shown", size_text(shown))
+                .with("prefetched", size_text(bytes.saturating_sub(shown)))),
+                None => size,
+            };
             k["sizeText"] = json!(size);
         }
     }
@@ -126,4 +138,47 @@ pub fn apply_settings(shell: &Shell, settings: &crate::config::Settings) {
     let budget = render_budget(settings);
     Service::global().set_budget(helios_cache::Tier::Ram, budget.map(|b| b as u64));
     shell.viewport().engine().set_budget(budget);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use helios_cache::{IMPORT_GLANCE, Scope, Store, Tier, Usage};
+    use std::sync::Arc;
+
+    struct Glances;
+
+    impl Store for Glances {
+        fn usage(&self) -> Vec<Usage> {
+            vec![Usage {
+                scope: Scope::Shared,
+                kind: IMPORT_GLANCE,
+                tier: Tier::Disk,
+                entries: 3,
+                bytes: 3 << 20,
+                pinned: 0,
+                budget: Some(256 << 20),
+                shown: Some(1 << 20),
+            }]
+        }
+
+        fn clear(&self, _: Option<&str>) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn the_import_previews_row_says_how_much_is_shown_and_read_ahead() {
+        let service = Service::new();
+        let store: Arc<dyn Store> = Arc::new(Glances);
+        service.attach(Arc::downgrade(&store));
+        let t = |m: Message| m.english;
+        let stats = stats(&service, &t);
+        let row = &stats["kinds"][0];
+        assert_eq!(row["shown"], 1 << 20);
+        assert_eq!(
+            row["sizeText"],
+            "3.0 MiB of 256.0 MiB, 3 entries: 1.0 MiB shown, 2.0 MiB read ahead"
+        );
+    }
 }

@@ -30,6 +30,9 @@ pub struct Lru<K> {
     slots: HashMap<K, Slot>,
     seq: u64,
     bytes: u64,
+    /// The bytes held per bonus: one class's share (the entries shown, of
+    /// a cache whose shown entries have a bonus of their own).
+    by_bonus: HashMap<u64, u64>,
 }
 
 impl<K> Default for Lru<K> {
@@ -39,6 +42,7 @@ impl<K> Default for Lru<K> {
             slots: HashMap::new(),
             seq: 0,
             bytes: 0,
+            by_bonus: HashMap::new(),
         }
     }
 }
@@ -60,6 +64,19 @@ impl<K: Clone + Ord + Hash> Lru<K> {
     /// The bytes its entries hold.
     pub fn bytes(&self) -> u64 {
         self.bytes
+    }
+
+    /// The bytes its entries of bonus `bonus` hold.
+    pub fn bytes_of_bonus(&self, bonus: u64) -> u64 {
+        self.by_bonus.get(&bonus).copied().unwrap_or(0)
+    }
+
+    fn count(&mut self, bonus: u64, add: u64, sub: u64) {
+        let n = self.by_bonus.entry(bonus).or_default();
+        *n = *n + add - sub;
+        if *n == 0 {
+            self.by_bonus.remove(&bonus);
+        }
     }
 
     pub fn contains(&self, key: &K) -> bool {
@@ -104,21 +121,41 @@ impl<K: Clone + Ord + Hash> Lru<K> {
             },
         );
         self.bytes += bytes;
+        self.count(bonus, bytes, 0);
         old
     }
 
     /// Marks `key` used at `now` (its bonus kept); false when it is not
     /// there.
     pub fn touch(&mut self, key: &K, now: u64) -> bool {
+        let Some(bonus) = self.slots.get(key).map(|s| s.bonus) else {
+            return false;
+        };
+        self.touch_with(key, now, bonus)
+    }
+
+    /// Marks `key` used at `now`, going `bonus` later from now on (a
+    /// prefetched entry shown: it joins the entries shown); false when it
+    /// is not there.
+    pub fn touch_with(&mut self, key: &K, now: u64, bonus: u64) -> bool {
         let seq = self.next_seq();
         let Some(slot) = self.slots.get_mut(key) else {
             return false;
         };
         self.order.remove(&(slot.priority, slot.seq, key.clone()));
-        slot.priority = now.saturating_add(slot.bonus);
+        let (was, bytes) = (slot.bonus, slot.bytes);
+        slot.bonus = bonus;
+        slot.priority = now.saturating_add(bonus);
         slot.seq = seq;
         self.order.insert((slot.priority, seq, key.clone()));
+        self.count(was, 0, bytes);
+        self.count(bonus, bytes, 0);
         true
+    }
+
+    /// An entry's bonus, when it is there.
+    pub fn bonus(&self, key: &K) -> Option<u64> {
+        self.slots.get(key).map(|s| s.bonus)
     }
 
     /// Counts `bytes` for `key` from now on (its content grew or was
@@ -128,7 +165,9 @@ impl<K: Clone + Ord + Hash> Lru<K> {
             return false;
         };
         self.bytes = self.bytes - slot.bytes + bytes;
+        let (bonus, was) = (slot.bonus, slot.bytes);
         slot.bytes = bytes;
+        self.count(bonus, bytes, was);
         true
     }
 
@@ -137,6 +176,7 @@ impl<K: Clone + Ord + Hash> Lru<K> {
         let slot = self.slots.remove(key)?;
         self.order.remove(&(slot.priority, slot.seq, key.clone()));
         self.bytes -= slot.bytes;
+        self.count(slot.bonus, 0, slot.bytes);
         Some(slot.bytes)
     }
 
@@ -166,14 +206,15 @@ impl<K: Clone + Ord + Hash> Lru<K> {
         gone
     }
 
-    /// Takes out the entries whose priority (last use plus bonus) is
-    /// before `before`: with no bonus, those not used since. The entries
-    /// taken and their bytes, the oldest first; the cost is the victims'.
+    /// Takes out the entries last used before `before`, whatever their
+    /// bonus. The entries taken and their bytes, lowest priority first; it
+    /// walks every entry (an age limit is applied rarely: when a tier
+    /// opens, on a prune).
     pub fn older_than(&mut self, before: u64) -> Vec<(K, u64)> {
         let gone: Vec<(K, u64)> = self
             .order
             .iter()
-            .take_while(|(priority, _, _)| *priority < before)
+            .filter(|(priority, _, k)| priority.saturating_sub(self.slots[k].bonus) < before)
             .map(|(_, _, k)| (k.clone(), self.slots[k].bytes))
             .collect();
         for (key, _) in &gone {

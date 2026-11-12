@@ -103,6 +103,7 @@ gui-caches-none = Aucun cache ne contient encore rien.
 gui-caches-size = { $size }, { $entries } entrées
 
 gui-caches-size-of = { $size } sur { $budget }, { $entries } entrées
+gui-caches-size-shown = { $size } : { $shown } affichées, { $prefetched } lues d’avance
 
 gui-caches-tier-disk = sur disque
 

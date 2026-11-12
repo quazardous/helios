@@ -229,6 +229,9 @@ pub(crate) struct ImportWindow {
     /// The files whose glances came, read or from the glance cache, in
     /// the order they came: the cells in view come first.
     glanced_in_order: Vec<PathBuf>,
+    /// The files in view whose glance the glance cache was told shown
+    /// (kept longest, never evicted by a prefetch).
+    glances_shown: std::collections::HashSet<PathBuf>,
     pub(super) contents: Contents,
     /// The import connectors (`helios_connect`): the Sources column lists
     /// their sources, a scan lists a source through its connector.
@@ -305,6 +308,7 @@ impl ImportWindow {
             .clear();
         self.glanced_early.clear();
         self.glanced_in_order.clear();
+        self.glances_shown.clear();
         self.contents = Contents::new();
         self.published = None;
         self.selection_synced = None;
@@ -1990,8 +1994,7 @@ fn contents_ui(
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = first;
     }
-    // The image map reads the photos in view first.
-    if let (Some(feed), Some(thumbs)) = (&w.map_feed, &w.thumbs) {
+    if let Some(thumbs) = &w.thumbs {
         let c = &w.contents;
         let in_view: Vec<PathBuf> = thumbs
             .on_screen()
@@ -1999,12 +2002,50 @@ fn contents_ui(
             .filter_map(|p| c.cell_of(p))
             .flat_map(|i| c.cells[i].raw.iter().chain(&c.cells[i].picture).cloned())
             .collect();
-        if in_view != w.on_screen {
+        show_glances(&mut w.glances_shown, c, &in_view);
+        // The image map reads the photos in view first.
+        if let Some(feed) = &w.map_feed
+            && in_view != w.on_screen
+        {
             feed.on_screen(in_view.clone());
             w.on_screen = in_view;
         }
     }
     out.dropped.map(|d| d.paths).filter(|p| !p.is_empty())
+}
+
+/// Tells the glance cache the glances of the files in view are shown (once
+/// each): they outlive every prefetched glance, in RAM and, marked off the
+/// interface thread, on disk.
+fn show_glances(
+    shown: &mut std::collections::HashSet<PathBuf>,
+    contents: &Contents,
+    in_view: &[PathBuf],
+) {
+    let cache = crate::import_scan::GlanceCache::global();
+    let mut warm = Vec::new();
+    for path in in_view {
+        if shown.contains(path) {
+            continue;
+        }
+        let Some((bytes, modified)) = contents.file_facts(path) else {
+            continue;
+        };
+        // Not kept yet: asked again on a later frame, once glanced.
+        if let Some(on_disk) = cache.show(path, bytes, modified) {
+            shown.insert(path.clone());
+            warm.extend(on_disk);
+        }
+    }
+    if !warm.is_empty() {
+        let cache = cache.clone();
+        let spawned = std::thread::Builder::new()
+            .name("helios-glance-shown".into())
+            .spawn(move || cache.warm(&warm));
+        if let Err(e) = spawned {
+            log::debug!("import glances shown: no thread: {e}");
+        }
+    }
 }
 
 /// A photo as the browser lists it: by its raw (a pair's) or its picture,

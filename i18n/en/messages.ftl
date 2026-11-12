@@ -161,6 +161,8 @@ gui-caches-size = { $size }, { $entries } entries
 
 gui-caches-size-of = { $size } of { $budget }, { $entries } entries
 
+gui-caches-size-shown = { $size }: { $shown } shown, { $prefetched } read ahead
+
 gui-caches-tier-disk = on disk
 
 gui-caches-tier-ram = in memory
