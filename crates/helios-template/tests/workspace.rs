@@ -597,6 +597,18 @@ fn what_a_workspace_writes_reads_back_the_same_from_its_files() {
             "{id}"
         );
     }
+    // Composites added in an order their file names do not keep (a
+    // workshop designed again gets `<id>-2`, which reads back first).
+    let (_, files) = made(&root, "helios.portrait-retouch", "composites");
+    let mut state = files.load_on_disk().unwrap();
+    let file = shipped::composites()[0].clone();
+    for id in ["user.backlit", "user.backlit-2"] {
+        let mut c = file.clone();
+        c.id = id.into();
+        state.bundle.composites.push(c);
+    }
+    files.save(&state, false).unwrap();
+    assert_eq!(files.load_on_disk().unwrap().to_json(), state.to_json());
     std::fs::remove_dir_all(&root).unwrap();
 }
 

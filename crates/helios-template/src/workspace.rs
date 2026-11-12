@@ -430,7 +430,13 @@ pub struct State {
 
 impl State {
     /// As one JSON value (what the desktop keeps as an undoable value).
+    /// Its composites come in the order their files are read back
+    /// ([`Bundle::load`]), so that a state written to its files and read
+    /// again gives the same value: a desktop compares the two to tell a
+    /// change made outside it.
     pub fn to_json(&self) -> Json {
+        let mut composites: Vec<&CompositeFile> = self.bundle.composites.iter().collect();
+        composites.sort_by_cached_key(|c| c.file_name());
         let texts: Vec<Json> = self
             .bundle
             .texts
@@ -442,7 +448,7 @@ impl State {
             "template": self.bundle.template,
             "layout": serde_json::from_str::<Json>(&self.bundle.layout.to_json())
                 .unwrap_or(Json::Null),
-            "composites": self.bundle.composites,
+            "composites": composites,
             "texts": texts,
         })
     }
