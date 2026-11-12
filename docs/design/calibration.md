@@ -484,6 +484,15 @@ usable. Slices 1 to 5 need no GUI.
 1. **Chart data and geometry** (`helios-calibrate`): the ColorChecker 24
    (2014 and before 2014) with source and licence notes, the D50 Lab,
    the homography, the sampling quadrilaterals. Tests 7 and 8.
+   **Built** (2026-11-12): `chart` (both charts, row by row, spot-checked
+   against darktable's values and patch centres; the patch side, 0.793
+   of the pitch, derived from darktable's sampling square), `lab`,
+   `homography`, `layout` (the four handles on the corner patches'
+   centres, each patch's centre, sampling quadrilateral and pixels, with
+   a plain mean and variance per channel that slice 2 makes robust).
+   Test 7 is `helios_photo::compare`'s Sharma, Wu and Dalal test; test 8
+   draws a chart in perspective and samples it back exactly, and a
+   misplaced chart shows on every patch's variance.
 2. **Sampler and checks:** the trimmed means, clipping, darkness and
    uniformity flags, the chart-wide checks, on synthetic chart images
    (a clipped patch, a gradient patch, a misplaced corner). Thresholds
