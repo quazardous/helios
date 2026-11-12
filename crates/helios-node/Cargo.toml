@@ -50,6 +50,16 @@ serde_json.workspace = true
 # `helios import`.
 signal-hook = "0.4"
 
+[features]
+## The stability scenarios (`tests/stability.rs`): `kill -9` in the middle
+## of the node's own jobs. Off by default so CI leaves them out: the bench
+## box's `stability` job runs them (`cargo stability`).
+stability = []
+
+[[test]]
+name = "stability"
+required-features = ["stability"]
+
 [dev-dependencies]
 helios-colour.workspace = true
 egui-pop-model.workspace = true

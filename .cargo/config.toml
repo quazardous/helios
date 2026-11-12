@@ -5,3 +5,7 @@ xtask = "run --quiet --package xtask --"
 # scenario is stopped after 120 s (.config/nextest.toml) instead of
 # holding the bench box until the job's timeout.
 survival = "nextest run -p helios-gui -p helios-node --test survival"
+# The stability scenarios (kill -9 in the middle of the headless node's
+# own jobs): not in CI, run by the bench box's `stability` job, on demand
+# and before a release (docs/bench.md).
+stability = "nextest run -p helios-node --features stability --test stability"
