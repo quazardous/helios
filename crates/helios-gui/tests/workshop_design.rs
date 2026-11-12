@@ -746,6 +746,10 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
     // A new design: a new session, kept by the user.
     let (_, kept) = designed(&mut h, &root);
     assert_ne!(kept, dropped);
+    // Its workshop is bundled next to the first one: the files read
+    // back as written, not as a change made outside the desktop (which
+    // reloaded the layout under the focused panel).
+    assert_eq!(h.state_mut().check_workspace_files(), None);
     h.state_mut()
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
