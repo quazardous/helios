@@ -750,6 +750,44 @@ after an import (P2) is still the owner's choice; the window closes once
 Import is pressed, as before. The jobs are the core's, shown in the main
 window's status bar and Queue panel (focus tags come with slice 7).
 
+### Built: slice 5 (2026-11-12)
+
+The Settings are the second window of their own: egui-pop's Settings app
+in its window mode, which egui-pop now opens as an application window
+(`AppHandle::open_window`, id `settings`, `admin::APP_WINDOW`) instead of
+an immediate viewport.
+
+- **Window mode by default.** Helios sets the app's mode (`admin.window`)
+  to its own window while the person has never chosen one
+  (`shell.rs`, `settings_in_their_own_window`); "Pop in" still takes the
+  Settings back over the main window, and that choice is kept.
+- **Opening.** Their usual commands open the window (`admin.open`:
+  `Ctrl+,`, File > Settings, the deep links from Storage, the health
+  check and the import window), and so does Window > Settings. Open
+  already, it comes to the front, on the page asked for. One instance.
+- **Chrome and geometry.** As the import window: Helios's title bar under
+  its own frame, its size and place kept under `settings`, agents naming
+  it (`window: "settings"`), its keys run with `appWindow == 'settings'`.
+- **Closing.** Its close button, the page's Close, Escape, `Ctrl+W` and
+  `admin.close` close it alone; the main window stays. Closing the main
+  window while it is open moves the Settings into the main window with
+  their size, place and title bar (egui-pop's rule).
+- **The forms** are egui-pop's pages, unchanged: drawn in the window's own
+  pass, writing the same store and layers, so a change reaches every
+  window at once.
+- **Embedded.** Where the backend has no windows of its own (kittest, the
+  web), the overlay as before: the settings tests and snapshots run
+  unchanged.
+- **Tests.** `tests/settings_window.rs` runs the shell with real
+  viewports: the window and its title bar, a section chosen and the
+  search typed in it, closing it alone, Window > Settings, and the move
+  into the main window. `tests/scenarios/settings-window.ron` runs the
+  same live, through egui-pop-test's window targeting.
+
+**Not done here.** Workspace-level values edited in the Settings window
+still belong to the main window's workspace (P9); it gets a header
+naming that focus once there are several. Quick settings are slice 6.
+
 ## 6. Open questions
 
 ### Product choices (for the owner)

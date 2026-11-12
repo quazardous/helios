@@ -1,0 +1,31 @@
+// The Settings in an OS window of their own: opened by their command, a
+// search typed in their window, then Escape twice (the search cleared,
+// then the window closed), the main window left as it was.
+// Run live by tools/bench/scenarios.py.
+Scenario(
+    name: "settings-window",
+    description: "The Settings open in a window of their own; a search typed there narrows them; Escape clears it, then closes the window alone.",
+    steps: [
+        Wait(Settled),
+        Call("admin.open", {}),
+        Wait(Settled),
+        // The Settings are an OS window of their own: what follows reads
+        // and types in it.
+        Window("settings"),
+        Expect(Tree(has: (role: "SearchInput", label: "Search every setting"))),
+        Shot("opened"),
+        Ui(Type(role: "SearchInput", label: "Search every setting", text: "theme")),
+        Wait(Settled),
+        Expect(Value("admin.filter", "theme")),
+        Shot("searched"),
+        Ui(Key("Escape")),
+        Wait(Settled),
+        Expect(Value("admin.filter", "")),
+        Ui(Key("Escape")),
+        Wait(Settled),
+        // Closed alone: the main window stays.
+        Window("main"),
+        Expect(Value("admin.open", false)),
+        Expect(NoError),
+    ],
+)

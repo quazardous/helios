@@ -506,6 +506,38 @@ impl ShellBuilder {
     }
 }
 
+/// The Settings window's id (egui-pop's Settings app in its window mode):
+/// `window: "settings"` for agents, `appWindow == 'settings'` in `when`
+/// clauses, its size and place kept under it.
+pub const SETTINGS_WINDOW: &str = egui_pop::api::admin::APP_WINDOW;
+
+/// Settings open in an OS window of their own (docs/design/windows.md,
+/// slice 5): egui-pop's Settings app in its window mode, an application
+/// window as the import window is, with Helios's title bar, its own size
+/// and place, closing alone. The person may still pop them in over the
+/// main window ("Pop in", remembered); only a mode never chosen is set.
+fn settings_in_their_own_window(app: &egui_pop::api::app::AppHandle) {
+    use egui_pop::api::admin::WINDOW;
+    use egui_pop::model::ids::OwnerId;
+    use egui_pop::model::values::{Change, Set, Value as Setting};
+    let store = app.store();
+    let mut store = lock(&store);
+    let path = WINDOW.path();
+    if store.get(&path).is_none_or(|e| e.origin.is_some()) {
+        return;
+    }
+    let set = Set::new(
+        path.as_str(),
+        Change::To(Setting::Bool(true)),
+        egui_pop::model::commands::Origin::User,
+    )
+    .by(&OwnerId::FRAMEWORK)
+    .untracked();
+    if let Err(e) = store.set(set) {
+        log::warn!("{}: {e:?}", WINDOW.as_str());
+    }
+}
+
 /// What a step of egui-pop's gave: its result, or why it was vetoed;
 /// nothing when it did not run.
 fn step_result(o: Option<egui_pop::api::steps::Outcome>) -> Result<Value, String> {
@@ -1142,6 +1174,7 @@ impl Shell {
             shell.notes.extend(notes);
             shell.focus.palettes_to_place = Some(lead);
         }
+        settings_in_their_own_window(shell.core.app.handle());
         shell
     }
 
@@ -3514,6 +3547,12 @@ impl Shell {
             // Window: Helios's windows, open or not, to bring one forward.
             command(MENU_WINDOW, "1_open", 0, lifetime::MAIN_WINDOW),
             command(MENU_WINDOW, "1_open", 1, import_window::COMMAND),
+            command(
+                MENU_WINDOW,
+                "1_open",
+                2,
+                egui_pop::api::admin::CMD_OPEN.as_str(),
+            ),
             // File > Storage: the disks and what each is for.
             command(MENU_FILE, "1_import", 3, storage::COMMAND),
             // Help > Health check.
