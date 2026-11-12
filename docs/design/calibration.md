@@ -550,6 +550,36 @@ usable. Slices 1 to 5 need no GUI.
    MCP tool, the shell command. Tested on a synthetic mosaic made from
    the synthetic chart (the inverse of the raw front, in the test kit)
    and on a decoded picture.
+   **Built in part** (2026-11-12): `run::calibrate`, the one call the
+   request will make. Given the measured image (white-balanced camera RGB,
+   or a picture's linear working RGB), its clip source, `M_s` and the four
+   handles, it tries the eight orientations; for each it checks the
+   patches, weighs a clipped, missing or excluded one 0, estimates the
+   illuminant from the kept neutrals (darktable's checker does it from the
+   middle grey: `channelmixerrgb::illuminant_from_neutral`, D50 taken as
+   the adaptation targets it, so the light found is the one whose
+   adaptation lands the neutrals on their references), builds `A` with
+   colour calibration's own CAT16 (`Plan::adaptation`, the pixel path
+   without clipping and gamut compression), takes `W` as linear Rec.2020
+   to XYZ (D50), and solves on Delta E 2000; the lowest mean wins. The
+   report: orientation, layout, checks, illuminant (xy, temperature,
+   darktable's word for it), `A`, `W`, the solution and `M_c = P M_s`.
+   Tests: a synthetic raw shot under 3200 K drawn through a real camera's
+   matrix, with a standard matrix off from it, gives the light back within
+   1e-4 in xy, the camera's matrix within 1e-4 and the orientation in
+   three handle orders, max Delta E below 5e-3 (the light is estimated
+   and adapted in the module's f32); a decoded picture under 6500 K needs
+   no correction (`P` within 1e-4 of the identity); a patch excluded by
+   name and a clipped one weigh 0 and change nothing; a chart outside the
+   image is unsolved.
+   **Remaining:** the measurement graph (the raw front without `colorin`
+   rendered at scale 1 on the patches' bounding box, `rawprepare`'s output
+   for the clip source, `M_s` from the camera's matrix; for a picture, the
+   decoded values), the `calibrate.chart` control request with its serde
+   answer (`dry_run` true only, until slice 5), the
+   `helios_calibrate_chart` MCP tool and the shell command, a changelog
+   fragment; tested on a synthetic mosaic (the inverse of the raw front,
+   in the test kit) and a decoded picture through the request.
 5. **Profiles in the vault:** the two namespaces, save, list, remove,
    export, import, the default rule and the nearest-illuminant pick;
    `calibrate.chart` with `save`. Tested on the in-memory and SQLite

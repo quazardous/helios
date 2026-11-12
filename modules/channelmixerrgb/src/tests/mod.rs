@@ -244,3 +244,41 @@ fn a_camera_illuminant_not_found_is_d50() {
 fn it_keeps_the_module_contract() {
     helios_testkit::assert_contract(ChannelMixerRgb);
 }
+
+#[test]
+fn the_adaptation_matrix_is_the_pixel_path_inside_the_gamut() {
+    let plan = Plan::new(blackbody_xy(3200.0), &rec2020_to_xyz_d50(), 0.0, false).unwrap();
+    let a = plan.adaptation();
+    for rgb in [
+        [0.18, 0.18, 0.18],
+        [0.4, 0.2, 0.1],
+        [0.05, 0.3, 0.2],
+        [0.9, 0.85, 0.7],
+    ] {
+        let by_pixel = plan.pixel(rgb);
+        let by_matrix = apply(&a, rgb);
+        for (p, m) in by_pixel.iter().zip(&by_matrix) {
+            assert!(close(*p, *m, 1e-6), "{rgb:?}: {by_pixel:?} {by_matrix:?}");
+        }
+    }
+}
+
+#[test]
+fn a_neutral_seen_under_a_light_gives_the_light_back() {
+    let w = rec2020_to_xyz_d50();
+    // A slightly warm grey (its own colour), seen under 3200 K: what the
+    // adaptation from 3200 K turns back into the grey.
+    let reference = [0.19, 0.2, 0.162];
+    for xy in [blackbody_xy(3200.0), daylight_xy(6500.0), D50_XY] {
+        let a = Plan::new(xy, &w, 0.0, false).unwrap().adaptation();
+        let to_rgb = invert(&w).unwrap();
+        // measured = W A⁻¹ W⁻¹ reference.
+        let seen = apply(&w, apply(&invert(&a).unwrap(), apply(&to_rgb, reference)));
+        let found = illuminant_from_neutral(seen, reference).unwrap();
+        assert!(
+            close(found[0], xy[0], 1e-5) && close(found[1], xy[1], 1e-5),
+            "{xy:?}: {found:?}"
+        );
+    }
+    assert_eq!(illuminant_from_neutral([0.0; 3], reference), None);
+}
