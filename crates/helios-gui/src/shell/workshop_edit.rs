@@ -62,6 +62,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "Experimental: answer a proposed value: accept it or set your own (one undo step each), or reject it; recorded in the session (`of`: the proposal's step; `param`; `action`: accept, override or reject; `value` for override); yours alone",
     ),
     (
+        "workshop.generalise",
+        "Experimental: make the workshop piloted automatic: one row per slider (a target a measure explains, else a fixed value, or kept as AI) and per AI zone (a fitted parametric mask, or kept as AI), with evidence, and J, A (the AI left, calls per photo) (`rows`: choices by name; `confirm`: write the next version, yours alone; `session`; `dry_run`)",
+    ),
+    (
         "workshop.send_proxy",
         "Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only",
     ),
@@ -105,6 +109,7 @@ impl Shell {
             "workshop.session" => self.workshop_session(args, origin),
             "workshop.propose" => self.propose_values(args, origin),
             "workshop.answer" => self.answer_proposal(args, origin),
+            "workshop.generalise" => self.generalise_session(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }

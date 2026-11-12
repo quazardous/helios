@@ -43,7 +43,7 @@ use helios_core::{Engine, Graph, Image, Macro, ModuleRef, Params, Region, Value}
 use serde::Serialize;
 
 use crate::build::SOURCE_PORT;
-use crate::format::{At, Measure, Target};
+use crate::format::{At, Measure, Target, Workshop, Zone};
 use crate::workshop::{Range, aim_in, measure_in, ranges};
 
 /// A test photo of the session.
@@ -771,6 +771,135 @@ pub fn generalise_rendered(
     )
 }
 
+/// How little AI a generalised workshop keeps (section 3, "Minimum AI,
+/// measured"): `J`, the junctions left, and `A`, the AI calls expected
+/// per photo in a run. Each junction is asked once per photo until the
+/// cache and the parametric check's share are estimated, so `A = J`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Minimum {
+    #[serde(rename = "J")]
+    pub junctions: usize,
+    #[serde(rename = "A")]
+    pub calls_per_photo: f64,
+}
+
+/// `J` and `A` for these rows, as they stand (their defaults, or the
+/// user's choices once [`choose`] amended them).
+pub fn minimum(rows: &[Row], zones: &[ZoneRow]) -> Minimum {
+    let junctions = rows.iter().filter(|r| r.default == Choice::Ai).count()
+        + zones.iter().filter(|z| z.default == ZoneChoice::Ai).count();
+    Minimum {
+        junctions,
+        calls_per_photo: junctions as f64,
+    }
+}
+
+/// The user's choices on the rows, by slider or zone name: `target`,
+/// `fixed` or `ai` for a slider, `parametric` or `ai` for a zone. A
+/// target needs one that fits the test photos; a parametric mask needs a
+/// fit, the best tried when none reached [`MIN_OVERLAP`]. Refused for a
+/// name no row has.
+pub fn choose(
+    rows: &mut [Row],
+    zones: &mut [ZoneRow],
+    choices: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    for (name, choice) in choices {
+        if let Some(row) = rows.iter_mut().find(|r| r.param == *name) {
+            row.default = match choice.as_str() {
+                "target" if row.target.is_some() => Choice::Target,
+                "target" => {
+                    return Err(format!(
+                        "`{name}`: no measure explains its values, so it has no target"
+                    ));
+                }
+                "fixed" => Choice::Fixed,
+                "ai" => Choice::Ai,
+                other => {
+                    return Err(format!("`{name}`: target, fixed or ai, not `{other}`"));
+                }
+            };
+        } else if let Some(zone) = zones.iter_mut().find(|z| z.zone == *name) {
+            zone.default = match choice.as_str() {
+                "parametric" => {
+                    if zone.fit.is_none() {
+                        zone.fit = zone.candidates.first().cloned();
+                    }
+                    if zone.fit.is_none() {
+                        return Err(format!("`{name}`: no parametric mask was fitted"));
+                    }
+                    ZoneChoice::Parametric
+                }
+                "ai" => ZoneChoice::Ai,
+                other => return Err(format!("`{name}`: parametric or ai, not `{other}`")),
+            };
+        } else {
+            return Err(format!("`{name}`: no row of that name"));
+        }
+    }
+    Ok(())
+}
+
+/// The workshop block and the new slider defaults the rows write, from
+/// the block the workshop has (`block`): a target row's target replaces
+/// any target of its slider; a fixed row drops it and its value becomes
+/// the slider's default; a zone fitted parametric is drawn by a
+/// `mask_parametric` with the fitted bounds. A junction cannot be written
+/// yet (a run asks it, slice 9): a row left on the AI is refused, saying
+/// which.
+pub fn written(
+    block: &Workshop,
+    rows: &[Row],
+    zones: &[ZoneRow],
+) -> Result<(Workshop, Params), String> {
+    let junctions: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.default == Choice::Ai)
+        .map(|r| r.param.as_str())
+        .chain(
+            zones
+                .iter()
+                .filter(|z| z.default == ZoneChoice::Ai)
+                .map(|z| z.zone.as_str()),
+        )
+        .collect();
+    if !junctions.is_empty() {
+        return Err(format!(
+            "an AI junction cannot be written into a workshop yet: choose a target, a value or a parametric mask for {}",
+            junctions.join(", ")
+        ));
+    }
+    let mut out = block.clone();
+    let mut defaults = Params::new();
+    for row in rows {
+        out.targets.retain(|t| t.param != row.param);
+        match (row.default, &row.target) {
+            (Choice::Target, Some(fit)) => out.targets.push(fit.target.clone()),
+            _ => defaults.set(&row.param, Value::Float(row.fixed)),
+        }
+    }
+    for z in zones {
+        if let (ZoneChoice::Parametric, Some(fit)) = (z.default, &z.fit)
+            && let Some(zone) = out.zones.iter_mut().find(|x| x.name == z.zone)
+        {
+            *zone = Zone {
+                name: z.zone.clone(),
+                module: PARAMETRIC.into(),
+                params: fit.params.clone(),
+                port: "mask".into(),
+            };
+        }
+    }
+    Ok((out, defaults))
+}
+
+/// The module a fitted zone is drawn by.
+pub const PARAMETRIC: &str = "mask_parametric";
+
+/// The module of a zone the AI draws, per photo: such a zone is fitted
+/// by rule 3.
+pub const AI_ZONE: &str = "mask_object";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,5 +1173,82 @@ mod tests {
         assert_eq!(rows[1].default, Choice::Fixed, "{}", rows[1].note);
         assert_eq!(rows[2].default, Choice::Target, "{}", rows[2].note);
         assert_eq!(user.default, Choice::Fixed);
+    }
+
+    #[test]
+    fn the_choices_write_targets_defaults_and_fitted_zones_and_count_the_ai() {
+        let target = run(&[(backlit(0.0, -4.0), 2.0), (backlit(-1.0, -4.0), 1.0)]);
+        let mut fixed = run(&[(backlit(0.0, -4.0), 2.0), (backlit(-1.0, -4.0), 1.0)]);
+        fixed.param = "haze".into();
+        fixed.default = Choice::Ai;
+        let fit = ZoneFit {
+            params: Params::new().with("luminance", Value::List(vec![0.5, 1.0, 0.0, 0.0])),
+            overlaps: vec![0.95],
+            overlap: 0.95,
+            fits: true,
+        };
+        let mut rows = vec![target, fixed];
+        let mut zones = vec![ZoneRow {
+            zone: "sky".into(),
+            fit: None,
+            default: ZoneChoice::Ai,
+            candidates: vec![fit.clone()],
+            note: String::new(),
+        }];
+        assert_eq!(
+            minimum(&rows, &zones),
+            Minimum {
+                junctions: 2,
+                calls_per_photo: 2.0
+            }
+        );
+        let block = Workshop {
+            intent: "backlit".into(),
+            keywords: Vec::new(),
+            targets: vec![Target {
+                param: "haze".into(),
+                measure: Measure::LumaMedian,
+                value: 0.0,
+                at: At::Output,
+                zone: None,
+                against: None,
+            }],
+            zones: vec![Zone {
+                name: "sky".into(),
+                module: AI_ZONE.into(),
+                params: Params::new(),
+                port: "mask".into(),
+            }],
+        };
+        // Junctions left: refused, naming them.
+        let e = written(&block, &rows, &zones).unwrap_err();
+        assert!(e.contains("haze, sky"), "{e}");
+        // An unknown name, or a target where none fits: refused.
+        let ask = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(a, b)| ((*a).to_string(), (*b).to_string()))
+                .collect()
+        };
+        assert!(choose(&mut rows, &mut zones, &ask(&[("nope", "fixed")])).is_err());
+        rows[1].target = None;
+        assert!(choose(&mut rows, &mut zones, &ask(&[("haze", "target")])).is_err());
+        choose(
+            &mut rows,
+            &mut zones,
+            &ask(&[("haze", "fixed"), ("sky", "parametric")]),
+        )
+        .unwrap();
+        assert_eq!(minimum(&rows, &zones).junctions, 0);
+        let (out, defaults) = written(&block, &rows, &zones).unwrap();
+        // The target row's target; the fixed row's target dropped, its
+        // value the default; the AI sky drawn by the fitted mask.
+        assert_eq!(out.targets.len(), 1);
+        assert_eq!(out.targets[0].param, "backlight_lift");
+        assert_eq!(out.targets[0].measure, Measure::ZonesRatio);
+        assert_eq!(defaults.float("haze"), 1.5);
+        assert!(defaults.get("backlight_lift").is_none());
+        assert_eq!(out.zones[0].module, PARAMETRIC);
+        assert_eq!(out.zones[0].params, fit.params);
     }
 }

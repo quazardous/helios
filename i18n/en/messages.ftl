@@ -1526,6 +1526,16 @@ gui-workshops-session = Session recorded: { $steps } steps
 gui-workshops-session-keep = Keep
 
 gui-workshops-session-keep-hint = Keep this session's record: who set what, why, and what the image measured. Not kept, it is dropped when the session ends
+gui-workshops-automatic = Make it automatic
+gui-workshops-automatic-hint = Turn what you set into a workshop for other photos: a target where a measure explains a value, else the same value; you confirm each row
+gui-workshops-row-target = Same target
+gui-workshops-row-fixed = Same value { $value }
+gui-workshops-row-ai = Keep as AI
+gui-workshops-zone-parametric = Parametric mask
+gui-workshops-ai-none = AI per photo: none
+gui-workshops-ai-left = AI per photo: { $junctions } junctions, { $calls } calls
+gui-workshops-confirm = Confirm
+gui-workshops-confirm-hint = Write the workshop's next version with these choices, as one undo step; a row kept as AI cannot be written yet
 
 gui-workshops-session-kept = Kept
 

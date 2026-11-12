@@ -935,3 +935,168 @@ fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
     assert_eq!(last["changes"][0]["new"], json!(0.6));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// "Make it automatic" (slice 7): the session's values on its test photo
+/// become rows with their evidence; an agent reads and amends them, the
+/// user alone confirms, and the confirmed rows write the workshop's next
+/// version as one undo step: the lift a target, the detail a fixed
+/// default, the session kept.
+#[test]
+fn make_it_automatic_writes_the_next_version_once_the_user_confirms() {
+    stand_ins();
+    let root = temp("generalise");
+    let mut h = window(&root);
+    let (node, session) = designed(&mut h, &root);
+    let lift = format!("node/{node}/backlight_lift");
+    let detail = format!("node/{node}/mountain_detail");
+    set_value(
+        &mut h,
+        &lift,
+        0.9,
+        Origin::User,
+        Some("the climber's face is too dark"),
+    );
+    set_value(&mut h, &detail, 0.1, Origin::User, None);
+
+    // The agent reads the rows: one per slider the session set, a fixed
+    // value by default on one test photo, the lift's target offered.
+    let a = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise" }),
+    ));
+    assert_eq!(a["session"], json!(session));
+    assert_eq!(a["photos"], json!(1));
+    let rows = a["rows"].as_array().unwrap();
+    let names: Vec<&str> = rows.iter().map(|r| r["param"].as_str().unwrap()).collect();
+    assert_eq!(names, ["backlight_lift", "mountain_detail"], "{a}");
+    for r in rows {
+        assert_eq!(r["default"], json!("fixed"), "{r}");
+        assert!(
+            r["candidates"].as_array().is_some_and(|c| !c.is_empty()),
+            "{r}"
+        );
+    }
+    assert!(rows[0]["target"].is_object(), "{}", rows[0]);
+    assert_eq!(rows[0]["fixed"], json!(0.9));
+    assert!(
+        rows[0]["note"]
+            .as_str()
+            .unwrap()
+            .contains("one test photo cannot tell"),
+        "{}",
+        rows[0]
+    );
+    assert_eq!(a["zones"], json!([]));
+    assert_eq!((a["J"].clone(), a["A"].clone()), (json!(0), json!(0.0)));
+    // An agent amends the choices, a wrong one refused; it never confirms.
+    let a = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise", "rows": { "mountain_detail": "ai" } }),
+    ));
+    assert_eq!(a["rows"][1]["default"], json!("ai"));
+    assert_eq!((a["J"].clone(), a["A"].clone()), (json!(1), json!(1.0)));
+    let out = agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise", "rows": { "nope": "fixed" } }),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    let out = agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise", "confirm": true }),
+    );
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert!(out.to_string().contains("only the user confirms"), "{out}");
+
+    // The panel shows the rows the agent amended, with J; Make it
+    // automatic shows them again at their defaults, with Confirm.
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label_contains("AI per photo: 1 junctions, 1 calls");
+    h.get_by_label("Make it automatic").click();
+    follow(&mut h);
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label_contains("AI per photo: none");
+    h.get_by_label("Confirm");
+    assert!(h.get_all_by_label("Keep as AI").count() >= 2);
+
+    // The rows the user will confirm, as the agent reads them.
+    let shown = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise", "rows": { "backlight_lift": "target" } }),
+    ));
+    let version = |h: &Harness<'static, Shell>, v: u32| {
+        h.state()
+            .workspace_bundle()
+            .unwrap()
+            .composites
+            .into_iter()
+            .find(|f| f.id == "user.backlit-mountain" && f.version == v)
+    };
+    // A junction cannot be written yet: nothing is.
+    let before = steps(&h);
+    h.state_mut()
+        .run(
+            "workshop.generalise",
+            json!({ "rows": { "mountain_detail": "ai" }, "confirm": true }),
+            Origin::User,
+        )
+        .unwrap();
+    follow(&mut h);
+    assert_eq!(steps(&h), before);
+    assert!(version(&h, 2).is_none());
+
+    // The user confirms: the lift a target, the detail its value, one
+    // undo step.
+    h.state_mut()
+        .run(
+            "workshop.generalise",
+            json!({ "rows": { "backlight_lift": "target" }, "confirm": true }),
+            Origin::User,
+        )
+        .unwrap();
+    follow(&mut h);
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    let file = version(&h, 2).expect("the next version");
+    let block = file.workshop.as_ref().unwrap();
+    assert_eq!(block.targets.len(), 1, "{block:?}");
+    assert_eq!(
+        serde_json::to_value(&block.targets[0]).unwrap(),
+        shown["rows"][0]["target"]["target"]
+    );
+    let default = |name: &str| {
+        file.exposed
+            .iter()
+            .find(|x| x.name == name)
+            .and_then(|x| x.default.clone())
+    };
+    assert_eq!(
+        default("mountain_detail"),
+        Some(helios_core::Value::Float(0.1))
+    );
+    assert_eq!(default("backlight_lift"), None);
+    // The image keeps its values; the session is kept, going on with the
+    // version written.
+    let v = h
+        .state()
+        .values()
+        .lock()
+        .unwrap()
+        .get(&lift)
+        .map(|e| e.value.clone());
+    assert_eq!(v, Some(helios_core::Value::Float(0.9)));
+    let rec = record(&mut h, &root)["record"].clone();
+    assert_eq!(rec["kept"], json!(true));
+    assert_eq!(rec["workshop"], json!("user.backlit-mountain@2"));
+    let _ = std::fs::remove_dir_all(&root);
+}

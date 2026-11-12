@@ -103,40 +103,52 @@ impl Shell {
             .as_ref()
             .map(|w| w.zones.clone())
             .unwrap_or_default();
-        let input = {
-            let viewport = self.focus.viewport.borrow();
-            let graph = viewport.graph().ok_or("no image is open")?;
-            let id = graph
-                .find(&record.node)
-                .ok_or_else(|| format!("the image's network has no `{}`", record.node))?;
-            let (from, port) = graph
-                .input_ports(id)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .next()
-                .flatten()
-                .ok_or("nothing feeds the workshop")?;
-            super::workshop_edit::proxy(&viewport, graph, from, &port)?
-        };
+        let input = self.session_input(record)?;
         let engine = self.focus.viewport.borrow().engine().clone();
         if input_only {
             let masks = helios_template::workshop::zone_masks(&engine, &catalogue, &zones, &input)?;
             return Ok(helios_template::session::measures(&input, &masks));
         }
         let built = catalogue.build_composite(&r, 0)?;
+        let values = self.session_values(record, file);
+        measured(&engine, &catalogue, &built, &zones, &input, &values)
+    }
+
+    /// The values the session's workshop node holds now, by exposed name.
+    pub(super) fn session_values(
+        &self,
+        record: &Session,
+        file: &helios_template::format::CompositeFile,
+    ) -> Params {
         let mut values = Params::new();
-        {
-            let store = lock(&self.core.values);
-            let prefix = format!("node/{}/", record.node);
-            for (path, entry) in store.list(&prefix) {
-                if let Some(name) = path.strip_prefix(&prefix)
-                    && file.exposed.iter().any(|x| x.name == name)
-                {
-                    values.set(name, entry.value.clone());
-                }
+        let store = lock(&self.core.values);
+        let prefix = format!("node/{}/", record.node);
+        for (path, entry) in store.list(&prefix) {
+            if let Some(name) = path.strip_prefix(&prefix)
+                && file.exposed.iter().any(|x| x.name == name)
+            {
+                values.set(name, entry.value.clone());
             }
         }
-        measured(&engine, &catalogue, &built, &zones, &input, &values)
+        values
+    }
+
+    /// What enters the session's workshop on the open image, at the
+    /// preview's proxy size.
+    pub(super) fn session_input(&self, record: &Session) -> Result<helios_core::Image, String> {
+        let viewport = self.focus.viewport.borrow();
+        let graph = viewport.graph().ok_or("no image is open")?;
+        let id = graph
+            .find(&record.node)
+            .ok_or_else(|| format!("the image's network has no `{}`", record.node))?;
+        let (from, port) = graph
+            .input_ports(id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .next()
+            .flatten()
+            .ok_or("nothing feeds the workshop")?;
+        super::workshop_edit::proxy(&viewport, graph, from, &port)
     }
 
     /// Measures the session's first step once the image's network holds
@@ -515,7 +527,7 @@ impl Shell {
     }
 }
 
-const NO_SESSION: &str = "no workshop session: design or apply a workshop first";
+pub(super) const NO_SESSION: &str = "no workshop session: design or apply a workshop first";
 
 /// A value as plain JSON: a number, a boolean, a string or a list.
 pub(super) fn plain(v: &helios_core::Value) -> Value {
