@@ -25,6 +25,7 @@
 //! allow (nothing runs).
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
@@ -69,6 +70,9 @@ pub(crate) struct Accounts {
     /// over the library, set by the desktop; none: "Pick photos…" is not
     /// offered.
     pub(crate) import: Option<ImportRemote>,
+    /// The library folder fetched copies go to, read and remembered off
+    /// the interface's thread; none: never asked.
+    pub(crate) library: Option<Arc<dyn LibraryFolder>>,
     /// The plugins installed: a connector of theirs asks for the
     /// capabilities its plugin lacks before it runs.
     pub(crate) plugins: Option<Arc<helios_plugin::Broker>>,
@@ -258,15 +262,30 @@ fn read_accounts(shared: &(Mutex<Read>, Condvar)) {
 }
 
 /// Imports the items a connector listed under a source: the items added.
+///
+/// The items are copied into the folder given, else into the library
+/// folder.
 pub type ImportRemote = Arc<
     dyn Fn(
             &dyn helios_connect::Connector,
             helios_connect::SourceRef,
             Vec<helios_connect::Item>,
+            Option<PathBuf>,
         ) -> Result<u64, String>
         + Send
         + Sync,
 >;
+
+/// The library folder a fetched item is copied into: the library's
+/// (`helios_library::import::library_root`) on the desktop. A picking
+/// with no folder of its own and no library folder asks for one before
+/// the service's picking page opens.
+pub trait LibraryFolder: Send + Sync {
+    /// The library folder, if one is known.
+    fn get(&self) -> Result<Option<PathBuf>, String>;
+    /// Remembers `dir` as the library folder.
+    fn set(&self, dir: &Path) -> Result<(), String>;
+}
 
 /// How long a picking waits for the person at most.
 const PICK_WAIT: std::time::Duration = std::time::Duration::from_mins(30);
@@ -295,6 +314,9 @@ pub(crate) enum PickStatus {
     Expired,
     /// The service refused the sign-in: the account needs a reconnection.
     SignIn,
+    /// No folder to copy the photos into: the library folder is asked
+    /// for, before any picking page opens.
+    NeedsFolder,
     Failed(String),
     Cancelled,
 }
@@ -340,6 +362,7 @@ impl Default for Accounts {
             oauth: OauthConnectors::default(),
             picking: None,
             import: None,
+            library: None,
             plugins: None,
             consent: None,
             opener: system_opener(),
@@ -454,10 +477,17 @@ impl Accounts {
     /// dialog, the person waited for (cancellable), what was picked
     /// imported. A sign-in the service refuses leaves the account needing
     /// attention, its Reconnect offered.
+    ///
+    /// The photos are copied `into` that folder, else into the library
+    /// folder; with neither, the picking stops at
+    /// [`PickStatus::NeedsFolder`] before the service is asked. A folder
+    /// chosen as the library's (`library`) is remembered first.
     pub(crate) fn pick(
         &mut self,
         connectors: &Connectors,
         id: &str,
+        into: Option<PathBuf>,
+        library: bool,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Result<(), String> {
         let book = self.book.clone().ok_or("accounts need a library open")?;
@@ -478,12 +508,25 @@ impl Accounts {
         let cancel = helios_connect::Cancel::new();
         let (st, stop, account_ref) = (status.clone(), cancel.clone(), account.account_ref());
         let opener = self.opener.clone();
+        let folder = self.library.clone();
         let set = move |s: PickStatus| {
             *st.lock().unwrap_or_else(PoisonError::into_inner) = s;
             wake();
         };
         std::thread::spawn(move || {
             use helios_connect::ConnectorError;
+            // Where the photos go is settled before the service is asked:
+            // a picking session waits for nobody.
+            let known = match (&into, &folder) {
+                (Some(dir), Some(f)) if library => f.set(dir).map(|()| true),
+                (Some(_), _) | (None, None) => Ok(true),
+                (None, Some(f)) => f.get().map(|d| d.is_some()),
+            };
+            match known {
+                Ok(true) => {}
+                Ok(false) => return set(PickStatus::NeedsFolder),
+                Err(e) => return set(PickStatus::Failed(e)),
+            }
             let deadline = std::time::Instant::now() + PICK_WAIT;
             // Every picking is a session of its own, its page opened at
             // once: a session waits for nobody, it expires.
@@ -503,7 +546,7 @@ impl Accounts {
             let end = match listed {
                 Ok(Some((source, items))) => {
                     set(PickStatus::Importing { items: items.len() });
-                    let done = import(connector.as_ref(), source, items);
+                    let done = import(connector.as_ref(), source, items, into);
                     let _ = connector.end_pick();
                     match done {
                         Ok(added) => PickStatus::Done { added },
@@ -782,6 +825,15 @@ pub(crate) fn state_text(state: &AccountState) -> Message {
             Message::new("gui-account-needs-attention", "needs attention")
         }
     }
+}
+
+/// What the picking's dialog asked.
+#[derive(Clone, Debug)]
+pub(crate) enum PickAsked {
+    /// A new picking.
+    Again(Asked),
+    /// The library folder chosen, then a picking under this account.
+    LibraryFolder(String),
 }
 
 /// What the accounts' part of the Sources column asked.
@@ -1114,16 +1166,17 @@ pub(crate) fn connect_dialog(
 /// open again or copy, a spinner while the person picks or the photos
 /// come in, then what was imported, or why not. Cancel stops the wait;
 /// "Start again" (a session expired, or a page the browser refused)
-/// asks for a new picking, given back to run.
+/// asks for a new picking, given back to run. Without a folder to copy
+/// the photos into, the library folder is asked for first.
 pub(crate) fn pick_dialog(
     ctx: &egui::Context,
     accounts: &mut Accounts,
     t: &dyn Fn(Message) -> String,
-) -> Option<Asked> {
+) -> Option<PickAsked> {
     let opener = accounts.opener.clone();
     let picking = accounts.picking.as_mut()?;
     let status = picking.status();
-    let (mut close, mut again) = (false, false);
+    let (mut close, mut again, mut folder) = (false, false, false);
     egui::Modal::new(egui::Id::unique("helios.import.pick")).show(ctx, |ui| {
         ui.set_width(360.0);
         ui.heading(t(Message::new(
@@ -1208,6 +1261,21 @@ pub(crate) fn pick_dialog(
                     .with("why", why.clone())),
                 true,
             ),
+            PickStatus::NeedsFolder => {
+                ui.label(t(Message::new(
+                    "gui-pick-library-folder",
+                    "Picked photos are copied into the library folder. Choose it once: it is remembered.",
+                )));
+                if ui
+                    .button(t(Message::new(
+                        "gui-pick-choose-folder",
+                        "Choose the library folder…",
+                    )))
+                    .clicked()
+                {
+                    folder = true;
+                }
+            }
             PickStatus::Cancelled => close = true,
         }
         let running = matches!(
@@ -1247,7 +1315,12 @@ pub(crate) fn pick_dialog(
         picking.cancel.cancel();
         accounts.picking = None;
         ctx.request_repaint();
-        return Some(Asked::Pick(account));
+        return Some(PickAsked::Again(Asked::Pick(account)));
+    }
+    if folder {
+        let account = picking.account.clone();
+        accounts.picking = None;
+        return Some(PickAsked::LibraryFolder(account));
     }
     if close {
         accounts.picking = None;

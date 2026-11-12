@@ -623,10 +623,12 @@ fn a_sign_in_opens_the_browser_at_once_without_waiting_for_a_frame() {
 }
 
 /// A connector that picks: each picking a new session (`s1`, `s2`…), the
-/// first `expired` of them expiring before the person is done.
+/// first `expired` of them expiring before the person is done; with
+/// `ready`, the person is done at once.
 struct Picks {
     sessions: Arc<std::sync::atomic::AtomicU32>,
     expired: u32,
+    ready: bool,
 }
 
 const PICKS: &str = "fake-picks";
@@ -647,6 +649,7 @@ impl helios_connect::ConnectorProvider for Picks {
         Ok(Box::new(PickConnector {
             sessions: self.sessions.clone(),
             expired: self.expired,
+            ready: self.ready,
             current: std::sync::Mutex::new(0),
         }))
     }
@@ -655,6 +658,7 @@ impl helios_connect::ConnectorProvider for Picks {
 struct PickConnector {
     sessions: Arc<std::sync::atomic::AtomicU32>,
     expired: u32,
+    ready: bool,
     current: std::sync::Mutex<u32>,
 }
 
@@ -666,6 +670,7 @@ impl helios_connect::Connector for PickConnector {
             caps: Picks {
                 sessions: Arc::default(),
                 expired: 0,
+                ready: false,
             }
             .manifest()
             .caps,
@@ -723,6 +728,9 @@ impl helios_connect::Connector for PickConnector {
             std::thread::sleep(Duration::from_millis(20));
             return Err(helios_connect::ConnectorError::Expired);
         }
+        if self.ready {
+            return Ok(true);
+        }
         while Instant::now() < deadline {
             if cancel.is_cancelled() {
                 return Err(helios_connect::ConnectorError::Cancelled);
@@ -760,9 +768,10 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
     shell.add_import_connector(Arc::new(Picks {
         sessions: sessions.clone(),
         expired: 1,
+        ready: false,
     }));
     shell.set_import_browser(opened.opener());
-    shell.set_import_remote(Arc::new(|_, _, _| Ok(0)));
+    shell.set_import_remote(Arc::new(|_, _, _, _| Ok(0)));
     shell.set_import_accounts(book, secrets);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -876,4 +885,128 @@ fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are(
     assert!(choices.copy_folders && !choices.darktable, "{choices:?}");
     let text = kept.borrow().clone().unwrap_or_default();
     assert!(text.contains("share = ") && text.contains("2026"), "{text}");
+}
+
+/// The library folder as a vault keeps it, in memory.
+#[derive(Default)]
+struct Folder(std::sync::Mutex<Option<std::path::PathBuf>>);
+
+impl helios_gui::shell::LibraryFolder for Folder {
+    fn get(&self) -> Result<Option<std::path::PathBuf>, String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+
+    fn set(&self, dir: &std::path::Path) -> Result<(), String> {
+        *self.0.lock().unwrap() = Some(dir.to_path_buf());
+        Ok(())
+    }
+}
+
+/// The folders the picked photos were imported into, by import.
+type Imported = Arc<std::sync::Mutex<Vec<Option<std::path::PathBuf>>>>;
+
+/// A window with a connected account of a connector whose picking is done
+/// at once, the library folder and the imports the test's.
+fn picking_world(
+    sources: Option<String>,
+) -> (
+    Harness<'static, Shell>,
+    Opened,
+    Arc<Folder>,
+    Imported,
+    Arc<std::sync::atomic::AtomicU32>,
+) {
+    let book = Arc::new(MemoryAccounts::default());
+    let mut account = helios_connect::account::Account::new(PICKS, "ann@example.org", &[]);
+    account.state = AccountState::Connected;
+    book.save(&account).unwrap();
+    let sessions = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let (opened, folder, imported) = (
+        Opened::default(),
+        Arc::new(Folder::default()),
+        Imported::default(),
+    );
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(Picks {
+        sessions: sessions.clone(),
+        expired: 0,
+        ready: true,
+    }));
+    shell.set_import_browser(opened.opener());
+    let seen = imported.clone();
+    shell.set_import_remote(Arc::new(move |_, _, _, into| {
+        seen.lock().unwrap().push(into);
+        Ok(0)
+    }));
+    shell.set_import_library_folder(folder.clone());
+    shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
+    if let Some(doc) = sources {
+        let doc = doc.replace("{account}", &account.id);
+        shell.keep_import_sources_with(
+            Box::new(move || Ok(Some(doc.clone()))),
+            Box::new(|_| Ok(())),
+        );
+    }
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(&mut h, "Pick photos…", |h| shown(h, "Pick photos…"));
+    (h, opened, folder, imported, sessions)
+}
+
+#[test]
+fn with_no_library_folder_it_is_asked_before_the_picking_opens_then_the_photos_go_there() {
+    let (mut h, opened, folder, imported, sessions) = picking_world(None);
+    h.get_by_label("Pick photos…").click();
+    until(&mut h, "the library folder asked", |h| {
+        shown(h, "Choose the library folder…")
+    });
+    // No picking page, no session at the service: the folder comes first,
+    // and the command line's wording never shows.
+    h.run_steps(4);
+    assert!(opened.urls().is_empty());
+    assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        h.query_all_by_label_contains("--into").next().is_none(),
+        "the command line's wording"
+    );
+    h.get_by_label("Choose the library folder…").click();
+    h.run_steps(3);
+    // The folder chooser answers.
+    let dir = std::env::temp_dir().join(format!("helios-pick-library-{}", std::process::id()));
+    let app = h.state().app().handle().clone();
+    let files = app
+        .service(&egui_pop::api::files::FILES)
+        .expect("the files service");
+    let ids = files.open_ids();
+    assert_eq!(ids.len(), 1, "one folder chooser open");
+    files.deliver(ids[0], Some(vec![dir.clone()])).unwrap();
+    until(&mut h, "the picked photos imported", |_| {
+        !imported.lock().unwrap().is_empty()
+    });
+    // Remembered as the library folder, then the picking opened and its
+    // photos imported there.
+    assert_eq!(folder.0.lock().unwrap().as_deref(), Some(dir.as_path()));
+    assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
+    assert_eq!(imported.lock().unwrap()[0].as_deref(), Some(dir.as_path()));
+    until(&mut h, "said imported", |h| shown(h, "0 photos imported."));
+}
+
+#[test]
+fn a_source_s_own_into_folder_takes_the_picked_photos_without_asking() {
+    let doc = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
+    let (mut h, opened, folder, imported, _) = picking_world(Some(doc.into()));
+    assert_eq!(h.state().import_sources().len(), 1, "the source read");
+    h.get_by_label("Pick photos…").click();
+    until(&mut h, "the picked photos imported", |_| {
+        !imported.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        imported.lock().unwrap()[0].as_deref(),
+        Some(std::path::Path::new("/photos/picked"))
+    );
+    assert_eq!(opened.urls().len(), 1);
+    // Nothing asked, nothing remembered as the library's.
+    assert!(!shown(&h, "Choose the library folder…"));
+    assert_eq!(*folder.0.lock().unwrap(), None);
 }

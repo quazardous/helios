@@ -830,10 +830,12 @@ gui-params-values 0e265cf773d72c36
 gui-pick-account 554b5fe876fe24f2
 gui-pick-again 23d4f0d457964c7f
 gui-pick-browser 809da427a6f0f41b
+gui-pick-choose-folder 60ee6bd014703f9a
 gui-pick-done 19c95ed7feb6813d
 gui-pick-expired f9be8eee7d97989e
 gui-pick-failed 0dc585e051a2e538
 gui-pick-importing a61d47728658ad72
+gui-pick-library-folder bd3d31e24eacba72
 gui-pick-nothing 692269164c42d95d
 gui-pick-sign-in 6770243a93dc36c8
 gui-pick-starting 18fd2f06bea071dd
