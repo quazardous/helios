@@ -81,7 +81,7 @@ use crate::signals::{self, Signals};
 pub const KIND: &str = "import";
 
 /// The imports' job ids in this process: `import-1`, `import-2`...
-static NEXT: AtomicU64 = AtomicU64::new(1);
+pub(crate) static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// Where the library folder is kept (`library/settings`, key `root`).
 const SETTINGS: &str = "settings";
@@ -324,6 +324,17 @@ pub struct Report {
     pub cancelled: bool,
     /// Files copied into the library folder.
     pub copied: u64,
+    /// Items of a connector whose bytes were fetched ([`crate::fetch`]).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub fetched: u64,
+    /// Items of a connector left out before any byte was fetched: known
+    /// by their item id or their claimed hash, or probably in the Library.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unfetched: u64,
+    /// Fetches tried again from zero after the bytes received were not
+    /// the ones announced.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub retried: u64,
     /// Sidecars copied with them.
     pub sidecars: u64,
     /// darktable edits kept as new versions ([`Options::darktable`]).
@@ -353,6 +364,11 @@ pub struct Report {
     /// they stay on disk when the import is undone.
     #[serde(skip)]
     pub copies: Vec<PathBuf>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Whether a card can be formatted after a copy: every photo on it is in
@@ -477,7 +493,7 @@ pub fn card_safety<S: Store>(
 }
 
 impl Report {
-    fn count(&mut self, status: Status) {
+    pub(crate) fn count(&mut self, status: Status) {
         self.files += 1;
         match status {
             Status::Added => self.added += 1,
@@ -1358,7 +1374,10 @@ pub fn import<S: Store>(
 /// and, for an image the import recorded, the image itself, off the
 /// Library, with its measured signals. So an undo clears the Library flag
 /// and takes back fields and versions; a redo sets them again.
-fn facts_kept(before: Option<ImageRows>, after: Option<&ImageRows>) -> Option<ImageRows> {
+pub(crate) fn facts_kept(
+    before: Option<ImageRows>,
+    after: Option<&ImageRows>,
+) -> Option<ImageRows> {
     let Some(after) = after else {
         return before;
     };
