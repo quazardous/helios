@@ -1364,48 +1364,60 @@ impl ImportWindow {
         status_bar_ui(ui, &words.grid, reading);
         let w = self;
         let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
-        layout.body(ui, |ui, height| {
-            // Sources and Choices keep their widths (a quarter of
-            // the room at most); Contents takes the rest, each
-            // column in its own rect, a line between them.
-            let gap = ui.spacing().item_spacing.x;
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), height),
-                egui::Sense::hover(),
+        // The body is the room above the footer, exactly: no scroll area
+        // around it, each column scrolls on its own (Sources and Choices
+        // when taller than the window, Contents its grid).
+        let height = layout.body_height(ui);
+        // Sources and Choices keep their widths (a quarter of the room at
+        // most); Contents takes the rest, each column in its own rect, a
+        // line between them.
+        let gap = ui.spacing().item_spacing.x;
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), height),
+            egui::Sense::hover(),
+        );
+        let [left, middle, right] = columns(rect, gap);
+        let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+        for x in [left.max.x + gap, right.min.x - gap] {
+            ui.painter().vline(x, rect.y_range(), stroke);
+        }
+        // A column's `Ui` is the body's child, not a scope it allocates:
+        // a column taller than its rect is clipped there, and never pushes
+        // the footer down nor the body past the window.
+        let column = |ui: &mut egui::Ui,
+                      salt: &str,
+                      rect: egui::Rect,
+                      add: &mut dyn FnMut(&mut egui::Ui)| {
+            let mut ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt(salt)
+                    .max_rect(rect)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
             );
-            let [left, middle, right] = columns(rect, gap);
-            let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-            for x in [left.max.x + gap, right.min.x - gap] {
-                ui.painter().vline(x, rect.y_range(), stroke);
+            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+            add(&mut ui);
+        };
+        column(ui, "helios.import.sources", left, &mut |ui| {
+            sources_ui(ui, w, words, &mut event);
+        });
+        column(ui, "helios.import.contents", middle, &mut |ui| {
+            ui.heading(&words.contents);
+            if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
+                event = Some(Event::Dropped(paths));
             }
-            let column =
-                |ui: &mut egui::Ui, rect: egui::Rect, add: &mut dyn FnMut(&mut egui::Ui)| {
-                    ui.scope_builder(
-                        egui::UiBuilder::new()
-                            .max_rect(rect)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                        |ui| {
-                            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
-                            add(ui);
-                        },
-                    );
-                };
-            column(ui, left, &mut |ui| sources_ui(ui, w, words, &mut event));
-            column(ui, middle, &mut |ui| {
-                ui.heading(&words.contents);
-                if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
-                    event = Some(Event::Dropped(paths));
-                }
-            });
-            column(ui, right, &mut |ui| {
-                if let Some(Asked::Into) = import_choices::choices_ui(ui, w, &words.choices) {
-                    event = Some(Event::ChooseInto);
-                }
+        });
+        column(ui, "helios.import.choices", right, &mut |ui| {
+            let mut storage = false;
+            let asked = import_choices::choices_ui(ui, w, &words.choices, &mut |ui| {
                 ui.separator();
-                if backup_line_ui(ui, words) {
-                    event = Some(Event::Storage);
-                }
+                storage = backup_line_ui(ui, words);
             });
+            if let Some(Asked::Into) = asked {
+                event = Some(Event::ChooseInto);
+            }
+            if storage {
+                event = Some(Event::Storage);
+            }
         });
         layout.footer(ui, |ui| {
             ui.separator();

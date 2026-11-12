@@ -1038,6 +1038,109 @@ fn the_embedded_import_window_is_centred_and_closes() {
     assert!((again.center() - centre).length() < 2.0, "{again:?}");
 }
 
+/// The import window's body fits the window at any size: only the grid
+/// scrolls (the Choices column would on its own, taller than the window),
+/// never the body as a whole; the grid takes the width it has, a column
+/// more as the window widens; its last row, scrolled to, ends above the
+/// footer; the backup line, last of the Choices column, is in view. Opened
+/// in main windows of two sizes, on a folder of 120 photos.
+#[test]
+fn the_import_body_fits_the_window_and_only_its_grid_scrolls() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::by;
+    const TITLE: &str = "Import photos";
+    const N: usize = 120;
+    let dir = temp("fits");
+    let folder = dir.join("Shoot");
+    photos(&folder, N, 32, 24);
+    let mut columns = Vec::new();
+    for size in [vec2(1280.0, 800.0), vec2(1920.0, 1200.0)] {
+        let mut h = headless::harness(Shell::new(helios_panels(), None), size);
+        h.run();
+        h.state_mut()
+            .run(
+                "library.importWindow",
+                json!({ "source": folder.display().to_string() }),
+                Origin::User,
+            )
+            .unwrap();
+        read_through(&mut h);
+        h.run_steps(5);
+        let window = headless::window_rect(&h, TITLE).expect("the import window");
+        let entries = h
+            .get_by_role_and_label(Role::ListBox, "Entries, thumbnails")
+            .rect();
+        let footer = h.get_by_label("Cancel").rect();
+        // One scroll bar in the window: the grid's, at its right edge.
+        let bars: Vec<egui::Rect> = h
+            .query_all(by().role(Role::ScrollBar))
+            .map(|n| n.rect())
+            .filter(|r| window.contains_rect(*r))
+            .collect();
+        assert_eq!(
+            bars.len(),
+            1,
+            "{size:?}: only the grid scrolls; bars {bars:?} in {window:?}, the grid {entries:?}"
+        );
+        assert!(
+            (bars[0].right() - entries.right()).abs() < 12.0
+                && bars[0].top() >= entries.top() - 1.0
+                && bars[0].bottom() <= entries.bottom() + 1.0,
+            "{size:?}: the bar {:?} is not the grid's {entries:?}",
+            bars[0]
+        );
+        // The grid ends above the footer.
+        assert!(
+            entries.bottom() <= footer.top(),
+            "{size:?}: the grid {entries:?} runs under the footer {footer:?}"
+        );
+        // The backup line, last of the Choices column, shows above it.
+        let storage = h
+            .query_all_by_label("Storage…")
+            .map(|n| n.rect())
+            .find(|r| window.contains_rect(*r))
+            .expect("the backup line's Storage… button");
+        assert!(
+            storage.bottom() <= footer.top() && storage.left() > entries.right(),
+            "{size:?}: the backup line {storage:?} is not shown above the footer {footer:?}"
+        );
+        // The cells of the first row: the grid's columns.
+        let cell = |h: &Harness<'static, Shell>, name: &str| {
+            h.query_all_by_label(name)
+                .map(|n| n.rect())
+                .find(|r| entries.intersects(*r))
+        };
+        let first = cell(&h, "IMG_0000.JPG").expect("the first cell");
+        let row = (0..N)
+            .filter_map(|i| cell(&h, &format!("IMG_{i:04}.JPG")))
+            .filter(|r| (r.top() - first.top()).abs() < 1.0)
+            .count();
+        columns.push(row);
+        // The last row, scrolled to, shows whole above the footer.
+        h.get_by_label("IMG_0000.JPG").click();
+        h.run_steps(2);
+        h.key_press(Key::End);
+        h.run_steps(5);
+        let last = cell(&h, &format!("IMG_{:04}.JPG", N - 1)).expect("the last cell in view");
+        let footer = h.get_by_label("Cancel").rect();
+        assert!(
+            last.bottom() <= entries.bottom() + 1.0 && last.bottom() <= footer.top(),
+            "{size:?}: the last cell {last:?} is cut, the grid {entries:?}, the footer {footer:?}"
+        );
+        // Still no other scroll bar, scrolled.
+        let bars = h
+            .query_all(by().role(Role::ScrollBar))
+            .filter(|n| window.contains_rect(n.rect()))
+            .count();
+        assert_eq!(bars, 1, "{size:?}: scrolled, only the grid scrolls");
+    }
+    assert!(
+        columns[1] > columns[0],
+        "the grid gains columns as the window widens: {columns:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 const NO_LIBRARY: &str =
     "No library is open: start Helios with one (--vault FILE) to import photos";
 

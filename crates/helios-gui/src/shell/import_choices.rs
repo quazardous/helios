@@ -422,11 +422,15 @@ fn folder_name(p: &Path) -> String {
     )
 }
 
-/// The Choices column.
+/// The Choices column, its heading above what scrolls on its own when
+/// taller than the column; `end` draws the column's last lines, in the
+/// scroll too (a line after a scroll area that fills the column would
+/// overflow it).
 pub(super) fn choices_ui(
     ui: &mut egui::Ui,
     w: &mut ImportWindow,
     words: &ChoiceWords,
+    end: &mut dyn FnMut(&mut egui::Ui),
 ) -> Option<Asked> {
     let mut asked = None;
     ui.heading(&words.heading);
@@ -464,6 +468,7 @@ pub(super) fn choices_ui(
                 .show(ui, |ui| {
                     ui.add(egui::Label::new(egui::RichText::new(&words.more_note).weak()).wrap());
                 });
+            end(ui);
         });
     asked
 }
