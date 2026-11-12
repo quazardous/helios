@@ -408,6 +408,8 @@ pub fn title(path: &str) -> Message {
         "hardware" => Message::new("gui-settings-hardware", "Hardware"),
         "health" => Message::new("gui-settings-health", "Health"),
         "health/check" => Message::new("gui-settings-health-check", "Health check"),
+        "accounts" => Message::new("gui-settings-accounts", "Accounts"),
+        "accounts/list" => Message::new("gui-settings-accounts-list", "Import accounts"),
         "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
         "interface/experimental" => Message::new("gui-settings-experimental", "Experimental"),
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
@@ -435,6 +437,7 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
         .scope_at("library", &tt("library"), "folder", 30)
         .scope_at("storage", &tt("storage"), "disc", 40)
         .scope_at("backup", &tt("backup"), "lock", 50)
+        .scope_at("accounts", &tt("accounts"), "unlock", 60)
         .scope_at("hardware", &tt("hardware"), "command", 70)
         .scope_at("health", &tt("health"), "success", 90);
     m = m.section("storage/volumes", &tt("storage/volumes"), |s| {
@@ -480,6 +483,9 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
     })
     .section("health/check", &tt("health/check"), |s| {
         health_section(s, t);
+    })
+    .section("accounts/list", &tt("accounts/list"), |s| {
+        accounts_section(s, t);
     })
     .wizard(backup_wizard(t))
 }
@@ -872,6 +878,64 @@ fn volumes_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             None,
         )
         .refresh("storage.*");
+    s.table(table);
+}
+
+/// Settings > Accounts: every import account with its source and state,
+/// "Reconnect" and "Sign out" on each (`import.accounts`,
+/// `import.reconnect`, `import.signOut`).
+fn accounts_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::shell::{ACCOUNTS_COMMAND, RECONNECT_COMMAND, SIGN_OUT_COMMAND};
+    s.description(&t(Message::new(
+        "gui-settings-accounts-about",
+        "The accounts Helios imports from. Their keys and tokens stay in this computer's keyring; the library keeps only their names.",
+    )));
+    let account = json!({ "account": "${row.id}" });
+    let table = Records::command("accounts", "", ACCOUNTS_COMMAND, "/accounts", "id")
+        .column(
+            "label",
+            &t(Message::new("gui-settings-account-name", "Account")),
+        )
+        .column(
+            "connectorText",
+            &t(Message::new("gui-settings-account-source", "Source")),
+        )
+        .column(
+            "stateText",
+            &t(Message::new("gui-settings-account-state", "State")),
+        )
+        .column("why", &t(Message::new("gui-settings-account-why", "Why")))
+        .tone("tone")
+        .row_action(
+            Action::command(RECONNECT_COMMAND)
+                .title(&t(Message::new("gui-account-reconnect", "Reconnect")))
+                .args(account.clone()),
+        )
+        .row_action(
+            Action::command(SIGN_OUT_COMMAND)
+                .title(&t(Message::new("gui-account-sign-out", "Sign out")))
+                .args(account)
+                .when("row.connected")
+                .confirmation(Confirmation::new(
+                    &t(Message::new(
+                        "gui-account-sign-out-title",
+                        "Sign out of { $account }?",
+                    )
+                    .with("account", "${row.label}")),
+                    &t(Message::new(
+                        "gui-account-sign-out-explain",
+                        "Helios forgets this account's keys and tokens on this computer. What was imported stays.",
+                    )),
+                    &t(Message::new("gui-account-sign-out", "Sign out")),
+                )),
+        )
+        .empty(
+            &t(Message::new(
+                "gui-settings-accounts-none",
+                "No account yet: add one with \"Add a source…\" in the import window.",
+            )),
+            None,
+        );
     s.table(table);
 }
 

@@ -1,0 +1,411 @@
+//! The import window's accounts (`docs/design/import-connectors.md`,
+//! sections 2.4.1 and 8.2): the Sources column lists the accounts of the
+//! connectors that declare a connection process, each with its state
+//! (connected, connecting, needs attention, not connected), and "Add a
+//! source…" offers those connectors. Picking one, or "Reconnect" on an
+//! account, runs its declared steps through the one generic flow
+//! ([`helios_connect::connect::Session`]), shown in a dialog of the
+//! window: a form's fields, a spinner while a step works, the page the
+//! browser was opened on, the reason a step failed.
+//!
+//! Settings > Accounts lists the same accounts through the commands of
+//! [`super::accounts_admin`].
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use helios_connect::Text;
+use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
+use helios_connect::connect::{Context, FieldKind, Session, Status, WebSteps};
+use helios_core::Message;
+
+use super::import_window::Texts;
+use crate::import_scan::Connectors;
+
+/// What the window keeps of the accounts.
+pub(crate) struct Accounts {
+    /// Where accounts are kept: the library's vault; none without a
+    /// library (the accounts are not shown).
+    pub(crate) book: Option<Arc<dyn AccountBook>>,
+    /// Where their secrets go: the system keyring on the desktop.
+    pub(crate) secrets: Arc<dyn Secrets>,
+    /// How the steps that reach a service run (`oauth`).
+    pub(crate) web: Option<Arc<dyn WebSteps>>,
+    /// The accounts as last read.
+    listed: Vec<Account>,
+    /// The connection running, shown in the window's dialog.
+    pub(crate) connecting: Option<Connecting>,
+    /// The same session, for the commands that read and answer it off
+    /// the window (`import.connection`).
+    pub(crate) current: Current,
+    /// The connectors' names, by id, for Settings > Accounts.
+    pub(crate) labels: Labels,
+}
+
+/// The connection running, shared with the commands.
+pub(crate) type Current = Arc<Mutex<Option<Arc<Session>>>>;
+/// The connectors' names, by id.
+pub(crate) type Labels = Arc<Mutex<BTreeMap<String, Text>>>;
+
+impl Default for Accounts {
+    fn default() -> Self {
+        Self {
+            book: None,
+            secrets: Arc::new(MemorySecrets::default()),
+            web: None,
+            listed: Vec::new(),
+            connecting: None,
+            current: Current::default(),
+            labels: Labels::default(),
+        }
+    }
+}
+
+/// A connection running.
+pub(crate) struct Connecting {
+    pub(crate) session: Arc<Session>,
+    /// The connector's name, as shown.
+    label: String,
+    /// The form's values as typed, by field.
+    values: BTreeMap<String, String>,
+    /// The form step the values are for.
+    form: Option<String>,
+    /// The browser was opened on this page.
+    opened: Option<String>,
+}
+
+impl Accounts {
+    /// The accounts, read again (a pass of the window: a connection or a
+    /// command may have changed them).
+    pub(crate) fn listed(&mut self) -> &[Account] {
+        if let Some(book) = &self.book {
+            match book.accounts() {
+                Ok(list) => self.listed = list,
+                Err(e) => log::warn!("import accounts: {e}"),
+            }
+        }
+        &self.listed
+    }
+
+    /// Starts connecting: a new account of `connector`, or the account
+    /// `account` again (from the step that failed when it needs
+    /// attention).
+    pub(crate) fn connect(
+        &mut self,
+        connectors: &Connectors,
+        connector: &str,
+        account: Option<&str>,
+        texts: Option<&Texts>,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let book = self.book.clone().ok_or("accounts need a library open")?;
+        let provider = connectors
+            .provider(connector)
+            .ok_or_else(|| format!("no source of kind {connector}"))?;
+        let manifest = provider.manifest();
+        if manifest.connect.is_empty() {
+            return Err(format!("{connector} needs no connection"));
+        }
+        let label = translated(texts, &manifest.label);
+        let (account, new) = match account {
+            Some(id) => (
+                book.account(id)?
+                    .ok_or_else(|| format!("no account {id}"))?,
+                false,
+            ),
+            None => (Account::new(connector, &label, &book.accounts()?), true),
+        };
+        if let Some(c) = self.connecting.take() {
+            c.session.cancel();
+        }
+        let context = Context {
+            provider,
+            services: connectors.services(),
+            book,
+            secrets: self.secrets.clone(),
+            web: self.web.clone(),
+        };
+        let session = Arc::new(Session::start(context, account, new, wake));
+        *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+        self.connecting = Some(Connecting {
+            session,
+            label,
+            values: BTreeMap::new(),
+            form: None,
+            opened: None,
+        });
+        Ok(())
+    }
+
+    /// Signs an account out: its secrets forgotten, "not connected".
+    pub(crate) fn sign_out(&mut self, id: &str) -> Result<(), String> {
+        let book = self.book.clone().ok_or("accounts need a library open")?;
+        helios_connect::account::sign_out(book.as_ref(), self.secrets.as_ref(), id)?;
+        Ok(())
+    }
+
+    /// The session is no longer shown.
+    fn close(&mut self) {
+        self.connecting = None;
+        *self.current.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+}
+
+/// A connector's text in the interface's language.
+pub(crate) fn translated(texts: Option<&Texts>, text: &Text) -> String {
+    match texts {
+        Some(t) => t(Message::new(&text.key, &text.en)),
+        None => text.en.clone(),
+    }
+}
+
+/// An account's state, as the Sources column and Settings > Accounts
+/// say it.
+pub(crate) fn state_text(state: &AccountState) -> Message {
+    match state {
+        AccountState::NotConnected => Message::new("gui-account-not-connected", "not connected"),
+        AccountState::Connecting { .. } => Message::new("gui-account-connecting", "connecting…"),
+        AccountState::Connected => Message::new("gui-account-connected", "connected"),
+        AccountState::NeedsAttention { .. } => {
+            Message::new("gui-account-needs-attention", "needs attention")
+        }
+    }
+}
+
+/// What the accounts' part of the Sources column asked.
+pub(crate) enum Asked {
+    Add(String),
+    Reconnect(String),
+    SignOut(String),
+}
+
+/// The accounts under their heading, each with its state and, in its
+/// menu, "Reconnect" and "Sign out"; then "Add a source…" with the
+/// connectors that declare a connection process. Nothing without a
+/// library, or when no account exists and no connector can be added.
+pub(crate) fn accounts_ui(
+    ui: &mut egui::Ui,
+    accounts: &mut Accounts,
+    connectors: &Connectors,
+    t: &dyn Fn(Message) -> String,
+) -> Option<Asked> {
+    accounts.book.as_ref()?;
+    let addable = connectors.addable();
+    let listed = accounts.listed().to_vec();
+    if listed.is_empty() && addable.is_empty() {
+        return None;
+    }
+    let mut asked = None;
+    ui.separator();
+    ui.strong(t(Message::new("gui-import-window-accounts", "Accounts")));
+    for account in &listed {
+        let state = t(state_text(&account.state));
+        let colour = match account.state {
+            AccountState::Connected => ui.visuals().text_color(),
+            AccountState::NeedsAttention { .. } => ui.visuals().warn_fg_color,
+            _ => ui.visuals().weak_text_color(),
+        };
+        let why = match &account.state {
+            AccountState::NeedsAttention { why, .. } => Some(why.clone()),
+            _ => None,
+        };
+        let row = ui
+            .horizontal(|ui| {
+                ui.label(&account.label);
+                ui.label(egui::RichText::new(&state).color(colour).small());
+            })
+            .response;
+        let row = row.interact(egui::Sense::click());
+        let row = match why {
+            Some(why) => row.on_hover_text(why),
+            None => row,
+        };
+        row.context_menu(|ui| {
+            if ui
+                .button(t(Message::new("gui-account-reconnect", "Reconnect")))
+                .clicked()
+            {
+                asked = Some(Asked::Reconnect(account.id.clone()));
+                ui.close();
+            }
+            if ui
+                .button(t(Message::new("gui-account-sign-out", "Sign out")))
+                .clicked()
+            {
+                asked = Some(Asked::SignOut(account.id.clone()));
+                ui.close();
+            }
+        });
+        if matches!(account.state, AccountState::NeedsAttention { .. })
+            && ui
+                .small_button(t(Message::new("gui-account-reconnect", "Reconnect")))
+                .clicked()
+        {
+            asked = Some(Asked::Reconnect(account.id.clone()));
+        }
+    }
+    if !addable.is_empty() {
+        ui.menu_button(
+            t(Message::new(
+                "gui-import-window-add-source",
+                "Add a source…",
+            )),
+            |ui| {
+                for (id, label) in &addable {
+                    if ui.button(t(Message::new(&label.key, &label.en))).clicked() {
+                        asked = Some(Asked::Add(id.clone()));
+                        ui.close();
+                    }
+                }
+            },
+        );
+    }
+    asked
+}
+
+/// The connection's dialog, while one runs or until its end is seen:
+/// the step's form, a spinner, the browser's page, why it failed, or
+/// that the account is connected. Closed by Cancel or Close.
+pub(crate) fn connect_dialog(
+    ctx: &egui::Context,
+    accounts: &mut Accounts,
+    t: &dyn Fn(Message) -> String,
+) {
+    let Some(connecting) = accounts.connecting.as_mut() else {
+        return;
+    };
+    let status = connecting.session.status();
+    // A browser step opens the page once, in the system browser (never
+    // a web view: services refuse them).
+    if let Status::Browser { url, .. } = &status
+        && connecting.opened.as_deref() != Some(url.as_str())
+    {
+        connecting.opened = Some(url.clone());
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    }
+    let mut close = false;
+    egui::Modal::new(egui::Id::unique("helios.import.connect")).show(ctx, |ui| {
+        ui.set_width(360.0);
+        ui.heading(t(Message::new("gui-connect-title", "Connect { $source }")
+            .with("source", connecting.label.clone())));
+        ui.add_space(4.0);
+        match &status {
+            Status::Working { .. } => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t(Message::new("gui-connect-working", "Connecting…")));
+                });
+                if ui
+                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                    .clicked()
+                {
+                    connecting.session.cancel();
+                }
+            }
+            Status::Form {
+                step,
+                fields,
+                error,
+            } => {
+                if connecting.form.as_deref() != Some(step.as_str()) {
+                    connecting.form = Some(step.clone());
+                    connecting.values = fields
+                        .iter()
+                        .map(|f| (f.id.clone(), f.default.clone()))
+                        .collect();
+                }
+                egui::Grid::new("helios.import.connect.form")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        for field in fields {
+                            let label =
+                                ui.label(t(Message::new(&field.label.key, &field.label.en)));
+                            let value = connecting.values.entry(field.id.clone()).or_default();
+                            ui.add(
+                                egui::TextEdit::singleline(value)
+                                    .password(field.kind == FieldKind::Secret),
+                            )
+                            .labelled_by(label.id);
+                            ui.end_row();
+                            if let Some(help) = &field.help {
+                                ui.label("");
+                                ui.weak(t(Message::new(&help.key, &help.en)));
+                                ui.end_row();
+                            }
+                        }
+                    });
+                if let Some(e) = error {
+                    ui.colored_label(ui.visuals().warn_fg_color, e);
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(t(Message::new("gui-connect-next", "Connect")))
+                        .clicked()
+                    {
+                        connecting.session.answer(connecting.values.clone());
+                    }
+                    if ui
+                        .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                        .clicked()
+                    {
+                        connecting.session.cancel();
+                    }
+                });
+            }
+            Status::Browser { url, .. } => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t(Message::new(
+                        "gui-connect-browser",
+                        "Sign in in your browser, then come back here.",
+                    )));
+                });
+                ui.hyperlink_to(
+                    t(Message::new(
+                        "gui-connect-open-again",
+                        "Open the page again",
+                    )),
+                    url,
+                );
+                if ui
+                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                    .clicked()
+                {
+                    connecting.session.cancel();
+                }
+            }
+            Status::Connected(account) => {
+                ui.label(t(Message::new(
+                    "gui-connect-done",
+                    "{ $account } is connected.",
+                )
+                .with("account", account.label.clone())));
+                if ui
+                    .button(t(Message::new("gui-connect-close", "Close")))
+                    .clicked()
+                {
+                    close = true;
+                }
+            }
+            Status::Failed { why, .. } => {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    t(
+                        Message::new("gui-connect-failed", "Not connected: { $why }")
+                            .with("why", why.clone()),
+                    ),
+                );
+                if ui
+                    .button(t(Message::new("gui-connect-close", "Close")))
+                    .clicked()
+                {
+                    close = true;
+                }
+            }
+            Status::Cancelled => close = true,
+        }
+    });
+    if close {
+        accounts.close();
+    }
+}

@@ -69,6 +69,22 @@ export-write-failed = cannot write { $path }: { $error }
 
 gui-about-description = A client/server, AI-first image processing framework.
 
+gui-account-connected = connected
+
+gui-account-connecting = connecting…
+
+gui-account-needs-attention = needs attention
+
+gui-account-not-connected = not connected
+
+gui-account-reconnect = Reconnect
+
+gui-account-sign-out = Sign out
+
+gui-account-sign-out-explain = Helios forgets this account's keys and tokens on this computer. What was imported stays.
+
+gui-account-sign-out-title = Sign out of { $account }?
+
 gui-backup-card-safe = { $card } is safe to format: every photo has its backups
 
 gui-backup-wizard = Set up backups
@@ -170,6 +186,26 @@ gui-compare-rating = Active photo's rating
 gui-compare-too-few = Select two or more photos to compare them
 
 gui-confirmed-by-policy = { $verb }: confirmed by policy
+
+gui-connect-browser = Sign in in your browser, then come back here.
+
+gui-connect-cancel = Cancel
+
+gui-connect-close = Close
+
+gui-connect-done = { $account } is connected.
+
+gui-connect-failed = Not connected: { $why }
+
+gui-connect-next = Connect
+
+gui-connect-open-again = Open the page again
+
+gui-connect-secret-refused = A secret is typed by the person, never given by an agent
+
+gui-connect-title = Connect { $source }
+
+gui-connect-working = Connecting…
 
 gui-copied = copied { $text }
 
@@ -439,9 +475,13 @@ gui-import-remember-help = The workspace's import source: the next import does n
 
 gui-import-verb = Import
 
+gui-import-window-accounts = Accounts
+
 gui-import-window-add = Add where they are
 
 gui-import-window-add-favourite = Add to favourites
+
+gui-import-window-add-source = Add a source…
 
 gui-import-window-all-types = All types
 
@@ -1120,6 +1160,22 @@ gui-scopes-blue = Blue
 gui-scopes-green = Green
 
 gui-scopes-red = Red
+
+gui-settings-account-name = Account
+
+gui-settings-account-source = Source
+
+gui-settings-account-state = State
+
+gui-settings-account-why = Why
+
+gui-settings-accounts = Accounts
+
+gui-settings-accounts-about = The accounts Helios imports from. Their keys and tokens stay in this computer's keyring; the library keeps only their names.
+
+gui-settings-accounts-list = Import accounts
+
+gui-settings-accounts-none = No account yet: add one with "Add a source…" in the import window.
 
 gui-settings-backup = Backup
 

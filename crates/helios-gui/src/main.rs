@@ -1928,6 +1928,13 @@ fn main() -> Result<(), String> {
                     marker,
                 )));
             }
+            // The import accounts, kept in the vault (public facts only).
+            if let Some(vault) = known_vault.clone() {
+                shell.set_import_accounts(
+                    Arc::new(helios_connect::account::VaultAccounts(vault)),
+                    Arc::new(helios_connect::account::MemorySecrets::default()),
+                );
+            }
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));

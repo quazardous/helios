@@ -12,6 +12,10 @@
 //! modules. The local folder ([`folder`]) and the mounted card ([`card`])
 //! are its first two; plugins join it in a later slice.
 //!
+//! Connectors that need an account declare a connection process
+//! (`[[connect]]`): [`connect`] drives it, [`account`] keeps what it
+//! found.
+//!
 //! [`contract`] is the suite every connector passes; [`land`] is the part
 //! file fetched bytes land in, hashed as they arrive.
 
@@ -23,8 +27,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+pub mod account;
 pub mod card;
+pub mod connect;
 pub mod contract;
+/// A connector declaring a form and a test step, for tests.
+#[doc(hidden)]
+pub mod fake;
 pub mod folder;
 pub mod land;
 pub mod local;
@@ -76,6 +85,17 @@ pub trait Connector: Send + Sync {
         _max_side: u32,
     ) -> Result<Option<Vec<u8>>, ConnectorError> {
         Ok(None)
+    }
+
+    /// Proves the connection under an account (the `test` step of a
+    /// connection process): the account's name as the source knows it
+    /// (an e-mail address, a server), or why it fails.
+    fn probe(
+        &self,
+        _account: Option<&AccountRef>,
+        _cancel: &Cancel,
+    ) -> Result<Probed, ConnectorError> {
+        Err(ConnectorError::Unsupported)
     }
 
     /// How Helios reads the item's bytes: in place (a mounted folder) or
@@ -185,6 +205,13 @@ pub enum Originals {
 pub struct AccountRef {
     pub connector: String,
     pub id: String,
+}
+
+/// What a connection's test found.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Probed {
+    /// The account's name as the source knows it.
+    pub label: Option<String>,
 }
 
 /// One place a connector lists: a folder, a card, a phone.
