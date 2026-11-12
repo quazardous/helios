@@ -4441,7 +4441,7 @@ impl Shell {
                 frame::request(self.core.app.handle(), ctx, FrameRequest::ToggleMaximize);
             }
             Action::Quit => self.quit(ctx),
-            Action::QuitConfirmed => self.quit_confirmed(ctx),
+            Action::QuitConfirmed => self.quit_confirmed(),
             Action::MainWindow => self.main_window(),
             Action::SystemMenu => {
                 // Under the title bar's start, where its menu button is

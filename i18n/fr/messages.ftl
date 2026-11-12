@@ -1754,8 +1754,6 @@ gui-import-window-menu-file = Fichier
 
 gui-import-window-menu-window = Fenêtre
 
-gui-main-window-in-use = La fenêtre principale affiche cette fenêtre ; elle revient quand cette fenêtre se ferme
-
 gui-quit-title = Quitter Helios ?
 
 gui-quit-jobs-detail = { $count } tâches en cours ; quitter les annule

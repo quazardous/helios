@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_pop::api::windows::WindowId;
 use helios_gui::dialogs::Level;
 use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_library::import::{Options, import};
@@ -2178,11 +2179,13 @@ fn ctrl_w_in_the_import_window_closes_it_alone() {
 
 /// The main window closed while the import window is open: Helios goes on,
 /// the import window moving into the main one (egui-pop's rule), its scan
-/// and choices kept; its Window menu lists the main window. Closing it
-/// then, the last window, quits.
+/// and choices kept; its Window menu lists the main window. Window > Main
+/// window brings the shell back, the import window in a window of its own
+/// again. Closing that one, then the main window, the last, quits.
 #[test]
-fn closing_the_main_window_keeps_the_import_window_and_the_last_one_quits() {
+fn closing_the_main_window_keeps_the_import_window_and_window_main_brings_it_back() {
     let (mut h, _window, dir) = import_in_its_own_window("close-main");
+    let import_title = h.state().app().handle().windows()[1].title.clone();
     let closing = close_main_window(&mut h);
     assert_eq!(closing, helios_gui::shell::Closing::Moved);
     h.run_steps(2);
@@ -2207,6 +2210,30 @@ fn closing_the_main_window_keeps_the_import_window_and_the_last_one_quits() {
         h.query_by_label("Main window").is_some(),
         "Window lists the main window"
     );
+    // Window > Main window: the shell is back in the main window, the
+    // import window in its own again, with its title.
+    h.get_by_label("Main window").click();
+    h.run_steps(3);
+    assert!(!h.state().quitting());
+    assert!(h.state().import_window_open(), "the import window stays");
+    let listed: Vec<_> = app
+        .windows()
+        .into_iter()
+        .map(|w| (w.id.to_string(), w.main, w.title))
+        .collect();
+    assert_eq!(app.windows()[0].id, WindowId::main(), "the shell is back");
+    assert_eq!(
+        listed[1..],
+        [("import".to_owned(), false, import_title)],
+        "the import window is its own again"
+    );
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "its OS window again: {windows:?}");
+    // Its close button: it closes alone, Helios goes on.
+    window_pass(&mut h, windows[0], true);
+    main_passes_in_the_back(&mut h, 3);
+    assert!(!h.state().import_window_open(), "the import window closed");
+    assert!(!h.state().quitting());
     // The last window closed: Helios quits.
     assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
     assert!(h.state().quitting());
