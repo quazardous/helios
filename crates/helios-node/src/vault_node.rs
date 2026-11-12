@@ -35,6 +35,7 @@ use helios_library::import::{self, Report};
 use helios_node_core::health::HealthInputs;
 use helios_node_core::jobs::{Backups, Health};
 use helios_node_core::node::{FLUSH_EVERY, Link, LocalNode};
+use helios_node_core::settings::NodeSettings;
 use helios_node_core::volumes::VolumeWatch;
 use helios_storage::Volumes;
 use helios_storage::strategy::Trigger;
@@ -260,6 +261,12 @@ impl VaultNode {
     /// after-import backup.
     pub fn importer(&self) -> &Importer {
         &self.importer
+    }
+
+    /// The settings layers the node keeps (`user`, `project/<folder>`),
+    /// each change announced on its bus.
+    pub fn settings(&self) -> NodeSettings<SqliteStore> {
+        self.node.settings()
     }
 
     /// The health check whose schedule the node keeps.

@@ -17,6 +17,8 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] import FOLDERS-OR-IMAGES...
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] settings-get LAYER
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] settings-set LAYER TOML-FILE|-
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] calibrate-chart PICTURE X,Y X,Y X,Y X,Y
@@ -128,6 +130,8 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] import FOLDERS-OR-IMAGES...
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] settings-get LAYER
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] settings-set LAYER TOML-FILE|-
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] calibrate-chart PICTURE X,Y X,Y X,Y X,Y
@@ -450,6 +454,18 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     .copied()
                     .map(absolute)
                     .collect::<Result<_, _>>()?,
+            },
+            ["settings-get", layer] => ControlRequest::SettingsLayerGet {
+                layer: layer.to_string(),
+            },
+            ["settings-set", layer, file] => ControlRequest::SettingsLayerSet {
+                layer: layer.to_string(),
+                text: if *file == "-" {
+                    std::io::read_to_string(std::io::stdin())
+                        .map_err(|e| format!("the standard input: {e}"))?
+                } else {
+                    std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?
+                },
             },
             ["workflow-runs"] => ControlRequest::WorkflowRuns,
             ["workflow-items", run] => ControlRequest::WorkflowItems {

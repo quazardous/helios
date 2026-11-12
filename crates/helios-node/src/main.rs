@@ -29,7 +29,10 @@
 //! disk of the strategy plugged in starts one) and the health check on its
 //! schedule, each a job on its bus. An import through its control
 //! endpoints (`library.import`) is announced on the bus and starts the
-//! strategy's after-import backup. A signal cancels the running backups
+//! strategy's after-import backup. The settings layers it keeps (`user`,
+//! `project/<folder>`) are read and written through them too
+//! (`settings.layer.get`, `settings.layer.set`), each change announced on
+//! the bus (`settings.layerChanged`). A signal cancels the running backups
 //! (the copy under way is recorded), then closes the vault cleanly.
 //!
 //! `--control` serves the debug control endpoint (render, set a parameter,
@@ -48,8 +51,8 @@
 //! `load-source`, `export`, `cancel`, `job.cancel`, the batch job's
 //! `batch_start` and `batch_end`, and the runs' `workflow.*` requests
 //! (`submit`, `runs`, `items`, `forget`, `cancel`, `retry`,
-//! `prioritize`, `pause`, `resume`) and `library.import` (with
-//! `--vault`), on a Unix socket only its user can
+//! `prioritize`, `pause`, `resume`), `library.import` and
+//! `settings.layer.*` (with `--vault`), on a Unix socket only its user can
 //! open. `helios batch` starts its own node with it, on a socket in a
 //! private directory made for that run.
 //!
@@ -275,6 +278,9 @@ struct Node {
     first_export: Option<String>,
     /// Imports into the vault the node owns (`--vault`).
     importer: Option<helios_node::vault_node::Importer>,
+    /// The settings layers the node keeps in that vault (`user`,
+    /// `project/<folder>`).
+    settings: Option<helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>>,
 }
 
 /// A batch job: the parent of the exports a batch asks for.
@@ -773,8 +779,8 @@ mod control {
         )]
         Debug,
         /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`,
-        /// `batch_end`, the runs' `workflow.*` requests and
-        /// `library.import`: the batch endpoint.
+        /// `batch_end`, the runs' `workflow.*` requests, `library.import`
+        /// and `settings.layer.*`: the batch endpoint.
         Batch,
     }
 
@@ -799,6 +805,8 @@ mod control {
                         | ControlRequest::WorkflowPause { .. }
                         | ControlRequest::WorkflowResume { .. }
                         | ControlRequest::LibraryImport { .. }
+                        | ControlRequest::SettingsLayerGet { .. }
+                        | ControlRequest::SettingsLayerSet { .. }
                 )
         }
     }
@@ -816,6 +824,14 @@ mod control {
         answer
     }
 
+    /// The refusal of a settings layer request by a node with no vault.
+    fn no_settings() -> Message {
+        Message::new(
+            "node-no-settings",
+            "the node keeps no settings: start it with --vault",
+        )
+    }
+
     /// The origin of an edit saved for a control client.
     const CONTROL: &str = "control";
 
@@ -825,7 +841,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests and library.import",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import and settings.layer.*",
                 ),
             );
         }
@@ -1028,6 +1044,20 @@ mod control {
             }
             ControlRequest::WorkflowPause { run } => node.workflows.pause(run),
             ControlRequest::WorkflowResume { run } => node.workflows.resume(run),
+            ControlRequest::SettingsLayerGet { layer } => match &node.settings {
+                None => Err(no_settings()),
+                Some(settings) => settings
+                    .read(layer)
+                    .map(|text| json!({ "layer": layer, "text": text }))
+                    .map_err(Message::plain),
+            },
+            ControlRequest::SettingsLayerSet { layer, text } => match &node.settings {
+                None => Err(no_settings()),
+                Some(settings) => settings
+                    .write(layer, text)
+                    .map(|()| json!({ "layer": layer }))
+                    .map_err(Message::plain),
+            },
             ControlRequest::LibraryImport { paths } => match &node.importer {
                 None => Err(Message::new(
                     "node-no-vault",
@@ -1478,16 +1508,20 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     let jobs = Jobs::new(bus.clone());
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.
-    let (vault, importer) = vault
-        .zip(args.vault.as_ref())
-        .map(|(vault, file)| {
-            let node =
-                VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
-            let held = (node.vault().clone(), node.importer().clone());
-            stopper.hold(node);
-            held
-        })
-        .unzip();
+    let held = vault.zip(args.vault.as_ref()).map(|(vault, file)| {
+        let node = VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
+        let held = (
+            node.vault().clone(),
+            node.importer().clone(),
+            node.settings(),
+        );
+        stopper.hold(node);
+        held
+    });
+    let (vault, importer, settings) = match held {
+        Some((vault, importer, settings)) => (Some(vault), Some(importer), Some(settings)),
+        None => (None, None, None),
+    };
     let edit = match (&vault, &loaded.frame_file) {
         (Some(vault), Some(file)) => match open_edit(
             vault,
@@ -1567,6 +1601,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         decisions: loaded.decisions.clone(),
         first_export: loaded.exports.first().map(|e| e.node.clone()),
         importer,
+        settings,
     });
     // A batch whose client went without ending it ends on its own.
     {
