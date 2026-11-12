@@ -17,9 +17,10 @@
 //!   `job.cancel` sent to the node's control endpoint by its relay. Pause
 //!   and resume run [`Jobs::pause`] for a job that offered it (the image
 //!   map's `map` job); retry is refused: no Helios job offers it yet.
-//! - A long export or batch that ends while no Helios window has the
-//!   focus says so on the desktop ([`Ended`], then
-//!   `platform::job_finished`).
+//! - A long job that ends while no Helios window has the focus says so
+//!   on the desktop ([`Ended`], then `platform::job_finished`), whoever
+//!   started it: a window, the node on its own (a backup, the health
+//!   check's schedule), an agent, or a followed node (its relayed jobs).
 //! - A connected node's jobs come through a relay ([`crate::relay`]),
 //!   ids `node:<name>/<id>`; the ones of a node lost for too long are
 //!   taken out of the jobs centre ([`Forgotten`]).
@@ -83,11 +84,16 @@ impl Ended {
         std::mem::take(&mut self.backups)
     }
 
-    /// The exports and batches that ended since the last call: how, and
-    /// how long they took. The title comes from the jobs model, else the
+    /// The jobs that ended since the last call, whoever started them (a
+    /// window, the node on its own, an agent, a node the desktop follows
+    /// through its relay): how, and how long they took. Left out: a job
+    /// inside another (an export of a batch: the batch says it), and the
+    /// node's background upkeep (`platform::QUIET_KINDS`). The title and,
+    /// when the event lacks it, the kind come from the jobs model, else the
     /// job's id.
     pub fn take(&mut self, app: &AppHandle) -> Vec<JobEnd> {
         let mut ends = Vec::new();
+        let centre = app.service(&egui_pop::api::jobs::JOBS);
         for e in app.events_since(self.seen) {
             self.seen = e.seq;
             let ok = match e.name.as_str() {
@@ -95,20 +101,23 @@ impl Ended {
                 helios_core::jobs::FAILED => false,
                 _ => continue,
             };
-            let job = match e.data["kind"].as_str() {
-                Some("export") => Job::Export,
-                Some("batch") => Job::Batch,
-                Some(helios_library::backup::KIND) => {
-                    self.backups = true;
-                    continue;
-                }
-                _ => continue,
-            };
             let id = e.data["id"].as_str().unwrap_or_default();
-            let title = app
-                .service(&egui_pop::api::jobs::JOBS)
-                .and_then(|j| j.job(id))
-                .map_or_else(|| id.to_string(), |j| j.title);
+            let known = centre.as_ref().and_then(|c| c.job(id));
+            let kind = e.data["kind"]
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| known.as_ref().map(|j| j.kind.clone()))
+                .unwrap_or_default();
+            if kind == helios_library::backup::KIND {
+                self.backups = true;
+            }
+            if known.as_ref().is_some_and(|j| j.parent.is_some()) {
+                continue;
+            }
+            let Some(job) = Job::of_kind(&kind) else {
+                continue;
+            };
+            let title = known.map_or_else(|| id.to_string(), |j| j.title);
             let outcome = if ok {
                 Ok(title)
             } else {

@@ -214,3 +214,63 @@ fn the_focus_is_any_helios_window_s() {
     // Nothing known: taken as focused, nothing said.
     assert!(focused(&[None]));
 }
+
+/// A backup the node started by itself (no window asked for it) that
+/// ends while no window has the focus is said once on the desktop; two
+/// clients that see the same job (the desktop's embedded node, another
+/// following it through its relay) each say it once.
+#[test]
+fn a_node_job_s_end_is_notified_once_per_client() {
+    use helios_gui::{Shell, headless, helios_panels};
+    use serde_json::json;
+    let english = |m: helios_core::Message| m.english;
+    let clients = [
+        ("backup-7", "client a"),
+        ("node:studio/backup-7", "client b"),
+    ];
+    for (id, client) in clients {
+        let mut h = headless::harness(Shell::new(helios_panels(), None), egui::vec2(1280.0, 800.0));
+        let bus = h.state().jobs().bus().clone();
+        let app = h.state().app().handle().clone();
+        let mut ended = helios_gui::jobs::Ended::after(app.last_event());
+        // The node's events, as its jobs or its relay publish them.
+        let started = json!({ "id": id, "title": "Back up to Disk A", "kind": "backup" });
+        bus.publish_value("jobs", None, "job.started", started);
+        let end = json!({ "id": id, "kind": "backup", "seconds": 42.0 });
+        bus.publish_value("jobs", None, "job.finished", end);
+        h.run();
+
+        let desktop = Simulated::default();
+        let (ctx, mut notifier) = notifying(&desktop);
+        let ends = ended.take(&app);
+        assert_eq!(ends.len(), 1, "{client}");
+        for end in &ends {
+            assert!(
+                job_finished(notifier.handle(), end, false, english),
+                "{client}"
+            );
+        }
+        // Seen again at the next frame: nothing more.
+        h.run();
+        assert!(ended.take(&app).is_empty(), "{client}");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while desktop.shown().is_empty() && Instant::now() < deadline {
+            notifier.logic(&ctx);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        notifier.logic(&ctx);
+        let shown: Vec<(String, String)> = desktop
+            .shown()
+            .into_iter()
+            .map(|(_, n)| (n.title, n.body))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![(
+                "Backup finished".to_string(),
+                "Back up to Disk A".to_string()
+            )],
+            "{client}"
+        );
+    }
+}

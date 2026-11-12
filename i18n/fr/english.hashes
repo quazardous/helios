@@ -534,10 +534,18 @@ gui-importer-form-title c057dbad928a7616
 gui-importer-refused 1e1ed0715ed2b65f
 gui-importer-scanned da651acfeeecce9b
 gui-importer-warning 48ec8d182f072be9
+gui-job-backup-done b8a19b2e17dff3eb
+gui-job-backup-failed 61c02dd09386a6ba
 gui-job-batch-done ccc1a6756b4cc887
 gui-job-batch-failed ca77875dcfbaac86
 gui-job-export-done 5fdda5b0fb93ec0f
 gui-job-export-failed f5ce199f9e1502ae
+gui-job-health-done c49af6b352063afb
+gui-job-health-failed 5a20f2d5572d28aa
+gui-job-import-done d7daa44a00483ad8
+gui-job-import-failed f478bfabd63564b9
+gui-job-other-done 802542d172a670b0
+gui-job-other-failed 8a2c04a1f1257c71
 gui-keys-from-template e70109422c5ad48b
 gui-layout-not-saved 942738e1ab7b193d
 gui-library-auto-advance b947431b44afe299
@@ -1358,7 +1366,7 @@ setting-display-wide-gamut-preview.description f0e0b6e09b6c09be
 setting-display-wide-gamut-preview.label 449f4dab4606e33d
 setting-health-destinationDays.description e15083cbcd7b1713
 setting-health-destinationDays.label 93fbf15e673b2706
-setting-notifications-jobs.description 7d029c60dd555a79
+setting-notifications-jobs.description 6cba8e76fe09f324
 setting-notifications-jobs.label fffc31760e483d40
 tip-helios-decisions.text 0eb2bf98ebacbe5d
 tip-helios-decisions.title 10452c9e778ad3f7

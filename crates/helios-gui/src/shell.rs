@@ -1145,7 +1145,7 @@ impl Shell {
         shell
     }
 
-    /// A long export or batch ended: said on the desktop when no Helios
+    /// A long job ended: said on the desktop when no Helios
     /// window has the focus and the `notifications.jobs` setting is on
     /// (see `platform::job_finished`); whether it was.
     pub fn job_finished(&self, end: &crate::platform::JobEnd) -> bool {
@@ -5526,7 +5526,7 @@ impl Shell {
         self.core.library_history.clone()
     }
 
-    /// The exports and batches that ended since the last frame: said on
+    /// The jobs that ended since the last frame: said on
     /// the desktop when long and unseen (`job_finished`). The jobs of a
     /// node lost for too long leave the jobs centre.
     fn job_notices(&mut self) {

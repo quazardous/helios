@@ -1219,15 +1219,22 @@ scheme (`MimeType=...;x-scheme-handler/helios;`); `install.sh` refreshes
 the desktop database. On Wayland the window asks for attention rather
 than taking the focus (egui does not hand the activation token on).
 
-**Notifications.** A long export or batch (ten seconds or more) that
-ends, finished or failed, while no Helios window has the focus (the main
-one or a detached panel's) is said on the desktop: `Shell::job_finished`,
-through egui-pop's notifications, tied to the desktop file by its id.
-Its title (export or batch, finished or failed) is translated; its body is
-the job's summary or error. The `notifications.jobs` setting ("Notify
-when a long job ends", on by default) turns it off; egui-pop's
-`notifications.desktop` setting still decides between the desktop and a
-toast.
+**Notifications.** A long job (ten seconds or more) that ends, finished
+or failed, while no Helios window has the focus (the main one or a
+detached panel's) is said on the desktop: `Shell::job_finished`, through
+egui-pop's notifications, tied to the desktop file by its id. Every job
+the desktop sees in its journal counts, whoever started it: a window, the
+node on its own (a backup after an import or on a disk plugged in, the
+health check's schedule), an agent over MCP, or a node the desktop
+follows (its jobs relayed as `node:<name>/<id>`). Each client decides for
+itself, by its own setting and focus, so a job two clients see is said
+once by each. Left out: a job inside another (an export of a batch) and
+the node's background upkeep (the image map, the stack suggestions). Its
+title (export, batch, import, backup, health check or job, finished or
+failed) is translated; its body is the job's title or error. The
+`notifications.jobs` setting ("Notify when a long job ends", on by
+default) turns it off; egui-pop's `notifications.desktop` setting still
+decides between the desktop and a toast.
 
 **Logs and crash reports** go to the user's state directory:
 

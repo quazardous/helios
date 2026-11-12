@@ -114,30 +114,52 @@ fn an_export_shows_in_the_jobs_centre_and_is_cancelled_from_it() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// A long export's end is what the desktop notification says: an export,
-/// how long it took, its title.
+/// A job's end is what the desktop notification says: its kind, how long
+/// it took, its title. Every kind is said, the node's own jobs too; not
+/// a job inside another, nor the node's background upkeep.
 #[test]
 fn a_job_s_end_feeds_the_desktop_notification() {
+    use helios_core::jobs::Start;
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     let shell_jobs = h.state().jobs();
     let app = h.state().app().handle().clone();
     let mut ended = helios_gui::jobs::Ended::after(app.last_event());
-    let job = shell_jobs.start(helios_core::jobs::Start::new(
-        "e9",
-        "Export 12 images",
-        "export",
-    ));
-    job.finished();
-    let other = shell_jobs.start(helios_core::jobs::Start::new(
-        "c1",
-        "Calibrate",
-        "calibration",
-    ));
-    other.failed("no GPU");
+    shell_jobs
+        .start(Start::new("e9", "Export 12 images", "export"))
+        .finished();
+    shell_jobs
+        .start(Start::new("c1", "Calibrate", "calibration"))
+        .failed("no GPU");
+    shell_jobs
+        .start(Start::new("backup-1", "Back up to Disk A", "backup"))
+        .finished();
+    shell_jobs
+        .start(Start::new("health-1", "Health check", "health"))
+        .finished();
+    // Not news: the image map's upkeep, an export inside a batch.
+    shell_jobs
+        .start(Start::new("map-1", "Image map", "map"))
+        .finished();
+    let batch = shell_jobs.start(Start::new("b1", "Export 2 photos", "batch").total(2));
+    shell_jobs
+        .start(Start::new("e10", "Export a", "export").parent("b1", 1.0))
+        .finished();
+    batch.finished();
     h.run();
     let ends = ended.take(&app);
-    assert_eq!(ends.len(), 1, "only exports and batches are notified");
-    assert_eq!(ends[0].job, Job::Export);
-    assert_eq!(ends[0].outcome, Ok("Export 12 images".to_string()));
-    assert!(ends[0].seconds >= 0.0);
+    let jobs: Vec<(Job, Result<String, String>)> =
+        ends.iter().map(|e| (e.job, e.outcome.clone())).collect();
+    assert_eq!(
+        jobs,
+        vec![
+            (Job::Export, Ok("Export 12 images".to_string())),
+            (Job::Other, Err("Calibrate: no GPU".to_string())),
+            (Job::Backup, Ok("Back up to Disk A".to_string())),
+            (Job::Health, Ok("Health check".to_string())),
+            (Job::Batch, Ok("Export 2 photos".to_string())),
+        ]
+    );
+    assert!(ends.iter().all(|e| e.seconds >= 0.0));
+    assert!(ended.take_backups(), "the backup's end is seen");
+    assert!(ended.take(&app).is_empty(), "each end is taken once");
 }

@@ -176,7 +176,7 @@ setting-interface-panels-queue-when-empty =
     .label = Queue panel without a queue
 
 setting-notifications-jobs =
-    .description = Shows a desktop notification when a long export or batch finishes or fails while no Helios window has the focus.
+    .description = Shows a desktop notification when a long job (an export, a batch, an import, a backup, a health check) finishes or fails while no Helios window has the focus, whoever started it.
     .label = Notify when a long job ends
 
 setting-project-decisions-mode =

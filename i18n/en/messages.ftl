@@ -635,6 +635,10 @@ gui-importer-scanned = { $importer }: { $found } photos found in { $source }, { 
 
 gui-importer-warning = { $importer }: { $warning }
 
+gui-job-backup-done = Backup finished
+
+gui-job-backup-failed = Backup failed
+
 gui-job-batch-done = Batch finished
 
 gui-job-batch-failed = Batch failed
@@ -642,6 +646,18 @@ gui-job-batch-failed = Batch failed
 gui-job-export-done = Export finished
 
 gui-job-export-failed = Export failed
+
+gui-job-health-done = Health check finished
+
+gui-job-health-failed = Health check failed
+
+gui-job-import-done = Import finished
+
+gui-job-import-failed = Import failed
+
+gui-job-other-done = Job finished
+
+gui-job-other-failed = Job failed
 
 gui-keys-from-template = template
 
