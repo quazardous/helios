@@ -71,12 +71,21 @@ pub struct Declarations {
 }
 
 /// The calls whose literal key and English the extractor reads from
-/// Helios's sources: `Message::new("key", "English { $arg }")`.
-pub const PATTERNS: &[extract::Pattern] = &[extract::Pattern {
-    callee: "Message::new",
-    key: 0,
-    english: Some(1),
-}];
+/// Helios's sources: `Message::new("key", "English { $arg }")`, and
+/// `StrKey::new("key", "English")` for a text egui-pop draws (a value
+/// scope's label).
+pub const PATTERNS: &[extract::Pattern] = &[
+    extract::Pattern {
+        callee: "Message::new",
+        key: 0,
+        english: Some(1),
+    },
+    extract::Pattern {
+        callee: "StrKey::new",
+        key: 0,
+        english: Some(1),
+    },
+];
 
 /// The messages Helios's code builds: every `Message::new` with a literal
 /// key and English in the `src` of each crate and module under `root`
