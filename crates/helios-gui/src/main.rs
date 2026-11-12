@@ -139,13 +139,13 @@ fn seconds_f64() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// The health check's runner: Helios's checks, over the volumes mounted
-/// (with the roles the vault gives them), the vault's file, whose folder
-/// stands for the library's place, and its backups (with the cards an
-/// import left short, still inserted, and the `health.destinationDays`
-/// setting read from `settings`), the GPU in use and its kernels, and the
-/// plugins installed, each probed; the ignored findings kept beside
-/// Helios's settings.
+/// The health check's runner: Helios's checks, over the node's inputs
+/// (the volumes mounted, the vault and its file, its backups), filled from
+/// the desktop: the cards an import left short, still inserted, the
+/// `health.destinationDays` setting read from `settings`, the GPU in use
+/// and its kernels, the plugins installed, each probed, and the
+/// catalogue's snapshots; the ignored findings kept beside Helios's
+/// settings.
 fn health_runner(
     vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
     file: Option<PathBuf>,
@@ -153,67 +153,27 @@ fn health_runner(
     settings: egui_pop::core::binding::SharedStore,
     plugins: Arc<helios_plugin::Broker>,
 ) -> helios_health::runner::Runner {
-    use helios_health::backup::{Backup, CardShort};
-    use helios_health::{Context, Findings, Ignored, Registry, runner};
-    let file = file.and_then(|f| f.canonicalize().ok());
-    let context = move || {
-        let mounted = helios_storage::system().volumes();
-        let mut volumes = mounted.clone();
-        if let Some(known) = vault
-            .as_deref()
-            .and_then(|v| helios_storage::registry::known(v).ok())
-        {
-            for v in &mut volumes {
-                if let Some(k) = known.iter().find(|k| k.id == v.id) {
-                    v.roles.clone_from(&k.roles);
-                    v.name.clone_from(&k.name);
-                }
-            }
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let backup = vault.as_deref().and_then(|v| {
-            Backup::read(v, &mounted, now)
-                .inspect_err(|e| log::warn!("health: backups: {e}"))
-                .ok()
-        });
-        let backup = backup.map(|mut b| {
-            b.destination_days = helios_gui::platform::destination_days(&settings);
-            b.cards = cards
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .iter()
-                .filter(|c| c.path.is_dir())
-                .map(|c| CardShort {
-                    label: c.label.clone(),
-                    short: c.short,
-                })
-                .collect();
-            b
-        });
-        Context {
-            volumes,
-            library: file
-                .as_deref()
-                .and_then(Path::parent)
-                .map(Path::to_path_buf),
-            vault: file.clone(),
-            backup,
-            gpu: health_gpu(),
-            plugins: health_plugins(&plugins),
-            // The catalogue's snapshots, here and on the disks plugged in.
-            snapshots: file
-                .as_deref()
-                .map(|f| helios_gui::catalogue::health(f, &mounted, now)),
-            changed_outside: vault.as_deref().and_then(|v| {
-                v.changed_outside_images()
-                    .inspect_err(|e| log::warn!("health: changed outside: {e}"))
-                    .ok()
-                    .map(|l| l.len())
-            }),
-        }
-    };
+    use helios_health::backup::CardShort;
+    use helios_health::{Findings, Ignored, Registry, runner};
+    let context =
+        helios_node_core::health::HealthInputs::new(helios_storage::system(), vault, file)
+            .with_destination_days(move || helios_gui::platform::destination_days(&settings))
+            .with_cards(move || {
+                cards
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .iter()
+                    .filter(|c| c.path.is_dir())
+                    .map(|c| CardShort {
+                        label: c.label.clone(),
+                        short: c.short,
+                    })
+                    .collect()
+            })
+            .with_gpu(health_gpu)
+            .with_plugins(move || health_plugins(&plugins))
+            .with_snapshots(helios_gui::catalogue::health)
+            .into_context();
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
     let mut registry = Registry::builtin();
     registry.add(Arc::new(helios_health::gpu::Kernels::new(health_kernels())));
