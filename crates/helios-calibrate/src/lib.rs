@@ -4,7 +4,8 @@
 //! measures every patch and solves a matrix against the chart's reference
 //! values.
 //!
-//! This crate is pure: no IO, no GUI, no pipeline. It holds, so far:
+//! This crate is pure: no IO, no GUI, no pipeline (colour calibration's
+//! CAT16 comes from its module's crate, as plain functions). It holds, so far:
 //!
 //! - [`chart`]: the charts Helios knows, their reference values (CIE Lab,
 //!   D50) with their source, and their layout (grid, patch size);
@@ -19,20 +20,23 @@
 //!   checks (clipping, darkness, uniformity), and the chart-wide checks on
 //!   the neutral patches, with their thresholds;
 //! - [`solver`]: the 3×3 matrix keeping the neutral axis, solved by
-//!   weighted least squares, the chart's orientation, and the report.
-//!
-//! The Delta E 2000 refinement comes in a later slice.
+//!   weighted least squares then refined on Delta E 2000, the chart's
+//!   orientation, and the report;
+//! - [`run`]: a chart shot measured, its illuminant estimated and solved
+//!   in one call, what `calibrate.chart` answers on a dry run.
 
 pub mod chart;
 pub mod homography;
 pub mod lab;
 pub mod layout;
+pub mod run;
 pub mod sampler;
 pub mod solver;
 
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
 pub use layout::{ImageView, Layout, Point};
+pub use run::{Illuminant, Report, Request, RunError, Shot, calibrate, working_to_xyz};
 pub use sampler::{
     ChartCheck, ClipSource, PatchCheck, PatchStats, THRESHOLDS, Thresholds, Warning, check_chart,
 };

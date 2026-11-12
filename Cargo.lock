@@ -2266,6 +2266,8 @@ dependencies = [
 name = "helios-calibrate"
 version = "0.80.0"
 dependencies = [
+ "helios-colour",
+ "helios-module-channelmixerrgb",
  "helios-photo",
 ]
 

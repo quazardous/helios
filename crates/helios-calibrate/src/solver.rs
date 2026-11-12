@@ -158,7 +158,7 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
+pub(crate) fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
     let norm = dot(v, v).sqrt();
     (norm.is_normal()).then(|| v.map(|c| c / norm))
 }
@@ -172,7 +172,7 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 }
 
 /// An orthonormal basis of the plane orthogonal to the unit vector `n`.
-fn orthogonal_basis(n: [f64; 3]) -> [[f64; 3]; 2] {
+pub(crate) fn orthogonal_basis(n: [f64; 3]) -> [[f64; 3]; 2] {
     // The axis least aligned with n, made orthogonal to it.
     let axis = (0..3)
         .min_by(|&a, &b| n[a].abs().total_cmp(&n[b].abs()))

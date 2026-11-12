@@ -8,6 +8,9 @@ repository.workspace = true
 
 [dependencies]
 helios-photo.workspace = true
+helios-colour.workspace = true
+# Colour calibration's own CAT16, so the solve and the render agree.
+helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
 
 [lints]
 workspace = true
