@@ -19,7 +19,8 @@
 //! [settings.exiftool]
 //! type = "string"
 //! default = "exiftool"
-//! about = "The exiftool program to run"
+//! label = "Program"
+//! help = "The exiftool program to run"
 //!
 //! [[capabilities]]
 //! name = "images.read"
@@ -32,11 +33,20 @@
 //! `plugin-<id>.title`, `plugin-<id>.description`,
 //! `command-<command id>.title`), which an interface loads with
 //! `helios_i18n::plugins`.
+//!
+//! `[settings.<key>]` is the plugin's configuration contract
+//! ([`helios_core::config`]); a plugin that makes accounts or reads
+//! sources declares theirs as `[account.settings.<key>]` and
+//! `[source.settings.<key>]`. Their labels and help are translated as
+//! `setting-<id>-<key>.label` / `.help` (`account-setting-…`,
+//! `source-setting-…`). A declaration with a problem, a default that does
+//! not fit its key among them, refuses the plugin.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
+use helios_core::config::{ConfigKey, Contract, Contracts, KeyType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
@@ -290,46 +300,24 @@ pub struct ConnectDecl {
 /// The step kinds Helios drives.
 pub const CONNECT_KINDS: &[&str] = &["oauth", "form", "device", "trust", "code", "test"];
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum SettingType {
-    Bool,
-    Int,
-    Float,
-    String,
-    Choice,
-}
+/// A setting's type: the configuration contract's ([`helios_core::config`]).
+pub type SettingType = KeyType;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+/// A setting: a key of the configuration contract.
+pub type SettingDecl = ConfigKey;
+
+/// What each account or each source the plugin creates is configured by:
+/// `[account.settings.<key>]`, `[source.settings.<key>]`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SettingDecl {
-    #[serde(rename = "type")]
-    pub ty: SettingType,
-    pub default: Json,
+pub struct InstanceDecl {
     #[serde(default)]
-    pub about: String,
-    /// The values a `choice` may take.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub choices: Vec<String>,
+    pub settings: Contract,
 }
 
-impl SettingDecl {
-    /// Whether a value fits the declared type.
-    pub fn check(&self, v: &Json) -> Result<(), String> {
-        let ok = match self.ty {
-            SettingType::Bool => v.is_boolean(),
-            SettingType::Int => v.is_i64() || v.is_u64(),
-            SettingType::Float => v.is_number(),
-            SettingType::String => v.is_string(),
-            SettingType::Choice => v
-                .as_str()
-                .is_some_and(|s| self.choices.iter().any(|c| c == s)),
-        };
-        if ok {
-            Ok(())
-        } else {
-            Err(format!("{v} is not a {:?}", self.ty).to_lowercase())
-        }
+impl InstanceDecl {
+    fn is_empty(&self) -> bool {
+        self.settings.is_empty()
     }
 }
 
@@ -374,9 +362,16 @@ pub struct Manifest {
     /// A source's connection process (the `import.source` service).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connect: Vec<ConnectDecl>,
-    /// Typed settings, each under the plugin's id (`<id>.<key>`).
+    /// The plugin's own settings, each under its id (`<id>.<key>`): the
+    /// configuration contract's first level.
     #[serde(default)]
-    pub settings: BTreeMap<String, SettingDecl>,
+    pub settings: Contract,
+    /// Each account's settings (`[account.settings.<key>]`).
+    #[serde(default, skip_serializing_if = "InstanceDecl::is_empty")]
+    pub account: InstanceDecl,
+    /// Each source's settings (`[source.settings.<key>]`).
+    #[serde(default, skip_serializing_if = "InstanceDecl::is_empty")]
+    pub source: InstanceDecl,
     #[serde(default)]
     pub capabilities: Vec<CapabilityDecl>,
 }
@@ -484,13 +479,18 @@ impl Manifest {
                 ));
             }
         }
-        for (key, s) in &self.settings {
-            if s.ty == SettingType::Choice && s.choices.is_empty() {
-                p.push(format!("setting `{key}`: a choice without `choices`"));
-            }
-            if let Err(e) = s.check(&s.default) {
-                p.push(format!("setting `{key}`: default {e}"));
-            }
+        let contracts = self.contracts();
+        p.extend(contracts.problems());
+        if !contracts.account.is_empty() && self.connect.is_empty() {
+            p.push("`[account.settings]` without `[[connect]]`: it makes no accounts".into());
+        }
+        if !contracts.source.is_empty()
+            && !self
+                .services
+                .iter()
+                .any(|s| s == "import.source" || s == "importer")
+        {
+            p.push("`[source.settings]` without the service `import.source` or `importer`".into());
         }
         for c in &self.capabilities {
             if capability(&c.name).is_none() {
@@ -606,11 +606,23 @@ impl Manifest {
         self.capabilities.iter().any(|c| c.name == capability)
     }
 
-    /// The settings with their defaults, keyed `<id>.<key>`.
+    /// Its configuration contracts: its own, each account's and each
+    /// source's.
+    pub fn contracts(&self) -> Contracts {
+        Contracts {
+            own: self.settings.clone(),
+            account: self.account.settings.clone(),
+            source: self.source.settings.clone(),
+        }
+    }
+
+    /// Its own settings with their defaults, keyed `<id>.<key>`; secrets
+    /// and settings without a default left out.
     pub fn default_settings(&self) -> BTreeMap<String, Json> {
         self.settings
-            .iter()
-            .map(|(k, s)| (format!("{}.{k}", self.id), s.default.clone()))
+            .defaults()
+            .into_iter()
+            .map(|(k, v)| (format!("{}.{k}", self.id), v))
             .collect()
     }
 }
@@ -654,5 +666,104 @@ mod tests {
         assert_eq!(i.extensions(), ["lrcat", "json"]);
         assert!(i.accepts("a.json"));
         assert!(!i.accepts("a.db"));
+    }
+
+    const SOURCE: &str = r#"
+id = "org.example.photos"
+version = "1.0.0"
+license = "MIT"
+command = ["run.sh"]
+services = ["import.source"]
+activation = ["onService:import.source"]
+
+[compat]
+helios = ">=0.0.1"
+interfaces = { protocol = 1, "import.source" = 1 }
+
+[settings.api]
+type = "string"
+default = "https://example.org/v1"
+about = "The API's base address"
+
+[account.settings.album]
+type = "string"
+label = "Album"
+
+[account.settings.token]
+type = "secret"
+label = "Access token"
+
+[source.settings.size]
+type = "int"
+default = 2048
+min = 256
+max = 8192
+step = 256
+
+[[connect]]
+id = "sign-in"
+kind = "form"
+"#;
+
+    fn problems(text: &str) -> Vec<String> {
+        match Manifest::parse(text) {
+            Ok(m) => m.problems(Version(0, 0, 9)),
+            Err(e) => vec![e],
+        }
+    }
+
+    #[test]
+    fn the_contract_is_read_at_its_three_levels() {
+        let m = Manifest::parse(SOURCE).unwrap();
+        assert_eq!(m.problems(Version(0, 0, 9)), Vec::<String>::new());
+        let c = m.contracts();
+        // An older `[settings.*]`, its `about` read as help.
+        assert_eq!(c.own.get("api").unwrap().help, "The API's base address");
+        assert_eq!(c.account.secrets().collect::<Vec<_>>(), ["token"]);
+        assert_eq!(c.source.get("size").unwrap().max, Some(8192.0));
+        assert_eq!(
+            m.default_settings().get("org.example.photos.api"),
+            Some(&serde_json::json!("https://example.org/v1"))
+        );
+        assert!(c.source.check(&serde_json::json!({ "size": 512 })).is_ok());
+        assert!(c.source.check(&serde_json::json!({ "size": 100 })).is_err());
+    }
+
+    #[test]
+    fn a_bad_contract_refuses_the_plugin() {
+        let refused = |from: &str, to: &str, expect: &str| {
+            let p = problems(&SOURCE.replace(from, to));
+            assert!(p.iter().any(|e| e.contains(expect)), "{to}: {p:?}");
+        };
+        refused(
+            "default = 2048",
+            "default = 100",
+            "source.setting `size`: default 100: 100 is below 256",
+        );
+        refused(
+            "default = \"https://example.org/v1\"",
+            "default = 3",
+            "setting `api`: default 3: expected string, got integer",
+        );
+        refused(
+            "type = \"secret\"\nlabel",
+            "type = \"secret\"\ndefault = \"x\"\nlabel",
+            "account.setting `token`: a secret has no default",
+        );
+        refused(
+            "type = \"secret\"",
+            "type = \"password\"",
+            "unknown variant `password`",
+        );
+        refused(
+            "[[connect]]\nid = \"sign-in\"\nkind = \"form\"",
+            "",
+            "it makes no accounts",
+        );
+        refused(
+            "services = [\"import.source\"]",
+            "services = [\"metadata.read\"]",
+            "`[source.settings]` without the service",
+        );
     }
 }

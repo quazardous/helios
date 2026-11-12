@@ -2317,6 +2317,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "getrandom 0.3.4",
+ "helios-core",
  "helios-storage",
  "helios-vault",
  "log",
@@ -2796,6 +2797,7 @@ name = "helios-plugin"
 version = "0.85.0"
 dependencies = [
  "helios-connect",
+ "helios-core",
  "helios-shell",
  "log",
  "serde",
