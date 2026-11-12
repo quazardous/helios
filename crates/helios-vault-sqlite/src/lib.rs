@@ -30,15 +30,18 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 
 use serde::Serialize;
 use serde_json::Value;
 
 use helios_core::ContentHash;
 use helios_vault::capture::CAPTURED;
+use helios_vault::capture::{CAMERA_MODEL, FILE_TYPE, LENS};
 use helios_vault::fields::{
-    AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, Sort, TAGS,
+    AuditEntry, Backups, Facets, LABELS, Order, PICKED, Query, RATING, REJECTED, Sort, TAGS,
 };
+use helios_vault::storage::VERIFIED;
 use helios_vault::storage::VolumeId;
 use helios_vault::{
     Folder, FolderState, Image, ImageId, LibraryFlag, Location, Presence, Sighting, Store, ToRead,
@@ -376,6 +379,7 @@ impl SqliteStore {
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let read_only = Connection::open_with_flags(path, flags).ok().map(|db| {
             let _ = db.busy_timeout(options.busy_timeout);
+            let _ = register_functions(&db);
             Box::new(Self {
                 db,
                 path: Some(path.to_path_buf()),
@@ -404,6 +408,7 @@ impl SqliteStore {
             _ => OpenError::Sqlite(err(e)),
         };
         db.busy_timeout(options.busy_timeout).map_err(sqlite)?;
+        register_functions(&db).map_err(sqlite)?;
         db.pragma_update(None, "foreign_keys", "ON")
             .map_err(sqlite)?;
         // WAL is kept in the file; an in-memory database answers "memory".
@@ -720,37 +725,148 @@ fn order_by(order: Order) -> String {
     format!("{key} {direction} NULLS LAST, {tie}i.id")
 }
 
-/// The statement a query selects with, and its arguments.
-fn select_sql(query: &Query) -> Result<(String, Vec<rusqlite::types::Value>), String> {
-    use rusqlite::types::Value as Sql;
+/// The SQL function folding a text for the case-blind match of words
+/// ([`helios_vault::fields::fold_case`], registered on every connection).
+const FOLD: &str = "helios_fold";
+
+/// Registers [`FOLD`] on a connection.
+fn register_functions(db: &Connection) -> rusqlite::Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    db.create_scalar_function(
+        FOLD,
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<Option<String>>(0)?
+                .map(|t| helios_vault::fields::fold_case(&t)))
+        },
+    )
+}
+
+type Sql = rusqlite::types::Value;
+
+/// What the Library calls a photo (on `i`): its first present copy's file
+/// name, by path, else the start of its id.
+fn shown_name() -> String {
+    let sep = std::path::MAIN_SEPARATOR;
+    format!(
+        "COALESCE((SELECT substr(s.path, length(rtrim(s.path, replace(s.path, '{sep}', ''))) + 1)
+          FROM sightings s WHERE s.image = i.id AND s.presence = 'present'
+          ORDER BY s.path LIMIT 1), substr(i.id, 1, 12))"
+    )
+}
+
+/// A photo's presence (on `i`): the best of its copies', missing without
+/// any.
+const PRESENCE: &str =
+    "(SELECT CASE MIN(CASE s.presence WHEN 'present' THEN 0 WHEN 'offline' THEN 1 ELSE 2 END)
+     WHEN 0 THEN 'present' WHEN 1 THEN 'offline' ELSE 'missing' END
+     FROM sightings s WHERE s.image = i.id)";
+
+/// The common table expressions measuring each photo's backups against
+/// `rule`, the last one named `name` (`image`, `have`, `off_site`,
+/// `unverified`); their arguments are pushed to `args`.
+fn backup_cte(name: &str, rule: &Backups, args: &mut Vec<Sql>) -> String {
+    let volumes = if rule.volumes.is_empty() {
+        "SELECT NULL, NULL, 0 WHERE 0".to_string()
+    } else {
+        vec!["SELECT ?, ?, ?"; rule.volumes.len()].join(" UNION ALL ")
+    };
+    for v in &rule.volumes {
+        args.push(Sql::Text(v.id.as_str().to_string()));
+        args.push(Sql::Text(v.drive.clone()));
+        args.push(Sql::Integer(i64::from(v.off_site)));
+    }
+    format!(
+        "{name}_v(volume, drive, off_site) AS ({volumes}),
+         {name}_c AS (
+           SELECT s.image AS image, v.drive AS drive, v.off_site AS off_site,
+                  EXISTS (SELECT 1 FROM documents d, json_each(d.value) j
+                          WHERE d.ns = '{VERIFIED}' AND d.key = s.image
+                            AND j.key = s.volume || char(9) || s.rel_path) AS ok
+           FROM sightings s JOIN {name}_v v ON v.volume = s.volume
+           WHERE s.image IS NOT NULL AND s.rel_path IS NOT NULL AND s.presence <> 'missing'),
+         {name} AS (
+           SELECT c.image AS image,
+                  COUNT(DISTINCT CASE WHEN c.ok THEN c.drive END) AS have,
+                  MAX(CASE WHEN c.ok THEN c.off_site ELSE 0 END) AS off_site,
+                  COUNT(DISTINCT CASE WHEN NOT c.ok AND c.drive NOT IN
+                      (SELECT o.drive FROM {name}_c o WHERE o.image = c.image AND o.ok)
+                    THEN c.drive END) AS unverified
+           FROM {name}_c c GROUP BY c.image)"
+    )
+}
+
+/// A photo's backup state (on the table `name` [`backup_cte`] made,
+/// joined), as [`BackupState::of`] decides it.
+fn backup_state(name: &str, rule: &Backups) -> String {
+    let copies = rule.copies;
+    let required = i32::from(!rule.off_site_required);
+    format!(
+        "CASE WHEN COALESCE({name}.have, 0) = 0 AND COALESCE({name}.unverified, 0) = 0 THEN 'none'
+              WHEN COALESCE({name}.have, 0) >= {copies}
+                   AND (COALESCE({name}.off_site, 0) = 1 OR {required}) THEN 'met'
+              WHEN COALESCE({name}.unverified, 0) > 0 THEN 'unverified'
+              ELSE 'short' END"
+    )
+}
+
+/// `?` marks for `n` values.
+fn marks(n: usize) -> String {
+    vec!["?"; n].join(", ")
+}
+
+/// The photos a query selects, as SQL: the common table expressions
+/// (without `WITH`, empty when none), then `FROM … WHERE …` on `i`, and
+/// the arguments of both in that order. With `facet`, the table `fk`
+/// measures each photo's backups against it, joined.
+fn matched_sql(
+    query: &Query,
+    facet: Option<&Backups>,
+) -> Result<(String, String, Vec<Sql>), String> {
     query.check()?;
-    let order = order_by(query.order);
+    let mut args: Vec<Sql> = Vec::new();
+    let mut ctes = Vec::new();
+    if let Some(b) = &query.backup {
+        ctes.push(backup_cte("bk", &b.rule, &mut args));
+    }
+    if let Some(rule) = facet {
+        ctes.push(backup_cte("fk", rule, &mut args));
+    }
     // The capture time, joined only to sort by it.
     let captured = if query.order.by == Sort::Captured {
         format!("LEFT JOIN fields c ON c.image = i.id AND c.name = '{CAPTURED}'")
     } else {
         String::new()
     };
-    let mut args: Vec<Sql> = vec![
-        query.min_rating.map_or(Sql::Null, Sql::Integer),
-        query.label.clone().map_or(Sql::Null, Sql::Text),
-    ];
     let mut sql = format!(
-            "SELECT i.id FROM images i
-             LEFT JOIN fields r ON r.image = i.id AND r.name = '{RATING}'
-             LEFT JOIN fields l ON l.image = i.id AND l.name = '{LABELS}'
-             LEFT JOIN fields p ON p.image = i.id AND p.name = '{PICKED}'
-             LEFT JOIN fields x ON x.image = i.id AND x.name = '{REJECTED}'
-             LEFT JOIN fields t ON t.image = i.id AND t.name = '{TAGS}'
-             {captured}
-             WHERE i.in_library = 1
-               AND (?1 IS NULL OR COALESCE(r.number, 0) >= ?1)
-               AND (?2 IS NULL OR EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value = ?2))"
-        );
+        "FROM images i
+         LEFT JOIN fields r ON r.image = i.id AND r.name = '{RATING}'
+         LEFT JOIN fields l ON l.image = i.id AND l.name = '{LABELS}'
+         LEFT JOIN fields p ON p.image = i.id AND p.name = '{PICKED}'
+         LEFT JOIN fields x ON x.image = i.id AND x.name = '{REJECTED}'
+         LEFT JOIN fields t ON t.image = i.id AND t.name = '{TAGS}'
+         {captured}"
+    );
+    if query.backup.is_some() {
+        sql.push_str(" LEFT JOIN bk ON bk.image = i.id");
+    }
+    if facet.is_some() {
+        sql.push_str(" LEFT JOIN fk ON fk.image = i.id");
+    }
+    sql.push_str(" WHERE i.in_library = 1");
+    if let Some(min) = query.min_rating {
+        sql.push_str(" AND COALESCE(r.number, 0) >= ?");
+        args.push(Sql::Integer(min));
+    }
+    if let Some(label) = &query.label {
+        sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value = ?)");
+        args.push(Sql::Text(label.clone()));
+    }
     if !query.labels.is_empty() {
-        let marks = vec!["?"; query.labels.len()].join(", ");
         sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value IN (");
-        sql.push_str(&marks);
+        sql.push_str(&marks(query.labels.len()));
         sql.push_str("))");
         args.extend(query.labels.iter().cloned().map(Sql::Text));
     }
@@ -790,9 +906,122 @@ fn select_sql(query: &Query) -> Result<(String, Vec<rusqlite::types::Value>), St
         sql.push_str(&ways.join(" OR "));
         sql.push(')');
     }
-    sql.push_str(" ORDER BY ");
-    sql.push_str(&order);
-    Ok((sql, args))
+    // Words: in the name the Library shows or in a tag, whatever their
+    // case (folded by the same Rust function as the memory store's).
+    let name = shown_name();
+    for word in &query.words {
+        let word = helios_vault::fields::fold_case(word);
+        let _ = write!(
+            sql,
+            " AND (instr({FOLD}({name}), ?) > 0
+                   OR EXISTS (SELECT 1 FROM json_each(t.value) WHERE instr({FOLD}(json_each.value), ?) > 0))"
+        );
+        args.push(Sql::Text(word.clone()));
+        args.push(Sql::Text(word));
+    }
+    // Camera, lens, file type: the `(name, value)` index over text fields
+    // finds the images with one of the values.
+    for (field, values) in [
+        (CAMERA_MODEL, &query.cameras),
+        (LENS, &query.lenses),
+        (FILE_TYPE, &query.file_types),
+    ] {
+        if values.is_empty() {
+            continue;
+        }
+        let _ = write!(
+            sql,
+            " AND i.id IN (SELECT image FROM fields WHERE name = '{field}' AND number IS NULL AND value IN ({}))",
+            marks(values.len())
+        );
+        args.extend(
+            values
+                .iter()
+                .map(|v| Sql::Text(Value::from(v.as_str()).to_string())),
+        );
+    }
+    // A folder: the range of paths below it, on the path index.
+    if let Some(folder) = &query.folder {
+        let prefix = helios_vault::folder_prefix(folder);
+        let mut end = prefix.clone();
+        let last = end
+            .pop()
+            .map_or('\0', |c| char::from_u32(c as u32 + 1).unwrap_or(c));
+        end.push(last);
+        sql.push_str(" AND i.id IN (SELECT image FROM sightings WHERE path >= ? AND path < ? AND image IS NOT NULL)");
+        args.push(Sql::Text(prefix));
+        args.push(Sql::Text(end));
+    }
+    if !query.presence.is_empty() {
+        let _ = write!(sql, " AND {PRESENCE} IN ({})", marks(query.presence.len()));
+        args.extend(query.presence.iter().map(|p| Sql::Text(p.as_str().into())));
+    }
+    if let Some(b) = &query.backup {
+        if b.states.is_empty() {
+            sql.push_str(" AND 0");
+        } else {
+            let _ = write!(
+                sql,
+                " AND ({}) IN ({})",
+                backup_state("bk", &b.rule),
+                marks(b.states.len())
+            );
+            args.extend(b.states.iter().map(|s| Sql::Text(s.name().into())));
+        }
+    }
+    Ok((ctes.join(",\n"), sql, args))
+}
+
+/// The statement a query selects with, and its arguments.
+fn select_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
+    let (ctes, from, args) = matched_sql(query, None)?;
+    let with = if ctes.is_empty() {
+        String::new()
+    } else {
+        format!("WITH {ctes} ")
+    };
+    let order = order_by(query.order);
+    Ok((format!("{with}SELECT i.id {from} ORDER BY {order}"), args))
+}
+
+/// The one statement counting a query's facets: rows of (facet, value,
+/// count).
+fn facets_sql(query: &Query, backups: Option<&Backups>) -> Result<(String, Vec<Sql>), String> {
+    let (ctes, from, args) = matched_sql(query, backups)?;
+    let backup = backups.map_or_else(|| "NULL".to_string(), |rule| backup_state("fk", rule));
+    let matched = format!(
+        "m AS (SELECT i.id AS id, CAST(COALESCE(r.number, 0) AS INTEGER) AS rating,
+                      l.value AS labels,
+                      CASE WHEN COALESCE(x.value, '') = 'true' THEN 'reject'
+                           WHEN COALESCE(p.value, '') = 'true' THEN 'pick' ELSE 'none' END AS flag,
+                      {PRESENCE} AS presence, {backup} AS backup
+               {from})"
+    );
+    let ctes = if ctes.is_empty() {
+        matched
+    } else {
+        format!("{ctes},\n{matched}")
+    };
+    let text = |facet: &str, field: &str| {
+        format!(
+            "SELECT '{facet}', json_extract(f.value, '$'), COUNT(*) FROM m
+             JOIN fields f ON f.image = m.id AND f.name = '{field}' AND f.number IS NULL GROUP BY 2"
+        )
+    };
+    let parts = [
+        "SELECT 'rating', rating, COUNT(*) FROM m GROUP BY 2".to_string(),
+        "SELECT 'label', j.value, COUNT(*) FROM m, json_each(m.labels) j GROUP BY 2".to_string(),
+        "SELECT 'flag', flag, COUNT(*) FROM m GROUP BY 2".to_string(),
+        text("camera", CAMERA_MODEL),
+        text("lens", LENS),
+        text("file_type", FILE_TYPE),
+        "SELECT 'presence', presence, COUNT(*) FROM m GROUP BY 2".to_string(),
+        "SELECT 'backup', backup, COUNT(*) FROM m WHERE backup IS NOT NULL GROUP BY 2".to_string(),
+    ];
+    Ok((
+        format!("WITH {ctes}\n{}", parts.join("\nUNION ALL\n")),
+        args,
+    ))
 }
 
 impl SqliteStore {
@@ -1354,6 +1583,29 @@ impl Store for SqliteStore {
             .iter()
             .map(|id| by_image.remove(&id.hex()).unwrap_or_default())
             .collect())
+    }
+
+    fn facets(&self, query: &Query, backups: Option<&Backups>) -> Result<Facets, String> {
+        let (sql, args) = facets_sql(query, backups)?;
+        let mut statement = self.db.prepare(&sql).map_err(err)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                let value = match r.get::<_, Sql>(1)? {
+                    Sql::Integer(n) => n.to_string(),
+                    Sql::Real(n) => n.to_string(),
+                    Sql::Text(t) => t,
+                    _ => String::new(),
+                };
+                Ok((r.get::<_, String>(0)?, value, r.get::<_, i64>(2)?))
+            })
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        let mut facets = Facets::default();
+        for (facet, value, n) in rows {
+            facets.add(&facet, &value, u64::try_from(n).unwrap_or(0));
+        }
+        Ok(facets)
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {

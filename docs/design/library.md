@@ -527,6 +527,16 @@ LightCraft's fields, §2): ISO, focal length, aperture, shutter, exposure
 bias, flash, body serial, edited, cropped, has versions, keyword count,
 has GPS, megapixels, aspect, import and edit dates.
 
+Built (2026-11-11): every term is a `Query` field run in the cursor's
+statement (`camera:`, `lens:`, `type:`, `folder:`, `presence:` and
+`backup:` are Helios's own keys in the search text, quoted values
+allowed); the facet counts (rating, label, flag, camera, lens, file
+type, presence, backup state) are one store query, shown under the
+toolbar while a filter is in force. Not moved yet: the window still
+holds every entry of the Library (read in windows of 2,000), so the
+grid's paging, the badges' backup marks and the tag completion still
+read the whole Library.
+
 **L5. Folders.** A Folders section in the Library panel: volumes, then
 folders with counts, from the Library's locations; offline volumes
 greyed with their "last seen"; a click scopes the grid

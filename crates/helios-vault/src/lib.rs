@@ -54,7 +54,10 @@ pub mod workshops;
 pub use capture::{Backfill, Capture};
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, LibraryRow, Row};
 pub use edit::{EditSaved, EditSession};
-pub use fields::{AuditEntry, Command, Order, Query, Sort};
+pub use fields::{
+    AuditEntry, BackupFilter, BackupState, BackupVolume, Backups, Command, Facets, Order, Query,
+    Sort,
+};
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
 pub use undo::{Change, Changes, ImageRows, Replayed};
@@ -308,6 +311,10 @@ pub trait Store: Send {
     }
     /// The images a query selects, in its order.
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String>;
+    /// How many of the images a query selects carry each value of each
+    /// facet ([`Facets`]); the backup states only with `backups`. A store
+    /// backed by a database answers in one statement.
+    fn facets(&self, query: &Query, backups: Option<&Backups>) -> Result<Facets, String>;
     /// Records a change; returns its sequence number.
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String>;
     fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String>;
@@ -384,6 +391,154 @@ impl MemoryStore {
 enum SortKey {
     Number(f64),
     Text(String),
+}
+
+impl MemoryStore {
+    /// A photo's presence: the best of its copies' ([`Presence::of`]).
+    fn presence_of(&self, id: &ImageId) -> Presence {
+        self.sightings
+            .iter()
+            .filter(|s| s.image.as_ref() == Some(id))
+            .map(|s| s.presence)
+            .min()
+            .unwrap_or(Presence::Missing)
+    }
+
+    /// What the Library calls a photo: its first present copy's file
+    /// name, by path, else the start of its id.
+    fn shown_name(&self, id: &ImageId) -> String {
+        self.sightings
+            .iter()
+            .filter(|s| s.image.as_ref() == Some(id) && s.presence == Presence::Present)
+            .map(|s| s.path.to_string_lossy())
+            .min()
+            .map_or_else(
+                || id.hex()[..12].to_string(),
+                |path| {
+                    path.rsplit(std::path::MAIN_SEPARATOR)
+                        .next()
+                        .unwrap_or_default()
+                        .to_string()
+                },
+            )
+    }
+
+    fn text_of(&self, id: &ImageId, field: &str) -> Option<&str> {
+        self.fields
+            .get(&(*id, field.to_string()))
+            .and_then(serde_json::Value::as_str)
+    }
+
+    fn items_of(&self, id: &ImageId, field: &str) -> Vec<&str> {
+        self.fields
+            .get(&(*id, field.to_string()))
+            .and_then(serde_json::Value::as_array)
+            .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+            .unwrap_or_default()
+    }
+
+    /// A photo's backup state against `rule`, as the SQL driver measures
+    /// it.
+    fn backup_state(&self, id: &ImageId, rule: &Backups) -> BackupState {
+        use std::collections::BTreeSet;
+        let verified = self
+            .documents
+            .get(&(storage::VERIFIED.to_string(), id.hex()))
+            .and_then(serde_json::Value::as_object);
+        let mut have = BTreeSet::new();
+        let mut unverified = BTreeSet::new();
+        let mut off_site = false;
+        for s in self
+            .sightings
+            .iter()
+            .filter(|s| s.image.as_ref() == Some(id) && s.presence != Presence::Missing)
+        {
+            let (Some(volume), Some(rel)) = (&s.volume, &s.rel_path) else {
+                continue;
+            };
+            let Some(counted) = rule.volumes.iter().find(|v| &v.id == volume) else {
+                continue;
+            };
+            let key = format!("{volume}\t{}", rel.display());
+            if verified.is_some_and(|v| v.contains_key(&key)) {
+                off_site |= counted.off_site;
+                have.insert(counted.drive.as_str());
+            } else {
+                unverified.insert(counted.drive.as_str());
+            }
+        }
+        let unverified = unverified.difference(&have).count() as u64;
+        BackupState::of(have.len() as u64, unverified, off_site, rule)
+    }
+
+    /// Whether a photo of the Library passes every term of a query.
+    fn passes(&self, id: &ImageId, query: &Query) -> bool {
+        let field = |name: &str| self.fields.get(&(*id, name.to_string()));
+        let yes = |name: &str| {
+            field(name)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        let rating = field(fields::RATING)
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let labels = self.items_of(id, fields::LABELS);
+        let tags = self.items_of(id, fields::TAGS);
+        let flag = Query::flag_of(yes(fields::PICKED), yes(fields::REJECTED));
+        let one_of = |wanted: &[String], name: &str| {
+            wanted.is_empty()
+                || self
+                    .text_of(id, name)
+                    .is_some_and(|v| wanted.iter().any(|w| w == v))
+        };
+        let captured = field(capture::CAPTURED).and_then(serde_json::Value::as_f64);
+        let in_range = (query.captured_from.is_none() && query.captured_before.is_none())
+            || captured.is_some_and(|t| {
+                query.captured_from.is_none_or(|from| t >= from as f64)
+                    && query.captured_before.is_none_or(|before| t < before as f64)
+            });
+        let words_ok = query.words.is_empty() || {
+            let name = fields::fold_case(&self.shown_name(id));
+            let tags: Vec<String> = tags.iter().map(|t| fields::fold_case(t)).collect();
+            query.words.iter().all(|w| {
+                let w = fields::fold_case(w);
+                name.contains(&w) || tags.iter().any(|t| t.contains(&w))
+            })
+        };
+        let folder_ok = query.folder.as_deref().is_none_or(|folder| {
+            let prefix = folder_prefix(folder);
+            self.sightings.iter().any(|s| {
+                s.image.as_ref() == Some(id) && s.path.to_string_lossy().starts_with(&prefix)
+            })
+        });
+        query.min_rating.is_none_or(|min| rating >= min)
+            && query
+                .label
+                .as_ref()
+                .is_none_or(|l| labels.contains(&l.as_str()))
+            && (query.labels.is_empty()
+                || query.labels.iter().any(|l| labels.contains(&l.as_str())))
+            && query.tags.iter().all(|t| tags.contains(&t.as_str()))
+            && (query.flags.is_empty() || query.flags.iter().any(|f| f == flag))
+            && in_range
+            && words_ok
+            && one_of(&query.cameras, capture::CAMERA_MODEL)
+            && one_of(&query.lenses, capture::LENS)
+            && one_of(&query.file_types, capture::FILE_TYPE)
+            && folder_ok
+            && (query.presence.is_empty() || query.presence.contains(&self.presence_of(id)))
+            && query
+                .backup
+                .as_ref()
+                .is_none_or(|b| b.states.contains(&self.backup_state(id, &b.rule)))
+    }
+}
+
+/// A folder as the start of the paths below it: its path with one
+/// separator at its end.
+pub fn folder_prefix(folder: &str) -> String {
+    let sep = std::path::MAIN_SEPARATOR;
+    format!("{}{sep}", folder.trim_end_matches(sep))
 }
 
 impl MemoryStore {
@@ -788,60 +943,55 @@ impl Store for MemoryStore {
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
-        let rating = |id: &ImageId| {
-            self.fields
-                .get(&(*id, fields::RATING.to_string()))
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0)
-        };
         query.check()?;
-        let has = |id: &ImageId, field: &str, item: &str| {
-            self.fields
-                .get(&(*id, field.to_string()))
-                .and_then(|v| v.as_array())
-                .is_some_and(|items| items.iter().any(|i| i.as_str() == Some(item)))
-        };
-        let yes = |id: &ImageId, field: &str| {
-            self.fields
-                .get(&(*id, field.to_string()))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        };
         let mut ids: Vec<ImageId> = self
             .images
             .keys()
-            .filter(|id| self.in_library(id))
-            .filter(|id| query.min_rating.is_none_or(|min| rating(id) >= min))
-            .filter(|id| {
-                query
-                    .label
-                    .as_ref()
-                    .is_none_or(|label| has(id, fields::LABELS, label))
-            })
-            .filter(|id| {
-                query.labels.is_empty() || query.labels.iter().any(|l| has(id, fields::LABELS, l))
-            })
-            .filter(|id| query.tags.iter().all(|t| has(id, fields::TAGS, t)))
-            .filter(|id| {
-                let flag = Query::flag_of(yes(id, fields::PICKED), yes(id, fields::REJECTED));
-                query.flags.is_empty() || query.flags.iter().any(|f| f == flag)
-            })
-            .filter(|id| {
-                if query.captured_from.is_none() && query.captured_before.is_none() {
-                    return true;
-                }
-                self.fields
-                    .get(&(**id, capture::CAPTURED.to_string()))
-                    .and_then(serde_json::Value::as_f64)
-                    .is_some_and(|t| {
-                        query.captured_from.is_none_or(|from| t >= from as f64)
-                            && query.captured_before.is_none_or(|before| t < before as f64)
-                    })
-            })
+            .filter(|id| self.in_library(id) && self.passes(id, query))
             .copied()
             .collect();
         self.sort(&mut ids, query.order);
         Ok(ids)
+    }
+
+    fn facets(&self, query: &Query, backups: Option<&Backups>) -> Result<Facets, String> {
+        query.check()?;
+        let mut facets = Facets::default();
+        for id in self
+            .images
+            .keys()
+            .filter(|id| self.in_library(id) && self.passes(id, query))
+        {
+            let field = |name: &str| self.fields.get(&(*id, name.to_string()));
+            let yes = |name: &str| {
+                field(name)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            };
+            let rating = field(fields::RATING)
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            facets.add("rating", &rating.to_string(), 1);
+            for label in self.items_of(id, fields::LABELS) {
+                facets.add("label", label, 1);
+            }
+            let flag = Query::flag_of(yes(fields::PICKED), yes(fields::REJECTED));
+            facets.add("flag", flag, 1);
+            for (facet, name) in [
+                ("camera", capture::CAMERA_MODEL),
+                ("lens", capture::LENS),
+                ("file_type", capture::FILE_TYPE),
+            ] {
+                if let Some(value) = self.text_of(id, name) {
+                    facets.add(facet, value, 1);
+                }
+            }
+            facets.add("presence", self.presence_of(id).as_str(), 1);
+            if let Some(rule) = backups {
+                facets.add("backup", self.backup_state(id, rule).name(), 1);
+            }
+        }
+        Ok(facets)
     }
 
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String> {

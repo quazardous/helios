@@ -834,6 +834,14 @@ gui-library-auto-advance = Avance automatique
 gui-library-compare-hint = Sélectionnez de deux à quatre images pour les comparer
 
 gui-library-count = { $shown } sur { $total }
+gui-library-facet-rating = Note
+gui-library-facet-label = Étiquette
+gui-library-facet-flag = Marque
+gui-library-facet-camera = Appareil
+gui-library-facet-lens = Objectif
+gui-library-facet-type = Type
+gui-library-facet-presence = Présence
+gui-library-facet-backup = Sauvegarde
 
 gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre
 

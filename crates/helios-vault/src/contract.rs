@@ -49,6 +49,8 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     the_map_reads_by_kind_newest_first(make());
     forgetting_and_pruning_never_touch_the_library(make());
     capture_fields_are_read_only_and_a_date_range_is_one_query(make());
+    queries_filter_by_every_library_term_in_one_query(make());
+    facets_count_each_value_in_one_query(make());
 }
 
 /// Capture fields are written whole by `set_captures` (a value not read
@@ -1058,6 +1060,13 @@ impl<S: Store> Store for FailingAudit<S> {
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
         self.0.select(query)
     }
+    fn facets(
+        &self,
+        query: &Query,
+        backups: Option<&crate::Backups>,
+    ) -> Result<crate::Facets, String> {
+        self.0.facets(query, backups)
+    }
     fn add_audit(&mut self, _: &crate::AuditEntry) -> Result<u64, String> {
         Err("injected fault".into())
     }
@@ -1832,4 +1841,314 @@ fn library_rows_come_with_their_locations_and_moves_show_in_deltas<S: Store>(s: 
         .unwrap();
     assert!(v.refresh(cursor.id).unwrap().replaced.is_empty());
     v.close_cursor(cursor.id);
+}
+
+/// The Library of the filter and facet scenarios (`docs/design/library.md`,
+/// L4), and the backup rule they are measured against: 1 `IMG_0001.CR3`
+/// present, tagged `Été`, a verified copy on one backup drive (short of
+/// two); 2 `beach.jpg` present, its backup copy not verified; 3 offline,
+/// verified on two drives, one off site (met); 4 missing, its backup copy
+/// missing too (none); 5 no copy at all (none).
+fn library_fixture<S: Store>(s: S) -> (Vault<S>, Vec<ImageId>, crate::Backups) {
+    use crate::capture::{CAMERA_MODEL, FILE_TYPE, LENS};
+    let mut s = with_images(s, 5);
+    let ids: Vec<ImageId> = (1..=5).map(|i| image(i).id).collect();
+    let root = Path::new(std::path::MAIN_SEPARATOR_STR).join("p");
+    let copy = |path: PathBuf, volume: &str, rel: &str, presence: Presence| Location {
+        volume: Some(VolumeId(volume.into())),
+        rel_path: Some(PathBuf::from(rel)),
+        presence,
+        ..Location::seen(path, 101, 5, 7)
+    };
+    let shots = root.join("shots");
+    let backup = root.join("backup");
+    let placed = [
+        (
+            0,
+            copy(
+                shots.join("IMG_0001.CR3"),
+                "uuid:lib",
+                "shots/IMG_0001.CR3",
+                Presence::Present,
+            ),
+        ),
+        (
+            0,
+            copy(
+                backup.join("IMG_0001.CR3"),
+                "uuid:b1",
+                "a/IMG_0001.CR3",
+                Presence::Present,
+            ),
+        ),
+        (
+            1,
+            copy(
+                shots.join("beach.jpg"),
+                "uuid:lib",
+                "shots/beach.jpg",
+                Presence::Present,
+            ),
+        ),
+        (
+            1,
+            copy(
+                backup.join("beach.jpg"),
+                "uuid:b1",
+                "a/beach.jpg",
+                Presence::Present,
+            ),
+        ),
+        (
+            2,
+            copy(
+                root.join("other").join("x.nef"),
+                "uuid:lib",
+                "other/x.nef",
+                Presence::Offline,
+            ),
+        ),
+        (
+            2,
+            copy(
+                backup.join("x.nef"),
+                "uuid:b1",
+                "a/x.nef",
+                Presence::Offline,
+            ),
+        ),
+        (
+            2,
+            copy(
+                root.join("far").join("x.nef"),
+                "uuid:b2",
+                "x.nef",
+                Presence::Offline,
+            ),
+        ),
+        (
+            3,
+            copy(
+                shots.join("y.nef"),
+                "uuid:lib",
+                "shots/y.nef",
+                Presence::Missing,
+            ),
+        ),
+        (
+            3,
+            copy(
+                backup.join("y.nef"),
+                "uuid:b1",
+                "a/y.nef",
+                Presence::Missing,
+            ),
+        ),
+    ];
+    for (i, location) in &placed {
+        s.put_location(&ids[*i], location).unwrap();
+    }
+    let verified = |pairs: &[(&str, &str)]| {
+        let mut doc = serde_json::Map::new();
+        for (volume, rel) in pairs {
+            doc.insert(format!("{volume}\t{}", Path::new(rel).display()), json!(5));
+        }
+        serde_json::Value::Object(doc)
+    };
+    let docs = [
+        (0, verified(&[("uuid:b1", "a/IMG_0001.CR3")])),
+        (2, verified(&[("uuid:b1", "a/x.nef"), ("uuid:b2", "x.nef")])),
+        (3, verified(&[("uuid:b1", "a/y.nef")])),
+    ];
+    for (i, doc) in &docs {
+        s.set_document(crate::storage::VERIFIED, &ids[*i].hex(), Some(doc))
+            .unwrap();
+    }
+    for (i, field, value) in [
+        (0, TAGS, json!(["Été"])),
+        (0, LABELS, json!(["red"])),
+        (2, LABELS, json!(["blue", "red"])),
+        (0, RATING, json!(3)),
+        (1, RATING, json!(3)),
+        (1, PICKED, json!(true)),
+        (0, CAMERA_MODEL, json!("Z 8")),
+        (1, CAMERA_MODEL, json!("Z 8")),
+        (2, CAMERA_MODEL, json!("R5")),
+        (0, LENS, json!("L1")),
+        (2, LENS, json!("L2")),
+        (0, FILE_TYPE, json!("cr3")),
+        (1, FILE_TYPE, json!("jpg")),
+        (2, FILE_TYPE, json!("nef")),
+    ] {
+        s.set_field(&ids[i], field, Some(&value)).unwrap();
+    }
+    let rule = crate::Backups {
+        volumes: vec![
+            crate::BackupVolume {
+                id: VolumeId("uuid:b1".into()),
+                drive: "d1".into(),
+                off_site: false,
+            },
+            crate::BackupVolume {
+                id: VolumeId("uuid:b2".into()),
+                drive: "d2".into(),
+                off_site: true,
+            },
+        ],
+        copies: 2,
+        off_site_required: true,
+    };
+    (Vault::new(s), ids, rule)
+}
+
+/// Every term of the Library's filter runs in the one query a cursor
+/// opens with: words (in the name the Library shows or a tag, whatever
+/// the case, accents included), camera, lens, file type, folder,
+/// presence and backup state, alone and together.
+fn queries_filter_by_every_library_term_in_one_query<S: Store>(s: S) {
+    use crate::{BackupFilter, BackupState};
+    let (v, ids, rule) = library_fixture(s);
+    let pick = |n: &[usize]| n.iter().map(|&i| ids[i]).collect::<Vec<_>>();
+    let run = |f: &dyn Fn(&mut Query)| {
+        let mut q = Query::default();
+        f(&mut q);
+        let q0 = v.reads().queries;
+        let cursor = v.open_cursor(q.clone()).unwrap();
+        assert_eq!(v.reads().queries - q0, 1, "{q:?}: one query");
+        let got = v.cursor_ids(cursor.id, 0, 99).unwrap();
+        v.close_cursor(cursor.id);
+        got
+    };
+    let words = |w: &[&str]| {
+        let w: Vec<String> = w.iter().map(ToString::to_string).collect();
+        run(&|q| q.words.clone_from(&w))
+    };
+    assert_eq!(words(&["img"]), pick(&[0]), "the name, whatever its case");
+    assert_eq!(words(&["BEACH", ".jpg"]), pick(&[1]), "every word");
+    assert_eq!(words(&["été"]), pick(&[0]), "a tag, accents folded");
+    assert_eq!(
+        words(&["x.nef"]),
+        pick(&[]),
+        "no present copy: the Library names it by its id"
+    );
+    assert_eq!(words(&[&ids[4].hex()[..8]]), pick(&[4]));
+    assert_eq!(run(&|q| q.cameras = vec!["Z 8".into()]), pick(&[0, 1]));
+    assert_eq!(run(&|q| q.cameras = vec!["z 8".into()]), pick(&[]), "exact");
+    assert_eq!(
+        run(&|q| q.lenses = vec!["L2".into(), "L1".into()]),
+        pick(&[0, 2])
+    );
+    assert_eq!(run(&|q| q.file_types = vec!["nef".into()]), pick(&[2]));
+    let shots = Path::new(std::path::MAIN_SEPARATOR_STR)
+        .join("p")
+        .join("shots");
+    let folder = |f: String| run(&|q| q.folder = Some(f.clone()));
+    assert_eq!(folder(shots.display().to_string()), pick(&[0, 1, 3]));
+    assert_eq!(
+        folder(format!("{}{}", shots.display(), std::path::MAIN_SEPARATOR)),
+        pick(&[0, 1, 3])
+    );
+    assert_eq!(
+        folder(shots.display().to_string()[..6].to_string()),
+        pick(&[]),
+        "a folder, not the start of a name"
+    );
+    assert_eq!(run(&|q| q.presence = vec![Presence::Offline]), pick(&[2]));
+    assert_eq!(
+        run(&|q| q.presence = vec![Presence::Missing]),
+        pick(&[3, 4])
+    );
+    assert_eq!(
+        run(&|q| q.presence = vec![Presence::Present]),
+        pick(&[0, 1])
+    );
+    let backup = |states: Vec<BackupState>| {
+        run(&|q| {
+            q.backup = Some(BackupFilter {
+                rule: rule.clone(),
+                states: states.clone(),
+            });
+        })
+    };
+    assert_eq!(backup(vec![BackupState::Short]), pick(&[0]));
+    assert_eq!(backup(vec![BackupState::Unverified]), pick(&[1]));
+    assert_eq!(backup(vec![BackupState::Met]), pick(&[2]));
+    assert_eq!(backup(vec![BackupState::None]), pick(&[3, 4]));
+    assert_eq!(
+        backup(vec![BackupState::Short, BackupState::Unverified]),
+        pick(&[0, 1])
+    );
+    assert_eq!(backup(vec![]), pick(&[]), "no state: no photo");
+    // Every term together, sorted.
+    assert_eq!(
+        run(&|q| {
+            q.words = vec![".".into()];
+            q.cameras = vec!["Z 8".into()];
+            q.presence = vec![Presence::Present];
+            q.min_rating = Some(3);
+            q.backup = Some(BackupFilter {
+                rule: rule.clone(),
+                states: vec![BackupState::Short, BackupState::Unverified],
+            });
+            q.order = Order::desc(Sort::Name);
+        }),
+        pick(&[1, 0]),
+        "`beach.jpg` after `IMG_0001.CR3`, descending"
+    );
+}
+
+/// The count per value of every facet comes in one query, for the whole
+/// Library and for a filter.
+fn facets_count_each_value_in_one_query<S: Store>(s: S) {
+    let (v, _, rule) = library_fixture(s);
+    let q0 = v.reads().queries;
+    let all = v.facets(&Query::default(), Some(&rule)).unwrap();
+    assert_eq!(v.reads().queries - q0, 1, "every facet in one query");
+    let want = |pairs: &[(&str, &[(&str, u64)])]| {
+        let mut f = crate::Facets::default();
+        for (facet, values) in pairs {
+            for (value, n) in *values {
+                f.add(facet, value, *n);
+            }
+        }
+        f
+    };
+    assert_eq!(
+        all,
+        want(&[
+            ("rating", &[("0", 3), ("3", 2)]),
+            ("label", &[("red", 2), ("blue", 1)]),
+            ("flag", &[("pick", 1), ("none", 4)]),
+            ("camera", &[("Z 8", 2), ("R5", 1)]),
+            ("lens", &[("L1", 1), ("L2", 1)]),
+            ("file_type", &[("cr3", 1), ("jpg", 1), ("nef", 1)]),
+            (
+                "presence",
+                &[("present", 2), ("offline", 1), ("missing", 2)]
+            ),
+            (
+                "backup",
+                &[("met", 1), ("short", 1), ("unverified", 1), ("none", 2)]
+            ),
+        ])
+    );
+    assert_eq!(all.count("camera", "Z 8"), 2);
+    // For a filter, without a rule: no backup counts.
+    let z8 = Query {
+        cameras: vec!["Z 8".into()],
+        ..Query::default()
+    };
+    let some = v.facets(&z8, None).unwrap();
+    assert_eq!(
+        some,
+        want(&[
+            ("rating", &[("3", 2)]),
+            ("label", &[("red", 1)]),
+            ("flag", &[("pick", 1), ("none", 1)]),
+            ("camera", &[("Z 8", 2)]),
+            ("lens", &[("L1", 1)]),
+            ("file_type", &[("cr3", 1), ("jpg", 1)]),
+            ("presence", &[("present", 2)]),
+        ])
+    );
 }

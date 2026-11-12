@@ -629,6 +629,22 @@ gui-library-count = { $shown } of { $total }
 
 gui-library-empty = No photos yet: import a card or a folder, or drop photos on the window
 
+gui-library-facet-backup = Backup
+
+gui-library-facet-camera = Camera
+
+gui-library-facet-flag = Flag
+
+gui-library-facet-label = Label
+
+gui-library-facet-lens = Lens
+
+gui-library-facet-presence = Presence
+
+gui-library-facet-rating = Rating
+
+gui-library-facet-type = Type
+
 gui-library-file = { $size } · modified { $day }
 
 gui-library-images = Images
