@@ -16,13 +16,16 @@
 //! lock and nothing else.
 //!
 //! The window goes first: the frame that sees the close request draws
-//! nothing and only writes what the user changed (the library's last
-//! changes, the edit's last step), and the window closes after it. What
-//! is left (closing the vault) runs once the window is gone, on threads
-//! of their own, each with a deadline ([`Finisher`]): what is not done by
-//! then is logged and left, and the process exits anyway. Nothing the
-//! user saved is at stake there: each edit step, rating and label is in
-//! the vault before the window closes (see docs/persistence.md).
+//! nothing and only sends what the user changed (the library's last
+//! changes, the edit's last step) to the vault, and the window closes
+//! after it; the GUI client then disconnects from the local node
+//! ([`crate::node`]), which owns the vault: asked to quit, it flushes and
+//! closes it once its last client is gone. The host waits for the node's
+//! stop on a thread of its own, with a deadline ([`Finisher`]): what is
+//! not done by then is logged and left, and the process exits anyway.
+//! Nothing the user saved is at stake there: each edit step, rating and
+//! label is in the vault before the window closes (see
+//! docs/persistence.md).
 
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Mutex, PoisonError};
@@ -92,8 +95,8 @@ impl Drop for MarkOnDrop {
     }
 }
 
-/// How long closing the vault (its clean-shutdown marker, SQLite's last
-/// checkpoint) may take once the window is gone.
+/// How long the node's stop (its last flush, the vault's clean-shutdown
+/// marker) may take once the window is gone.
 pub const VAULT_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Work left for after the window: each piece on a thread of its own,

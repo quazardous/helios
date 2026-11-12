@@ -2338,3 +2338,44 @@ fn the_carousel_cells_never_overlap_whatever_the_window_and_the_thumbnail_size()
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The vault is the local node's, not a window's: the main window closed
+/// while the import window remains leaves the node running and its vault
+/// open to writes; the last window closed asks the node to quit, and it
+/// closes the vault once the GUI client is gone.
+#[test]
+fn a_window_closing_while_another_remains_leaves_the_vault_open() {
+    use helios_gui::node::LocalNode;
+    use helios_vault_sqlite::SqliteStore;
+
+    let (mut h, _window, dir) = import_in_its_own_window("node-vault");
+    let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+    let node = LocalNode::open(
+        store,
+        Arc::new(helios_core::Bus::new()),
+        Duration::from_hours(1),
+    );
+    let link = node.link();
+    let client = node.connect();
+    h.state_mut().attach_node(link.clone());
+    assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Moved);
+    h.run_steps(2);
+    assert!(!link.quitting(), "the node goes on");
+    node.vault()
+        .set_config_layer("user", Some("kept = 1"))
+        .expect("the vault is open to writes");
+    // The last window closed: Helios quits, the node is asked to.
+    assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
+    assert!(link.quitting());
+    assert!(!link.stopped(), "the GUI is still connected");
+    drop(client);
+    assert!(
+        link.wait_stopped(Duration::from_secs(10)),
+        "the node stopped"
+    );
+    node.stop();
+    let again = SqliteStore::open(&dir.join("vault.db")).unwrap();
+    assert!(!again.report().unclean_shutdown, "closed cleanly");
+    drop(again);
+    let _ = std::fs::remove_dir_all(&dir);
+}

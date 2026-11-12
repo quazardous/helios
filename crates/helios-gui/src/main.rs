@@ -61,6 +61,7 @@ fn earlier_layout(workspace: &Path, ui_settings: &Path) -> Option<Layout> {
 }
 
 type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
+type LocalNode = helios_gui::node::LocalNode<helios_vault_sqlite::SqliteStore>;
 
 /// A problem worth knowing: on the terminal, and in the log file once the
 /// window's logs are set up.
@@ -1080,6 +1081,8 @@ struct App {
     preparing: Vec<Preparing>,
     /// Runs the exports the shell asks for, with a vault.
     exporter: Option<helios_gui::export::Exporter<helios_vault_sqlite::SqliteStore>>,
+    /// The GUI's connection to the local node, dropped as the GUI ends.
+    node: Option<helios_gui::node::Client>,
 }
 
 impl Drop for App {
@@ -1375,7 +1378,8 @@ impl App {
 impl App {
     /// The main window closes after this pass and Helios with it: nothing
     /// to draw (work waiting for a frame, thumbnails or tiles, would hold
-    /// the window up), only what the user changed to write.
+    /// the window up), only what the user changed to send to the node's
+    /// vault. The node saves and closes it once the GUI is gone.
     fn closing(&mut self) {
         quit::requested();
         if let Some(persist) = &mut self.persist {
@@ -1394,6 +1398,7 @@ impl eframe::App for App {
             // shell's pass below); Quit, the last window closed and the
             // system's end of session end it.
             let closing = if SESSION_ENDING.load(std::sync::atomic::Ordering::SeqCst) {
+                self.shell.session_ending();
                 Closing::Quit
             } else {
                 self.shell.main_window_closing(ui.ctx())
@@ -1532,6 +1537,11 @@ impl eframe::App for App {
             warn(&format!("cannot save the interface's settings: {e}"));
         }
         quit::mark("interface settings, keys and layout saved");
+        // The GUI client disconnects: the node, asked to quit, closes
+        // the vault once its last client is gone.
+        if self.node.take().is_some() {
+            quit::mark("GUI client disconnected from the node");
+        }
     }
 }
 
@@ -1761,26 +1771,35 @@ fn main() -> Result<(), String> {
     let thumbs_file = vault_file.clone();
     let map_file = vault_file.clone();
     // A library that cannot be opened leaves Helios without one: the
-    // reason is said, and imports refuse with it.
-    let (persist, no_library) = match vault_file
+    // reason is said, and imports refuse with it. The local node owns the
+    // vault (docs/design/node-client-split.md, choice A): it saves it on
+    // its own schedule and closes it when it stops; the window is its
+    // client, linked to it by `Persist`.
+    let (node, no_library) = match vault_file
         .as_deref()
         .map(helios_gui::platform::open_library)
     {
-        Some(Ok(store)) => (Some(Persist::new(store, bus)), None),
+        Some(Ok(store)) => (
+            Some(LocalNode::open(
+                store,
+                bus.clone(),
+                helios_gui::node::FLUSH_EVERY,
+            )),
+            None,
+        ),
         Some(Err(e)) => {
             warn(&format!("the library: {e}"));
             (None, Some(e))
         }
         None => (None, None),
     };
+    let persist = node.as_ref().map(|n| Persist::on(n.vault().clone(), bus));
     start::mark("vault opened (and migrated)");
     // Workshop sessions a former run left unkept are dropped (C6).
     if let Some(Err(e)) = persist.as_ref().map(Persist::drop_unkept_sessions) {
         warn(&format!("the workshop sessions: {e}"));
     }
-    // Held here, the vault outlives the window: it closes once the
-    // window is gone (see `helios_gui::quit`).
-    let vault = persist.as_ref().map(|p| p.vault().clone());
+    let vault = node.as_ref().map(|n| n.vault().clone());
     // The library is read while the window opens.
     let library_reading = vault.clone().map(read_library);
     // Helios's settings, resolved once from their layers: the machine's
@@ -1923,9 +1942,16 @@ fn main() -> Result<(), String> {
     // layers to the vault, the machine's to its file.
     let settings_vault = vault.clone();
     let settings_dir = config.clone();
+    // The GUI connects to the node as it starts, and disconnects as it
+    // ends (`on_exit`); the shell asks the node to quit.
+    let node_link = node.as_ref().map(LocalNode::link);
+    let node_client = node.as_ref().map(LocalNode::connect);
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
+            if let Some(link) = node_link {
+                shell.attach_node(link);
+            }
             let _ = WINDOW.set(cc.egui_ctx.clone());
             shell.library_mut().set_texture_budget(texture_budget);
             // The render cache's budget (`system.cache.budget` / `share`).
@@ -2217,6 +2243,7 @@ fn main() -> Result<(), String> {
                 )
             });
             let mut app = App {
+                node: node_client,
                 exporter,
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
@@ -2239,10 +2266,13 @@ fn main() -> Result<(), String> {
         })
         .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");
-    // The window is gone: what is left runs against its deadline.
+    // The window is gone: the node stops (its last flush, the vault
+    // closed), against its deadline, whether or not the shell asked it
+    // to quit (an error ending eframe).
+    drop(vault);
     let mut finisher = quit::Finisher::default();
-    if let Some(vault) = vault {
-        finisher.spawn("vault closed", quit::VAULT_DEADLINE, move || drop(vault));
+    if let Some(node) = node {
+        finisher.spawn("node stopped", quit::VAULT_DEADLINE, move || node.stop());
     }
     for left in finisher.finish() {
         warn(&format!("quit: {left} was left unfinished"));
