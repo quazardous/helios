@@ -316,6 +316,22 @@ fn backfill_captures<S: helios_vault::Store + 'static>(
     });
 }
 
+/// The library's folder, kept in its vault: where picked photos are
+/// copied when their source has no folder of its own.
+struct LibraryFolder(Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>);
+
+impl helios_gui::shell::LibraryFolder for LibraryFolder {
+    fn get(&self) -> Result<Option<PathBuf>, String> {
+        helios_library::import::library_root(self.0.as_ref())
+    }
+
+    fn set(&self, dir: &Path) -> Result<(), String> {
+        let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        helios_library::import::set_library_root(self.0.as_ref(), &dir)
+    }
+}
+
 fn seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -521,14 +537,26 @@ fn library_commands(
         let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
         let history = history.clone();
         let backed = after_import.clone();
-        shell.set_import_remote(Arc::new(move |connector, source, items| {
+        shell.set_import_remote(Arc::new(move |connector, source, items, into| {
+            // The window asks for the library folder before a picking
+            // that has none; should it be gone since, say so in the
+            // desktop's words, not the command line's.
+            if into.is_none() && helios_library::import::library_root(vault.as_ref())?.is_none() {
+                return Err(
+                    "no library folder to copy the photos into: choose one, or set Into in the import window's choices"
+                        .into(),
+                );
+            }
             let remote = helios_library::fetch::Remote {
                 connector,
                 source,
                 items,
                 new_only: false,
             };
-            let options = helios_library::import::Options::default();
+            let options = helios_library::import::Options {
+                placement: helios_library::import::Placement::Copy { into },
+                ..helios_library::import::Options::default()
+            };
             let mut report = helios_library::fetch::import_remote(
                 vault.as_ref(),
                 &jobs,
@@ -551,6 +579,7 @@ fn library_commands(
             Ok(report.added)
         }));
     }
+    shell.set_import_library_folder(Arc::new(LibraryFolder(vault.clone())));
     let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(

@@ -504,6 +504,8 @@ gui-pick-account = Votre navigateur doit être connecté au compte relié sous l
 
 gui-pick-again = Recommencer
 
+gui-pick-choose-folder = Choisir le dossier de la bibliothèque…
+
 gui-pick-browser = Choisissez vos photos dans votre navigateur, appuyez sur OK, puis revenez ici.
 
 gui-pick-done = { $count } photos importées.
@@ -513,6 +515,8 @@ gui-pick-expired = La session de choix a expiré, recommencez.
 gui-pick-failed = Non importé : { $why }
 
 gui-pick-importing = Import de { $count } photos…
+
+gui-pick-library-folder = Les photos choisies sont copiées dans le dossier de la bibliothèque. Choisissez-le une fois : il est retenu.
 
 gui-pick-nothing = Rien n'a été choisi à temps.
 

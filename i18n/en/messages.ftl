@@ -1211,6 +1211,8 @@ gui-pick-again = Start again
 
 gui-pick-browser = Pick your photos in your browser, press Done, then come back here.
 
+gui-pick-choose-folder = Choose the library folder…
+
 gui-pick-done = { $count } photos imported.
 
 gui-pick-expired = The picking session expired, start again.
@@ -1218,6 +1220,8 @@ gui-pick-expired = The picking session expired, start again.
 gui-pick-failed = Not imported: { $why }
 
 gui-pick-importing = Importing { $count } photos…
+
+gui-pick-library-folder = Picked photos are copied into the library folder. Choose it once: it is remembered.
 
 gui-pick-nothing = Nothing was picked in time.
 

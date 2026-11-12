@@ -119,6 +119,16 @@ impl Shell {
         self.import.get_mut().accounts.import = Some(import);
     }
 
+    /// The library folder picked photos are copied into when their source
+    /// has no folder of its own: read before a picking, asked for and
+    /// remembered through `library` when there is none.
+    pub fn set_import_library_folder(
+        &mut self,
+        library: Arc<dyn super::import_accounts::LibraryFolder>,
+    ) {
+        self.import.get_mut().accounts.library = Some(library);
+    }
+
     /// Adds an import connector (a plugin's, a test's): its sources join
     /// the import window, and "Add a source…" offers it when it declares
     /// a connection process.

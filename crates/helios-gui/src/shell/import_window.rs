@@ -74,6 +74,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::import_accounts::PickAsked;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
 use super::import_sources::SourceKey;
 use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
@@ -209,6 +210,8 @@ pub(crate) struct ImportWindow {
     /// The folder chooser, while it is open: for a source, or for Into.
     choosing: Option<Pending>,
     choosing_into: Option<Pending>,
+    /// The library folder asked for a picking under this account.
+    choosing_library: Option<(String, Pending)>,
     /// What the vault holds, for the "in your Library" prefilter.
     known: Option<Known>,
     /// The image map's recorder: what the sources list is kept.
@@ -1238,8 +1241,26 @@ impl ImportWindow {
     }
 
     /// The folder the chooser gave: a recent source, ticked; or where
-    /// copies go.
+    /// copies go; or the library folder a picking asked for, the picking
+    /// then started.
     fn receive_chosen_folder(&mut self) {
+        if let Some((account, pending)) = &self.choosing_library
+            && let Some(result) = pending.take()
+        {
+            let account = account.clone();
+            self.choosing_library = None;
+            if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
+                && let Some(p) = paths.into_iter().next()
+            {
+                let wake = self.waker();
+                if let Err(e) = self
+                    .accounts
+                    .pick(&self.connectors, &account, Some(p), true, wake)
+                {
+                    log::warn!("import accounts: {e}");
+                }
+            }
+        }
         if let Some(result) = self.choosing_into.as_ref().and_then(Pending::take) {
             self.choosing_into = None;
             if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
@@ -1516,10 +1537,19 @@ impl ImportWindow {
                 self.account_run(again);
             }
             super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
-            if let Some(again) =
-                super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m))
-            {
-                self.account_asked(again);
+            match super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m)) {
+                Some(PickAsked::Again(again)) => self.account_asked(again),
+                Some(PickAsked::LibraryFolder(account)) => {
+                    if let Some(f) = app.service(&FILES) {
+                        let title = texts(Message::new(
+                            "gui-pick-choose-folder",
+                            "Choose the library folder…",
+                        ));
+                        let request = FileRequest::folder(&title).purpose("helios.library.folder");
+                        self.choosing_library = Some((account, f.choose(&app, request)));
+                    }
+                }
+                None => {}
             }
         }
         // The chooser's answer comes in this window too.
@@ -1560,8 +1590,15 @@ impl ImportWindow {
             }
             Asked::SignOut(id) => self.accounts.sign_out(&id),
             Asked::Pick(id) => {
+                // The source's own Into, else the window's.
+                let into = self
+                    .sources
+                    .own(&SourceKey::Account(id.clone()))
+                    .unwrap_or_else(|| self.window_choices())
+                    .into
+                    .clone();
                 let wake = self.waker();
-                self.accounts.pick(&self.connectors, &id, wake)
+                self.accounts.pick(&self.connectors, &id, into, false, wake)
             }
         };
         if let Err(e) = done {
