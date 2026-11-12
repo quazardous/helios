@@ -26,6 +26,7 @@ pub mod card;
 pub mod contract;
 pub mod folder;
 pub mod local;
+pub mod ranged;
 
 /// The version of the connector interface this crate speaks.
 pub const INTERFACE: u32 = 1;
