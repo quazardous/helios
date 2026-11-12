@@ -244,8 +244,19 @@ window, Helios stays open while any of its windows exists, and closing
 the last window follows the same rule as Ctrl+Q. Ctrl+Q stops the local
 node only when the desktop started it; a remote node and its jobs keep
 running. Every window has a menu bar with at least a Window menu. See
-docs/design/windows.md, section 7; the full node and client split is
-still to be analysed (not decided).
+docs/design/windows.md, section 7.
+**The node and client split** (2026-11-12, decided by the owner): locally
+the node is a library embedded in the desktop process (zero copy kept),
+behind the same API as a remote node, and a separate `helios-node`
+process runs only for remote or headless use; edit sessions and undo
+history live on the node, windows keep view state and gestures in
+progress; thumbnail generation and its disk cache are the node's, textures
+the client's; files are served by id, as a path when the client sees the
+volume (checked by size, mtime and a partial hash, remapped per volume)
+and as a stream otherwise, with a client resource agent for sources only
+the client sees; secrets stay where the work runs, the client only hosts
+the consent browser. Streamed node renders are not the default for a
+remote darkroom. See docs/design/node-client-split.md.
 
 **Helios makes darktable and vkdt meet** (2026-10-11, decided as the
 long-term goal). darktable brings compatibility (edits, workflow, users) and
