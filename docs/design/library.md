@@ -269,6 +269,34 @@ rebindable in each application.
   replacements), and no catalogue between the photographer and the
   files.
 
+### LightCraft (a Rust Lightroom clone, reviewed 2026-11-12)
+
+An open-source, pure-Rust, egui/wgpu copy of Lightroom (MIT OR Apache-2.0),
+built by agents at a fast pace. Its catalogue lives entirely in memory, an
+append-only journal plus snapshots, so it does not scale like the vault, but
+its *library model* is a useful checklist:
+
+- **Smart albums as rule trees**: a rule is `{field, op, value}` or a nested
+  group with its own match mode (all, any, none). Each field has a kind: text,
+  keywords (a list of names), number, date, album, a fixed choice, or a flag.
+  The operators follow the kind: contains, is, starts with, empty or not;
+  equal, less, greater, between; in the last N days; in an album or not.
+- **Its fields, by group**: rating, flag, label and text at the top level;
+  source (album, virtual copy, copy name, stacked); file (name, extension, path,
+  kind, format, duration); dates (capture, import, edit); keywords and people
+  (with counts); description (title, caption, alt text, creator, copyright and
+  its status); camera (camera, lens, focal length, aperture, shutter, ISO,
+  flash, exposure bias, body serial); location (place, city, state, country,
+  has GPS); size (long and short edge, aspect, megapixels); develop (edited,
+  cropped, treatment); assisted culling (sharpness, best of its group).
+- **A keyword tree with synonyms**, rename and merge.
+- **A field search syntax** (`rating:>3 iso:>800 camera:…`), and seven sort keys.
+
+What Helios takes: the field list as a checklist for L4's keys and L6's smart
+albums, the rule-tree shape and its operators per kind for L6, and synonyms,
+rename and merge for L12 after the path tags (L-C7). What it does not take:
+the in-memory catalogue; everything runs on the vault `Query` and cursors.
+
 ### What users carry from one to another
 
 - Number keys for stars, a reject key, colour labels on keys, a pick
@@ -494,7 +522,10 @@ vault query; egui-pop's `Filter` grammar gets the new keys (an upstream
 change, worked around with Helios's own chips first). The facet counts
 (how many per label, per camera) come with it. Test: query tests per
 key; the window's filter equals the vault's answer on a fixture.
-Focus: the filter is the focus's.
+Focus: the filter is the focus's. Checklist for later keys (from
+LightCraft's fields, §2): ISO, focal length, aperture, shutter, exposure
+bias, flash, body serial, edited, cropped, has versions, keyword count,
+has GPS, megapixels, aspect, import and edit dates.
 
 **L5. Folders.** A Folders section in the Library panel: volumes, then
 folders with counts, from the Library's locations; offline volumes
@@ -506,7 +537,10 @@ focus's browse state.
 
 **L6. Albums, smart albums, quick collection.** Vault documents
 `library/collections` (L-C2): albums hold image ids, smart albums a
-filter; the quick collection is one album; B toggles it; Ctrl+K recent
+filter, stored as a rule tree: `{field, op, value}` rules and nested
+groups with their own match mode (all, any, none), operators per field
+kind (LightCraft's model, §2), compiled to one vault `Query` so a smart
+album pages and counts like L4; the quick collection is one album; B toggles it; Ctrl+K recent
 filters (darktable's collection history; Lightroom's Ctrl+K is keywords,
 so the profile decides). Undoable steps; agent commands
 `library.collection.*`. Test: vault documents, undo, a scenario that
@@ -542,7 +576,9 @@ Test: stack commands; an import fixture with pairs.
 
 **L12. Keyword tree.** A Keywords section: the tree from `|` paths with
 counts, click to filter, drag on photos, rename and merge a branch as
-one batch step (L-C7). Test: tree from a fixture; a rename undone.
+one batch step (L-C7). After it, the "B extras": synonyms (a keyword
+also found under its synonyms, exported to XMP as Lightroom does),
+and keywords as entities that keep their identity through a rename. Test: tree from a fixture; a rename undone.
 
 **L13. Metadata panel.** EXIF read-only (from L2 and the loader),
 editable title, description, creator, copyright, keywords; templates
