@@ -228,6 +228,7 @@ command-workshop-describe.title 81e28c5e0f43f797
 command-workshop-design.title 9aa93a4b7659928b
 command-workshop-save.title 65d5af81aeae4310
 command-workshop-send-proxy.title 18f403b94722beca
+command-workshop-session.title 70d9735f9e6631e1
 command-workshop-suggest.title 09ab1368c1c2bb3b
 command-workspace-edit.title 64e78837425d5909
 command-workspace-importParts-apply.title 781ecee2214cd986
@@ -892,6 +893,10 @@ gui-workshops-save-title bd36dcc7170336e0
 gui-workshops-save-value 14f9b253a3193a0a
 gui-workshops-save-verb 9c77c5240e2100c2
 gui-workshops-send-proxy 7628588e49b5d56c
+gui-workshops-session 004853eccacdeec7
+gui-workshops-session-keep bab3b446ab9be9ce
+gui-workshops-session-keep-hint c2683982a627c0c9
+gui-workshops-session-kept 6fb3b34711df76f1
 gui-workshops-shipped 211c0e16125ce48c
 gui-workshops-unit-percent a1092ca158312426
 gui-workshops-unit-stops f904099c8af835b0

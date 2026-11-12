@@ -1,10 +1,10 @@
 # Workshops made on the fly: designed by the AI, refined by hand, run within limits
 
 Status: **decided** (2026-11-11): the owner accepted every
-recommendation of section 9 (C1 to C8). A design note: slices 1 to 4
+recommendation of section 9 (C1 to C8). A design note: slices 1 to 5
 are built (semantic sliders, zone measures, the draft and its check,
-`workshop.design` through the user's own agent over MCP), the rest is
-not. It extends [workshops.md](workshops.md) (workshops v1,
+`workshop.design` through the user's own agent over MCP, the session
+record), the rest is not. It extends [workshops.md](workshops.md) (workshops v1,
 built, experimental) and uses decision nodes and AI junctions
 ([module-contract.md](../module-contract.md)), macros
 ([macros.md](macros.md)), the undo design ([undo.md](undo.md)), the
@@ -320,6 +320,28 @@ version's metadata the session id, so the History panel can show "aim:
 climber's face too dark" on a row and the session can be rebuilt from
 the versions. No change to version ids (metadata is not hashed).
 
+Built (slice 5). `helios_template::session` holds the record; the vault
+keeps it in `workshops/sessions` (`Vault::workshop_session`). Recording
+is always on (C6): `workshop.design` and `workshop.apply` start a session
+(their step is its first, kind `design` or `apply`, measured before on
+what enters the workshop and after on what it gives), ending the one
+before. Each value step on the workshop's node is then a step: `set`
+(or `override` when the user moves a value an open proposal holds),
+`undo`, `redo`. A step lists its `changes` (`param`, `old`, `new`, as
+plain JSON) rather than one `param`, since a step may move several; it
+names its `store_step`. Measures are keyed `image.<measure>` (median,
+highlights, clipping) and `<zone>.<measure>` (median, highlights,
+contrast), from one render of the workshop alone on the proxy. The
+record is written as it grows with `kept: false`; `workshop.session`
+reads it with its `net` outcome, `keep` (the user's alone, the panel's
+Keep) or `close` (dropped unless kept); a session a former run left
+unkept is dropped when the desktop opens the vault. `Set::aim` and
+`Store::aim` (for a group) put the words on the value store's step;
+`Version::meta` (a column of its own, not hashed) carries
+`{"workshop_session": "<id>"}` on each version saved during a session.
+Not built yet: `mask` and `structure` steps, a second test image in the
+same session, the History panel's aim column.
+
 ## 3. Generalise: "Make it automatic"
 
 The user presses **Make it automatic** in the Workshops panel (or an
@@ -621,7 +643,7 @@ included.
    MCP agent) answers the backlit intent with a draft; the workspace
    gains the workshop with exactly its sliders; Ctrl+Z removes it. This
    slice ends the **near goal**.
-5. **The session record** (M). The `workshops/sessions` document, step
+5. **The session record** (M, built 2026-11-11). The `workshops/sessions` document, step
    records with author, kind, aim and measures, the `aim` on value-store
    steps, the session id in version metadata. Test: a scripted pilot
    session (design, three slider moves, an undo) gives the expected

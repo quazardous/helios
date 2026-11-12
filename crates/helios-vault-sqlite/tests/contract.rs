@@ -23,7 +23,17 @@ fn a_sqlite_vault_survives_reopening() {
         let image = v.images().unwrap()[0].id;
         let first = Version::new(image, vec![], edit.clone(), "user", 1).labelled("first");
         v.add_version(&first).unwrap();
-        first
+        // Metadata comes back too, and leaves the id alone.
+        let meta = Some(serde_json::json!({ "workshop_session": "s-1" }));
+        let tagged = Version::new(image, vec![first.id], edit.clone(), "user", 2).with_meta(meta);
+        assert_eq!(
+            tagged.id,
+            Version::new(image, vec![first.id], edit.clone(), "user", 2).id
+        );
+        v.add_version(&tagged).unwrap();
+        v.set_workshop_session("s-1", Some(&serde_json::json!({ "kept": true })))
+            .unwrap();
+        tagged
     };
     let v = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
     assert_eq!(v.import(&dir.join("photos"), 2).unwrap().unchanged, 1);
@@ -33,11 +43,26 @@ fn a_sqlite_vault_survives_reopening() {
         "known from the database: nothing read"
     );
     assert_eq!(v.describe()["images"], 1);
-    // The edit history came back with the images, unchanged.
+    // The edit history came back with the images, unchanged, and the
+    // session records with it.
     assert_eq!(v.heads(&first.image).unwrap(), std::slice::from_ref(&first));
+    assert_eq!(
+        first.meta,
+        Some(serde_json::json!({ "workshop_session": "s-1" }))
+    );
+    assert_eq!(
+        v.workshop_session("s-1").unwrap(),
+        Some(serde_json::json!({ "kept": true }))
+    );
     assert!(
-        !v.add_version(&Version::new(first.image, vec![], edit, "agent", 9))
-            .unwrap()
+        !v.add_version(&Version::new(
+            first.image,
+            first.parents.clone(),
+            edit,
+            "agent",
+            9
+        ))
+        .unwrap()
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

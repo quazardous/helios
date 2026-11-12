@@ -644,7 +644,12 @@ impl<S: Store> Persist<S> {
         if !changes.is_empty() {
             self.write(shell, changes, at);
         }
+        shell.set_edited_image(self.editing.as_ref().map(|e| e.session.image().hex()));
+        if let Some(e) = &mut self.editing {
+            e.session.set_meta(shell.session_meta());
+        }
         self.save_edit(shell, now);
+        self.write_sessions(shell);
         self.pin_snapshots(shell);
         self.answer_stacks(shell, at);
         let expansions = shell.library_mut().take_expansions();
@@ -706,6 +711,30 @@ impl<S: Store> Persist<S> {
         if decided && let Err(e) = self.show_decisions(shell) {
             shell.notify(Level::Error, e);
         }
+    }
+
+    /// Keeps the workshop sessions' records the desktop wrote, and drops
+    /// those it ended unkept.
+    fn write_sessions(&self, shell: &mut Shell) {
+        for (id, record) in shell.take_session_writes() {
+            if let Err(e) = self.vault.set_workshop_session(&id, record.as_ref()) {
+                shell.notify(Level::Warning, e);
+            }
+        }
+    }
+
+    /// Drops the workshop sessions a former run left unkept (it ended
+    /// before their session did): a session is kept only when the user
+    /// says so (or, later, when it is generalised).
+    pub fn drop_unkept_sessions(&self) -> Result<usize, String> {
+        let mut n = 0;
+        for (id, record) in self.vault.workshop_sessions()? {
+            if record["kept"].as_bool() != Some(true) {
+                self.vault.set_workshop_session(&id, None)?;
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// Saves the edit when the value store committed a step, or while a

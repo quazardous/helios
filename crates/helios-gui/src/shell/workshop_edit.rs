@@ -50,6 +50,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "Experimental: check a workshop draft on the open image and apply it as one undo step (`draft`; `intent`, the session's by default; `apply`: true by default; `replace`; `dry_run`)",
     ),
     (
+        "workshop.session",
+        "Experimental: the workshop session's record: each step piloting the workshop, its author, aim and zone measures (`action`: read, keep (yours alone: a session not kept is dropped when it ends) or close)",
+    ),
+    (
         "workshop.send_proxy",
         "Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only",
     ),
@@ -90,6 +94,7 @@ impl Shell {
             "workshop.context" => self.workshop_context(args),
             "workshop.design" => self.design_workshop(args, origin),
             "workshop.send_proxy" => self.switch_send_proxy(args, origin),
+            "workshop.session" => self.workshop_session(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }
@@ -136,6 +141,18 @@ impl Shell {
             })?;
             if let Some(node) = answer["node"].as_str() {
                 self.select_node(node);
+                let node = node.to_string();
+                let workshop = answer["workshop"]
+                    .as_str()
+                    .map_or_else(|| r.to_string(), String::from);
+                self.start_session(
+                    &node,
+                    &workshop,
+                    helios_template::session::Kind::Apply,
+                    origin,
+                    None,
+                );
+                answer["session"] = json!(self.session_id());
             }
             answer
         };

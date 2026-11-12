@@ -619,6 +619,9 @@ command-workshop-save =
 command-workshop-send-proxy =
     .title = Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only
 
+command-workshop-session =
+    .title = Experimental: the workshop session's record: each step piloting the workshop, its author, aim and zone measures (`action`: read, keep (yours alone: a session not kept is dropped when it ends) or close)
+
 command-workshop-suggest =
     .title = Experimental: find workshops by what you want, ranked by name, keywords, then intent (`intent`)
 

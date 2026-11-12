@@ -49,6 +49,7 @@ pub mod storage;
 pub mod undo;
 pub mod versions;
 pub mod workflow;
+pub mod workshops;
 
 pub use capture::{Backfill, Capture};
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, LibraryRow, Row};

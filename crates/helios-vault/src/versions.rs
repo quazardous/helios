@@ -45,6 +45,11 @@ pub struct Version {
     pub origin: String,
     pub at: u64,
     pub label: Option<String>,
+    /// What else the step that made it carries, not hashed: the workshop
+    /// session it was made in (`{"workshop_session": "<id>"}`), so a
+    /// session can be rebuilt from the versions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
 }
 
 impl Version {
@@ -75,11 +80,18 @@ impl Version {
             origin: origin.into(),
             at,
             label: None,
+            meta: None,
         }
     }
 
     pub fn labelled(mut self, label: &str) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// The version with its metadata (not part of its id).
+    pub fn with_meta(mut self, meta: Option<Value>) -> Self {
+        self.meta = meta;
         self
     }
 }

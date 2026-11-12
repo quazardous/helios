@@ -544,3 +544,239 @@ fn a_refused_draft_applies_nothing_and_the_user_alone_lets_the_proxy_out() {
     assert!(ctx["proxy"]["base64"].as_str().unwrap().len() > 40);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The user describes, the scripted agent designs: the session starts
+/// with the design. Returns the workshop's node and the session's id.
+fn designed(h: &mut Harness<'static, Shell>, root: &Path) -> (String, String) {
+    h.state_mut()
+        .run(
+            "workshop.describe",
+            json!({ "intent": INTENT }),
+            Origin::User,
+        )
+        .unwrap();
+    follow(h);
+    let a = answer(agent(
+        h,
+        root,
+        json!({ "cmd": "workshop.design", "draft": backlit_draft() }),
+    ));
+    assert_eq!(a["applied"], json!(true), "{a}");
+    (
+        a["node"].as_str().unwrap().to_string(),
+        a["session"].as_str().expect("a session").to_string(),
+    )
+}
+
+/// Sets one of the workshop's values, as `origin`, with words or not.
+fn set_value(
+    h: &mut Harness<'static, Shell>,
+    path: &str,
+    v: f64,
+    origin: Origin,
+    aim: Option<&str>,
+) {
+    let mut set = helios_values::Set::new(
+        path,
+        helios_values::Change::To(helios_core::Value::Float(v)),
+        origin,
+    );
+    if let Some(aim) = aim {
+        set = set.aim(aim);
+    }
+    h.state().values().lock().unwrap().set(set).unwrap();
+    follow(h);
+}
+
+fn record(h: &mut Harness<'static, Shell>, root: &Path) -> Json {
+    answer(agent(h, root, json!({ "cmd": "workshop.session" })))
+}
+
+#[test]
+fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
+    stand_ins();
+    let root = temp("session");
+    let mut h = window(&root);
+    let (node, session) = designed(&mut h, &root);
+    let lift = format!("node/{node}/backlight_lift");
+    let detail = format!("node/{node}/mountain_detail");
+    // The user lifts the backlight, saying why; moves the detail; the
+    // agent, on its own, pushes the detail further; the user undoes it.
+    set_value(
+        &mut h,
+        &lift,
+        0.9,
+        Origin::User,
+        Some("the climber's face is too dark"),
+    );
+    // (The check narrowed the detail's range to about 0 to 0.26.)
+    set_value(&mut h, &detail, 0.1, Origin::User, None);
+    set_value(&mut h, &detail, 0.2, Origin::Agent("mcp".into()), None);
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap()
+        .expect("a step to undo");
+    follow(&mut h);
+
+    let out = record(&mut h, &root);
+    let rec = &out["record"];
+    assert_eq!(rec["session"], json!(session));
+    assert_eq!(rec["node"], json!(node));
+    assert_eq!(rec["workshop"], json!("user.backlit-mountain@1"));
+    assert_eq!(rec["kept"], json!(false));
+    let steps = rec["steps"].as_array().unwrap();
+    let kinds: Vec<&str> = steps.iter().map(|s| s["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["design", "set", "set", "set", "undo"], "{rec}");
+    let authors: Vec<&str> = steps
+        .iter()
+        .map(|s| s["author"].as_str().unwrap())
+        .collect();
+    assert!(authors[0].starts_with("agent:"), "{authors:?}");
+    assert_eq!(authors[1..], ["user", "user", "agent:mcp", "user"]);
+    assert_eq!(steps[0]["aim"], json!(INTENT));
+    assert_eq!(steps[1]["aim"], json!("the climber's face is too dark"));
+    assert_eq!(steps[2]["aim"], Json::Null);
+    assert_eq!(steps[1]["changes"][0]["param"], json!("backlight_lift"));
+    assert_eq!(steps[1]["changes"][0]["new"], json!(0.9));
+    // The undo puts the agent's value back.
+    assert_eq!(
+        steps[4]["changes"][0],
+        json!({ "param": "mountain_detail", "old": 0.2, "new": 0.1 })
+    );
+    let seqs: Vec<u64> = steps.iter().map(|s| s["seq"].as_u64().unwrap()).collect();
+    assert_eq!(seqs, [1, 2, 3, 4, 5]);
+    // The zones measured around each step: the lift brightens the
+    // foreground, and each step starts where the last one ended.
+    let m = |i: usize, when: &str, key: &str| {
+        steps[i]["measures"][when][key]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{i} {when} {key}: {}", steps[i]))
+    };
+    assert!(m(0, "before", "foreground.luma.median") < m(0, "after", "foreground.luma.median"));
+    assert!(
+        m(1, "after", "foreground.luma.median") > m(1, "before", "foreground.luma.median"),
+        "{}",
+        steps[1]
+    );
+    assert_eq!(
+        m(1, "before", "foreground.luma.median"),
+        m(0, "after", "foreground.luma.median")
+    );
+    assert!(steps[1]["measures"]["after"]["sky.luma.high"].is_number());
+    assert!(steps[1]["measures"]["after"]["image.clip.high"].is_number());
+    // The net outcome: the lift as the user set it, the detail as the
+    // undo left it.
+    assert_eq!(out["net"]["backlight_lift"]["value"], json!(0.9));
+    assert_eq!(out["net"]["mountain_detail"]["value"], json!(0.1));
+    // The value store's steps carry the words too.
+    let store = h.state().values().lock().unwrap();
+    assert!(
+        store
+            .undo_steps()
+            .iter()
+            .any(|s| s.aim.as_deref() == Some("the climber's face is too dark"))
+    );
+    drop(store);
+    // The panel says it, with Keep.
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label_contains("Session recorded: 5 steps");
+    h.get_by_label("Keep");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
+    use helios_gui::persist::Persist;
+    use helios_vault::Vault;
+    use helios_vault_sqlite::SqliteStore;
+    stand_ins();
+    let root = temp("kept");
+    let db = root.join("vault.db");
+    let mut h = window(&root);
+    let mut persist = Persist::new(
+        SqliteStore::open(&db).unwrap(),
+        std::sync::Arc::new(helios_core::Bus::new()),
+    );
+    let sessions = |p: &Persist<SqliteStore>| {
+        p.vault()
+            .workshop_sessions()
+            .unwrap()
+            .into_iter()
+            .map(|(k, v)| (k, v["kept"].as_bool().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    // Recorded as it goes, then closed unkept: gone.
+    let (node, dropped) = designed(&mut h, &root);
+    set_value(
+        &mut h,
+        &format!("node/{node}/backlight_lift"),
+        0.8,
+        Origin::User,
+        None,
+    );
+    persist.frame(h.state_mut(), 1.0);
+    assert_eq!(sessions(&persist), [(dropped.clone(), false)]);
+    // An agent cannot keep it.
+    let out = agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.session", "action": "keep" }),
+    );
+    assert!(
+        out["error"].as_str().unwrap().contains("only the user"),
+        "{out}"
+    );
+    let closed = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.session", "action": "close" }),
+    ));
+    assert_eq!(closed["dropped"], json!(true));
+    persist.frame(h.state_mut(), 2.0);
+    assert!(sessions(&persist).is_empty(), "nothing left behind");
+
+    // A new design: a new session, kept by the user.
+    let (_, kept) = designed(&mut h, &root);
+    assert_ne!(kept, dropped);
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label("Keep").click();
+    follow(&mut h);
+    persist.frame(h.state_mut(), 3.0);
+    assert_eq!(sessions(&persist), [(kept.clone(), true)]);
+    // One more design: the kept session ends and stays; the new one is
+    // recorded, unkept, when the desktop goes.
+    let (_, left) = designed(&mut h, &root);
+    persist.frame(h.state_mut(), 4.0);
+    assert_eq!(sessions(&persist).len(), 2);
+    drop(persist);
+    drop(h);
+
+    // Reopened: the session left unkept is dropped, the kept one is
+    // there with its steps.
+    let reopened = Persist::new(
+        SqliteStore::open(&db).unwrap(),
+        std::sync::Arc::new(helios_core::Bus::new()),
+    );
+    assert_eq!(reopened.drop_unkept_sessions().unwrap(), 1);
+    assert_eq!(sessions(&reopened), [(kept.clone(), true)]);
+    let doc = Vault::new(SqliteStore::open(&db).unwrap())
+        .workshop_session(&kept)
+        .unwrap()
+        .unwrap();
+    assert_eq!(doc["steps"][0]["kind"], json!("design"));
+    assert!(reopened.vault().workshop_session(&left).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(&root);
+}

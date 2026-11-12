@@ -366,6 +366,9 @@ pub struct Set {
     pub gesture: Option<GestureId>,
     /// Only if the value has not changed since this sequence number.
     pub if_seq: Option<u64>,
+    /// What the write aims at, in words (the user's note, an AI
+    /// proposal's ask): kept on the step it makes.
+    pub aim: Option<String>,
 }
 
 impl Set {
@@ -377,7 +380,14 @@ impl Set {
             force: false,
             gesture: None,
             if_seq: None,
+            aim: None,
         }
+    }
+
+    /// What the write aims at, kept on its step.
+    pub fn aim(mut self, aim: &str) -> Self {
+        self.aim = Some(aim.into());
+        self
     }
 
     pub fn force(mut self) -> Self {
@@ -509,6 +519,8 @@ struct Gesture {
     changes: Vec<(String, Value, Value)>,
     /// Where it began: its step is made there.
     place: Vec<Place>,
+    /// What it aims at, in words: see [`Store::aim`].
+    aim: Option<String>,
 }
 
 /// A place of the context stack (the library, the darkroom on an image,
@@ -572,6 +584,10 @@ pub struct Step {
     /// request id the agent gave), if any: see [`Store::begin_request`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<u64>,
+    /// What it aimed at, in words (the user's note, an AI proposal's
+    /// ask); none for a plain move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aim: Option<String>,
 }
 
 impl Step {
@@ -944,6 +960,7 @@ impl Store {
                 changes: vec![change],
                 place: self.place.clone(),
                 group: None,
+                aim: set.aim,
             }),
         }
         Ok(Applied {
@@ -1118,6 +1135,7 @@ impl Store {
                 paths: BTreeSet::new(),
                 changes: Vec::new(),
                 place: self.place.clone(),
+                aim: None,
             },
         );
         id
@@ -1164,6 +1182,14 @@ impl Store {
         self.open(origin, label, false)
     }
 
+    /// Says what an open gesture or group aims at, in words: its step
+    /// keeps them. Nothing for a gesture already ended.
+    pub fn aim(&mut self, id: GestureId, aim: &str) {
+        if let Some(g) = self.gestures.get_mut(&id) {
+            g.aim = Some(aim.into());
+        }
+    }
+
     /// Ends a gesture or a group; what it changed becomes one undo step.
     pub fn end(&mut self, id: GestureId) {
         if let Some(g) = self.gestures.remove(&id)
@@ -1176,6 +1202,7 @@ impl Store {
                 changes: g.changes,
                 place: g.place,
                 group: None,
+                aim: g.aim,
             });
         }
     }

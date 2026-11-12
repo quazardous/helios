@@ -283,11 +283,20 @@ impl std::fmt::Debug for SqliteStore {
 
 impl SqliteStore {
     fn versions_where(&self, condition: &str, key: &str) -> Result<Vec<Version>, String> {
-        type Raw = (String, String, String, String, String, i64, Option<String>);
+        type Raw = (
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+        );
         let mut statement = self
             .db
             .prepare(&format!(
-                "SELECT id, image, parents, edit, origin, at, label FROM versions WHERE {condition}"
+                "SELECT id, image, parents, edit, origin, at, label, meta FROM versions WHERE {condition}"
             ))
             .map_err(err)?;
         let rows: Vec<Raw> = statement
@@ -300,13 +309,14 @@ impl SqliteStore {
                     r.get(4)?,
                     r.get(5)?,
                     r.get(6)?,
+                    r.get(7)?,
                 ))
             })
             .map_err(err)?
             .collect::<Result<_, _>>()
             .map_err(err)?;
         rows.into_iter()
-            .map(|(id, image, parents, edit, origin, at, label)| {
+            .map(|(id, image, parents, edit, origin, at, label, meta)| {
                 let parents: Vec<String> =
                     serde_json::from_str(&parents).map_err(|e| format!("version {id}: {e}"))?;
                 Ok(Version {
@@ -320,6 +330,10 @@ impl SqliteStore {
                     origin,
                     at: at as u64,
                     label,
+                    meta: meta
+                        .map(|m| serde_json::from_str(&m))
+                        .transpose()
+                        .map_err(|e| format!("version {id}: {e}"))?,
                 })
             })
             .collect()
@@ -1429,7 +1443,7 @@ impl Store for SqliteStore {
         let added = self
             .db
             .execute(
-                "INSERT OR IGNORE INTO versions (id, image, parents, edit, origin, at, label) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO versions (id, image, parents, edit, origin, at, label, meta) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     v.id.hex(),
                     v.image.hex(),
@@ -1437,7 +1451,8 @@ impl Store for SqliteStore {
                     v.edit.to_string(),
                     v.origin,
                     v.at as i64,
-                    v.label
+                    v.label,
+                    v.meta.as_ref().map(Value::to_string)
                 ],
             )
             .map_err(err)?;
