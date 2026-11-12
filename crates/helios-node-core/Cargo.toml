@@ -1,0 +1,23 @@
+[package]
+name = "helios-node-core"
+description = "A Helios node without a window: it owns the vault, flushes it, watches the machine's volumes and runs the work that outlives a window (backups, the health check); the desktop embeds it, helios-node runs it headless"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-health.workspace = true
+helios-library.workspace = true
+helios-storage.workspace = true
+helios-vault.workspace = true
+log = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-vault-sqlite.workspace = true
+
+[lints]
+workspace = true

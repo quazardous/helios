@@ -2491,6 +2491,7 @@ dependencies = [
  "helios-module-sigmoid",
  "helios-module-whitebalance",
  "helios-node",
+ "helios-node-core",
  "helios-photo",
  "helios-plugin",
  "helios-plugin-darktable-library",
@@ -2744,6 +2745,21 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+]
+
+[[package]]
+name = "helios-node-core"
+version = "0.79.0"
+dependencies = [
+ "helios-core",
+ "helios-health",
+ "helios-library",
+ "helios-storage",
+ "helios-vault",
+ "helios-vault-sqlite",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

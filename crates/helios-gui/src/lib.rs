@@ -40,9 +40,11 @@ pub mod mask_tree;
 pub mod masks;
 pub mod modules;
 pub mod navigator;
-pub mod node;
+/// The local node the desktop embeds, from the node's crate.
+pub use helios_node_core::node;
 pub mod node_jobs;
-pub mod node_volumes;
+/// The node's volume watch, from the node's crate.
+pub use helios_node_core::volumes as node_volumes;
 pub mod params;
 pub mod persist;
 pub mod platform;

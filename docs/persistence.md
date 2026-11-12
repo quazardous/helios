@@ -64,7 +64,7 @@ longest history, then the greatest id); a session then continues the
 version it saved last, so two writers on one image make two heads and
 neither overwrites the other.
 
-**Quitting.** The vault is the local node's (`helios_gui::node`, embedded
+**Quitting.** The vault is the local node's (`helios_node_core::node`, embedded
 in the desktop's process): it opens it, flushes it on its own schedule
 (a checkpoint every few seconds, with or without a window), and closes
 it when it stops. The frame that sees the close request draws nothing:
@@ -78,7 +78,7 @@ and the next opening checks the file. Every step is already in the vault
 by then: nothing saved waits for the quit. A window closing while
 another remains leaves the node and its vault as they are, and the
 exports, backups and health checks running: they are the node's jobs,
-not a window's (`helios_gui::node_jobs` for the backups and the health
+not a window's (`helios_node_core::jobs` for the backups and the health
 check). The node's stop waits for them, or cancels them first when the
 quit was confirmed (the question asked when jobs are running), before
 its last flush; a cancelled backup stops before its next photo, the copy
