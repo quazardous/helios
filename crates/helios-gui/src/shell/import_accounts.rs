@@ -10,6 +10,12 @@
 //!
 //! Settings > Accounts lists the same accounts through the commands of
 //! [`super::accounts_admin`].
+//!
+//! A connector served by a plugin that still lacks some of the
+//! capabilities it declares asks for them first, in a consent dialog
+//! ([`consent_dialog`]): each capability with the reason the plugin's
+//! manifest gives, Allow (granted, kept, the action run again) or Don't
+//! allow (nothing runs).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -46,6 +52,25 @@ pub(crate) struct Accounts {
     /// over the library, set by the desktop; none: "Pick photos…" is not
     /// offered.
     pub(crate) import: Option<ImportRemote>,
+    /// The plugins installed: a connector of theirs asks for the
+    /// capabilities its plugin lacks before it runs.
+    pub(crate) plugins: Option<Arc<helios_plugin::Broker>>,
+    /// The consent asked, shown in the window's dialog.
+    pub(crate) consent: Option<Consent>,
+}
+
+/// A plugin's capabilities asked for before one of its actions runs.
+pub(crate) struct Consent {
+    /// The plugin's id.
+    pub(crate) plugin: String,
+    /// Its name, as shown.
+    title: String,
+    /// What it lacks, each with its manifest's reason.
+    capabilities: Vec<helios_plugin::manifest::CapabilityDecl>,
+    /// The action to run again once allowed.
+    then: Asked,
+    /// The person said no: the calm word is shown until closed.
+    declined: bool,
 }
 
 /// Imports the items a connector listed under a source: the items added.
@@ -122,6 +147,8 @@ impl Default for Accounts {
             labels: Labels::default(),
             picking: None,
             import: None,
+            plugins: None,
+            consent: None,
         }
     }
 }
@@ -295,6 +322,59 @@ impl Accounts {
         Ok(())
     }
 
+    /// The connector an action is for: its own, or its account's.
+    fn connector_of(&mut self, asked: &Asked) -> Option<String> {
+        match asked {
+            Asked::Add(connector) => Some(connector.clone()),
+            Asked::Reconnect(id) | Asked::Pick(id) => self
+                .listed()
+                .iter()
+                .find(|a| &a.id == id)
+                .map(|a| a.connector.clone()),
+            Asked::SignOut(_) => None,
+        }
+    }
+
+    /// Whether `asked` waits for the person's consent: its connector's
+    /// plugin lacks capabilities it declares, so the consent dialog asks
+    /// for them and the action is held until Allow. The plugin's id when
+    /// it waits.
+    pub(crate) fn ask_consent(&mut self, asked: &Asked) -> Option<String> {
+        let broker = self.plugins.clone()?;
+        let connector = self.connector_of(asked)?;
+        let plugin = helios_plugin::source::plugin_of(&broker, &connector)?;
+        let capabilities = broker.missing(&plugin).ok()?;
+        if capabilities.is_empty() {
+            return None;
+        }
+        let title = broker
+            .manifest(&plugin)
+            .map_or_else(|| plugin.clone(), |m| m.title().to_owned());
+        self.consent = Some(Consent {
+            plugin: plugin.clone(),
+            title,
+            capabilities,
+            then: asked.clone(),
+            declined: false,
+        });
+        Some(plugin)
+    }
+
+    /// The person allowed the consent asked: its capabilities granted
+    /// (and kept, by the broker's keeper), the action it held given back
+    /// to run again.
+    fn allow(&mut self) -> Option<Asked> {
+        let consent = self.consent.take()?;
+        let broker = self.plugins.clone()?;
+        for c in &consent.capabilities {
+            if let Err(e) = broker.grant(&consent.plugin, &c.name) {
+                log::warn!("plugin consent: {e}");
+                return None;
+            }
+        }
+        Some(consent.then)
+    }
+
     /// The session is no longer shown.
     fn close(&mut self) {
         self.connecting = None;
@@ -324,6 +404,7 @@ pub(crate) fn state_text(state: &AccountState) -> Message {
 }
 
 /// What the accounts' part of the Sources column asked.
+#[derive(Clone, Debug)]
 pub(crate) enum Asked {
     Add(String),
     Pick(String),
@@ -424,6 +505,85 @@ pub(crate) fn accounts_ui(
         );
     }
     asked
+}
+
+/// The consent dialog, while a plugin's capabilities are asked for: the
+/// plugin's name and id, each capability it lacks with the reason its
+/// manifest gives, Allow and Don't allow. Allow grants them all and gives
+/// back the action held, to run again; Don't allow says calmly that
+/// nothing ran and where to allow them later.
+pub(crate) fn consent_dialog(
+    ctx: &egui::Context,
+    accounts: &mut Accounts,
+    t: &dyn Fn(Message) -> String,
+) -> Option<Asked> {
+    let consent = accounts.consent.as_mut()?;
+    let (mut allow, mut close) = (false, false);
+    egui::Modal::new(egui::Id::unique("helios.plugin.consent")).show(ctx, |ui| {
+        ui.set_width(400.0);
+        ui.heading(t(Message::new("gui-consent-title", "Allow { $plugin }?")
+            .with("plugin", consent.title.clone())));
+        ui.weak(t(Message::new("gui-consent-from", "Plugin { $id }")
+            .with("id", consent.plugin.clone())));
+        ui.add_space(6.0);
+        if consent.declined {
+            ui.label(t(Message::new(
+                "gui-consent-declined",
+                "Nothing was changed: { $plugin } does not run without these permissions. You can allow them later in Settings > Plugins.",
+            )
+            .with("plugin", consent.title.clone())));
+            if ui
+                .button(t(Message::new("gui-connect-close", "Close")))
+                .clicked()
+            {
+                close = true;
+            }
+            return;
+        }
+        ui.label(t(Message::new(
+            "gui-consent-asks",
+            "{ $plugin } asks for your permission to:",
+        )
+        .with("plugin", consent.title.clone())));
+        for c in &consent.capabilities {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("•");
+                ui.label(&c.reason);
+            });
+        }
+        ui.add_space(6.0);
+        ui.weak(t(Message::new(
+            "gui-consent-later",
+            "Helios remembers your answer; Settings > Plugins changes it.",
+        )));
+        ui.horizontal(|ui| {
+            if ui
+                .button(t(Message::new("gui-consent-allow", "Allow")))
+                .clicked()
+            {
+                allow = true;
+            }
+            if ui
+                .button(t(Message::new("gui-consent-deny", "Don't allow")))
+                .clicked()
+            {
+                consent.declined = true;
+                ui.ctx().request_repaint();
+            }
+        });
+    });
+    // What the answer changed is drawn at once: the window repaints only
+    // when asked.
+    if close || allow {
+        ctx.request_repaint();
+    }
+    if close {
+        accounts.consent = None;
+    }
+    if allow {
+        return accounts.allow();
+    }
+    None
 }
 
 /// The connection's dialog, while one runs or until its end is seen:

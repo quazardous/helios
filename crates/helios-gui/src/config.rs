@@ -473,6 +473,8 @@ pub fn title(path: &str) -> Message {
         "health/check" => Message::new("gui-settings-health-check", "Health check"),
         "accounts" => Message::new("gui-settings-accounts", "Accounts"),
         "accounts/list" => Message::new("gui-settings-accounts-list", "Import accounts"),
+        "plugins" => Message::new("gui-settings-plugins", "Plugins"),
+        "plugins/capabilities" => Message::new("gui-settings-plugins-capabilities", "Permissions"),
         "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
         "interface/experimental" => Message::new("gui-settings-experimental", "Experimental"),
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
@@ -501,6 +503,7 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
         .scope_at("storage", &tt("storage"), "disc", 40)
         .scope_at("backup", &tt("backup"), "lock", 50)
         .scope_at("accounts", &tt("accounts"), "unlock", 60)
+        .scope_at("plugins", &tt("plugins"), "phosphor:puzzle-piece", 65)
         .scope_at("hardware", &tt("hardware"), "command", 70)
         .scope_at("health", &tt("health"), "success", 90);
     m = m.section("storage/volumes", &tt("storage/volumes"), |s| {
@@ -549,6 +552,9 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
     })
     .section("accounts/list", &tt("accounts/list"), |s| {
         accounts_section(s, t);
+    })
+    .section("plugins/capabilities", &tt("plugins/capabilities"), |s| {
+        plugins_section(s, t);
     })
     .wizard(backup_wizard(t))
 }
@@ -999,6 +1005,51 @@ fn accounts_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             )),
             None,
         );
+    s.table(table);
+}
+
+/// Settings > Plugins: every installed plugin's capabilities, each with
+/// the reason its manifest gives and a switch granting or taking it back
+/// (`plugin.capabilities`, `plugin.grant`). Taking one back stops the
+/// plugin; it asks again the next time it is needed.
+fn plugins_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use helios_plugin::commands::{CAPABILITIES, GRANT};
+    s.description(&t(Message::new(
+        "gui-settings-plugins-about",
+        "What each plugin may do. A plugin asks the first time it needs a permission; Helios remembers your answer.",
+    )));
+    let table = Records::command(
+        "plugin-capabilities",
+        "",
+        CAPABILITIES,
+        "/capabilities",
+        "id",
+    )
+    .column(
+        "pluginText",
+        &t(Message::new("gui-settings-plugin-name", "Plugin")),
+    )
+    .column(
+        "reason",
+        &t(Message::new("gui-settings-plugin-reason", "Why")),
+    )
+    .row_field(RowField::toggle(
+        "granted",
+        &t(Message::new("gui-settings-plugin-granted", "Allowed")),
+        GRANT,
+        json!({
+            "plugin": "${row.plugin}",
+            "capability": "${row.capability}",
+            "granted": "${value}",
+        }),
+    ))
+    .empty(
+        &t(Message::new(
+            "gui-settings-plugins-none",
+            "No plugin asks for a permission.",
+        )),
+        None,
+    );
     s.table(table);
 }
 

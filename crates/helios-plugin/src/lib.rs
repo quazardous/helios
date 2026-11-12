@@ -21,12 +21,14 @@
 //! - [`broker`]: discovery, activation, routing, capabilities, services;
 //! - [`importer`]: the importer protocol's checks (`importer.scan`);
 //! - [`commands`]: the broker as shell commands;
+//! - [`grants`]: the capabilities granted, as a settings layer keeps them;
 //! - [`source`]: the `import.source` service as an import connector;
 //! - [`bundled`]: the plugins Helios ships, built beside it.
 
 pub mod broker;
 pub mod bundled;
 pub mod commands;
+pub mod grants;
 pub mod importer;
 pub mod manifest;
 pub mod rpc;

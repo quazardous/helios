@@ -340,6 +340,13 @@ gui-compare-first 266fefe0e5a0945f
 gui-compare-rating 8d3d60f2b2f33084
 gui-compare-too-few bdc994e76c8e5b1c
 gui-confirmed-by-policy 3cbe35a902970f08
+gui-consent-allow 4212ce82c4d5efa0
+gui-consent-asks a0f6d514da96185a
+gui-consent-declined 54f6ed2b2c0ddae4
+gui-consent-deny a475d1db6de4ada6
+gui-consent-from 21f07de88b8004dd
+gui-consent-later 5922b07154e63efe
+gui-consent-title ee6fe0041b47bf86
 gui-copied 2f397b47ced4b53e
 gui-copied-files 3f8356c6e2ce0997
 gui-copied-files-missing cac988d22f12cea2
@@ -860,6 +867,13 @@ gui-scopes-green e75b76ee627e2c3a
 gui-scopes-red ec567f4422597e6a
 gui-settings-health 7633e8a1583e45e7
 gui-settings-health-check c1e913ce62823067
+gui-settings-plugin-granted 2c8c84258a75df83
+gui-settings-plugin-name f272a9b884fbf0d8
+gui-settings-plugin-reason b548901a66fbd4b1
+gui-settings-plugins f4791889f7d7e08b
+gui-settings-plugins-about a0bae695137a1523
+gui-settings-plugins-capabilities 83dd6669158d29a3
+gui-settings-plugins-none 56632202a58d9500
 gui-size-bytes f7153bf939a9449c
 gui-size-gib 05df2d85b96c6970
 gui-size-kib 053b6d255ce6ae14

@@ -1388,8 +1388,15 @@ impl ImportWindow {
                 ctx.request_repaint_of(ViewportId::ROOT);
             }
         }
-        // The connection running, in a dialog over the window.
+        // The connection running, in a dialog over the window; before
+        // it, a plugin's capabilities asked for, its action run again
+        // once allowed.
         if let Some(texts) = self.texts.clone() {
+            if let Some(again) =
+                super::import_accounts::consent_dialog(&ctx, &mut self.accounts, &|m| texts(m))
+            {
+                self.account_asked(again);
+            }
             super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
             super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m));
         }
@@ -1401,6 +1408,10 @@ impl ImportWindow {
     /// asked; what fails is said in the window's toasts.
     fn account_asked(&mut self, asked: super::import_accounts::Asked) {
         use super::import_accounts::Asked;
+        // A plugin's capabilities not granted yet are asked for first.
+        if self.accounts.ask_consent(&asked).is_some() {
+            return;
+        }
         let done = match asked {
             Asked::Add(connector) => self.connect_account(&connector, None),
             Asked::Reconnect(id) => {

@@ -1,12 +1,13 @@
-//! The broker as commands: `plugin.list`, `plugin.enable`,
-//! `plugin.disable`, `plugin.grant`, `plugin.revoke`, `metadata.read`,
-//! `device.list`, `device.info`, `device.capture`, `device.download`, and
-//! the commands plugins contribute, each run in its plugin.
+//! The broker as commands: `plugin.list`, `plugin.capabilities`,
+//! `plugin.enable`, `plugin.disable`, `plugin.grant`, `plugin.revoke`,
+//! `metadata.read`, `device.list`, `device.info`, `device.capture`,
+//! `device.download`, and the commands plugins contribute, each run in
+//! its plugin.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use helios_shell::commands::{CommandSpec, Registry};
+use helios_shell::commands::{CommandSpec, Origin, Registry};
 use serde_json::{Value as Json, json};
 
 use crate::Broker;
@@ -21,19 +22,38 @@ fn optional<'a>(args: &'a Json, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Json::as_str)
 }
 
-/// Declares the plugin commands on a registry, over a shared broker. The
-/// answer lists the contributed commands left out, because their id was
-/// already taken.
-pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<String>, String> {
+/// A command's handler.
+pub type Handler = Box<dyn Fn(&Json, &Origin) -> Result<Json, String> + Send + Sync>;
+
+/// Grants or takes back a plugin's capability (`plugin.grant`).
+pub const GRANT: &str = "plugin.grant";
+/// Every plugin's capabilities as rows (`plugin.capabilities`).
+pub const CAPABILITIES: &str = "plugin.capabilities";
+
+/// The commands that show and manage the plugins (`plugin.*`), for a
+/// registry of their own or the desktop's.
+pub fn admin(broker: &Arc<Broker>) -> Vec<(CommandSpec, Handler)> {
+    let mut out: Vec<(CommandSpec, Handler)> = Vec::new();
     let b = broker.clone();
-    registry.register(
+    out.push((
         CommandSpec::new(
             "plugin.list",
             "List plugins, their capabilities and state",
             "Plugins",
-        ),
-        move |_, _| Ok(b.list()),
-    )?;
+        )
+        .read_only(),
+        Box::new(move |_, _| Ok(b.list())),
+    ));
+    let b = broker.clone();
+    out.push((
+        CommandSpec::new(
+            CAPABILITIES,
+            "List every plugin's capabilities, each with its reason and whether it is granted",
+            "Plugins",
+        )
+        .read_only(),
+        Box::new(move |_, _| Ok(capability_rows(&b))),
+    ));
     for (id, title, enable) in [
         ("plugin.enable", "Enable a plugin (`plugin`)", true),
         (
@@ -43,16 +63,19 @@ pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<Stri
         ),
     ] {
         let b = broker.clone();
-        registry.register(CommandSpec::new(id, title, "Plugins"), move |args, _| {
-            let plugin = text(args, "plugin")?;
-            b.set_enabled(plugin, enable)?;
-            Ok(json!({"plugin": plugin, "enabled": enable}))
-        })?;
+        out.push((
+            CommandSpec::new(id, title, "Plugins"),
+            Box::new(move |args, _| {
+                let plugin = text(args, "plugin")?;
+                b.set_enabled(plugin, enable)?;
+                Ok(json!({"plugin": plugin, "enabled": enable}))
+            }),
+        ));
     }
     for (id, title, grant) in [
         (
-            "plugin.grant",
-            "Grant a plugin a capability it declares (`plugin`, `capability`)",
+            GRANT,
+            "Grant a plugin a capability it declares (`plugin`, `capability`; `granted`: false takes it back)",
             true,
         ),
         (
@@ -62,16 +85,53 @@ pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<Stri
         ),
     ] {
         let b = broker.clone();
-        registry.register(CommandSpec::new(id, title, "Plugins"), move |args, _| {
-            let plugin = text(args, "plugin")?;
-            let capability = text(args, "capability")?;
-            if grant {
-                b.grant(plugin, capability)?;
-            } else {
-                b.revoke(plugin, capability)?;
-            }
-            Ok(json!({"plugin": plugin, "capability": capability, "granted": grant}))
-        })?;
+        out.push((
+            CommandSpec::new(id, title, "Plugins"),
+            Box::new(move |args, _| {
+                let plugin = text(args, "plugin")?;
+                let capability = text(args, "capability")?;
+                let grant = grant && args.get("granted").and_then(Json::as_bool) != Some(false);
+                if grant {
+                    b.grant(plugin, capability)?;
+                } else {
+                    b.revoke(plugin, capability)?;
+                }
+                Ok(json!({"plugin": plugin, "capability": capability, "granted": grant}))
+            }),
+        ));
+    }
+    out
+}
+
+/// Every plugin's capabilities, one row each (`/capabilities`): `id`
+/// (`<plugin> <capability>`), `plugin`, `pluginText` (its title),
+/// `capability`, `reason` (its manifest's), `about` (what the capability
+/// allows), `granted`.
+fn capability_rows(broker: &Broker) -> Json {
+    let list = broker.list();
+    let mut rows = Vec::new();
+    for p in list["plugins"].as_array().into_iter().flatten() {
+        for c in p["capabilities"].as_array().into_iter().flatten() {
+            rows.push(json!({
+                "id": format!("{} {}", p["id"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default()),
+                "plugin": p["id"],
+                "pluginText": p["title"],
+                "capability": c["name"],
+                "reason": c["reason"],
+                "about": c["about"],
+                "granted": c["granted"],
+            }));
+        }
+    }
+    json!({ "capabilities": rows })
+}
+
+/// Declares the plugin commands on a registry, over a shared broker. The
+/// answer lists the contributed commands left out, because their id was
+/// already taken.
+pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<String>, String> {
+    for (spec, handler) in admin(&broker) {
+        registry.register(spec, handler)?;
     }
     let b = broker.clone();
     registry.register(

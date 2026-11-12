@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
+use crate::grants::Grants;
 use crate::importer::{self, Scan};
 use crate::manifest::{
-    Enforcement, INTERFACES, ImporterDecl, MANIFEST, Manifest, Version, capability,
+    CapabilityDecl, Enforcement, INTERFACES, ImporterDecl, MANIFEST, Manifest, Version, capability,
 };
 use crate::rpc::{CallError, Cancel, Event, Listener, Process};
 
@@ -158,6 +159,13 @@ struct Slot {
 
 type Listeners = Arc<Mutex<Vec<Sender<Notice>>>>;
 
+/// Who keeps the grants, told each time they change.
+type GrantsKeeper = Arc<dyn Fn(&Grants) + Send + Sync>;
+
+/// The capabilities a plugin is granted by the act that hands it its
+/// data, never asked for ahead: `source.read` (picking the source).
+const GRANTED_BY_THE_ACT: &[&str] = &["source.read"];
+
 /// Who follows a call's `$/progress`, by its token.
 type Watchers = Arc<Mutex<HashMap<String, Arc<dyn Fn(&Json) + Send + Sync>>>>;
 
@@ -175,6 +183,7 @@ pub struct Broker {
     rejected: Vec<Rejected>,
     listeners: Listeners,
     watchers: Watchers,
+    keeper: Mutex<Option<GrantsKeeper>>,
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -188,6 +197,7 @@ impl Broker {
             rejected: Vec::new(),
             listeners: Arc::default(),
             watchers: Arc::default(),
+            keeper: Mutex::new(None),
         }
     }
 
@@ -350,7 +360,8 @@ impl Broker {
     }
 
     /// Grants a capability the plugin declares. A running plugin is
-    /// stopped, so it starts again told of its new grants.
+    /// stopped, so it starts again told of its new grants. The grants are
+    /// handed to their keeper ([`Broker::on_grants`]).
     pub fn grant(&self, id: &str, capability: &str) -> Result<(), String> {
         let slot = self.slot(id)?;
         if !slot.manifest.declares(capability) {
@@ -358,20 +369,98 @@ impl Broker {
                 "`{id}` does not declare the capability `{capability}`"
             ));
         }
-        let mut st = slot.state.lock().expect("plugin lock");
-        if st.granted.insert(capability.into()) {
-            self.stop_locked(id, &mut st, "capabilities changed");
+        let changed = {
+            let mut st = slot.state.lock().expect("plugin lock");
+            let changed = st.granted.insert(capability.into());
+            if changed {
+                self.stop_locked(id, &mut st, "capabilities changed");
+            }
+            changed
+        };
+        if changed {
+            self.keep_grants();
         }
         Ok(())
     }
 
+    /// Takes a capability back: a running plugin is stopped. The grants
+    /// are handed to their keeper.
     pub fn revoke(&self, id: &str, capability: &str) -> Result<(), String> {
         let slot = self.slot(id)?;
-        let mut st = slot.state.lock().expect("plugin lock");
-        if st.granted.remove(capability) {
-            self.stop_locked(id, &mut st, "capabilities changed");
+        let changed = {
+            let mut st = slot.state.lock().expect("plugin lock");
+            let changed = st.granted.remove(capability);
+            if changed {
+                self.stop_locked(id, &mut st, "capabilities changed");
+            }
+            changed
+        };
+        if changed {
+            self.keep_grants();
         }
         Ok(())
+    }
+
+    /// The grants kept from an earlier run ([`crate::grants`]): each
+    /// plugin is granted what it declares of its own; the rest is left
+    /// out. The keeper is not told.
+    pub fn load_grants(&self, grants: &Grants) {
+        for (id, slot) in &self.plugins {
+            let Some(kept) = grants.get(id) else {
+                continue;
+            };
+            let mut st = slot.state.lock().expect("plugin lock");
+            st.granted = kept
+                .iter()
+                .filter(|c| slot.manifest.declares(c))
+                .cloned()
+                .collect();
+        }
+    }
+
+    /// Every installed plugin's granted capabilities; a plugin no longer
+    /// installed is not among them, so its grants go when they are next
+    /// kept.
+    pub fn grants(&self) -> Grants {
+        self.plugins
+            .iter()
+            .filter_map(|(id, slot)| {
+                let st = slot.state.lock().expect("plugin lock");
+                (!st.granted.is_empty()).then(|| (id.clone(), st.granted.clone()))
+            })
+            .collect()
+    }
+
+    /// Who keeps the grants: told them each time a grant or a revoke
+    /// changes them (written to the person's settings layer by the
+    /// desktop).
+    pub fn on_grants(&self, keeper: impl Fn(&Grants) + Send + Sync + 'static) {
+        *self.keeper.lock().expect("keeper lock") = Some(Arc::new(keeper));
+    }
+
+    fn keep_grants(&self) {
+        let keeper = self.keeper.lock().expect("keeper lock").clone();
+        if let Some(keeper) = keeper {
+            keeper(&self.grants());
+        }
+    }
+
+    /// The capabilities a plugin declares and the person has not granted
+    /// yet, with the reasons its manifest gives: what to ask before one of
+    /// its actions (the ones the act itself grants, `source.read`, left
+    /// out).
+    pub fn missing(&self, id: &str) -> Result<Vec<CapabilityDecl>, String> {
+        let slot = self.slot(id)?;
+        let st = slot.state.lock().expect("plugin lock");
+        Ok(slot
+            .manifest
+            .capabilities
+            .iter()
+            .filter(|c| {
+                !st.granted.contains(&c.name) && !GRANTED_BY_THE_ACT.contains(&c.name.as_str())
+            })
+            .cloned()
+            .collect())
     }
 
     pub fn running(&self, id: &str) -> bool {
@@ -496,7 +585,7 @@ impl Broker {
             {
                 return Err(format!(
                     "plugin `{id}` needs the capability `{}` ({}), not granted: \
-                     grant it with `plugin.grant`",
+                     allow it in Settings > Plugins",
                     c.name, c.reason
                 ));
             }
@@ -742,7 +831,7 @@ impl Broker {
         {
             return Err(format!(
                 "plugin `{id}` needs the capability `{capability}`, not granted: \
-                 grant it with `plugin.grant`"
+                 allow it in Settings > Plugins"
             ));
         }
         Ok(())

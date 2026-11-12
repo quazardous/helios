@@ -471,11 +471,30 @@ pub struct Lenient {
     pub problems: Vec<Problem>,
 }
 
+/// The top-level tables a layer keeps as written, for another part of
+/// Helios to read: they are not settings, so they are neither checked nor
+/// shown, and a layer written back keeps them. `plugin-grants`: the
+/// capabilities the person allowed each plugin (`helios_plugin::grants`).
+pub const KEPT_TABLES: &[&str] = &["plugin-grants"];
+
 /// Settings resolved through their layers.
 #[derive(Clone, Debug)]
 pub struct Config {
     schema: Schema,
     layers: BTreeMap<Layer, BTreeMap<String, Value>>,
+    /// Each layer's [`KEPT_TABLES`], as read.
+    kept: BTreeMap<Layer, Table>,
+}
+
+/// Takes the [`KEPT_TABLES`] out of a layer's table.
+fn take_kept(table: &mut Table) -> Table {
+    let mut kept = Table::new();
+    for name in KEPT_TABLES {
+        if let Some(v) = table.remove(*name) {
+            kept.insert((*name).to_string(), v);
+        }
+    }
+    kept
 }
 
 impl Config {
@@ -483,7 +502,13 @@ impl Config {
         Self {
             schema,
             layers: BTreeMap::new(),
+            kept: BTreeMap::new(),
         }
+    }
+
+    /// A layer's kept table `name` (one of [`KEPT_TABLES`]), as read.
+    pub fn kept(&self, layer: Layer, name: &str) -> Option<&Toml> {
+        self.kept.get(&layer)?.get(name)
     }
 
     pub fn schema(&self) -> &Schema {
@@ -638,18 +663,20 @@ impl Config {
     /// layer is left as it was and every problem is returned. Load the lower
     /// layers first: a value equal to what it inherits leaves its layer.
     pub fn load_str(&mut self, layer: Layer, text: &str) -> Result<(), Vec<Problem>> {
-        let table: Table = text.parse().map_err(|e: toml::de::Error| {
+        let mut table: Table = text.parse().map_err(|e: toml::de::Error| {
             vec![Problem {
                 layer,
                 key: String::new(),
                 reason: format!("not valid TOML: {}", e.message()),
             }]
         })?;
+        let kept = take_kept(&mut table);
         let mut flat = Vec::new();
         let mut problems = Vec::new();
         flatten("", &table, &mut flat, layer, &mut problems);
         let mut next = self.clone();
         next.layers.remove(&layer);
+        next.kept.insert(layer, kept);
         for (key, value) in flat {
             if let Err(p) = next.set(layer, &key, value) {
                 problems.push(p);
@@ -670,7 +697,7 @@ impl Config {
     /// replaced; the keys read as global and the problems are returned.
     pub fn load_str_lenient(&mut self, layer: Layer, text: &str) -> Lenient {
         let mut out = Lenient::default();
-        let table: Table = match text.parse() {
+        let mut table: Table = match text.parse() {
             Ok(t) => t,
             Err(e) => {
                 let e: toml::de::Error = e;
@@ -682,6 +709,7 @@ impl Config {
                 return out;
             }
         };
+        self.kept.insert(layer, take_kept(&mut table));
         let mut flat = Vec::new();
         flatten("", &table, &mut flat, layer, &mut out.problems);
         self.layers.remove(&layer);
@@ -706,6 +734,7 @@ impl Config {
             Ok(text) => self.load_str(layer, &text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 self.layers.remove(&layer);
+                self.kept.remove(&layer);
                 Ok(())
             }
             Err(e) => Err(vec![Problem {
@@ -716,9 +745,10 @@ impl Config {
         }
     }
 
-    /// A layer as TOML text, only the values it sets.
+    /// A layer as TOML text, only the values it sets, and its
+    /// [`KEPT_TABLES`] as read.
     pub fn layer_toml(&self, layer: Layer) -> String {
-        let mut root = Table::new();
+        let mut root = self.kept.get(&layer).cloned().unwrap_or_default();
         for (key, value) in self.layers.get(&layer).into_iter().flatten() {
             let integer = matches!(
                 self.schema.get(key).map(|s| s.kind),
@@ -854,6 +884,32 @@ mod tests {
             Some((Value::Number(1024.0), Layer::Default))
         );
         assert_eq!(c.get("nope"), None);
+    }
+
+    #[test]
+    fn a_kept_table_is_no_setting_and_survives_a_write_back() {
+        let text = "[interface.graph]\nzoom = \"overview\"\n\n[plugin-grants]\n\"org.example.p\" = [\"network\"]\n";
+        let mut c = config();
+        assert!(c.load_str_lenient(Layer::User, text).problems.is_empty());
+        c.load_str(Layer::User, text).unwrap();
+        assert_eq!(
+            c.kept(Layer::User, "plugin-grants").unwrap()["org.example.p"],
+            Toml::Array(vec![Toml::String("network".into())])
+        );
+        c.set(
+            Layer::User,
+            "interface.graph.zoom",
+            Value::Choice("detail".into()),
+        )
+        .unwrap();
+        let back = c.layer_toml(Layer::User);
+        let mut again = config();
+        again.load_str(Layer::User, &back).unwrap();
+        assert_eq!(
+            again.kept(Layer::User, "plugin-grants"),
+            c.kept(Layer::User, "plugin-grants"),
+            "{back}"
+        );
     }
 
     #[test]

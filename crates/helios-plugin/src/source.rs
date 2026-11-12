@@ -55,6 +55,17 @@ pub fn providers(broker: &Arc<Broker>) -> Vec<SourceProvider> {
         .collect()
 }
 
+/// The plugin behind the connector `connector` (the last part of its id,
+/// as [`SourceProvider::new`] names it), when one serves
+/// `import.source`.
+pub fn plugin_of(broker: &Broker, connector: &str) -> Option<String> {
+    broker
+        .providers(SERVICE)
+        .into_iter()
+        .find(|id| id.rsplit('.').next() == Some(connector))
+        .map(String::from)
+}
+
 /// A source plugin's connector provider: its manifest read from the
 /// plugin's, its connectors calling it through the broker.
 pub struct SourceProvider {

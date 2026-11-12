@@ -18,6 +18,10 @@
 //!   `url` or `why`.
 //! - `import.connectionAnswer`: the form's `values`; `cancel: true` gives
 //!   the connection up.
+//!
+//! `import.addSource` and `import.reconnect` on a connector whose plugin
+//! lacks capabilities answer `consent` (the plugin's id) instead: the
+//! window asks the person first.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError};
@@ -30,7 +34,7 @@ use helios_shell::commands::{CommandSpec, Origin};
 use serde_json::{Value, json};
 
 use super::Shell;
-use super::import_accounts::{Current, Labels, state_text};
+use super::import_accounts::{Asked, Current, Labels, state_text};
 
 /// Lists the accounts (read-only).
 pub const ACCOUNTS: &str = "import.accounts";
@@ -106,6 +110,22 @@ impl Shell {
                 .insert(manifest.id.clone(), manifest.label.clone());
         }
         w.connectors.add_provider(provider);
+    }
+
+    /// The plugins installed: a connector of theirs asks for the
+    /// capabilities its plugin lacks before it runs (the consent dialog),
+    /// and the plugin commands (`plugin.list`, `plugin.capabilities`,
+    /// `plugin.grant`…) are declared, for Settings > Plugins and agents.
+    pub fn set_plugins(&mut self, broker: Arc<helios_plugin::Broker>) {
+        self.import.get_mut().accounts.plugins = Some(broker.clone());
+        if self.has_command(helios_plugin::commands::CAPABILITIES) {
+            return;
+        }
+        for (spec, handler) in helios_plugin::commands::admin(&broker) {
+            if let Err(e) = self.register(spec, handler) {
+                log::warn!("plugin commands: {e}");
+            }
+        }
     }
 
     /// The import accounts' commands that read or change them off the
@@ -223,6 +243,15 @@ impl Shell {
         };
         self.open_import_window(&Value::Null);
         let mut w = self.import.get_mut();
+        // A plugin's capabilities not granted yet are asked for in the
+        // window first; the connection starts once the person allows.
+        let asked = match &account {
+            Some(id) => Asked::Reconnect(id.clone()),
+            None => Asked::Add(connector.clone()),
+        };
+        if let Some(plugin) = w.accounts.ask_consent(&asked) {
+            return Ok(json!({ "account": null, "consent": plugin }));
+        }
         w.connect_account(&connector, account.as_deref())?;
         let id = w
             .accounts
