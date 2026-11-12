@@ -78,6 +78,23 @@ first start ("More info", then "Run anyway"): see
 [docs/windows-port.md](./docs/windows-port.md) for what Windows still
 lacks.
 
+For macOS on Apple silicon (arm64):
+
+- `helios-<version>-macos-arm64.dmg`: a disk image holding `Helios.app`.
+  Open it and drag Helios onto Applications. The command line is inside
+  the app: `/Applications/Helios.app/Contents/MacOS/helios`.
+
+It needs macOS 11 or newer on an Apple silicon Mac; the GPU goes through
+Metal. The app is not signed with a Developer ID nor notarised yet, so
+macOS refuses the first start ("cannot be opened" or "damaged"): right-click
+Helios in Applications, choose Open, then Open again (on macOS 15 and later,
+open System Settings, Privacy & Security, and choose "Open Anyway"). Or
+clear the quarantine flag in a terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Helios.app
+```
+
 Building from source: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Documentation

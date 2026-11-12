@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Helios.app's Info.plist; packaging/macos/release.sh fills in @VERSION@. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Helios</string>
+  <key>CFBundleExecutable</key>
+  <string>helios-gui</string>
+  <key>CFBundleIconFile</key>
+  <string>Helios</string>
+  <key>CFBundleIdentifier</key>
+  <string>io.github.quazardous.Helios</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>Helios</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@VERSION@</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.photography</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSHumanReadableCopyright</key>
+  <string>Free software under the GNU General Public License, version 3 or later.</string>
+</dict>
+</plist>

@@ -1,8 +1,7 @@
 name: release
 
-# Builds the Linux and Windows packages of a version and publishes them as a GitHub
-# Release (docs/releases.md); a first macOS build runs too, its files kept
-# as the run's artefacts only. Versions advance on their own with each
+# Builds the Linux, Windows and macOS packages of a version and publishes
+# them as a GitHub Release (docs/releases.md). Versions advance on their own with each
 # promotion of `next` (promote.yml); a version is published only when the
 # coordinator tags its "Release X.Y.Z" commit on `main` as `vX.Y.Z`, by
 # judgment (a real feature or a serious fix). No workflow pushes tags.
@@ -269,16 +268,22 @@ jobs:
           ./packaging/windows/smoke-installer.ps1 "dist/helios-$env:VERSION-windows-x86_64-setup.exe" `
             crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
 
-  # macOS on Apple silicon (arm64), first slice: the same programs built
-  # for aarch64-apple-darwin, signed ad hoc only, as a tarball kept with the
-  # run's artefacts, and its smoke test (packaging/macos/smoke.sh). Not yet
-  # attached to the Release, and allowed to fail: publish does not wait for
-  # it. Helios links no C library of darktable's; the C its crates carry
+  # macOS on Apple silicon (arm64): the same programs built for
+  # aarch64-apple-darwin, in Helios.app inside a disk image
+  # (packaging/macos/release.sh), smoke-tested mounted
+  # (packaging/macos/smoke.sh), then kept for the Release. A red macOS job
+  # does not hold the Release back: it then ships without the image.
+  # Helios links no C library of darktable's; the C its crates carry
   # (bundled SQLite and the like) builds with the runner's Xcode: no Homebrew.
+  # Signing with a Developer ID and notarisation run only when their
+  # secrets are set (docs/releases.md, "macOS"); without them the app is
+  # signed ad hoc.
   macos:
     runs-on: macos-15
-    continue-on-error: true
     timeout-minutes: 90
+    env:
+      HAS_MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      HAS_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -286,6 +291,39 @@ jobs:
       - name: version
         id: version
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      # The Developer ID Application certificate, into a keychain of the
+      # run's own; MACOS_SIGN_IDENTITY then names it for release.sh.
+      - name: signing identity
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          if [ "$HAS_MACOS_CERTIFICATE" != "true" ]; then
+            msg="MACOS_CERTIFICATE_P12 is not set: Helios.app is signed ad hoc, not notarised (docs/releases.md, \"macOS\")"
+            echo "::notice::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          pass="$(openssl rand -hex 16)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | awk '/Developer ID Application/ { print $2; exit }')"
+          [ -n "$identity" ] || { echo "::error::no Developer ID Application identity in MACOS_CERTIFICATE_P12"; exit 1; }
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          if [ "$HAS_NOTARY_KEY" = "true" ]; then
+            echo "$APPLE_NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            echo "APPLE_NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+          fi
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
         with:
@@ -297,27 +335,45 @@ jobs:
         run: |
           uname -m
           cargo build --release --locked \
-            -p helios-node -p helios-gui -p helios-plugin-darktable-library
+            -p helios-node -p helios-gui -p helios-plugin-darktable-library \
+            -p helios-plugin-lightroom-catalog -p helios-plugin-google-photos
       - name: package
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: packaging/macos/release.sh "$VERSION" target/release dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: helios-${{ steps.version.outputs.version }}-macos-arm64
-          path: dist/
-          if-no-files-found: error
       - name: smoke
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           (cd dist && shasum -a 256 -c SHA256SUMS-macos)
-          packaging/macos/smoke.sh "dist/helios-$VERSION-macos-arm64.tar.gz" \
+          packaging/macos/smoke.sh "dist/helios-$VERSION-macos-arm64.dmg" \
             crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ steps.version.outputs.version }}-macos-arm64
+          path: dist/
+          if-no-files-found: error
+      - name: forget the signing keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"
 
+  # Publishes when every Linux and Windows job passed; the macOS image is
+  # attached when its job passed too.
   publish:
-    needs: [build-linux, smoke-linux, flatpak, build-windows, smoke-windows]
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true }}
+    needs: [build-linux, smoke-linux, flatpak, build-windows, smoke-windows, macos]
+    if: >-
+      ${{ !cancelled()
+      && needs.build-linux.result == 'success' && needs.smoke-linux.result == 'success'
+      && needs.flatpak.result == 'success'
+      && needs.build-windows.result == 'success' && needs.smoke-windows.result == 'success'
+      && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true) }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -336,6 +392,11 @@ jobs:
         with:
           name: helios-${{ needs.flatpak.outputs.version }}-flatpak-x86_64
           path: dist-flatpak
+      - uses: actions/download-artifact@v4
+        if: needs.macos.result == 'success'
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-macos-arm64
+          path: dist-macos
       # One SHA256SUMS for every file attached.
       - name: checksums
         run: |
@@ -344,6 +405,12 @@ jobs:
           cat dist-windows/SHA256SUMS-windows >> dist/SHA256SUMS
           mv dist-flatpak/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak dist/
           cat dist-flatpak/SHA256SUMS-flatpak >> dist/SHA256SUMS
+          if [ -f dist-macos/SHA256SUMS-macos ]; then
+            mv dist-macos/helios-"$VERSION"-macos-arm64.dmg dist/
+            cat dist-macos/SHA256SUMS-macos >> dist/SHA256SUMS
+          else
+            echo "::warning::no macOS disk image: the macos job did not pass"
+          fi
           (cd dist && sha256sum -c SHA256SUMS)
       - name: GitHub Release
         env:
@@ -357,6 +424,8 @@ jobs:
             dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak
             dist/SHA256SUMS
           )
+          dmg=dist/helios-"$VERSION"-macos-arm64.dmg
+          if [ -f "$dmg" ]; then files+=("$dmg"); fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Helios $VERSION" --notes-file dist/release-notes.md "${files[@]}"
 
