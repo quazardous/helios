@@ -1,4 +1,5 @@
-//! A fake Photos Picker API on a local port: one session, polled
+//! A fake Photos Picker API on a local port: sessions `s1`, `s2`… (a
+//! new one at each creation), expiring at `expires`, polled
 //! `polls` times before the picking is done, its items listed two a page,
 //! their originals served at `<baseUrl>=d` (`=dv` for a video), every
 //! call checked for the bearer token `good`. It records each request.
@@ -24,12 +25,18 @@ pub type Picked = (&'static str, &'static str, bool, Vec<u8>);
 
 impl FakePicker {
     pub fn start(polls: u32, items: Vec<Picked>) -> Self {
+        Self::expiring(polls, items, "2030-01-01T00:00:00Z")
+    }
+
+    /// Its sessions expire at `expires` (RFC 3339).
+    pub fn expiring(polls: u32, items: Vec<Picked>, expires: &'static str) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
         let host = base.clone();
         let polled = Arc::new(AtomicU32::new(0));
+        let created = Arc::new(AtomicU32::new(0));
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
@@ -58,7 +65,15 @@ impl FakePicker {
                 let _ = reader.read_exact(&mut body);
                 log.lock().unwrap().push(format!("{method} {target}"));
                 let (status, kind, payload) = if auth == format!("Bearer {TOKEN}") {
-                    route(&method, &target, &host, polls, &polled, &items)
+                    let fake = Fake {
+                        host: &host,
+                        polls,
+                        polled: &polled,
+                        created: &created,
+                        expires,
+                        items: &items,
+                    };
+                    route(&method, &target, &fake)
                 } else {
                     (
                         401,
@@ -103,14 +118,31 @@ fn item_json(host: &str, (id, name, video, _): &Picked) -> Value {
     })
 }
 
-fn route(
-    method: &str,
-    target: &str,
-    host: &str,
+/// What the fake answers from.
+struct Fake<'a> {
+    host: &'a str,
     polls: u32,
-    polled: &AtomicU32,
-    items: &[Picked],
-) -> (u16, &'static str, Vec<u8>) {
+    polled: &'a AtomicU32,
+    created: &'a AtomicU32,
+    expires: &'static str,
+    items: &'a [Picked],
+}
+
+fn route(method: &str, target: &str, fake: &Fake<'_>) -> (u16, &'static str, Vec<u8>) {
+    let Fake {
+        host,
+        polls,
+        polled,
+        expires,
+        items,
+        ..
+    } = *fake;
+    // A session the fake created.
+    let known = |id: &str| {
+        id.strip_prefix('s')
+            .and_then(|n| n.parse::<u32>().ok())
+            .is_some_and(|n| n >= 1 && n <= fake.created.load(Ordering::SeqCst))
+    };
     let ok = |v: Value| (200, "application/json", v.to_string().into_bytes());
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let param = |k: &str| {
@@ -120,27 +152,31 @@ fn route(
             .map(String::from)
     };
     match (method, path) {
-        ("POST", "/v1/sessions") => ok(json!({
-            "id": "s1",
-            "pickerUri": format!("{host}/pick/s1"),
-            "pollingConfig": { "pollInterval": "0.01s", "timeoutIn": "30s" },
-            "expireTime": "2030-01-01T00:00:00Z",
-            "mediaItemsSet": false,
-        })),
-        ("GET", "/v1/sessions/s1") => {
+        ("POST", "/v1/sessions") => {
+            let id = format!("s{}", fake.created.fetch_add(1, Ordering::SeqCst) + 1);
+            ok(json!({
+                "id": id,
+                "pickerUri": format!("{host}/pick/{id}"),
+                "pollingConfig": { "pollInterval": "0.01s", "timeoutIn": "30s" },
+                "expireTime": expires,
+                "mediaItemsSet": false,
+            }))
+        }
+        ("GET", p) if p.strip_prefix("/v1/sessions/").is_some_and(known) => {
+            let id = &p["/v1/sessions/".len()..];
             let done = polled.fetch_add(1, Ordering::SeqCst) + 1 >= polls;
             if done {
-                ok(json!({ "id": "s1", "pickerUri": format!("{host}/pick/s1"),
-                    "mediaItemsSet": true }))
+                ok(json!({ "id": id, "pickerUri": format!("{host}/pick/{id}"),
+                    "expireTime": expires, "mediaItemsSet": true }))
             } else {
-                ok(json!({ "id": "s1", "pickerUri": format!("{host}/pick/s1"),
-                    "mediaItemsSet": false,
+                ok(json!({ "id": id, "pickerUri": format!("{host}/pick/{id}"),
+                    "expireTime": expires, "mediaItemsSet": false,
                     "pollingConfig": { "pollInterval": "0.01s", "timeoutIn": "30s" } }))
             }
         }
-        ("DELETE", "/v1/sessions/s1") => ok(json!({})),
+        ("DELETE", p) if p.strip_prefix("/v1/sessions/").is_some_and(known) => ok(json!({})),
         ("GET", "/v1/mediaItems") => {
-            if param("sessionId").as_deref() != Some("s1") {
+            if !param("sessionId").as_deref().is_some_and(known) {
                 return (404, "application/json", b"{}".to_vec());
             }
             if polled.load(Ordering::SeqCst) < polls {

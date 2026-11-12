@@ -142,6 +142,47 @@ fn listing_before_the_picking_is_done_is_transient() {
 }
 
 #[test]
+fn an_expired_session_is_said_expired_and_the_next_picking_is_a_new_session() {
+    let fake = FakePicker::expiring(
+        1000,
+        vec![("m1", "a.png", false, png(1))],
+        "2020-01-01T00:00:00Z",
+    );
+    let picker = Picker::new(&fake.base, TOKEN);
+    let first = picker.create(None).unwrap();
+    assert_eq!(
+        first.expires_in(helios_plugin_google_photos::epoch("2021-01-01T00:00:00Z").unwrap()),
+        Some(Duration::ZERO)
+    );
+    // Said at once, not waited out to the deadline.
+    let started = std::time::Instant::now();
+    assert_eq!(
+        picker.wait(&first.id, Some(Duration::from_secs(20)), &Cancel::new()),
+        Err(ConnectorError::Expired)
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    // Picking again creates a session of its own, its own page.
+    let second = picker.create(None).unwrap();
+    assert_ne!(second.id, first.id);
+    assert_ne!(second.picker_uri, first.picker_uri);
+    let posts = fake
+        .requests()
+        .iter()
+        .filter(|r| *r == "POST /v1/sessions")
+        .count();
+    assert_eq!(posts, 2);
+}
+
+#[test]
+fn a_session_lasts_until_its_expire_time() {
+    let fake = FakePicker::expiring(1, Vec::new(), "2030-01-01T00:00:10Z");
+    let session = Picker::new(&fake.base, TOKEN).create(None).unwrap();
+    let at = helios_plugin_google_photos::epoch("2030-01-01T00:00:00Z").unwrap();
+    assert_eq!(session.expires_in(at), Some(Duration::from_secs(10)));
+    assert_eq!(session.expires_in(at + 60), Some(Duration::ZERO));
+}
+
+#[test]
 fn a_refused_token_asks_for_a_reconnection_without_retrying() {
     let fake = FakePicker::start(1, vec![("m1", "a.png", false, png(1))]);
     let refused = Picker::new(&fake.base, "expired");

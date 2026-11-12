@@ -128,6 +128,12 @@ gui-caption-profile = Profil utilisé : { $name }
 
 gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
+gui-connect-copy-link = Copier le lien
+
+gui-connect-link-hint = L'adresse de la page, à coller dans votre navigateur s'il ne l'a pas ouverte.
+
+gui-connect-open-again = Ouvrir à nouveau
+
 gui-copied = copié { $text }
 
 gui-copied-files = { $count ->
@@ -478,9 +484,15 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
+gui-pick-account = Votre navigateur doit être connecté au compte relié sous le nom { $account } ; si la page dit qu'elle ne peut pas s'ouvrir, connectez-vous à ce compte et recommencez.
+
+gui-pick-again = Recommencer
+
 gui-pick-browser = Choisissez vos photos dans votre navigateur, appuyez sur OK, puis revenez ici.
 
 gui-pick-done = { $count } photos importées.
+
+gui-pick-expired = La session de choix a expiré, recommencez.
 
 gui-pick-failed = Non importé : { $why }
 

@@ -96,6 +96,10 @@ helios-export.workspace = true
 helios-bricks.workspace = true
 # MIT OR Apache-2.0: the proxy an agent may see, as base64 PNG.
 base64 = "0.22"
+# MIT: a page opened in the system browser through the platform's own
+# opener (xdg-open and the desktop portal, `open`, ShellExecute), already
+# in the tree through egui_kittest.
+open = "5"
 
 # Unix: SIGTERM, SIGINT and SIGHUP close Helios as Ctrl+Q does (MIT OR
 # Apache-2.0, the node's choice for its own signals).

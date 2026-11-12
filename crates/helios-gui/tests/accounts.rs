@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
+use helios_connect::ConnectorProvider as _;
 use helios_connect::account::{
     AccountBook, AccountState, MemoryAccounts, MemorySecrets, Secrets as _,
 };
@@ -516,4 +517,286 @@ fn cancelling_the_add_a_source_wizard_after_signing_in_keeps_the_account_only() 
         assert!(h.state().import_sources().is_empty(), "{steps}");
     }
     assert_eq!(*kept.borrow(), None);
+}
+
+/// The browser openings asked, with when: an opener that returns at
+/// once, as the platform's does.
+#[derive(Clone, Default)]
+struct Opened(Arc<std::sync::Mutex<Vec<(String, Instant)>>>);
+
+impl Opened {
+    fn opener(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+        let seen = self.0.clone();
+        Arc::new(move |url: &str| {
+            seen.lock().unwrap().push((url.to_owned(), Instant::now()));
+        })
+    }
+
+    fn urls(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(u, _)| u.clone())
+            .collect()
+    }
+
+    /// Waits for the `n`th opening, without a frame of the window: the
+    /// time it took from `from`.
+    fn nth_after(&self, n: usize, from: Instant) -> Duration {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some((_, at)) = self.0.lock().unwrap().get(n - 1) {
+                return at.saturating_duration_since(from);
+            }
+            assert!(Instant::now() < deadline, "the browser was never opened");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+/// A sign-in whose consent page is opened, then waited on until
+/// cancelled.
+struct SlowSignIn;
+
+impl helios_connect::connect::WebSteps for SlowSignIn {
+    fn oauth(
+        &self,
+        _account: &mut helios_connect::account::Account,
+        _step: &helios_connect::StepKind,
+        _secrets: &dyn helios_connect::account::Secrets,
+        browser: &dyn Fn(&str),
+        cancel: &helios_connect::Cancel,
+    ) -> Result<(), String> {
+        browser("https://accounts.example.org/consent?state=1");
+        while !cancel.is_cancelled() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Err("cancelled".into())
+    }
+}
+
+#[test]
+fn a_sign_in_opens_the_browser_at_once_without_waiting_for_a_frame() {
+    let book = Arc::new(MemoryAccounts::default());
+    let secrets = Arc::new(MemorySecrets::default());
+    let opened = Opened::default();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(OauthProvider));
+    shell.set_import_sign_in(Arc::new(SlowSignIn));
+    shell.set_import_browser(opened.opener());
+    shell.set_import_accounts(book, secrets);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(&mut h, "Add a source…", |h| shown(h, "Add a source…"));
+    h.get_by_label("Add a source…").click();
+    until(&mut h, "the connectors offered", |h| {
+        shown(h, "Test server")
+    });
+    h.get_by_label("Test server").click();
+    h.run_steps(2);
+    h.get_by_label("Next").click();
+    until(&mut h, "the account step", |h| {
+        shown(h, "Sign in to an account…")
+    });
+    h.get_by_label("Sign in to an account…").click();
+    // The frame that takes the click starts the sign-in; the browser
+    // opens from the sign-in itself, no later frame or input needed.
+    let clicked = Instant::now();
+    h.step();
+    let took = opened.nth_after(1, clicked);
+    assert!(took < Duration::from_millis(200), "opened after {took:?}");
+    assert_eq!(
+        opened.urls(),
+        ["https://accounts.example.org/consent?state=1"]
+    );
+    // The dialog shows the link, to copy, and opens it again on demand.
+    until(&mut h, "the link and Open again", |h| {
+        shown(h, "Open again") && shown(h, "Copy link")
+    });
+    h.run_steps(4);
+    assert_eq!(opened.urls().len(), 1, "opened once per page");
+    h.get_by_label("Open again").click();
+    h.run_steps(2);
+    assert_eq!(opened.urls().len(), 2, "and again when asked");
+}
+
+/// A connector that picks: each picking a new session (`s1`, `s2`…), the
+/// first `expired` of them expiring before the person is done.
+struct Picks {
+    sessions: Arc<std::sync::atomic::AtomicU32>,
+    expired: u32,
+}
+
+const PICKS: &str = "fake-picks";
+
+impl helios_connect::ConnectorProvider for Picks {
+    fn manifest(&self) -> helios_connect::ConnectorManifest {
+        let mut m = FakeProvider.manifest();
+        m.id = PICKS.into();
+        m.caps.picks = true;
+        m
+    }
+
+    fn create(
+        &self,
+        _settings: &helios_connect::Settings,
+        _services: &helios_connect::ConnectorServices,
+    ) -> Result<Box<dyn helios_connect::Connector>, helios_connect::ConnectorError> {
+        Ok(Box::new(PickConnector {
+            sessions: self.sessions.clone(),
+            expired: self.expired,
+            current: std::sync::Mutex::new(0),
+        }))
+    }
+}
+
+struct PickConnector {
+    sessions: Arc<std::sync::atomic::AtomicU32>,
+    expired: u32,
+    current: std::sync::Mutex<u32>,
+}
+
+impl helios_connect::Connector for PickConnector {
+    fn describe(&self) -> helios_connect::ConnectorInfo {
+        helios_connect::ConnectorInfo {
+            id: PICKS.into(),
+            label: FakeProvider.manifest().label,
+            caps: Picks {
+                sessions: Arc::default(),
+                expired: 0,
+            }
+            .manifest()
+            .caps,
+        }
+    }
+
+    fn sources(
+        &self,
+        _account: Option<&helios_connect::AccountRef>,
+    ) -> Result<Vec<helios_connect::SourceRef>, helios_connect::ConnectorError> {
+        Ok(Vec::new())
+    }
+
+    fn list(
+        &self,
+        _source: &helios_connect::SourceRef,
+        _from: Option<&helios_connect::Cursor>,
+        _page: usize,
+        _cancel: &helios_connect::Cancel,
+    ) -> Result<helios_connect::Page, helios_connect::ConnectorError> {
+        Ok(helios_connect::Page {
+            complete: true,
+            ..helios_connect::Page::default()
+        })
+    }
+
+    fn pick(
+        &self,
+        account: &helios_connect::AccountRef,
+        _cancel: &helios_connect::Cancel,
+    ) -> Result<helios_connect::Pick, helios_connect::ConnectorError> {
+        let n = self
+            .sessions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        *self.current.lock().unwrap() = n;
+        Ok(helios_connect::Pick {
+            url: format!("https://picker.example.org/pick/s{n}"),
+            source: helios_connect::SourceRef {
+                connector: PICKS.into(),
+                id: account.id.clone(),
+                label: "Picked".into(),
+                root: None,
+                capacity: None,
+            },
+        })
+    }
+
+    fn picked(
+        &self,
+        deadline: Instant,
+        cancel: &helios_connect::Cancel,
+    ) -> Result<bool, helios_connect::ConnectorError> {
+        if *self.current.lock().unwrap() <= self.expired {
+            std::thread::sleep(Duration::from_millis(20));
+            return Err(helios_connect::ConnectorError::Expired);
+        }
+        while Instant::now() < deadline {
+            if cancel.is_cancelled() {
+                return Err(helios_connect::ConnectorError::Cancelled);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Ok(false)
+    }
+
+    fn access(&self, _item: &helios_connect::ItemRef) -> helios_connect::Access {
+        helios_connect::Access::Fetch
+    }
+
+    fn fetch(
+        &self,
+        _item: &helios_connect::ItemRef,
+        _offset: u64,
+        _sink: &mut dyn helios_connect::FetchSink,
+        _cancel: &helios_connect::Cancel,
+    ) -> Result<helios_connect::Fetched, helios_connect::ConnectorError> {
+        Err(helios_connect::ConnectorError::NotFound)
+    }
+}
+
+#[test]
+fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
+    let book = Arc::new(MemoryAccounts::default());
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut account = helios_connect::account::Account::new(PICKS, "ann@example.org", &[]);
+    account.state = AccountState::Connected;
+    book.save(&account).unwrap();
+    let sessions = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let opened = Opened::default();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(Picks {
+        sessions: sessions.clone(),
+        expired: 1,
+    }));
+    shell.set_import_browser(opened.opener());
+    shell.set_import_remote(Arc::new(|_, _, _| Ok(0)));
+    shell.set_import_accounts(book, secrets);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(&mut h, "Pick photos…", |h| shown(h, "Pick photos…"));
+    h.get_by_label("Pick photos…").click();
+    let clicked = Instant::now();
+    h.step();
+    let took = opened.nth_after(1, clicked);
+    assert!(took < Duration::from_millis(200), "opened after {took:?}");
+    assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
+    // The first session expires: said so, not waited out, and a new
+    // session replaces it.
+    until(&mut h, "the session said expired", |h| {
+        shown(h, "The picking session expired, start again.")
+    });
+    // The dialog settles where it now stands before the click.
+    h.run_steps(4);
+    h.get_by_label("Start again").click();
+    until(&mut h, "the new session's page opened", |_| {
+        opened.urls().len() == 2
+    });
+    assert_eq!(
+        opened.urls(),
+        [
+            "https://picker.example.org/pick/s1",
+            "https://picker.example.org/pick/s2"
+        ]
+    );
+    assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // The dialog names the account the browser must be signed in to.
+    until(&mut h, "the account named", |h| {
+        h.query_all_by_label_contains("signed in to the account connected as ann@example.org")
+            .next()
+            .is_some()
+    });
 }
