@@ -7,9 +7,14 @@
 //! | layer | where the desktop keeps it |
 //! |---|---|
 //! | `global` | this machine: `<config>/global.toml` ([`GLOBAL_FILE`]) |
-//! | `project` | the library: the vault's `project/<library folder>` layer |
-//! | `user` | the person, on every machine: the vault's `user` layer |
+//! | `project` | the library: the node's `project/<library folder>` layer |
+//! | `user` | the person, on every machine: the node's `user` layer |
 //! | `run` | the command line's `--set KEY=VALUE` |
+//!
+//! The node keeps the `user` and `project` layers in its vault and every
+//! client reads and writes them through it
+//! (`helios_node_core::settings`); the machine's file and the
+//! interface's own settings (egui-pop's) stay on the client.
 //!
 //! A value an older program left in a layer its concern refuses (a
 //! machine setting in the vault's `user` layer) is read as `global`
@@ -265,7 +270,7 @@ pub fn read(
     )
 }
 
-/// Writes a vault layer (its name and text).
+/// Writes a layer the node keeps (its name and text).
 pub type VaultWriter = Box<dyn Fn(&str, &str) -> Result<(), String> + Send>;
 
 /// The Settings app's side: the settings as egui-pop settings, their

@@ -26,6 +26,10 @@
 //! published on its bus, with or without a window, for its clients and
 //! its jobs (a backup disk plugged in) to hear.
 //!
+//! The node keeps the person's and the libraries' settings layers
+//! ([`LocalNode::settings`], [`crate::settings`]): its clients read and
+//! write them through it, and hear their changes on its bus.
+//!
 //! A remote node's life is its own: its clients quitting does not stop
 //! it. Only the embedded node follows the desktop's quit.
 
@@ -37,6 +41,7 @@ use helios_core::Bus;
 use helios_storage::Volumes;
 use helios_vault::{Store, Vault};
 
+use crate::settings::NodeSettings;
 use crate::volumes::VolumeWatch;
 
 /// How often the node flushes the vault, whatever the windows do.
@@ -281,6 +286,12 @@ impl<S: Store + 'static> LocalNode<S> {
     /// The vault the node owns, for the clients in its process.
     pub fn vault(&self) -> &Arc<Vault<S>> {
         &self.vault
+    }
+
+    /// The settings layers the node keeps (the person's and the
+    /// libraries'), for a client to read and write.
+    pub fn settings(&self) -> NodeSettings<S> {
+        NodeSettings::new(self.vault.clone(), self.bus.clone())
     }
 
     /// The node's life, for the shell to ask it to quit.
