@@ -35,8 +35,10 @@ pub mod contract;
 #[doc(hidden)]
 pub mod fake;
 pub mod folder;
+pub mod keyring;
 pub mod land;
 pub mod local;
+pub mod oauth;
 pub mod ranged;
 
 /// The version of the connector interface this crate speaks.
@@ -448,6 +450,14 @@ pub enum StepKind {
         token: String,
         #[serde(default)]
         scopes: Vec<String>,
+        /// Where a token is revoked on signing out, when the service has
+        /// one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revoke: Option<String>,
+        /// The client id, when the connector ships one; the environment
+        /// and the account's own override it ([`oauth`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<String>,
     },
     /// A form built from a schema; its secret fields go to the keyring.
     Form { schema: serde_json::Value },

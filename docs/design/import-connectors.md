@@ -343,6 +343,57 @@ the same screens, the same states and the same tests:
   server, a fake device that accepts after N polls, a fake certificate),
   so a connector's process is tested like its listing.
 
+### 2.4.2 The OAuth step, as built
+
+`helios_connect::oauth::OAuth` runs an `oauth` step (`authorize`,
+`token`, `scopes`, and optionally `revoke` and `client_id` in the
+manifest):
+
+1. A code verifier (32 random bytes, base64url) and its S256 challenge,
+   and a random `state`.
+2. A listener on `127.0.0.1` with a port the system picks; the redirect
+   URI is `http://127.0.0.1:<port>` (Google's loopback flow for desktop
+   apps; no out-of-band copy and paste).
+3. The system browser opened on the authorisation URL (the import
+   window's dialog shows it too). The first request on the loopback
+   that carries a `code` or an `error` is the answer: a `state` other
+   than Helios's fails the step, `access_denied` says the consent was
+   refused. The page shown says to go back to Helios.
+4. The code exchanged at the token endpoint with the verifier.
+
+**Where tokens live.** The refresh token, the access token and its
+expiry go to the account's `Secrets`: on the desktop the system
+keyring (`helios_connect::keyring::SystemSecrets`, service
+`helios-import`, entry `<account>/<name>`), reached through
+`secret-tool` or `security` as `helios-ai` does for its keys, so no
+native D-Bus dependency (Windows has no keyring support yet: secrets
+last the session there). The account's vault
+document holds only where tokens renew and are revoked, the client id
+and the step's id, never a token.
+
+**Using and renewing.** `OAuth::access_token` gives a connector a valid
+access token, renewed through the refresh token a minute before it
+expires (a rotated refresh token is kept). A renewal the service
+refuses (`invalid_grant`: access revoked, token aged out) leaves the
+account *needs attention* at its `oauth` step, so Reconnect replays the
+sign-in only. **Signing out** posts the token to `revoke` when the
+service has one (a failure there is logged, not blocking), then forgets
+the secrets.
+
+**Client id.** Never built in. In order: the environment variable
+`HELIOS_<CONNECTOR>_CLIENT_ID` (the connector id upper-cased, `-` as
+`_`: `HELIOS_GOOGLE_PHOTOS_CLIENT_ID`), the account's own `client_id`
+(a form field asked before the sign-in), then the manifest's. Without
+one the step fails naming the variable to set. Google gives desktop
+clients a client secret it does not treat as confidential:
+`HELIOS_<CONNECTOR>_CLIENT_SECRET` or a secret field `client_secret`.
+
+**Tests** (`crates/helios-connect/tests/oauth_flow.rs`) run against a
+fake authorisation server on a local port, the "browser" being an HTTP
+client that follows its redirect: PKCE checked by the server, a forged
+`state`, a refused consent, a missing client id, a renewal and a
+refused one, signing out with revocation.
+
 ### 2.5 Rate limits, cuts, offline
 
 - **Rate limits.** `RateLimited { retry_after }` pauses the source's
