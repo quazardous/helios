@@ -260,16 +260,19 @@ pub fn solve(problem: &Problem<'_>) -> Result<Solution, SolveError> {
         .iter()
         .map(|&k| luminance(problem.measured[k]))
         .sum();
-    let reference_y: f64 = neutrals.iter().map(|&k| lab_to_xyz(chart.patches[k].lab)[1]).sum();
+    let reference_y: f64 = neutrals
+        .iter()
+        .map(|&k| lab_to_xyz(chart.patches[k].lab)[1])
+        .sum();
     let s = reference_y / measured_y;
     if neutrals.is_empty() || !s.is_normal() || s < 0.0 {
         return Err(SolveError::NoNeutral);
     }
     let x: Vec<[f64; 3]> = problem.measured.iter().map(|v| v.map(|c| c * s)).collect();
 
-    let sum = neutrals.iter().fold([0.0; 3], |acc, &k| {
-        [0, 1, 2].map(|c| acc[c] + x[k][c])
-    });
+    let sum = neutrals
+        .iter()
+        .fold([0.0; 3], |acc, &k| [0, 1, 2].map(|c| acc[c] + x[k][c]));
     let neutral = normalise(sum).ok_or(SolveError::NoNeutral)?;
 
     // P = P0 + U Bᵀ: the constrained P0 = I, B = N (six unknowns); the free
@@ -304,14 +307,9 @@ pub fn solve(problem: &Problem<'_>) -> Result<Solution, SolveError> {
         let columns: Vec<[f64; 3]> = (0..unknowns).map(column).collect();
         for p in 0..unknowns {
             rhs[p] += wk * dot(columns[p], target);
-            for q in 0..=p {
-                normal[p][q] += wk * dot(columns[p], columns[q]);
+            for (cell, column) in normal[p].iter_mut().zip(&columns) {
+                *cell += wk * dot(columns[p], *column);
             }
-        }
-    }
-    for p in 0..unknowns {
-        for q in p + 1..unknowns {
-            normal[p][q] = normal[q][p];
         }
     }
     let u = cholesky_solve(&normal, &rhs).ok_or(SolveError::Underdetermined)?;
@@ -487,7 +485,7 @@ mod tests {
         0.4716, 0.0603, -0.0830, -0.7798, 1.5474, 0.2480, -0.1496, 0.1937, 0.6651,
     ];
 
-    /// The references in the frame of x: t_k = A⁻¹ W⁻¹ xyz(L_k).
+    /// The references in the frame of x: `t_k = A⁻¹ W⁻¹ xyz(L_k)`.
     fn targets(adaptation: &Mat3) -> Vec<[f64; 3]> {
         let back = mul(&inverse(adaptation).unwrap(), &inverse(&to_xyz()).unwrap());
         CHART
@@ -565,7 +563,10 @@ mod tests {
 
     impl Shot {
         fn measured(&self) -> Vec<[f64; 3]> {
-            self.camera.iter().map(|c| apply(&self.standard, *c)).collect()
+            self.camera
+                .iter()
+                .map(|c| apply(&self.standard, *c))
+                .collect()
         }
     }
 
@@ -668,10 +669,8 @@ mod tests {
         let solution = solve(&free).unwrap();
         // The exposure scale is folded into x: P s = skew.
         let s = solution.exposure_ev.exp2();
-        for r in 0..3 {
-            for c in 0..3 {
-                assert!((solution.matrix[r][c] * s - skew[r][c]).abs() < 1e-9);
-            }
+        for (found, expected) in solution.matrix.iter().flatten().zip(skew.iter().flatten()) {
+            assert!((found * s - expected).abs() < 1e-9);
         }
         assert!(solution.after.max < 1e-4);
         let kept = solve(&problem(&measured, &weights)).unwrap();
