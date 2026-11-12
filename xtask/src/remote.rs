@@ -405,13 +405,13 @@ pub fn read_env(text: &str, key: &str) -> Option<String> {
 }
 
 #[derive(Clone)]
-struct Bench {
+pub(crate) struct Bench {
     destination: String,
     key: Option<PathBuf>,
 }
 
 impl Bench {
-    fn configure(root: &Path) -> Result<Bench, String> {
+    pub(crate) fn configure(root: &Path) -> Result<Bench, String> {
         // a fresh worktree has no local.env of its own: fall back to the main
         // checkout's (the repository's common directory's parent)
         let local = std::fs::read_to_string(root.join("tools/bench/local.env"))
@@ -444,7 +444,7 @@ impl Bench {
         })
     }
 
-    fn ssh(&self, connect_timeout: u32, args: &[&str]) -> Command {
+    pub(crate) fn ssh(&self, connect_timeout: u32, args: &[&str]) -> Command {
         let mut c = Command::new("ssh");
         if let Some(key) = &self.key {
             // Only this key: an agent offering its own keys first can use
