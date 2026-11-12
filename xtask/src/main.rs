@@ -4,6 +4,9 @@
 //! - `release [--date YYYY-MM-DD]`: assemble the changelog fragments into
 //!   CHANGELOG.md, bump the workspace version, remove the fragments. Stops
 //!   there: reviewing, committing and tagging stay a human's call.
+//! - `promote <SHA> [--remote NAME]`: what `promote.yml` runs once CI passed
+//!   on a commit of `next`: the release of its fragments committed on top
+//!   of it, then `main` (and `next`) moved to that (see `promote.rs`).
 //! - `check [--base REF]`: fragments are well formed and readable by an
 //!   outsider; with `--base`, code changed since REF comes with a fragment.
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
@@ -38,6 +41,7 @@ mod bench;
 mod commits;
 mod i18n;
 mod lint;
+mod promote;
 mod remote;
 mod test_times;
 
@@ -400,6 +404,62 @@ fn plan(root: &Path, date: &str) -> Result<Option<Release>, Vec<String>> {
     }))
 }
 
+/// Writes a planned release into the tree at `root`: the CHANGELOG.md
+/// section, the workspace version, the in-tree plugins' Helios range and
+/// the `AppStream` metadata; removes the fragments released. Returns the
+/// new version. Cargo.lock is left to cargo to refresh.
+fn apply_release(root: &Path, date: &str, release: Release) -> String {
+    let Release {
+        old,
+        new,
+        section,
+        fragments: files,
+    } = release;
+    let changelog = std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap_or_default();
+    let cargo = std::fs::read_to_string(root.join("Cargo.toml")).expect("workspace manifest");
+    std::fs::write(
+        root.join("CHANGELOG.md"),
+        insert_section(&changelog, &section),
+    )
+    .expect("write CHANGELOG.md");
+    std::fs::write(root.join("Cargo.toml"), write_version(&cargo, old, new))
+        .expect("write Cargo.toml");
+    for f in files {
+        std::fs::remove_file(f).expect("remove a fragment");
+    }
+    // the in-tree plugins (examples, and the importers Helios ships)
+    // follow the release, or the next build refuses them as made for
+    // another Helios
+    for manifest in plugin_manifests(root) {
+        if let Ok(text) = std::fs::read_to_string(&manifest) {
+            std::fs::write(&manifest, write_plugin_range(&text, new))
+                .expect("write a plugin manifest");
+        }
+    }
+    let v = format!("{}.{}.{}", new.0, new.1, new.2);
+    // the AppStream metadata lists the release, for the software centres
+    // and Flathub
+    let metainfo = root.join(METAINFO);
+    let text = std::fs::read_to_string(&metainfo).expect("the metainfo");
+    std::fs::write(&metainfo, insert_metainfo_release(&text, &v, date))
+        .expect("write the metainfo");
+    v
+}
+
+/// The folders of the in-tree plugins whose manifest follows the release.
+const PLUGIN_DIRS: [&str; 2] = ["plugins/examples", "plugins/importers"];
+
+/// The manifests (`helios-plugin.toml`) of the in-tree plugins.
+fn plugin_manifests(root: &Path) -> Vec<PathBuf> {
+    PLUGIN_DIRS
+        .iter()
+        .flat_map(|d| std::fs::read_dir(root.join(d)).into_iter().flatten())
+        .flatten()
+        .map(|e| e.path().join("helios-plugin.toml"))
+        .filter(|p| p.is_file())
+        .collect()
+}
+
 fn changed_since(base: &str) -> Result<Vec<String>, String> {
     let run = |args: &[&str]| -> Result<Vec<String>, String> {
         let out = Command::new("git")
@@ -453,7 +513,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -489,47 +549,8 @@ fn main() -> ExitCode {
                 Ok(None) => {
                     fail(&["nothing to release: no user-facing fragment in changelog.d/".into()])
                 }
-                Ok(Some(Release {
-                    old,
-                    new,
-                    section,
-                    fragments: files,
-                })) => {
-                    let changelog =
-                        std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap_or_default();
-                    let cargo = std::fs::read_to_string(root.join("Cargo.toml"))
-                        .expect("workspace manifest");
-                    std::fs::write(
-                        root.join("CHANGELOG.md"),
-                        insert_section(&changelog, &section),
-                    )
-                    .expect("write CHANGELOG.md");
-                    std::fs::write(root.join("Cargo.toml"), write_version(&cargo, old, new))
-                        .expect("write Cargo.toml");
-                    for f in files {
-                        std::fs::remove_file(f).expect("remove a fragment");
-                    }
-                    // the in-tree plugins (examples, and the importers
-                    // Helios ships) follow the release, or the next build
-                    // refuses them as made for another Helios
-                    let in_tree = ["plugins/examples", "plugins/importers"]
-                        .iter()
-                        .flat_map(|d| std::fs::read_dir(root.join(d)).into_iter().flatten())
-                        .flatten();
-                    for entry in in_tree {
-                        let manifest = entry.path().join("helios-plugin.toml");
-                        if let Ok(text) = std::fs::read_to_string(&manifest) {
-                            std::fs::write(&manifest, write_plugin_range(&text, new))
-                                .expect("write a plugin manifest");
-                        }
-                    }
-                    let v = format!("{}.{}.{}", new.0, new.1, new.2);
-                    // the AppStream metadata lists the release, for the
-                    // software centres and Flathub
-                    let metainfo = root.join(METAINFO);
-                    let text = std::fs::read_to_string(&metainfo).expect("the metainfo");
-                    std::fs::write(&metainfo, insert_metainfo_release(&text, &v, &date))
-                        .expect("write the metainfo");
+                Ok(Some(release)) => {
+                    let v = apply_release(&root, &date, release);
                     println!(
                         "Prepared {v}. Run `cargo check` to refresh Cargo.lock, review the diff, then commit \"Release {v}\" and tag v{v}."
                     );
@@ -558,6 +579,10 @@ fn main() -> ExitCode {
                 fail(&problems)
             }
         }
+        ["promote", rest @ ..] => promote::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", promote::USAGE);
+            ExitCode::from(2)
+        }),
         ["lint", rest @ ..] => lint::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", lint::USAGE);
             ExitCode::from(2)

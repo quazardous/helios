@@ -30,7 +30,7 @@ Jobs of the Benchfile:
 | `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target) and `filter=` (a name filter), stopped at the first failure, in the branch's target | 4 cores, 4 GB |
 | `test-affected` | the tests a change touches since `base=` (`origin/main` by default), or the `crates=` given (as `--push` does), and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
-| `release` | `cargo xtask release` (survival first), Cargo.lock refreshed; the change as `out/release.patch` (see CONTRIBUTING.md) | 5 cores, 6 GB |
+| `release` | the fallback when GitHub's CI is down (promotion releases otherwise): `cargo xtask release` (survival first), Cargo.lock refreshed; the change as `out/release.patch` (see CONTRIBUTING.md) | 5 cores, 6 GB |
 | `i18n-extract` | the translation catalogues regenerated on a branch: `cargo xtask i18n extract`, then `i18n stamp fr`, then `i18n check` (its report in `out/i18n.txt`); the change as `out/i18n.patch`, applied on the branch with `git apply --index` and committed there | 5 cores, 6 GB |
 | `dt-asan-rgbcurve` | darktable at `dt_ref=<sha>` (the fork) built with AddressSanitizer (recovering) and Lua, then the rgbcurve scroll scenario (`tools/bench/rgbcurve`: a wheel step away from every node on R, and a wheel with the zoom key held over a node) in a headless labwc (wbox); per case the history before and after, the ASan reports and screenshots in `out/<case>/`, `out/SUMMARY.txt` | 8 cores, 10 GB |
 | `flatpak` | the Flatpak bundle (`packaging/flatpak/build.sh`) built from source with flatpak-builder, as the release workflow builds it, into `out/`, then installed and smoke-tested (`packaging/flatpak/smoke.sh`); the runtime, the SDK and the downloaded sources stay in the `flatpak` storage | 5 cores, 8 GB |
@@ -556,12 +556,17 @@ How a change goes in:
 
 What happens on `next`:
 - Every push runs the whole CI (the suite, survival, the commits walk,
-  lint, Windows). A newer push cancels the run still going: only the newest
-  commit is promoted.
-- When CI passes, `promote.yml` fast-forwards `main` to that commit. `main`
-  only holds commits that passed everything; releases are made from it. If
-  `main` ever holds a commit `next` lacks, promotion refuses: merge `main`
-  into `next`.
+  lint, Windows). Runs are not cancelled: the newest push waits behind the
+  run going, and each green run is promoted.
+- When CI passes, `promote.yml` promotes that exact commit: with
+  user-facing fragments it commits "Release X.Y.Z" on top of it (version,
+  CHANGELOG, Cargo.lock, as the bot), then fast-forwards `main`, and `next`
+  if it has not moved (a moved `next` gets the release by a merge commit).
+  `main` only holds commits that passed everything, plus version bumps
+  (docs/releases.md). Expect bot commits on `next`: rebase on
+  `origin/next` before merging, as always. If `main` ever holds a commit
+  `next` lacks and no such merge, promotion skips: merge `main` into
+  `next`.
 - **One watcher** (the coordinating agent) follows CI on `next`. When a run
   goes red, it starts **one fixing agent first**, before any other work.
   That agent reproduces the failure, adds the test that would have caught

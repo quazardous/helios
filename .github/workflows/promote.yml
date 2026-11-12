@@ -1,8 +1,31 @@
 name: Promote next to main
 
 # `next` is the buffer branch agents merge into (docs/bench.md, "The next
-# branch"). Once CI passes on a push to `next`, `main` fast-forwards to that
-# exact commit, so `main` only holds commits that passed everything.
+# branch"). Once CI passes on a push to `next`, `main` moves to that exact
+# commit, with its release (docs/releases.md):
+#
+# - The promotion works on the commit CI validated, the run's `head_sha`,
+#   never on whatever `next` points to by then. A commit CI did not test
+#   never reaches `main`.
+# - With user-facing fragments in `changelog.d/`, `cargo xtask promote`
+#   commits "Release X.Y.Z" on top of that commit (the CHANGELOG section,
+#   the version the fragments decide, Cargo.lock), as the bot. No fragment,
+#   no release: the commit alone is promoted.
+# - The survival scenarios are not run again: CI ran them on that commit,
+#   in its test job, and the release commit changes no code.
+# - The release commit must differ from the validated commit by a version
+#   bump only (versions, CHANGELOG, metainfo, fragments removed, and in
+#   Cargo.lock only the workspace's own versions); anything more, a stale
+#   Cargo.lock say, stops the promotion before any push.
+# - `main` fast-forwards to it; `next` too, in the same atomic push, if it
+#   still points at that commit (a lease). If `next` has moved, the
+#   release is merged into it by a merge commit, never rewritten; the
+#   promotion of the newer commit then builds on that merge.
+# - Pushes made with GITHUB_TOKEN start no workflow: the release commit and
+#   the merge do not rerun CI. The next push to `next` tests them, with
+#   whatever lands next.
+# - Nothing is tagged here: the coordinator tags `vX.Y.Z` on `main` when a
+#   version is worth publishing, which starts release.yml.
 on:
   workflow_run:
     workflows: [ci]
@@ -18,23 +41,24 @@ concurrency:
 
 jobs:
   promote:
-    name: Fast-forward main
+    name: Release and fast-forward main
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Fast-forward main to the commit CI passed
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: promote
+      - name: Bot identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Release and promote the commit CI passed
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          git fetch origin next
-          if git merge-base --is-ancestor "$SHA" origin/main; then
-            echo "main already holds $SHA"; exit 0
-          fi
-          git merge-base --is-ancestor origin/main "$SHA" \
-            || { echo "::error::main has commits next lacks; merge main into next first"; exit 1; }
-          git push origin "$SHA:refs/heads/main"
-          echo "main is now $SHA"
+        # --locked: a stale Cargo.lock fails here, before anything is written.
+        run: cargo --locked xtask promote "$SHA"

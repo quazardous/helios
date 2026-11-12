@@ -1,7 +1,11 @@
 name: release
 
 # Builds the Linux and Windows packages of a version and publishes them as a GitHub
-# Release (docs/releases.md). Runs on a `vX.Y.Z` tag pushed, or by hand:
+# Release (docs/releases.md). Versions advance on their own with each
+# promotion of `next` (promote.yml); a version is published only when the
+# coordinator tags its "Release X.Y.Z" commit on `main` as `vX.Y.Z`, by
+# judgment (a real feature or a serious fix). No workflow pushes tags.
+# Runs on a `vX.Y.Z` tag pushed, or by hand:
 # with `publish: false` (the default by hand) it only builds, tests and
 # keeps the files as the run's artefacts, without creating a Release.
 on:
