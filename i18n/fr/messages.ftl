@@ -842,6 +842,7 @@ gui-library-facet-lens = Objectif
 gui-library-facet-type = Type
 gui-library-facet-presence = Présence
 gui-library-facet-backup = Sauvegarde
+gui-library-folders = Dossiers
 
 gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre
 

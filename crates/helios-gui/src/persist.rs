@@ -671,6 +671,20 @@ impl<S: Store> Persist<S> {
                 .with("error", e),
             );
         }
+        // The Folders section open: its counts, one store query.
+        if shell.library_mut().take_folders_wanted() {
+            match self.vault.folders(&helios_vault::Query::default()) {
+                Ok(folders) => shell.library_mut().set_folders(folders),
+                Err(e) => shell.notify(
+                    Level::Error,
+                    Message::new(
+                        "gui-vault-unreadable",
+                        "Cannot read the library: { $error }",
+                    )
+                    .with("error", e),
+                ),
+            }
+        }
         let query = shell.library_mut().take_query();
         if let Some(query) = query {
             // The photos it takes, then how many carry each value of each

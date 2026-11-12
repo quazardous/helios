@@ -709,6 +709,139 @@ pub fn facet_term(facet: &str, value: &str) -> String {
     }
 }
 
+/// The folders tree's counts, as far as they are read.
+#[derive(Clone, Debug, Default)]
+enum FolderCounts {
+    /// Not read since the photos last changed.
+    #[default]
+    Unread,
+    /// The Folders section is open: the host is to count them.
+    Wanted,
+    /// The host took the ask ([`Library::take_folders_wanted`]).
+    Asked,
+    Read(std::collections::BTreeMap<String, u64>),
+}
+
+/// A folder of the folders tree (`docs/design/library.md`, L5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderNode {
+    /// Its absolute path, as a `folder:` term takes it.
+    pub path: String,
+    /// What the tree shows: its name, or the folders from the one above
+    /// it shown (a chain of folders holding nothing but the next one is
+    /// one row: `home/me/Photos`).
+    pub name: String,
+    /// The photos with a copy here or below.
+    pub count: u64,
+    pub children: Vec<FolderNode>,
+}
+
+/// The folders tree of the vault's counts ([`helios_vault::Vault::folders`]):
+/// the top folders (none above them counted), each with the folders right
+/// below it, by name. A folder whose only content is one folder below
+/// (the same photos, nothing beside) is shown in one row with it.
+pub fn folder_tree(counts: &std::collections::BTreeMap<String, u64>) -> Vec<FolderNode> {
+    let mut below: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut tops = Vec::new();
+    for path in counts.keys() {
+        let parent = Path::new(path)
+            .parent()
+            .map(|p| p.to_string_lossy())
+            .filter(|p| counts.contains_key(p.as_ref()));
+        match parent {
+            Some(parent) => {
+                let (key, _) = counts.get_key_value(parent.as_ref()).expect("counted");
+                below.entry(key.as_str()).or_default().push(path.as_str());
+            }
+            None => tops.push(path.as_str()),
+        }
+    }
+    let mut out: Vec<FolderNode> = tops
+        .into_iter()
+        .map(|top| {
+            // A top row names its whole path.
+            let mut n = folder_node(top, Some(top), counts, &below);
+            n.name = n.path.clone();
+            n
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// A folder of [`folder_tree`] and those below it; `shown_from` is the
+/// folder its row starts at when a chain of folders is one row.
+fn folder_node(
+    path: &str,
+    shown_from: Option<&str>,
+    counts: &std::collections::BTreeMap<String, u64>,
+    below: &HashMap<&str, Vec<&str>>,
+) -> FolderNode {
+    let count = counts.get(path).copied().unwrap_or(0);
+    let kids = below.get(path).map(Vec::as_slice).unwrap_or_default();
+    // Nothing here but the one folder below: one row.
+    if let [only] = kids
+        && counts.get(*only).copied() == Some(count)
+    {
+        return folder_node(only, shown_from.or(Some(path)), counts, below);
+    }
+    let name = match shown_from {
+        Some(from) => {
+            let start = Path::new(from).parent().map(Path::new);
+            let rel = start.and_then(|s| Path::new(path).strip_prefix(s).ok());
+            match rel {
+                Some(rel) if !rel.as_os_str().is_empty() => rel.to_string_lossy().into_owned(),
+                _ => path.to_string(),
+            }
+        }
+        None => Path::new(path)
+            .file_name()
+            .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned()),
+    };
+    let mut children: Vec<FolderNode> = kids
+        .iter()
+        .map(|k| folder_node(k, None, counts, below))
+        .collect();
+    children.sort_by(|a, b| a.name.cmp(&b.name));
+    FolderNode {
+        path: path.to_string(),
+        name,
+        count,
+        children,
+    }
+}
+
+/// A folder's row in the Folders section, and the folders below it (open
+/// on demand, a top folder open first); `chosen` takes the folder clicked.
+fn folder_row(
+    ui: &mut Ui,
+    node: &FolderNode,
+    top: bool,
+    selected: Option<&str>,
+    chosen: &mut Option<String>,
+) {
+    let text = format!("{} {}", node.name, node.count);
+    let on = selected == Some(node.path.as_str());
+    if node.children.is_empty() {
+        if ui.selectable_label(on, text).clicked() {
+            *chosen = Some(node.path.clone());
+        }
+        return;
+    }
+    let id = ui.make_persistent_id(("helios.library.folder", &node.path));
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, top)
+        .show_header(ui, |ui| {
+            if ui.selectable_label(on, text).clicked() {
+                *chosen = Some(node.path.clone());
+            }
+        })
+        .body(|ui| {
+            for child in &node.children {
+                folder_row(ui, child, false, selected, chosen);
+            }
+        });
+}
+
 /// The longest side of a thumbnail, in pixels.
 pub const THUMB: u32 = 256;
 
@@ -774,6 +907,10 @@ pub struct Library {
     /// How many photos of the filter carry each value of each facet, as
     /// the vault last counted them.
     facets: Option<helios_vault::Facets>,
+    /// The folders tree's counts (`docs/design/library.md`, L5): photos
+    /// with a copy in each folder or below, for the whole Library, as the
+    /// vault last counted them; none until the Folders section is open.
+    folders: FolderCounts,
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
@@ -900,6 +1037,7 @@ impl Default for Library {
             matches: None,
             backup_rule: helios_vault::Backups::default(),
             facets: None,
+            folders: FolderCounts::Unread,
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
@@ -1255,6 +1393,55 @@ impl Library {
         self.facets.as_ref()
     }
 
+    /// Whether the host must count the folders ([`Library::set_folders`]),
+    /// once: asked while the Folders section is open and its counts are
+    /// not read since the photos last changed.
+    pub fn take_folders_wanted(&mut self) -> bool {
+        let wanted = matches!(self.folders, FolderCounts::Wanted);
+        if wanted {
+            self.folders = FolderCounts::Asked;
+        }
+        wanted
+    }
+
+    /// The folders tree's counts, as the vault counted them
+    /// ([`helios_vault::Vault::folders`] for the whole Library).
+    pub fn set_folders(&mut self, folders: std::collections::BTreeMap<String, u64>) {
+        self.folders = FolderCounts::Read(folders);
+    }
+
+    /// The folders tree, once counted: the top folders, each with its
+    /// folders below.
+    pub fn folder_tree(&self) -> Option<Vec<FolderNode>> {
+        match &self.folders {
+            FolderCounts::Read(counts) => Some(folder_tree(counts)),
+            _ => None,
+        }
+    }
+
+    /// The folder the filter is scoped to (its `folder:` term).
+    pub fn folder(&self) -> Option<String> {
+        helios_terms(&self.filter.text).folder
+    }
+
+    /// Scopes the library to a folder and below (its `folder:` term in
+    /// the filter, in place of any other), or to no folder; the rest of
+    /// the filter is kept.
+    pub fn set_folder(&mut self, folder: Option<&str>) {
+        let mut words: Vec<String> = tokens(&self.filter.text)
+            .into_iter()
+            .filter(|t| !t.to_lowercase().starts_with("folder:"))
+            .collect();
+        if let Some(folder) = folder {
+            words.push(format!("folder:{}", quoted(folder)));
+        }
+        let filter = Filter {
+            text: words.join(" "),
+            ..self.filter.clone()
+        };
+        self.set_filter(filter);
+    }
+
     /// The vault query of the filter in force, its backup rule set.
     fn query_for(&self, filter: &Filter) -> Query {
         let mut query = query_of(filter);
@@ -1404,6 +1591,8 @@ impl Library {
         self.entries = entries;
         self.reindex();
         self.selected = selected.and_then(|id| self.index.get(&id).copied());
+        // Photos came or went: the folders are counted again when shown.
+        self.folders = FolderCounts::Unread;
         // Photos came or went: the vault answers the filter again.
         self.ask_query();
         self.reorder();
@@ -2451,6 +2640,46 @@ impl Library {
         }
     }
 
+    /// The Folders section (`docs/design/library.md`, L5): the folders of
+    /// the Library's copies with how many photos are there or below,
+    /// counted by the vault when the section opens; a click scopes the
+    /// grid to a folder (its `folder:` term), a click on it again drops
+    /// the scope.
+    fn folders_section(&mut self, ui: &mut Ui) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let title = crate::i18n::text(ui.ctx(), Message::new("gui-library-folders", "Folders"));
+        let selected = self.folder();
+        let mut chosen = None;
+        egui::CollapsingHeader::new(title)
+            .id_salt("helios.library.folders")
+            .show(ui, |ui| {
+                let Some(tree) = self.folder_tree() else {
+                    // Counted once by the host, next frame.
+                    // One frame more for the host's turn (no spinner: it
+                    // would repaint on and on).
+                    if matches!(self.folders, FolderCounts::Unread) {
+                        self.folders = FolderCounts::Wanted;
+                        ui.ctx().request_repaint();
+                    }
+                    return;
+                };
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.library.folders.scroll")
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        for top in &tree {
+                            folder_row(ui, top, true, selected.as_deref(), &mut chosen);
+                        }
+                    });
+            });
+        if let Some(path) = chosen {
+            let same = selected.as_deref() == Some(path.as_str());
+            self.set_folder((!same).then_some(path.as_str()));
+        }
+    }
+
     /// The sort's menu and its direction: a change runs
     /// [`SORT_COMMAND`], which the workspace keeps.
     fn sort_menu(&mut self, ui: &mut Ui) {
@@ -2586,6 +2815,7 @@ impl Library {
         // stay in place while the library is empty.
         self.toolbar(ui);
         self.facets_bar(ui);
+        self.folders_section(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
             let text = crate::i18n::text(

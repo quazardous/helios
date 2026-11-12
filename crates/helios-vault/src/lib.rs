@@ -23,7 +23,7 @@
 //! `helios-vault-sqlite`), every one checked by the same [`contract`]. Time is passed in, never
 //! read, and every byte hashed is counted, so tests check budgets.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -317,6 +317,12 @@ pub trait Store: Send {
     /// facet ([`Facets`]); the backup states only with `backups`. A store
     /// backed by a database answers in one statement.
     fn facets(&self, query: &Query, backups: Option<&Backups>) -> Result<Facets, String>;
+    /// How many of the images a query selects have a copy in each folder
+    /// or below it (present or not, as [`Query::folder`] takes them), for
+    /// every folder holding a copy and each folder above it, by absolute
+    /// path without a trailing separator (the root keeps its own). A store
+    /// backed by a database answers in one statement.
+    fn folders(&self, query: &Query) -> Result<BTreeMap<String, u64>, String>;
     /// Records a change; returns its sequence number.
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String>;
     fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String>;
@@ -442,7 +448,6 @@ impl MemoryStore {
     /// A photo's backup state against `rule`, as the SQL driver measures
     /// it.
     fn backup_state(&self, id: &ImageId, rule: &Backups) -> BackupState {
-        use std::collections::BTreeSet;
         let verified = self
             .documents
             .get(&(storage::VERIFIED.to_string(), id.hex()))
@@ -994,6 +999,31 @@ impl Store for MemoryStore {
             }
         }
         Ok(facets)
+    }
+
+    fn folders(&self, query: &Query) -> Result<BTreeMap<String, u64>, String> {
+        query.check()?;
+        let mut images: BTreeMap<String, BTreeSet<ImageId>> = BTreeMap::new();
+        for s in &self.sightings {
+            let Some(id) = s.image.as_ref() else {
+                continue;
+            };
+            if !self.in_library(id) || !self.passes(id, query) {
+                continue;
+            }
+            for dir in s.path.parent().into_iter().flat_map(Path::ancestors) {
+                if !dir.as_os_str().is_empty() {
+                    images
+                        .entry(dir.to_string_lossy().into_owned())
+                        .or_default()
+                        .insert(*id);
+                }
+            }
+        }
+        Ok(images
+            .into_iter()
+            .map(|(dir, ids)| (dir, ids.len() as u64))
+            .collect())
     }
 
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String> {

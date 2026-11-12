@@ -545,6 +545,17 @@ greyed with their "last seen"; a click scopes the grid
 kittest click; offline state. Focus: the selected folder is the
 focus's browse state.
 
+Built (2026-11-12), first part: a Folders section in the Library panel
+(collapsed; the vault counts when it opens, again after the photos
+change): every folder holding a copy, with how many photos are there or
+below (`Vault::folders`, one recursive query; each count is what the
+`folder:` filter selects); chains of folders holding only the next one
+are one row; a click scopes the grid with the `folder:` term, a second
+click drops it. Not built yet: volumes as the top level, offline volumes
+greyed with their last seen, the row's menu (show in file manager, scan,
+import here), the selected folder kept per focus and in templates, and a
+dock panel of its own.
+
 **L6. Albums, smart albums, quick collection.** Vault documents
 `library/collections` (L-C2): albums hold image ids, smart albums a
 filter, stored as a rule tree: `{field, op, value}` rules and nested

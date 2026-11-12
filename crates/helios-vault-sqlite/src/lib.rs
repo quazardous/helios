@@ -1024,6 +1024,41 @@ fn facets_sql(query: &Query, backups: Option<&Backups>) -> Result<(String, Vec<S
     ))
 }
 
+/// The folders tree's statement (`docs/design/library.md`, L5): each
+/// matched photo's copies give their folder (the path cut after its last
+/// separator), then each folder above it, recursively; `UNION` keeps one
+/// row per photo and folder, so a count is the photos there or below.
+fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
+    let (ctes, from, args) = matched_sql(query, None)?;
+    let sep = std::path::MAIN_SEPARATOR;
+    // The path up to its last separator, kept: what `rtrim` leaves once
+    // it took every trailing character but the separator.
+    let dir = |x: &str| format!("rtrim({x}, replace({x}, '{sep}', ''))");
+    let up = "substr(dir, 1, length(dir) - 1)";
+    let matched = format!(
+        "m AS (SELECT i.id AS id {from}),
+         dirs(id, dir) AS (
+             SELECT s.image, {} FROM m JOIN sightings s ON s.image = m.id
+             UNION
+             SELECT id, {} FROM dirs WHERE length(dir) > 1)",
+        dir("s.path"),
+        dir(up)
+    );
+    let ctes = if ctes.is_empty() {
+        matched
+    } else {
+        format!("{ctes},\n{matched}")
+    };
+    Ok((
+        format!(
+            "WITH RECURSIVE {ctes}
+             SELECT CASE WHEN length(dir) > 1 THEN {up} ELSE dir END, COUNT(*)
+             FROM dirs WHERE dir <> '' GROUP BY dir"
+        ),
+        args,
+    ))
+}
+
 impl SqliteStore {
     /// The plan SQLite chooses for a query's select, one step a line:
     /// what a test reads to check an index serves it.
@@ -1606,6 +1641,22 @@ impl Store for SqliteStore {
             facets.add(&facet, &value, u64::try_from(n).unwrap_or(0));
         }
         Ok(facets)
+    }
+
+    fn folders(&self, query: &Query) -> Result<BTreeMap<String, u64>, String> {
+        let (sql, args) = folders_sql(query)?;
+        let mut statement = self.db.prepare(&sql).map_err(err)?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        Ok(rows
+            .into_iter()
+            .map(|(dir, n)| (dir, u64::try_from(n).unwrap_or(0)))
+            .collect())
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {

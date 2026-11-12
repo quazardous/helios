@@ -41,12 +41,21 @@ type Photo = (
     i64,
 );
 
-/// Three photos.
+/// Three photos, the third in a `raw` folder.
 const PHOTOS: [Photo; 3] = [
     (1, "a.jpg", "Z 8", "jpg", &["red"], 3),
     (2, "b.jpg", "Z 8", "jpg", &[], 1),
     (3, "c.nef", "R5", "nef", &["red"], 0),
 ];
+
+/// Where a photo's copy is: the third in `raw`, the others at the top.
+fn folder_of(dir: &Path, n: u8) -> PathBuf {
+    if n == 3 {
+        dir.join("raw")
+    } else {
+        dir.to_path_buf()
+    }
+}
 
 fn vault_file(dir: &Path) -> PathBuf {
     let path = dir.join("vault.db");
@@ -60,7 +69,10 @@ fn vault_file(dir: &Path) -> PathBuf {
             })
             .unwrap();
         store
-            .put_location(&id(n), &Location::seen(dir.join(name), 10, 1, 1))
+            .put_location(
+                &id(n),
+                &Location::seen(folder_of(dir, n).join(name), 10, 1, 1),
+            )
             .unwrap();
         for (field, value) in [
             (CAPTURED, json!(u64::from(n) * 100)),
@@ -165,6 +177,61 @@ fn the_filter_runs_in_the_vault_and_its_facets_are_counted() {
     filter(&mut h, &mut persist, "");
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     assert!(h.state().library().facets().is_none());
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_folders_tree_counts_as_the_vault_and_a_click_scopes_the_grid() {
+    let root = temp("folders");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    assert!(
+        h.state().library().folder_tree().is_none(),
+        "closed: not counted"
+    );
+    h.get_by_label("Folders").click();
+    settle(&mut h, &mut persist, 1.0);
+    let tree = h.state().library().folder_tree().unwrap();
+    let top = root.to_string_lossy().into_owned();
+    let raw = root.join("raw").to_string_lossy().into_owned();
+    assert_eq!(tree.len(), 1, "{tree:?}");
+    assert_eq!((tree[0].path.as_str(), tree[0].count), (top.as_str(), 3));
+    assert_eq!(tree[0].name, top, "a top row names its whole path");
+    assert_eq!(tree[0].children.len(), 1);
+    let below = &tree[0].children[0];
+    assert_eq!(
+        (below.path.as_str(), below.name.as_str(), below.count),
+        (raw.as_str(), "raw", 1)
+    );
+    // Each count is what the `folder:` filter selects in the vault.
+    for node in [&tree[0], below] {
+        let cursor = persist
+            .vault()
+            .open_cursor(helios_vault::Query {
+                folder: Some(node.path.clone()),
+                ..helios_vault::Query::default()
+            })
+            .unwrap();
+        persist.vault().close_cursor(cursor.id);
+        assert_eq!(cursor.count as u64, node.count, "{}", node.path);
+    }
+
+    // A click scopes the grid to the folder; again, to the whole Library.
+    h.get_by_label(&format!("{top} 3"));
+    h.get_by_label("raw 1").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(grid(&h), ["c.nef"]);
+    assert_eq!(h.state().library().folder(), Some(raw.clone()));
+    h.get_by_label("raw 1").click();
+    settle(&mut h, &mut persist, 9.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    assert_eq!(h.state().library().folder(), None);
+    // The scope keeps the rest of the filter.
+    filter(&mut h, &mut persist, "type:jpg");
+    h.state_mut().library_mut().set_folder(Some(&top));
+    settle(&mut h, &mut persist, 12.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
