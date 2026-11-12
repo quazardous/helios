@@ -18,6 +18,7 @@
 //! The marks cost a lock and a clock read each; they are taken a few
 //! times per frame.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -108,15 +109,16 @@ impl Marks {
             text.push_str("no section open: the frame's own work, or egui's\n");
         }
         for (section, at) in &s.open {
-            text.push_str(&format!(
-                "  in {section}, for {} ms\n",
+            let _ = writeln!(
+                text,
+                "  in {section}, for {} ms",
                 now.duration_since(*at).as_millis()
-            ));
+            );
         }
         if cfg!(debug_assertions) && !s.closed.is_empty() {
             text.push_str("closed before, last first:\n");
             for (section, took) in &s.closed {
-                text.push_str(&format!("  {section}: {} ms\n", took.as_millis()));
+                let _ = writeln!(text, "  {section}: {} ms", took.as_millis());
             }
         }
         Some(text)
@@ -309,7 +311,7 @@ mod tests {
         }
         let _a = marks.section("outer");
         let _b = marks.section("inner");
-        assert!(marks.stalled(Duration::from_secs(60)).is_none());
+        assert!(marks.stalled(Duration::from_mins(1)).is_none());
         let text = marks.stalled(Duration::ZERO).expect("reported");
         let (outer, inner) = (
             text.find("in outer").unwrap(),

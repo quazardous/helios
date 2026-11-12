@@ -356,6 +356,7 @@ impl Accounts {
     /// for them and the action is held until Allow. The plugin's id when
     /// it waits.
     pub(crate) fn ask_consent(&mut self, asked: &Asked) -> Option<String> {
+        let _stall = crate::stall::section("import window: a plugin's consent looked up");
         let broker = self.plugins.clone()?;
         let connector = self.connector_of(asked)?;
         let plugin = helios_plugin::source::plugin_of(&broker, &connector)?;
@@ -380,6 +381,7 @@ impl Accounts {
     /// (and kept, by the broker's keeper), the action it held given back
     /// to run again.
     fn allow(&mut self) -> Option<Asked> {
+        let _stall = crate::stall::section("import window: a plugin's capabilities granted");
         let consent = self.consent.take()?;
         let broker = self.plugins.clone()?;
         for c in &consent.capabilities {
