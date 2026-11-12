@@ -27,6 +27,7 @@ use helios_connect::{
     ItemId, ItemKind, ItemRef, Needs, Originals, Page, Pick, Probed, Settings, SourceRef, Text,
     TokenFn,
 };
+use helios_core::config::Contracts;
 use serde_json::{Value as Json, json};
 
 use crate::Broker;
@@ -72,6 +73,8 @@ pub struct SourceProvider {
     broker: Arc<Broker>,
     plugin: String,
     manifest: ConnectorManifest,
+    /// The plugin's configuration contracts, from its manifest.
+    config: Contracts,
 }
 
 impl SourceProvider {
@@ -101,6 +104,7 @@ impl SourceProvider {
             })
             .collect();
         let declares = |c: &str| m.capabilities.iter().any(|d| d.name == c);
+        let config = m.contracts();
         let manifest = ConnectorManifest {
             label: Text::new(&format!("connect-{id}"), title),
             description: Text::new(&format!("connect-{id}-about"), &m.description),
@@ -124,6 +128,7 @@ impl SourceProvider {
         };
         Some(Self {
             plugin: plugin.to_owned(),
+            config,
             broker,
             manifest,
         })
@@ -156,6 +161,10 @@ impl SourceProvider {
 impl ConnectorProvider for SourceProvider {
     fn manifest(&self) -> ConnectorManifest {
         self.manifest.clone()
+    }
+
+    fn config(&self) -> Contracts {
+        self.config.clone()
     }
 
     fn create(

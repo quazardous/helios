@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use helios_core::config::Contracts;
 use serde::{Deserialize, Serialize};
 
 pub mod account;
@@ -555,6 +556,13 @@ pub trait ConnectorProvider: Send + Sync {
     /// Data, readable without running the connector.
     fn manifest(&self) -> ConnectorManifest;
 
+    /// What configures it, each account it connects and each source it
+    /// reads (the configuration contract, [`helios_core::config`]);
+    /// nothing by default.
+    fn config(&self) -> Contracts {
+        Contracts::default()
+    }
+
     fn create(
         &self,
         settings: &Settings,
@@ -596,7 +604,27 @@ mod tests {
                 .unwrap();
             assert_eq!(connector.describe().id, *id);
             assert_eq!(connector.describe().caps, manifest.caps);
+            // Each declares its sources' choices, soundly, and nothing
+            // for itself or accounts it does not have.
+            let config = provider.config();
+            assert_eq!(config.problems(), Vec::<String>::new(), "{id}");
+            assert!(config.own.is_empty() && config.account.is_empty());
+            for key in [
+                "copy",
+                "into",
+                "layout",
+                "rename",
+                "duplicates",
+                "darktable",
+            ] {
+                assert!(config.source.get(key).is_some(), "{id}: {key}");
+            }
         }
+        // A card's photos are copied unless the person switches; a
+        // folder's are added where they are.
+        let copy = |id: &str| registry[id].config().source.defaults()["copy"].clone();
+        assert_eq!(copy("card"), serde_json::json!(true));
+        assert_eq!(copy("folder"), serde_json::json!(false));
     }
 
     #[test]

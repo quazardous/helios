@@ -19,6 +19,7 @@
 
 pub mod brick;
 pub mod bus;
+pub mod config;
 pub mod curve;
 pub mod describe;
 pub mod engine;
@@ -32,6 +33,7 @@ pub mod module;
 pub mod network;
 pub mod params;
 pub mod scheduler;
+pub mod schema;
 pub mod status;
 
 pub use brick::{

@@ -331,6 +331,8 @@ impl Broker {
                     "commands": m.commands,
                     "importers": m.importers,
                     "settings": m.settings,
+                    "account_settings": m.account.settings,
+                    "source_settings": m.source.settings,
                     "capabilities": m.capabilities.iter().map(|c| {
                         let (enforcement, about) = capability(&c.name).expect("checked");
                         json!({

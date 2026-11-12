@@ -5,7 +5,9 @@
 
 use std::path::Path;
 
-use crate::local::{Local, source_at};
+use helios_core::config::Contracts;
+
+use crate::local::{Local, source_at, source_contract};
 use crate::{
     Access, AccountRef, Cancel, Caps, Connector, ConnectorError, ConnectorInfo, ConnectorManifest,
     ConnectorProvider, ConnectorServices, Cursor, FetchSink, Fetched, INTERFACE, ItemRef, Needs,
@@ -31,6 +33,13 @@ fn label() -> Text {
 pub struct FolderProvider;
 
 impl ConnectorProvider for FolderProvider {
+    fn config(&self) -> Contracts {
+        Contracts {
+            source: source_contract(false),
+            ..Contracts::default()
+        }
+    }
+
     fn manifest(&self) -> ConnectorManifest {
         ConnectorManifest {
             id: ID.into(),

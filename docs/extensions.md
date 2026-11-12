@@ -65,7 +65,8 @@ contribution points):
   are actions with elements and effects, so a key can reach any slider
   without the plugin choosing one;
 - **settings**: typed by a schema, under the plugin's id, with defaults and
-  a page; no free configuration keys;
+  a page; no free configuration keys (see "The configuration contract"
+  below);
 - **panels and views**: area, the views they belong to, a `when` context;
 - **services**: importers, exporters, vault fields, resolvers, sync
   backends;
@@ -79,6 +80,56 @@ contribution points):
   `helios_i18n::plugins` loads them through egui-pop's prefix-owned
   catalogues: a key that is neither the plugin's nor one of its declared
   commands' is refused, so a plugin never rewrites another's text.
+
+## The configuration contract
+
+What a plugin, a module or a connector lets the person configure is
+declared once, as data (`helios_core::config`), at three levels: the
+plugin itself (`[settings.<key>]`), each account it connects
+(`[account.settings.<key>]`) and each source it reads
+(`[source.settings.<key>]`). Settings renders the first two, the import
+window the third; built-in connectors (folder, card) declare theirs in
+code with the same types (`ConnectorProvider::config`).
+
+```toml
+[settings.quality]
+type = "int"            # bool, int, float, string, choice, path, secret
+default = 90
+min = 1                 # int and float: min, max, step
+max = 100
+step = 1
+label = "Quality"       # English; the key's name when absent
+help = "The JPEG quality of the previews it asks for"
+group = "Previews"      # the heading it is shown under
+order = 0               # its place in its group, then by name
+
+[settings.mode]
+type = "choice"
+choices = ["auto", "custom"]
+default = "auto"
+
+[settings.cache]
+type = "path"
+path = "folder"         # or "file"
+visible_when = { mode = "custom" }   # a list: any of its values
+
+[account.settings.token]
+type = "secret"         # kept in the keyring, never shown back: no default
+label = "Access token"
+```
+
+`about`, which older manifests give, is read as `help`; a key without a
+default is unset until the person sets one. Labels and help are
+translated in the plugin's catalogues as the message
+`setting-<id>-<key>` (`account-setting-…`, `source-setting-…`) with the
+attributes `label` and `help`. A contract gives a JSON Schema of its
+values, checked by the same checker as the node's command params, and the
+manifest is refused when a declaration is wrong: an unknown type, a
+default that does not fit its key (type, bounds, choices), a secret with a
+default, a choice without choices, a path without its kind, bounds on a
+key that is not a number, `visible_when` naming a key the level does not
+declare, account settings from a plugin without `[[connect]]`, or source
+settings without the `import.source` or `importer` service.
 
 ## Packaging and trust
 
@@ -104,7 +155,8 @@ The broker reads the manifest first and refuses it, before anything runs,
 when the id is not a reverse domain, the Helios version is outside the
 range it gives, an interface or its version is unknown, a capability is
 unknown or comes without a reason, an activation event names nothing the
-plugin declares, or a setting's default does not fit its type. The
+plugin declares, or its configuration contract is wrong (a setting's
+default that does not fit its type, among others). The
 manifest's command runs in the plugin's directory (a program found there
 is run from there, any other is looked up on `PATH`).
 
