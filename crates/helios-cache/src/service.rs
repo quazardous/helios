@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -114,6 +115,9 @@ pub struct Kind {
     pub persist: bool,
     /// Bumped when the format changes: older entries are dropped.
     pub version: u32,
+    /// Its disk entries not used for this long are pruned, on top of the
+    /// size budget; `None`: only the budget evicts them.
+    pub unused: Option<Duration>,
     pub scope: ScopeRule,
     /// Why it is not in the shared pool, for a silo.
     pub reason: &'static str,
@@ -129,6 +133,9 @@ pub const THUMB_SMALL: Kind = Kind {
     share: Share::Default,
     persist: true,
     version: 2,
+    // A Library photo's thumbnail is all an offline photo shows: kept
+    // while the budget allows, whatever its age.
+    unused: None,
     scope: ScopeRule::PerLibrary,
     reason: "a library's thumbnails stay beside its catalogue and move with it",
 };
@@ -150,23 +157,31 @@ pub const RENDER_STEP: Kind = Kind {
     share: Share::Default,
     persist: false,
     version: 1,
+    unused: None,
     scope: ScopeRule::Shared,
     reason: "",
 };
 
+/// How long an import preview not seen again is kept on disk: 30 days.
+pub const GLANCE_UNUSED: Duration = Duration::from_hours(30 * 24);
+
 /// The import window's glances of files not yet in the Library: each
 /// file's small preview, capture time and camera, kept in RAM by path,
 /// size and modification time (no content hash is read before an import),
-/// so the window opened again or scrolled back reads nothing.
+/// so the window opened again or scrolled back reads nothing; a card's
+/// also on disk by the card's volume, the path on it, size and
+/// modification time, so a card plugged in again, even after a restart or
+/// at another mount point, shows its previews without a read.
 pub const IMPORT_GLANCE: Kind = Kind {
     id: "import.glance",
     title: "Import previews",
-    tiers: &[Tier::Ram],
+    tiers: &[Tier::Ram, Tier::Disk],
     identity: Identity::Path,
     cost: Cost::Decode,
     share: Share::Default,
-    persist: false,
-    version: 1,
+    persist: true,
+    version: 2,
+    unused: Some(GLANCE_UNUSED),
     scope: ScopeRule::Shared,
     reason: "",
 };

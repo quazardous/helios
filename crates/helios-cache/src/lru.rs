@@ -166,6 +166,22 @@ impl<K: Clone + Ord + Hash> Lru<K> {
         gone
     }
 
+    /// Takes out the entries whose priority (last use plus bonus) is
+    /// before `before`: with no bonus, those not used since. The entries
+    /// taken and their bytes, the oldest first; the cost is the victims'.
+    pub fn older_than(&mut self, before: u64) -> Vec<(K, u64)> {
+        let gone: Vec<(K, u64)> = self
+            .order
+            .iter()
+            .take_while(|(priority, _, _)| *priority < before)
+            .map(|(_, _, k)| (k.clone(), self.slots[k].bytes))
+            .collect();
+        for (key, _) in &gone {
+            self.remove(key);
+        }
+        gone
+    }
+
     /// Takes out every entry `keep` does not keep: those taken and their
     /// bytes.
     pub fn clear(&mut self, mut keep: impl FnMut(&K) -> bool) -> Vec<(K, u64)> {

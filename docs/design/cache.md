@@ -41,7 +41,7 @@ limit and its default. "None" means nothing bounds it.
 | 10 | Large thumbnails (`Library::large_textures`) | VRAM | image id | **none** (freed when a render lands) | explicit | none | pool `Loader::large` / Compare | render lands | none | `thumbnails.rs` |
 | 11 | Loupe stand-in (`Viewport::stand_in`) | VRAM | the image opened | one texture | replaced when the render is complete | none | `Shell::open_from_library` / viewport | render complete | none | `thumbnails.rs` |
 | 12 | Head renders (`Library::Heads`) | VRAM (texture) + the render's `Image` in RAM via the render cache | image id + version + size | **none** | stale entries replaced; never evicted | none | `head_render::spawn` on the viewport's engine / Compare | generation per image (edit or network change) | none | `compare_heads.rs` |
-| 13 | Import window glances (`import_scan::GlanceCache`, kind `import.glance`), then its textures (`import_browser`) | RAM (`ColorImage` at 256 px) then VRAM | path + size + mtime (a Library file seen unchanged: its image's `thumb.256` entry) | 192 MiB for the glances (LRU, down to 90 %); a frame's upload count is capped for the textures | LRU; textures removed when a path leaves the listing | none | scan glance (embedded preview, scaled in 8 bits first), the library thumbnail cache / import grid | a changed file has another key | `usage()` (bytes, count), hits and misses | `import.rs`, `import_snapshots.rs` |
+| 13 | Import window glances (`import_scan::GlanceCache`, kind `import.glance`), then its textures (`import_browser`) | RAM (`ColorImage` at 256 px), a card's also on disk (`$XDG_CACHE_HOME/helios/import.glance`), then VRAM | RAM: path + size + mtime; disk: the card's volume + path on it + size + mtime (a Library file seen unchanged: its image's `thumb.256` entry) | 192 MiB in RAM, 256 MiB on disk (LRU, down to 90 %); a frame's upload count is capped for the textures | LRU; on disk also pruned when unused for 30 days; textures removed when a path leaves the listing | none | scan glance (embedded preview, scaled in 8 bits first), the library thumbnail cache / import grid | a changed file has another key | `usage()` (bytes, count), hits and misses | `import.rs`, `import_snapshots.rs`, `helios-cache/tests/disk.rs` |
 | 14 | Import scan memo (`import_scan`: `seen`, `by_size`) | RAM | path → (size, mtime); size → hashes | none, one scan | dropped with the scan | none | the scan | per scan | none | `import.rs` |
 | 15 | Image map (sightings) | disk (the vault file) | path + size + mtime → content hash | `system.map.limit` | forgetting rules (`system.map.keepMissing`) | `system.map.*` | import scans, `thumb_check` / import window, thumbnail keys | re-check | rows | `helios-library` unit tests |
 | 16 | Resolver memo (`helios_resolve::Cached`) | RAM, in `helios-node` | `Request::key` (pixels + brief) | **none** | never | none | AI and HTTP resolvers / decision nodes | none (same question, same answer) | none | `helios-resolve` tests |
@@ -163,6 +163,7 @@ CacheKind {
     share: Share::Default,        // or a reserved minimum per tier
     persist: true,                // disk tier survives restarts
     version: 2,                   // bumped when the format changes: old entries are dropped
+    unused: None,                 // or Some(age): disk entries unused that long are pruned
     scope: ScopeRule::Shared,     // or PerLibrary, PerUser, Private
 }
 ```
@@ -296,6 +297,60 @@ target.
 - The disk tier is never synced and never backed up: the vault and its
   replicas hold durable data; caches are rebuilt (ROADMAP, "durable copies
   count for redundancy; caches are evictable and do not").
+
+### The disk tier: two identities, pruning by last use
+
+Decided with the owner (2026-11-12). A persisted entry can be known by
+two identities:
+
+- **Source / path**: the source or volume, the path on it, the file's
+  size and modification time. Known without reading the content, so
+  cheap: the key of a card's files before an import, and of anything not
+  hashed yet. A path hit is trusted only while size and modification
+  time match; a file changed under the same path has another key and is
+  read again.
+- **Content hash**: safe, but costs a full read. It survives a move, a
+  rename or a copy on another volume, and two copies of one file share
+  one entry. A hash hit is always valid.
+
+How the service uses them:
+
+1. **Lookup** by either identity, the path key first because it is
+   cheap. A kind declares which it uses (`Identity::Path` or
+   `Identity::Content`).
+2. **Linking**: once a file is hashed (an import, a connector's verified
+   fetch, a backup's verification), its path entry is also filed under
+   the hash, and the path key points to it. A card's glance then serves
+   the Library photo it became, and the same photo seen on another
+   volume finds its preview by hash. Not built yet: the next step of
+   slice 6.
+3. **Volume, not mount point**: a path key names the volume (the id the
+   storage layer gives it; a card's is its label and capacity until a
+   stronger one is known) and the path on it, so a card mounted
+   elsewhere, or after a restart, matches.
+4. **Pruning by last use**, per entry, whichever identity was used: each
+   entry's last use is its file's modification time (set again on every
+   hit), and a kind may declare an age (`unused`) after which an entry
+   not used is pruned, on top of the size budget, least recently used
+   first. Imported files' glances are not dropped on purpose: they age
+   out like the rest.
+5. **Replacing**: an entry is replaced only by a different one (another
+   key: the content changed) or a better one (a larger preview, a
+   capture time or camera it lacked); the same glance read again does
+   not rewrite it.
+
+`helios_cache::Disk` is that tier for one kind: a folder
+`<root>/<kind>/v<version>` (older versions' folders deleted when it
+opens), one file per entry named by the BLAKE3 hash of its key (a key
+may be a volume and a path without leaking into file names), listed off
+the interface thread, written through a temporary name and a rename, and
+attached to the service like any store. The first kind on it is
+`import.glance` in the user cache folder: 256 MiB, unused for 30 days
+pruned. The thumbnail cache (8) keeps its own folder for now and has no
+age limit: a Library photo's thumbnail is all an offline photo shows, so
+pruning it by age would leave a hole the file cannot fill until its
+disk is back (not decided: an age for thumbnails of photos whose files
+are online).
 
 ### Invalidation
 
@@ -446,8 +501,13 @@ measured where speed is at stake (`thumb-bench`, the engine's
    glance path). Begun (2026-11-11): a file the image map saw in the
    Library unchanged (path, size, modification time) shows its image's
    `thumb.256` entry; the other files' glances are `import.glance` in
-   RAM. Not done yet: a file hashed later (by content alone) meeting its
-   entry, and glances written to the disk cache under a provisional key.
+   RAM. 2026-11-12: a card's glances are also kept on disk
+   (`helios_cache::Disk`, see "The disk tier"), keyed by the card's
+   volume, the path on it, size and modification time, pruned when
+   unused for 30 days: a card plugged in again reads only the files that
+   changed. Not done yet: linking a glance to the content hash once the
+   file is hashed, an offline card's cells shown from its disk glances,
+   and folders' glances on disk.
 7. **The small stores.** `resolve.answer` (16, bounded), `kit.compiled`
    (17), `plugin.bundle` (18), `ai.download` (19) registered in the user
    cache scope, so the page lists and clears them; the plugin protocol's

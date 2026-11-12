@@ -14,17 +14,22 @@
 //! - [`Flight`]: single flight, concurrent requests for one key merged
 //!   into one computation, every wait bounded;
 //! - [`Service`]: kinds, budgets per tier, the stores attached, their
-//!   usage and statistics, and clearing.
+//!   usage and statistics, and clearing;
+//! - [`Disk`]: a kind's disk tier, a folder of entries kept within a size
+//!   budget and pruned once unused for the kind's age limit.
 
+mod disk;
 mod flight;
 mod lru;
 mod service;
 
+pub use disk::{CACHEDIR_TAG, Disk, user_cache_dir};
 pub use flight::{Flight, FlightError};
 pub use lru::{Lru, Pin, Pins};
 pub use service::{
-    Cost, Counters, IMPORT_GLANCE, Identity, Kind, RENDER_STEP, Scope, ScopeRule, Service, Share,
-    Store, THUMB_LARGE, THUMB_SMALL, Tier, Usage, memory_share, physical_memory, size_text,
+    Cost, Counters, GLANCE_UNUSED, IMPORT_GLANCE, Identity, Kind, RENDER_STEP, Scope, ScopeRule,
+    Service, Share, Store, THUMB_LARGE, THUMB_SMALL, Tier, Usage, memory_share, physical_memory,
+    size_text,
 };
 
 /// The share of physical memory the RAM tier may use by default, in

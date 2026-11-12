@@ -2260,6 +2260,7 @@ dependencies = [
 name = "helios-cache"
 version = "0.77.0"
 dependencies = [
+ "blake3",
  "serde_json",
 ]
 

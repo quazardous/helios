@@ -45,10 +45,13 @@ pub fn stats(service: &Service, t: &dyn Fn(Message) -> String) -> Value {
                         .with("entries", k["entries"].to_string()),
                 ),
             };
+            // A kind may hold entries in several tiers (RAM and disk):
+            // one row each.
             k["id"] = json!(format!(
-                "{}|{}",
+                "{}|{}|{}",
                 k["scope"].as_str().unwrap_or_default(),
-                k["kind"].as_str().unwrap_or_default()
+                k["kind"].as_str().unwrap_or_default(),
+                k["tier"].as_str().unwrap_or_default()
             ));
             k["detail"] = json!(format!(
                 "{} · {tier}",
