@@ -376,6 +376,12 @@ impl Connectors {
             .collect()
     }
 
+    /// Every connector's manifest, in the order added: what the "Add a
+    /// source…" wizard offers.
+    pub fn manifests(&self) -> Vec<helios_connect::ConnectorManifest> {
+        self.providers.iter().map(|p| p.manifest()).collect()
+    }
+
     /// How connectors signed in through an `oauth` step get their
     /// accounts' tokens.
     pub fn set_token(&mut self, token: helios_connect::TokenFn) {

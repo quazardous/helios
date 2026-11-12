@@ -75,6 +75,12 @@ fn add_a_source_runs_the_connectors_form_and_test_and_lists_the_account_connecte
         shown(h, "Test server")
     });
     h.get_by_label("Test server").click();
+    h.run_steps(2);
+    h.get_by_label("Next").click();
+    until(&mut h, "the account step", |h| {
+        shown(h, "Sign in to an account…")
+    });
+    h.get_by_label("Sign in to an account…").click();
     until(&mut h, "the form", |h| connection(h)["state"] == "form");
     let form = connection(&mut h);
     let fields: Vec<&str> = form["fields"]
@@ -373,4 +379,141 @@ fn settings_accounts_sets_the_person_s_own_oauth_client_over_helios_s() {
         )
         .is_err()
     );
+}
+
+/// The sources kept in memory, as the node would keep them.
+fn keep_sources(h: &mut Harness<'_, Shell>) -> std::rc::Rc<std::cell::RefCell<Option<String>>> {
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let (read, write) = (kept.clone(), kept.clone());
+    h.state_mut().keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+    kept
+}
+
+fn click(h: &mut Harness<'_, Shell>, label: &str) {
+    h.query_all_by_label(label)
+        .next()
+        .unwrap_or_else(|| panic!("no {label}"))
+        .click();
+    h.run_steps(3);
+}
+
+/// The wizard taken to the account step of the fake connector, then an
+/// account signed in to there: the wizard picks it.
+fn wizard_signed_in(h: &mut Harness<'_, Shell>) {
+    run(h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(h, "Add a source…", |h| shown(h, "Add a source…"));
+    click(h, "Add a source…");
+    // The connector's line says what it does.
+    until(h, "the kinds", |h| shown(h, "A server for tests"));
+    click(h, "Test server");
+    click(h, "Next");
+    until(h, "the account step", |h| {
+        shown(h, "Sign in to an account…")
+    });
+    assert!(shown(h, "No account yet"));
+    click(h, "Sign in to an account…");
+    until(h, "the form", |h| connection(h)["state"] == "form");
+    run(
+        h,
+        "import.connectionAnswer",
+        json!({ "values": { "host": "nas.local", "user": "ann", "password": "right" } }),
+        Origin::User,
+    )
+    .unwrap();
+    until(h, "connected", |h| connection(h)["state"] == "connected");
+    click(h, "Close");
+    until(h, "the dialog closed", |h| connection(h).is_null());
+    until(h, "the account listed in the step", |h| {
+        shown(h, "ann@nas.local")
+    });
+}
+
+/// "Add a source…" for a connector reached through an account: its
+/// account signed in to in the wizard, the choices it cannot honour
+/// hidden and never kept on it, the source saved under its name and
+/// selected.
+#[test]
+fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source_cannot_honour() {
+    let (world, mut h) = world();
+    let kept = keep_sources(&mut h);
+    // The window's choices add where they are and read darktable edits.
+    let mut start = h.state().import_choices();
+    start.copy_folders = false;
+    start.darktable = true;
+    h.state_mut().set_import_choices(start);
+    wizard_signed_in(&mut h);
+    click(&mut h, "Next");
+    until(&mut h, "the choices", |h| shown(h, "Duplicates"));
+    assert!(
+        !shown(&h, "Add where they are"),
+        "a remote source always copies"
+    );
+    assert!(!shown(&h, "Read darktable edits"), "no sidecars there");
+    click(&mut h, "Keep");
+    click(&mut h, "Next");
+    // The name starts as the account's; the person makes it theirs.
+    h.query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(egui_kittest::Node::is_focused)
+        .expect("the name field focused")
+        .type_text(" photos");
+    h.run_steps(3);
+    click(&mut h, "Add the source");
+    let accounts = world.book.accounts().unwrap();
+    assert_eq!(accounts.len(), 1);
+    let sources = h.state().import_sources();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    let source = &sources[0];
+    assert_eq!(source.connector, ID);
+    assert_eq!(source.account.as_deref(), Some(accounts[0].id.as_str()));
+    assert!(source.path.is_none());
+    let name = source.name.clone().unwrap_or_default();
+    assert!(name.contains("photos"), "the name typed: {name}");
+    let choices = source.choices.clone().expect("its own choices");
+    assert!(choices.copy_folders && !choices.darktable, "{choices:?}");
+    assert_eq!(choices.duplicates.as_str(), "keep");
+    assert!(
+        kept.borrow()
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&accounts[0].id)
+    );
+    // Selected: the column shows its choices, under its name.
+    until(&mut h, "its choices shown", |h| {
+        shown(h, &format!("{name}: its own choices"))
+    });
+    assert!(shown(&h, "Saved sources") && shown(&h, &name));
+}
+
+/// Cancel in the wizard leaves no source, wherever it is pressed; an
+/// account signed in to on the way stays an account.
+#[test]
+fn cancelling_the_add_a_source_wizard_after_signing_in_keeps_the_account_only() {
+    let (world, mut h) = world();
+    let kept = keep_sources(&mut h);
+    wizard_signed_in(&mut h);
+    click(&mut h, "Cancel");
+    assert!(!h.state().import_wizard_open());
+    assert!(h.state().import_sources().is_empty());
+    assert_eq!(world.book.accounts().unwrap().len(), 1);
+    // Again, to the choices and to the name: the account is offered, picked
+    // by a click.
+    for steps in [1, 2] {
+        click(&mut h, "Add a source…");
+        click(&mut h, "Test server");
+        click(&mut h, "Next");
+        click(&mut h, "ann@nas.local");
+        for _ in 0..steps {
+            click(&mut h, "Next");
+        }
+        click(&mut h, "Cancel");
+        assert!(!h.state().import_wizard_open(), "{steps}");
+        assert!(h.state().import_sources().is_empty(), "{steps}");
+    }
+    assert_eq!(*kept.borrow(), None);
 }

@@ -635,6 +635,38 @@ gui-size-kib = { $size } Kio
 
 gui-size-mib = { $size } Mio
 
+gui-wizard-account = Compte
+
+gui-wizard-add = Ajouter la source
+
+gui-wizard-back = Retour
+
+gui-wizard-card = Les cartes et appareils photo apparaissent d’eux-mêmes dans la liste quand ils sont insérés, avec les choix par défaut : il n’y a rien à ajouter.
+
+gui-wizard-choices = Comment ses photos sont importées. Vous pourrez les changer plus tard dans la colonne Choix.
+
+gui-wizard-choose = Choisir…
+
+gui-wizard-folder = Dossier
+
+gui-wizard-kind = De quel type de source s’agit-il ?
+
+gui-wizard-name = Nom de la source
+
+gui-wizard-name-help = Son nom dans la colonne Sources
+
+gui-wizard-next = Suivant
+
+gui-wizard-no-account = Aucun compte pour l’instant
+
+gui-wizard-no-folder = Aucun dossier à cet endroit
+
+gui-wizard-no-library = Ouvrez d’abord une bibliothèque : les comptes y sont conservés
+
+gui-wizard-sign-in = Se connecter à un compte…
+
+gui-wizard-title = Ajouter une source
+
 gui-workspace-description = description
 
 gui-workspace-edit-title = Modifier l’espace de travail
@@ -1018,6 +1050,8 @@ gui-import-window-add-favourite = Ajouter aux favoris
 
 gui-import-window-all-types = Tous les types
 
+gui-import-window-add-source = Ajouter une source…
+
 gui-import-window-cancel = Annuler
 
 gui-import-window-card-inserted = { $card } insérée
@@ -1139,6 +1173,8 @@ gui-import-window-select-all = tout
 gui-import-window-select-day = jour
 
 gui-import-window-select-none = rien
+
+gui-import-window-saved = Sources enregistrées
 
 gui-import-window-sources = Sources
 

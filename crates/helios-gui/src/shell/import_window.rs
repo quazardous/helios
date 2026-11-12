@@ -75,6 +75,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
+use super::import_sources::SourceKey;
 use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
 use crate::import_scan::{
     Connectors, Contents, Counts, Known, MapRecorder, Recorded, Scan, Scanned, Types,
@@ -181,7 +182,7 @@ pub(crate) struct ImportWindow {
     /// drawn in where the backend has no windows of its own.
     embedded_title: Option<String>,
     /// The shell's translator and what the words need of it.
-    texts: Option<Texts>,
+    pub(super) texts: Option<Texts>,
     shell_words: ShellWords,
     /// What the window asked of the shell, taken at the main window's
     /// next pass.
@@ -277,6 +278,9 @@ pub(crate) struct ImportWindow {
     /// The name of the preset being saved, while it is typed, and
     /// whether its field is to take the focus.
     naming: Option<(String, bool)>,
+    /// The "Add a source…" wizard, while it is open: the window's body
+    /// shows its steps ([`super::import_wizard`]).
+    pub(super) wizard: Option<super::import_wizard::Wizard>,
 }
 
 impl ImportWindow {
@@ -295,6 +299,7 @@ impl ImportWindow {
     /// again.
     fn cancel(&mut self, ctx: &Egui) {
         self.open = false;
+        self.wizard = None;
         self.clear_contents();
         ctx.request_repaint_of(ViewportId::ROOT);
     }
@@ -597,6 +602,9 @@ struct Words {
     cards: String,
     no_cards: String,
     recent: String,
+    /// The sources saved under a name, and the wizard adding one.
+    saved: String,
+    add_source: String,
     favourites: String,
     no_favourites: String,
     choose: String,
@@ -1176,6 +1184,11 @@ fn window_title() -> Message {
 }
 
 impl ImportWindow {
+    /// Asks where copies go, through the folder chooser.
+    pub(super) fn choose_into(&mut self, pending: Pending) {
+        self.choosing_into = Some(pending);
+    }
+
     /// The folder the chooser gave: a recent source, ticked; or where
     /// copies go.
     fn receive_chosen_folder(&mut self) {
@@ -1184,7 +1197,11 @@ impl ImportWindow {
             if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
                 && let Some(p) = paths.into_iter().next()
             {
-                self.choices.into = Some(p);
+                // The wizard's choices, while it shows them.
+                let wizard = self.wizard.as_mut();
+                if !wizard.is_some_and(|wz| wz.take_into(p.clone())) {
+                    self.choices.into = Some(p);
+                }
             }
         }
         let Some(result) = self.choosing.as_ref().and_then(Pending::take) else {
@@ -1221,6 +1238,11 @@ impl ImportWindow {
                 "No card inserted",
             )),
             recent: t(Message::new("gui-import-window-recent", "Recent")),
+            saved: t(Message::new("gui-import-window-saved", "Saved sources")),
+            add_source: t(Message::new(
+                "gui-import-window-add-source",
+                "Add a source…",
+            )),
             favourites: t(Message::new("gui-import-window-favourites", "Favourites")),
             no_favourites: t(Message::new("gui-import-window-no-favourites", "None yet")),
             choose: t(Message::new("gui-import-window-choose", "Choose a folder…")),
@@ -1440,7 +1462,7 @@ impl ImportWindow {
 
     /// Adds, reconnects or signs out an account, as the Sources column
     /// asked; what fails is said in the window's toasts.
-    fn account_asked(&mut self, asked: super::import_accounts::Asked) {
+    pub(super) fn account_asked(&mut self, asked: super::import_accounts::Asked) {
         use super::import_accounts::Asked;
         // A plugin's capabilities not granted yet are asked for first.
         if self.accounts.ask_consent(&asked).is_some() {
@@ -1517,6 +1539,11 @@ impl ImportWindow {
         let ui = &mut ui;
         let reading = self.scans.iter().any(|(_, _, done)| !done);
         status_bar_ui(ui, &words.grid, reading);
+        // The wizard takes the columns' and the footer's room.
+        if self.wizard.is_some() {
+            self.wizard_ui(ui, app);
+            return event;
+        }
         let w = self;
         let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
         // The body is the room above the footer, exactly: no scroll area
@@ -1717,10 +1744,45 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                     .find(|(s, _)| s.root.as_deref() == Some(path))
                     .map_or_else(|| name_of(path), |(s, _)| s.label.clone())
             };
+            // The sources saved under a name, folders and accounts.
+            let named = w.sources.named();
+            let named_folders: Vec<PathBuf> = named
+                .iter()
+                .filter_map(|(k, _)| match k {
+                    SourceKey::Folder(p) => Some(p.clone()),
+                    SourceKey::Account(_) => None,
+                })
+                .collect();
+            if !named.is_empty() {
+                ui.separator();
+                ui.strong(&words.saved);
+            }
+            for (key, name) in named {
+                match key {
+                    SourceKey::Folder(path) => {
+                        if let Some(e) = source_row(ui, w, words, &path, name, None) {
+                            *event = Some(e);
+                        }
+                    }
+                    SourceKey::Account(id) => {
+                        let selected = w.sources.account.as_deref() == Some(id.as_str());
+                        if ui
+                            .selectable_label(selected, &name)
+                            .on_hover_text(w.account_label(&id))
+                            .clicked()
+                        {
+                            w.select_account(id);
+                        }
+                    }
+                }
+            }
             ui.separator();
             ui.strong(&words.recent);
             let favourites = w.memory.favourites.clone();
             for path in w.memory.recent.clone() {
+                if named_folders.contains(&path) {
+                    continue;
+                }
                 let star = (!favourites.contains(&path)).then_some((&words.add_favourite, true));
                 if let Some(e) = source_row(ui, w, words, &path, label_of(&path), star) {
                     *event = Some(e);
@@ -1731,6 +1793,9 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                 ui.weak(&words.no_favourites);
             }
             for path in favourites {
+                if named_folders.contains(&path) {
+                    continue;
+                }
                 let remove = Some((&words.remove_favourite, false));
                 if let Some(e) = source_row(ui, w, words, &path, label_of(&path), remove) {
                     *event = Some(e);
@@ -1739,7 +1804,10 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             // The folders saved with their own choices, listed neither
             // as recent nor as favourites.
             for path in w.sources.folders() {
-                if w.memory.recent.contains(&path) || w.memory.favourites.contains(&path) {
+                if w.memory.recent.contains(&path)
+                    || w.memory.favourites.contains(&path)
+                    || named_folders.contains(&path)
+                {
                     continue;
                 }
                 if let Some(e) = source_row(ui, w, words, &path, label_of(&path), None) {
@@ -1749,6 +1817,9 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             ui.separator();
             if ui.button(&words.choose).clicked() {
                 *event = Some(Event::Choose);
+            }
+            if ui.button(&words.add_source).clicked() {
+                w.open_wizard();
             }
             if let Some(texts) = w.texts.clone() {
                 let selected = w.sources.account.clone().filter(|_| w.sources.kept());

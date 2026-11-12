@@ -12,6 +12,9 @@
 //!   it on that source, one step of the column's Undo; "Reset to
 //!   defaults" gives the source the window's choices again. A card stays
 //!   an automatic source, with the window's choices.
+//! - A source added through the "Add a source…" wizard
+//!   ([`super::import_wizard`]) has a name: it is listed under it, among
+//!   the saved sources.
 //! - **Choices a connector cannot honour are hidden**: a remote
 //!   connector's photos are always copied ("Add where they are" hidden)
 //!   and have no darktable sidecars ("Read darktable edits" hidden).
@@ -166,6 +169,29 @@ impl Sources {
     /// The saved folders, in the order saved.
     pub(crate) fn folders(&self) -> Vec<PathBuf> {
         self.list.iter().filter_map(|s| s.path.clone()).collect()
+    }
+
+    /// Saves a source (the "Add a source…" wizard's), in place of one
+    /// of the same folder or account.
+    pub(crate) fn add(&mut self, source: SavedSource) {
+        let key = source.key();
+        self.list.retain(|s| key.is_none() || s.key() != key);
+        self.list.push(source);
+        self.store();
+    }
+
+    /// A source's name, when the person gave one.
+    pub(crate) fn name_of(&self, key: &SourceKey) -> Option<&str> {
+        self.get(key).and_then(|s| s.name.as_deref())
+    }
+
+    /// The sources named, in the order saved: their own rows in the
+    /// Sources column.
+    pub(crate) fn named(&self) -> Vec<(SourceKey, String)> {
+        self.list
+            .iter()
+            .filter_map(|s| Some((s.key()?, s.name.clone()?)))
+            .collect()
     }
 
     /// Sets a source's own choices, saving the source when new.
