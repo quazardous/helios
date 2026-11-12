@@ -9,7 +9,7 @@ services = ["importer"]
 activation = ["onImporter:lightroom-catalog"]
 
 [compat]
-helios = ">=0.81.0, <0.82.0"
+helios = ">=0.82.0, <0.83.0"
 interfaces = { protocol = 1, importer = 2 }
 
 [[importers]]
