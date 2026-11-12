@@ -569,23 +569,7 @@ impl Accounts {
         let spawned = std::thread::Builder::new()
             .name("plugin-consent".into())
             .spawn(move || {
-                let asking = (|| {
-                    let plugin = helios_plugin::source::plugin_of(&broker, &connector)?;
-                    let capabilities = broker.missing(&plugin).ok()?;
-                    if capabilities.is_empty() {
-                        return None;
-                    }
-                    let title = broker
-                        .manifest(&plugin)
-                        .map_or_else(|| plugin.clone(), |m| m.title().to_owned());
-                    Some(Asking {
-                        plugin,
-                        title,
-                        capabilities,
-                        then,
-                        declined: false,
-                    })
-                })();
+                let asking = look_up(&broker, &connector, then);
                 let _ = tx.send(asking);
                 if let Some(wake) = wake {
                     wake();
@@ -739,6 +723,27 @@ fn browser_link(ui: &mut egui::Ui, url: &str, opener: &Opener, t: &dyn Fn(Messag
             ui.ctx().copy_text(url.to_owned());
         }
     });
+}
+
+/// What the consent dialog asks before `then`: the capabilities the
+/// plugin serving `connector` lacks; nothing when it lacks none (or is
+/// not enabled). Takes the plugin's lock: never on the interface's thread.
+fn look_up(broker: &helios_plugin::Broker, connector: &str, then: Asked) -> Option<Asking> {
+    let plugin = helios_plugin::source::plugin_of(broker, connector)?;
+    let capabilities = broker.missing(&plugin).ok()?;
+    if capabilities.is_empty() {
+        return None;
+    }
+    let title = broker
+        .manifest(&plugin)
+        .map_or_else(|| plugin.clone(), |m| m.title().to_owned());
+    Some(Asking {
+        plugin,
+        title,
+        capabilities,
+        then,
+        declined: false,
+    })
 }
 
 /// The plugin serving `connector`, from the manifests alone (no plugin's

@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 
 const PLUGIN: &str = "org.example.fake-source";
 const REASON: &str = "Talks to the fake service";
+/// The plugin slow to stop.
+const SLOW: &str = "org.example.slow-source";
 
 fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, Shell>) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -331,7 +333,6 @@ fn allow_on_a_plugin_slow_to_stop_holds_no_frame() {
         eprintln!("python3 is not installed: skipped");
         return;
     }
-    const SLOW: &str = "org.example.slow-source";
     let mut broker = Broker::new(Policy {
         grace: Duration::from_secs(2),
         ..Policy::default()
