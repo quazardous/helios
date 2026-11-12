@@ -697,8 +697,6 @@ gui-library-folders = Folders
 
 gui-library-folders-elsewhere = Other folders
 
-gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
-
 gui-library-images = Images
 
 gui-library-import = Import…
@@ -750,6 +748,8 @@ gui-library-sort-tip = Sort by
 gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
+
+gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 
 gui-log-clear = Clear
 
@@ -848,8 +848,6 @@ gui-macro-publish-title = Publish { $name } to your library?
 gui-macro-publish-verb = Publish
 
 gui-macro-published = { $composite } published to { $file }: undo does not take it back
-
-gui-main-window-in-use = The main window shows this window now; it comes back when this window closes
 
 gui-mask-display = Show mask
 

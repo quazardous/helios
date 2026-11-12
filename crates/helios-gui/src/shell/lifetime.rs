@@ -10,7 +10,8 @@
 //!   running, one question is asked first, and only then.
 //! - **Closing a window** (Ctrl+W, Alt+F4, its close button) closes that
 //!   window only. Closing the main window while another is open moves that
-//!   one into it (egui-pop's rule): Helios goes on.
+//!   one into it (egui-pop's rule): Helios goes on. Window > Main window
+//!   brings the main window back, that window going back to its own.
 //! - **Closing the last window** quits, as Quit does.
 //!
 //! The host (the desktop's `main.rs`) asks [`Shell::main_window_closing`]
@@ -23,12 +24,11 @@
 //! window (the exports): the question before quitting counts its jobs,
 //! and a confirmed quit asks the node to cancel them.
 
-use egui::{Context, ViewportCommand, ViewportId};
+use egui::{Context, ViewportCommand};
 use egui_pop::api::windows::WindowId;
 use helios_core::Message;
 
 use super::Shell;
-use crate::dialogs::Level;
 
 /// Quits once the question about running jobs is answered.
 pub(super) const QUIT_CONFIRMED: &str = "helios.quit.confirmed";
@@ -36,7 +36,7 @@ pub(super) const QUIT_CONFIRMED: &str = "helios.quit.confirmed";
 pub(super) const MAIN_WINDOW: &str = "helios.window.main";
 
 /// How many passes a quit question holds back the main window's close
-/// that came with it (egui-pop's Quit closes the window it runs in).
+/// that came with it (egui-pop's Quit closes the main window).
 const HOLD_PASSES: u64 = 3;
 
 /// Where the application's life stands.
@@ -104,22 +104,24 @@ impl Shell {
     /// Quits Helios, from any window: asks first when jobs are running.
     pub(super) fn quit(&mut self, ctx: &Context) {
         if self.lifetime.quitting {
-            close_main_window(ctx);
+            self.core.app.handle().quit();
             return;
         }
         let running = self.running_jobs();
         if running == 0 || self.core.assume_yes {
-            self.quit_confirmed(ctx);
+            self.quit_confirmed();
         } else {
             self.lifetime.asked_at = Some(ctx.cumulative_pass_nr());
             self.ask_before_quitting(running);
         }
     }
 
-    /// Quits, whatever runs: the running jobs cancelled.
-    pub(super) fn quit_confirmed(&mut self, ctx: &Context) {
+    /// Quits, whatever runs: the running jobs cancelled. egui-pop closes
+    /// the main window, and every other window with it, none moving into
+    /// the main one.
+    pub(super) fn quit_confirmed(&mut self) {
         self.lifetime.quitting(true);
-        close_main_window(ctx);
+        self.core.app.handle().quit();
     }
 
     /// Whether Helios is quitting: the main window's close ends it.
@@ -159,21 +161,10 @@ impl Shell {
     }
 
     /// Window > Main window: brings it forward. One closed while another
-    /// window took its place comes back once that window closes.
+    /// window took its place comes back: that window's content goes back
+    /// to a window of its own, and the main window draws the shell again.
     pub(super) fn main_window(&mut self) {
-        let app = self.core.app.handle().clone();
-        let main = WindowId::main();
-        if app.window_viewport(&main).is_some() {
-            app.raise_window(&main);
-        } else {
-            self.notify(
-                Level::Info,
-                Message::new(
-                    "gui-main-window-in-use",
-                    "The main window shows this window now; it comes back when this window closes",
-                ),
-            );
-        }
+        self.core.app.handle().raise_window(&WindowId::main());
     }
 
     /// The jobs a quit would cancel: the node's (the exports, which
@@ -206,11 +197,4 @@ impl Shell {
         };
         self.confirm(confirm);
     }
-}
-
-/// Closes the main window, wherever the quit was asked: the process ends
-/// with it.
-fn close_main_window(ctx: &Context) {
-    ctx.send_viewport_cmd_to(ViewportId::ROOT, ViewportCommand::Close);
-    ctx.request_repaint_of(ViewportId::ROOT);
 }
