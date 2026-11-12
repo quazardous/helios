@@ -89,10 +89,11 @@ fn name(p: &Path) -> &str {
 fn the_importer_is_declared_as_the_study_says() {
     let dir = scratch("declared");
     let b = broker(&dir, quick());
+    // Other bundled importers may sit beside it: this one is declared once.
     let importers = b.importers();
-    assert_eq!(importers.len(), 1);
-    let (plugin, decl) = &importers[0];
-    assert_eq!(plugin, PLUGIN);
+    let ours: Vec<_> = importers.iter().filter(|(p, _)| p == PLUGIN).collect();
+    assert_eq!(ours.len(), 1, "{importers:?}");
+    let (_, decl) = ours[0];
     assert_eq!(
         (decl.id.as_str(), decl.label.as_str(), decl.anywhere),
         (IMPORTER, "darktable library", true)

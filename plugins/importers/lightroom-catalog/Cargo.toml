@@ -1,0 +1,26 @@
+[package]
+name = "helios-plugin-lightroom-catalog"
+description = "Helios importer plugin: the photos of a Lightroom Classic catalogue with their stars, rejects, labels, keywords and collections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "helios-lightroom-catalog"
+path = "src/main.rs"
+
+[dependencies]
+# its read-only `file:` URI, shared with the darktable importer
+helios-plugin-darktable-library = { path = "../darktable-library" }
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-plugin.workspace = true
+
+[lints]
+workspace = true

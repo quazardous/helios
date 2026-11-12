@@ -170,6 +170,7 @@ pub fn rules() -> &'static [(&'static str, Rule)] {
             "plugins/importers/",
             Crates(&[
                 "helios-plugin-darktable-library",
+                "helios-plugin-lightroom-catalog",
                 "helios-plugin",
                 "helios-gui",
             ]),

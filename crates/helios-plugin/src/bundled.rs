@@ -53,15 +53,26 @@ macro_rules! file {
 }
 
 /// The plugins Helios ships.
-pub const PLUGINS: &[Bundled] = &[Bundled {
-    name: "darktable-library",
-    program: "helios-darktable-library",
-    files: &[
-        file!("darktable-library", "helios-plugin.toml"),
-        file!("darktable-library", "i18n/en/plugin.ftl"),
-        file!("darktable-library", "i18n/fr/plugin.ftl"),
-    ],
-}];
+pub const PLUGINS: &[Bundled] = &[
+    Bundled {
+        name: "darktable-library",
+        program: "helios-darktable-library",
+        files: &[
+            file!("darktable-library", "helios-plugin.toml"),
+            file!("darktable-library", "i18n/en/plugin.ftl"),
+            file!("darktable-library", "i18n/fr/plugin.ftl"),
+        ],
+    },
+    Bundled {
+        name: "lightroom-catalog",
+        program: "helios-lightroom-catalog",
+        files: &[
+            file!("lightroom-catalog", "helios-plugin.toml"),
+            file!("lightroom-catalog", "i18n/en/plugin.ftl"),
+            file!("lightroom-catalog", "i18n/fr/plugin.ftl"),
+        ],
+    },
+];
 
 /// A marker written last: a folder without it was left half written.
 const COMPLETE: &str = ".complete";
@@ -274,7 +285,10 @@ mod tests {
         let mut dirs = vec![(Scope::User, root.join("user"))];
         let added = add_to(&mut dirs, &root.join("plugins"), &programs).unwrap();
         assert_eq!(added.dir, None);
-        assert_eq!(added.without_program, ["darktable-library"]);
+        assert_eq!(
+            added.without_program,
+            ["darktable-library", "lightroom-catalog"]
+        );
         assert_eq!(dirs.len(), 1);
         for plugin in PLUGINS {
             std::fs::write(programs.join(program_file(plugin.program)), "stand-in").unwrap();
