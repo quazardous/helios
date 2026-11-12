@@ -572,14 +572,38 @@ usable. Slices 1 to 5 need no GUI.
    no correction (`P` within 1e-4 of the identity); a patch excluded by
    name and a clipped one weigh 0 and change nothing; a chart outside the
    image is unsolved.
-   **Remaining:** the measurement graph (the raw front without `colorin`
-   rendered at scale 1 on the patches' bounding box, `rawprepare`'s output
-   for the clip source, `M_s` from the camera's matrix; for a picture, the
-   decoded values), the `calibrate.chart` control request with its serde
-   answer (`dry_run` true only, until slice 5), the
-   `helios_calibrate_chart` MCP tool and the shell command, a changelog
-   fragment; tested on a synthetic mosaic (the inverse of the raw front,
-   in the test kit) and a decoded picture through the request.
+   **Built** (2026-11-12), the request on the decoded-picture path:
+   `helios_calibrate::request` (`ChartArgs`, the serialisable
+   `ChartAnswer`: per patch name, measured, reference, Delta E before and
+   after, status `kept`/`excluded`/`clipped`/`missing` and the `dark`,
+   `not_uniform` flags; mean, max and worst patches by name, before and
+   after; orientation, the corners in the chart's order, illuminant,
+   exposure, quality word, `P` and `M_c`; the chart-wide warnings), and
+   `calibrate_picture`, a decoded picture measured on its linear working
+   RGB with `M_s` the identity and clipping read at 0.995 on the same
+   values (an approximation of the encoded test the note asks for). The
+   node's `calibrate.chart` control request takes `path` (an absolute
+   file: the content id comes with the vault, slice 5), `corners`,
+   `chart`, `exclude`, `dry_run` (`false` refused); a raw is refused until
+   slice 4c. It is answered on the debug control endpoint, with the MCP
+   tool `helios_calibrate_chart`, the command line's `helios control
+   calibrate-chart PICTURE X,Y X,Y X,Y X,Y [--chart ID] [--exclude
+   PATCH]...`, and the desktop's `calibrate.chart` command (the same dry
+   run, refusals in English). `Layout::draw` draws a synthetic chart shot.
+   Tests: the request's arguments and defaults, a picture answered
+   through JSON (orientation, illuminant, every patch kept, `P` the
+   identity), excluded and missing patches, the refusals; the node driven
+   through the command line on a 16-bit Rec.2020 TIFF (the handles given
+   mirrored, an excluded patch, an unknown patch, a raw refused); the
+   desktop command on an sRGB TIFF.
+4c. **The raw measurement graph:** the raw front without `colorin`
+   rendered at scale 1 on the patches' bounding box (`rawprepare`,
+   `whitebalance` in camera reference mode, `highlights`, `demosaic`, the
+   image's own parameters), `rawprepare`'s output for the clip source at
+   `highlights`' level, `M_s` from the camera's matrix as `colorin`
+   builds it; `calibrate.chart` on a raw through it. Tested through the
+   request on a synthetic mosaic made from the synthetic chart (the
+   inverse of the raw front, in the test kit).
 5. **Profiles in the vault:** the two namespaces, save, list, remove,
    export, import, the default rule and the nearest-illuminant pick;
    `calibrate.chart` with `save`. Tested on the in-memory and SQLite
