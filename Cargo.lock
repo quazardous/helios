@@ -2269,6 +2269,8 @@ dependencies = [
  "helios-colour",
  "helios-module-channelmixerrgb",
  "helios-photo",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2453,6 +2455,7 @@ dependencies = [
  "egui_kittest",
  "helios-bricks",
  "helios-cache",
+ "helios-calibrate",
  "helios-config",
  "helios-connect",
  "helios-controls",
@@ -2699,6 +2702,8 @@ dependencies = [
  "egui-pop-model",
  "helios-ai",
  "helios-cache",
+ "helios-calibrate",
+ "helios-colour",
  "helios-config",
  "helios-core",
  "helios-decision",

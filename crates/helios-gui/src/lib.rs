@@ -4,6 +4,7 @@
 
 pub mod agent_state;
 pub mod caches;
+pub mod calibrate;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;

@@ -153,6 +153,15 @@ fn node_params() -> Value {
     })
 }
 
+fn corners() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
+    })
+}
+
 fn null() -> Value {
     Value::Null
 }
@@ -1684,6 +1693,43 @@ pub const TOOLS: &[Tool] = &[
         }],
     },
     Tool {
+        name: "helios_calibrate_chart",
+        endpoint: Endpoint::Control,
+        cmd: "calibrate.chart",
+        description: "Measures a colour chart shot (a decoded picture: TIFF, PNG, JPEG) and solves its colour correction, a dry run that writes nothing: per patch the measured value, the reference and Delta E 2000 before and after, with its status; mean, max and worst patches; the orientation found, the light estimated from the neutral patches, the exposure offset and the matrices (debug control)",
+        params: &[
+            Param {
+                name: "path",
+                schema: string,
+                description: "Absolute path of the chart shot, on the node's machine",
+                default: None,
+            },
+            Param {
+                name: "corners",
+                schema: corners,
+                description: "The centres of the chart's four corner patches, [x, y] in the picture's pixels as stored, in any order",
+                default: None,
+            },
+            optional(
+                "chart",
+                optional_string,
+                "The chart's id: xrite.cc24.2014 (the default) or xrite.cc24.2000",
+            ),
+            Param {
+                name: "exclude",
+                schema: strings,
+                description: "Patch names left out of the solve (B3)",
+                default: Some(empty_list),
+            },
+            Param {
+                name: "dry_run",
+                schema: boolean,
+                description: "Report only, write nothing: the only mode answered so far",
+                default: Some(yes),
+            },
+        ],
+    },
+    Tool {
         name: "helios_pause",
         endpoint: Endpoint::Control,
         cmd: "pause",
@@ -2710,6 +2756,7 @@ mod tests {
                     "items" if tool.cmd == "workflow.prioritize" => json!(["/nonexistent/a.png"]),
                     "items" => json!(["/nonexistent/a.png", { "path": "/nonexistent/b.png" }]),
                     "to" => json!("top"),
+                    "corners" => json!([[10.0, 10.0], [90.0, 10.0], [90.0, 60.0], [10.0, 60.0]]),
                     _ => json!("exp"),
                 };
                 (p.name.to_string(), v)
@@ -2774,6 +2821,7 @@ mod tests {
             "workflow.resume",
             "cache.stats",
             "cache.clear",
+            "calibrate.chart",
         ];
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");

@@ -325,3 +325,97 @@ fn a_source_takes_a_file_and_exports_take_the_network_as_it_was() {
     let (code, usage) = s.control(&["export", "exp", "--to", &out("e.png")]);
     assert_eq!(code, 2, "{usage}");
 }
+
+/// A ColorChecker under D50 as a 16-bit TIFF in linear Rec.2020: each
+/// patch's square filled with its reference at 80 % exposure, the rest a
+/// dark grey. Returns the corner patches' centres.
+fn chart_picture(path: &std::path::Path) -> [[f64; 2]; 4] {
+    use helios_calibrate::lab::lab_to_xyz;
+    use helios_calibrate::{Layout, XRITE_CC24_2014 as CHART};
+    use helios_photo::color::{apply, inverse};
+
+    const CORNERS: [[f64; 2]; 4] = [[50.0, 44.0], [274.0, 35.0], [280.0, 176.0], [40.0, 170.0]];
+    let (w, h) = (320_usize, 220_usize);
+    let placed = Layout::new(&CHART, CORNERS).unwrap();
+    let from_xyz = inverse(&helios_calibrate::working_to_xyz()).unwrap();
+    let values: Vec<[f64; 3]> = CHART
+        .patches
+        .iter()
+        .map(|p| apply(&from_xyz, lab_to_xyz(p.lab)).map(|v| 0.8 * v))
+        .collect();
+    let data = placed.draw(w, h, &values, 0.01);
+    let image = helios_core::Image::new(helios_core::Region::sized(w as u32, h as u32), 3, data);
+    let bytes = helios_export::encode_in(
+        &image,
+        &helios_export::Format::Tiff,
+        helios_colour::OutputSpace::Rec2020,
+    )
+    .unwrap();
+    std::fs::write(path, bytes).unwrap();
+    CORNERS
+}
+
+#[test]
+fn a_chart_picture_is_calibrated_through_control() {
+    let s = Sandbox::start("calibrate", true);
+    let picture = s.dir.join("chart.tif");
+    let corners = chart_picture(&picture);
+    // The handles given from the bottom-left corner, going round the
+    // other way: the orientation is found.
+    let point = |[x, y]: [f64; 2]| format!("{x},{y}");
+    let given = [corners[3], corners[2], corners[1], corners[0]].map(point);
+    let mut args = vec!["calibrate-chart", picture.to_str().unwrap()];
+    args.extend(given.iter().map(String::as_str));
+    let (code, answer) = s.control(&args);
+    assert_eq!(code, 0, "{answer}");
+    assert_eq!(answer["dry_run"], true);
+    assert_eq!(answer["chart"], "xrite.cc24.2014");
+    assert_eq!(answer["orientation"]["mirrored"], true, "{answer}");
+    assert_eq!(answer["image"]["width"], 320);
+    let patches = answer["patches"].as_array().unwrap();
+    assert_eq!(patches.len(), 24);
+    assert!(patches.iter().all(|p| p["status"] == "kept"), "{answer}");
+    // Seen under D50 through the working space itself: nothing to correct.
+    let after = answer["after"]["max"].as_f64().unwrap();
+    assert!(after < 0.05, "{}", answer["after"]);
+    let cct = answer["illuminant"]["cct"].as_f64().unwrap();
+    assert!((cct - 5000.0).abs() < 100.0, "{}", answer["illuminant"]);
+
+    // Excluding a patch and naming a chart go through the command line.
+    let mut excluded = args.clone();
+    excluded.extend(["--exclude", "B3", "--chart", "xrite.cc24.2014"]);
+    let (code, answer) = s.control(&excluded);
+    assert_eq!(code, 0, "{answer}");
+    let b3 = answer["patches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "B3")
+        .unwrap();
+    assert_eq!(b3["status"], "excluded");
+
+    // Refusals: an unknown patch, a raw, corners off the picture.
+    let mut unknown = args.clone();
+    unknown.extend(["--exclude", "Z9"]);
+    let (code, refused) = s.control(&unknown);
+    assert_eq!(code, 1);
+    assert!(
+        refused["error"].as_str().unwrap().contains("Z9"),
+        "{refused}"
+    );
+    let raw = s.dir.join("chart.cr2");
+    std::fs::write(&raw, b"not a raw").unwrap();
+    let mut raw_args = vec!["calibrate-chart", raw.to_str().unwrap()];
+    raw_args.extend(given.iter().map(String::as_str));
+    let (code, refused) = s.control(&raw_args);
+    assert_eq!(code, 1);
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("not measured yet"),
+        "{refused}"
+    );
+    let (code, usage) = s.control(&["calibrate-chart", picture.to_str().unwrap(), "1,2"]);
+    assert_eq!(code, 2, "{usage}");
+}

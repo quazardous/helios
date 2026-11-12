@@ -939,6 +939,23 @@ mod control {
                 Ok(json!({}))
             }
             ControlRequest::CacheStats => Ok(helios_cache::Service::global().snapshot()),
+            ControlRequest::CalibrateChart {
+                path,
+                corners,
+                chart,
+                exclude,
+                dry_run,
+            } => helios_node::calibrate::chart(
+                path,
+                &helios_calibrate::ChartArgs {
+                    corners: *corners,
+                    chart: chart
+                        .clone()
+                        .unwrap_or_else(|| helios_calibrate::request::DEFAULT_CHART.into()),
+                    exclude: exclude.clone(),
+                    dry_run: *dry_run,
+                },
+            ),
             ControlRequest::CacheClear { kind } => Ok(json!({
                 "freed": helios_cache::Service::global().clear(kind.as_deref()),
             })),

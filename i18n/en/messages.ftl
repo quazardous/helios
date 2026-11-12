@@ -31,6 +31,24 @@ batch-stopped = stopped before it was written: the same batch run again finishes
 
 batch-vault-attached = --vault with a running node only keeps sidecars: it needs --sidecar (the node keeps its runs in its own vault)
 
+calibrate-bad-image = the chart shot has no pixel or fewer than three channels
+
+calibrate-dry-run-only = only the dry run is answered so far: saving a profile is not built yet
+
+calibrate-load-failed = cannot read the chart shot: { $error }
+
+calibrate-no-neutral = the chart could not be solved at these corners: no neutral patch is kept
+
+calibrate-raw-not-yet = a raw chart shot is not measured yet: give a decoded picture (TIFF, PNG, JPEG) of it
+
+calibrate-too-few-patches = the chart could not be solved at these corners: too few patches are kept
+
+calibrate-unknown-chart = no chart `{ $chart }`
+
+calibrate-unknown-patch = the chart has no patch `{ $patch }`
+
+calibrate-unsolved = the chart could not be measured and solved at these corners
+
 engine-failure-compile = compile
 
 engine-failure-device-lost = device lost

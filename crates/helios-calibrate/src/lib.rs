@@ -23,12 +23,15 @@
 //!   weighted least squares then refined on Delta E 2000, the chart's
 //!   orientation, and the report;
 //! - [`run`]: a chart shot measured, its illuminant estimated and solved
-//!   in one call, what `calibrate.chart` answers on a dry run.
+//!   in one call;
+//! - [`request`]: `calibrate.chart`'s arguments and answer, serialisable,
+//!   and its dry run on a decoded picture.
 
 pub mod chart;
 pub mod homography;
 pub mod lab;
 pub mod layout;
+pub mod request;
 pub mod run;
 pub mod sampler;
 pub mod solver;
@@ -36,6 +39,7 @@ pub mod solver;
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
 pub use layout::{ImageView, Layout, Point};
+pub use request::{ChartAnswer, ChartArgs, ChartError, calibrate_picture, calibrate_shot};
 pub use run::{Illuminant, Report, Request, RunError, Shot, calibrate, working_to_xyz};
 pub use sampler::{
     ChartCheck, ClipSource, PatchCheck, PatchStats, THRESHOLDS, Thresholds, Warning, check_chart,

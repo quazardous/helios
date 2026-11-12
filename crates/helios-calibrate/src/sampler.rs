@@ -220,9 +220,10 @@ pub fn patch_stats(
 }
 
 /// The fraction of patch `k`'s sampling area clipped in `image` (one
-/// channel for `rawprepare`'s mosaic, or a picture's channels: a pixel is
-/// clipped when any of its channels is at or above `level`); `None` when
-/// no pixel of the image falls in the area.
+/// channel for `rawprepare`'s mosaic, or a picture's colour channels: a
+/// pixel is clipped when any of its first three channels is at or above
+/// `level`, a decoded picture's alpha, 1, left out); `None` when no pixel
+/// of the image falls in the area.
 pub fn clipped_fraction(
     layout: &Layout,
     image: &ImageView<'_>,
@@ -235,7 +236,13 @@ pub fn clipped_fraction(
     }
     let clipped = pixels
         .iter()
-        .filter(|&&(x, y)| image.pixel(x, y).iter().any(|&v| f64::from(v) >= level))
+        .filter(|&&(x, y)| {
+            image
+                .pixel(x, y)
+                .iter()
+                .take(3)
+                .any(|&v| f64::from(v) >= level)
+        })
         .count();
     Some(clipped as f64 / pixels.len() as f64)
 }

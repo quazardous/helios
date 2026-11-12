@@ -83,6 +83,18 @@ keeps only the runs in that vault (no settings layer, no edit), as
 `helios batch --vault` asks of its own node. The batch endpoint answers
 every `workflow-*` verb as well.
 
+`calibrate-chart PICTURE X,Y X,Y X,Y X,Y [--chart ID] [--exclude
+PATCH]...` measures a colour chart shot and solves its correction
+(`calibrate.chart`, the MCP tool `helios_calibrate_chart`, see
+[design/calibration.md](design/calibration.md)): the four points are the
+centres of the chart's corner patches in the picture's pixels as stored,
+in any order. It is a dry run, nothing is written: the answer is the
+report (per patch the measured value, the reference, Delta E 2000 before
+and after and its status; mean, max and worst patches; the orientation
+found, the light estimated from the neutrals, the exposure offset, the
+matrices). Only decoded pictures (TIFF, PNG, JPEG) are measured so far; a
+raw is refused.
+
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job
 already ended), a `message` comes beside it (`{"key", "args", "english"}`),

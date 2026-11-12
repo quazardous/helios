@@ -9,11 +9,11 @@ use crate::solver::{normalise, orthogonal_basis};
 use helios_module_channelmixerrgb::{blackbody_xy, daylight_xy, rec2020_to_xyz_d50};
 use helios_photo::color::{IDENTITY, camera_to_working, inverse, mul};
 
-const CHART: &Chart = &XRITE_CC24_2014;
-const W: usize = 640;
-const H: usize = 440;
+pub(crate) const CHART: &Chart = &XRITE_CC24_2014;
+pub(crate) const W: usize = 640;
+pub(crate) const H: usize = 440;
 /// The chart upright, slightly in perspective.
-const CORNERS: [Point; 4] = [[95.0, 88.0], [548.0, 70.0], [560.0, 352.0], [80.0, 340.0]];
+pub(crate) const CORNERS: [Point; 4] = [[95.0, 88.0], [548.0, 70.0], [560.0, 352.0], [80.0, 340.0]];
 
 /// XYZ to camera RGB of a real body (dcraw's table, Canon EOS 5D Mark II).
 const CAMERA: [f64; 9] = [
@@ -21,7 +21,7 @@ const CAMERA: [f64; 9] = [
 ];
 
 /// Colour calibration's adaptation from `xy` to D50, in f64.
-fn adaptation_from(xy: [f32; 2]) -> Mat3 {
+pub(crate) fn adaptation_from(xy: [f32; 2]) -> Mat3 {
     to_f64(
         &Plan::new(xy, &rec2020_to_xyz_d50(), 0.0, false)
             .unwrap()
@@ -31,7 +31,7 @@ fn adaptation_from(xy: [f32; 2]) -> Mat3 {
 
 /// Every patch's reference seen under the light `a` adapts from: `t_k =
 /// A⁻¹ W⁻¹ xyz(L_k)`, in the working space.
-fn lit(a: &Mat3) -> Vec<[f64; 3]> {
+pub(crate) fn lit(a: &Mat3) -> Vec<[f64; 3]> {
     let back = mul(&inverse(a).unwrap(), &inverse(&working_to_xyz()).unwrap());
     CHART
         .patches
@@ -54,27 +54,10 @@ fn correction(targets: &[[f64; 3]]) -> Mat3 {
 
 /// The chart drawn upright at [`CORNERS`], each patch's square filled with
 /// its value, the rest a dark grey; three channels.
-fn draw(values: &[[f64; 3]]) -> Vec<f32> {
-    let placed = Layout::new(CHART, CORNERS).unwrap();
-    let half = 0.5 * CHART.patch_side;
-    let mut rgb = vec![0.01_f32; W * H * 3];
-    for y in 0..H {
-        for x in 0..W {
-            let [u, v] = placed.to_chart.apply([x as f64 + 0.5, y as f64 + 0.5]);
-            let (i, j) = (u.round(), v.round());
-            if i < 0.0 || j < 0.0 || i >= CHART.columns as f64 || j >= CHART.rows as f64 {
-                continue;
-            }
-            if (u - i).abs() > half || (v - j).abs() > half {
-                continue;
-            }
-            let k = CHART.index(i as usize, j as usize);
-            for c in 0..3 {
-                rgb[(y * W + x) * 3 + c] = values[k][c] as f32;
-            }
-        }
-    }
-    rgb
+pub(crate) fn draw(values: &[[f64; 3]]) -> Vec<f32> {
+    Layout::new(CHART, CORNERS)
+        .unwrap()
+        .draw(W, H, values, 0.01)
 }
 
 fn view(data: &[f32]) -> ImageView<'_> {

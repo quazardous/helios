@@ -30,6 +30,24 @@ batch-stopped = arrêté avant d’être écrit : relancer le même lot le termi
 
 batch-vault-attached = --vault avec un nœud déjà lancé ne conserve que les sidecars : il demande --sidecar (le nœud garde ses exécutions dans son propre coffre)
 
+calibrate-bad-image = la prise de vue de la mire n’a aucun pixel ou moins de trois canaux
+
+calibrate-dry-run-only = seul l’essai à blanc est disponible pour l’instant : l’enregistrement d’un profil n’existe pas encore
+
+calibrate-load-failed = impossible de lire la prise de vue de la mire : { $error }
+
+calibrate-raw-not-yet = une prise de vue raw de la mire n’est pas encore mesurée : donnez-en une image décodée (TIFF, PNG, JPEG)
+
+calibrate-unknown-chart = aucune mire « { $chart } »
+
+calibrate-unknown-patch = la mire n’a pas de case « { $patch } »
+
+calibrate-no-neutral = la mire n’a pu être résolue à ces coins : aucune case neutre n’est retenue
+
+calibrate-too-few-patches = la mire n’a pu être résolue à ces coins : trop peu de cases sont retenues
+
+calibrate-unsolved = la mire n’a pu être mesurée et résolue à ces coins
+
 engine-failure-compile = compilation
 
 engine-failure-device-lost = périphérique perdu

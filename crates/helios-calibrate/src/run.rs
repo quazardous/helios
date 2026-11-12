@@ -243,4 +243,4 @@ pub fn calibrate(shot: &Shot<'_>, request: &Request<'_>) -> Result<Report, RunEr
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
