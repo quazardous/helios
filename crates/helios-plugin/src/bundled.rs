@@ -1,5 +1,5 @@
-//! The plugins Helios ships, its official importers
-//! (`plugins/importers/` in its repository): Rust programs built with
+//! The plugins Helios ships, its official importers and sources
+//! (`plugins/importers/`, `plugins/sources/` in its repository): Rust programs built with
 //! Helios, so nothing else needs to be installed.
 //!
 //! Each one's program is built beside Helios's own
@@ -39,11 +39,16 @@ pub struct Bundled {
 
 macro_rules! file {
     ($plugin:literal, $path:literal) => {
+        file!("importers", $plugin, $path)
+    };
+    ($category:literal, $plugin:literal, $path:literal) => {
         File {
             path: $path,
             contents: include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../plugins/importers/",
+                "/../../plugins/",
+                $category,
+                "/",
                 $plugin,
                 "/",
                 $path
@@ -70,6 +75,15 @@ pub const PLUGINS: &[Bundled] = &[
             file!("lightroom-catalog", "helios-plugin.toml"),
             file!("lightroom-catalog", "i18n/en/plugin.ftl"),
             file!("lightroom-catalog", "i18n/fr/plugin.ftl"),
+        ],
+    },
+    Bundled {
+        name: "google-photos",
+        program: "helios-google-photos",
+        files: &[
+            file!("sources", "google-photos", "helios-plugin.toml"),
+            file!("sources", "google-photos", "i18n/en/plugin.ftl"),
+            file!("sources", "google-photos", "i18n/fr/plugin.ftl"),
         ],
     },
 ];
@@ -238,16 +252,19 @@ mod tests {
     /// from a release.
     #[test]
     fn every_file_of_the_shipped_plugins_is_bundled() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/importers");
-        let mut names: Vec<String> = std::fs::read_dir(&root)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        let bundled: Vec<&str> = PLUGINS.iter().map(|p| p.name).collect();
-        assert_eq!(names, bundled);
+        let plugins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins");
+        let mut dirs = std::collections::BTreeMap::new();
+        for category in ["importers", "sources"] {
+            for e in std::fs::read_dir(plugins.join(category)).unwrap() {
+                let e = e.unwrap();
+                dirs.insert(e.file_name().to_string_lossy().into_owned(), e.path());
+            }
+        }
+        let mut bundled: Vec<&str> = PLUGINS.iter().map(|p| p.name).collect();
+        bundled.sort_unstable();
+        assert_eq!(dirs.keys().map(String::as_str).collect::<Vec<_>>(), bundled);
         for plugin in PLUGINS {
-            let dir = root.join(plugin.name);
+            let dir = &dirs[plugin.name];
             let mut files = vec![MANIFEST.to_string()];
             for locale in std::fs::read_dir(dir.join("i18n")).unwrap() {
                 let locale = locale.unwrap().path();
@@ -287,7 +304,7 @@ mod tests {
         assert_eq!(added.dir, None);
         assert_eq!(
             added.without_program,
-            ["darktable-library", "lightroom-catalog"]
+            ["darktable-library", "lightroom-catalog", "google-photos"]
         );
         assert_eq!(dirs.len(), 1);
         for plugin in PLUGINS {

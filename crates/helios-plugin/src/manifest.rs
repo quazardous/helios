@@ -49,10 +49,11 @@ pub const INTERFACES: &[(&str, &[u32])] = &[
     ("metadata.read", &[1]),
     ("device", &[1]),
     ("importer", &[1, 2]),
+    ("import.source", &[1]),
 ];
 
 /// The services a plugin may provide; each is also an interface.
-pub const SERVICES: &[&str] = &["metadata.read", "device", "importer"];
+pub const SERVICES: &[&str] = &["metadata.read", "device", "importer", "import.source"];
 
 /// How the broker holds a capability to its word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -274,6 +275,21 @@ impl ImporterDecl {
     }
 }
 
+/// One step of a source's connection process (`[[connect]]`), which
+/// Helios drives itself: `oauth`, `form`, `device`, `trust`, `code` or
+/// `test`, the step's own keys beside (`helios_connect::ConnectStep`
+/// reads them).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ConnectDecl {
+    pub id: String,
+    pub kind: String,
+    #[serde(flatten)]
+    pub rest: BTreeMap<String, Json>,
+}
+
+/// The step kinds Helios drives.
+pub const CONNECT_KINDS: &[&str] = &["oauth", "form", "device", "trust", "code", "test"];
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SettingType {
@@ -355,6 +371,9 @@ pub struct Manifest {
     /// Importers, under File > Import from (the `importer` service).
     #[serde(default)]
     pub importers: Vec<ImporterDecl>,
+    /// A source's connection process (the `import.source` service).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connect: Vec<ConnectDecl>,
     /// Typed settings, each under the plugin's id (`<id>.<key>`).
     #[serde(default)]
     pub settings: BTreeMap<String, SettingDecl>,
@@ -450,6 +469,7 @@ impl Manifest {
             }
         }
         p.extend(self.importer_problems());
+        p.extend(self.connect_problems());
         for e in &self.activation {
             let ok = match e.split_once(':') {
                 None => e == "onStartup",
@@ -483,6 +503,36 @@ impl Manifest {
             }
             if c.reason.trim().is_empty() {
                 p.push(format!("capability `{}` without a reason", c.name));
+            }
+        }
+        p
+    }
+
+    /// What keeps a connection process from running: it belongs to the
+    /// `import.source` service, each step has a unique id and a known
+    /// kind, and an `oauth` step gives where to authorise and get tokens.
+    fn connect_problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if !self.connect.is_empty() && !self.services.iter().any(|s| s == "import.source") {
+            p.push("`[[connect]]` without the service `import.source`".into());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for step in &self.connect {
+            if step.id.trim().is_empty() || !seen.insert(step.id.as_str()) {
+                p.push(format!("connection step `{}`: an id of its own", step.id));
+            }
+            if !CONNECT_KINDS.contains(&step.kind.as_str()) {
+                p.push(format!(
+                    "connection step `{}`: unknown kind `{}`",
+                    step.id, step.kind
+                ));
+            }
+            if step.kind == "oauth" {
+                for key in ["authorize", "token"] {
+                    if !step.rest.get(key).is_some_and(Json::is_string) {
+                        p.push(format!("connection step `{}`: no `{key}`", step.id));
+                    }
+                }
             }
         }
         p

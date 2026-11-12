@@ -38,7 +38,7 @@ try {
     throw
   }
   foreach ($f in 'helios.exe', 'helios-gui.exe', 'helios-node.exe', 'helios-mcp.exe',
-    'helios-darktable-library.exe', 'helios-lightroom-catalog.exe', 'COPYING', 'THIRD-PARTY-LICENSES.txt', 'README.md', 'unins000.exe') {
+    'helios-darktable-library.exe', 'helios-lightroom-catalog.exe', 'helios-google-photos.exe', 'COPYING', 'THIRD-PARTY-LICENSES.txt', 'README.md', 'unins000.exe') {
     if (-not (Test-Path (Join-Path $dir $f))) { throw "not installed: $f" }
   }
   if (-not (Test-Path $shortcut)) { throw "no Start menu entry at $shortcut" }

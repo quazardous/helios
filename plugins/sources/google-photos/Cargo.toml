@@ -1,0 +1,31 @@
+[package]
+name = "helios-plugin-google-photos"
+description = "Helios source plugin: the photos picked in Google Photos, through the Photos Picker API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "helios-google-photos"
+path = "src/main.rs"
+
+[dependencies]
+helios-connect.workspace = true
+serde_json.workspace = true
+# MIT OR Apache-2.0: the Picker API's requests and the downloads (rustls),
+# as the OAuth step already uses it.
+ureq = "3"
+
+[dev-dependencies]
+helios-core.workspace = true
+helios-library.workspace = true
+helios-plugin.workspace = true
+helios-vault.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[lints]
+workspace = true

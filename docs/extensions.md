@@ -378,7 +378,10 @@ their folders is bundled. `cargo xtask release` moves their
 `darktable-library` (see docs/darktable-library-import.md); the second,
 `lightroom-catalog`, reads a Lightroom Classic `.lrcat` (stars, rejects,
 labels, keywords, collections as tags; the schema it assumes is listed in
-its crate documentation).
+its crate documentation). The first source, under `plugins/sources/`,
+is `google-photos`: the `import.source` service over Google's Photos
+Picker API, with its connection steps declared in `[[connect]]` (an
+`oauth` step, then a `test`); see docs/google-photos.md.
 
 The test plugin `crates/helios-plugin/tests/fixtures/ratings-folder`
 (Python, standard library alone) reads a folder of JPEGs and the

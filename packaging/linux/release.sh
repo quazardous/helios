@@ -23,7 +23,7 @@ out="$3"
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 id=io.github.quazardous.Helios
-programs="helios helios-node helios-mcp helios-gui helios-darktable-library helios-lightroom-catalog"
+programs="helios helios-node helios-mcp helios-gui helios-darktable-library helios-lightroom-catalog helios-google-photos"
 sizes="16 24 32 48 64 128 256 512"
 
 # appimagetool and the AppImage runtime it puts in front of the image (the

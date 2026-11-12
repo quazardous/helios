@@ -46,9 +46,9 @@ modules:
       # helios (the command line), helios-node and helios-mcp (which helios
       # starts), helios-gui (the window) and the programs of the plugins
       # Helios ships, as the release workflow builds them.
-      - cargo build --release --locked --offline -p helios-node -p helios-gui -p helios-plugin-darktable-library -p helios-plugin-lightroom-catalog
+      - cargo build --release --locked --offline -p helios-node -p helios-gui -p helios-plugin-darktable-library -p helios-plugin-lightroom-catalog -p helios-plugin-google-photos
       - |
-        for p in helios helios-node helios-mcp helios-gui helios-darktable-library helios-lightroom-catalog; do
+        for p in helios helios-node helios-mcp helios-gui helios-darktable-library helios-lightroom-catalog helios-google-photos; do
           install -Dm755 "target/release/$p" "$FLATPAK_DEST/bin/$p"
         done
       - install -Dm644 packaging/linux/io.github.quazardous.Helios.desktop -t "$FLATPAK_DEST/share/applications"

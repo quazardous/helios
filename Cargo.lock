@@ -2779,6 +2779,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-plugin-google-photos"
+version = "0.78.0"
+dependencies = [
+ "helios-connect",
+ "helios-core",
+ "helios-library",
+ "helios-plugin",
+ "helios-vault",
+ "image",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "helios-plugin-gphoto2-camera"
 version = "0.78.0"
 dependencies = [
