@@ -393,6 +393,20 @@ A row reads: *"Backlight lift: 0.72 and 0.55 on the test photos;
 target `zones.ratio(foreground, sky)` at -2.1 stops fits both within
 0.03. [Same target] [Same value 0.64] [Keep as AI]"*.
 
+Built (slice 7, first part). `helios_template::generalise` applies rules
+1 and 2 to the sliders the session set: each candidate (the image's
+median and highlights, each zone's median, highlights and contrast,
+`zones.ratio` for each pair of zones, read on the output or as an
+offset from the input) takes as its goal the mean of what the user's
+values measure, and is aimed from the neutral value on each test photo.
+A row holds the user's values, the fixed value and spread, the
+tolerance, every candidate with its aimed values and error (the best
+first), the default and its note. With one test photo the targets that
+fit are offered but the fixed value stays the default. Not built yet:
+rules 3 and 4 (parametric fits of AI zones, junctions), `J` and `A`,
+`workshop.generalise` and the panel's Make it automatic, `confirm`
+writing the next version, a second test photo in the session.
+
 ### Limits
 
 Each row also carries its **limits**, the explicit bounds the run must
@@ -664,7 +678,7 @@ included.
 6. **Proposals while piloting** (S, built 2026-11-11). `workshop.propose`, ghost values,
    Accept, Override, Reject recorded. Test: the fake agent proposes, the
    script overrides; the record holds proposal and override.
-7. **Generalisation** (L). The rules (targets that explain a value,
+7. **Generalisation** (L, rules 1 and 2 built 2026-11-12). The rules (targets that explain a value,
    fixed values, parametric fits of AI zones, junctions kept), the rows
    with evidence, `J` and `A`, `confirm` writing the next version. Test:
    the scripted session on two synthetic test images gives "Backlight
