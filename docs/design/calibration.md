@@ -511,6 +511,22 @@ usable. Slices 1 to 5 need no GUI.
    where expected and nowhere else.
 3. **Solver:** stage 1, the constraint, stage 2, orientation. Tests 1 to
    6, the report structure.
+   **Built in part** (2026-11-12): `solver` (the exposure from the kept
+   neutrals' luminance; `n` the direction of their sum, so the constraint
+   stays linear; `P = I + U Nᵀ` solved by a 6×6 Cholesky, or all nine
+   coefficients free for the darktable-like solve; the eight orientations
+   of the handles, the lowest mean Delta E 2000 kept; the report: per
+   patch measured, reference, Delta E before and after, weight, then
+   mean, max, the worst three, the exposure in EV and darktable's quality
+   words). `A` and `W` are the caller's (slice 4 computes `A` with
+   `channelmixerrgb`'s own CAT16). Tests 1 (a real camera's matrix found
+   back to 1e-6 through a non-trivial adaptation and an exposure offset),
+   2 (on stage 1 alone), 3 (asserted on every solve), 4 and 5 (each of the
+   eight handle orders found back), plus the free solve and the refusals.
+3b. **Solver, the rest:** stage 2 (Levenberg-Marquardt on Delta E 2000
+   from stage 1's `U`, `Stage::DeltaE2000`, test 2 re-run on it) and test 6
+   (stage 1 without the constraint against darktable's checker, its LMS
+   mix converted to a working-space matrix, on the same patches).
 4. **`calibrate.chart` dry run:** the measurement graph (raw front
    without `colorin`, regions of the patches), the control request, the
    MCP tool, the shell command. Tested on a synthetic mosaic made from
