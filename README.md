@@ -2,6 +2,8 @@
 
 # Helios
 
+![Status: alpha, under construction](https://img.shields.io/badge/status-alpha%20%E2%80%94%20under%20construction-orange)
+
 > [!WARNING]
 > 🚧 **Under construction: alpha.** Helios changes every day, its formats
 > and settings may change without notice, and features are missing or
