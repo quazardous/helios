@@ -780,7 +780,19 @@ health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
 
 health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
 
-node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end, aux requêtes workflow.*, à library.import et à settings.layer.*
+node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end, aux requêtes workflow.*, à library.import, à settings.layer.*, à commands.list et à command.run
+
+node-command-debug-only = seul le point d’accès de contrôle de débogage l’exécute (helios-node --control, versions de débogage)
+
+node-command-needs-vault = le nœud ne garde aucun coffre : lancez-le avec --vault
+
+node-command-needs-window = aucune fenêtre du bureau ne tient cet espace de travail
+
+node-command-origin = `{ $origin }` n’est pas une origine : user, cli, control, agent:NOM ou script:NOM
+
+node-command-params = `{ $id }` a refusé ses paramètres : { $error }
+
+node-command-unknown = aucune commande `{ $id }`
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
 
