@@ -116,6 +116,10 @@ pub struct Context {
     /// How many Library photos are marked changed outside Helios (their
     /// file rewritten by another application); `None` without a vault.
     pub changed_outside: Option<usize>,
+    /// What the node read of the vault's database file (it opens, its
+    /// integrity); `None` when not read (the library and integrity
+    /// checks then say nothing).
+    pub database: Option<checks::Database>,
 }
 
 /// One check of the setup.

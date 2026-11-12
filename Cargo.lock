@@ -2516,7 +2516,6 @@ dependencies = [
  "helios-storage",
  "helios-vault",
  "log",
- "rusqlite",
  "serde",
  "serde_json",
 ]

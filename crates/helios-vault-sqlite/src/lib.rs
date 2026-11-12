@@ -48,6 +48,7 @@ use helios_vault::{
     Version, VersionId, parse_hash,
 };
 
+pub mod health;
 mod migrate;
 pub mod snapshot;
 
