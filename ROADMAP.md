@@ -337,6 +337,17 @@ a profile per camera and illuminant kept in the vault and applied by a
 with a dry run. Design, slices and open questions:
 [docs/design/calibration.md](docs/design/calibration.md).
 
+**A camera look fitted to the embedded JPEG** (2026-11-13, plan
+accepted; the design's details not decided). An optional look, off by
+default, that answers "my raw doesn't look like the JPEG": per file, a
+3×3 matrix keeping neutrals, a hue/saturation table, and tone and chroma
+curves fitted from the raw to its embedded preview on Delta E 2000,
+checked on held-out blocks and refused by gates (preview, scene, picture
+style, score); its numbers are copied into the edit, so renders never
+refit. The chart profile stays the accurate reference. Idea from
+LightCraft. Design, steps and open questions:
+[docs/design/camera-look.md](docs/design/camera-look.md).
+
 ### 2.2 Kernel and scheduler
 
 - Content-addressed work units, offloadable anywhere (client, GPU PC by
