@@ -329,6 +329,16 @@ gui-edit-does-not-fit = Part of the saved edit does not fit this network: { $par
 
 gui-edit-not-saved = The edit was not saved: { $error }
 
+gui-editor-card = Card or camera
+
+gui-editor-params = Parameters
+
+gui-editor-params-wrong = A parameter does not fit what the connector takes
+
+gui-editor-save = Save the source
+
+gui-editor-title = Edit source
+
 gui-export-bits = PNG bits per channel
 
 gui-export-cancelled = The export was cancelled: { $written } photos written to { $folder }
@@ -581,6 +591,8 @@ gui-import-window-duplicates-keep = Keep
 
 gui-import-window-duplicates-skip = Skip
 
+gui-import-window-edit-source = Edit source…
+
 gui-import-window-empty = No photos in the sources ticked
 
 gui-import-window-example = e.g. { $example }
@@ -590,6 +602,10 @@ gui-import-window-favourites = Favourites
 gui-import-window-forget = Forget this folder
 
 gui-import-window-forget-hint = Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it
+
+gui-import-window-forget-source = Forget this source
+
+gui-import-window-forget-source-hint = Takes it off this column, its name and choices with it; the photos and the library are untouched
 
 gui-import-window-import = Import { $count }
 

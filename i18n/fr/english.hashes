@@ -391,6 +391,11 @@ gui-duplicates-waiting b7d76f1b17257c39
 gui-duplicates-waiting-note 8415f0fbd08021d1
 gui-edit-does-not-fit b270477011039ced
 gui-edit-not-saved 988fbabe3acbb2ab
+gui-editor-card 7990bbcb51e1fe73
+gui-editor-params fff7588f4a1a3651
+gui-editor-params-wrong 9fac9b9663ae50d2
+gui-editor-save bf722ac13bbc1962
+gui-editor-title bbab0761ce200edc
 gui-export-bits 445ead6584b2ae46
 gui-export-cancelled 1b689c82cb971e12
 gui-export-clash 49f01efc23c89024
@@ -516,11 +521,14 @@ gui-import-window-duplicates 29e870919dd2ab47
 gui-import-window-duplicates-ask 9e2a8daf23545400
 gui-import-window-duplicates-keep bab3b446ab9be9ce
 gui-import-window-duplicates-skip d5661c3c615168d0
+gui-import-window-edit-source ab3bf326294210ac
 gui-import-window-empty fe07d84361c8a78d
 gui-import-window-example 3ee1ea9bdc5fbf23
 gui-import-window-favourites 7192206bcca57ec5
 gui-import-window-forget b048c9b09ccf06b2
 gui-import-window-forget-hint c993c16ae95c1288
+gui-import-window-forget-source a5f2cd948afc14b5
+gui-import-window-forget-source-hint 70720134381beb2d
 gui-import-window-import a96568bcea9b92b7
 gui-import-window-in-library 8e2f7088b5da9f30
 gui-import-window-into 952ca2732019c6b3

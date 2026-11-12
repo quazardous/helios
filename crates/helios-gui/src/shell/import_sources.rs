@@ -18,7 +18,14 @@
 //! - **Choices a connector cannot honour are hidden**: a remote
 //!   connector's photos are always copied ("Add where they are" hidden)
 //!   and have no darktable sidecars ("Read darktable edits" hidden).
+//! - **"Edit source…"** in a source's menu opens the wizard's steps on it
+//!   ([`super::import_wizard`]): its parameters (the folder or account,
+//!   then the keys of its connector's source contract that are not
+//!   choices), its choices, its name. A remembered source (a recent
+//!   folder, a card) is saved by it; **"Forget this source"** takes a
+//!   source off the column. Both are steps of the column's Undo.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -91,10 +98,14 @@ pub struct SavedSource {
     /// Its own choices; `None`: the window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices: Option<Choices>,
+    /// Its connector's own parameters: the keys of its source contract
+    /// that are not choices, as set.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, serde_json::Value>,
 }
 
 impl SavedSource {
-    fn key(&self) -> Option<SourceKey> {
+    pub(crate) fn key(&self) -> Option<SourceKey> {
         match (&self.path, &self.account) {
             (Some(p), _) => Some(SourceKey::Folder(p.clone())),
             (None, Some(a)) => Some(SourceKey::Account(a.clone())),
@@ -139,12 +150,29 @@ impl Honours {
             darktable: local,
         }
     }
+
+    /// What a connector honours, its source contract having the last
+    /// word when it declares one: without a `copy` key its photos are
+    /// always copied, without `darktable` no sidecars are read.
+    pub fn of_connector(caps: &Caps, contract: &helios_core::config::Contract) -> Self {
+        let mut honours = Self::of(caps);
+        if !contract.is_empty() {
+            honours.add_in_place &= contract.get("copy").is_some();
+            honours.darktable &= contract.get("darktable").is_some();
+        }
+        honours
+    }
 }
 
-/// A change of a source's choices, for Undo.
+/// A change of a source (its choices, an edit, a forget), for Undo.
 struct Step {
-    key: SourceKey,
-    before: Option<Choices>,
+    /// The source as it is after the change, when there is one.
+    key: Option<SourceKey>,
+    /// The source before, and its place in the list.
+    before: Option<(usize, SavedSource)>,
+    /// The recent folders and favourites before, when the change took a
+    /// folder off them.
+    memory: Option<(Vec<PathBuf>, Vec<PathBuf>)>,
     at: Instant,
 }
 
@@ -182,8 +210,38 @@ impl Sources {
         self.write.is_some()
     }
 
-    fn get(&self, key: &SourceKey) -> Option<&SavedSource> {
+    pub(crate) fn get(&self, key: &SourceKey) -> Option<&SavedSource> {
         self.list.iter().find(|s| s.key().as_ref() == Some(key))
+    }
+
+    /// The source of `key` and its place, as a step's `before`.
+    fn before(&self, key: &SourceKey) -> Option<(usize, SavedSource)> {
+        self.list
+            .iter()
+            .position(|s| s.key().as_ref() == Some(key))
+            .map(|i| (i, self.list[i].clone()))
+    }
+
+    /// Puts `source` in place of the one of `key` (at its place), or takes
+    /// it away (`None`); one Undo step, its own.
+    fn replace(&mut self, key: Option<&SourceKey>, source: Option<SavedSource>) {
+        let before = key.and_then(|k| self.before(k));
+        let after = source.as_ref().and_then(SavedSource::key);
+        let at = before.as_ref().map(|(i, _)| *i);
+        self.list
+            .retain(|s| s.key().is_none() || (s.key().as_ref() != key && s.key() != after));
+        if let Some(source) = source {
+            let at = at.unwrap_or(self.list.len()).min(self.list.len());
+            self.list.insert(at, source);
+        }
+        let now = Instant::now();
+        self.undo.push(Step {
+            key: after,
+            before,
+            memory: None,
+            at: now.checked_sub(ONE_STEP).unwrap_or(now),
+        });
+        self.store();
     }
 
     /// A source's own choices.
@@ -226,6 +284,9 @@ impl Sources {
 
     /// Sets a source's own choices, saving the source when new.
     fn set(&mut self, key: &SourceKey, connector: &str, choices: Option<Choices>) {
+        if self.get(key).is_none() && choices.is_none() {
+            return;
+        }
         if let Some(s) = self.list.iter_mut().find(|s| s.key().as_ref() == Some(key)) {
             s.choices = choices;
         } else {
@@ -239,6 +300,7 @@ impl Sources {
                 path,
                 account,
                 choices,
+                params: BTreeMap::new(),
             });
         }
         self.store();
@@ -260,7 +322,7 @@ impl Sources {
         self.list = doc.sources;
     }
 
-    fn store(&self) {
+    pub(crate) fn store(&self) {
         let Some(write) = &self.write else { return };
         let doc = Document {
             sources: self.list.clone(),
@@ -290,7 +352,9 @@ impl ImportWindow {
             return Some(SourceKey::Account(id.clone()));
         }
         let last = self.ticked.last()?;
-        (!self.is_card(last)).then(|| SourceKey::Folder(last.clone()))
+        let key = SourceKey::Folder(last.clone());
+        // A card is an automatic source, unless saved.
+        (!self.is_card(last) || self.sources.get(&key).is_some()).then_some(key)
     }
 
     /// The window's choices: the column's while it shows them.
@@ -305,7 +369,7 @@ impl ImportWindow {
     /// The choices an import from `path` runs with: the folder's own, else
     /// the window's.
     pub(super) fn choices_for(&self, path: &std::path::Path) -> Choices {
-        if self.is_card(path) {
+        if self.is_card(path) && !self.sources.has_own(path) {
             return self.window_choices().clone();
         }
         self.sources
@@ -354,13 +418,25 @@ impl ImportWindow {
             .iter()
             .find(|a| a.id == id)
             .map(|a| a.connector.clone());
-        connector
-            .and_then(|c| self.connectors.provider(&c))
-            .map_or_else(Honours::default, |p| Honours::of(&p.manifest().caps))
+        connector.map_or_else(Honours::default, |c| self.connector_honours(&c))
     }
 
-    fn connector_of(&mut self, key: &SourceKey) -> String {
+    /// What the connector `id` honours, by its capabilities and its
+    /// source contract.
+    pub(super) fn connector_honours(&self, id: &str) -> Honours {
+        self.connectors
+            .provider(id)
+            .map_or_else(Honours::default, |p| {
+                Honours::of_connector(&p.manifest().caps, &p.config().source)
+            })
+    }
+
+    pub(super) fn connector_of(&mut self, key: &SourceKey) -> String {
+        if let Some(saved) = self.sources.get(key) {
+            return saved.connector.clone();
+        }
         match key {
+            SourceKey::Folder(p) if self.is_card(p) => helios_connect::card::ID.to_string(),
             SourceKey::Folder(_) => helios_connect::folder::ID.to_string(),
             SourceKey::Account(id) => self
                 .accounts
@@ -379,18 +455,17 @@ impl ImportWindow {
         if let Some(key) = shown.filter(|k| Some(k) == self.sources.showing.as_ref())
             && self.choices != *before
         {
-            let earlier = self.sources.own(&key).cloned();
+            let earlier = self.sources.before(&key);
             let now = Instant::now();
-            let joined = self
-                .sources
-                .undo
-                .last()
-                .is_some_and(|s| s.key == key && now.duration_since(s.at) < ONE_STEP);
+            let joined = self.sources.undo.last().is_some_and(|s| {
+                s.key.as_ref() == Some(&key) && now.duration_since(s.at) < ONE_STEP
+            });
             match self.sources.undo.last_mut() {
                 Some(step) if joined => step.at = now,
                 _ => self.sources.undo.push(Step {
-                    key: key.clone(),
+                    key: Some(key.clone()),
                     before: earlier,
+                    memory: None,
                     at: now,
                 }),
             }
@@ -405,20 +480,72 @@ impl ImportWindow {
         }
     }
 
-    /// Takes back the last change of a source's choices.
+    /// Takes back the last change of a source: its choices, an edit or
+    /// a forget.
     pub(super) fn undo_source_choice(&mut self) {
         let Some(step) = self.sources.undo.pop() else {
             return;
         };
-        let connector = self.connector_of(&step.key);
-        self.sources.set(&step.key, &connector, step.before);
-        if self.sources.showing.as_ref() == Some(&step.key) {
-            self.choices = self
-                .sources
-                .own(&step.key)
-                .unwrap_or(&self.sources.window)
-                .clone();
-            self.custom = false;
+        let list = &mut self.sources.list;
+        if let Some(key) = &step.key {
+            list.retain(|s| s.key().as_ref() != Some(key));
+        }
+        let back = step.before.as_ref().and_then(|(_, s)| s.key());
+        if let Some((at, source)) = step.before {
+            list.retain(|s| s.key().is_none() || s.key() != back);
+            list.insert(at.min(list.len()), source);
+        }
+        self.sources.store();
+        if let Some((recent, favourites)) = step.memory {
+            self.memory.recent = recent;
+            self.memory.favourites = favourites;
+            self.save();
+        }
+        // The column shows the selected source afresh.
+        if self.sources.showing.is_some() {
+            self.choices = self.sources.window.clone();
+            self.sources.showing = None;
+        }
+    }
+
+    /// Saves `source` in place of the source of `key` (an edit, or a
+    /// remembered source promoted when it had none): one Undo step.
+    pub(super) fn replace_source(&mut self, key: &SourceKey, source: SavedSource) {
+        self.sources.replace(Some(key), Some(source));
+        if self.sources.showing.is_some() {
+            self.choices = self.sources.window.clone();
+            self.sources.showing = None;
+        }
+    }
+
+    /// "Forget this source": the source of `key` is no longer saved, nor a
+    /// recent folder or a favourite; it is unticked. One Undo step.
+    pub(super) fn forget_source(&mut self, key: &SourceKey) {
+        let memory = (self.memory.recent.clone(), self.memory.favourites.clone());
+        self.sources.replace(Some(key), None);
+        let mut took = false;
+        match key {
+            SourceKey::Folder(path) => {
+                took = self.memory.recent.contains(path) || self.memory.favourites.contains(path);
+                self.memory.recent.retain(|p| p != path);
+                self.memory.favourites.retain(|p| p != path);
+                self.ticked.retain(|p| p != path);
+                if took {
+                    self.save();
+                }
+            }
+            SourceKey::Account(id) => {
+                if self.sources.account.as_deref() == Some(id.as_str()) {
+                    self.sources.account = None;
+                }
+            }
+        }
+        if took && let Some(step) = self.sources.undo.last_mut() {
+            step.memory = Some(memory);
+        }
+        if self.sources.showing.is_some() {
+            self.choices = self.sources.window.clone();
+            self.sources.showing = None;
         }
     }
 
@@ -427,14 +554,15 @@ impl ImportWindow {
         let Some(key) = self.sources.showing.clone() else {
             return;
         };
-        let Some(before) = self.sources.own(&key).cloned() else {
+        if self.sources.own(&key).is_none() {
             return;
-        };
+        }
         // Its own step: a change right after it is not joined to it.
         let now = Instant::now();
         self.sources.undo.push(Step {
-            key: key.clone(),
-            before: Some(before),
+            key: Some(key.clone()),
+            before: self.sources.before(&key),
+            memory: None,
             at: now.checked_sub(ONE_STEP).unwrap_or(now),
         });
         let connector = self.connector_of(&key);
@@ -473,9 +601,22 @@ impl Shell {
         self.import.get_mut().select_account(id.to_string());
     }
 
-    /// Takes back the last change of an import source's choices.
+    /// Takes back the last change of an import source: its choices, an
+    /// edit or a forget.
     pub fn undo_import_source_choice(&mut self) {
         self.import.get_mut().undo_source_choice();
+    }
+
+    /// "Forget this source" on the import window's folder `path`.
+    pub fn forget_import_source(&mut self, path: &std::path::Path) {
+        self.import
+            .get_mut()
+            .forget_source(&SourceKey::Folder(path.to_path_buf()));
+    }
+
+    /// The import window's recent folders.
+    pub fn import_recent(&self) -> Vec<PathBuf> {
+        self.import.get().memory.recent.clone()
     }
 }
 
@@ -497,6 +638,7 @@ mod tests {
                         rename: "{date}-{seq}".into(),
                         ..Choices::default()
                     }),
+                    params: BTreeMap::new(),
                 },
                 SavedSource {
                     connector: "google-photos".into(),
@@ -504,6 +646,7 @@ mod tests {
                     path: None,
                     account: Some("google-photos-1".into()),
                     choices: None,
+                    params: [("album".to_owned(), serde_json::json!("Holidays"))].into(),
                 },
             ],
         };

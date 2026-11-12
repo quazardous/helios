@@ -2957,3 +2957,150 @@ fn cancelling_the_add_a_source_wizard_at_any_step_leaves_no_source() {
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The menu of the folder row labelled `label` in the Sources column.
+fn row_menu(h: &mut Harness<'static, Shell>, label: &str) {
+    h.get(
+        egui_kittest::kittest::By::new()
+            .role(egui::accesskit::Role::CheckBox)
+            .label(label),
+    )
+    .click_secondary();
+    h.run_steps(3);
+}
+
+#[test]
+fn edit_source_saves_a_recent_folder_with_its_copy_or_add_and_name_kept_after_a_restart() {
+    let dir = temp("editor");
+    let trips = dir.join("trips");
+    std::fs::create_dir_all(&trips).unwrap();
+    put(&trips.join("a.jpg"), Ok(&jpeg("a")), 2);
+    let vault = dir.join("vault.db");
+    {
+        let (node, kept) = node_at(&vault);
+        let mut h = shell_keeping(&kept);
+        open_on(&mut h, &trips);
+        // A recent folder, remembered but not saved.
+        assert!(h.state().import_sources().is_empty());
+        row_menu(&mut h, "trips");
+        click(&mut h, "Edit source…");
+        assert!(h.state().import_wizard_open());
+        let _ = h.get_by_label("Edit source");
+        // Its parameter, the folder, is there; its kind is not asked.
+        assert!(
+            h.query_by_label("What kind of source is it?").is_none(),
+            "the editor starts at the setup"
+        );
+        click(&mut h, "Next");
+        // A folder honours both: copy or add is offered.
+        let _ = h.get_by_label("Add where they are");
+        click(&mut h, "Copy into the Library");
+        click(&mut h, "By month");
+        click(&mut h, "Next");
+        type_in_focused(&mut h, " raw");
+        click(&mut h, "Save the source");
+        assert!(!h.state().import_wizard_open());
+        let sources = h.state().import_sources();
+        assert_eq!(sources.len(), 1, "{sources:?}");
+        let source = &sources[0];
+        assert_eq!(
+            (source.connector.as_str(), source.path.as_deref()),
+            ("folder", Some(trips.as_path()))
+        );
+        let name = source.name.clone().unwrap_or_default();
+        assert!(name.contains("trips") && name.contains("raw"), "{name}");
+        let choices = source.choices.clone().expect("its own choices");
+        assert!(choices.copy_folders, "{choices:?}");
+        assert_eq!(choices.layout.as_str(), "month");
+        // Selected, under its name among the saved sources.
+        assert_eq!(h.state().import_ticked(), std::slice::from_ref(&trips));
+        let _ = h.get_by_label("Saved sources");
+        // Edited again: switched back to add where they are.
+        row_menu(&mut h, &name);
+        click(&mut h, "Edit source…");
+        click(&mut h, "Next");
+        click(&mut h, "Add where they are");
+        click(&mut h, "Next");
+        click(&mut h, "Save the source");
+        let sources = h.state().import_sources();
+        assert_eq!(sources.len(), 1, "{sources:?}");
+        assert!(!sources[0].choices.as_ref().unwrap().copy_folders);
+        // Undo takes the edit back, as the column's other changes.
+        h.state_mut().undo_import_source_choice();
+        h.run_steps(3);
+        assert!(
+            h.state().import_sources()[0]
+                .choices
+                .as_ref()
+                .unwrap()
+                .copy_folders
+        );
+        drop(h);
+        node.stop();
+    }
+    // After a restart, it is back with its name and choices.
+    let (node, kept) = node_at(&vault);
+    let h = shell_keeping(&kept);
+    let sources = h.state().import_sources();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert!(
+        sources[0]
+            .name
+            .as_deref()
+            .unwrap_or_default()
+            .contains("raw")
+    );
+    let choices = sources[0].choices.clone().unwrap();
+    assert!(choices.copy_folders && choices.layout.as_str() == "month");
+    drop(h);
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn forget_this_source_takes_a_folder_off_the_column_and_undo_brings_it_back() {
+    let dir = temp("forget-source");
+    let (trips, family) = (dir.join("trips"), dir.join("family"));
+    for (folder, name) in [(&trips, "a"), (&family, "b")] {
+        std::fs::create_dir_all(folder).unwrap();
+        put(&folder.join(format!("{name}.jpg")), Ok(&jpeg(name)), 2);
+    }
+    let (node, kept) = node_at(&dir.join("vault.db"));
+    let mut h = shell_keeping(&kept);
+    // A recent folder, only remembered: forgotten, then back.
+    open_on(&mut h, &family);
+    open_on(&mut h, &trips);
+    assert!(h.state().import_recent().contains(&family));
+    row_menu(&mut h, "family");
+    click(&mut h, "Forget this source");
+    assert!(!h.state().import_recent().contains(&family));
+    assert!(h.query_by_label("family").is_none());
+    h.state_mut().undo_import_source_choice();
+    h.run_steps(3);
+    assert!(h.state().import_recent().contains(&family));
+    // A folder with its own choices: forgotten with them.
+    click(&mut h, "Keep");
+    assert_eq!(h.state().import_sources().len(), 1);
+    row_menu(&mut h, "trips");
+    click(&mut h, "Forget this source");
+    assert!(h.state().import_sources().is_empty());
+    assert!(!h.state().import_recent().contains(&trips));
+    assert!(!h.state().import_ticked().contains(&trips));
+    let text = kept
+        .read(helios_gui::shell::IMPORT_SOURCES)
+        .unwrap()
+        .unwrap_or_default();
+    assert!(!text.contains("trips"), "{text}");
+    h.state_mut().undo_import_source_choice();
+    h.run_steps(3);
+    let sources = h.state().import_sources();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert_eq!(
+        sources[0].choices.as_ref().unwrap().duplicates.as_str(),
+        "keep"
+    );
+    assert!(h.state().import_recent().contains(&trips));
+    drop(h);
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}

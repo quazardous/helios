@@ -656,7 +656,9 @@ Into, the folder pattern, Name, Duplicates, Read darktable edits).
   source the window's choices again. The window's choices stay the last
   used, per library, as before; a source without choices of its own
   follows them.
-- **A card** stays an automatic source with the window's choices.
+- **A card** stays an automatic source with the window's choices,
+  unless saved through "Edit source…" (section 3.8): its own choices
+  then follow it where it is mounted.
 - **Choices a connector cannot honour are hidden.** A connector reached
   through an account (`caps.accounts`, Google Photos) is remote: its
   photos are always copied ("Add where they are" hidden) and carry no
@@ -696,6 +698,47 @@ folder's row ticks it, an account's selects it; a named folder is not
 listed again under Recent or Favourites. Cancel, at any step, saves
 nothing; an account signed in to on the way stays an account (Settings >
 Accounts lists it).
+
+### 3.8 Editing a source (as built)
+
+"Edit source…", in a source's menu in the Sources column (a right click
+on its row), opens the wizard's steps on that source, from its setup; its
+kind is the source's and is not asked again.
+
+1. **Its parameters**: the folder or the account, then the connector's
+   own parameters, from its configuration contract
+   (`ConnectorProvider::config()`, its `source` level): each key that is
+   not one of the choices, by its type (a checkbox, a choice, a number,
+   a text), hidden while its `visible_when` does not hold. Next waits
+   for values the contract takes. They are kept on the source
+   (`params`, a table of `[[source]]`).
+2. **Its choices**, as in the wizard. Copy or add where they are is
+   offered only when the connector honours both: a connector reached
+   through an account, or whose source contract has no `copy` key
+   (Google Photos), shows copy alone; a source kept with "add where they
+   are" by an older document is saved copied.
+3. **Its name**, empty for a source never saved: the folder's or the
+   account's then.
+
+"Save the source" puts it in place of the source edited (a folder moved
+is ticked where it is now), one step of the column's Undo. A remembered
+source, a recent folder or a card, is saved by it: that is how one is
+promoted. **"Forget this source"**, in the same menu, takes a source off
+the column: its name, choices and parameters, and a folder off Recent
+and Favourites; it is one Undo step too, bringing all of it back. It
+leaves the image map alone, which "Forget this folder" clears.
+
+**The choices and the contract.** The local sources' contract
+(`helios_connect::local::source_contract`) names the choices' keys
+(`copy`, `into`, `layout`, `rename`, `duplicates`, `darktable`); the
+window's `Choices` read and write those values
+(`Choices::from_values`, `Choices::values`), and its defaults are the
+contract's. Its stored form keeps its own field names (`copy_folders`),
+so documents and presets already written still read.
+
+Not yet: promoting an account listed under Accounts (only those saved
+are edited); a contract key's label and help in the person's language
+(the contract's English is shown).
 
 ## 4. The connectors surveyed
 
