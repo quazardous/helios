@@ -34,6 +34,7 @@ use serde::Serialize;
 use serde_json::json;
 use storage::VolumeId;
 
+pub mod accounts;
 pub mod capture;
 pub mod catalog;
 pub mod changed;
