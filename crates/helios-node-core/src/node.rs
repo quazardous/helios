@@ -238,7 +238,14 @@ impl<S: Store + 'static> LocalNode<S> {
     /// Opens the vault on `store`, announcing its changes on `bus`, and
     /// starts the node: it flushes every `every` until it stops.
     pub fn open(store: S, bus: Arc<Bus>, every: Duration) -> Self {
-        let vault = Arc::new(Vault::new(store).with_bus(bus.clone()));
+        Self::own(Vault::new(store), bus, every)
+    }
+
+    /// Takes `vault`, already open (read before the bus existed: the
+    /// settings it keeps size the bus), announcing its changes on `bus`
+    /// from now on, and starts the node as [`LocalNode::open`] does.
+    pub fn own(vault: Vault<S>, bus: Arc<Bus>, every: Duration) -> Self {
+        let vault = Arc::new(vault.with_bus(bus.clone()));
         let link = Link(Arc::default());
         let runner = {
             let (vault, life) = (vault.clone(), link.0.clone());

@@ -55,7 +55,11 @@ process per library), [sync.md](sync.md) (replicas), [workflow-level.md](../work
 - **`helios-node` is a headless node** (`crates/helios-node/src/main.rs`):
   a network from JSON, renders and exports, the workflow runs
   (`crates/helios-node/src/workflow/`), the inspect and control endpoints,
-  settings layers kept in its vault with `--vault`.
+  settings layers kept in its vault with `--vault`. With `--vault` it runs
+  the same `LocalNode` the desktop embeds (`crates/helios-node-core`,
+  `crates/helios-node/src/vault_node.rs`): one owner of the vault, which
+  the settings, the edit and the runs borrow, with the volume watch, the
+  backups and the health check as its jobs, and a clean close on SIGTERM.
 - **The link between them carries jobs only.** `--node NAME=INSPECT[,CONTROL]`
   starts a relay (`crates/helios-gui/src/relay.rs`) that mirrors a node's
   `job.*` events into the jobs centre and sends Cancel back. No catalogue

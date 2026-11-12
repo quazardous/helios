@@ -3,7 +3,7 @@
 //! Loads a network from a JSON description, serves the read-only inspection
 //! endpoint on a socket, prints `ready <socket>` on stdout, renders what the
 //! description asks for, then stays up so it can be inspected. Stop it with
-//! a signal.
+//! SIGTERM or SIGINT (Ctrl-C): it exits with 0, its vault closed cleanly.
 //!
 //!     helios-node --graph network.json --socket /path/to/node.sock
 //!                 [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--runs-vault FILE]
@@ -21,6 +21,14 @@
 //! FILE` (a SQLite vault), the user and project layers live in the vault:
 //! a layer file given and not yet in the vault is imported into it once,
 //! and from then on the vault's copy is the one read.
+//!
+//! With `--vault`, the node owns the vault (`helios_node::vault_node`): it
+//! opens it once and lends it to the settings, the edit and the runs, saves
+//! it on its own schedule, and runs what the desktop's node runs without a
+//! window: it watches the machine's volumes, runs the backups (a backup
+//! disk of the strategy plugged in starts one) and the health check on its
+//! schedule, each a job on its bus. A signal cancels the running backups
+//! (the copy under way is recorded), then closes the vault cleanly.
 //!
 //! `--control` serves the debug control endpoint (render, set a parameter,
 //! cancel, pause, resume, inject a fault). It exists only in debug builds and
@@ -75,7 +83,8 @@ use helios_decision::Book;
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
-use helios_node::workflow::runs::{Context as RunsContext, Workflows};
+use helios_node::vault_node::{Options as VaultNodeOptions, VaultNode};
+use helios_node::workflow::runs::{Context as RunsContext, SharedVault, Workflows};
 use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -151,9 +160,12 @@ impl Describe for SharedGraph {
     }
 }
 
+/// The vault `--vault` names.
+type Vault = helios_vault::Vault<helios_vault_sqlite::SqliteStore>;
+
 /// The edit of the image a node with a vault works on, kept as versions.
 struct NodeEdit {
-    vault: helios_vault::Vault<helios_vault_sqlite::SqliteStore>,
+    vault: SharedVault,
     session: Mutex<helios_vault::EditSession>,
     /// The head's `marks` (the desktop's labels and locks), which a node
     /// does not change: carried over to each version it saves.
@@ -184,18 +196,15 @@ fn edit_of(graph: &Graph, book: &Book) -> Value {
 /// saved there is loaded into `graph` and `book`, and changes are saved
 /// from now on.
 fn open_edit(
-    vault_file: &Path,
+    vault: &SharedVault,
     file: &Path,
     bus: &Arc<Bus>,
     graph: &mut Graph,
     book: &mut Book,
     declared: &BTreeMap<String, helios_decision::Mode>,
 ) -> Result<NodeEdit, String> {
-    let store = helios_vault_sqlite::SqliteStore::open(vault_file)
-        .map_err(|e| format!("{}: {e}", vault_file.display()))?;
-    let vault = helios_vault::Vault::new(store).with_bus(bus.clone());
     let image = vault.import_file(file, unix_now())?;
-    let (session, head) = helios_vault::EditSession::open(&vault, image)?;
+    let (session, head) = helios_vault::EditSession::open(vault, image)?;
     let marks = head
         .as_ref()
         .map_or(Value::Null, |h| h.edit["marks"].clone());
@@ -221,7 +230,7 @@ fn open_edit(
         );
     }
     Ok(NodeEdit {
-        vault,
+        vault: vault.clone(),
         session: Mutex::new(session),
         marks,
     })
@@ -1248,20 +1257,12 @@ fn vault_layer(layer: Layer, path: &Path) -> Option<String> {
     }
 }
 
-/// The node's settings, from the layers it was given.
-fn config(args: &Args) -> Result<Config, String> {
+/// The node's settings, from the layers it was given; with a `vault`,
+/// the user and project layers are kept in it.
+fn config(args: &Args, vault: Option<&Vault>) -> Result<Config, String> {
     let mut config = Config::new(Schema::core());
     // Lowest layer first: a value equal to what it inherits leaves its layer,
     // so what it inherits must be known when it is set.
-    let vault = args
-        .vault
-        .as_ref()
-        .map(|path| {
-            helios_vault_sqlite::SqliteStore::open(path)
-                .map(helios_vault::Vault::new)
-                .map_err(|e| format!("{}: {e}", path.display()))
-        })
-        .transpose()?;
     let mut layers: Vec<_> = args.layers.iter().collect();
     layers.sort_by_key(|(layer, _)| *layer);
     let problems = |source: String| {
@@ -1272,7 +1273,7 @@ fn config(args: &Args) -> Result<Config, String> {
     };
     let mut from_vault = Vec::new();
     for (layer, path) in layers {
-        let kept = vault.as_ref().zip(vault_layer(*layer, path));
+        let kept = vault.zip(vault_layer(*layer, path));
         let Some((vault, name)) = kept else {
             config
                 .load_file(*layer, path)
@@ -1291,7 +1292,7 @@ fn config(args: &Args) -> Result<Config, String> {
         from_vault.push((*layer, name));
     }
     // Layers kept in the vault, given as files or not.
-    if let Some(vault) = &vault {
+    if let Some(vault) = vault {
         if !from_vault.iter().any(|(l, _)| *l == Layer::User) {
             from_vault.push((Layer::User, "user".into()));
         }
@@ -1312,6 +1313,61 @@ fn config(args: &Args) -> Result<Config, String> {
     Ok(config)
 }
 
+/// The node of `--vault`, stopped once: by a signal, or as `main` ends.
+#[derive(Clone, Default)]
+struct Stopper(Arc<Mutex<Option<VaultNode>>>);
+
+impl Stopper {
+    fn hold(&self, node: VaultNode) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(node);
+    }
+
+    /// Stops the node, if it is running: its jobs settled, the vault
+    /// closed cleanly.
+    fn stop(&self) {
+        let node = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(node) = node {
+            node.stop();
+            eprintln!("helios-node: the vault is closed");
+        }
+    }
+
+    /// SIGTERM or SIGINT stops the node, then ends the process (code 0).
+    #[cfg(unix)]
+    fn on_signals(&self) {
+        let signalled = Arc::new(AtomicBool::new(false));
+        for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+            if let Err(e) = signal_hook::flag::register(signal, signalled.clone()) {
+                eprintln!("helios-node: signal {signal} not heard: {e}");
+            }
+        }
+        let me = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("helios-node-signals".into())
+            .spawn(move || {
+                while !signalled.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                eprintln!("helios-node: stopping");
+                me.stop();
+                std::process::exit(0);
+            });
+        if let Err(e) = spawned {
+            eprintln!("helios-node: no thread to hear signals on: {e}");
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn on_signals(&self) {}
+}
+
 fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
@@ -1322,6 +1378,16 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let stopper = Stopper::default();
+    stopper.on_signals();
+    let code = serve(&args, &stopper);
+    // A start that failed past the vault's opening still closes it cleanly.
+    stopper.stop();
+    code
+}
+
+/// Runs the node `args` describe; returns only when it cannot start.
+fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     let loaded = std::fs::read_to_string(&args.graph)
         .map_err(|e| format!("cannot read {}: {e}", args.graph.display()))
         .and_then(|text| {
@@ -1336,7 +1402,21 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let config = match config(&args) {
+    // The vault is opened once: read for the settings first, then owned by
+    // the node, which the other users borrow it from.
+    let vault = match args.vault.as_ref().map(|path| {
+        helios_vault_sqlite::SqliteStore::open(path)
+            .map(Vault::new)
+            .map_err(|e| format!("{}: {e}", path.display()))
+    }) {
+        None => None,
+        Some(Ok(v)) => Some(v),
+        Some(Err(e)) => {
+            eprintln!("helios-node: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let config = match config(args, vault.as_ref()) {
         Ok(c) => Arc::new(c),
         Err(e) => {
             eprintln!("helios-node: {e}");
@@ -1358,7 +1438,16 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let edit = match (&args.vault, &loaded.frame_file) {
+    let jobs = Jobs::new(bus.clone());
+    // The node owns the vault and runs its jobs: the volume watch, the
+    // backups, the health check.
+    let vault = vault.zip(args.vault.as_ref()).map(|(vault, file)| {
+        let node = VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
+        let vault = node.vault().clone();
+        stopper.hold(node);
+        vault
+    });
+    let edit = match (&vault, &loaded.frame_file) {
         (Some(vault), Some(file)) => match open_edit(
             vault,
             file,
@@ -1386,14 +1475,13 @@ fn main() -> ExitCode {
             config.number("system.ai.calls") as u64,
         )],
     ));
-    let jobs = Jobs::new(bus.clone());
     // Built first: its instance names the owner of the runs.
     let inspector = Inspector::new(bus.clone());
-    // The runs last in the vault, on a connection of their own.
-    let runs_vault = match args.runs_vault.as_ref().or(args.vault.as_ref()) {
-        None => None,
+    // The runs last in the node's vault, or in `--runs-vault`'s.
+    let runs_vault = match &args.runs_vault {
+        None => vault,
         Some(path) => match helios_vault_sqlite::SqliteStore::open(path) {
-            Ok(store) => Some(Arc::new(helios_vault::Vault::new(store))),
+            Ok(store) => Some(Arc::new(Vault::new(store))),
             Err(e) => {
                 eprintln!("helios-node: {}: {e}", path.display());
                 return ExitCode::from(1);
