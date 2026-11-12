@@ -1288,6 +1288,7 @@ impl App {
     fn closing(&mut self) {
         quit::requested();
         if let Some(persist) = &mut self.persist {
+            let _stall = helios_gui::stall::section("vault written (closing frame)");
             persist.frame(&mut self.shell, seconds_f64());
             quit::mark("vault written (closing frame)");
         }
@@ -1296,6 +1297,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let _stall = helios_gui::stall::frame("the main window's pass");
         if ui.ctx().input(|i| i.viewport().close_requested()) {
             // The application's life is the shell's policy, not the main
             // window's: closed while another window is open, that window
@@ -1320,7 +1322,10 @@ impl eframe::App for App {
         }
         start::mark_in_first_frame("egui's pass begun (fonts ready)");
 
-        self.shell.ui(ui);
+        {
+            let _stall = helios_gui::stall::section("the shell's pass");
+            self.shell.ui(ui);
+        }
         // The GPU path is installed by now: the image's own surface
         // follows the Wide-gamut preview setting.
         let frame: &eframe::Frame = frame;
@@ -1402,7 +1407,10 @@ impl eframe::App for App {
             }
         }
         if let Some(persist) = &mut self.persist {
-            persist.frame(&mut self.shell, seconds_f64());
+            {
+                let _stall = helios_gui::stall::section("the library's changes sent to the vault");
+                persist.frame(&mut self.shell, seconds_f64());
+            }
             // A scan changed where copies are (a disk plugged in or
             // out): the photos' badges and thumbnails follow.
             if persist.take_locations_changed() {
@@ -1589,6 +1597,9 @@ fn main() -> Result<(), String> {
     };
     start::mark("instance check");
     let ending = listen_for_ending();
+    // A frame holding the interface's thread too long leaves a trace in
+    // the log and the crash folder (`helios_gui::stall`).
+    let _stall_watchdog = helios_gui::stall::Watchdog::start(platform::crash_dir());
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`): opened on a
     // thread while the settings, the vault and the shell are read, as
@@ -2128,9 +2139,13 @@ fn main() -> Result<(), String> {
             if let Some(kept) = node_settings.clone() {
                 let write = kept.clone();
                 let doc = helios_gui::shell::IMPORT_SOURCES;
+                // Written off the interface's thread: a pass never waits
+                // on the node.
                 shell.keep_import_sources_with(
                     Box::new(move || kept.read(doc)),
-                    Box::new(move |text| write.write(doc, text)),
+                    helios_gui::shell::write_import_sources_in_background(move |text| {
+                        write.write(doc, text)
+                    }),
                 );
             }
             if let Err(e) = shell.use_profile(&profile) {

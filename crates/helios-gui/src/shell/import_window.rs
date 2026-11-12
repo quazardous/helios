@@ -298,9 +298,13 @@ impl ImportWindow {
     /// Closes the import focus: nothing more read, the main window drawn
     /// again.
     fn cancel(&mut self, ctx: &Egui) {
+        let _stall = crate::stall::section("import window: closing");
         self.open = false;
         self.wizard = None;
         self.clear_contents();
+        // The connection running gives up on its own thread; a picking
+        // goes on there, detached, and says how it ended.
+        self.accounts.window_closed();
         ctx.request_repaint_of(ViewportId::ROOT);
     }
 
@@ -914,6 +918,7 @@ impl Shell {
     /// the shell, and its OS window opened or closed as the import focus
     /// is.
     pub(super) fn import_window_frame(&mut self, ctx: &Egui) {
+        let _stall = crate::stall::section("import window: the main window's part");
         {
             let w = self.import.get();
             let mut held = w.ctx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -983,6 +988,7 @@ impl Shell {
                 drop(w);
                 let state = self.import.state.clone();
                 app.open_window(spec, move |ui, window| {
+                    let _stall = crate::stall::frame("the import window's pass");
                     // Never drawn while the shell holds it (it does not, between
                     // its own passes).
                     if let Ok(mut w) = state.try_borrow_mut() {
@@ -1412,6 +1418,9 @@ impl ImportWindow {
             Some(Event::Cancel) => {
                 self.cancel(&ctx);
                 window.close = true;
+                // Closed: nothing more of this pass (no dialog, no choice
+                // kept), the window gone at once.
+                return;
             }
             Some(Event::Choose) => {
                 if let Some(f) = app.service(&FILES) {

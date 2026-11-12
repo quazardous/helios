@@ -37,6 +37,36 @@ pub type ReadSources = Box<dyn Fn() -> Result<Option<String>, String>>;
 /// Keeps the sources' document's TOML text.
 pub type WriteSources = Box<dyn Fn(&str) -> Result<(), String>>;
 
+/// `write` on a thread of its own, as the window's [`WriteSources`]: the
+/// window's pass hands the text over and goes on, never waiting on the
+/// node (its vault may be held by another writer, a scan's image map or
+/// a job). Texts given while one is written are coalesced, the last one
+/// kept. The thread ends when the writer is dropped; it is never joined.
+pub fn write_in_background(
+    write: impl Fn(&str) -> Result<(), String> + Send + 'static,
+) -> WriteSources {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let spawned = std::thread::Builder::new()
+        .name("helios-import-sources".into())
+        .spawn(move || {
+            while let Ok(mut text) = rx.recv() {
+                while let Ok(newer) = rx.try_recv() {
+                    text = newer;
+                }
+                if let Err(e) = write(&text) {
+                    log::warn!("import sources: {DOCUMENT}: {e}");
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!("import sources: no thread to write them on: {e}");
+    }
+    Box::new(move |text| {
+        tx.send(text.to_owned())
+            .map_err(|_| "the sources' writer has stopped".to_owned())
+    })
+}
+
 /// Which source: a folder by its path, or a connector's account by id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceKey {
@@ -345,6 +375,7 @@ impl ImportWindow {
     /// After the window is drawn: a choice changed on the source shown is
     /// saved on it (one Undo step); then Undo or Reset, when asked.
     pub(super) fn keep_source_choices(&mut self, shown: Option<SourceKey>, before: &Choices) {
+        let _stall = crate::stall::section("import window: a source's choices kept");
         if let Some(key) = shown.filter(|k| Some(k) == self.sources.showing.as_ref())
             && self.choices != *before
         {

@@ -58,6 +58,7 @@ pub use health::{
 pub use import_choices::Choices;
 pub use import_sources::{
     DOCUMENT as IMPORT_SOURCES, Honours, ReadSources, SavedSource, WriteSources,
+    write_in_background as write_import_sources_in_background,
 };
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use storage::{

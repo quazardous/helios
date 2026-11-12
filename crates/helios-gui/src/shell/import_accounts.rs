@@ -185,6 +185,7 @@ impl Accounts {
     }
 
     pub(crate) fn listed(&mut self) -> &[Account] {
+        let _stall = crate::stall::section("import window: the accounts read");
         if let Some(book) = &self.book {
             match book.accounts() {
                 Ok(list) => self.listed = list,
@@ -388,6 +389,17 @@ impl Accounts {
             }
         }
         Some(consent.then)
+    }
+
+    /// The import window closed: the connection running gives up (its
+    /// session's thread sees the cancel and ends on its own, never
+    /// joined) and its dialog is gone; a picking goes on, detached.
+    pub(crate) fn window_closed(&mut self) {
+        if let Some(c) = &self.connecting {
+            c.session.cancel();
+        }
+        self.consent = None;
+        self.close();
     }
 
     /// The session is no longer shown.
