@@ -19,7 +19,7 @@
   AI-assisted project. Keep one purpose per commit, every commit building
   and passing its tests, with a changelog fragment for user-visible changes.
   The darktable fork keeps its own rules (see its `AGENTS.md`).
-- Every change follows "The next branch" in `docs/bench.md`: branch from
+- Every change follows `docs/next.md`: branch from
   `origin/next`, local fmt/check only, test **only your own part** on the box
   (`test-crate` / `egui-pop-test` on what you touched, never `test-affected`
   or the whole suite), merge into `next`, stop; never wait for CI.
