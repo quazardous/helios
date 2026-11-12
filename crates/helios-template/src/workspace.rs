@@ -31,7 +31,7 @@ use egui_pop_model::layout::Layout;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
-use crate::bundle::{Bundle, EXTENSION, Text};
+use crate::bundle::{Bundle, EXTENSION, LAYOUT_FILE, Text};
 use crate::catalogue::Catalogue;
 use crate::format::{
     Binding, CompositeFile, Connection, Endpoint, Exit, FORMAT, InnerDesc, NetworkDesc, NodeDesc,
@@ -137,6 +137,60 @@ impl Files {
     pub fn saved_layout(&self) -> Option<Layout> {
         let text = std::fs::read_to_string(&self.layout).ok()?;
         Layout::from_json(&text).ok()
+    }
+
+    /// What the workspace's own files hold now, part by part: one hash
+    /// for the copy of its layout written with its state, one for the
+    /// rest (the state's other files and the pointer: its network,
+    /// composites, tools, library, name). A desktop remembers them after
+    /// each write of its own, so a file rewritten with the same content
+    /// is not a change, and a change to one part reloads that part only.
+    pub fn hashes(&self) -> Hashes {
+        use std::hash::{Hash, Hasher};
+        fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else if let Ok(bytes) = std::fs::read(&path) {
+                    let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+                    out.push((rel, bytes));
+                }
+            }
+        }
+        let state = self.own.join(STATE_DIR);
+        let mut files = Vec::new();
+        walk(&state, &state, &mut files);
+        files.retain(|(rel, _)| rel != Path::new(LAYOUT_FILE));
+        files.sort();
+        let mut network = std::hash::DefaultHasher::new();
+        files.hash(&mut network);
+        std::fs::read(self.own.join(POINTER))
+            .ok()
+            .hash(&mut network);
+        let mut layout = std::hash::DefaultHasher::new();
+        std::fs::read(state.join(LAYOUT_FILE))
+            .ok()
+            .hash(&mut layout);
+        Hashes {
+            network: network.finish(),
+            layout: layout.finish(),
+        }
+    }
+
+    /// Writes the copy of the layout kept with the workspace's state, so
+    /// it never lags behind the layout shown; nothing for a workspace not
+    /// edited yet (its state is its template's). Says whether it wrote.
+    pub fn save_layout_copy(&self, layout: &Layout) -> Result<bool, String> {
+        let dir = self.own.join(STATE_DIR);
+        if !dir.is_dir() {
+            return Ok(false);
+        }
+        write(&dir.join(LAYOUT_FILE), &format!("{}\n", layout.to_json()))?;
+        Ok(true)
     }
 
     /// The workspace as it stands: its edited state, else its template,
@@ -296,6 +350,15 @@ fn comparable(state: &State) -> Json {
         o.remove("layout");
     }
     json
+}
+
+/// What a workspace's own files hold, part by part ([`Files::hashes`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hashes {
+    /// Everything but the layout's copy: the network and the rest.
+    pub network: u64,
+    /// The copy of the layout written with the state.
+    pub layout: u64,
 }
 
 /// The parts a desktop merges by when the files of the workspace it has

@@ -5246,6 +5246,7 @@ impl Shell {
             );
         }
         self.focus.layout_saved = Some(layout);
+        self.keep_layout_copy();
     }
 
     /// What the workbench refused this frame, said in the status bar:
