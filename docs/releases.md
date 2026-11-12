@@ -268,6 +268,36 @@ host's programs are not; a library or vault outside the folders above
 needs an override. Helios is not on Flathub yet: see
 [flathub.md](./flathub.md) for what submitting it takes.
 
+## macOS (first build)
+
+The workflow also builds Helios for macOS on Apple silicon (arm64), in
+its `macos` job on GitHub's `macos-15` runner. This is a first step: its
+files are kept as the run's artefacts, not attached to the Release, and
+the job may fail without stopping the Release (`continue-on-error`).
+
+- It builds the same programs as on Linux and Windows for
+  `aarch64-apple-darwin`. Helios links no C library of darktable's (its
+  processing is ported to Rust), and the C its crates carry (the bundled
+  SQLite and the like) builds with the runner's Xcode command line tools:
+  no Homebrew package is needed. The GPU goes through wgpu's Metal
+  backend; without a usable GPU Helios processes on the CPU.
+- `packaging/macos/release.sh` packages them as
+  `helios-X.Y.Z-macos-arm64.tar.gz`, a folder that runs in place
+  (`bin/helios-gui`, `bin/helios`...) with `COPYING`,
+  `THIRD-PARTY-LICENSES.txt` and `README.md`, and `SHA256SUMS-macos`.
+- The programs are signed ad hoc only (Apple silicon runs nothing
+  unsigned): no Developer ID, no notarisation. A tarball downloaded with a
+  browser is quarantined by Gatekeeper; clear it with
+  `xattr -dr com.apple.quarantine helios-X.Y.Z-macos-arm64` after
+  unpacking.
+- `packaging/macos/smoke.sh` tests the tarball on the runner, with no
+  display session: both programs say their version, `helios` imports a
+  picture into a new vault and exports it as a JPEG.
+
+Still to come: an app bundle (`Helios.app`) in a disk image, and the
+macOS window behaviour (the global menu bar, the app staying open with no
+window). Signing and notarisation need an Apple Developer account.
+
 ## Checking a download
 
 Download `SHA256SUMS` beside the files, then:
