@@ -353,9 +353,11 @@ the node is the workstation".
 | 18 | No resource agent | none | the `Connector` trait served by a client process (read-only, per session) | M |
 | 19 | No path remapping between machines | none | volume report from the client; node answers paths on shared volumes remapped | S |
 
-## 7. Open choices
+## 7. Choices
 
-Each is posted to the owner with a default. Recommended answers are marked.
+Decided by the owner on 2026-11-12: **A, B, C, D and E are taken; F is
+not** (the client renders when it has the raw and a GPU; the node streams
+renders only when it cannot). The choices as they were put:
 
 - **A. Local topology** (recommended): the node is a library the desktop
   embeds in its process (one GPU device, zero-copy viewport, as windows.md
