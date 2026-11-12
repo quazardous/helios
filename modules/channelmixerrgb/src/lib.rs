@@ -282,6 +282,24 @@ impl Plan {
         })
     }
 
+    /// The adaptation as one working-RGB matrix: [`Plan::pixel`] without
+    /// its clipping and gamut compression, so `pixel(v) = adaptation() v`
+    /// for colours it neither clips nor compresses. The chart calibration
+    /// solves through it, so the solve and the render agree.
+    pub fn adaptation(&self) -> M3 {
+        let gain: M3 = std::array::from_fn(|r| {
+            std::array::from_fn(|c| {
+                if r == c {
+                    D50_LMS[c] / self.illuminant[c]
+                } else {
+                    0.0
+                }
+            })
+        });
+        let back = mul(&CAT16_LMS_TO_XYZ, &mul(&XYZ_TO_CAT16_LMS, &self.mix_to_xyz));
+        mul(&self.xyz_to_rgb, &mul(&back, &mul(&gain, &self.rgb_to_lms)))
+    }
+
     /// One pixel, darktable's `_loop_switch` on its CAT16 path.
     pub fn pixel(&self, rgb: [f32; 3]) -> [f32; 3] {
         let min = if self.clip { 0.0 } else { f32::MIN };
@@ -424,6 +442,26 @@ pub fn wb_coeffs_to_illuminant_xy(cam_to_xyz: &M3, wb: [f32; 3]) -> [f32; 2] {
     xyz[1] /= xyz[1];
     let sum = xyz[0] + xyz[1] + xyz[2];
     [xyz[0] / sum, xyz[1] / sum]
+}
+
+/// The illuminant of a neutral seen under it, as darktable's colour
+/// checker finds it from the middle grey (`_extract_color_checker`, with
+/// D50 as [`Plan::adaptation`] targets it):
+/// `measured` and `reference` in XYZ (any scale), the reference's own
+/// colour taken out in CAT16 LMS. `None` when the result is not a usable
+/// illuminant.
+pub fn illuminant_from_neutral(measured: [f32; 3], reference: [f32; 3]) -> Option<[f32; 2]> {
+    if !(measured[1] > 0.0 && reference[1] > 0.0) {
+        return None;
+    }
+    let test = apply(&XYZ_TO_CAT16_LMS, measured.map(|c| c / measured[1]));
+    let truth = apply(&XYZ_TO_CAT16_LMS, reference.map(|c| c / reference[1]));
+    // D50 as the adaptation targets it, so the light found here is the one
+    // whose adaptation brings the neutral onto its reference.
+    let lms: [f32; 3] = std::array::from_fn(|c| D50_LMS[c] * test[c] / truth[c]);
+    let xyz = apply(&CAT16_LMS_TO_XYZ, lms);
+    let sum = xyz[0] + xyz[1] + xyz[2];
+    Some([xyz[0] / sum, xyz[1] / sum]).filter(|xy| xy.iter().all(|v| v.is_finite()) && usable(*xy))
 }
 
 /// darktable's `_is_usable_illuminant_xy`: inside the triangle, and every
