@@ -1879,3 +1879,51 @@ fn import_opens_in_its_own_window_reads_in_its_status_bar_and_closes_alone() {
     assert_eq!(declared(&h), [window]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_card_plugged_in_again_shows_its_glances_from_disk_and_reads_only_a_changed_file() {
+    const N: usize = 12;
+    let dir = temp("card-disk");
+    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    photos(&dcim, N, 320, 240);
+    let glances = helios_gui::import_scan::GlanceCache::global();
+    let cache = dir.join("cache");
+    glances.open_disk(&cache).unwrap();
+    // First seen: every file read, its glance kept on disk.
+    let h = card_window(&dir, None);
+    let first = h.state().import_glances();
+    assert_eq!((first.read, first.from_disk), (N, 0), "{first:?}");
+    assert_eq!(glances.disk().unwrap().usage().1, N);
+    drop(h);
+    // Unmounted, then mounted again elsewhere after a restart: RAM is
+    // empty, the disk tier listed anew. One file changed meanwhile.
+    let elsewhere = dir.join("media");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::rename(dir.join("EOS_DIGITAL"), elsewhere.join("EOS_DIGITAL")).unwrap();
+    glances.forget_ram();
+    glances.open_disk(&cache).unwrap();
+    let changed = elsewhere.join("EOS_DIGITAL/DCIM/100CANON/IMG_0003.JPG");
+    image::RgbImage::from_pixel(320, 240, image::Rgb([200, 10, 10]))
+        .save(&changed)
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&changed)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + Duration::from_mins(1))
+        .unwrap();
+    let h = card_window(&elsewhere, None);
+    let again = h.state().import_glances();
+    // Nothing read from the card but the file changed.
+    assert_eq!(again.read, 1, "{again:?}");
+    assert_eq!((again.cached, again.from_disk), (N - 1, N - 1), "{again:?}");
+    for p in h.state().import_thumbnails_on_screen() {
+        assert!(
+            h.state().import_thumbnail_ready(&p),
+            "{} without its glance",
+            p.display()
+        );
+    }
+    assert_eq!(h.state().import_cells().len(), N);
+    let _ = std::fs::remove_dir_all(&dir);
+}

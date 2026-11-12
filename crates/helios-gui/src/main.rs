@@ -1938,6 +1938,22 @@ fn main() -> Result<(), String> {
             if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
                 shell.set_import_thumbnail_cache(cache);
             }
+            // The cards' glances on disk, in the user cache folder: a card
+            // plugged in again shows its previews without a read. Its
+            // folder is listed off the interface thread.
+            if let Some(root) = helios_cache::user_cache_dir() {
+                let spawned = std::thread::Builder::new()
+                    .name("helios-glance-disk".into())
+                    .spawn(move || {
+                        let glances = helios_gui::import_scan::GlanceCache::global();
+                        if let Err(e) = glances.open_disk(&root) {
+                            log::warn!("import previews on disk: {}: {e}", root.display());
+                        }
+                    });
+                if let Err(e) = spawned {
+                    log::warn!("import previews on disk: no thread: {e}");
+                }
+            }
             // The image map: what the import window's sources list is
             // recorded, Helios's own folders never.
             if let Some(vault) = known_vault.clone() {

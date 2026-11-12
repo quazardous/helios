@@ -14,7 +14,10 @@
 //!   (the cells in view, then the next screen), then the rest in order.
 //! - [`GlanceCache`]: the glances kept in RAM by path, size and
 //!   modification time (the cache service's `import.glance`, with a
-//!   budget), so a window opened again or scrolled back reads nothing.
+//!   budget), so a window opened again or scrolled back reads nothing; a
+//!   card's also on disk by the card's volume, the path on it, size and
+//!   modification time, so a card plugged in again (after a restart, at
+//!   another mount point) shows its glances without a read.
 //! - [`Prefilter`]: whether a file is probably in the Library already, a
 //!   lookup on the image map first (a Library image's file seen at that
 //!   path, unchanged since: known without a read), then by size, then by
@@ -34,13 +37,14 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use chrono::{NaiveDate, NaiveDateTime, TimeZone};
 use egui::ColorImage;
-use helios_cache::{Counters, IMPORT_GLANCE, Scope, Service, Store, Tier, Usage};
+use helios_cache::{Counters, Disk, IMPORT_GLANCE, Scope, Service, Store, Tier, Usage};
 use helios_connect::{
     Access, Cancel, Connector, ConnectorError, ConnectorServices, Cursor, Item, ItemRef, PAGE,
     Settings, SourceRef,
 };
 use helios_core::ContentHash;
 use helios_storage::Card;
+use image::ImageEncoder;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -424,6 +428,8 @@ struct Stats {
     read: AtomicUsize,
     /// Files answered from the [`GlanceCache`].
     cached: AtomicUsize,
+    /// Of those, the ones from its disk tier.
+    from_disk: AtomicUsize,
     busy: AtomicUsize,
     /// The most files read at once.
     peak: AtomicUsize,
@@ -436,6 +442,8 @@ pub struct Glances {
     pub read: usize,
     /// Files answered from the [`GlanceCache`], nothing read.
     pub cached: usize,
+    /// Of those, the ones from its disk tier (a card seen before).
+    pub from_disk: usize,
     /// The most files read at once.
     pub peak: usize,
 }
@@ -446,6 +454,7 @@ impl std::ops::Add for Glances {
         Glances {
             read: self.read + o.read,
             cached: self.cached + o.cached,
+            from_disk: self.from_disk + o.from_disk,
             peak: self.peak.max(o.peak),
         }
     }
@@ -460,14 +469,16 @@ struct Picking {
 }
 
 impl Picking {
-    fn new(files: &[(PathBuf, u64, Option<i64>)]) -> Self {
+    /// The files listed, by their paths in order.
+    fn new<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> Self {
+        let index: HashMap<PathBuf, usize> = paths
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| (p.clone(), i))
+            .collect();
         Self {
-            index: files
-                .iter()
-                .enumerate()
-                .map(|(i, f)| (f.0.clone(), i))
-                .collect(),
-            taken: vec![false; files.len()],
+            taken: vec![false; index.len()],
+            index,
             next: 0,
         }
     }
@@ -488,18 +499,34 @@ impl Picking {
     }
 }
 
-/// A file's glance, read or from the cache.
-fn glance_one(path: &Path, bytes: u64, modified: Option<i64>, stats: &Stats) -> Arc<Glanced> {
+/// A file's glance, read or from the cache: its RAM tier, then, for a
+/// card's file (`on_disk`, its key there), its disk tier.
+fn glance_one(
+    path: &Path,
+    bytes: u64,
+    modified: Option<i64>,
+    on_disk: Option<&str>,
+    stats: &Stats,
+) -> Arc<Glanced> {
     let cache = GlanceCache::global();
     let key = (path.to_path_buf(), bytes, modified);
     if let Some(hit) = cache.get(&key) {
         stats.cached.fetch_add(1, Ordering::Relaxed);
         return hit;
     }
+    if let Some(hit) = on_disk.and_then(|k| cache.disk_glance(k, key.clone())) {
+        stats.cached.fetch_add(1, Ordering::Relaxed);
+        stats.from_disk.fetch_add(1, Ordering::Relaxed);
+        return hit;
+    }
     let busy = stats.busy.fetch_add(1, Ordering::SeqCst) + 1;
     stats.peak.fetch_max(busy, Ordering::SeqCst);
     let started = std::time::Instant::now();
-    let glanced = match helios_load::glance_at(path, Some(crate::library::THUMB)) {
+    let read = helios_load::glance_at(path, Some(crate::library::THUMB));
+    // A file that could not be read (perhaps a card's read error) is not
+    // kept on disk: read again next time.
+    let on_disk = on_disk.filter(|_| read.is_ok());
+    let glanced = match read {
         Ok(g) => Glanced {
             taken: g.taken.as_deref().and_then(exif_time),
             camera: g.camera,
@@ -514,8 +541,155 @@ fn glance_one(path: &Path, bytes: u64, modified: Option<i64>, stats: &Stats) -> 
     stats.read.fetch_add(1, Ordering::Relaxed);
     let glanced = Arc::new(glanced);
     cache.put(key, glanced.clone(), started.elapsed());
+    if let Some(k) = on_disk {
+        cache.keep_on_disk(k, &glanced);
+    }
     glanced
 }
+
+/// The disk key of a card's file: the card's volume, the file's path on
+/// it, its size and modification time. The same card mounted elsewhere,
+/// or after a restart, finds it; a file changed has another.
+pub fn disk_key(volume: &str, on_card: &Path, bytes: u64, modified: Option<i64>) -> String {
+    let path = on_card.to_string_lossy();
+    let modified = modified.map_or_else(String::new, |m| m.to_string());
+    format!("{volume}\n{path}\n{bytes}\n{modified}")
+}
+
+/// The volume a scanned source is and its mount point, for a card: the
+/// key its glances are kept under on disk.
+fn card_volume(source: &SourceRef) -> Option<(String, PathBuf)> {
+    if source.connector != helios_connect::card::ID {
+        return None;
+    }
+    let root = source.root.clone()?;
+    let card = Card {
+        label: source.label.clone(),
+        root: root.clone(),
+        capacity: source.capacity,
+    };
+    Some((card.volume().id.0, root))
+}
+
+/// A glance as the bytes of a disk entry: a magic, flags, the capture
+/// time, the camera, the preview's size and the preview as a JPEG.
+fn encode_glance(g: &Glanced) -> Vec<u8> {
+    let mut out = GLANCE_MAGIC.to_vec();
+    let flags = u8::from(g.taken.is_some())
+        | u8::from(g.camera.is_some()) << 1
+        | u8::from(g.thumb.is_some()) << 2;
+    out.push(flags);
+    if let Some(t) = g.taken {
+        out.extend_from_slice(&t.and_utc().timestamp().to_le_bytes());
+    }
+    if let Some(c) = &g.camera {
+        let c = &c.as_bytes()[..c.len().min(usize::from(u16::MAX))];
+        out.extend_from_slice(&(c.len() as u16).to_le_bytes());
+        out.extend_from_slice(c);
+    }
+    if let Some(t) = &g.thumb {
+        let rgb: Vec<u8> = t
+            .pixels
+            .iter()
+            .flat_map(|p| [p.r(), p.g(), p.b()])
+            .collect();
+        let (w, h) = (t.size[0] as u32, t.size[1] as u32);
+        out.extend_from_slice(&w.to_le_bytes());
+        out.extend_from_slice(&h.to_le_bytes());
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88);
+        if encoder
+            .write_image(&rgb, w, h, image::ExtendedColorType::Rgb8)
+            .is_err()
+        {
+            // The flags say a preview: an entry that cannot be read back
+            // is a miss, read again.
+            return Vec::new();
+        }
+    }
+    out
+}
+
+/// What a disk entry says before its preview: its flags, capture time,
+/// camera, the preview's size and where its JPEG starts.
+struct GlanceHeader {
+    taken: Option<NaiveDateTime>,
+    camera: Option<String>,
+    size: Option<[usize; 2]>,
+    jpeg: usize,
+}
+
+fn glance_header(bytes: &[u8]) -> Option<GlanceHeader> {
+    let rest = bytes.strip_prefix(GLANCE_MAGIC)?;
+    let (&flags, mut rest) = rest.split_first()?;
+    let mut take = |n: usize| -> Option<&[u8]> {
+        let (head, tail) = rest.split_at_checked(n)?;
+        rest = tail;
+        Some(head)
+    };
+    let taken = if flags & 1 != 0 {
+        let secs = i64::from_le_bytes(take(8)?.try_into().ok()?);
+        Some(chrono::DateTime::from_timestamp(secs, 0)?.naive_utc())
+    } else {
+        None
+    };
+    let camera = if flags & 2 != 0 {
+        let len = u16::from_le_bytes(take(2)?.try_into().ok()?);
+        Some(String::from_utf8_lossy(take(usize::from(len))?).into_owned())
+    } else {
+        None
+    };
+    let size = if flags & 4 != 0 {
+        let w = u32::from_le_bytes(take(4)?.try_into().ok()?);
+        let h = u32::from_le_bytes(take(4)?.try_into().ok()?);
+        Some([w as usize, h as usize])
+    } else {
+        None
+    };
+    let jpeg = bytes.len() - rest.len();
+    Some(GlanceHeader {
+        taken,
+        camera,
+        size,
+        jpeg,
+    })
+}
+
+/// A disk entry's glance back; `None` for one that cannot be read.
+fn decode_glance(bytes: &[u8]) -> Option<Glanced> {
+    let header = glance_header(bytes)?;
+    let thumb = match header.size {
+        None => None,
+        Some(size) => {
+            let img = image::load_from_memory_with_format(
+                &bytes[header.jpeg..],
+                image::ImageFormat::Jpeg,
+            )
+            .ok()?
+            .to_rgba8();
+            if [img.width() as usize, img.height() as usize] != size {
+                return None;
+            }
+            Some(ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
+        }
+    };
+    Some(Glanced {
+        taken: header.taken,
+        camera: header.camera,
+        thumb,
+    })
+}
+
+/// How good a glance is, to keep the better of two: its preview's pixels,
+/// then whether it has a capture time and a camera.
+fn glance_rank(size: Option<[usize; 2]>, taken: bool, camera: bool) -> (usize, bool, bool) {
+    (size.map_or(0, |[w, h]| w * h), taken, camera)
+}
+
+/// The start of every glance entry on disk.
+const GLANCE_MAGIC: &[u8; 4] = b"HGL2";
+
+/// The disk budget of the glances: 256 MiB, about ten thousand previews.
+pub const GLANCE_DISK_BUDGET: u64 = 256 << 20;
 
 /// What a glance found: when a file was taken, by which camera, and its
 /// preview at the cell's size.
@@ -553,6 +727,9 @@ pub struct GlanceCache {
     index: Mutex<GlanceIndex>,
     budget: u64,
     counters: Arc<Counters>,
+    /// Its disk tier, once opened ([`GlanceCache::open_disk`]): the
+    /// cards' glances.
+    disk: Mutex<Option<Arc<Disk>>>,
 }
 
 impl GlanceCache {
@@ -561,6 +738,78 @@ impl GlanceCache {
             index: Mutex::default(),
             budget,
             counters: Service::global().counters(&Scope::Shared, &IMPORT_GLANCE),
+            disk: Mutex::default(),
+        }
+    }
+
+    /// Opens its disk tier under `root` (Helios's user cache folder),
+    /// attached to the cache service: what was not used for the kind's
+    /// age limit is pruned. Lists a folder: never on the interface thread.
+    /// Until it is opened, glances are kept in RAM only.
+    ///
+    /// # Errors
+    /// The folder cannot be made.
+    pub fn open_disk(&self, root: &Path) -> std::io::Result<()> {
+        let disk = Arc::new(Disk::open(
+            root,
+            IMPORT_GLANCE,
+            Scope::Shared,
+            GLANCE_DISK_BUDGET,
+            std::time::SystemTime::now(),
+        )?);
+        disk.attach();
+        *lock(&self.disk) = Some(disk);
+        Ok(())
+    }
+
+    /// Its disk tier, once opened.
+    pub fn disk(&self) -> Option<Arc<Disk>> {
+        lock(&self.disk).clone()
+    }
+
+    /// Forgets its RAM tier, the disk tier kept: what a restart leaves.
+    pub fn forget_ram(&self) {
+        let mut index = lock(&self.index);
+        index.entries.clear();
+        index.bytes = 0;
+    }
+
+    /// The glance kept on disk under `on_disk`, put in RAM under `key`.
+    fn disk_glance(&self, on_disk: &str, key: GlanceKey) -> Option<Arc<Glanced>> {
+        let disk = self.disk()?;
+        let bytes = disk.get(on_disk.as_bytes())?;
+        let Some(glanced) = decode_glance(&bytes) else {
+            disk.remove(on_disk.as_bytes());
+            return None;
+        };
+        let glanced = Arc::new(glanced);
+        self.put(key, glanced.clone(), std::time::Duration::ZERO);
+        Some(glanced)
+    }
+
+    /// Keeps `glanced` on disk under `on_disk`; an entry already there is
+    /// replaced only by a better one (a larger preview, a capture time or
+    /// a camera it lacks).
+    fn keep_on_disk(&self, on_disk: &str, glanced: &Glanced) {
+        let Some(disk) = self.disk() else { return };
+        let key = on_disk.as_bytes();
+        if let Some(old) = disk.peek(key).as_deref().and_then(glance_header) {
+            let rank_old = glance_rank(old.size, old.taken.is_some(), old.camera.is_some());
+            let rank_new = glance_rank(
+                glanced.thumb.as_ref().map(|t| t.size),
+                glanced.taken.is_some(),
+                glanced.camera.is_some(),
+            );
+            if rank_new <= rank_old {
+                return;
+            }
+        }
+        let bytes = encode_glance(glanced);
+        if bytes.is_empty() {
+            return;
+        }
+        if let Err(e) = disk.put(key, &bytes) {
+            log::debug!("import glances on disk: {e}");
         }
     }
 
@@ -705,6 +954,8 @@ impl Scan {
                     }
                 };
                 let prefilter = known.map(|k| Prefilter::of(k())).unwrap_or_default();
+                // A card's glances are kept on disk too, by its volume.
+                let volume = card_volume(&listed_source);
                 let mut recorder = map.and_then(|(make, seen_by)| make(seen_by));
                 let mut listed = Vec::with_capacity(items.len());
                 for item in items {
@@ -740,14 +991,18 @@ impl Scan {
                     if sender.send(Scanned::Found(found)).is_err() {
                         return;
                     }
-                    listed.push((path, bytes, modified));
+                    let on_disk = volume.as_ref().and_then(|(id, root)| {
+                        let on_card = path.strip_prefix(root).ok()?;
+                        Some(disk_key(id, on_card, bytes, modified))
+                    });
+                    listed.push((path, bytes, modified, on_disk));
                 }
                 wake();
                 if let Some(r) = recorder.as_mut() {
                     r.flush();
                 }
                 // The glances, on a few threads, the files wanted first.
-                let picking = Mutex::new(Picking::new(&listed));
+                let picking = Mutex::new(Picking::new(listed.iter().map(|f| &f.0)));
                 let recorder = Mutex::new(recorder);
                 let (listed, picking, recorder, wanted, wake, stopped, stats, now_reading) = (
                     &listed,
@@ -772,9 +1027,10 @@ impl Scan {
                                     lock(picking).pick(&wanted)
                                 };
                                 let Some(i) = next else { return };
-                                let (path, bytes, modified) = &listed[i];
+                                let (path, bytes, modified, on_disk) = &listed[i];
                                 lock(now_reading).clone_from(path);
-                                let g = glance_one(path, *bytes, *modified, stats);
+                                let g =
+                                    glance_one(path, *bytes, *modified, on_disk.as_deref(), stats);
                                 if let Some(r) = lock(recorder).as_mut() {
                                     // The camera's local time, kept as if it
                                     // were UTC.
@@ -827,6 +1083,7 @@ impl Scan {
         Glances {
             read: self.stats.read.load(Ordering::Relaxed),
             cached: self.stats.cached.load(Ordering::Relaxed),
+            from_disk: self.stats.from_disk.load(Ordering::Relaxed),
             peak: self.stats.peak.load(Ordering::Relaxed),
         }
     }
@@ -1279,8 +1536,8 @@ mod tests {
 
     #[test]
     fn glances_take_the_files_wanted_first_then_the_rest_in_order_each_once() {
-        let files: Vec<(PathBuf, u64, Option<i64>)> = (0..6)
-            .map(|i| (PathBuf::from(format!("/f/{i}.jpg")), 1, None))
+        let files: Vec<PathBuf> = (0..6)
+            .map(|i| PathBuf::from(format!("/f/{i}.jpg")))
             .collect();
         let mut picking = Picking::new(&files);
         let wanted = vec![PathBuf::from("/f/4.jpg"), PathBuf::from("/elsewhere.jpg")];
@@ -1320,6 +1577,38 @@ mod tests {
         assert_eq!(usage[0].kind.id, "import.glance");
         assert!(cache.clear(Some("import.glance")) > 0);
         assert!(cache.get(&key(0)).is_none());
+    }
+
+    #[test]
+    fn a_glance_on_disk_reads_back_and_is_replaced_only_by_a_better_one() {
+        let taken = exif_time("2026:11:02 10:20:30");
+        let glanced = Glanced {
+            taken,
+            camera: Some("Canon EOS R6".into()),
+            thumb: Some(ColorImage::filled(
+                [24, 16],
+                egui::Color32::from_rgb(90, 120, 200),
+            )),
+        };
+        let bytes = encode_glance(&glanced);
+        let back = decode_glance(&bytes).unwrap();
+        assert_eq!(back.taken, taken);
+        assert_eq!(back.camera.as_deref(), Some("Canon EOS R6"));
+        let thumb = back.thumb.unwrap();
+        assert_eq!(thumb.size, [24, 16]);
+        let p = thumb.pixels[0];
+        assert!(p.r().abs_diff(90) < 8 && p.b().abs_diff(200) < 8, "{p:?}");
+        // Nothing but a magic: not an entry.
+        assert!(decode_glance(b"HGL2").is_none());
+        assert!(decode_glance(&bytes[..8]).is_none());
+        let bare = encode_glance(&Glanced::default());
+        assert!(decode_glance(&bare).is_some_and(|g| g.thumb.is_none()));
+        // Replaced only by a larger preview, or one with what it lacked.
+        let header = glance_header(&bytes).unwrap();
+        let old = glance_rank(header.size, true, true);
+        assert!(glance_rank(Some([24, 16]), true, true) <= old);
+        assert!(glance_rank(Some([12, 8]), true, true) < old);
+        assert!(glance_rank(Some([48, 32]), false, false) > old);
     }
 
     #[test]
