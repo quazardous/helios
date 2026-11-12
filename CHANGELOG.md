@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.83.0] - 2026-11-12
+
+### Added
+
+- Albums in the Library: an Albums section in the Library panel lists them with how many photos each holds; "New album…" makes one from the selected photos, and each album's menu adds or removes the selected photos, renames or deletes it. A click shows only the album's photos, kept with the workspace. Every change is one undo step, and agents have the same commands (`library.collection.*`).
+
 ## [0.82.0] - 2026-11-12
 
 ### Added
