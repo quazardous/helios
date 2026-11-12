@@ -1068,7 +1068,7 @@ impl<S: Store> Store for FailingAudit<S> {
     ) -> Result<crate::Facets, String> {
         self.0.facets(query, backups)
     }
-    fn folders(&self, query: &Query) -> Result<std::collections::BTreeMap<String, u64>, String> {
+    fn folders(&self, query: &Query) -> Result<crate::VolumeFolders, String> {
         self.0.folders(query)
     }
     fn add_audit(&mut self, _: &crate::AuditEntry) -> Result<u64, String> {
@@ -2158,29 +2158,46 @@ fn facets_count_each_value_in_one_query<S: Store>(s: S) {
 }
 
 /// The folders tree's counts (`docs/design/library.md`, L5): every folder
-/// holding a copy and each folder above it, with how many photos have a
-/// copy there or below, in one query; each count is what the `folder:`
-/// filter selects.
+/// holding a copy and each folder above it, apart for each volume, with
+/// how many photos have a copy there or below, in one query; a folder on
+/// one volume counts what the `folder:` filter selects.
 fn folders_count_their_photos_and_those_below_in_one_query<S: Store>(s: S) {
     let (v, _, _) = library_fixture(s);
     let root = Path::new(std::path::MAIN_SEPARATOR_STR);
     let p = root.join("p");
     let key = |path: &Path| path.to_string_lossy().into_owned();
+    let on = |name: &str| Some(VolumeId(name.into()));
     let q0 = v.reads().queries;
     let all = v.folders(&Query::default()).unwrap();
     assert_eq!(v.reads().queries - q0, 1, "every folder in one query");
-    let want: std::collections::BTreeMap<String, u64> = [
-        (key(root), 4),
-        (key(&p), 4),
-        (key(&p.join("shots")), 3),
-        (key(&p.join("backup")), 4),
-        (key(&p.join("other")), 1),
-        (key(&p.join("far")), 1),
+    let counts = |rows: &[(&Path, u64)]| -> std::collections::BTreeMap<String, u64> {
+        rows.iter().map(|(path, n)| (key(path), *n)).collect()
+    };
+    let want: crate::VolumeFolders = [
+        (
+            on("uuid:lib"),
+            counts(&[
+                (root, 4),
+                (&p, 4),
+                (&p.join("shots"), 3),
+                (&p.join("other"), 1),
+            ]),
+        ),
+        (
+            on("uuid:b1"),
+            counts(&[(root, 4), (&p, 4), (&p.join("backup"), 4)]),
+        ),
+        (
+            on("uuid:b2"),
+            counts(&[(root, 1), (&p, 1), (&p.join("far"), 1)]),
+        ),
     ]
     .into_iter()
     .collect();
     assert_eq!(all, want);
-    for (folder, n) in &all {
+    for dir in ["shots", "other", "backup", "far"] {
+        let folder = key(&p.join(dir));
+        let n = all.values().find_map(|f| f.get(&folder)).unwrap();
         let cursor = v
             .open_cursor(Query {
                 folder: Some(folder.clone()),
@@ -2196,6 +2213,8 @@ fn folders_count_their_photos_and_those_below_in_one_query<S: Store>(s: S) {
         ..Query::default()
     };
     let some = v.folders(&z8).unwrap();
-    assert_eq!(some.get(&key(&p.join("shots"))), Some(&2));
-    assert_eq!(some.get(&key(&p.join("other"))), None);
+    let lib = &some[&on("uuid:lib")];
+    assert_eq!(lib.get(&key(&p.join("shots"))), Some(&2));
+    assert_eq!(lib.get(&key(&p.join("other"))), None);
+    assert_eq!(some.get(&on("uuid:b2")), None);
 }

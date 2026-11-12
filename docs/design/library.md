@@ -551,10 +551,18 @@ change): every folder holding a copy, with how many photos are there or
 below (`Vault::folders`, one recursive query; each count is what the
 `folder:` filter selects); chains of folders holding only the next one
 are one row; a click scopes the grid with the `folder:` term, a second
-click drops it. Not built yet: volumes as the top level, offline volumes
-greyed with their last seen, the row's menu (show in file manager, scan,
-import here), the selected folder kept per focus and in templates, and a
-dock panel of its own.
+click drops it.
+
+Built (2026-11-12), second part: the volumes are the top level. The
+vault counts each volume's folders apart (`Vault::folders` keyed by the
+copies' volume; a photo with copies on two volumes counts on each), the
+tree names each volume from the registry (its name, else its label),
+with the photos it holds; volumes at hand first, then offline ones,
+greyed and saying the day they were last seen; copies on no known volume
+last, as "Other folders". An offline volume's folders still filter the
+grid (the photos show from the thumbnail cache). Not built yet: the
+row's menu (show in file manager, scan, import here), the selected
+folder kept per focus and in templates, and a dock panel of its own.
 
 **L6. Albums, smart albums, quick collection.** Vault documents
 `library/collections` (L-C2): albums hold image ids, smart albums a

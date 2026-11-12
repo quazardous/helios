@@ -1025,9 +1025,10 @@ fn facets_sql(query: &Query, backups: Option<&Backups>) -> Result<(String, Vec<S
 }
 
 /// The folders tree's statement (`docs/design/library.md`, L5): each
-/// matched photo's copies give their folder (the path cut after its last
-/// separator), then each folder above it, recursively; `UNION` keeps one
-/// row per photo and folder, so a count is the photos there or below.
+/// matched photo's copies give their volume and folder (the path cut
+/// after its last separator), then each folder above it, recursively;
+/// `UNION` keeps one row per photo, volume and folder, so a count is the
+/// photos on that volume there or below.
 fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
     let (ctes, from, args) = matched_sql(query, None)?;
     let sep = std::path::MAIN_SEPARATOR;
@@ -1037,10 +1038,10 @@ fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
     let up = "substr(dir, 1, length(dir) - 1)";
     let matched = format!(
         "m AS (SELECT i.id AS id {from}),
-         dirs(id, dir) AS (
-             SELECT s.image, {} FROM m JOIN sightings s ON s.image = m.id
+         dirs(id, vol, dir) AS (
+             SELECT s.image, s.volume, {} FROM m JOIN sightings s ON s.image = m.id
              UNION
-             SELECT id, {} FROM dirs WHERE length(dir) > 1)",
+             SELECT id, vol, {} FROM dirs WHERE length(dir) > 1)",
         dir("s.path"),
         dir(up)
     );
@@ -1052,8 +1053,8 @@ fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
     Ok((
         format!(
             "WITH RECURSIVE {ctes}
-             SELECT CASE WHEN length(dir) > 1 THEN {up} ELSE dir END, COUNT(*)
-             FROM dirs WHERE dir <> '' GROUP BY dir"
+             SELECT vol, CASE WHEN length(dir) > 1 THEN {up} ELSE dir END, COUNT(*)
+             FROM dirs WHERE dir <> '' GROUP BY vol, dir"
         ),
         args,
     ))
@@ -1643,20 +1644,28 @@ impl Store for SqliteStore {
         Ok(facets)
     }
 
-    fn folders(&self, query: &Query) -> Result<BTreeMap<String, u64>, String> {
+    fn folders(&self, query: &Query) -> Result<helios_vault::VolumeFolders, String> {
         let (sql, args) = folders_sql(query)?;
         let mut statement = self.db.prepare(&sql).map_err(err)?;
         let rows = statement
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })
             .map_err(err)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(err)?;
-        Ok(rows
-            .into_iter()
-            .map(|(dir, n)| (dir, u64::try_from(n).unwrap_or(0)))
-            .collect())
+        let mut folders = helios_vault::VolumeFolders::new();
+        for (volume, dir, n) in rows {
+            folders
+                .entry(volume.map(VolumeId))
+                .or_default()
+                .insert(dir, u64::try_from(n).unwrap_or(0));
+        }
+        Ok(folders)
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {

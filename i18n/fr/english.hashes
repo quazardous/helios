@@ -560,6 +560,7 @@ gui-library-facet-rating 36690a4e79cfa166
 gui-library-facet-type f97f51ee1be110cd
 gui-library-file f5342066f92b83c2
 gui-library-folders a4ab9b34eea3af48
+gui-library-folders-elsewhere defbb19ac5e1997e
 gui-library-images f081af80bddd910b
 gui-library-import 4f18fde2a41db156
 gui-library-import-photos 36112b331ee04a37
@@ -586,6 +587,7 @@ gui-library-sort-size da247eb7d8a1f68e
 gui-library-sort-tip fdd935e0be790484
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
+gui-library-volume-offline 5f2b93239dade10c
 gui-log-clear 238f7a82e564b550
 gui-log-empty 204c4ef685556125
 gui-macro-fold-detail d63939bfb0cb05f6

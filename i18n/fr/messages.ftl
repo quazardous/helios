@@ -843,6 +843,8 @@ gui-library-facet-type = Type
 gui-library-facet-presence = Présence
 gui-library-facet-backup = Sauvegarde
 gui-library-folders = Dossiers
+gui-library-folders-elsewhere = Autres dossiers
+gui-library-volume-offline = { $volume } { $count }, hors ligne, vu pour la dernière fois le { $date }
 
 gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre
 

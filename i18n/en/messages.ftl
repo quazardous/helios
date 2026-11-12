@@ -693,6 +693,10 @@ gui-library-file = { $size } · modified { $day }
 
 gui-library-folders = Folders
 
+gui-library-folders-elsewhere = Other folders
+
+gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
+
 gui-library-images = Images
 
 gui-library-import = Import…
