@@ -477,9 +477,6 @@ command-viewport-zoom-in =
 command-viewport-zoom-out =
     .title = Image : dézoomer
 
-command-window-close =
-    .title = Fermer la fenêtre
-
 command-window-maximize =
     .title = Agrandir ou restaurer la fenêtre
 
@@ -632,3 +629,9 @@ command-library-compare =
 
 command-library-sort =
     .title = Trier la bibliothèque (`by` : captured, imported, name, rating, edited ou size ; `descending`) ; gardé avec l’espace de travail. Sans `by`, dit comment elle est triée
+
+command-helios-quit-confirmed =
+    .title = Quitter Helios en annulant les tâches en cours
+
+command-helios-window-main =
+    .title = Fenêtre principale

@@ -183,6 +183,9 @@ pub fn defaults() -> Vec<(String, String, String)> {
     bind("Ctrl+P", crate::quick_open::COMMAND, "");
     // Import photos, as Lightroom's File > Import.
     bind("Ctrl+Shift+I", "library.importWindow", "");
+    // Close the window in front, as its close button does (egui-pop's
+    // `window.close`); Ctrl+Q, egui-pop's, quits from any window.
+    bind("Ctrl+W", "window.close", "");
     // Export photos, as Lightroom's File > Export.
     bind("Ctrl+Shift+E", "library.export", "");
     // Bypass the selected module (darktable's and Blender's habit).
