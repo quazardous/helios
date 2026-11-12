@@ -1079,8 +1079,8 @@ struct App {
     library_reading: Option<LibraryReading>,
     /// Images being made ready, opened in the viewport as each is.
     preparing: Vec<Preparing>,
-    /// Runs the exports the shell asks for, with a vault.
-    exporter: Option<helios_gui::export::Exporter<helios_vault_sqlite::SqliteStore>>,
+    /// Starts the exports the shell asks for; the node runs them.
+    exporter: Option<Arc<helios_gui::export::Exporter<helios_vault_sqlite::SqliteStore>>>,
     /// The GUI's connection to the local node, dropped as the GUI ends.
     node: Option<helios_gui::node::Client>,
 }
@@ -1949,7 +1949,7 @@ fn main() -> Result<(), String> {
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
-            if let Some(link) = node_link {
+            if let Some(link) = node_link.clone() {
                 shell.attach_node(link);
             }
             let _ = WINDOW.set(cc.egui_ctx.clone());
@@ -2229,7 +2229,9 @@ fn main() -> Result<(), String> {
             if !shell.has_command(helios_gui::shell::IMPORT_COMMAND) {
                 shell.set_no_library(no_library.clone());
             }
-            let exporter = persist.as_ref().map(|p| {
+            // The node runs the exports (its jobs): they go on when the
+            // window that started them closes.
+            let exporter = persist.as_ref().zip(node_link.as_ref()).map(|(p, link)| {
                 let ctx = cc.egui_ctx.clone();
                 // On the viewport's engine: one render cache and one
                 // budget for the desktop, so exporting the image open does
@@ -2241,6 +2243,7 @@ fn main() -> Result<(), String> {
                     move || ctx.request_repaint(),
                     shell.viewport().engine().clone(),
                 )
+                .adopted_by(link)
             });
             let mut app = App {
                 node: node_client,

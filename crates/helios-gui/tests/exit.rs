@@ -163,3 +163,72 @@ fn quitting_closes_the_vault_through_the_node() {
     assert!(h.state().quitting());
     d.gui_ends(h);
 }
+
+/// Quit while an export, the node's job, runs: the question comes first;
+/// confirmed, the node cancels the export before its last flush, and
+/// stops cleanly with what was saved.
+#[test]
+fn quitting_during_an_export_asks_then_the_node_cancels_it() {
+    use egui_kittest::kittest::Queryable as _;
+    use helios_gui::export::Exporter;
+
+    let (d, mut h) = desktop("export");
+    h.state_mut().library_mut().rate(4).unwrap();
+    let link = d.node.link();
+    let jobs = h.state().jobs();
+    let exporter = Exporter::with_engine(
+        d.node.vault().clone(),
+        jobs.clone(),
+        h.state().export_sink(),
+        || {},
+        1,
+        h.state().viewport().engine().clone(),
+    )
+    .adopted_by(&link);
+    // Held: it is running, nothing written, when Quit comes.
+    exporter.pause();
+    // Outside the desktop's folder, which its end removes.
+    let out = std::env::temp_dir().join(format!("helios-quit-export-out-{}", std::process::id()));
+    h.state_mut()
+        .run(
+            "library.export",
+            json!({ "scope": "shown", "format": "png", "folder": out }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let bundle = h
+        .state()
+        .workspace_bundle()
+        .unwrap_or_else(helios_template::workspace::blank);
+    let asks = h.state_mut().take_exports();
+    let batch = exporter.run(&bundle, &asks[0]).unwrap();
+
+    h.state_mut()
+        .run("workbench.quit", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    assert!(!h.state().quitting(), "asked first");
+    assert!(
+        h.query_by_label_contains("jobs are running").is_some(),
+        "the question about the running export"
+    );
+    // Its Quit button's command.
+    h.state_mut()
+        .run("helios.quit.confirmed", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    assert!(h.state().quitting());
+    assert_eq!(
+        link.running_jobs(),
+        std::slice::from_ref(&batch),
+        "running until the stop"
+    );
+    d.gui_ends(h);
+    exporter.resume();
+    assert!(exporter.wait(std::time::Duration::from_mins(1)));
+    assert!(!jobs.cancellable().contains(&batch), "the export ended");
+    let written = std::fs::read_dir(&out).map_or(0, Iterator::count);
+    assert_eq!(written, 0, "cancelled: nothing written");
+    let _ = std::fs::remove_dir_all(&out);
+}
