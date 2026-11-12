@@ -647,6 +647,8 @@ gui-library-facet-type = Type
 
 gui-library-file = { $size } · modified { $day }
 
+gui-library-folders = Folders
+
 gui-library-images = Images
 
 gui-library-import = Import…
