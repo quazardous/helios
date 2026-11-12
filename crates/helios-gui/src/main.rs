@@ -1721,14 +1721,15 @@ fn main() -> Result<(), String> {
     // The library is read while the window opens.
     let library_reading = vault.clone().map(read_library);
     // Helios's settings, resolved once from their layers: the machine's
-    // file, the library's and the person's layers in the vault (the ones
-    // `helios-node --vault` keeps there), `--set`. Every part reads them
-    // from here; what does not read is left out and logged.
+    // file, the library's and the person's layers the node keeps (as
+    // `helios-node --vault` does), `--set`. Every part reads them from
+    // here; what does not read is left out and logged.
     let config = helios_gui::shell::config_dir();
+    let node_settings = node.as_ref().map(LocalNode::settings);
     let settings = {
         let (sources, problems) = helios_gui::config::read(
             &config,
-            &|name| vault.as_ref().map_or(Ok(None), |v| v.config_layer(name)),
+            &|name| node_settings.as_ref().map_or(Ok(None), |n| n.read(name)),
             vault
                 .as_ref()
                 .and(vault_file.as_deref())
@@ -1857,8 +1858,7 @@ fn main() -> Result<(), String> {
     // The grids' thumbnail textures, within their budget.
     let texture_budget = helios_gui::thumb_textures::budget(&settings);
     // The Settings app writes them back: the person's and the library's
-    // layers to the vault, the machine's to its file.
-    let settings_vault = vault.clone();
+    // layers through the node, the machine's to its file.
     let settings_dir = config.clone();
     // The GUI connects to the node as it starts, and disconnects as it
     // ends (`on_exit`); the shell asks the node to quit.
@@ -1888,8 +1888,8 @@ fn main() -> Result<(), String> {
             helios_gui::config::install(
                 shell.app().handle(),
                 settings.clone(),
-                settings_vault.clone().map(|v| {
-                    Box::new(move |name: &str, text: &str| v.set_config_layer(name, Some(text)))
+                node_settings.clone().map(|n| {
+                    Box::new(move |name: &str, text: &str| n.write(name, text))
                         as helios_gui::config::VaultWriter
                 }),
                 &settings_dir,
