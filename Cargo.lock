@@ -1160,20 +1160,6 @@ dependencies = [
 
 [[package]]
 name = "egui-pop"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d001a30cb495c1082ba4d74977b813f446a91c509a67c44cdb75a89591ec3b3"
-dependencies = [
- "egui",
- "egui-pop-api",
- "egui-pop-core",
- "egui-pop-model",
- "egui-pop-tokens",
- "egui-pop-viewport",
-]
-
-[[package]]
-name = "egui-pop"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1b4b2e72634a4d933b18235344e6e0e0f09fbf0e8b4c2130a004fff80556811"
@@ -1497,11 +1483,11 @@ dependencies = [
 
 [[package]]
 name = "egui_hud"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47f7deef1086debcb72366591f00bb43556eb94c2cb306e2fe9d217a2bd4fa82"
+checksum = "189060a572ae0b59ddaa826e03153b8e67a6ba85018ec60698e34a182f36bc22"
 dependencies = [
- "egui-pop 0.9.0",
+ "egui-pop",
  "egui-pop-model",
  "egui_fit",
  "serde",
@@ -2359,7 +2345,7 @@ name = "helios-controls-gallery"
 version = "0.83.0"
 dependencies = [
  "eframe",
- "egui-pop 0.10.2",
+ "egui-pop",
  "egui_hud",
  "egui_kittest",
  "helios-controls",
@@ -2406,7 +2392,7 @@ dependencies = [
 name = "helios-declarations"
 version = "0.83.0"
 dependencies = [
- "egui-pop 0.10.2",
+ "egui-pop",
  "helios-gui",
  "helios-i18n",
  "helios-node",
@@ -2464,7 +2450,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
- "egui-pop 0.10.2",
+ "egui-pop",
  "egui-pop-agent",
  "egui-pop-test",
  "egui-pop-wayland",
