@@ -281,11 +281,15 @@ impl Shell {
                 *held = Some(ctx.clone());
             }
         }
-        if !self.core.health.listening && self.watching_volumes() {
+        if !self.core.health.listening
+            && let Some(watch) = self.volume_watch()
+        {
             let (volumes, ctx) = (self.core.health.volumes.clone(), ctx.clone());
-            self.on_volumes_changed(move || {
-                volumes.fetch_add(1, Ordering::SeqCst);
-                ctx.request_repaint();
+            watch.on_change(move |change| {
+                if !change.at_start() {
+                    volumes.fetch_add(1, Ordering::SeqCst);
+                    ctx.request_repaint();
+                }
             });
             self.core.health.listening = true;
         }

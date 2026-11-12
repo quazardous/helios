@@ -1738,6 +1738,19 @@ fn main() -> Result<(), String> {
         }
         None => (None, None),
     };
+    // The node watches the machine's cards and disks, with or without a
+    // window; without a library, a watch of the desktop's own still lists
+    // the cards.
+    let volume_watch = node.as_ref().map_or_else(
+        || {
+            helios_gui::node_volumes::VolumeWatch::start(
+                helios_storage::system(),
+                bus.clone(),
+                helios_gui::node_volumes::POLL,
+            )
+        },
+        |n| n.watch_volumes(helios_storage::system()),
+    );
     let persist = node.as_ref().map(|n| Persist::on(n.vault().clone(), bus));
     start::mark("vault opened (and migrated)");
     // Workshop sessions a former run left unkept are dropped (C6).
@@ -1931,9 +1944,8 @@ fn main() -> Result<(), String> {
             // Tips come by themselves in the window, never in tests.
             shell.tips_by_themselves(true);
             shell.set_queue_when_empty(queue_when_empty);
-            // The import window's cards, polled off the interface thread,
-            // and its recent folders and favourites.
-            shell.watch_cards(helios_storage::system());
+            // The import window's cards, from the node's volume watch.
+            shell.follow_volumes(volume_watch.clone());
             // The volumes and where each photo is: present, offline or
             // missing, scanned at start, when a volume comes or goes and
             // every five minutes.
@@ -1954,13 +1966,15 @@ fn main() -> Result<(), String> {
                         Err(e) => log::warn!("volumes: the scan failed: {e}"),
                     },
                 );
-                shell.on_volumes_changed(move || scanner.poke());
+                volume_watch.on_change(move |change| {
+                    if !change.at_start() {
+                        scanner.poke();
+                    }
+                });
                 // The strategy's "when a backup disk is plugged in": what
                 // is short goes to it.
-                if let Some(backups) = backups.clone() {
-                    shell.on_volumes_changed(move || {
-                        backups.start(helios_storage::strategy::Trigger::OnConnect, None);
-                    });
+                if let Some(backups) = &backups {
+                    backups.follow(&volume_watch);
                 }
                 // The Storage page, and the volumes offline photos name.
                 let marker = helios_library::import::library_root(&vault)
@@ -2059,26 +2073,12 @@ fn main() -> Result<(), String> {
                     log::warn!("library.map.scanNow: {e}");
                 }
                 let plugged = feed.clone();
-                let known = std::sync::Mutex::new(
-                    helios_storage::system()
-                        .volumes()
-                        .into_iter()
-                        .map(|v| v.id)
-                        .collect::<std::collections::BTreeSet<_>>(),
-                );
-                shell.on_volumes_changed(move || {
-                    let now: std::collections::BTreeSet<_> = helios_storage::system()
-                        .volumes()
-                        .into_iter()
-                        .map(|v| v.id)
-                        .collect();
-                    let mut known = known
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    for id in now.difference(&known) {
-                        plugged.plugged(id.clone());
+                volume_watch.on_change(move |change| {
+                    if let helios_gui::node_volumes::Change::Mounted(m) = change
+                        && !m.at_start
+                    {
+                        plugged.plugged(m.id.clone());
                     }
-                    *known = now;
                 });
                 if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
                     helios_gui::image_map::start_thumb_check(

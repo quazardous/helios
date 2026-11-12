@@ -80,7 +80,9 @@ use crate::import_scan::{
 use egui_pop::api::files::browser::{
     DropOrigin, EntryKind, EntryMarks, FileBrowser, SourceEntry, ViewModes,
 };
-use helios_storage::{Card, Volumes, Watch};
+use helios_storage::{Card, Volumes};
+
+use crate::node_volumes::{self, Change, VolumeWatch};
 
 /// The command that opens the window (`source`: the card or folder to
 /// open it on).
@@ -182,7 +184,13 @@ pub(crate) struct ImportWindow {
     /// What the window asked of the shell, taken at the main window's
     /// next pass.
     events: Vec<Event>,
-    watch: Option<Watch>,
+    /// The node's volume watch the cards come from
+    /// ([`Shell::follow_volumes`]).
+    volumes: Option<VolumeWatch>,
+    /// Its events, read at each frame of the main window.
+    volume_events: Option<std::sync::mpsc::Receiver<helios_core::Envelope>>,
+    /// Cards plugged in since the watch's first look, not toasted yet.
+    inserted: Vec<Card>,
     /// The context the cards' and the scans' threads ask a frame of.
     ctx: Arc<Mutex<Option<Egui>>>,
     /// The viewport the window is drawn in (the main one while embedded):
@@ -441,8 +449,21 @@ impl ImportWindow {
     /// The cards as last polled; the first one ticked while the person
     /// has not chosen and no card is ticked.
     fn follow_cards(&mut self) {
-        let Some(watch) = &self.watch else { return };
-        self.cards = watch.cards();
+        let Some(events) = &self.volume_events else {
+            return;
+        };
+        for change in events.try_iter().filter_map(|e| Change::of(&e)) {
+            let Some(card) = change.card() else { continue };
+            self.cards.retain(|c| c.root != card.root);
+            if let Change::Mounted(m) = &change {
+                self.cards.push(card.clone());
+                if !m.at_start {
+                    self.inserted.push(card.clone());
+                }
+            } else {
+                self.inserted.retain(|c| c.root != card.root);
+            }
+        }
         self.connectors.set_cards(&self.cards);
         let cards = &self.cards;
         if self.open
@@ -600,13 +621,19 @@ fn name_of(p: &Path) -> String {
 }
 
 impl Shell {
-    /// Watches the cards and cameras of `volumes` for the import window
-    /// and its toasts (the desktop gives `helios_storage::system()`; tests a list
-    /// of their own).
-    pub fn watch_cards(&mut self, volumes: Arc<dyn Volumes>) {
+    /// Follows the node's volume watch (`LocalNode::watch_volumes`): the
+    /// import window lists the cards and cameras it publishes, and a card
+    /// plugged in while the window is closed raises a toast. The shell
+    /// reads the watch's events off the bus at each frame; the watch asks
+    /// a frame of the windows when a volume comes or goes.
+    pub fn follow_volumes(&mut self, watch: VolumeWatch) {
         let mut w = self.import.get_mut();
         let (ctx, drawn_in) = (w.ctx.clone(), w.drawn_in.clone());
-        w.watch = Some(Watch::start(volumes, move || {
+        // Subscribed before the list is read: a card in both is listed
+        // once (by its root).
+        w.volume_events = Some(watch.subscribe());
+        w.cards = watch.cards();
+        watch.on_change(move |_| {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                 // The main window's toasts, and the import window's list.
                 ctx.request_repaint_of(ViewportId::ROOT);
@@ -614,21 +641,24 @@ impl Shell {
                     ctx.request_repaint_of(at);
                 }
             }
-        }));
+        });
+        w.volumes = Some(watch);
     }
 
-    /// Calls `f` (off the interface thread) when a volume appears or goes,
-    /// once [`Shell::watch_cards`] watches them: the background volume
-    /// scan's cue.
-    pub fn on_volumes_changed(&self, f: impl Fn() + Send + 'static) {
-        if let Some(watch) = &self.import.get().watch {
-            watch.on_volumes(f);
-        }
+    /// A volume watch of the shell's own on `volumes`, for a shell with
+    /// no node (tests, a desktop without a library): [`Shell::follow_volumes`]
+    /// on a watch publishing on a bus of its own.
+    pub fn watch_cards(&mut self, volumes: Arc<dyn Volumes>) {
+        self.follow_volumes(VolumeWatch::start(
+            volumes,
+            Arc::new(helios_core::Bus::new()),
+            node_volumes::POLL,
+        ));
     }
 
-    /// Whether the volumes are watched ([`Shell::watch_cards`]).
-    pub(super) fn watching_volumes(&self) -> bool {
-        self.import.get().watch.is_some()
+    /// The volume watch the shell follows ([`Shell::follow_volumes`]).
+    pub(super) fn volume_watch(&self) -> Option<VolumeWatch> {
+        self.import.get().volumes.clone()
     }
 
     /// Keeps the import window's recent folders, favourites and last
@@ -864,11 +894,7 @@ impl Shell {
         let (open, inserted) = {
             let mut w = self.import.get_mut();
             w.follow_cards();
-            let inserted = w
-                .watch
-                .as_ref()
-                .map(Watch::take_inserted)
-                .unwrap_or_default();
+            let inserted = std::mem::take(&mut w.inserted);
             (w.open, inserted)
         };
         if !open {
