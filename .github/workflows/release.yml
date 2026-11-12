@@ -1,7 +1,8 @@
 name: release
 
 # Builds the Linux and Windows packages of a version and publishes them as a GitHub
-# Release (docs/releases.md). Versions advance on their own with each
+# Release (docs/releases.md); a first macOS build runs too, its files kept
+# as the run's artefacts only. Versions advance on their own with each
 # promotion of `next` (promote.yml); a version is published only when the
 # coordinator tags its "Release X.Y.Z" commit on `main` as `vX.Y.Z`, by
 # judgment (a real feature or a serious fix). No workflow pushes tags.
@@ -292,6 +293,52 @@ jobs:
         shell: pwsh
         run: |
           ./packaging/windows/smoke-installer.ps1 "dist/helios-$env:VERSION-windows-x86_64-setup.exe" `
+            crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
+
+  # macOS on Apple silicon (arm64), first slice: the same programs built
+  # for aarch64-apple-darwin, signed ad hoc only, as a tarball kept with the
+  # run's artefacts, and its smoke test (packaging/macos/smoke.sh). Not yet
+  # attached to the Release, and allowed to fail: publish does not wait for
+  # it. Helios links no C library of darktable's; the C its crates carry
+  # (bundled SQLite and the like) builds with the runner's Xcode: no Homebrew.
+  macos:
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - name: version
+        id: version
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: build
+        run: |
+          uname -m
+          cargo build --release --locked \
+            -p helios-node -p helios-gui -p helios-plugin-darktable-library
+      - name: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: packaging/macos/release.sh "$VERSION" target/release dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ steps.version.outputs.version }}-macos-arm64
+          path: dist/
+          if-no-files-found: error
+      - name: smoke
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          (cd dist && shasum -a 256 -c SHA256SUMS-macos)
+          packaging/macos/smoke.sh "dist/helios-$VERSION-macos-arm64.tar.gz" \
             crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
 
   publish:
