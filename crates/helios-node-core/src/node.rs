@@ -1,5 +1,6 @@
-//! The desktop's local node, embedded in its process
-//! (docs/design/node-client-split.md, choice A): it owns the vault.
+//! The local node: the vault's owner. The desktop embeds it in its
+//! process (docs/design/node-client-split.md, choice A); `helios-node
+//! --vault` runs it headless.
 //!
 //! The node opens the vault ([`LocalNode::open`]), saves it on its own
 //! schedule (a flush every [`FLUSH_EVERY`] on a thread of its own, with
@@ -13,7 +14,7 @@
 //!
 //! The node runs the work that outlives a window ([`NodeJobs`], adopted
 //! with [`Link::adopt`]): the exports, the backups and the health check
-//! ([`crate::node_jobs`]). A window starts such work and
+//! ([`crate::jobs`]). A window starts such work and
 //! watches it through the jobs API (the Queue panel, the jobs centre);
 //! closing it leaves the work running. The node's stop waits for that
 //! work, or cancels it first when the quit was confirmed as cancelling
@@ -21,7 +22,7 @@
 //! flush.
 //!
 //! The node watches the machine's volumes ([`LocalNode::watch_volumes`],
-//! [`crate::node_volumes`]): cards and disks coming and going are
+//! [`crate::volumes`]): cards and disks coming and going are
 //! published on its bus, with or without a window, for its clients and
 //! its jobs (a backup disk plugged in) to hear.
 //!
@@ -36,7 +37,7 @@ use helios_core::Bus;
 use helios_storage::Volumes;
 use helios_vault::{Store, Vault};
 
-use crate::node_volumes::{self, VolumeWatch};
+use crate::volumes::VolumeWatch;
 
 /// How often the node flushes the vault, whatever the windows do.
 pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
@@ -224,7 +225,8 @@ impl Drop for Client {
     }
 }
 
-/// The node embedded in the desktop's process: the vault's owner.
+/// The local node, the vault's owner: embedded in the desktop's process,
+/// or headless in `helios-node`.
 pub struct LocalNode<S: Store + 'static> {
     vault: Arc<Vault<S>>,
     bus: Arc<Bus>,
@@ -257,9 +259,9 @@ impl<S: Store + 'static> LocalNode<S> {
     /// Watches `volumes` (the machine's: `helios_storage::system()`) on a
     /// thread of the node's, with or without a window: their comings and
     /// goings are published on the node's bus
-    /// ([`crate::node_volumes`]). The watch stops as the node stops.
+    /// ([`crate::volumes`]). The watch stops as the node stops.
     pub fn watch_volumes(&self, volumes: Arc<dyn Volumes>) -> VolumeWatch {
-        let watch = VolumeWatch::start(volumes, self.bus.clone(), node_volumes::POLL);
+        let watch = VolumeWatch::start(volumes, self.bus.clone(), crate::volumes::POLL);
         self.link
             .0
             .watches

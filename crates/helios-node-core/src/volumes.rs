@@ -8,8 +8,8 @@
 //! card. The volumes there at the first look are published too, marked
 //! [`Mounted::at_start`]. Its clients subscribe: the import window lists
 //! the cards and a card inserted while it is closed raises a toast (the
-//! shell reads the bus, [`crate::Shell::follow_volumes`]); the backups
-//! start on a disk plugged in ([`crate::node_jobs::Backups::follow`]);
+//! desktop's shell reads the bus); the backups
+//! start on a disk plugged in ([`crate::jobs::Backups::follow`]);
 //! the volume scan and the image map hear of them through
 //! [`VolumeWatch::on_change`].
 //!

@@ -10,8 +10,8 @@
 //!   (Linux reads `/proc/mounts`, `/dev/disk` and `/sys`, see [`detect`];
 //!   other systems list none for now, behind the same trait). Its
 //!   [`Volumes::cards`] keeps the cards and cameras, for the import window.
-//!   Watching them come and go is the node's (`helios-gui`'s
-//!   `node_volumes`), on the machine the volumes are plugged into.
+//!   Watching them come and go is the node's (`helios-node-core`'s
+//!   `volumes`), on the machine the volumes are plugged into.
 //! - [`marker`] reads and writes the identity file `.helios/volume.json`.
 //! - [`registry`] keeps the volumes Helios has seen in the vault, offline
 //!   ones included.
