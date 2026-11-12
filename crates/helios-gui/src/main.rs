@@ -1930,9 +1930,18 @@ fn main() -> Result<(), String> {
             }
             // The import accounts, kept in the vault (public facts only).
             if let Some(vault) = known_vault.clone() {
+                // Secrets and tokens in the system keyring (Windows has no
+                // keyring support yet: kept for the session only); `oauth`
+                // steps through the browser sign-in.
+                let secrets: Arc<dyn helios_connect::account::Secrets> = if cfg!(windows) {
+                    Arc::new(helios_connect::account::MemorySecrets::default())
+                } else {
+                    Arc::new(helios_connect::keyring::SystemSecrets)
+                };
+                shell.set_import_sign_in(Arc::new(helios_connect::oauth::OAuth::system()));
                 shell.set_import_accounts(
                     Arc::new(helios_connect::account::VaultAccounts(vault)),
-                    Arc::new(helios_connect::account::MemorySecrets::default()),
+                    secrets,
                 );
             }
             // What the vault holds, for its "in your Library" prefilter.
