@@ -9,6 +9,9 @@
 //!   of it, then `main` (and `next`) moved to that (see `promote.rs`).
 //! - `check [--base REF]`: fragments are well formed and readable by an
 //!   outsider; with `--base`, code changed since REF comes with a fragment.
+//!   The in-tree plugins' Helios range and the workspace's own Cargo.lock
+//!   lines follow the workspace version, so a branch that lands after a
+//!   version bump fails its own CI rather than `--locked` builds on `next`.
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
 //!   catalogs of `i18n/` (see `i18n.rs`).
 //! - `lint [--fix] [--require-all]`: rustfmt, clippy and the optional
@@ -460,6 +463,131 @@ fn plugin_manifests(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Why an in-tree plugin manifest's Helios range is not the one the version
+/// bump writes for `v` (`write_plugin_range`, so the check and the bump agree).
+fn range_problem(path: &str, manifest: &str, v: Version) -> Option<String> {
+    (write_plugin_range(manifest, v) != manifest).then(|| {
+        format!(
+            "{path}: its Helios range does not follow version {}.{}.{}: set `helios = \"{}\"` (what the version bump writes)",
+            v.0,
+            v.1,
+            v.2,
+            plugin_range(v)
+        )
+    })
+}
+
+/// The Cargo.lock lines of workspace members (`(name, version)`, from their
+/// manifests) that lag behind: what `cargo update --workspace` would change.
+fn lock_problems(lock: &str, members: &[(String, String)]) -> Vec<String> {
+    let mut locked = std::collections::HashMap::new();
+    for block in lock.split("\n\n") {
+        // a package of the workspace has no `source`
+        if !block.starts_with("[[package]]") || block.lines().any(|l| l.starts_with("source = ")) {
+            continue;
+        }
+        let field = |key: &str| {
+            block
+                .lines()
+                .find_map(|l| l.strip_prefix(key))
+                .map(|v| v.trim_matches('"'))
+        };
+        if let (Some(name), Some(version)) = (field("name = "), field("version = ")) {
+            locked.insert(name, version);
+        }
+    }
+    members
+        .iter()
+        .filter_map(|(name, version)| match locked.get(name.as_str()) {
+            Some(l) if l == version => None,
+            Some(l) => Some(format!(
+                "Cargo.lock: `{name}` is locked at {l} but its manifest says {version}: run `cargo update --workspace` and commit (or `git add`) Cargo.lock"
+            )),
+            None => Some(format!(
+                "Cargo.lock: no line for `{name}`: run `cargo update --workspace` and commit (or `git add`) Cargo.lock"
+            )),
+        })
+        .collect()
+}
+
+/// The plugin ranges and Cargo.lock lines that do not follow the workspace
+/// version (see `range_problem` and `lock_problems`).
+fn version_problems(root: &Path) -> Vec<String> {
+    let cargo_toml = std::fs::read_to_string(root.join("Cargo.toml")).unwrap_or_default();
+    let v = match read_version(&cargo_toml) {
+        Ok(v) => v,
+        Err(e) => return vec![format!("Cargo.toml: {e}")],
+    };
+    let mut problems: Vec<String> = plugin_manifests(root)
+        .iter()
+        .filter_map(|p| {
+            let text = std::fs::read_to_string(p).unwrap_or_default();
+            let path = p.strip_prefix(root).unwrap_or(p).to_string_lossy();
+            range_problem(&path, &text, v)
+        })
+        .collect();
+    match workspace_members(root) {
+        Ok(members) => {
+            problems.extend(lock_problems(&staged_lock(root), &members));
+        }
+        Err(e) => problems.push(e),
+    }
+    problems
+}
+
+/// Cargo.lock as git holds it (the index: what a commit takes), else the
+/// file. Not the file first: any cargo command run without `--locked`,
+/// `cargo xtask` itself included, rewrites a stale lock on disk before the
+/// check could see it, while the commit still carries the stale one.
+fn staged_lock(root: &Path) -> String {
+    Command::new("git")
+        .args(["show", ":Cargo.lock"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map_or_else(
+            || std::fs::read_to_string(root.join("Cargo.lock")).unwrap_or_default(),
+            |o| String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+}
+
+/// The workspace members' names and versions, as `cargo metadata` resolves
+/// them (`version.workspace = true` included), without touching Cargo.lock.
+fn workspace_members(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let out = Command::new(cargo)
+        .args([
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--offline",
+        ])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "cargo metadata: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let meta: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
+    Ok(meta["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            Some((
+                p["name"].as_str()?.to_string(),
+                p["version"].as_str()?.to_string(),
+            ))
+        })
+        .collect())
+}
+
 fn changed_since(base: &str) -> Result<Vec<String>, String> {
     let run = |args: &[&str]| -> Result<Vec<String>, String> {
         let out = Command::new("git")
@@ -572,8 +700,9 @@ fn main() -> ExitCode {
                     Err(e) => problems.push(e),
                 }
             }
+            problems.extend(version_problems(&root));
             if problems.is_empty() {
-                println!("Changelog fragments OK.");
+                println!("Changelog fragments, plugin ranges and Cargo.lock OK.");
                 ExitCode::SUCCESS
             } else {
                 fail(&problems)
@@ -631,6 +760,35 @@ mod tests {
             write_plugin_range(manifest, (0, 1, 0)),
             "id = \"x\"\n\n[requires]\nhelios = \">=0.1.0, <0.2.0\"\n"
         );
+    }
+
+    #[test]
+    fn plugin_ranges_follow_the_workspace_version() {
+        let manifest = "id = \"x\"\n\n[compat]\nhelios = \">=0.78.0, <0.79.0\"\n";
+        assert_eq!(range_problem("x.toml", manifest, (0, 78, 2)), None);
+        let stale = manifest.replace("0.78.0, <0.79.0", "0.77.0, <0.78.0");
+        let problem = range_problem("x.toml", &stale, (0, 78, 0)).expect("a stale range");
+        assert!(problem.starts_with("x.toml: "), "{problem}");
+        assert!(
+            problem.contains("`helios = \">=0.78.0, <0.79.0\"`"),
+            "{problem}"
+        );
+    }
+
+    #[test]
+    fn lock_lines_follow_the_members() {
+        let lock = "version = 4\n\n[[package]]\nname = \"helios-a\"\nversion = \"0.78.0\"\n\n[[package]]\nname = \"helios-b\"\nversion = \"0.77.0\"\n\n[[package]]\nname = \"serde\"\nversion = \"0.77.0\"\nsource = \"registry+https://example.org/index\"\n";
+        let member = |n: &str, v: &str| (n.to_string(), v.to_string());
+        assert!(lock_problems(lock, &[member("helios-a", "0.78.0")]).is_empty());
+        let stale = lock_problems(
+            lock,
+            &[member("helios-a", "0.78.0"), member("helios-b", "0.78.0")],
+        );
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].contains("`helios-b` is locked at 0.77.0 but its manifest says 0.78.0"));
+        assert!(stale[0].contains("cargo update --workspace"));
+        // a registry package of the same name is not the member's line
+        assert_eq!(lock_problems(lock, &[member("serde", "0.78.0")]).len(), 1);
     }
 
     #[test]

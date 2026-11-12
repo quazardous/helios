@@ -33,6 +33,12 @@ the promotion workflow (`.github/workflows/promote.yml`, running
 - The workflow pushes with its own token, which starts no workflow: the
   release commit and the merge do not rerun CI (they change versions
   only); the next push to `next` tests them with whatever it brings.
+- A branch started before a bump still carries the old version where it
+  adds or moves a plugin: `cargo xtask check`, in CI on every pull
+  request, fails when an in-tree plugin's Helios range is not the one the
+  bump writes, or when Cargo.lock holds a workspace member at another
+  version than its manifest. Its message says what to write; for the lock,
+  `cargo update --workspace`. The branch's own CI fails, not `next`.
 
 ## Publishing: a tag, by judgment
 
