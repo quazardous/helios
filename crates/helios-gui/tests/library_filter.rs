@@ -3,7 +3,9 @@
 //! vault, the grid shows what it answers, and the facet counts of the
 //! filter show under the toolbar, a click on one adding it to the filter.
 //! The folders tree (L5): its counts, a click scoping the grid, each
-//! row's menu, and the folder chosen kept with the workspace.
+//! row's menu, and the folder chosen kept with the workspace. The albums
+//! (L6): made from the selection, filled and emptied, one undo step each,
+//! a click scoping the grid, the album chosen kept with the workspace.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -453,6 +455,165 @@ fn the_folder_chosen_is_the_workspace_s_and_its_menu_imports_there() {
     assert_eq!(h.state().import_ticked(), [PathBuf::from(&raw)]);
     // The main window's folder is untouched by the import focus.
     assert_eq!(h.state().library().folder(), Some(raw.clone()));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The collection the workspace keeps, as written to its files.
+fn kept_collection(config: &Path, workspace: &Path) -> Option<String> {
+    Files::new(config, workspace)
+        .load()
+        .unwrap()
+        .bundle
+        .template
+        .library
+        .and_then(|l| l.collection)
+}
+
+/// Runs a command as the user; the shell queues it for its frame.
+fn run(h: &mut Harness<'static, Shell>, id: &str, args: Value) {
+    h.state_mut().run(id, args, Origin::User).unwrap();
+}
+
+/// The albums as the Library shows them: name and count.
+fn albums(h: &Harness<'_, Shell>) -> Vec<(String, usize)> {
+    let library = h.state().library();
+    library
+        .albums()
+        .unwrap_or_default()
+        .iter()
+        .map(|a| (a.name.clone(), library.album_count(a)))
+        .collect()
+}
+
+#[test]
+fn an_album_made_from_the_selection_scopes_the_grid_and_each_change_undoes() {
+    let root = temp("albums");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    // As the desktop wires it: undo and redo move the vault's rows.
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+    h.get_by_label("No album yet");
+
+    // "New album…" from the selection: the form asks its name.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(3).hex()]);
+    h.get_by_label("New album…").click();
+    settle(&mut h, &mut persist, 2.0);
+    run(
+        &mut h,
+        "dialog.answer",
+        json!({ "values": { "name": "Trip 2024" } }),
+    );
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(albums(&h), [("Trip 2024".to_string(), 2)]);
+    let line = history.line();
+    assert_eq!(
+        line.undo.last().unwrap().label.text,
+        "New album “Trip 2024”"
+    );
+
+    // A click scopes the grid to it, kept with the workspace.
+    h.get_by_label("Trip 2024 2").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(grid(&h), ["a.jpg", "c.nef"]);
+    assert_eq!(
+        h.state().library().collection().as_deref(),
+        Some("trip-2024")
+    );
+    assert_eq!(kept_collection(&config, &ws).as_deref(), Some("trip-2024"));
+
+    // Photos added and removed by an agent: the grid follows.
+    run(
+        &mut h,
+        "library.collection.add",
+        json!({ "id": "trip-2024", "images": [id(2).hex()] }),
+    );
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    run(
+        &mut h,
+        "library.collection.remove",
+        json!({ "id": "trip-2024", "images": [id(1).hex()] }),
+    );
+    settle(&mut h, &mut persist, 11.0);
+    assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Remove 1 photos from “Trip 2024”"
+    );
+    // Undone: the photo is back in the album and the grid.
+    let undone = history.undo(
+        &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(
+        matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+        "{undone:?}"
+    );
+    settle(&mut h, &mut persist, 14.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    assert_eq!(albums(&h), [("Trip 2024".to_string(), 3)]);
+
+    // Renamed; a name taken or an unknown album refused.
+    run(
+        &mut h,
+        "library.collection.rename",
+        json!({ "id": "trip-2024", "name": "Summer" }),
+    );
+    settle(&mut h, &mut persist, 17.0);
+    assert_eq!(albums(&h), [("Summer".to_string(), 3)]);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "SUMMER" }),
+    );
+    run(&mut h, "library.collection", json!({ "id": "nope" }));
+    settle(&mut h, &mut persist, 20.0);
+    assert_eq!(albums(&h).len(), 1);
+    assert_eq!(
+        h.state().library().collection().as_deref(),
+        Some("trip-2024")
+    );
+    drop((h, persist));
+
+    // The workspace opened again: the same album, the same grid.
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 22.0);
+    assert_eq!(
+        h.state().library().collection().as_deref(),
+        Some("trip-2024")
+    );
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+
+    // Deleted: an album that is not there shows no photo; the photos stay
+    // in the Library.
+    run(
+        &mut h,
+        "library.collection.delete",
+        json!({ "id": "trip-2024" }),
+    );
+    settle(&mut h, &mut persist, 25.0);
+    assert!(albums(&h).is_empty());
+    assert!(grid(&h).is_empty());
+    run(&mut h, "library.collection", json!({ "id": null }));
+    settle(&mut h, &mut persist, 28.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    assert_eq!(kept_collection(&config, &ws), None);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

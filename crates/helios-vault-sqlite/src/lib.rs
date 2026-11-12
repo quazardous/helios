@@ -952,6 +952,16 @@ fn matched_sql(
         args.push(Sql::Text(prefix));
         args.push(Sql::Text(end));
     }
+    // An album: the ids its document holds.
+    if let Some(album) = &query.album {
+        let _ = write!(
+            sql,
+            " AND i.id IN (SELECT j.value FROM documents d, json_each(d.value, '$.images') j
+                           WHERE d.ns = '{}' AND d.key = ?)",
+            helios_vault::collections::COLLECTIONS
+        );
+        args.push(Sql::Text(album.clone()));
+    }
     if !query.presence.is_empty() {
         let _ = write!(sql, " AND {PRESENCE} IN ({})", marks(query.presence.len()));
         args.extend(query.presence.iter().map(|p| Sql::Text(p.as_str().into())));

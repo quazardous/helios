@@ -8,6 +8,9 @@
 //!   back ([`helios_vault::Vault::replay`]). No file is touched: copies
 //!   stay in the library folder, and a later import finds them there by
 //!   their hash.
+//! - **One step per album change** (`docs/design/library.md`, L6): a
+//!   new album, a rename, a deletion, photos added or removed; its
+//!   changes are the album's document before and after.
 //! - **For the session only** (docs/design/undo.md, decided 2026-10-14):
 //!   the steps live in memory; a restart starts with none.
 //! - **Active with the library's panels** (the Library, the Filmstrip,
@@ -74,6 +77,37 @@ pub fn import_label(photos: u64) -> Label {
         text: m.english.clone(),
         key: Some(m.key),
         args: [("count".to_string(), photos.to_string())].into(),
+    }
+}
+
+/// An album change's label: "New album “Trip”", "Add 3 photos to “Trip”"
+/// (`name`: the album's name before the change; `count`: the photos
+/// added or removed).
+pub fn album_label(edit: &crate::library::AlbumEdit, name: &str, count: usize) -> Label {
+    use crate::library::AlbumEdit as E;
+    let m = match edit {
+        E::Create { .. } => Message::new("gui-history-album-new", "New album “{ $name }”"),
+        E::Rename { .. } => Message::new("gui-history-album-rename", "Rename album “{ $name }”"),
+        E::Delete { .. } => Message::new("gui-history-album-delete", "Delete album “{ $name }”"),
+        E::Add { .. } => Message::new(
+            "gui-history-album-add",
+            "Add { $count } photos to “{ $name }”",
+        ),
+        E::Remove { .. } => Message::new(
+            "gui-history-album-remove",
+            "Remove { $count } photos from “{ $name }”",
+        ),
+    }
+    .with("name", name)
+    .with("count", count);
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [
+            ("name".to_string(), name.to_string()),
+            ("count".to_string(), count.to_string()),
+        ]
+        .into(),
     }
 }
 
@@ -232,6 +266,7 @@ mod tests {
                 before: None,
                 after: None,
             }],
+            ..Changes::default()
         }
     }
 

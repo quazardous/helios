@@ -633,6 +633,27 @@ command-library-sort =
 command-library-folder =
     .title = Limiter la bibliothèque à un dossier et à ceux qu’il contient (`path`, absolu ; null : toute la bibliothèque) ; gardé avec l’espace de travail. Sans `path`, dit le dossier
 
+command-library-collection =
+    .title = Limiter la bibliothèque à un album (`id` ; null : toute la bibliothèque) ; gardé avec l’espace de travail. Sans `id`, dit l’album
+
+command-library-collection-create =
+    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection) ; sans `name`, le demande. Répond son `id`
+
+command-library-collection-rename =
+    .title = Renommer un album (`id`, `name`) ; sans `name`, le demande
+
+command-library-collection-delete =
+    .title = Supprimer un album (`id`) ; ses photos restent dans la bibliothèque
+
+command-library-collection-add =
+    .title = Ajouter des photos à un album (`id` ; `images` : identifiants, sinon la sélection)
+
+command-library-collection-remove =
+    .title = Retirer des photos d’un album (`id` ; `images` : identifiants, sinon la sélection) ; elles restent dans la bibliothèque
+
+command-library-collection-list =
+    .title = Lister les albums : `id`, `name` et combien de photos chacun contient
+
 command-library-scanFolder =
     .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume
 

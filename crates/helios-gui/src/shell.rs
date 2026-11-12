@@ -238,6 +238,11 @@ enum Action {
     /// Scopes the library to a folder (`path`; null: none), as whom;
     /// without `path`, says the folder.
     Folder(Value, Origin),
+    /// Scopes the library to a collection (`id`; null: none), as whom;
+    /// without `id`, says the collection.
+    Collection(Value, Origin),
+    /// An album command (its id) with its arguments.
+    CollectionEdit(&'static str, Value),
     /// Scans a folder for the image map (`path`).
     ScanFolder(Value),
     /// Moves the comparison's active photo by a step.
@@ -2799,6 +2804,45 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                crate::library::COLLECTION_COMMAND,
+                "Scope the library to an album (`id`; null: the whole library); kept with the workspace. Without `id`, says the album",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::Collection(a.clone(), origin.clone()))),
+        );
+        for (id, title) in [
+            (
+                crate::library::COLLECTION_CREATE_COMMAND,
+                "New album (`name`; `images`: ids, else the selection); without `name`, asks it. Answers its `id`",
+            ),
+            (
+                crate::library::COLLECTION_RENAME_COMMAND,
+                "Rename an album (`id`, `name`); without `name`, asks it",
+            ),
+            (
+                crate::library::COLLECTION_DELETE_COMMAND,
+                "Delete an album (`id`); its photos stay in the library",
+            ),
+            (
+                crate::library::COLLECTION_ADD_COMMAND,
+                "Add photos to an album (`id`; `images`: ids, else the selection)",
+            ),
+            (
+                crate::library::COLLECTION_REMOVE_COMMAND,
+                "Remove photos from an album (`id`; `images`: ids, else the selection); they stay in the library",
+            ),
+            (
+                crate::library::COLLECTION_LIST_COMMAND,
+                "List the albums: `id`, `name` and how many photos each holds",
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, _| Ok(Action::CollectionEdit(id, a.clone()))),
+            );
+        }
+        add(
+            CommandSpec::new(
                 crate::library::SCAN_FOLDER_COMMAND,
                 "Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume",
                 "Library",
@@ -4153,6 +4197,9 @@ impl Shell {
         if let Some(folder) = &l.folder {
             lib.set_folder(Some(folder));
         }
+        if let Some(collection) = &l.collection {
+            lib.set_collection(Some(collection));
+        }
     }
 
     /// `library.sort`: sorts this window's library, and keeps the sort
@@ -4226,6 +4273,197 @@ impl Shell {
                 .set_folder(folder.as_deref());
         }
         Ok(json!({ "path": self.focus.library.borrow().folder() }))
+    }
+
+    /// `library.collection`: scopes this window's library to an album, and
+    /// keeps it with the workspace (one undo step) when one is open;
+    /// answers the album in force.
+    fn collection_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        if let Some(id) = args.get("id") {
+            let id = match id {
+                Value::Null => None,
+                Value::String(id) => {
+                    let known = self
+                        .focus
+                        .library
+                        .borrow()
+                        .albums()
+                        .is_none_or(|a| a.iter().any(|a| a.id == *id));
+                    if !known {
+                        return Err(format!("`id`: no album `{id}`"));
+                    }
+                    Some(id.clone())
+                }
+                other => return Err(format!("`id`: {other} is not an album's id")),
+            };
+            if let Some(state) = self.workspace_state() {
+                let mut library = state.bundle.template.library.unwrap_or_default();
+                library.collection.clone_from(&id);
+                // An empty library section is none at all.
+                let library =
+                    (library != helios_template::LibraryDesc::default()).then_some(library);
+                if library
+                    != self
+                        .workspace_state()
+                        .and_then(|s| s.bundle.template.library)
+                {
+                    self.edit_workspace(&json!({ "library": library }), origin)?;
+                }
+            }
+            self.focus
+                .library
+                .borrow_mut()
+                .set_collection(id.as_deref());
+        }
+        Ok(json!({ "id": self.focus.library.borrow().collection() }))
+    }
+
+    /// The album commands (`library.collection.*`): each change is queued
+    /// for the host, which makes it in the vault as one step of the
+    /// library's history (`docs/design/library.md`, L6). A name not given
+    /// is asked in a form.
+    fn collection_edit(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
+        use crate::library::{
+            AlbumEdit, COLLECTION_ADD_COMMAND as ADD, COLLECTION_CREATE_COMMAND as CREATE,
+            COLLECTION_DELETE_COMMAND as DELETE, COLLECTION_LIST_COMMAND as LIST,
+            COLLECTION_REMOVE_COMMAND as REMOVE, COLLECTION_RENAME_COMMAND as RENAME,
+        };
+        let text = |a: &'_ Value, key: &str| a.get(key).and_then(Value::as_str).map(String::from);
+        let albums: Vec<helios_vault::collections::Album> = self
+            .focus
+            .library
+            .borrow()
+            .albums()
+            .map(<[_]>::to_vec)
+            .unwrap_or_default();
+        if command == LIST {
+            let lib = self.focus.library.borrow();
+            let list: Vec<Value> = albums
+                .iter()
+                .map(|a| json!({ "id": a.id, "name": a.name, "count": lib.album_count(a) }))
+                .collect();
+            return Ok(json!({ "albums": list, "shown": lib.collection() }));
+        }
+        let name = text(args, "name")
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
+        let name = name.as_deref();
+        let taken = |name: &str, id: &str| {
+            let folded = helios_vault::fields::fold_case(name);
+            albums
+                .iter()
+                .any(|a| a.id != id && helios_vault::fields::fold_case(&a.name) == folded)
+        };
+        // The images named, else the selection (none: an error, but for a
+        // new album, which may start empty).
+        let images = |lib: &crate::library::Library, empty_ok: bool| match args.get("images") {
+            Some(Value::Array(list)) => Ok(list
+                .iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect::<Vec<_>>()),
+            Some(other) => Err(format!("`images`: {other} is not a list of ids")),
+            None => match lib.targets() {
+                Ok(keys) => Ok(keys),
+                Err(_) if empty_ok => Ok(Vec::new()),
+                Err(e) => Err(e),
+            },
+        };
+        if command == CREATE {
+            let Some(name) = name else {
+                self.album_form(CREATE, "");
+                return Ok(Value::Null);
+            };
+            if taken(name, "") {
+                return Err(format!("an album is already named “{name}”"));
+            }
+            let id =
+                helios_vault::collections::album_key(name, |k| albums.iter().any(|a| a.id == k));
+            let mut lib = self.focus.library.borrow_mut();
+            let images = images(&lib, true)?;
+            let count = images.len();
+            lib.edit_album(AlbumEdit::Create {
+                id: id.clone(),
+                name: name.to_string(),
+                images,
+            });
+            return Ok(json!({ "id": id, "name": name, "images": count }));
+        }
+        // The other commands name an album: given, else the one a form
+        // asked a new name for.
+        let id = match text(args, "id") {
+            Some(id) => id,
+            None if command == RENAME => self
+                .focus
+                .album_renamed
+                .clone()
+                .ok_or("`id`: no album named")?,
+            None => return Err("`id`: no album named".into()),
+        };
+        let Some(album) = albums.iter().find(|a| a.id == id) else {
+            return Err(format!("`id`: no album `{id}`"));
+        };
+        let mut lib = self.focus.library.borrow_mut();
+        let edit = match command {
+            RENAME => {
+                let Some(name) = name else {
+                    drop(lib);
+                    self.focus.album_renamed = Some(id);
+                    let current = album.name.clone();
+                    self.album_form(RENAME, &current);
+                    return Ok(Value::Null);
+                };
+                if taken(name, &id) {
+                    return Err(format!("an album is already named “{name}”"));
+                }
+                AlbumEdit::Rename {
+                    id,
+                    name: name.to_string(),
+                }
+            }
+            DELETE => AlbumEdit::Delete { id },
+            ADD => AlbumEdit::Add {
+                images: images(&lib, false)?,
+                id,
+            },
+            REMOVE => AlbumEdit::Remove {
+                images: images(&lib, false)?,
+                id,
+            },
+            other => return Err(format!("`{other}` is not an album command")),
+        };
+        let answer = json!({ "id": edit.id() });
+        lib.edit_album(edit);
+        Ok(answer)
+    }
+
+    /// Asks an album's name (`current` to start from), then runs `command`
+    /// with it.
+    fn album_form(&mut self, command: &str, current: &str) {
+        let (title, verb) = if current.is_empty() {
+            (
+                Message::new("gui-library-album-new-title", "New album"),
+                Message::new("gui-library-album-new-verb", "Create"),
+            )
+        } else {
+            (
+                Message::new("gui-library-album-rename-title", "Rename the album"),
+                Message::new("gui-library-album-rename-verb", "Rename"),
+            )
+        };
+        self.form(crate::dialogs::Form {
+            title: self.text(title),
+            fields: vec![crate::dialogs::Field {
+                key: "name".into(),
+                descriptor: helios_values::Descriptor::text(
+                    &self.text(Message::new("gui-library-album-name", "name")),
+                    current,
+                ),
+                value: helios_core::Value::Text(current.to_string()),
+            }],
+            verb: self.text(verb),
+            command: command.into(),
+        });
     }
 
     /// Compares photos side by side: the Compare place on `images` (ids),
@@ -4745,6 +4983,8 @@ impl Shell {
             Action::ComparePhotos(args) => return self.compare_photos(&args),
             Action::Sort(args, origin) => return self.sort_library(&args, &origin),
             Action::Folder(args, origin) => return self.folder_library(&args, &origin),
+            Action::Collection(args, origin) => return self.collection_library(&args, &origin),
+            Action::CollectionEdit(id, args) => return self.collection_edit(id, &args),
             Action::ScanFolder(args) => {
                 let path = args
                     .get("path")

@@ -229,7 +229,10 @@ impl<S: Store> Run<'_, S> {
                 change.changed().then_some(change)
             })
             .collect();
-        Changes { images }
+        Changes {
+            images,
+            ..Changes::default()
+        }
     }
 
     /// The item's place on the source's volume.

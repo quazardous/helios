@@ -474,7 +474,10 @@ impl<S: Store> Vault<S> {
                     after: rows_of(&*store, id)?,
                 });
             }
-            Ok(Changes { images })
+            Ok(Changes {
+                images,
+                ..Changes::default()
+            })
         })?;
         if !changes.is_empty() {
             self.catalog.lock().expect("catalog lock").version += 1;

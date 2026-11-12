@@ -39,6 +39,7 @@ pub mod capture;
 pub mod catalog;
 pub mod changed;
 pub mod claims;
+pub mod collections;
 pub mod contract;
 pub mod edit;
 pub mod fields;
@@ -540,7 +541,15 @@ impl MemoryStore {
                 s.image.as_ref() == Some(id) && s.path.to_string_lossy().starts_with(&prefix)
             })
         });
+        let album_ok = query.album.as_deref().is_none_or(|album| {
+            self.documents
+                .get(&(collections::COLLECTIONS.to_string(), album.to_string()))
+                .and_then(|d| d.get("images"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|a| a.iter().any(|i| i.as_str() == Some(id.hex().as_str())))
+        });
         query.min_rating.is_none_or(|min| rating >= min)
+            && album_ok
             && query
                 .label
                 .as_ref()

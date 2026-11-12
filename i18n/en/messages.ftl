@@ -105,6 +105,8 @@ gui-account-sign-out-explain = Helios forgets this account's keys and tokens on 
 
 gui-account-sign-out-title = Sign out of { $account }?
 
+gui-album-not-changed = The album was not changed: { $error }
+
 gui-backup-card-safe = { $card } is safe to format: every photo has its backups
 
 gui-backup-wizard = Set up backups
@@ -413,6 +415,16 @@ gui-health-summary-warnings = Warnings: { $count }
 
 gui-health-undo-ignore = Show again
 
+gui-history-album-add = Add { $count } photos to “{ $name }”
+
+gui-history-album-delete = Delete album “{ $name }”
+
+gui-history-album-new = New album “{ $name }”
+
+gui-history-album-remove = Remove { $count } photos from “{ $name }”
+
+gui-history-album-rename = Rename album “{ $name }”
+
 gui-history-batch = { $label } ({ $count } values)
 
 gui-history-import = Import { $count } photos
@@ -680,6 +692,30 @@ gui-job-other-failed = Job failed
 gui-keys-from-template = template
 
 gui-layout-not-saved = The layout was not saved: { $error }
+
+gui-library-album-add = Add the selected photos
+
+gui-library-album-delete = Delete the album
+
+gui-library-album-name = name
+
+gui-library-album-new = New album…
+
+gui-library-album-new-title = New album
+
+gui-library-album-new-verb = Create
+
+gui-library-album-remove = Remove the selected photos
+
+gui-library-album-rename = Rename…
+
+gui-library-album-rename-title = Rename the album
+
+gui-library-album-rename-verb = Rename
+
+gui-library-albums = Albums
+
+gui-library-albums-none = No album yet
 
 gui-library-auto-advance = Auto-advance
 

@@ -578,6 +578,22 @@ fn a_library_s_folder_is_absolute_and_follows_the_schema() {
 }
 
 #[test]
+fn a_library_s_collection_follows_the_schema() {
+    let mut bundle = batch_export();
+    bundle.template.library.as_mut().unwrap().collection = Some("trip-2024".into());
+    assert!(bundle.validate(&catalogue()).is_ok());
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        json["library"]["collection"],
+        serde_json::json!("trip-2024")
+    );
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn the_picture_templates_and_the_blank_workspace_take_a_picture_or_a_raw() {
     // Every built-in template but "Develop one image" (a raw only), and
     // the blank workspace: a raw goes through the raw front.

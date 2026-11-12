@@ -52,6 +52,8 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     queries_filter_by_every_library_term_in_one_query(make());
     facets_count_each_value_in_one_query(make());
     folders_count_their_photos_and_those_below_in_one_query(make());
+    albums_are_made_filled_renamed_and_forgotten(make());
+    an_album_s_changes_are_undone_and_redone(make());
 }
 
 /// Capture fields are written whole by `set_captures` (a value not read
@@ -655,6 +657,7 @@ fn a_step_is_reverted_and_replayed_keeping_the_files<S: Store>(s: S, dir: &Path)
                 after: v.rows(&new).unwrap(),
             },
         ],
+        ..Changes::default()
     };
     assert!(changes.images.iter().all(Change::changed));
     let after: Vec<_> = changes.images.iter().map(|c| c.after.clone()).collect();
@@ -2217,4 +2220,69 @@ fn folders_count_their_photos_and_those_below_in_one_query<S: Store>(s: S) {
     assert_eq!(lib.get(&key(&p.join("shots"))), Some(&2));
     assert_eq!(lib.get(&key(&p.join("other"))), None);
     assert_eq!(some.get(&on("uuid:b2")), None);
+}
+
+/// The photos of an album, as a query selects them.
+fn in_album<S: Store>(v: &Vault<S>, album: &str) -> Vec<ImageId> {
+    let c = v
+        .open_cursor(Query {
+            album: Some(album.into()),
+            ..Query::default()
+        })
+        .unwrap();
+    let ids = v.cursor_ids(c.id, 0, 100).unwrap();
+    v.close_cursor(c.id);
+    ids
+}
+
+/// Albums (`docs/design/library.md`, L6): made with a key from their
+/// name, names unique whatever the case, filled and emptied, listed by
+/// name, forgotten; a query on an album selects its photos.
+fn albums_are_made_filled_renamed_and_forgotten<S: Store>(s: S) {
+    let v = Vault::new(with_images(s, 3));
+    let id = |n: u8| image(n).id;
+    let (a, _) = v.create_album(None, " Trip ", &[id(1), id(1)]).unwrap();
+    assert_eq!((a.id.as_str(), a.name.as_str()), ("trip", "Trip"));
+    assert_eq!(a.images, vec![id(1).hex()]);
+    assert!(
+        v.create_album(None, "TRIP", &[]).is_err(),
+        "names are unique"
+    );
+    assert!(v.create_album(Some("trip"), "Other", &[]).is_err());
+    assert!(v.create_album(None, " ", &[]).is_err());
+    v.add_to_album("trip", &[id(3), id(1)]).unwrap();
+    assert_eq!(in_album(&v, "trip"), vec![id(1), id(3)]);
+    v.remove_from_album("trip", &[id(1)]).unwrap();
+    assert_eq!(in_album(&v, "trip"), vec![id(3)]);
+    assert_eq!(v.rename_album("trip", "Summer").unwrap().documents.len(), 1);
+    assert!(v.rename_album("trip", "Summer").unwrap().is_empty());
+    v.create_album(Some("b"), "Beach", &[]).unwrap();
+    let names: Vec<String> = v.albums().unwrap().into_iter().map(|a| a.name).collect();
+    assert_eq!(names, ["Beach", "Summer"]);
+    assert!(v.rename_album("b", "summer").is_err());
+    v.delete_album("trip").unwrap();
+    assert!(v.album("trip").unwrap().is_none());
+    assert!(in_album(&v, "trip").is_empty(), "no album, no photo");
+    assert!(v.delete_album("trip").is_err());
+    assert!(v.add_to_album("nope", &[id(1)]).is_err());
+}
+
+/// An album's changes are steps: undone and redone, a document changed
+/// since left alone.
+fn an_album_s_changes_are_undone_and_redone<S: Store>(s: S) {
+    let v = Vault::new(with_images(s, 3));
+    let id = |n: u8| image(n).id;
+    let (_, made) = v.create_album(None, "Trip", &[id(1)]).unwrap();
+    let added = v.add_to_album("trip", &[id(2)]).unwrap();
+    v.revert(&added).unwrap();
+    assert_eq!(in_album(&v, "trip"), vec![id(1)]);
+    v.replay(&added).unwrap();
+    assert_eq!(in_album(&v, "trip"), vec![id(1), id(2)]);
+    let gone = v.delete_album("trip").unwrap();
+    v.revert(&gone).unwrap();
+    assert_eq!(v.album("trip").unwrap().unwrap().images.len(), 2);
+    v.add_to_album("trip", &[id(3)]).unwrap();
+    let kept = v.revert(&made).unwrap();
+    assert_eq!(kept.kept, 1);
+    assert_eq!(in_album(&v, "trip").len(), 3);
 }
