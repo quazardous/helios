@@ -277,6 +277,13 @@
       "warn": {"$value": "{warning}", "$description": "warn_fg_color (#FF7A0C), darkened as `warning` is for contrast on white"},
       "error": {"$value": "#ab0116", "$description": "error_fg_color"},
       "critical": {"$value": "{red.12}", "$description": "Red.200: Rerun draws critical in strong_fg_color (Gray.0) on error_fg_color; as a text colour, the red nearest the strong text"}
+    },
+    "axis": {
+      "$type": "color",
+      "$description": "A view's axes (red, green, blue for x, y, z), on the viewport's mid grey surround: pale enough to be seen at 3:1 on it.",
+      "x": {"$value": "#ffe0e0", "$description": "3.2:1 on the surround"},
+      "y": {"$value": "#d6ffd6", "$description": "3.6:1 on the surround"},
+      "z": {"$value": "#e0e6ff", "$description": "3.2:1 on the surround"}
     }
   },
   "viewport": {
