@@ -24,6 +24,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.78.0] - 2026-11-12
+
+### Added
+
+- A memory card plugged in again shows its import previews at once, even after Helios restarted or with the card mounted elsewhere: each card's previews are kept on disk, by the card, the file's path on it, its size and modification time. Nothing is read from the card but the files that changed. Previews not seen for 30 days are pruned, and the Caches page counts and clears them with the other caches.
+- The Library's whole search runs in the catalogue: words, dates, rating, labels, flags, tags and backup state, and new keys for the camera, lens, file type, folder and presence (`camera:"Z 8"`, `type:nef`, `folder:/photos/2024`, `presence:offline`). While a filter is in force, the Library counts its photos per rating, label, flag, camera, lens, file type, presence and backup state; a click on a count adds it to the filter.
+- The Library can be sorted by capture time, import time, file name, rating, last edit or file size, either way, from a menu in its toolbar or by an agent. Photos show by capture time, oldest first, unless sorted otherwise; each window keeps its own sort with its workspace, and the photo count no longer wraps onto a line of its own in a narrow Library panel.
+- Workshops (experimental) can be designed from your words: describe what you want in the Workshops panel ("backlit, the sky too contrasted") and your own AI agent, connected over MCP, proposes a workshop. Helios checks it on the open photo, drops sliders that change nothing and narrows ranges that clip, then applies it as one undo step; the photo's pixels are shared only if you allow it for the session.
+- While you refine a workshop (experimental), your AI agent can propose values: they show in the Workshops panel as ghost values you accept (one undo step), override by moving the slider, or reject. Each proposal and each of your answers is kept in the session's record, with who made it.
+- Workshops (experimental) now record how you pilot them: each step on a designed or applied workshop is kept with who made it (you or your agent), why, and what the photo's zones measured before and after. The Workshops panel shows the session with a Keep button; a session you do not keep is dropped when it ends.
+
+### Changed
+
+- The Import window opens as a window of its own, beside the main window rather than inside it: the main window stays usable while photos are chosen, and its status bar says which folder or file is being read. Closing it closes the import alone.
+- Import glances, library thumbnails and offline previews of a raw file now read only its embedded previews and metadata, not its sensor data: about a tenth of the file for NEF, ARW, RAF, CR2, DNG and ORF, a third for CR3. On a card reader, a network share or a slow disk, previews come up faster. The pictures are the same as before.
+
+### Fixed
+
+- The graph's navigation hint, hand mode indicator and overview now lie under any window, palette, menu or dialog over the graph, instead of being hidden while one covers it (egui-pop 0.9).
+- Where Helios has a single window (in the browser), the Import window opens centred in it again, with a close button, rather than in the top left corner over the menus.
+- The Import window fits its content to the window again: only the photo grid scrolls, its last row is no longer hidden under the buttons, and the backup line below the choices shows again. The choices scroll on their own only when taller than the window.
+- A workspace holding two macros whose files sort in another order than they were added (a workshop designed twice) no longer reads its own files as changed outside Helios: the layout is no longer reloaded under the panel in use, and no false "changed outside Helios" note shows.
+- A workspace whose files change outside Helios reloads only the part that changed: a new network keeps the panels open on screen, a new layout applies without touching the network, and files rewritten with the same content reload nothing. The layout copy saved with the workspace now follows every layout change, so a reload never brings back an older layout.
+
 ## [0.77.0] - 2026-11-11
 
 ### Added

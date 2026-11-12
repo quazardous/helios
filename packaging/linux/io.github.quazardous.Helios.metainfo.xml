@@ -58,6 +58,9 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.78.0" date="2026-11-12">
+      <url type="details">https://github.com/quazardous/helios/releases/tag/v0.78.0</url>
+    </release>
     <release version="0.77.0" date="2026-11-11">
       <url type="details">https://github.com/quazardous/helios/releases/tag/v0.77.0</url>
     </release>
