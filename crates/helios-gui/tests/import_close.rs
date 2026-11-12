@@ -69,6 +69,12 @@ fn open_on(h: &mut Harness<'_, Shell>, source: &Path) {
 fn close_in_time(h: &mut Harness<'_, Shell>, what: &str) {
     h.get_by_role_and_label(Role::Button, "Close window")
         .click();
+    frames_in_time(h, what);
+}
+
+/// The frames after a close: each comes within [`DEADLINE`], and the
+/// window is closed.
+fn frames_in_time(h: &mut Harness<'_, Shell>, what: &str) {
     for frame in 0..3 {
         let at = Instant::now();
         h.step();
@@ -133,7 +139,13 @@ fn closing_while_a_sources_connection_waits_gives_it_up_and_comes_back_at_once()
     h.get_by_label("Test server").click();
     // The connection's thread waits for the form's answer.
     until(&mut h, "the form", |h| connection(h)["state"] == "form");
-    close_in_time(&mut h, "a connection waiting");
+    // Closed by the system's close button: the connection's dialog over
+    // the window holds the headless window's own close button back.
+    let ctx = h.ctx.clone();
+    let at = Instant::now();
+    h.state_mut().close_import_window(&ctx);
+    assert!(at.elapsed() < DEADLINE, "the close took {:?}", at.elapsed());
+    frames_in_time(&mut h, "a connection waiting");
     assert!(connection(&mut h).is_null(), "the connection still shown");
 }
 

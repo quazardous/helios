@@ -699,6 +699,15 @@ impl Shell {
         w.file = Some(file);
     }
 
+    /// Closes the import window as the system's close button does (its
+    /// title bar's, past any dialog over it): the import focus closes.
+    pub fn close_import_window(&mut self, ctx: &Egui) {
+        let mut w = self.import.get_mut();
+        if w.open {
+            w.cancel(ctx);
+        }
+    }
+
     /// Whether the import window is open.
     pub fn import_window_open(&self) -> bool {
         self.import.get().open
