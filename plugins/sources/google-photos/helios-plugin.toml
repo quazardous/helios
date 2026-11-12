@@ -9,7 +9,7 @@ services = ["import.source"]
 activation = ["onService:import.source"]
 
 [compat]
-helios = ">=0.78.0, <0.79.0"
+helios = ">=0.79.0, <0.80.0"
 interfaces = { protocol = 1, "import.source" = 1 }
 
 # Where the Picker API answers; only tests change it.
