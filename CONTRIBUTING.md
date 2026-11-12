@@ -183,6 +183,12 @@ fragments: `breaking` bumps the major version (the minor one before 1.0),
 `added`, `changed`, `deprecated` and `removed` bump the minor version,
 `fixed` and `security` alone bump the patch version.
 
+**Only next's CI counts (decided 2026-11-12).** A pull request from a
+branch of this repository runs no CI: it is tested on the bench box, merged
+into `next`, and the run on `next` decides. A red `next` is fixed by a
+follow-up pull request. A contributor's pull request from a fork runs the
+full CI, as before.
+
 **Versions advance with each promotion (decided 2026-11-12).** No release
 is prepared by hand and there is no release pull request:
 

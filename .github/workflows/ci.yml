@@ -8,6 +8,7 @@ on:
     # and merges are pushed with GITHUB_TOKEN, so they start no run here:
     # they only bump versions, and the next push tests them.
     branches: [main, next]
+  # Pull requests: only a contributor's, from a fork (see each job's `if`).
   pull_request:
 
 # One run per branch at a time. A run on `next` is never cancelled: next
@@ -21,6 +22,11 @@ concurrency:
 
 jobs:
   test:
+    # Our own pull requests (branches of this repository) run no CI: they
+    # are tested on the bench box and merged into next, whose push run is
+    # the one that counts. A contributor's pull request from a fork runs
+    # everything.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     # Pinned, not ubuntu-latest: the fallback Mesa build links this
     # image's LLVM 22 (see .github/actions/software-vulkan).
     runs-on: ubuntu-26.04
@@ -87,6 +93,11 @@ jobs:
   # The workspace on Windows (MSVC): it builds, and its tests run. No GPU
   # on the runner: the GPU tests run on WARP (DX12 in software).
   windows:
+    # Our own pull requests (branches of this repository) run no CI: they
+    # are tested on the bench box and merged into next, whose push run is
+    # the one that counts. A contributor's pull request from a fork runs
+    # everything.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -113,6 +124,11 @@ jobs:
   # `cargo xtask check-commits`, capped at 20 commits, stops at the first
   # broken one and names it in the job summary, with what each commit ran.
   commits:
+    # Our own pull requests (branches of this repository) run no CI: they
+    # are tested on the bench box and merged into next, whose push run is
+    # the one that counts. A contributor's pull request from a fork runs
+    # everything.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
@@ -146,6 +162,11 @@ jobs:
 
   # The controls gallery builds for wasm32: its pages stay web-ready.
   gallery-web:
+    # Our own pull requests (branches of this repository) run no CI: they
+    # are tested on the bench box and merged into next, whose push run is
+    # the one that counts. A contributor's pull request from a fork runs
+    # everything.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +185,11 @@ jobs:
   # Every linter of `cargo xtask lint`, installed so none is skipped:
   # rustfmt, clippy, cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.
   lint:
+    # Our own pull requests (branches of this repository) run no CI: they
+    # are tested on the bench box and merged into next, whose push run is
+    # the one that counts. A contributor's pull request from a fork runs
+    # everything.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

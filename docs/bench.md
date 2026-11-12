@@ -17,7 +17,7 @@ does with it.
 | Where | What |
 |-------|------|
 | Locally | `cargo fmt`, `cargo check --tests`, `cargo xtask check`; never clippy (the box lints first in every test job) |
-| CI (GitHub Actions) | the full gate on every push and pull request: lint, tests, doctests, survival, check-commits |
+| CI (GitHub Actions) | the full gate on every push to `next` and `main`, and on contributors' pull requests from forks: lint, tests, doctests, survival, check-commits. Our own pull requests run none: the box tests them and `next`'s run decides |
 | The bench box | the same jobs on demand, on a pushed branch or on uncommitted code, plus timings on an otherwise idle machine and the tests on a real GPU |
 
 Jobs of the Benchfile:
