@@ -315,7 +315,10 @@ fn copy_local(root: &Path, dir: &Path) -> Result<Option<String>, String> {
 fn point_current(base: &Path, name: &str) -> Result<(), String> {
     let tmp = base.join(".current.new");
     let _ = std::fs::remove_file(&tmp);
+    #[cfg(unix)]
     std::os::unix::fs::symlink(name, &tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(name, &tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, base.join("current")).map_err(|e| format!("current: {e}"))
 }
 
