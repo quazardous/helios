@@ -259,6 +259,9 @@ command-library-copyFiles =
 command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 
+command-library-folder =
+    .title = Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder
+
 command-library-importFiles =
     .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`)
 
@@ -276,6 +279,9 @@ command-library-openFolder =
 
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
+
+command-library-scanFolder =
+    .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
 
 command-library-sort =
     .title = Sort the library (`by`: captured, imported, name, rating, edited or size; `descending`); kept with the workspace. Without `by`, says how it is sorted

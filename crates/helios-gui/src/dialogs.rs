@@ -110,17 +110,55 @@ pub struct Info {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum MenuItem {
-    Command { id: String, args: Json },
+    /// A command run with `args`; `label`, when given, is what the row
+    /// says (the command's title else); `enabled: false` greys it, as a
+    /// command that does not apply is (an offline folder's "Show in file
+    /// manager").
+    Command {
+        id: String,
+        args: Json,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        enabled: bool,
+    },
     Separator,
-    Submenu { label: String, items: Vec<MenuItem> },
+    Submenu {
+        label: String,
+        items: Vec<MenuItem>,
+    },
 }
 
 impl MenuItem {
     pub fn command(id: &str) -> Self {
+        Self::run(id, Json::Null)
+    }
+
+    /// A command with its arguments.
+    pub fn run(id: &str, args: Json) -> Self {
         MenuItem::Command {
             id: id.into(),
-            args: Json::Null,
+            args,
+            label: None,
+            enabled: true,
         }
+    }
+
+    /// What the row says, in place of the command's title.
+    #[must_use]
+    pub fn labeled(mut self, text: impl Into<String>) -> Self {
+        if let MenuItem::Command { label, .. } = &mut self {
+            *label = Some(text.into());
+        }
+        self
+    }
+
+    /// Greyed when `on` is false.
+    #[must_use]
+    pub fn enabled(mut self, on: bool) -> Self {
+        if let MenuItem::Command { enabled, .. } = &mut self {
+            *enabled = on;
+        }
+        self
     }
 }
 

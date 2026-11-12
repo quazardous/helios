@@ -630,6 +630,12 @@ command-library-compare =
 command-library-sort =
     .title = Trier la bibliothèque (`by` : captured, imported, name, rating, edited ou size ; `descending`) ; gardé avec l’espace de travail. Sans `by`, dit comment elle est triée
 
+command-library-folder =
+    .title = Limiter la bibliothèque à un dossier et à ceux qu’il contient (`path`, absolu ; null : toute la bibliothèque) ; gardé avec l’espace de travail. Sans `path`, dit le dossier
+
+command-library-scanFolder =
+    .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume
+
 command-helios-quit-confirmed =
     .title = Quitter Helios en annulant les tâches en cours
 

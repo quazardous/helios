@@ -115,6 +115,9 @@ enum Scan {
     Now(VolumeId),
     /// Every volume mounted that the setting allows.
     All,
+    /// A folder and those below it (an absolute path), asked for on
+    /// purpose: listed on the volume mounted above it.
+    Folder(PathBuf),
 }
 
 /// What the rest of Helios tells the job: the paths on screen, the volumes
@@ -183,6 +186,18 @@ impl Feed {
     pub fn scan_now(&self, volume: Option<VolumeId>) {
         let mut fed = self.fed();
         let scan = volume.map_or(Scan::All, Scan::Now);
+        if !fed.scans.contains(&scan) {
+            fed.scans.push(scan);
+        }
+        fed.woken = true;
+    }
+
+    /// Scans a folder and those below it now (`library.scanFolder`, the
+    /// Library's folders tree): listed on the volume mounted above it, as
+    /// a volume asked for on purpose is.
+    pub fn scan_folder(&self, folder: PathBuf) {
+        let mut fed = self.fed();
+        let scan = Scan::Folder(folder);
         if !fed.scans.contains(&scan) {
             fed.scans.push(scan);
         }
@@ -709,6 +724,10 @@ impl<M: Map> Job<M> {
         }
         let now = (self.clock)();
         for scan in asked {
+            if let Scan::Folder(folder) = &scan {
+                self.start_folder_scan(folder, now);
+                continue;
+            }
             let (wanted, on_purpose): (Vec<Volume>, bool) = match &scan {
                 Scan::Plugged(id) | Scan::Now(id) => (
                     self.volumes
@@ -719,6 +738,7 @@ impl<M: Map> Job<M> {
                     matches!(scan, Scan::Now(_)),
                 ),
                 Scan::All => (self.volumes.clone(), false),
+                Scan::Folder(_) => continue,
             };
             for v in wanted {
                 let Some(mount) = v.mount.clone() else {
@@ -746,6 +766,39 @@ impl<M: Map> Job<M> {
                 });
             }
         }
+    }
+
+    /// Starts listing `folder` and the folders below it, on the volume
+    /// mounted deepest above it; a folder on no volume mounted, or on one
+    /// being scanned already, is left.
+    fn start_folder_scan(&mut self, folder: &Path, now: u64) {
+        let Some((v, mount)) = self
+            .volumes
+            .iter()
+            .filter_map(|v| {
+                let mount = v.mount.clone()?;
+                folder.starts_with(&mount).then(|| (v.clone(), mount))
+            })
+            .max_by_key(|(_, m)| m.components().count())
+        else {
+            log::debug!("map: {} is on no volume mounted", folder.display());
+            return;
+        };
+        if !self.scans(&v, true) || self.scanning.iter().any(|s| s.volume == v.id) {
+            return;
+        }
+        let rel = folder.strip_prefix(&mount).unwrap_or(folder).to_path_buf();
+        if self.map.forgotten(&v.id, &rel) {
+            // Asked for by name: listed again.
+            self.map.folder_listed(&v.id, &rel, 0, now);
+        }
+        self.scanning.push_back(Scanning {
+            volume: v.id.clone(),
+            mount,
+            seen: std::iter::once(rel.clone()).collect(),
+            folders: VecDeque::from([rel]),
+            files: 0,
+        });
     }
 
     /// The next folder a scan lists; a scan with none left ends (and the
@@ -1448,6 +1501,19 @@ mod tests {
         drain(&mut job);
         assert!(old(&w).is_some());
         assert!(!w.vault.forgotten(Some(&disk), Path::new("x.jpg")).unwrap());
+    }
+
+    #[test]
+    fn scan_folder_lists_that_folder_and_below_only() {
+        let w = card_world();
+        let mut job = job(&w);
+        w.feed.scan_folder(PathBuf::from("/media/card/DCIM/100"));
+        // Neither the volume's root nor `DCIM` above it.
+        assert_eq!(listed(&drain(&mut job)), ["DCIM/100"]);
+        assert!(card_at(&w, "DCIM/100/x.cr3").is_some());
+        // A folder on no volume mounted lists nothing.
+        w.feed.scan_folder(PathBuf::from("/nowhere/photos"));
+        assert!(listed(&drain(&mut job)).is_empty());
     }
 
     #[test]

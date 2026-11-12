@@ -504,6 +504,13 @@ impl Bundle {
         if let Some(export) = t.library.as_ref().and_then(|l| l.export.as_ref()) {
             check_export(export, p);
         }
+        if let Some(folder) = t.library.as_ref().and_then(|l| l.folder.as_ref())
+            && !std::path::Path::new(folder).is_absolute()
+        {
+            p.push(format!(
+                "library.folder: `{folder}` is not an absolute path"
+            ));
+        }
         if let Some(sort) = t.library.as_ref().and_then(|l| l.sort.as_ref())
             && !crate::format::SORTS.contains(&sort.by.as_str())
         {

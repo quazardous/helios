@@ -2,19 +2,22 @@
 //! L4): Helios's own keys and the words of the search field run in the
 //! vault, the grid shows what it answers, and the facet counts of the
 //! filter show under the toolbar, a click on one adding it to the filter.
+//! The folders tree (L5): its counts, a click scoping the grid, each
+//! row's menu, and the folder chosen kept with the workspace.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_pop::views::library::filter::Filter;
 use helios_core::{Bus, ContentHash};
 use helios_gui::persist::Persist;
 use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_shell::commands::Origin;
 use helios_storage::{Identity, LastSeen, Volume, VolumeKind};
+use helios_template::workspace::Files;
 use helios_vault::capture::{CAMERA_MODEL, CAPTURED, FILE_TYPE};
 use helios_vault::fields::{LABELS, RATING};
 use helios_vault::storage::VolumeId;
@@ -95,7 +98,9 @@ fn vault_with(dir: &Path, place: impl Fn(u8, &str) -> Location) -> PathBuf {
     path
 }
 
-fn window(root: &Path, path: &Path) -> (Harness<'static, Shell>, Persist<SqliteStore>) {
+/// A workspace made from a built-in template under `root`: its
+/// configuration folder and the workspace.
+fn workspace(root: &Path) -> (PathBuf, PathBuf) {
     let config = root.join("config");
     let probe = Shell::new(helios_panels(), None);
     let catalogue = templates::catalogue(&probe.template_panels(), probe.specs());
@@ -106,11 +111,26 @@ fn window(root: &Path, path: &Path) -> (Harness<'static, Shell>, Persist<SqliteS
         &config,
     )
     .unwrap();
+    (config, created.workspace)
+}
+
+fn window(root: &Path, path: &Path) -> (Harness<'static, Shell>, Persist<SqliteStore>) {
+    let (config, workspace) = workspace(root);
+    open(&config, &workspace, path)
+}
+
+/// A window on `workspace`, in the Library, filled from the vault at
+/// `path`.
+fn open(
+    config: &Path,
+    workspace: &Path,
+    path: &Path,
+) -> (Harness<'static, Shell>, Persist<SqliteStore>) {
     let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
-        .workspace(&created.workspace)
+        .workspace(workspace)
         .build();
     shell.load_layout().unwrap();
-    shell.open_workspace(&config, &created.workspace).unwrap();
+    shell.open_workspace(config, workspace).unwrap();
     let persist = Persist::new(SqliteStore::open(path).unwrap(), Arc::new(Bus::new()));
     persist.fill_library(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
@@ -317,6 +337,122 @@ fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() 
     h.get_by_label(&row).click();
     settle(&mut h, &mut persist, 9.0);
     assert_eq!(grid(&h).len(), 3);
+
+    // The offline folder's menu: nothing at hand, all greyed.
+    row_menu(&mut h, &row);
+    assert!(menu_greyed(&h).iter().all(|(_, greyed)| *greyed));
+    // A volume at hand's: its mount point, shown, scanned, imported.
+    row_menu(&mut h, "System 2");
+    assert!(menu_greyed(&h).iter().all(|(_, greyed)| !*greyed));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The folder the workspace keeps, as written to its files.
+fn kept_folder(config: &Path, workspace: &Path) -> Option<String> {
+    Files::new(config, workspace)
+        .load()
+        .unwrap()
+        .bundle
+        .template
+        .library
+        .and_then(|l| l.folder)
+}
+
+/// A right click on a row of the folders tree: the shell's menu opens.
+fn row_menu(h: &mut Harness<'static, Shell>, row: &str) {
+    h.get_by_label(row).click_secondary();
+    for _ in 0..3 {
+        h.run();
+    }
+}
+
+/// The folder menu's entries, each with whether it is greyed.
+fn menu_greyed(h: &Harness<'_, Shell>) -> Vec<(&'static str, bool)> {
+    [
+        "Show in file manager",
+        "Scan this folder",
+        "Import new photos here",
+    ]
+    .into_iter()
+    .map(|label| {
+        // An entry's label ends with its command's keys, when it has some.
+        let mut found = h.query_all_by_label_contains(label);
+        let node = found
+            .next()
+            .unwrap_or_else(|| panic!("{label}: not in the menu"));
+        assert!(found.next().is_none(), "{label}: twice");
+        (label, node.accesskit_node().is_disabled())
+    })
+    .collect()
+}
+
+#[test]
+fn the_folder_chosen_is_the_workspace_s_and_its_menu_imports_there() {
+    let root = temp("folder-kept");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    let raw = root.join("raw").to_string_lossy().into_owned();
+    h.get_by_label("Folders").click();
+    settle(&mut h, &mut persist, 1.0);
+    assert_eq!(kept_folder(&config, &ws), None);
+    h.get_by_label("raw 1").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(grid(&h), ["c.nef"]);
+    assert_eq!(kept_folder(&config, &ws), Some(raw.clone()));
+
+    // Another place of the window and back: the folder stays the focus's.
+    for place in ["view.network", "view.library"] {
+        h.state_mut().run(place, Value::Null, Origin::User).unwrap();
+        settle(&mut h, &mut persist, 10.0);
+    }
+    assert_eq!(h.state().library().folder(), Some(raw.clone()));
+    assert_eq!(grid(&h), ["c.nef"]);
+    // Another library setting written: the folder stays, here and kept.
+    h.state_mut()
+        .run("library.sort", json!({ "by": "name" }), Origin::User)
+        .unwrap();
+    settle(&mut h, &mut persist, 15.0);
+    assert_eq!(h.state().library().folder(), Some(raw.clone()));
+    assert_eq!(kept_folder(&config, &ws), Some(raw.clone()));
+    // A relative path changes nothing.
+    h.state_mut()
+        .run("library.folder", json!({ "path": "raw" }), Origin::User)
+        .unwrap();
+    settle(&mut h, &mut persist, 18.0);
+    assert_eq!(h.state().library().folder(), Some(raw.clone()));
+    assert_eq!(kept_folder(&config, &ws), Some(raw.clone()));
+    drop((h, persist));
+
+    // The workspace opened again: the same folder, the same grid.
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 20.0);
+    assert_eq!(h.state().library().folder(), Some(raw.clone()));
+    assert_eq!(grid(&h), ["c.nef"]);
+
+    // The row's menu: its three commands, at hand.
+    h.get_by_label("Folders").click();
+    settle(&mut h, &mut persist, 25.0);
+    row_menu(&mut h, "raw 1");
+    assert_eq!(
+        menu_greyed(&h),
+        [
+            ("Show in file manager", false),
+            ("Scan this folder", false),
+            ("Import new photos here", false)
+        ]
+    );
+    // "Import new photos here": the import window, on the folder.
+    h.query_all_by_label_contains("Import new photos here")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(4);
+    assert!(h.state().import_window_open());
+    assert_eq!(h.state().import_ticked(), [PathBuf::from(&raw)]);
+    // The main window's folder is untouched by the import focus.
+    assert_eq!(h.state().library().folder(), Some(raw.clone()));
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

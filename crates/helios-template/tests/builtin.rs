@@ -554,6 +554,30 @@ fn a_library_s_sort_is_checked_and_follows_the_schema() {
 }
 
 #[test]
+fn a_library_s_folder_is_absolute_and_follows_the_schema() {
+    let mut bundle = batch_export();
+    let folder = if cfg!(windows) {
+        "C:\\photos\\2024"
+    } else {
+        "/photos/2024"
+    };
+    bundle.template.library.as_mut().unwrap().folder = Some(folder.into());
+    assert!(bundle.validate(&catalogue()).is_ok());
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(json["library"]["folder"], serde_json::json!(folder));
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    bundle.template.library.as_mut().unwrap().folder = Some("photos/2024".into());
+    let problems = bundle.validate(&catalogue()).problems;
+    assert!(
+        problems.iter().any(|p| p.starts_with("library.folder")),
+        "{problems:?}"
+    );
+}
+
+#[test]
 fn the_picture_templates_and_the_blank_workspace_take_a_picture_or_a_raw() {
     // Every built-in template but "Develop one image" (a raw only), and
     // the blank workspace: a raw goes through the raw front.

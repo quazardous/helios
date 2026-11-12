@@ -693,6 +693,12 @@ gui-library-facet-type = Type
 
 gui-library-file = { $size } · modified { $day }
 
+gui-library-folder-import = Import new photos here
+
+gui-library-folder-scan = Scan this folder
+
+gui-library-folder-show = Show in file manager
+
 gui-library-folders = Folders
 
 gui-library-folders-elsewhere = Other folders
