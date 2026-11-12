@@ -125,6 +125,14 @@ typos flags that is right (darktable or vkdt jargon) goes in `_typos.toml`.
 A license cargo-deny rejects needs a decision before it goes in
 `deny.toml`.
 
+Only the vault's SQLite driver (`helios-vault-sqlite`) and the node
+(`helios-node-core`) open the vault file or a raw SQLite connection;
+everything else reaches the data through the node. `cargo xtask check`
+refuses `SqliteStore::open`, `rusqlite::Connection` and `Connection::open*`
+elsewhere, test code excepted. The files that still do it are listed, each
+with its reason, in `xtask/allow/vault-access.toml`; the list only shrinks
+(an entry that no longer matches is reported).
+
 An optional pre-commit hook runs the fast checks (rustfmt and
 `cargo xtask check`) before each commit:
 

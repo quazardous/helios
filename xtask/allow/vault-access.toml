@@ -1,0 +1,38 @@
+# Files allowed to open the vault file or a raw SQLite connection outside
+# helios-vault-sqlite and helios-node-core (see `cargo xtask check` and
+# xtask/src/vault_access.rs). The list only shrinks: an entry whose file no
+# longer does it is reported, and removed with the code that needed it.
+
+# For good: importers read foreign catalogs, not the Helios vault.
+[[allow]]
+path = "plugins/importers/darktable-library/src/lib.rs"
+reason = "reads darktable's own library.db, a foreign catalog"
+
+[[allow]]
+path = "plugins/importers/lightroom-catalog/src/lib.rs"
+reason = "reads a Lightroom catalog, a foreign database"
+
+# Until the clients go through the node.
+[[allow]]
+path = "crates/helios-node/src/bin/helios.rs"
+reason = "the CLI opens the vault for import; it moves to the node's Client"
+
+[[allow]]
+path = "crates/helios-node/src/batch.rs"
+reason = "`helios batch` opens the vault; it moves to the node's Client"
+
+[[allow]]
+path = "crates/helios-node/src/mcp.rs"
+reason = "helios-mcp opens the vault for some tools; it moves to the node's Client"
+
+[[allow]]
+path = "crates/helios-health/src/checks.rs"
+reason = "the health check's integrity reads; they move behind a driver function the node calls"
+
+[[allow]]
+path = "crates/helios-gui/src/platform.rs"
+reason = "the desktop opens the vault for its embedded node; it moves to the node's Client"
+
+[[allow]]
+path = "crates/helios-node/src/main.rs"
+reason = "the headless node opens its vault; the opening moves into helios-node-core"
