@@ -61,10 +61,10 @@ helios-controls = { path = "crates/helios-controls" }
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.9", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.10", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
-egui-pop-agent = "0.3"
+egui-pop-agent = "0.4"
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
 egui-pop-i18n = "0.9"
@@ -72,7 +72,7 @@ egui-pop-i18n = "0.9"
 # layout without building the window's stack (workspace templates).
 egui-pop-model = "0.7"
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = "0.9"
+egui-pop-test = "0.10"
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
 egui-pop-wayland = "0.2"
