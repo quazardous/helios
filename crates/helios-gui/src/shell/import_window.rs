@@ -63,7 +63,7 @@ use egui::ViewportId;
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::api::toasts::{TOASTS, Toast};
-use egui_pop::api::windows::{WindowId, WindowSpec, WindowUi};
+use egui_pop::api::windows::{WindowId, WindowSpec};
 use egui_pop::core::overlay::DialogLayout;
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
@@ -108,6 +108,24 @@ pub const FORGET_VOLUME: &str = "library.forgetVolume";
 /// agents).
 pub const WINDOW: &str = "import";
 
+/// The id of the window of the main one the import window is drawn in
+/// where the backend has no windows of its own (kittest, the web).
+const EMBEDDED_ID: &str = "helios.import.embedded";
+
+/// What the window's pass reads of the window it is drawn in, and asks of
+/// it: egui-pop's application window, or a window of the main one.
+struct Frame {
+    app: egui_pop::api::app::AppHandle,
+    /// Drawn inside the main window: no panel of its own.
+    embedded: bool,
+    /// The person asked to close it (its close button).
+    close_requested: bool,
+    /// The title it shows.
+    title: Option<String>,
+    /// It closes.
+    close: bool,
+}
+
 /// The shell's translator, given to the window's content.
 pub(super) type Texts = Arc<dyn Fn(Message) -> String + Send + Sync>;
 
@@ -151,6 +169,9 @@ pub(crate) struct ImportWindow {
     open: bool,
     /// The OS window opened for it, not seen closed since.
     shown: Option<WindowId>,
+    /// Its title as last drawn, for the window of the main one it is
+    /// drawn in where the backend has no windows of its own.
+    embedded_title: Option<String>,
     /// The shell's translator and what the words need of it.
     texts: Option<Texts>,
     shell_words: ShellWords,
@@ -242,6 +263,14 @@ impl ImportWindow {
         if let Err(e) = std::fs::write(file, text) {
             log::warn!("import sources: {}: {e}", file.display());
         }
+    }
+
+    /// Closes the import focus: nothing more read, the main window drawn
+    /// again.
+    fn cancel(&mut self, ctx: &Egui) {
+        self.open = false;
+        self.clear_contents();
+        ctx.request_repaint_of(ViewportId::ROOT);
     }
 
     /// Stops reading and forgets what was read.
@@ -855,8 +884,14 @@ impl Shell {
 
     /// The import focus's OS window, opened while the focus is open and
     /// closed with it; closed by itself (its close button, `window.close`),
-    /// the focus closes, and the main window stays.
+    /// the focus closes, and the main window stays. Where the backend has
+    /// no windows of its own (kittest, the web), a window of the main one
+    /// instead ([`Shell::embedded_import_window`]).
     fn follow_import_focus(&mut self, ctx: &Egui) {
+        if ctx.embed_viewports() {
+            self.embedded_import_window(ctx);
+            return;
+        }
         let app = self.core.app.handle().clone();
         let id = WindowId::new(WINDOW);
         let there = app.window_viewport(&id).is_some();
@@ -882,7 +917,20 @@ impl Shell {
                     // Never drawn while the shell holds it (it does not, between
                     // its own passes).
                     if let Ok(mut w) = state.try_borrow_mut() {
-                        w.window_pass(ui, window);
+                        let mut frame = Frame {
+                            app: window.app().clone(),
+                            embedded: window.embedded(),
+                            close_requested: window.close_requested(),
+                            title: None,
+                            close: false,
+                        };
+                        w.window_pass(ui, &mut frame);
+                        if let Some(title) = frame.title {
+                            window.set_title(title);
+                        }
+                        if frame.close {
+                            window.close();
+                        }
                     }
                 });
             }
@@ -893,6 +941,54 @@ impl Shell {
             }
             (false, false) => w.shown = None,
             (true, true) => {}
+        }
+    }
+
+    /// The import window inside the main window, where the backend has no
+    /// windows of its own (kittest, the web): a window of the main one,
+    /// centred and closable, as egui's own embedding of an application
+    /// window is neither (it sits at the top left, over the menus, with a
+    /// collapse arrow and no close button).
+    fn embedded_import_window(&mut self, ctx: &Egui) {
+        let state = self.import.state.clone();
+        let Ok(mut w) = state.try_borrow_mut() else {
+            return;
+        };
+        if !w.open {
+            return;
+        }
+        let title = w.embedded_title.clone().unwrap_or_else(|| {
+            w.texts
+                .as_ref()
+                .map_or_else(|| "Import photos".to_owned(), |t| t(window_title()))
+        });
+        let main = ctx.content_rect().size();
+        let max = (main - egui::vec2(32.0, 32.0)).max(egui::Vec2::ZERO);
+        let mut frame = Frame {
+            app: self.core.app.handle().clone(),
+            embedded: true,
+            close_requested: false,
+            title: None,
+            close: false,
+        };
+        let mut open = true;
+        egui::Window::new(&title)
+            .id(egui::Id::unique(EMBEDDED_ID))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size(default_size(main))
+            .min_size(MIN_SIZE.min(max))
+            .max_size(max)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(ctx.content_rect().center())
+            .show(ctx, |ui| w.window_pass(ui, &mut frame));
+        if frame.title.is_some() {
+            w.embedded_title = frame.title;
+        }
+        // Its close button closes the import focus, as the OS window's does.
+        if !open && w.open {
+            w.cancel(ctx);
         }
     }
 
@@ -1161,11 +1257,11 @@ impl ImportWindow {
     /// `open_window`): the cards and the scans followed, the window drawn
     /// with its status bar, and what its controls asked done, here or by
     /// the shell at the main window's next pass.
-    fn window_pass(&mut self, ui: &mut egui::Ui, window: &mut WindowUi<'_>) {
+    fn window_pass(&mut self, ui: &mut egui::Ui, window: &mut Frame) {
         let ctx = ui.ctx().clone();
         *self.drawn_in.lock().unwrap_or_else(PoisonError::into_inner) = Some(ctx.viewport_id());
         if !self.open {
-            window.close();
+            window.close = true;
             return;
         }
         self.follow_cards();
@@ -1174,9 +1270,9 @@ impl ImportWindow {
         let Some(words) = self.words(&ctx, sample.as_ref()) else {
             return;
         };
-        window.set_title(words.title.clone());
-        let app = window.app().clone();
-        let mut event = if window.embedded() {
+        window.title = Some(words.title.clone());
+        let app = window.app.clone();
+        let mut event = if window.embedded {
             self.window_ui(ui, &words, &app)
         } else {
             egui::CentralPanel::default()
@@ -1198,16 +1294,14 @@ impl ImportWindow {
             }
         }
         // Its close button closes the import focus.
-        if window.close_requested() {
+        if window.close_requested {
             event = Some(Event::Cancel);
         }
         match event {
             None => {}
             Some(Event::Cancel) => {
-                self.open = false;
-                self.clear_contents();
-                window.close();
-                ctx.request_repaint_of(ViewportId::ROOT);
+                self.cancel(&ctx);
+                window.close = true;
             }
             Some(Event::Choose) => {
                 if let Some(f) = app.service(&FILES) {
