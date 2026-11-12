@@ -38,6 +38,7 @@ helios-gpu.workspace = true
 helios-photo.workspace = true
 helios-display.workspace = true
 helios-load.workspace = true
+helios-calibrate.workspace = true
 # The thumbnail cache, its fast read and its pool.
 helios-thumbs.workspace = true
 helios-cache.workspace = true

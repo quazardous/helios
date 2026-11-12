@@ -626,6 +626,25 @@ pub mod control {
             #[serde(default)]
             kind: Option<String>,
         },
+        /// Measures a colour chart shot and solves its correction
+        /// (`docs/design/calibration.md`): `path` an absolute picture
+        /// file (a raw is refused until its measurement graph lands),
+        /// `corners` the centres of the four corner patches, `[x, y]` in
+        /// its pixels as stored, in any order. Answers the report; a dry
+        /// run only, nothing written (`dry_run` false is refused).
+        #[serde(rename = "calibrate.chart")]
+        CalibrateChart {
+            path: PathBuf,
+            corners: [[f64; 2]; 4],
+            /// The chart's id (`xrite.cc24.2014` when not given).
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            chart: Option<String>,
+            /// Patch names left out of the solve (`B3`).
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            exclude: Vec<String>,
+            #[serde(default = "yes")]
+            dry_run: bool,
+        },
     }
 
     /// Where `workflow.prioritize` moves items within their run.
@@ -672,6 +691,10 @@ pub mod control {
 
     fn page() -> usize {
         100
+    }
+
+    fn yes() -> bool {
+        true
     }
 
     fn someone() -> String {

@@ -19,6 +19,8 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] import FOLDERS-OR-IMAGES...
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] calibrate-chart PICTURE X,Y X,Y X,Y X,Y
+//!                    [--chart ID] [--exclude PATCH]...
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
 //!                    [--quality Q] [--again] [--jobs N] --to DIR IMAGES...
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
@@ -58,6 +60,11 @@
 //! interrupted: Ctrl-C cancels the batch's images in the run and leaves no
 //! partial file, or, with `--vault` and its own node, stops it to be
 //! finished by the same batch run again. See `docs/cli.md`.
+//!
+//! `calibrate-chart` measures a colour chart shot (a decoded picture) and
+//! solves its correction, a dry run that writes nothing: the four points
+//! are the centres of the chart's corner patches in the picture's pixels,
+//! in any order; it prints the report (see `docs/design/calibration.md`).
 //!
 //! `doctor display` says what the display offers the desktop: the session
 //! (Wayland, X11 or none), on Wayland what the compositor's colour
@@ -123,6 +130,8 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] import FOLDERS-OR-IMAGES...
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] calibrate-chart PICTURE X,Y X,Y X,Y X,Y
+                 [--chart ID] [--exclude PATCH]...
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
                  [--quality Q] [--again] [--jobs N] --to DIR IMAGES...
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
@@ -191,6 +200,19 @@ fn file_format(text: &str) -> Result<FileFormat, String> {
 }
 
 /// A path the node can use wherever it runs from.
+/// A point `X,Y` in pixels.
+fn point(text: &str) -> Result<[f64; 2], String> {
+    let bad = || format!("`{text}` is not a point X,Y");
+    let (x, y) = text.split_once(',').ok_or_else(bad)?;
+    let x: f64 = x.trim().parse().map_err(|_| bad())?;
+    let y: f64 = y.trim().parse().map_err(|_| bad())?;
+    if x.is_finite() && y.is_finite() {
+        Ok([x, y])
+    } else {
+        Err(bad())
+    }
+}
+
 fn absolute(path: &str) -> Result<PathBuf, String> {
     std::path::absolute(path).map_err(|e| format!("{path}: {e}"))
 }
@@ -249,6 +271,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     let mut at = None;
     let mut jobs = None;
     let mut sets: BTreeMap<String, Params> = BTreeMap::new();
+    let (mut chart, mut exclude) = (None, Vec::new());
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--socket" => {
@@ -295,6 +318,8 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 sets.entry(node).or_default().set(&param, value(&v));
             }
             "--region" => area = Some(region(&args.next().ok_or("--region needs X,Y,W,H")?)?),
+            "--chart" => chart = Some(args.next().ok_or("--chart needs a chart id")?),
+            "--exclude" => exclude.push(args.next().ok_or("--exclude needs a patch name")?),
             _ => words.push(arg),
         }
     }
@@ -412,6 +437,13 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     concurrency: jobs,
                 }
             }
+            ["calibrate-chart", path, a, b, c, d] => ControlRequest::CalibrateChart {
+                path: absolute(path)?,
+                corners: [point(a)?, point(b)?, point(c)?, point(d)?],
+                chart: chart.clone(),
+                exclude: exclude.clone(),
+                dry_run: true,
+            },
             ["import", paths @ ..] if !paths.is_empty() => ControlRequest::LibraryImport {
                 paths: paths
                     .iter()

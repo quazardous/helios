@@ -15,6 +15,15 @@ batch-several-ends 64a674c6169d3f03
 batch-several-sources 9e966f5d4cf4a738
 batch-stopped bf8c5265f0d7c6ae
 batch-vault-attached 96665044590f1b33
+calibrate-bad-image f103f3ad11e12ef2
+calibrate-dry-run-only 1252211a885be2c3
+calibrate-load-failed 68ec9d17424153d7
+calibrate-no-neutral 2ddeab915c68e5c8
+calibrate-raw-not-yet c1bd8029f1c2c178
+calibrate-too-few-patches 39cbc91c1ef232ce
+calibrate-unknown-chart 0bc18b9c0b243c5c
+calibrate-unknown-patch 5e87dc525e69f6b9
+calibrate-unsolved 60a7121b9f08c961
 category-decisions b5763e317b887036
 category-developer 3bef768f6a95f10d
 category-experimental d683fc9d31620457
