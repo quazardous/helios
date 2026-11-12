@@ -196,6 +196,16 @@ gui-edit-does-not-fit = Une partie de la retouche enregistrée ne correspond pas
 
 gui-edit-not-saved = La retouche n’a pas été enregistrée : { $error }
 
+gui-editor-card = Carte ou appareil photo
+
+gui-editor-params = Paramètres
+
+gui-editor-params-wrong = Un paramètre ne correspond pas à ce que le connecteur accepte
+
+gui-editor-save = Enregistrer la source
+
+gui-editor-title = Modifier la source
+
 gui-gesture-in-progress = { $gesture } est en cours
 
 gui-graph-add-macro = Macros › { $name }
@@ -265,6 +275,12 @@ gui-import-backup-storage = Stockage…
 gui-import-backup-today = { $disk } (vu aujourd’hui)
 
 gui-import-backup-unusable = { $disk } (branché, ne peut pas recevoir de copies)
+
+gui-import-window-edit-source = Modifier la source…
+
+gui-import-window-forget-source = Oublier cette source
+
+gui-import-window-forget-source-hint = La retire de cette colonne, avec son nom et ses choix ; les photos et la bibliothèque ne sont pas touchées
 
 gui-job-backup-done = Sauvegarde terminée
 

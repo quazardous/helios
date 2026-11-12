@@ -1,7 +1,11 @@
 //! A connector for tests that declares a connection process: a form
 //! (a server, a user, a secret password) and a test step that accepts
-//! the password `right` only. It lists nothing. The import window's
-//! tests use it for "Add a source…" and Settings > Accounts.
+//! the password `right` only. It lists nothing. Each of its sources
+//! has one parameter, the share it reads (`share`), and no copy or add
+//! choice: its photos are always copied. The import window's tests use
+//! it for "Add a source…", "Edit source…" and Settings > Accounts.
+
+use helios_core::config::{ConfigKey, Contract, Contracts, KeyType};
 
 use crate::{
     Access, AccountRef, Cancel, Caps, ConnectStep, Connector, ConnectorError, ConnectorInfo,
@@ -25,6 +29,19 @@ fn label() -> Text {
 }
 
 impl ConnectorProvider for FakeProvider {
+    fn config(&self) -> Contracts {
+        Contracts {
+            source: Contract::new().key(
+                "share",
+                ConfigKey::new(KeyType::String)
+                    .default_value(serde_json::json!("photos"))
+                    .label("Share")
+                    .help("The share the photos are read from"),
+            ),
+            ..Contracts::default()
+        }
+    }
+
     fn manifest(&self) -> ConnectorManifest {
         ConnectorManifest {
             id: ID.into(),

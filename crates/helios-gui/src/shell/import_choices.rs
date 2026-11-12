@@ -58,19 +58,61 @@ pub struct Choices {
 }
 
 impl Default for Choices {
+    /// A folder's: the defaults of the local sources' contract
+    /// ([`helios_connect::local::source_contract`]).
     fn default() -> Self {
-        Choices {
-            copy_folders: false,
-            into: None,
-            layout: Layout::Day,
-            rename: "{stem}".into(),
-            duplicates: Duplicates::Skip,
-            darktable: true,
-        }
+        Choices::from_values(&helios_connect::local::source_contract(false).defaults())
     }
 }
 
 impl Choices {
+    /// The choices of a local source's values, by the contract's key
+    /// names (`copy`, `into`, `layout`, `rename`, `duplicates`,
+    /// `darktable`); a value missing or not fitting gives the folder
+    /// default's (`{stem}`, by day, duplicates skipped, sidecars read).
+    pub fn from_values(values: &serde_json::Map<String, Value>) -> Self {
+        let text = |key: &str| values.get(key).and_then(Value::as_str);
+        let flag = |key: &str, or: bool| values.get(key).and_then(Value::as_bool).unwrap_or(or);
+        Choices {
+            copy_folders: flag("copy", false),
+            into: text("into").filter(|t| !t.is_empty()).map(PathBuf::from),
+            layout: text("layout")
+                .and_then(|t| Layout::parse(t).ok())
+                .unwrap_or_default(),
+            rename: text("rename").unwrap_or("{stem}").to_owned(),
+            duplicates: text("duplicates")
+                .and_then(|t| Duplicates::parse(t).ok())
+                .unwrap_or_default(),
+            darktable: flag("darktable", true),
+        }
+    }
+
+    /// Its values, by the local sources' contract's key names: what
+    /// [`Choices::from_values`] reads back.
+    pub fn values(&self) -> serde_json::Map<String, Value> {
+        let mut values = serde_json::Map::new();
+        values.insert("copy".into(), json!(self.copy_folders));
+        if let Some(into) = &self.into {
+            values.insert("into".into(), json!(into));
+        }
+        values.insert("layout".into(), json!(self.layout.as_str()));
+        values.insert("rename".into(), json!(self.rename));
+        values.insert("duplicates".into(), json!(self.duplicates.as_str()));
+        values.insert("darktable".into(), json!(self.darktable));
+        values
+    }
+
+    /// The keys of a source contract the choices stand for: the
+    /// connector's other keys are its own parameters.
+    pub const KEYS: [&str; 6] = [
+        "copy",
+        "into",
+        "layout",
+        "rename",
+        "duplicates",
+        "darktable",
+    ];
+
     /// `library.importFiles`'s arguments for `paths`, copied or not.
     pub fn args(&self, paths: &[PathBuf], copy: bool) -> Value {
         let mut args = json!({
@@ -610,5 +652,34 @@ fn copy_choices_ui(
         ui.colored_label(ui.visuals().error_fg_color, e);
     } else if let Some(example) = &words.name_example {
         ui.weak(example);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_choices_are_the_local_source_contracts_values() {
+        let contract = helios_connect::local::source_contract(false);
+        let choices = Choices {
+            copy_folders: true,
+            into: Some("/photos/library".into()),
+            layout: Layout::Month,
+            rename: "{date}-{seq}".into(),
+            duplicates: Duplicates::Keep,
+            darktable: false,
+        };
+        let values = choices.values();
+        contract
+            .check(&Value::Object(values.clone()))
+            .expect("the contract takes them");
+        assert_eq!(Choices::from_values(&values), choices);
+        for key in Choices::KEYS {
+            assert!(contract.get(key).is_some(), "{key}");
+        }
+        assert_eq!(contract.keys.len(), Choices::KEYS.len());
+        // The default is the contract's.
+        assert_eq!(Choices::default().values(), contract.defaults());
     }
 }

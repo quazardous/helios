@@ -93,11 +93,11 @@ pub const COMMAND: &str = "library.importWindow";
 
 /// What is kept between runs.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct Memory {
+pub(super) struct Memory {
     #[serde(default)]
-    recent: Vec<PathBuf>,
+    pub(super) recent: Vec<PathBuf>,
     #[serde(default)]
-    favourites: Vec<PathBuf>,
+    pub(super) favourites: Vec<PathBuf>,
     #[serde(default)]
     last: Option<PathBuf>,
 }
@@ -200,7 +200,7 @@ pub(crate) struct ImportWindow {
     /// the one a scan's progress repaints.
     drawn_in: Arc<Mutex<Option<ViewportId>>>,
     cards: Vec<Card>,
-    memory: Memory,
+    pub(super) memory: Memory,
     file: Option<PathBuf>,
     /// The sources ticked, in the order ticked.
     pub(super) ticked: Vec<PathBuf>,
@@ -284,7 +284,7 @@ pub(crate) struct ImportWindow {
 }
 
 impl ImportWindow {
-    fn save(&self) {
+    pub(super) fn save(&self) {
         let Some(file) = &self.file else { return };
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -616,6 +616,10 @@ struct Words {
     remove_favourite: String,
     forget: String,
     forget_hint: String,
+    /// A source's menu: the editor, and the source taken off the column.
+    edit_source: String,
+    forget_source: String,
+    forget_source_hint: String,
     contents: String,
     grid: GridWords,
     choices: ChoiceWords,
@@ -1302,6 +1306,18 @@ impl ImportWindow {
                 "gui-import-window-forget",
                 "Forget this folder",
             )),
+            edit_source: t(Message::new(
+                "gui-import-window-edit-source",
+                "Edit source…",
+            )),
+            forget_source: t(Message::new(
+                "gui-import-window-forget-source",
+                "Forget this source",
+            )),
+            forget_source_hint: t(Message::new(
+                "gui-import-window-forget-source-hint",
+                "Takes it off this column, its name and choices with it; the photos and the library are untouched",
+            )),
             forget_hint: t(Message::new(
                 "gui-import-window-forget-hint",
                 "Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it",
@@ -1822,11 +1838,13 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                     }
                     SourceKey::Account(id) => {
                         let selected = w.sources.account.as_deref() == Some(id.as_str());
-                        if ui
+                        let row = ui
                             .selectable_label(selected, &name)
-                            .on_hover_text(w.account_label(&id))
-                            .clicked()
-                        {
+                            .on_hover_text(w.account_label(&id));
+                        let key = SourceKey::Account(id.clone());
+                        if let Some(asked) = source_menu(&row, w, words) {
+                            w.source_menu_asked(asked, key);
+                        } else if row.clicked() {
                             w.select_account(id);
                         }
                     }
@@ -1918,7 +1936,13 @@ fn source_row(
         if w.sources.has_own(path) {
             ui.weak("●").on_hover_text(&words.choices.own_choices);
         }
+        let mut asked = None;
+        let kept = w.sources.kept();
         tick.context_menu(|ui| {
+            if kept {
+                asked = menu_items(ui, words);
+                ui.separator();
+            }
             if ui
                 .button(&words.forget)
                 .on_hover_text(&words.forget_hint)
@@ -1928,6 +1952,9 @@ fn source_row(
                 ui.close();
             }
         });
+        if let Some(asked) = asked {
+            w.source_menu_asked(asked, SourceKey::Folder(path.to_path_buf()));
+        }
         if let Some((text, add)) = favourite {
             let icon = if add { "☆" } else { "✕" };
             if ui.small_button(icon).on_hover_text(text).clicked() {
@@ -1936,6 +1963,50 @@ fn source_row(
         }
     });
     event
+}
+
+/// What a source's menu asked.
+pub(super) enum MenuAsked {
+    Edit,
+    Forget,
+}
+
+/// "Edit source…" and "Forget this source", in a source's menu.
+fn menu_items(ui: &mut egui::Ui, words: &Words) -> Option<MenuAsked> {
+    let mut asked = None;
+    if ui.button(&words.edit_source).clicked() {
+        asked = Some(MenuAsked::Edit);
+        ui.close();
+    }
+    if ui
+        .button(&words.forget_source)
+        .on_hover_text(&words.forget_source_hint)
+        .clicked()
+    {
+        asked = Some(MenuAsked::Forget);
+        ui.close();
+    }
+    asked
+}
+
+/// A saved account's row's menu, while the sources are kept.
+fn source_menu(row: &egui::Response, w: &ImportWindow, words: &Words) -> Option<MenuAsked> {
+    if !w.sources.kept() {
+        return None;
+    }
+    let mut asked = None;
+    row.context_menu(|ui| asked = menu_items(ui, words));
+    asked
+}
+
+impl ImportWindow {
+    /// What a source's menu asked: its editor opened, or it forgotten.
+    fn source_menu_asked(&mut self, asked: MenuAsked, key: SourceKey) {
+        match asked {
+            MenuAsked::Edit => self.open_editor(key),
+            MenuAsked::Forget => self.forget_source(&key),
+        }
+    }
 }
 
 /// The widths of the Sources and Choices columns, in points (at most a

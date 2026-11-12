@@ -800,3 +800,80 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
             .is_some()
     });
 }
+
+/// "Edit source…" on an account's source: its connector's own parameter
+/// (the fake's `share`) set and kept; add where they are never offered,
+/// and refused when an older document held it.
+#[test]
+fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are() {
+    use egui_kittest::kittest::By;
+    let (_world, mut h) = world();
+    let kept = keep_sources(&mut h);
+    wizard_signed_in(&mut h);
+    // The connector's own parameter, at its default, under the account.
+    let share = |value: &'static str| {
+        By::new()
+            .role(egui::accesskit::Role::TextInput)
+            .value(value)
+    };
+    assert!(h.query(share("photos")).is_some(), "the share's field");
+    click(&mut h, "Next");
+    click(&mut h, "Next");
+    click(&mut h, "Add the source");
+    let sources = h.state().import_sources();
+    assert_eq!(sources[0].params["share"], json!("photos"));
+    let name = sources[0].name.clone().unwrap_or_default();
+    // A document saying add where they are (an older Helios's, say).
+    let text = kept
+        .borrow()
+        .clone()
+        .unwrap_or_default()
+        .replace("copy_folders = true", "copy_folders = false");
+    assert!(text.contains("copy_folders = false"), "{text}");
+    *kept.borrow_mut() = Some(text);
+    let (read, write) = (kept.clone(), kept.clone());
+    h.state_mut().keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+    h.run_steps(3);
+    assert!(
+        !h.state().import_sources()[0]
+            .choices
+            .as_ref()
+            .unwrap()
+            .copy_folders
+    );
+    // Edited: its share changed, copy kept as the only way.
+    h.query_all_by_label(&name)
+        .next()
+        .expect("its row")
+        .click_secondary();
+    h.run_steps(3);
+    click(&mut h, "Edit source…");
+    until(&mut h, "the editor", |h| shown(h, "Edit source"));
+    h.get(share("photos")).focus();
+    h.run_steps(2);
+    h.get(share("photos")).type_text("-2026");
+    h.run_steps(3);
+    click(&mut h, "Next");
+    until(&mut h, "the choices", |h| shown(h, "Duplicates"));
+    assert!(!shown(&h, "Add where they are"), "copy only");
+    click(&mut h, "Next");
+    click(&mut h, "Save the source");
+    assert!(!h.state().import_wizard_open());
+    let sources = h.state().import_sources();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    let share = sources[0].params["share"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(share.contains("2026") && share != "photos", "{share}");
+    let choices = sources[0].choices.clone().unwrap();
+    assert!(choices.copy_folders && !choices.darktable, "{choices:?}");
+    let text = kept.borrow().clone().unwrap_or_default();
+    assert!(text.contains("share = ") && text.contains("2026"), "{text}");
+}
