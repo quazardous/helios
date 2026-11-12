@@ -314,3 +314,68 @@ fn the_shipped_program_scans_through_the_broker() {
     assert_eq!(scan.images.len(), 3);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn develop_settings_come_mapped_with_the_unmatched_listed_per_photo() {
+    let dir = scratch("develop");
+    let lrcat = catalogue(&dir);
+    let con = Connection::open(&lrcat).unwrap();
+    con.execute_batch(
+        r#"CREATE TABLE Adobe_imageDevelopSettings (id_local INTEGER PRIMARY KEY,
+               allowFastRender INTEGER, croppedHeight, croppedWidth, digest,
+               grayscale INTEGER, hasDevelopAdjustments INTEGER, historySettingsID,
+               image INTEGER, processVersion, settingsID, text, validatedForVersion);
+           INSERT INTO Adobe_imageDevelopSettings (image, processVersion, text) VALUES
+               (1000, '11.0', 's = { Exposure2012 = -0.5, Contrast2012 = 20,
+                   WhiteBalance = "As Shot", HasCrop = false,
+                   ToneCurvePV2012 = { 0, 0, 255, 255 } }'),
+               (1001, '11.0', 's = { Exposure2012 = 2 }'),
+               (1002, '11.0', 's = { Exposure2012 = ');
+           UPDATE Adobe_images SET orientation = 'DA' WHERE id_local = 1000;"#,
+    )
+    .unwrap();
+    drop(con);
+    // c.jpg has no catalogue row: its sidecar is read
+    std::fs::write(
+        dir.join("photos/c.xmp"),
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description
+            xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+            crs:Exposure2012="+1.00" crs:Vibrance="+12"/></rdf:RDF></x:xmpmeta>"#,
+    )
+    .unwrap();
+    let result = scan(&params(&lrcat), &AtomicBool::new(false), &mut |_, _, _| {}).unwrap();
+    let images = result["images"].as_array().unwrap();
+    // a.jpg: the master's settings, not its virtual copy's
+    assert_eq!(
+        images[0]["develop"],
+        json!({
+            "from": "catalogue",
+            "modules": [
+                {"module": "exposure", "params": {"exposure": -0.5}},
+                {"module": "flip", "params": {"orientation": 6}},
+            ],
+            "unmatched": {"Contrast2012": 20.0},
+        })
+    );
+    assert_eq!(images[1].get("develop"), None);
+    assert_eq!(images[2]["develop"]["from"], "xmp");
+    assert_eq!(
+        images[2]["develop"]["modules"],
+        json!([{"module": "exposure", "params": {"exposure": 1.0}}])
+    );
+    let warnings: Vec<&str> = result["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    let has = |part: &str| warnings.iter().any(|w| w.contains(part));
+    assert!(has("develop settings read for 2 photos"), "{warnings:?}");
+    assert!(
+        has("equivalent, not imported: a.jpg: Contrast2012 = +20"),
+        "{warnings:?}"
+    );
+    assert!(has("c.jpg: Vibrance = +12"), "{warnings:?}");
+    assert!(has("could not be read, skipped: b.jpg"), "{warnings:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

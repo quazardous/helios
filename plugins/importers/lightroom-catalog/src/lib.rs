@@ -5,8 +5,11 @@
 //! file it holds with what Lightroom knows of it: stars, reject, colour
 //! label, keywords (the whole `a|b|c` path) and the collections it is in
 //! (as tags under `Lightroom collection|…`, until Helios has albums).
-//! Virtual copies are folded into their master photo. Develop settings are
-//! not read yet.
+//! Virtual copies are folded into their master photo. The master's develop
+//! settings are read and their basic panel mapped onto Helios modules (see
+//! [`develop`]), sent as each image's `develop`; Helios does not apply them
+//! yet. Settings with no faithful Helios equivalent are listed per photo,
+//! with their values, in the scan's warnings.
 //!
 //! The scan answers in pages (`importer/page` notifications) when Helios
 //! asks for them (`pageSize`), as the darktable library importer does.
@@ -49,8 +52,14 @@
 //! itself; the columns are checked before anything is read, so a
 //! catalogue that differs is refused with what it lacks.
 //!
+//! Read when present (an older catalogue may lack them):
+//! `Adobe_images.orientation` and `Adobe_imageDevelopSettings (image,
+//! text)`; see [`develop`] for their formats.
+//!
 //! - [`serve`]: the plugin's JSON-RPC loop, one message per line;
 //! - [`scan`]: one `importer.scan`.
+
+pub mod develop;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, Write};
@@ -214,6 +223,15 @@ fn check_columns(con: &Connection) -> Result<(), ScanError> {
     Ok(())
 }
 
+/// Whether `table` exists with all of `columns`.
+fn has_columns(con: &Connection, table: &str, columns: &[&str]) -> rusqlite::Result<bool> {
+    let mut stmt = con.prepare(&format!("PRAGMA main.table_info({table})"))?;
+    let have: BTreeSet<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    Ok(columns.iter().all(|c| have.contains(*c)))
+}
+
 /// Text from a column, whatever SQLite holds there; none for NULL.
 fn text(v: ValueRef<'_>) -> Option<String> {
     match v {
@@ -304,6 +322,7 @@ struct Row {
     rating: Option<f64>,
     label: Option<String>,
     pick: Option<f64>,
+    orientation: Option<String>,
 }
 
 /// A node of a tree kept as `(id, name, parent)` rows: its path from the
@@ -438,16 +457,21 @@ fn read(
     mut warnings: Vec<String>,
     mut pager: Option<Pager<'_>>,
 ) -> Result<Value, ScanError> {
-    let mut stmt = con.prepare(
+    let orientation = if has_columns(con, "Adobe_images", &["orientation"])? {
+        "i.orientation"
+    } else {
+        "NULL"
+    };
+    let mut stmt = con.prepare(&format!(
         "SELECT i.id_local, i.rootFile, i.masterImage, i.rating, i.colorLabels, i.pick, \
-         r.absolutePath, d.pathFromRoot, f.baseName, f.extension \
+         r.absolutePath, d.pathFromRoot, f.baseName, f.extension, {orientation} \
          FROM main.Adobe_images AS i \
          JOIN main.AgLibraryFile AS f ON f.id_local = i.rootFile \
          JOIN main.AgLibraryFolder AS d ON d.id_local = f.folder \
          JOIN main.AgLibraryRootFolder AS r ON r.id_local = d.rootFolder \
          WHERE f.baseName IS NOT NULL AND r.absolutePath IS NOT NULL \
-         ORDER BY i.rootFile, i.masterImage IS NOT NULL, i.id_local",
-    )?;
+         ORDER BY i.rootFile, i.masterImage IS NOT NULL, i.id_local"
+    ))?;
     let rows: Vec<Row> = stmt
         .query_map([], |r| {
             Ok(Row {
@@ -457,6 +481,7 @@ fn read(
                 rating: number(r.get_ref(3)?),
                 label: text(r.get_ref(4)?).filter(|l| !l.trim().is_empty()),
                 pick: number(r.get_ref(5)?),
+                orientation: text(r.get_ref(10)?),
                 path: file_path(
                     &text(r.get_ref(6)?).unwrap_or_default(),
                     &text(r.get_ref(7)?).unwrap_or_default(),
@@ -524,6 +549,18 @@ fn read(
         &collections,
     )?;
 
+    let mut develop_texts = HashMap::new();
+    if has_columns(con, "Adobe_imageDevelopSettings", &["image", "text"])? {
+        let mut stmt = con.prepare(
+            "SELECT image, text FROM main.Adobe_imageDevelopSettings WHERE text IS NOT NULL",
+        )?;
+        for r in stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, text(r.get_ref(1)?))))? {
+            if let (id, Some(t)) = r? {
+                develop_texts.insert(id, t);
+            }
+        }
+    }
+
     // One file per `rootFile`: its rows, the master first.
     let mut files: Vec<&[Row]> = Vec::new();
     let mut start = 0;
@@ -538,6 +575,7 @@ fn read(
     let (mut missing, mut missing_folders) = (0, BTreeSet::new());
     let (mut differing, mut picked, mut copies) = (Vec::new(), 0usize, 0usize);
     let mut unknown_labels: BTreeMap<String, usize> = BTreeMap::new();
+    let (mut developed, mut unreadable, mut unmatched) = (0usize, Vec::new(), Vec::new());
     progress(0, total, "");
     let mut pages = 0usize;
     for (done, versions) in files.iter().enumerate() {
@@ -587,7 +625,7 @@ fn read(
             .iter()
             .any(|v| marks(v.rating, v.pick) != (stars, rejected, pick) || v.label != base.label)
         {
-            differing.push(name);
+            differing.push(name.clone());
         }
         if let Some(l) = &base.label {
             match label(l) {
@@ -603,6 +641,25 @@ fn read(
             .collect();
         if !tags.is_empty() {
             entry["tags"] = json!(tags);
+        }
+        if let Some((from, settings)) = develop_settings(base, develop_texts.get(&base.id)) {
+            match settings {
+                Ok(settings) => {
+                    let raw = base
+                        .path
+                        .extension()
+                        .is_some_and(|e| develop::is_raw(&e.to_string_lossy()));
+                    let d = develop::map(&settings, base.orientation.as_deref(), raw);
+                    if !d.is_empty() {
+                        developed += 1;
+                        entry["develop"] = d.json(from);
+                    }
+                    if !d.unmatched.is_empty() {
+                        unmatched.push(format!("{name}: {}", d.unmatched_text()));
+                    }
+                }
+                Err(e) => unreadable.push(format!("{name} ({e})")),
+            }
         }
         images.push(entry);
     }
@@ -636,6 +693,24 @@ fn read(
              which Helios keeps: {}",
             photos(differing.len()),
             quoted(differing)
+        ));
+    }
+    if developed > 0 {
+        warnings.push(format!(
+            "develop settings read for {}: their exposure, white balance as shot and \
+             orientation were mapped onto Helios modules, which Helios does not apply yet",
+            photos(developed)
+        ));
+    }
+    for line in unmatched {
+        warnings.push(format!(
+            "Lightroom settings with no faithful Helios equivalent, not imported: {line}"
+        ));
+    }
+    if !unreadable.is_empty() {
+        warnings.push(format!(
+            "develop settings that could not be read, skipped: {}",
+            unreadable.join("; ")
         ));
     }
     if picked > 0 {
@@ -673,6 +748,25 @@ fn read(
         return Ok(json!({ "pages": pages, "total": total, "warnings": warnings }));
     }
     Ok(json!({ "images": images, "warnings": warnings }))
+}
+
+/// A master photo's develop settings and where they come from: the
+/// catalogue's text, else the `.xmp` sidecar beside the file (`<base>.xmp`,
+/// as Lightroom writes it for a raw file); none when neither is there.
+fn develop_settings(
+    row: &Row,
+    catalogue: Option<&String>,
+) -> Option<(&'static str, Result<develop::Settings, String>)> {
+    if let Some(t) = catalogue {
+        return Some(("catalogue", develop::parse_settings(t)));
+    }
+    let sidecar = row.path.with_extension("xmp");
+    if sidecar == row.path {
+        return None;
+    }
+    let xml = std::fs::read_to_string(&sidecar).ok()?;
+    let settings = develop::parse_xmp(&xml);
+    (!settings.is_empty()).then_some(("xmp", Ok(settings)))
 }
 
 /// Writes one message, a line of JSON.
