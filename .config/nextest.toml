@@ -40,6 +40,12 @@ test-group = 'alone'
 filter = 'test(/a_cold_folder_fills|the_library_read_at_scale/)'
 success-output = "final"
 
+# The stability scenarios print where each kill landed: kept when they
+# pass, for the `stability` job's report.
+[[profile.default.overrides]]
+filter = 'binary(stability)'
+success-output = "final"
+
 # The library at scale: each test builds a vault of 30,000 to 100,000
 # photos, a fixed amount of work that a loaded, throttled box slows five
 # times over. Bound on counts (queries, stats), not seconds, they get a

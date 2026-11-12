@@ -4,9 +4,13 @@
 //! the node starts the strategy's after-import backup; its settings
 //! layers are read and written through its control endpoint.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use common::{BACKUP_DISK, backed_up, disk, until};
 
 use helios_core::Bus;
 use helios_core::jobs::Jobs;
@@ -14,7 +18,7 @@ use helios_health::runner::Schedule;
 use helios_library::import::{self, Placement};
 use helios_node::vault_node::{Options, VaultNode};
 use helios_storage::strategy::{self, Scope, Strategy, Trigger};
-use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, Volumes, detect, registry};
+use helios_storage::{Role, Volume, Volumes, registry};
 use helios_vault::Vault;
 use helios_vault_sqlite::SqliteStore;
 
@@ -34,18 +38,6 @@ impl Drop for Place {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
-}
-
-/// Waits until `done`, at most `deadline`; whether it came.
-fn until(deadline: Duration, done: impl Fn() -> bool) -> bool {
-    let end = Instant::now() + deadline;
-    while !done() {
-        if Instant::now() > end {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    true
 }
 
 #[test]
@@ -100,39 +92,6 @@ fn the_node_runs_its_jobs_and_closes_the_vault_cleanly_when_stopped() {
         Vault::new(again).config_layer("user").unwrap().as_deref(),
         Some("a = 2")
     );
-}
-
-fn disk(id: &str, mount: &Path, roles: &[Role]) -> Volume {
-    std::fs::create_dir_all(mount).unwrap();
-    Volume {
-        id: VolumeId(id.into()),
-        identified_by: Identity::Uuid,
-        name: id.into(),
-        kind: VolumeKind::External,
-        capacity: Some(1_000_000_000),
-        free: Some(400_000_000),
-        mount: Some(mount.to_path_buf()),
-        roles: roles.iter().copied().collect(),
-        ..detect::weak(id, None)
-    }
-}
-
-const BACKUP_DISK: &str = "uuid:backup";
-
-/// Photos with a copy on the backup disk.
-fn backed_up(vault: &Vault<SqliteStore>) -> usize {
-    vault
-        .images()
-        .unwrap()
-        .iter()
-        .filter(|i| {
-            vault
-                .locations(&i.id)
-                .unwrap()
-                .iter()
-                .any(|l| l.volume.as_ref().is_some_and(|v| v.as_str() == BACKUP_DISK))
-        })
-        .count()
 }
 
 /// The headless node end to end, with no window: a library disk and a
