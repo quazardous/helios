@@ -63,7 +63,7 @@ helios-controls = { path = "crates/helios-controls" }
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.10", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.10.2", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
 egui-pop-agent = "0.4"
@@ -74,7 +74,7 @@ egui-pop-i18n = "0.9"
 # layout without building the window's stack (workspace templates).
 egui-pop-model = "0.7"
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = "0.10"
+egui-pop-test = "0.10.1"
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
 egui-pop-wayland = "0.2"
@@ -133,28 +133,6 @@ too_many_lines = "allow"
 # Owned arguments are part of the public API shape (handles and messages
 # moved into threads or stored); changing them is an API decision.
 needless_pass_by_value = "allow"
-
-# egui-pop's next ahead of its crates.io release: a window moved into the
-# main window keeps its geometry and draws the main window's title bar.
-# Every crate of the family comes from the same commit, so the graph holds
-# one copy of each. Drop this table once a release carries that fix.
-[patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "749a08e9" }
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
