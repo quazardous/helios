@@ -890,6 +890,15 @@ contract (section 2.1).
 - A `remote` backend for the catalog SDK: the vault API with server-side
   cursors.
 
+### Distribution
+
+- (2026-11-12 decision) Helios is not submitted to Flathub. Flathub's
+  generative-AI policy refuses AI-assisted manifests and submissions made
+  by agents, and Helios is built with AI assistance. The Flatpak ships as a
+  single-file bundle (`.flatpak`) on each GitHub release, next to the
+  AppImage, the tarball and the Windows installer. Not decided: a Flatpak
+  repository of our own, so that `flatpak update` finds new versions.
+
 ### Later phases
 
 To be defined with the next normalized layers (module self-description,

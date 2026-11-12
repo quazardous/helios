@@ -283,8 +283,9 @@ darktable outside the sandbox still runs (its process is not visible), so
 close darktable before importing; a local program set as an AI provider
 (segmentation) and the Ollama setup run inside the sandbox, where the
 host's programs are not; a library or vault outside the folders above
-needs an override. Helios is not on Flathub yet: see
-[flathub.md](./flathub.md) for what submitting it takes.
+needs an override. Helios is not on Flathub: Flathub's policy refuses
+AI-assisted manifests and agent-made submissions, so the bundle on each
+release is the Flatpak channel (see the ROADMAP's "Distribution").
 
 ## macOS
 
