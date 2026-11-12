@@ -999,6 +999,45 @@ fn the_import_window_keeps_its_size() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Where the backend has no windows of its own (kittest, the web), the
+/// import window is a window of the main one, centred and closable, as
+/// before it had an OS window of its own; not egui's embedding of an
+/// application window, which sits at the top left over the menus with a
+/// collapse arrow and no close button.
+#[test]
+fn the_embedded_import_window_is_centred_and_closes() {
+    const TITLE: &str = "Import photos";
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let rect = headless::window_rect(&h, TITLE).expect("drawn in the main window");
+    let centre = h.ctx.content_rect().center();
+    assert!(
+        (rect.center() - centre).length() < 2.0,
+        "centred: {rect:?} around {centre:?}"
+    );
+    // A window of the main one, not an application window egui embeds.
+    let app = h.state().app().handle().clone();
+    assert_eq!(app.windows().len(), 1, "the main window only");
+    // Its close button closes the import focus.
+    h.get_by_role_and_label(egui::accesskit::Role::Window, TITLE)
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Close window")
+        .click();
+    h.run_steps(3);
+    assert!(!h.state().import_window_open());
+    assert!(headless::window_rect(&h, TITLE).is_none());
+    // File > Import… opens it again, centred.
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let again = headless::window_rect(&h, TITLE).expect("open again");
+    assert!((again.center() - centre).length() < 2.0, "{again:?}");
+}
+
 const NO_LIBRARY: &str =
     "No library is open: start Helios with one (--vault FILE) to import photos";
 
