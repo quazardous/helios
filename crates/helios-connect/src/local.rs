@@ -13,12 +13,69 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use helios_core::config::{ConfigKey, Contract, KeyType, PathKind};
 use helios_vault::IMAGE_EXTENSIONS;
+use serde_json::json;
 
 use crate::{
     Access, Cancel, Caps, ConnectorError, ConnectorInfo, Cursor, FetchSink, Fetched, Item, ItemId,
     ItemKind, ItemRef, Page, SourceRef, Text,
 };
+
+/// The choices of a local source (folder or card), as the import window
+/// offers them: copied (`copy`, the default given) into a folder (`into`,
+/// the Library folder when unset) by date (`layout`) under a name
+/// (`rename`), or added where they are; what to do with duplicates; and
+/// whether darktable's XMP sidecars are read.
+pub fn source_contract(copy: bool) -> Contract {
+    let copies = |key: ConfigKey| key.group("Copies").visible_when("copy", json!(true));
+    Contract::new()
+        .key(
+            "copy",
+            ConfigKey::new(KeyType::Bool)
+                .default_value(json!(copy))
+                .label("Copy into the Library")
+                .help("Copy the photos; otherwise they are added where they are")
+                .group("Copies")
+                .order(-1),
+        )
+        .key(
+            "into",
+            copies(ConfigKey::new(KeyType::Path).path(PathKind::Folder))
+                .label("Into")
+                .help("The folder copies go to; the Library folder when none is chosen"),
+        )
+        .key(
+            "layout",
+            copies(ConfigKey::new(KeyType::Choice))
+                .choices(&["day", "month", "year", "flat"])
+                .default_value(json!("day"))
+                .label("Folders")
+                .help("How copies are filed by capture date"),
+        )
+        .key(
+            "rename",
+            copies(ConfigKey::new(KeyType::String))
+                .default_value(json!("{stem}"))
+                .label("Name")
+                .help("The copies' name pattern; {stem} is the original name"),
+        )
+        .key(
+            "duplicates",
+            ConfigKey::new(KeyType::Choice)
+                .choices(&["skip", "keep", "ask"])
+                .default_value(json!("skip"))
+                .label("Duplicates")
+                .help("What to do with a photo the library already has"),
+        )
+        .key(
+            "darktable",
+            ConfigKey::new(KeyType::Bool)
+                .default_value(json!(true))
+                .label("Read darktable edits")
+                .help("Read the XMP sidecars darktable writes beside the photos"),
+        )
+}
 
 /// What a source is: `card` (a folder holding `DCIM`, read from there),
 /// `folder` or `file`; and where to read.

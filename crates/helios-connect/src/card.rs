@@ -4,9 +4,10 @@
 //! cards it polls, else the connector asks the system. It declares no
 //! connection process.
 
+use helios_core::config::Contracts;
 use helios_storage::Card;
 
-use crate::local::{Local, source_at};
+use crate::local::{Local, source_at, source_contract};
 use crate::{
     Access, AccountRef, Cancel, Caps, CardsFn, Connector, ConnectorError, ConnectorInfo,
     ConnectorManifest, ConnectorProvider, ConnectorServices, Cursor, FetchSink, Fetched, INTERFACE,
@@ -33,6 +34,13 @@ fn label() -> Text {
 pub struct CardProvider;
 
 impl ConnectorProvider for CardProvider {
+    fn config(&self) -> Contracts {
+        Contracts {
+            source: source_contract(true),
+            ..Contracts::default()
+        }
+    }
+
     fn manifest(&self) -> ConnectorManifest {
         ConnectorManifest {
             id: ID.into(),
