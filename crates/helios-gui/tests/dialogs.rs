@@ -221,10 +221,7 @@ fn a_menu_lists_commands_with_their_keys_and_greys_what_does_not_apply() {
             MenuItem::command("test.palette_only"),
             MenuItem::Separator,
             MenuItem::command("workbench.fullscreen"),
-            MenuItem::Command {
-                id: "helios.log.moveTo".into(),
-                args: json!({ "area": "center" }),
-            },
+            MenuItem::run("helios.log.moveTo", json!({ "area": "center" })),
         ],
     );
     let mut h = harness(shell);

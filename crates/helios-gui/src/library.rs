@@ -353,6 +353,8 @@ pub struct VolumeNote {
     pub last_seen: Option<(u64, String)>,
     /// Mounted here, now.
     pub online: bool,
+    /// Where it is mounted, while it is.
+    pub mount: Option<PathBuf>,
 }
 
 impl VolumeNote {
@@ -740,6 +742,8 @@ pub struct VolumeNode {
     pub online: bool,
     /// When it was last seen (seconds since the epoch), offline.
     pub last_seen: Option<u64>,
+    /// Where it is mounted, while it is: its row's menu acts there.
+    pub mount: Option<PathBuf>,
     pub folders: Vec<FolderNode>,
 }
 
@@ -763,6 +767,7 @@ fn volume_tree(
                 // none, or on one it does not know, are not greyed.
                 online: note.is_none_or(|n| n.online),
                 last_seen: note.and_then(|n| n.last_seen.as_ref().map(|(at, _)| *at)),
+                mount: note.and_then(|n| n.mount.clone()),
                 folders: folder_tree(folders),
                 id,
             }
@@ -904,7 +909,12 @@ fn volume_row(
         .show_header(ui, |ui| {
             let label = egui::RichText::new(text).strong();
             let label = if online { label } else { label.weak() };
-            ui.label(label);
+            let row = ui.add(egui::Label::new(label).sense(egui::Sense::click()));
+            // Known volumes only: "Other folders" is no place on disk.
+            if volume.id.is_some() {
+                let mount = volume.mount.as_ref().map(|m| m.display().to_string());
+                folder_menu(&row, mount.as_deref(), online && mount.is_some());
+            }
         })
         .body(|ui| {
             if !online {
@@ -912,7 +922,7 @@ fn volume_row(
                 ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
             }
             for top in &volume.folders {
-                folder_row(ui, top, true, selected, chosen);
+                folder_row(ui, top, true, online, selected, chosen);
             }
         });
 }
@@ -923,29 +933,79 @@ fn folder_row(
     ui: &mut Ui,
     node: &FolderNode,
     top: bool,
+    online: bool,
     selected: Option<&str>,
     chosen: &mut Option<String>,
 ) {
     let text = format!("{} {}", node.name, node.count);
     let on = selected == Some(node.path.as_str());
-    if node.children.is_empty() {
-        if ui.selectable_label(on, text).clicked() {
+    let mut row = |ui: &mut Ui| {
+        let r = ui.selectable_label(on, text.clone());
+        folder_menu(&r, Some(&node.path), online);
+        if r.clicked() {
             *chosen = Some(node.path.clone());
         }
+    };
+    if node.children.is_empty() {
+        row(ui);
         return;
     }
     let id = ui.make_persistent_id(("helios.library.folder", &node.path));
     egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, top)
-        .show_header(ui, |ui| {
-            if ui.selectable_label(on, text).clicked() {
-                *chosen = Some(node.path.clone());
-            }
-        })
+        .show_header(ui, row)
         .body(|ui| {
             for child in &node.children {
-                folder_row(ui, child, false, selected, chosen);
+                folder_row(ui, child, false, online, selected, chosen);
             }
         });
+}
+
+/// The command a folder's "Scan this folder" runs (`path`): the image
+/// map's job lists the folder and those below it again, recording the
+/// files new or changed there.
+pub const SCAN_FOLDER_COMMAND: &str = "library.scanFolder";
+
+/// The command that scopes the library to a folder (`path`; null: the
+/// whole library), kept with the workspace.
+pub const FOLDER_COMMAND: &str = "library.folder";
+
+/// A folder's or a volume's context menu in the folders tree, through the
+/// shell's menus: "Show in file manager", "Scan this folder" and "Import
+/// new photos here", greyed for a folder not at hand (an offline volume's).
+fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
+    use crate::dialogs::MenuItem;
+    if !row.secondary_clicked() {
+        return;
+    }
+    let ctx = &row.ctx;
+    let word = |m: Message| crate::i18n::text(ctx, m);
+    let path = path.unwrap_or_default();
+    let item = |id: &str, args: serde_json::Value, label: Message| {
+        MenuItem::run(id, args)
+            .labeled(word(label))
+            .enabled(at_hand && !path.is_empty())
+    };
+    crate::dialogs::context_menu(
+        row,
+        vec![
+            item(
+                "library.openFolder",
+                serde_json::json!({ "path": path }),
+                Message::new("gui-library-folder-show", "Show in file manager"),
+            ),
+            item(
+                SCAN_FOLDER_COMMAND,
+                serde_json::json!({ "path": path }),
+                Message::new("gui-library-folder-scan", "Scan this folder"),
+            ),
+            MenuItem::Separator,
+            item(
+                crate::clipboard::images::WINDOW,
+                serde_json::json!({ "source": path }),
+                Message::new("gui-library-folder-import", "Import new photos here"),
+            ),
+        ],
+    );
 }
 
 /// The longest side of a thumbnail, in pixels.
@@ -1452,6 +1512,7 @@ impl Library {
                         name: v.name.clone(),
                         last_seen: v.last_seen.as_ref().map(|s| (s.at, s.node.clone())),
                         online: v.online(),
+                        mount: v.mount.clone(),
                     },
                 )
             })
@@ -1584,8 +1645,7 @@ impl Library {
                 .cloned()
                 .unwrap_or_else(|| VolumeNote {
                     name: volume.to_string(),
-                    last_seen: None,
-                    online: false,
+                    ..VolumeNote::default()
                 }),
         )
     }
@@ -1910,6 +1970,16 @@ impl Library {
     /// in view are told it, so the thumbnail re-check reads them first.
     pub fn set_map_feed(&mut self, feed: helios_library::map_job::Feed) {
         self.map_feed = Some(feed);
+    }
+
+    /// Asks the image map's job to list `folder` and those below it again
+    /// ([`SCAN_FOLDER_COMMAND`]); false without the job (no vault).
+    pub fn scan_folder(&self, folder: &Path) -> bool {
+        let Some(feed) = &self.map_feed else {
+            return false;
+        };
+        feed.scan_folder(folder.to_path_buf());
+        true
     }
 
     /// Tells the map's feed the files in view when they changed: the
@@ -2783,8 +2853,16 @@ impl Library {
                     });
             });
         if let Some(path) = chosen {
+            // Through the shell: the folder is kept with the workspace.
             let same = selected.as_deref() == Some(path.as_str());
-            self.set_folder((!same).then_some(path.as_str()));
+            crate::dialogs::request(
+                ui.ctx(),
+                crate::dialogs::Request::Run(
+                    FOLDER_COMMAND.into(),
+                    serde_json::json!({ "path": (!same).then_some(path) }),
+                    helios_shell::commands::Origin::User,
+                ),
+            );
         }
     }
 

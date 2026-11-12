@@ -248,6 +248,11 @@
             "by": { "enum": ["captured", "imported", "name", "rating", "edited", "size"] },
             "descending": { "type": "boolean" }
           }
+        },
+        "folder": {
+          "description": "The folder the library is scoped to (an absolute path), with those below it; the whole library when absent.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },

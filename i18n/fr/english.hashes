@@ -106,12 +106,14 @@ command-keymap-package.title dafef66dd3b9bf88
 command-library-compare.title d0cb5f40dd939879
 command-library-copyFiles.title 47994437a8a0f5ba
 command-library-export.title c2dc933564069c87
+command-library-folder.title 401442b888a6ce54
 command-library-importFiles.title a7190ef3f937e18a
 command-library-importSource.title b212d23cfe694c9e
 command-library-importWindow.title 5cf073c01aa7d73f
 command-library-importWith.title 8da42d005844e0c1
 command-library-openFolder.title 79525ab3a42262e5
 command-library-pasteFiles.title 409587651f782f9a
+command-library-scanFolder.title 65e0df53774b720b
 command-library-sort.title 31b0d3aa70f57a39
 command-library-storage.title 72ca240c73a1c7aa
 command-macro-dissolve.title e472cc526f105a70
@@ -560,6 +562,9 @@ gui-library-facet-presence beeefaec1ce58ef2
 gui-library-facet-rating 36690a4e79cfa166
 gui-library-facet-type f97f51ee1be110cd
 gui-library-file f5342066f92b83c2
+gui-library-folder-import 10145b3d149f7903
+gui-library-folder-scan b7864987ea2b1016
+gui-library-folder-show 979529b4e076ad3a
 gui-library-folders a4ab9b34eea3af48
 gui-library-folders-elsewhere defbb19ac5e1997e
 gui-library-images f081af80bddd910b

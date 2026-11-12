@@ -564,6 +564,18 @@ grid (the photos show from the thumbnail cache). Not built yet: the
 row's menu (show in file manager, scan, import here), the selected
 folder kept per focus and in templates, and a dock panel of its own.
 
+Built (2026-11-12), third part: a right click on a folder or a volume
+opens its menu through the shell's menus (`dialogs::context_menu`, the
+entries commands): "Show in file manager" (`library.openFolder`), "Scan
+this folder" (`library.scanFolder`: the image map's job lists that
+folder and those below it, as a volume asked for on purpose) and
+"Import new photos here" (`library.importWindow` on the folder); all
+three greyed on an offline volume. The tree's click runs
+`library.folder`, which scopes this focus's library and writes the
+folder to the workspace's `library.folder` (one undo step, as the sort):
+the workspace opens on it again, and a changed query keeps it. Not
+built yet: a dock panel of its own for the tree.
+
 **L6. Albums, smart albums, quick collection.** Vault documents
 `library/collections` (L-C2): albums hold image ids, smart albums a
 filter, stored as a rule tree: `{field, op, value}` rules and nested

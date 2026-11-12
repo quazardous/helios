@@ -565,13 +565,26 @@ impl Shell {
                     .as_ref()
                     .and_then(|l| l.query.clone())
             };
-            if changed(&|b| query(b) != query(next)) {
+            let folder = |s: &State| {
+                s.bundle
+                    .template
+                    .library
+                    .as_ref()
+                    .and_then(|l| l.folder.clone())
+            };
+            let query_changed = changed(&|b| query(b) != query(next));
+            if query_changed {
                 lib.set_filter(
                     query(next)
                         .as_ref()
                         .map(crate::library::filter_of)
                         .unwrap_or_default(),
                 );
+            }
+            // The folders tree's choice, kept with the workspace (a
+            // new filter drops the folder: put back).
+            if query_changed || changed(&|b| folder(b) != folder(next)) {
+                lib.set_folder(folder(next).as_deref());
             }
         }
         if let Some(b) = before
@@ -979,7 +992,12 @@ impl Shell {
                             .map_err(|e| format!("sort: {e}"))?,
                     ),
                 };
-                let library = library_of(args, export, sort)?;
+                // And the folder, the folders tree's.
+                let folder = self
+                    .workspace_state()
+                    .and_then(|s| s.bundle.template.library)
+                    .and_then(|l| l.folder);
+                let library = library_of(args, export, sort, folder)?;
                 self.edit_workspace(&json!({ "library": library }), origin)
             }
             "workspace.reset" => {
@@ -1473,6 +1491,7 @@ fn library_of(
     args: &Value,
     export: Option<ExportDesc>,
     sort: Option<SortDesc>,
+    folder: Option<String>,
 ) -> Result<Value, String> {
     let t = |k: &str, default: &str| text(args, k).unwrap_or(default).to_string();
     let source = t("source", "none");
@@ -1504,6 +1523,7 @@ fn library_of(
         && !compare
         && export.is_none()
         && sort.is_none()
+        && folder.is_none()
     {
         return Ok(Value::Null);
     }
@@ -1514,6 +1534,7 @@ fn library_of(
         compare,
         export,
         sort,
+        folder,
     }))
 }
 

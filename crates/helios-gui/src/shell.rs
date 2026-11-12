@@ -233,6 +233,11 @@ enum Action {
     /// Sorts the library (`by`, `descending`), as whom; without `by`,
     /// says how it is sorted.
     Sort(Value, Origin),
+    /// Scopes the library to a folder (`path`; null: none), as whom;
+    /// without `path`, says the folder.
+    Folder(Value, Origin),
+    /// Scans a folder for the image map (`path`).
+    ScanFolder(Value),
     /// Moves the comparison's active photo by a step.
     CompareStep(i64),
     /// Zoom and pan synchronised across the compared photos, or not
@@ -2747,6 +2752,22 @@ impl Shell {
             ),
             Box::new(|a, origin| Ok(Action::Sort(a.clone(), origin.clone()))),
         );
+        add(
+            CommandSpec::new(
+                crate::library::FOLDER_COMMAND,
+                "Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::Folder(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                crate::library::SCAN_FOLDER_COMMAND,
+                "Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::ScanFolder(a.clone()))),
+        );
         for (id, title, step) in [
             ("compare.next", "Compare: make the next photo active", 1),
             (
@@ -4086,6 +4107,9 @@ impl Shell {
         if let Some(q) = &l.query {
             lib.set_filter(crate::library::filter_of(q));
         }
+        if let Some(folder) = &l.folder {
+            lib.set_folder(Some(folder));
+        }
     }
 
     /// `library.sort`: sorts this window's library, and keeps the sort
@@ -4127,6 +4151,38 @@ impl Shell {
         }
         let sort = self.focus.library.borrow().sort();
         Ok(json!({ "by": sort.by.name(), "descending": sort.descending }))
+    }
+
+    /// `library.folder`: scopes this window's library to a folder, and
+    /// keeps it with the workspace (one undo step) when one is open;
+    /// answers the folder in force.
+    fn folder_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        if let Some(path) = args.get("path") {
+            let folder = match path {
+                Value::Null => None,
+                Value::String(p) if Path::new(p).is_absolute() => Some(p.clone()),
+                other => return Err(format!("`path`: {other} is not an absolute folder")),
+            };
+            if let Some(state) = self.workspace_state() {
+                let mut library = state.bundle.template.library.unwrap_or_default();
+                library.folder.clone_from(&folder);
+                // An empty library section is none at all.
+                let library =
+                    (library != helios_template::LibraryDesc::default()).then_some(library);
+                if library
+                    != self
+                        .workspace_state()
+                        .and_then(|s| s.bundle.template.library)
+                {
+                    self.edit_workspace(&json!({ "library": library }), origin)?;
+                }
+            }
+            self.focus
+                .library
+                .borrow_mut()
+                .set_folder(folder.as_deref());
+        }
+        Ok(json!({ "path": self.focus.library.borrow().folder() }))
     }
 
     /// Compares photos side by side: the Compare place on `images` (ids),
@@ -4645,6 +4701,16 @@ impl Shell {
             }
             Action::ComparePhotos(args) => return self.compare_photos(&args),
             Action::Sort(args, origin) => return self.sort_library(&args, &origin),
+            Action::Folder(args, origin) => return self.folder_library(&args, &origin),
+            Action::ScanFolder(args) => {
+                let path = args
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .filter(|p| Path::new(p).is_absolute())
+                    .ok_or("`path`: an absolute folder")?;
+                let asked = self.focus.library.borrow().scan_folder(Path::new(path));
+                return Ok(json!({ "asked": asked }));
+            }
             Action::CompareStep(step) => {
                 let selection = self.focus.library.borrow().selection();
                 let mut cmp = self.focus.comparison.borrow_mut();
@@ -5558,20 +5624,28 @@ fn menu_rows(
             MenuItem::Submenu { label, items } => {
                 ui.menu_button(label, |ui| menu_rows(ui, h, cx, items, chosen));
             }
-            MenuItem::Command { id, args } => {
+            MenuItem::Command {
+                id,
+                args,
+                label,
+                enabled,
+            } => {
                 let Ok(cid) = CommandId::new(id.as_str()) else {
                     continue;
                 };
                 let Some(spec) = h.command(&cid) else {
                     continue;
                 };
-                let mut button = egui::Button::new(h.command_menu_title(&spec));
+                let title = label.clone().unwrap_or_else(|| h.command_menu_title(&spec));
+                let mut button = egui::Button::new(title);
                 if let Some(k) = h.keys_for(&cid).first() {
                     button = button.shortcut_text(k.clone());
                 }
                 let applies = h.applies(&cid, cx);
-                let r = ui.add_enabled(applies, button);
-                if !applies {
+                let r = ui.add_enabled(applies && *enabled, button);
+                // A row its owner greyed (an offline folder's) says
+                // nothing more; one whose command does not apply, why.
+                if *enabled && !applies {
                     r.on_disabled_hover_text(format!("Does not apply here ({})", spec.when));
                 } else if r.clicked() {
                     *chosen = Some((id.clone(), args.clone()));

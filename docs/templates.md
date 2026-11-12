@@ -228,6 +228,7 @@ What the workspace sets for the library (optional):
   "query": { "flags": ["pick"], "min_rating": 2 },
   "auto_advance": true,
   "sort": { "by": "rating", "descending": true },
+  "folder": "/home/me/Pictures/2024",
   "export": { "format": "jpeg", "quality": 92, "folder": "~/Pictures/Export",
               "pattern": "{date}-{seq}", "clash": "number" }
 }
@@ -265,6 +266,11 @@ What the workspace sets for the library (optional):
   `size`, and `descending` (false by default). Absent, by capture time,
   oldest first. The Library toolbar's sort and `library.sort` write it
   (one undo step); validation refuses a sort it does not know.
+- `folder` (2026-11-12) is the folder the library is scoped to, with
+  those below it (the `folder:` term of the search): an absolute path.
+  Absent, the whole library. A click in the Library panel's folders
+  tree and `library.folder` write it (one undo step); validation
+  refuses a path that is not absolute.
 - `export` (2026-11-07) is what the export dialog (`library.export`,
   File > Export…) starts from, written as `library.export` takes its
   arguments: `format` (`jpeg`, `png`, `tiff`), `quality` (JPEG, 1 to

@@ -177,6 +177,11 @@ pub struct LibraryDesc {
     /// first, when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<SortDesc>,
+    /// The folder the library is scoped to (an absolute path; the
+    /// folders tree's choice), with those below it; the whole library
+    /// when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 /// How the library orders its photos: what by ([`SORTS`]), and which way.

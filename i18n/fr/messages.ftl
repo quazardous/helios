@@ -863,6 +863,9 @@ gui-library-facet-backup = Sauvegarde
 gui-library-folders = Dossiers
 gui-library-folders-elsewhere = Autres dossiers
 gui-library-volume-offline = { $volume } { $count }, hors ligne, vu pour la dernière fois le { $date }
+gui-library-folder-show = Afficher dans le gestionnaire de fichiers
+gui-library-folder-scan = Analyser ce dossier
+gui-library-folder-import = Importer les nouvelles photos d’ici
 
 gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre
 
