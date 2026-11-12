@@ -2257,6 +2257,8 @@ fn the_carousel_cells_never_overlap_whatever_the_window_and_the_thumbnail_size()
     let folder = dir.join("Shoot");
     photos(&folder, 9, 320, 240);
     for window in [vec2(1280.0, 800.0), vec2(900.0, 640.0)] {
+        // The middle cell's width at each thumbnail size.
+        let mut middles = Vec::new();
         for side in [64.0, 256.0] {
             let at = format!("window {window:?}, thumbnails of {side}");
             let mut h = headless::harness(Shell::new(helios_panels(), None), window);
@@ -2321,8 +2323,18 @@ fn the_carousel_cells_never_overlap_whatever_the_window_and_the_thumbnail_size()
                     );
                 }
             }
+            let middle = cells
+                .iter()
+                .find(|(label, _)| label.starts_with("IMG_0004"))
+                .unwrap_or_else(|| panic!("{at}: the middle cell is shown: {cells:?}"));
+            middles.push(middle.1.width());
             eprintln!("{at}: {cells:?}");
         }
+        // The size control sizes the middle cell.
+        assert!(
+            middles[1] > middles[0] + 1.0,
+            "window {window:?}: the middle cell at 64 and 256: {middles:?}"
+        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
