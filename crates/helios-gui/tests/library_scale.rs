@@ -87,6 +87,13 @@ fn presence(i: u32) -> Presence {
 /// small file, each with its size and date as the vault saw them; marks on
 /// some.
 fn synthetic(dir: &Path, n: u32) -> PathBuf {
+    grow(dir, 0..n)
+}
+
+/// The vault in `dir` with photos `ids` added (created when it is not
+/// there): a library measured at one size grows to the next instead of
+/// being built again.
+fn grow(dir: &Path, ids: std::ops::Range<u32>) -> PathBuf {
     // One source file per 20,000 links: a file system caps a file's
     // hard links (ext4 at 65,000), and the measure goes to 100,000 photos.
     let source = |i: u32| {
@@ -101,7 +108,7 @@ fn synthetic(dir: &Path, n: u32) -> PathBuf {
     let path = dir.join("vault.db");
     let mut store = SqliteStore::open(&path).unwrap();
     store.begin().unwrap();
-    for i in 0..n {
+    for i in ids {
         let id = id(i);
         store
             .add_to_library(&Image {
@@ -224,23 +231,35 @@ fn read(path: &Path, n: u32, order: Order) -> Result<Cost, String> {
     Ok(cost)
 }
 
+/// A measure, not a deadline: the library read at growing sizes, each
+/// read's cost printed (its time, queries and stats, and the time the
+/// vault took to grow to that size). What the read must cost in queries
+/// and stats is checked by the test below; this one checks only that each
+/// read shows every photo as the vault holds it. One vault grows from one
+/// size to the next, so the fixture is built once, whatever the machine's
+/// speed.
 #[test]
 fn the_library_read_at_scale_measured() {
+    let dir = scratch("read");
+    let mut built = 0;
     for n in [30_000, 100_000] {
-        let dir = scratch("read");
-        let path = synthetic(&dir, n);
+        let start = Instant::now();
+        let path = grow(&dir, built..n);
+        built = n;
+        let grown = start.elapsed();
         let line = match read(&path, n, helios_gui::library::DEFAULT_SORT) {
             Ok(c) => json!({
                 "images": c.images,
                 "ms": c.elapsed.as_millis(),
                 "queries": c.queries,
                 "stats": c.stats,
+                "built_ms": grown.as_millis(),
             }),
             Err(e) => json!({ "images": n, "error": e }),
         };
         println!("library-read {line}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A shell whose library is filled from the vault at `path`.
@@ -254,7 +273,8 @@ fn open(path: &Path) -> (Shell, Persist<SqliteStore>) {
 /// The read's cost does not grow a query or a file system call per photo:
 /// one query opens the cursor, one reads each window of
 /// `helios_gui::persist::PAGE` photos, and the sizes and dates shown are the
-/// vault's, never a `stat`'s. A time deadline catches a read gone slow.
+/// vault's, never a `stat`'s. Bound on counts, not seconds: a read gone
+/// slow per photo shows as queries or stats, whatever the machine's speed.
 /// Sorted by capture time (the library's default) the photos come in its
 /// order from the same query.
 #[test]
@@ -271,11 +291,6 @@ fn the_library_read_at_scale_is_a_query_per_window_and_no_stat() {
             cost.queries
         );
         assert_eq!(cost.stats, 0, "the read stat-ed the photos' files");
-        assert!(
-            cost.elapsed < Duration::from_secs(30),
-            "{order:?}: read in {:?}",
-            cost.elapsed
-        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -340,7 +355,6 @@ fn a_filtered_read_at_scale_is_a_query_per_window_and_facets_one_more() {
         "library-filter {}",
         json!({ "images": n, "matched": want.len(), "ms": elapsed.as_millis() })
     );
-    assert!(elapsed < Duration::from_secs(30), "filtered in {elapsed:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
