@@ -80,6 +80,7 @@ pub use accounts_admin::{
 mod health;
 mod import;
 mod import_accounts;
+mod import_browsers;
 pub use import_accounts::LibraryFolder;
 mod import_choices;
 mod import_sources;

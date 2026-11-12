@@ -465,6 +465,12 @@ impl ImportWindow {
         if !wz.honours.darktable {
             choices.darktable = false;
         }
+        // An edited source keeps the browser it was shown in.
+        let browser = wz
+            .editing
+            .as_ref()
+            .and_then(|k| self.sources.get(k))
+            .and_then(|s| s.browser);
         let source = SavedSource {
             connector,
             name: Some(wz.name.trim().to_string()),
@@ -472,6 +478,7 @@ impl ImportWindow {
             account,
             choices: Some(choices),
             params: wz.params.into_iter().collect(),
+            browser,
         };
         if let Some(old) = &wz.editing {
             self.replace_source(old, source);

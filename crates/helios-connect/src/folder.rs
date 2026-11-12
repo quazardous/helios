@@ -9,9 +9,9 @@ use helios_core::config::Contracts;
 
 use crate::local::{Local, source_at, source_contract};
 use crate::{
-    Access, AccountRef, Cancel, Caps, Connector, ConnectorError, ConnectorInfo, ConnectorManifest,
-    ConnectorProvider, ConnectorServices, Cursor, FetchSink, Fetched, INTERFACE, ItemRef, Needs,
-    Page, PlacesFn, Settings, SourceRef, Text,
+    Access, AccountRef, Browser, Cancel, Caps, Connector, ConnectorError, ConnectorInfo,
+    ConnectorManifest, ConnectorProvider, ConnectorServices, Cursor, FetchSink, Fetched, INTERFACE,
+    ItemRef, Needs, Page, PlacesFn, Settings, SourceRef, Text,
 };
 
 /// The folder connector's id.
@@ -55,6 +55,7 @@ impl ConnectorProvider for FolderProvider {
             platforms: Vec::new(),
             interface: INTERFACE,
             connect: Vec::new(),
+            browsers: vec![Browser::Folder, Browser::Tree, Browser::Timeline],
         }
     }
 

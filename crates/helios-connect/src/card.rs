@@ -9,7 +9,7 @@ use helios_storage::Card;
 
 use crate::local::{Local, source_at, source_contract};
 use crate::{
-    Access, AccountRef, Cancel, Caps, CardsFn, Connector, ConnectorError, ConnectorInfo,
+    Access, AccountRef, Browser, Cancel, Caps, CardsFn, Connector, ConnectorError, ConnectorInfo,
     ConnectorManifest, ConnectorProvider, ConnectorServices, Cursor, FetchSink, Fetched, INTERFACE,
     ItemRef, Needs, Page, Settings, SourceRef, Text,
 };
@@ -56,6 +56,7 @@ impl ConnectorProvider for CardProvider {
             platforms: Vec::new(),
             interface: INTERFACE,
             connect: Vec::new(),
+            browsers: vec![Browser::Folder, Browser::Timeline],
         }
     }
 

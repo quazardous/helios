@@ -497,6 +497,24 @@ gui-import-backup-today = { $disk } (seen today)
 
 gui-import-backup-unusable = { $disk } (plugged in, cannot take copies)
 
+gui-import-browse = Browse
+
+gui-import-browse-collections = Albums
+
+gui-import-browse-every-folder = Every folder
+
+gui-import-browse-folder = All photos
+
+gui-import-browse-not-listed = Helios does not list this source's photos here yet.
+
+gui-import-browse-pick-about = Choose the photos in the service's own page: they are imported once picked.
+
+gui-import-browse-picker = Pick in the service
+
+gui-import-browse-timeline = By date
+
+gui-import-browse-tree = Folder tree
+
 gui-import-cancelled = The import was cancelled: { $photos } photos imported
 
 gui-import-copy = Copy the photos into the library folder

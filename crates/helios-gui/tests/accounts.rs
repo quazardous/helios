@@ -638,6 +638,8 @@ impl helios_connect::ConnectorProvider for Picks {
         let mut m = FakeProvider.manifest();
         m.id = PICKS.into();
         m.caps.picks = true;
+        // As Google Photos declares: its own picking page alone.
+        m.browsers = vec![helios_connect::Browser::Picker];
         m
     }
 
@@ -1009,4 +1011,91 @@ fn a_source_s_own_into_folder_takes_the_picked_photos_without_asking() {
     // Nothing asked, nothing remembered as the library's.
     assert!(!shown(&h, "Choose the library folder…"));
     assert_eq!(*folder.0.lock().unwrap(), None);
+}
+
+/// A connector declaring three browsers: the Contents column offers
+/// them for its account, the one chosen is kept on the source and comes
+/// back when the sources are read again.
+#[test]
+fn an_account_source_offers_its_connectors_three_browsers_and_keeps_the_one_chosen() {
+    use helios_connect::Browser;
+    let (_world, mut h) = world();
+    let kept = keep_sources(&mut h);
+    wizard_signed_in(&mut h);
+    click(&mut h, "Next");
+    click(&mut h, "Next");
+    click(&mut h, "Add the source");
+    until(&mut h, "the switch", |h| shown(h, "Albums"));
+    let (offered, current) = h.state().import_source_browsers();
+    assert_eq!(
+        offered,
+        [Browser::Folder, Browser::Collections, Browser::Timeline]
+    );
+    assert_eq!(current, Some(Browser::Folder));
+    for label in ["Browse", "All photos", "Albums", "By date"] {
+        assert!(shown(&h, label), "{label}");
+    }
+    assert!(!shown(&h, "Folder tree") && !shown(&h, "Pick in the service"));
+    // Nothing lists an account's photos yet: said, no grid of folders.
+    assert!(shown(
+        &h,
+        "Helios does not list this source's photos here yet."
+    ));
+    click(&mut h, "By date");
+    assert_eq!(
+        h.state().import_source_browsers().1,
+        Some(Browser::Timeline)
+    );
+    assert_eq!(
+        h.state().import_sources()[0].browser,
+        Some(Browser::Timeline)
+    );
+    let text = kept.borrow().clone().unwrap_or_default();
+    assert!(text.contains("browser = \"timeline\""), "{text}");
+    // Read again, as after a restart: shown by date.
+    let (read, write) = (kept.clone(), kept.clone());
+    h.state_mut().keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+    let account = h.state().import_sources()[0].account.clone().unwrap();
+    h.state_mut().select_import_account(&account);
+    h.run_steps(3);
+    assert_eq!(
+        h.state().import_source_browsers().1,
+        Some(Browser::Timeline)
+    );
+}
+
+/// A connector that picks in its service's page alone (Google Photos):
+/// no switch, the Contents column offers its picking.
+#[test]
+fn a_picking_source_shows_only_its_picker_in_the_contents_column() {
+    use helios_connect::Browser;
+    let (mut h, _opened, _folder, _imported, _) = picking_world(None);
+    click(&mut h, "ann@example.org");
+    until(&mut h, "the picker shown", |h| {
+        shown(
+            h,
+            "Choose the photos in the service's own page: they are imported once picked.",
+        )
+    });
+    assert_eq!(
+        h.state().import_source_browsers(),
+        (vec![Browser::Picker], Some(Browser::Picker))
+    );
+    for label in ["Browse", "All photos", "By date", "Albums", "Folder tree"] {
+        assert!(!shown(&h, label), "{label}");
+    }
+    // Its button runs the picking, the library folder asked first.
+    h.query_all_by_label("Pick photos…")
+        .last()
+        .expect("the Contents column's")
+        .click();
+    until(&mut h, "the library folder asked", |h| {
+        shown(h, "Choose the library folder…")
+    });
 }

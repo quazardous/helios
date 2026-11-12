@@ -453,6 +453,76 @@ pub struct ConnectorManifest {
     /// (`[[connect]]`, section 2.4.1); empty for folders and cards.
     #[serde(default)]
     pub connect: Vec<ConnectStep>,
+    /// How the import window browses its sources, in the order offered
+    /// (section 3.9); empty: [`ConnectorManifest::browsers`] derives them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browsers: Vec<Browser>,
+}
+
+impl ConnectorManifest {
+    /// The browsers its sources are shown in: the ones declared, else
+    /// the picker for a connector whose items are picked in the service's
+    /// own page, else one flat folder.
+    pub fn browsers(&self) -> Vec<Browser> {
+        if !self.browsers.is_empty() {
+            let mut seen = Vec::with_capacity(self.browsers.len());
+            for b in &self.browsers {
+                if !seen.contains(b) {
+                    seen.push(*b);
+                }
+            }
+            return seen;
+        }
+        if self.caps.picks {
+            vec![Browser::Picker]
+        } else {
+            vec![Browser::Folder]
+        }
+    }
+}
+
+/// A way of browsing a source in the import window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Browser {
+    /// Its folders and subfolders, one folder's photos (with its
+    /// subfolders') at a time.
+    Tree,
+    /// Every photo in one flat folder.
+    Folder,
+    /// The albums of a service.
+    Collections,
+    /// By capture date.
+    Timeline,
+    /// The service's own picking page ([`Connector::pick`]).
+    Picker,
+}
+
+impl Browser {
+    /// Every browser, in the order the import window offers them.
+    pub const ALL: [Self; 5] = [
+        Self::Tree,
+        Self::Folder,
+        Self::Collections,
+        Self::Timeline,
+        Self::Picker,
+    ];
+
+    /// Its name, as manifests and the saved sources write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Tree => "tree",
+            Self::Folder => "folder",
+            Self::Collections => "collections",
+            Self::Timeline => "timeline",
+            Self::Picker => "picker",
+        }
+    }
+
+    /// The browser of that name.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|b| b.name() == name)
+    }
 }
 
 /// What a connector needs.
@@ -599,6 +669,7 @@ mod tests {
             assert_eq!(manifest.interface, INTERFACE);
             // Folders and cards declare no connection process.
             assert!(manifest.connect.is_empty());
+            assert!(manifest.browsers().contains(&Browser::Timeline), "{id}");
             let connector = provider
                 .create(&Settings::Null, &ConnectorServices::default())
                 .unwrap();

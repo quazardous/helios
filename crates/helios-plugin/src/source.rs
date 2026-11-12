@@ -124,6 +124,11 @@ impl SourceProvider {
             platforms: Vec::new(),
             interface: helios_connect::INTERFACE,
             connect,
+            browsers: m
+                .browsers
+                .iter()
+                .filter_map(|b| helios_connect::Browser::from_name(b))
+                .collect(),
             id,
         };
         Some(Self {

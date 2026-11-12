@@ -475,6 +475,15 @@ gui-import-backup-plugged 2b17139b69ac2c5c
 gui-import-backup-storage dffe60fd3753af8c
 gui-import-backup-today 1bd8ff62b6d88dc1
 gui-import-backup-unusable 8a3552433dddd753
+gui-import-browse 48f4619f60abe6ff
+gui-import-browse-collections 8cb6d31ea8697f9d
+gui-import-browse-every-folder 742cbad34515dc1e
+gui-import-browse-folder 50a56f492c631ea1
+gui-import-browse-not-listed be5aaf1084ed7cf7
+gui-import-browse-pick-about 28382f5cbbf2f6b1
+gui-import-browse-picker a9436da3f7053fff
+gui-import-browse-timeline 70a85f922f59436e
+gui-import-browse-tree c0fedd3381fdcc9b
 gui-import-cancelled ef0a315043a78d47
 gui-import-copy 6559bd9463867f74
 gui-import-copy-help 94e74fb4f9cc2bcf
