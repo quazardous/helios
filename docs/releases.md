@@ -1,15 +1,16 @@
 # Releases
 
-Each release of Helios is a tag `vX.Y.Z` on `main` and a GitHub Release of
-the same name on the
+Each minor or major release of Helios is a tag `vX.Y.0` on `main` and a
+GitHub Release of the same name on the
 [Releases page](https://github.com/quazardous/helios/releases).
 
 ## Where they come from
 
-A merge to `main` with user-facing changes is released right after it
-lands (see CONTRIBUTING.md, "Versions and releases"): the bench box
-prepares the version bump and the CHANGELOG.md section, the commit
-"Release X.Y.Z" is tagged `vX.Y.Z` and pushed. The tag starts the release
+A release is prepared on the bench box from `next`, merged into `next`
+as the commit "Release X.Y.Z" through a pull request, and reaches `main`
+when `promote.yml` promotes a green `next` (see CONTRIBUTING.md,
+"Versions and releases"). Only a minor or major release is tagged: the
+tag `vX.Y.0`, pushed on that commit on `main`, starts the release
 workflow (`.github/workflows/release.yml`) on GitHub Actions, which:
 
 1. builds `helios`, `helios-node`, `helios-mcp`, `helios-gui` and the
