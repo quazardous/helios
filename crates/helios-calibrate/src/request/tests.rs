@@ -7,9 +7,14 @@ use crate::solver::Orientation;
 use helios_module_channelmixerrgb::daylight_xy;
 
 /// The chart under 6500 K as a decoded picture would hold it: linear
-/// working RGB, four channels (alpha 1).
+/// working RGB at 80 % exposure (the white patch's blue would reach the
+/// clip level at full exposure), four channels (alpha 1).
 fn picture() -> Vec<f32> {
-    let rgb = draw(&lit(&adaptation_from(daylight_xy(6500.0))));
+    let values: Vec<[f64; 3]> = lit(&adaptation_from(daylight_xy(6500.0)))
+        .into_iter()
+        .map(|v| v.map(|c| 0.8 * c))
+        .collect();
+    let rgb = draw(&values);
     rgb.chunks(3)
         .flat_map(|p| [p[0], p[1], p[2], 1.0])
         .collect()
@@ -55,7 +60,9 @@ fn a_picture_answers_its_report() {
         answer
             .patches
             .iter()
-            .all(|p| p.status == "kept" && p.flags.is_empty())
+            .all(|p| p.status == "kept" && p.flags.is_empty()),
+        "{:?}",
+        answer.patches
     );
     assert_eq!(answer.patches[0].name, CHART.patches[0].name);
     assert!(answer.after.max < 5e-3, "{:?}", answer.after);
