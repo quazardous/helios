@@ -14,16 +14,22 @@
 //!   pairs;
 //! - [`layout`]: a chart placed in an image by its four corner patches,
 //!   each patch's centre and sampling quadrilateral, and the pixels inside
-//!   it, with their plain mean and variance.
+//!   it;
+//! - [`sampler`]: each patch's robust statistics (trimmed means) and its
+//!   checks (clipping, darkness, uniformity), and the chart-wide checks on
+//!   the neutral patches, with their thresholds.
 //!
-//! The sampler's checks (trimmed means, clipping, uniformity) and the
-//! solver come in later slices.
+//! The solver comes in a later slice.
 
 pub mod chart;
 pub mod homography;
 pub mod lab;
 pub mod layout;
+pub mod sampler;
 
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
-pub use layout::{ImageView, Layout, PatchStats, Point};
+pub use layout::{ImageView, Layout, Point};
+pub use sampler::{
+    ChartCheck, ClipSource, PatchCheck, PatchStats, THRESHOLDS, Thresholds, Warning, check_chart,
+};

@@ -497,6 +497,18 @@ usable. Slices 1 to 5 need no GUI.
    uniformity flags, the chart-wide checks, on synthetic chart images
    (a clipped patch, a gradient patch, a misplaced corner). Thresholds
    set here.
+   **Built** (2026-11-12): `sampler` (5 % trimmed means with the count
+   kept; the clipped fraction of each area read on `rawprepare`'s output
+   at `highlights`' level, `clip × 0.987`, or 0.995 for a picture, the
+   patch excluded above 1 %; too dark under 1 % of the white patch's
+   luminance or 0.2 % of the white level; not uniform above a 5 %
+   variation or halves 3 % apart; the neutrals' order, their
+   chromaticities' spread (0.02) and cast (0.03)). The thresholds live in
+   `sampler::THRESHOLDS`, each documented with the synthetic chart that
+   sets it; the tests draw a clean chart (noise, hot pixels) that passes
+   everything, then a clipped, a dark and a gradient patch, a misplaced
+   corner, swapped and flipped corners and a colour cast, each caught
+   where expected and nowhere else.
 3. **Solver:** stage 1, the constraint, stage 2, orientation. Tests 1 to
    6, the report structure.
 4. **`calibrate.chart` dry run:** the measurement graph (raw front

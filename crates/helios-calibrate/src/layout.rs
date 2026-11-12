@@ -9,6 +9,7 @@
 
 use crate::chart::Chart;
 use crate::homography::Homography;
+use crate::sampler::{PatchStats, THRESHOLDS, patch_stats};
 
 /// A point in the image, in pixels.
 pub type Point = [f64; 2];
@@ -29,20 +30,10 @@ pub struct ImageView<'a> {
 }
 
 impl ImageView<'_> {
-    fn pixel(&self, x: usize, y: usize) -> &[f32] {
+    pub(crate) fn pixel(&self, x: usize, y: usize) -> &[f32] {
         let at = (y * self.width + x) * self.channels;
         &self.data[at..at + self.channels]
     }
-}
-
-/// A patch's pixels summed up: per channel, the plain mean and the
-/// population variance. The sampler's robust statistics and its checks
-/// (trimmed mean, clipping, uniformity) build on these in a later slice.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PatchStats {
-    pub count: usize,
-    pub mean: Vec<f64>,
-    pub variance: Vec<f64>,
 }
 
 /// A chart placed in an image by its four corner patches.
@@ -141,38 +132,11 @@ impl Layout {
         out
     }
 
-    /// Patch `k`'s mean and variance per channel in `image`; `None` when
-    /// no pixel of the image falls in its sampling area.
+    /// Patch `k`'s robust statistics in `image` (trimmed at
+    /// [`THRESHOLDS`]' rate); `None` when no pixel of the image falls in
+    /// its sampling area.
     pub fn measure(&self, image: &ImageView<'_>, k: usize) -> Option<PatchStats> {
-        let pixels = self.pixels(k, image.width, image.height);
-        if pixels.is_empty() {
-            return None;
-        }
-        let n = pixels.len() as f64;
-        let mut mean = vec![0.0; image.channels];
-        for &(x, y) in &pixels {
-            for (m, &v) in mean.iter_mut().zip(image.pixel(x, y)) {
-                *m += f64::from(v);
-            }
-        }
-        for m in &mut mean {
-            *m /= n;
-        }
-        // Two passes: the variance of nearly uniform patches stays exact.
-        let mut variance = vec![0.0; image.channels];
-        for &(x, y) in &pixels {
-            for ((s, &v), m) in variance.iter_mut().zip(image.pixel(x, y)).zip(&mean) {
-                *s += (f64::from(v) - m).powi(2);
-            }
-        }
-        for s in &mut variance {
-            *s /= n;
-        }
-        Some(PatchStats {
-            count: pixels.len(),
-            mean,
-            variance,
-        })
+        patch_stats(self, image, k, THRESHOLDS.trim)
     }
 }
 
@@ -271,7 +235,7 @@ mod tests {
                 // The image holds f32: the mean equals the value to f32's
                 // precision, and the patch is uniform.
                 assert!((stats.mean[c] - v).abs() < 1e-6, "{} {c}", patch.name);
-                assert!(stats.variance[c] < 1e-12, "{} {c}", patch.name);
+                assert!(stats.sigma[c] < 1e-6, "{} {c}", patch.name);
             }
         }
     }
@@ -299,7 +263,7 @@ mod tests {
             };
             let worst = |s: &PatchStats| {
                 (0..3)
-                    .map(|c| s.variance[c].sqrt() / s.mean[c].abs().max(1e-6))
+                    .map(|c| s.sigma[c] / s.mean[c].abs().max(1e-6))
                     .fold(0.0, f64::max)
             };
             assert!(worst(&good) < 1e-6);

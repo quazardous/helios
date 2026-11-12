@@ -1,6 +1,6 @@
 [package]
 name = "helios-calibrate"
-description = "Camera colour calibration from a chart: the charts' reference values and geometry, the patches' sampling areas"
+description = "Camera colour calibration from a chart: the charts' reference values and geometry, the patches' sampling areas and their checks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
