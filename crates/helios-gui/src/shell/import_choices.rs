@@ -232,7 +232,7 @@ impl Shell {
     /// The presets are kept beside it, in `import-presets.json`.
     pub fn remember_import_choices_in(&mut self, file: PathBuf) {
         let read = |f: &Path| std::fs::read_to_string(f).ok();
-        let w = &mut self.focus.import_window;
+        let mut w = self.import.get_mut();
         w.choices = read(&file)
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
@@ -246,63 +246,81 @@ impl Shell {
 
     /// The import presets' names, in order.
     pub fn import_presets(&self) -> Vec<String> {
-        self.focus.import_window.presets.keys().cloned().collect()
+        self.import.get().presets.keys().cloned().collect()
     }
 
     /// Sets the Choices column to a preset's (`None`: Default): copy or
     /// add for folders included, a card still copied unless switched.
     pub fn apply_import_preset(&mut self, name: Option<&str>) {
-        let w = &mut self.focus.import_window;
-        let choices = match name {
-            Some(name) => match w.presets.get(name) {
-                Some(c) => c.clone(),
-                None => return,
-            },
-            None => Choices::default(),
-        };
-        w.choices = choices;
-        w.copy = None;
-        w.custom = false;
+        self.import.get_mut().apply_preset(name);
     }
 
     /// Saves the choices as the preset `name`, replacing one of that name.
     /// The copy or add shown is kept for folders when no card is ticked.
     pub fn save_import_preset(&mut self, name: &str) {
-        let w = &mut self.focus.import_window;
-        let mut choices = w.choices.clone();
-        if !w.ticked.iter().any(|p| w.is_card(p)) {
-            choices.copy_folders = w.copies();
-        }
-        w.choices.copy_folders = choices.copy_folders;
-        w.presets.insert(name.to_string(), choices);
-        w.save_presets();
+        self.import.get_mut().save_preset(name);
     }
 
     /// Deletes the preset `name`; the choices stay as they are.
     pub fn delete_import_preset(&mut self, name: &str) {
-        if self.focus.import_window.presets.remove(name).is_some() {
-            self.focus.import_window.save_presets();
-        }
+        self.import.get_mut().delete_preset(name);
     }
 
     /// The import window's choices.
     pub fn import_choices(&self) -> Choices {
-        self.focus.import_window.choices.clone()
+        self.import.get().choices.clone()
     }
 
     /// Sets the import window's choices.
     pub fn set_import_choices(&mut self, choices: Choices) {
-        self.focus.import_window.choices = choices;
+        self.import.get_mut().choices = choices;
     }
 
     /// Whether the import window copies the photos.
     pub fn import_copies(&self) -> bool {
-        self.focus.import_window.copies()
+        self.import.get().copies()
+    }
+}
+
+impl ImportWindow {
+    /// Sets the choices to a preset's (`None`: Default).
+    pub(super) fn apply_preset(&mut self, name: Option<&str>) {
+        let choices = match name {
+            Some(name) => match self.presets.get(name) {
+                Some(c) => c.clone(),
+                None => return,
+            },
+            None => Choices::default(),
+        };
+        self.choices = choices;
+        self.copy = None;
+        self.custom = false;
     }
 
-    pub(super) fn choice_words(&self, sample: Option<&Sample>) -> ChoiceWords {
-        let t = |m: Message| self.text(m);
-        let w = &self.focus.import_window;
+    /// Saves the choices as the preset `name`.
+    pub(super) fn save_preset(&mut self, name: &str) {
+        let mut choices = self.choices.clone();
+        if !self.ticked.iter().any(|p| self.is_card(p)) {
+            choices.copy_folders = self.copies();
+        }
+        self.choices.copy_folders = choices.copy_folders;
+        self.presets.insert(name.to_string(), choices);
+        self.save_presets();
+    }
+
+    /// Deletes the preset `name`.
+    pub(super) fn delete_preset(&mut self, name: &str) {
+        if self.presets.remove(name).is_some() {
+            self.save_presets();
+        }
+    }
+
+    pub(super) fn choice_words(
+        &self,
+        t: &dyn Fn(Message) -> String,
+        sample: Option<&Sample>,
+    ) -> ChoiceWords {
+        let w = self;
         let (folder_example, name_example, bad_name) = match sample {
             Some(s) => {
                 let (folder, name) = examples(&w.choices, s);

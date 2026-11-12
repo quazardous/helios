@@ -306,9 +306,6 @@ pub fn wgpu_setup(gpu: &helios_gpu::Gpu) -> eframe::egui_wgpu::WgpuSetup {
     })
 }
 
-/// The import window's egui id source (`egui::Id::unique` of it).
-pub(crate) const IMPORT_WINDOW: &str = "helios.import.window";
-
 /// Names a widget's rectangle for this frame, so it can be pictured by
 /// that name (`gui.snapshot {target: name}`). The rectangle is in the
 /// points of the window it is drawn in, which is kept with it.
@@ -504,18 +501,21 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// The desktop shell: the process's [`Core`](core::Core), what every
-/// window shares, and the [`Focus`](focus::Focus) of its one window.
+/// window shares, the [`Focus`](focus::Focus) of its main window and the
+/// import focus.
 ///
 /// The split follows Helios's windows (docs/design/windows.md): one OS
-/// window per focus, all of them in one process around one core. The
-/// process has one focus today, the main window (the root viewport, which
-/// is always the first focus); a second window is a second `Focus` on the
-/// same core.
+/// window per focus, all of them in one process around one core. The main
+/// window (the root viewport) is always the first focus; the import focus
+/// opens in an OS window of its own (`import_window`), through egui-pop's
+/// application windows.
 pub struct Shell {
     /// What every window of the process shares.
     core: core::Core,
     /// What belongs to the main window.
     focus: focus::Focus,
+    /// The import focus, in an OS window of its own.
+    import: import_window::ImportFocus,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
 }
@@ -621,6 +621,9 @@ impl Shell {
         let mut builder = App::builder()
             .name("Helios")
             .host(host)
+            // The import focus opens an OS window of its own: on Wayland,
+            // a present mode that never stalls every window behind one.
+            .multi_window(true)
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
             .plugins(DefaultPlugins)
@@ -867,6 +870,7 @@ impl Shell {
         let mut shell = Shell {
             core,
             focus,
+            import: import_window::ImportFocus::new(),
             notes: Vec::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {

@@ -35,15 +35,35 @@
 //! The recent folders, the favourites and the last source are kept in a
 //! small JSON file when the desktop gives one
 //! ([`Shell::remember_import_sources_in`]).
+//!
+//! **The import focus** (docs/design/windows.md, slice 4): the window is
+//! an OS window of its own, through egui-pop's application windows
+//! (`AppHandle::open_window`, an egui deferred viewport: it repaints on
+//! its own, and the main window sleeps while a card is read). Its state
+//! ([`ImportWindow`]) is shared, behind an `Rc`, by the shell and the
+//! window's content: the content draws it in the window's own pass, reads
+//! the sources, ticks, chooses folders and presets there; what needs the
+//! shell (Import, Forget, Storage…, sources dropped) waits in
+//! `ImportWindow::events` for the main window's next pass. The window has
+//! its own status bar ("Reading <path>" while the sources are read), and
+//! egui-pop gives it its own toasts, dialogs and palette. It shares the
+//! process's core: the thumbnails come from the library's one cache, so
+//! no photo is read twice. Closing the window closes the import focus;
+//! the main window stays. Where the backend has no windows of its own
+//! (kittest, the web), egui embeds it in the main window.
 
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Context as Egui;
+use egui::ViewportId;
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::api::toasts::{TOASTS, Toast};
+use egui_pop::api::windows::{WindowId, WindowSpec, WindowUi};
 use egui_pop::core::overlay::DialogLayout;
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
@@ -77,19 +97,72 @@ struct Memory {
     last: Option<PathBuf>,
 }
 
-/// The window's state, kept by the shell.
 /// The command that forgets a folder in the image map (registered by
 /// the desktop over its vault).
 pub const FORGET_FOLDER: &str = "library.forgetFolder";
 /// The command that forgets a volume in the image map.
 pub const FORGET_VOLUME: &str = "library.forgetVolume";
 
+/// The import focus's OS window: its id, under which egui-pop keeps its
+/// size (`appWindow == 'import'` in `when` clauses, `window: "import"` for
+/// agents).
+pub const WINDOW: &str = "import";
+
+/// The shell's translator, given to the window's content.
+pub(super) type Texts = Arc<dyn Fn(Message) -> String + Send + Sync>;
+
+/// The import focus: the second focus of the process, of kind intake, in
+/// an OS window of its own. Its state is shared with the window's content.
+pub(super) struct ImportFocus {
+    pub(super) state: Rc<RefCell<ImportWindow>>,
+}
+
+impl ImportFocus {
+    pub(super) fn new() -> Self {
+        Self {
+            state: Rc::default(),
+        }
+    }
+
+    pub(super) fn get(&self) -> Ref<'_, ImportWindow> {
+        self.state.borrow()
+    }
+
+    pub(super) fn get_mut(&self) -> RefMut<'_, ImportWindow> {
+        self.state.borrow_mut()
+    }
+}
+
+/// What the window's words need of the shell's core, given at each of
+/// the main window's passes while it is open.
+#[derive(Clone, Default)]
+struct ShellWords {
+    /// The strategy line: what backups the photos will get, and whether
+    /// none is set up.
+    backup: (String, bool),
+    /// Why nothing can be imported: no library open.
+    no_library: Option<String>,
+}
+
+/// The import window's state: shared by the shell and the window's
+/// content (see the module's docs).
 #[derive(Default)]
 pub(crate) struct ImportWindow {
     open: bool,
+    /// The OS window opened for it, not seen closed since.
+    shown: Option<WindowId>,
+    /// The shell's translator and what the words need of it.
+    texts: Option<Texts>,
+    shell_words: ShellWords,
+    /// What the window asked of the shell, taken at the main window's
+    /// next pass.
+    events: Vec<Event>,
     watch: Option<Watch>,
-    /// The context the cards' thread asks a frame of.
+    /// The context the cards' and the scans' threads ask a frame of.
     ctx: Arc<Mutex<Option<Egui>>>,
+    /// The viewport the window is drawn in (the main one while embedded):
+    /// the one a scan's progress repaints.
+    drawn_in: Arc<Mutex<Option<ViewportId>>>,
     cards: Vec<Card>,
     memory: Memory,
     file: Option<PathBuf>,
@@ -206,18 +279,13 @@ impl ImportWindow {
             if self.scans.iter().any(|(p, _, _)| p == path) {
                 continue;
             }
-            let ctx = self.ctx.clone();
             let seen_by = if self.dropped.contains(path) {
                 "drop"
             } else {
                 "import"
             };
             let map = self.map.clone().map(|m| (m, seen_by));
-            let wake = move || {
-                if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                    ctx.request_repaint();
-                }
-            };
+            let wake = self.waker();
             // A folder no volume holds now: as the image map recorded it.
             let scan = match &self.recorded {
                 Some(recorded) if !path.exists() => {
@@ -290,6 +358,18 @@ impl ImportWindow {
                     }
                     Scanned::Done => *done = true,
                 }
+            }
+        }
+    }
+
+    /// Asks a frame of the window from another thread: of its own OS
+    /// window, or of the main one while embedded or not drawn yet.
+    fn waker(&self) -> impl Fn() + Send + Sync + 'static {
+        let (ctx, drawn_in) = (self.ctx.clone(), self.drawn_in.clone());
+        move || {
+            if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+                let at = *drawn_in.lock().unwrap_or_else(PoisonError::into_inner);
+                ctx.request_repaint_of(at.unwrap_or(ViewportId::ROOT));
             }
         }
     }
@@ -411,11 +491,11 @@ enum Event {
     Dropped(Vec<PathBuf>),
 }
 
-/// The Contents column's words.
+/// The Contents column's and the status bar's words.
 struct GridWords {
     counts: String,
-    /// "Reading <path>": the words before and after the path, and the
-    /// path, while a source is read.
+    /// "Reading <path>", the status bar's: the words before and after the
+    /// path, and the path, while a source is read.
     reading: Option<(String, String, String)>,
     empty: String,
     new_only: String,
@@ -482,10 +562,15 @@ impl Shell {
     /// and its toasts (the desktop gives `helios_storage::system()`; tests a list
     /// of their own).
     pub fn watch_cards(&mut self, volumes: Arc<dyn Volumes>) {
-        let ctx = self.focus.import_window.ctx.clone();
-        self.focus.import_window.watch = Some(Watch::start(volumes, move || {
+        let mut w = self.import.get_mut();
+        let (ctx, drawn_in) = (w.ctx.clone(), w.drawn_in.clone());
+        w.watch = Some(Watch::start(volumes, move || {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                ctx.request_repaint();
+                // The main window's toasts, and the import window's list.
+                ctx.request_repaint_of(ViewportId::ROOT);
+                if let Some(at) = *drawn_in.lock().unwrap_or_else(PoisonError::into_inner) {
+                    ctx.request_repaint_of(at);
+                }
             }
         }));
     }
@@ -494,75 +579,77 @@ impl Shell {
     /// once [`Shell::watch_cards`] watches them: the background volume
     /// scan's cue.
     pub fn on_volumes_changed(&self, f: impl Fn() + Send + 'static) {
-        if let Some(watch) = &self.focus.import_window.watch {
+        if let Some(watch) = &self.import.get().watch {
             watch.on_volumes(f);
         }
     }
 
     /// Whether the volumes are watched ([`Shell::watch_cards`]).
     pub(super) fn watching_volumes(&self) -> bool {
-        self.focus.import_window.watch.is_some()
+        self.import.get().watch.is_some()
     }
 
     /// Keeps the import window's recent folders, favourites and last
     /// source in `file` (JSON), read now.
     pub fn remember_import_sources_in(&mut self, file: PathBuf) {
-        self.focus.import_window.memory = std::fs::read_to_string(&file)
+        let mut w = self.import.get_mut();
+        w.memory = std::fs::read_to_string(&file)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        self.focus.import_window.file = Some(file);
+        w.file = Some(file);
     }
 
     /// Whether the import window is open.
     pub fn import_window_open(&self) -> bool {
-        self.focus.import_window.open
+        self.import.get().open
     }
 
     /// The import window's cards, as last polled.
     pub fn import_cards(&self) -> Vec<Card> {
-        self.focus.import_window.cards.clone()
+        self.import.get().cards.clone()
     }
 
     /// What the vault holds (size, partial hash), for the import window's
     /// "in your Library" prefilter; called once per source read, off the
     /// interface thread.
     pub fn set_import_known(&mut self, known: Known) {
-        self.focus.import_window.known = Some(known);
+        self.import.get_mut().known = Some(known);
     }
 
     /// The image map's recorder for what the import window's sources
     /// list (`docs/design/image-map.md`, section 4); called once per
     /// source read, off the interface thread.
     pub fn set_import_map(&mut self, map: MapRecorder) {
-        self.focus.import_window.map = Some(map);
+        self.import.get_mut().map = Some(map);
     }
 
     /// The image map's record of what Helios saw on every volume: the
     /// import window lists an offline folder's photos from it.
     pub fn set_import_recorded(&mut self, recorded: Recorded) {
-        self.focus.import_window.recorded = Some(recorded);
+        self.import.get_mut().recorded = Some(recorded);
     }
 
     /// The library's thumbnail cache: the import window shows the photos
     /// it has thumbnails of (an offline volume's) from it.
     pub fn set_import_thumbnail_cache(&mut self, cache: Arc<helios_thumbs::ThumbCache>) {
-        self.focus.import_window.thumb_cache = Some(cache);
-        self.focus.import_window.thumbs = None;
-        self.focus.import_window.browser = None;
+        let mut w = self.import.get_mut();
+        w.thumb_cache = Some(cache);
+        w.thumbs = None;
+        w.browser = None;
     }
 
     /// The import window's file browser, once drawn: its mode, entries,
     /// selection and focus.
-    pub fn import_browser(&self) -> Option<&FileBrowser> {
-        self.focus.import_window.browser.as_ref()
+    pub fn import_browser(&self) -> Option<Ref<'_, FileBrowser>> {
+        Ref::filter_map(self.import.get(), |w| w.browser.as_ref()).ok()
     }
 
     /// Whether the import window's thumbnail of the photo at `path` (a
     /// pair's raw) is made.
     pub fn import_thumbnail_ready(&self, path: &Path) -> bool {
-        self.focus
-            .import_window
+        self.import
+            .get()
             .thumbs
             .as_ref()
             .is_some_and(|t| t.ready(path))
@@ -571,8 +658,8 @@ impl Shell {
     /// What the import window's scans' glances did so far: files read,
     /// answered from the glance cache, and the most read at once.
     pub fn import_glances(&self) -> crate::import_scan::Glances {
-        self.focus
-            .import_window
+        self.import
+            .get()
             .scans
             .iter()
             .map(|(_, scan, _)| scan.glances())
@@ -582,8 +669,8 @@ impl Shell {
     /// The photos the import window's browser last asked thumbnails of as
     /// visible.
     pub fn import_thumbnails_on_screen(&self) -> Vec<PathBuf> {
-        self.focus
-            .import_window
+        self.import
+            .get()
             .thumbs
             .as_ref()
             .map(|t| t.on_screen())
@@ -591,34 +678,34 @@ impl Shell {
     }
 
     /// The import window's file browser, to drive it.
-    pub fn import_browser_mut(&mut self) -> Option<&mut FileBrowser> {
-        self.focus.import_window.browser.as_mut()
+    pub fn import_browser_mut(&mut self) -> Option<RefMut<'_, FileBrowser>> {
+        RefMut::filter_map(self.import.get_mut(), |w| w.browser.as_mut()).ok()
     }
 
     /// The image map's job: the import window, the Library grid and
     /// Compare tell it the files in view.
     pub fn set_map_feed(&mut self, feed: helios_library::map_job::Feed) {
         self.focus.library.borrow_mut().set_map_feed(feed.clone());
-        self.focus.import_window.map_feed = Some(feed);
+        self.import.get_mut().map_feed = Some(feed);
     }
 
     /// The import window's counts: photos shown, new, their size, and the
     /// ones an Import takes.
     pub fn import_counts(&self) -> Counts {
-        self.focus.import_window.contents.counts()
+        self.import.get().contents.counts()
     }
 
     /// Whether every source ticked in the import window is read through.
     pub fn import_read(&self) -> bool {
-        let w = &self.focus.import_window;
+        let w = self.import.get();
         w.scans.len() == w.ticked.len() && w.scans.iter().all(|(_, _, done)| *done)
     }
 
     /// The import window's cells: name, day, probably in the Library, a
     /// RAW+JPEG pair, ticked.
     pub fn import_cells(&self) -> Vec<(String, Option<chrono::NaiveDate>, bool, bool, bool)> {
-        self.focus
-            .import_window
+        self.import
+            .get()
             .contents
             .cells
             .iter()
@@ -628,17 +715,28 @@ impl Shell {
 
     /// The sources ticked in the import window.
     pub fn import_ticked(&self) -> Vec<PathBuf> {
-        self.focus.import_window.ticked.clone()
+        self.import.get().ticked.clone()
+    }
+
+    /// The viewport the import window was last drawn in: its own OS
+    /// window's, or the main window's while egui embeds it.
+    pub fn import_window_viewport(&self) -> Option<ViewportId> {
+        let w = self.import.get();
+        *w.drawn_in.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// `library.importWindow`: opens the import window, on `source` when
     /// given, or on the files and folders of `paths` (a folder a source,
     /// a file its folder with only the files given ticked; `copy` sets
     /// copy or add), else on the first card, else on the last source used.
+    /// Open already, its window comes to the front.
     pub(super) fn open_import_window(&mut self, args: &Value) {
         // The strategy line reads the strategy and its disks as they are.
         self.refresh_volumes();
-        let w = &mut self.focus.import_window;
+        let mut w = self.import.get_mut();
+        if let Some(id) = &w.shown {
+            self.core.app.handle().raise_window(id);
+        }
         w.follow_cards();
         w.clear_contents();
         w.open = true;
@@ -688,7 +786,8 @@ impl Shell {
             w.ticked.push(PathBuf::from(source));
             w.touched = true;
         } else if let Some(card) = w.cards.first() {
-            w.ticked.push(card.root.clone());
+            let root = card.root.clone();
+            w.ticked.push(root);
         } else if let Some(last) = w.memory.last.clone().filter(|p| p.exists()) {
             w.ticked.push(last);
         }
@@ -708,37 +807,92 @@ impl Shell {
         }
     }
 
-    /// Each frame: the cards polled, a toast for each card inserted while
-    /// the window is closed, and the window when open.
+    /// Each frame of the main window: the cards polled, a toast for each
+    /// card inserted while the window is closed, what the window asked of
+    /// the shell, and its OS window opened or closed as the import focus
+    /// is.
     pub(super) fn import_window_frame(&mut self, ctx: &Egui) {
         {
-            let mut held = self
-                .focus
-                .import_window
-                .ctx
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+            let w = self.import.get();
+            let mut held = w.ctx.lock().unwrap_or_else(PoisonError::into_inner);
             if held.is_none() {
                 *held = Some(ctx.clone());
             }
         }
-        self.focus.import_window.follow_cards();
-        let inserted = self
-            .focus
-            .import_window
-            .watch
-            .as_ref()
-            .map(Watch::take_inserted)
-            .unwrap_or_default();
-        if !self.focus.import_window.open {
+        let (open, inserted) = {
+            let mut w = self.import.get_mut();
+            w.follow_cards();
+            let inserted = w
+                .watch
+                .as_ref()
+                .map(Watch::take_inserted)
+                .unwrap_or_default();
+            (w.open, inserted)
+        };
+        if !open {
             for card in inserted {
                 self.card_toast(&card);
             }
         }
         self.receive_chosen_folder();
-        if self.focus.import_window.open {
-            self.focus.import_window.follow_scans();
-            self.import_window_ui(ctx);
+        if open {
+            // What the window's words need of the shell.
+            let words = ShellWords {
+                backup: self.import_backup_line(),
+                no_library: self.core.no_library.clone().map(|m| self.text(m)),
+            };
+            let texts: Texts = Arc::new(self.texts());
+            let mut w = self.import.get_mut();
+            w.texts = Some(texts);
+            w.shell_words = words;
+        }
+        let events = std::mem::take(&mut self.import.get_mut().events);
+        for event in events {
+            self.import_event(event);
+        }
+        self.follow_import_focus(ctx);
+    }
+
+    /// The import focus's OS window, opened while the focus is open and
+    /// closed with it; closed by itself (its close button, `window.close`),
+    /// the focus closes, and the main window stays.
+    fn follow_import_focus(&mut self, ctx: &Egui) {
+        let app = self.core.app.handle().clone();
+        let id = WindowId::new(WINDOW);
+        let there = app.window_viewport(&id).is_some();
+        let mut w = self.import.get_mut();
+        match (w.open, there) {
+            (true, false) if w.shown.is_some() => {
+                w.open = false;
+                w.shown = None;
+                w.clear_contents();
+            }
+            (true, false) => {
+                let title = w
+                    .texts
+                    .as_ref()
+                    .map_or_else(|| "Import photos".to_owned(), |t| t(window_title()));
+                let spec = WindowSpec::new(WINDOW, title)
+                    .size(default_size(ctx.content_rect().size()))
+                    .min_size(MIN_SIZE);
+                w.shown = Some(id.clone());
+                drop(w);
+                let state = self.import.state.clone();
+                app.open_window(spec, move |ui, window| {
+                    // Never drawn while the shell holds it (it does not, between
+                    // its own passes).
+                    if let Ok(mut w) = state.try_borrow_mut() {
+                        w.window_pass(ui, window);
+                    }
+                });
+            }
+            (false, true) => {
+                w.shown = None;
+                drop(w);
+                app.close_window(&id);
+            }
+            (false, false) => w.shown = None,
+            (true, true) => {}
         }
     }
 
@@ -761,48 +915,127 @@ impl Shell {
 
     /// The folder the chooser gave: a recent source, ticked.
     fn receive_chosen_folder(&mut self) {
-        if let Some(result) = self
-            .focus
-            .import_window
-            .choosing_into
-            .as_ref()
-            .and_then(Pending::take)
-        {
-            self.focus.import_window.choosing_into = None;
-            if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
-                && let Some(p) = paths.into_iter().next()
-            {
-                self.focus.import_window.choices.into = Some(p);
+        self.import.get_mut().receive_chosen_folder();
+    }
+
+    /// What the window asked of the shell.
+    fn import_event(&mut self, event: Event) {
+        match event {
+            Event::Forget(path) => {
+                let args = serde_json::json!({ "path": path.display().to_string() });
+                if let Err(e) = self.run(FORGET_FOLDER, args, Origin::User) {
+                    self.warn(format!("forget: {e}"));
+                }
             }
-        }
-        let Some(result) = self
-            .focus
-            .import_window
-            .choosing
-            .as_ref()
-            .and_then(Pending::take)
-        else {
-            return;
-        };
-        self.focus.import_window.choosing = None;
-        if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result) {
-            let w = &mut self.focus.import_window;
-            for p in paths {
-                w.memory.recent.retain(|r| r != &p);
-                w.memory.recent.insert(0, p.clone());
-                w.memory.recent.truncate(8);
-                w.tick(&p, true);
-                w.touched = true;
+            Event::Import => self.import_ticked_sources(),
+            Event::Dropped(paths) => self.open_import_window(&json!({ "paths": paths })),
+            Event::Storage => {
+                if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
+                    self.warn(format!("storage: {e}"));
+                }
             }
-            w.save();
+            // Handled in the window's own pass.
+            Event::Cancel
+            | Event::Choose
+            | Event::ChooseInto
+            | Event::Favourite(..)
+            | Event::Preset(_)
+            | Event::SavePreset(_)
+            | Event::DeletePreset(_) => {}
         }
     }
 
-    fn import_words(&self, sample: Option<&import_choices::Sample>) -> Words {
-        let t = |m: Message| self.text(m);
-        let backup = self.import_backup_line();
-        Words {
-            title: t(Message::new("gui-import-window-title", "Import photos")),
+    /// Imports the photos ticked of each source ticked, as
+    /// `library.importFiles` does with their `paths` and the choices
+    /// (copied or added where they are, filed, named, duplicates,
+    /// darktable edits), kept as the last used; the window closes at
+    /// once. Without a library open, nothing is imported: a toast says
+    /// why and the window stays.
+    fn import_ticked_sources(&mut self) {
+        // No library to import into: said, the window left open.
+        if let Err(e) = self.can_import() {
+            self.warn(e);
+            return;
+        }
+        let (choices, copy, ticked) = {
+            let mut w = self.import.get_mut();
+            let copy = w.copies();
+            let any_card = w.ticked.iter().any(|p| w.is_card(p));
+            if !any_card {
+                w.choices.copy_folders = copy;
+            }
+            w.save_choices();
+            (w.choices.clone(), copy, std::mem::take(&mut w.ticked))
+        };
+        for path in &ticked {
+            let (files, card) = {
+                let mut w = self.import.get_mut();
+                (w.contents.selected_files(path), w.is_card(path))
+            };
+            if files.is_empty() {
+                continue;
+            }
+            let args = choices.args(&files, copy);
+            if let Err(e) = self.import_files(&args, &Origin::User) {
+                self.warn(e);
+            }
+            let mut w = self.import.get_mut();
+            if !card {
+                w.memory.recent.retain(|r| r != path);
+                w.memory.recent.insert(0, path.clone());
+                w.memory.recent.truncate(8);
+            }
+            w.memory.last = Some(path.clone());
+        }
+        let mut w = self.import.get_mut();
+        w.save();
+        w.open = false;
+        w.clear_contents();
+    }
+}
+
+/// The window's title.
+fn window_title() -> Message {
+    Message::new("gui-import-window-title", "Import photos")
+}
+
+impl ImportWindow {
+    /// The folder the chooser gave: a recent source, ticked; or where
+    /// copies go.
+    fn receive_chosen_folder(&mut self) {
+        if let Some(result) = self.choosing_into.as_ref().and_then(Pending::take) {
+            self.choosing_into = None;
+            if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
+                && let Some(p) = paths.into_iter().next()
+            {
+                self.choices.into = Some(p);
+            }
+        }
+        let Some(result) = self.choosing.as_ref().and_then(Pending::take) else {
+            return;
+        };
+        self.choosing = None;
+        if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result) {
+            for p in paths {
+                self.memory.recent.retain(|r| r != &p);
+                self.memory.recent.insert(0, p.clone());
+                self.memory.recent.truncate(8);
+                self.tick(&p, true);
+                self.touched = true;
+            }
+            self.save();
+        }
+    }
+
+    /// The window's words, in the shell's language; none before the shell
+    /// gave its translator.
+    fn words(&self, ctx: &Egui, sample: Option<&import_choices::Sample>) -> Option<Words> {
+        let texts = self.texts.clone()?;
+        let t = |m: Message| texts(m);
+        let (backup, no_backup) = self.shell_words.backup.clone();
+        let counts = self.contents.counts();
+        Some(Words {
+            title: t(window_title()),
             sources: t(Message::new("gui-import-window-sources", "Sources")),
             cards: t(Message::new("gui-import-window-cards", "Cards and cameras")),
             no_cards: t(Message::new(
@@ -830,21 +1063,21 @@ impl Shell {
                 "Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it",
             )),
             contents: t(Message::new("gui-import-window-contents", "Contents")),
-            grid: self.grid_words(),
-            choices: self.choice_words(sample),
+            grid: self.grid_words(ctx, &t),
+            choices: self.choice_words(&t, sample),
             cancel: t(Message::new("gui-import-window-cancel", "Cancel")),
             import_count: t(
                 Message::new("gui-import-window-import", "Import { $count }")
-                    .with("count", self.focus.import_window.contents.counts().selected),
+                    .with("count", counts.selected),
             ),
-            totals: {
-                let counts = self.focus.import_window.contents.counts();
-                t(
-                    Message::new("gui-import-window-totals", "{ $photos } photos, { $size }")
-                        .with("photos", counts.selected)
-                        .with("size", self.import_size_text(counts.selected_bytes)),
-                )
-            },
+            totals: t(
+                Message::new("gui-import-window-totals", "{ $photos } photos, { $size }")
+                    .with("photos", counts.selected)
+                    .with(
+                        "size",
+                        crate::library::size_text(ctx, counts.selected_bytes),
+                    ),
+            ),
             preset: t(Message::new("gui-import-window-preset", "Preset")),
             default_preset: t(Message::new("gui-import-window-preset-default", "Default")),
             last_used: t(Message::new(
@@ -869,31 +1102,16 @@ impl Shell {
                 "gui-import-window-none-ticked",
                 "Tick the photos to import",
             )),
-            no_library: self.core.no_library.clone().map(t),
-            backup: backup.0,
-            no_backup: backup.1,
+            no_library: self.shell_words.no_library.clone(),
+            backup,
+            no_backup,
             storage: t(Message::new("gui-import-backup-storage", "Storage…")),
-        }
+        })
     }
 
-    /// A size, as the Library says it.
-    fn import_size_text(&self, bytes: u64) -> String {
-        self.focus
-            .import_window
-            .ctx
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map_or_else(
-                || helios_storage::capacity_text(bytes),
-                |ctx| crate::library::size_text(ctx, bytes),
-            )
-    }
-
-    fn grid_words(&self) -> GridWords {
-        let t = |m: Message| self.text(m);
-        let counts = self.focus.import_window.contents.counts();
-        let size = self.import_size_text(counts.bytes);
+    fn grid_words(&self, ctx: &Egui, t: &dyn Fn(Message) -> String) -> GridWords {
+        let counts = self.contents.counts();
+        let size = crate::library::size_text(ctx, counts.bytes);
         GridWords {
             counts: t(Message::new(
                 "gui-import-window-counts",
@@ -902,7 +1120,7 @@ impl Shell {
             .with("photos", counts.photos)
             .with("new", counts.new)
             .with("size", size)),
-            reading: self.focus.import_window.reading().map(|path| {
+            reading: self.reading().map(|path| {
                 // Translated around a mark, so the path alone is shortened
                 // to the line's width.
                 const MARK: &str = "\u{E000}";
@@ -939,131 +1157,32 @@ impl Shell {
         }
     }
 
-    fn import_window_ui(&mut self, ctx: &Egui) {
-        let sample = self.focus.import_window.sample();
-        let words = self.import_words(sample.as_ref());
-        let mut open = true;
-        let mut event = None;
-        let app = self.core.app.handle().clone();
-        let w = &mut self.focus.import_window;
-        let main = ctx.content_rect().size();
-        let max = main - egui::vec2(32.0, 32.0);
-        egui::Window::new(&words.title)
-            .id(egui::Id::unique(crate::shell::IMPORT_WINDOW))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(default_size(main))
-            .min_size(MIN_SIZE.min(max))
-            .max_size(max)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
-            .show(ctx, |outer| {
-                // The window has the size the person gives it, never its
-                // content's: an `egui::Window` grows to what its content
-                // took the frame before, so a content a point too wide
-                // grew it frame after frame. The content lays out in the
-                // room it is given, apart, and the window holds that room.
-                let room = outer.available_rect_before_wrap();
-                outer.advance_cursor_after_rect(room);
-                let mut ui = outer.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt("helios.import.room")
-                        .max_rect(room)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                ui.set_clip_rect(room.intersect(ui.clip_rect()));
-                let ui = &mut ui;
-                let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
-                layout.body(ui, |ui, height| {
-                    // Sources and Choices keep their widths (a quarter of
-                    // the room at most); Contents takes the rest, each
-                    // column in its own rect, a line between them.
-                    let gap = ui.spacing().item_spacing.x;
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), height),
-                        egui::Sense::hover(),
-                    );
-                    let [left, middle, right] = columns(rect, gap);
-                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-                    for x in [left.max.x + gap, right.min.x - gap] {
-                        ui.painter().vline(x, rect.y_range(), stroke);
-                    }
-                    let column =
-                        |ui: &mut egui::Ui,
-                         rect: egui::Rect,
-                         add: &mut dyn FnMut(&mut egui::Ui)| {
-                            ui.scope_builder(
-                                egui::UiBuilder::new()
-                                    .max_rect(rect)
-                                    .layout(egui::Layout::top_down(egui::Align::Min)),
-                                |ui| {
-                                    ui.set_clip_rect(rect.intersect(ui.clip_rect()));
-                                    add(ui);
-                                },
-                            );
-                        };
-                    column(ui, left, &mut |ui| sources_ui(ui, w, &words, &mut event));
-                    column(ui, middle, &mut |ui| {
-                        ui.heading(&words.contents);
-                        let reading = w.scans.iter().any(|(_, _, done)| !done);
-                        if let Some(paths) = contents_ui(ui, w, &words.grid, reading, &app) {
-                            event = Some(Event::Dropped(paths));
-                        }
-                    });
-                    column(ui, right, &mut |ui| {
-                        if let Some(Asked::Into) = import_choices::choices_ui(ui, w, &words.choices)
-                        {
-                            event = Some(Event::ChooseInto);
-                        }
-                        ui.separator();
-                        if backup_line_ui(ui, &words) {
-                            event = Some(Event::Storage);
-                        }
-                    });
-                });
-                layout.footer(ui, |ui| {
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        if let Some(e) = presets_ui(ui, w, &words) {
-                            event = Some(e);
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let count = w.contents.counts().selected;
-                            let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
-                            let why = if let Some(e) = &words.no_library {
-                                e
-                            } else if w.ticked.is_empty() {
-                                &words.nothing
-                            } else if let Some(e) = bad_name {
-                                e
-                            } else {
-                                &words.none_ticked
-                            };
-                            let import = ui
-                                .add_enabled(
-                                    count > 0 && bad_name.is_none() && words.no_library.is_none(),
-                                    egui::Button::new(&words.import_count),
-                                )
-                                .on_disabled_hover_text(why);
-                            if import.clicked() {
-                                event = Some(Event::Import);
-                            }
-                            if ui.button(&words.cancel).clicked() {
-                                event = Some(Event::Cancel);
-                            }
-                            if let Some(e) = &words.no_library {
-                                ui.colored_label(ui.visuals().warn_fg_color, e);
-                            } else if count > 0 {
-                                ui.label(&words.totals);
-                            }
-                        });
-                    });
-                });
-            });
-        if !open {
-            event = Some(Event::Cancel);
+    /// The window's own pass (its content, given to egui-pop's
+    /// `open_window`): the cards and the scans followed, the window drawn
+    /// with its status bar, and what its controls asked done, here or by
+    /// the shell at the main window's next pass.
+    fn window_pass(&mut self, ui: &mut egui::Ui, window: &mut WindowUi<'_>) {
+        let ctx = ui.ctx().clone();
+        *self.drawn_in.lock().unwrap_or_else(PoisonError::into_inner) = Some(ctx.viewport_id());
+        if !self.open {
+            window.close();
+            return;
         }
+        self.follow_cards();
+        self.follow_scans();
+        let sample = self.sample();
+        let Some(words) = self.words(&ctx, sample.as_ref()) else {
+            return;
+        };
+        window.set_title(words.title.clone());
+        let app = window.app().clone();
+        let mut event = if window.embedded() {
+            self.window_ui(ui, &words, &app)
+        } else {
+            egui::CentralPanel::default()
+                .show(ui, |ui| self.window_ui(ui, &words, &app))
+                .inner
+        };
         // Dropped anywhere else on the window: its sources too.
         if event.is_none() {
             let dropped: Vec<PathBuf> = ctx.input(|i| {
@@ -1078,101 +1197,195 @@ impl Shell {
                 event = Some(Event::Dropped(dropped));
             }
         }
+        // Its close button closes the import focus.
+        if window.close_requested() {
+            event = Some(Event::Cancel);
+        }
         match event {
             None => {}
             Some(Event::Cancel) => {
-                self.focus.import_window.open = false;
-                self.focus.import_window.clear_contents();
+                self.open = false;
+                self.clear_contents();
+                window.close();
+                ctx.request_repaint_of(ViewportId::ROOT);
             }
             Some(Event::Choose) => {
-                if let Some(f) = self.core.app.handle().service(&FILES) {
+                if let Some(f) = app.service(&FILES) {
                     let request = FileRequest::folder(&words.choose).purpose("helios.import");
-                    self.focus.import_window.choosing =
-                        Some(f.choose(self.core.app.handle(), request));
+                    self.choosing = Some(f.choose(&app, request));
                 }
             }
             Some(Event::ChooseInto) => {
-                if let Some(f) = self.core.app.handle().service(&FILES) {
+                if let Some(f) = app.service(&FILES) {
                     let request =
                         FileRequest::folder(&words.choices.change).purpose("helios.import.into");
-                    self.focus.import_window.choosing_into =
-                        Some(f.choose(self.core.app.handle(), request));
+                    self.choosing_into = Some(f.choose(&app, request));
                 }
             }
             Some(Event::Favourite(path, on)) => {
-                let w = &mut self.focus.import_window;
-                w.memory.favourites.retain(|p| p != &path);
+                self.memory.favourites.retain(|p| p != &path);
                 if on {
-                    w.memory.favourites.push(path);
+                    self.memory.favourites.push(path);
                 }
-                w.save();
+                self.save();
             }
-            Some(Event::Forget(path)) => {
-                let args = serde_json::json!({ "path": path.display().to_string() });
-                if let Err(e) = self.run(FORGET_FOLDER, args, Origin::User) {
-                    self.warn(format!("forget: {e}"));
-                }
+            Some(Event::Preset(name)) => self.apply_preset(name.as_deref()),
+            Some(Event::SavePreset(name)) => self.save_preset(&name),
+            Some(Event::DeletePreset(name)) => self.delete_preset(&name),
+            // The shell's, at the main window's next pass.
+            Some(e @ (Event::Import | Event::Forget(_) | Event::Storage | Event::Dropped(_))) => {
+                self.events.push(e);
+                ctx.request_repaint_of(ViewportId::ROOT);
             }
-            Some(Event::Import) => self.import_ticked_sources(),
-            Some(Event::Dropped(paths)) => self.open_import_window(&json!({ "paths": paths })),
-            Some(Event::Storage) => {
-                if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
-                    self.warn(format!("storage: {e}"));
-                }
-            }
-            Some(Event::Preset(name)) => self.apply_import_preset(name.as_deref()),
-            Some(Event::SavePreset(name)) => self.save_import_preset(&name),
-            Some(Event::DeletePreset(name)) => self.delete_import_preset(&name),
         }
+        // The chooser's answer comes in this window too.
+        self.receive_chosen_folder();
     }
 
-    /// Imports the photos ticked of each source ticked, as
-    /// `library.importFiles` does with their `paths` and the choices
-    /// (copied or added where they are, filed, named, duplicates,
-    /// darktable edits), kept as the last used; the window closes at
-    /// once. Without a library open, nothing is imported: a toast says
-    /// why and the window stays.
-    fn import_ticked_sources(&mut self) {
-        // No library to import into: said, the window left open.
-        if let Err(e) = self.can_import() {
-            self.warn(e);
-            return;
-        }
-        let copy = self.focus.import_window.copies();
-        let any_card = self
-            .focus
-            .import_window
-            .ticked
-            .iter()
-            .any(|p| self.focus.import_window.is_card(p));
-        if !any_card {
-            self.focus.import_window.choices.copy_folders = copy;
-        }
-        self.focus.import_window.save_choices();
-        let choices = self.focus.import_window.choices.clone();
-        let ticked = std::mem::take(&mut self.focus.import_window.ticked);
-        for path in &ticked {
-            let files = self.focus.import_window.contents.selected_files(path);
-            if files.is_empty() {
-                continue;
+    /// The window's body: its status bar at the bottom, the three columns
+    /// and the footer above.
+    fn window_ui(
+        &mut self,
+        outer: &mut egui::Ui,
+        words: &Words,
+        app: &egui_pop::api::app::AppHandle,
+    ) -> Option<Event> {
+        let mut event = None;
+        // The window has the size the person gives it, never its
+        // content's: an `egui::Window` (the window embedded) grows to what
+        // its content took the frame before, so a content a point too wide
+        // grew it frame after frame. The content lays out in the room it
+        // is given, apart, and the window holds that room.
+        let room = outer.available_rect_before_wrap();
+        outer.advance_cursor_after_rect(room);
+        let mut ui = outer.new_child(
+            egui::UiBuilder::new()
+                .id_salt("helios.import.room")
+                .max_rect(room)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        ui.set_clip_rect(room.intersect(ui.clip_rect()));
+        let ui = &mut ui;
+        let reading = self.scans.iter().any(|(_, _, done)| !done);
+        status_bar_ui(ui, &words.grid, reading);
+        let w = self;
+        let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
+        layout.body(ui, |ui, height| {
+            // Sources and Choices keep their widths (a quarter of
+            // the room at most); Contents takes the rest, each
+            // column in its own rect, a line between them.
+            let gap = ui.spacing().item_spacing.x;
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), height),
+                egui::Sense::hover(),
+            );
+            let [left, middle, right] = columns(rect, gap);
+            let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+            for x in [left.max.x + gap, right.min.x - gap] {
+                ui.painter().vline(x, rect.y_range(), stroke);
             }
-            let card = self.focus.import_window.is_card(path);
-            let args = choices.args(&files, copy);
-            if let Err(e) = self.import_files(&args, &Origin::User) {
-                self.warn(e);
-            }
-            let w = &mut self.focus.import_window;
-            if !card {
-                w.memory.recent.retain(|r| r != path);
-                w.memory.recent.insert(0, path.clone());
-                w.memory.recent.truncate(8);
-            }
-            w.memory.last = Some(path.clone());
-        }
-        self.focus.import_window.save();
-        self.focus.import_window.open = false;
-        self.focus.import_window.clear_contents();
+            let column =
+                |ui: &mut egui::Ui, rect: egui::Rect, add: &mut dyn FnMut(&mut egui::Ui)| {
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                        |ui| {
+                            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                            add(ui);
+                        },
+                    );
+                };
+            column(ui, left, &mut |ui| sources_ui(ui, w, words, &mut event));
+            column(ui, middle, &mut |ui| {
+                ui.heading(&words.contents);
+                if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
+                    event = Some(Event::Dropped(paths));
+                }
+            });
+            column(ui, right, &mut |ui| {
+                if let Some(Asked::Into) = import_choices::choices_ui(ui, w, &words.choices) {
+                    event = Some(Event::ChooseInto);
+                }
+                ui.separator();
+                if backup_line_ui(ui, words) {
+                    event = Some(Event::Storage);
+                }
+            });
+        });
+        layout.footer(ui, |ui| {
+            ui.separator();
+            ui.horizontal(|ui| {
+                if let Some(e) = presets_ui(ui, w, words) {
+                    event = Some(e);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let count = w.contents.counts().selected;
+                    let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
+                    let why = if let Some(e) = &words.no_library {
+                        e
+                    } else if w.ticked.is_empty() {
+                        &words.nothing
+                    } else if let Some(e) = bad_name {
+                        e
+                    } else {
+                        &words.none_ticked
+                    };
+                    let import = ui
+                        .add_enabled(
+                            count > 0 && bad_name.is_none() && words.no_library.is_none(),
+                            egui::Button::new(&words.import_count),
+                        )
+                        .on_disabled_hover_text(why);
+                    if import.clicked() {
+                        event = Some(Event::Import);
+                    }
+                    if ui.button(&words.cancel).clicked() {
+                        event = Some(Event::Cancel);
+                    }
+                    if let Some(e) = &words.no_library {
+                        ui.colored_label(ui.visuals().warn_fg_color, e);
+                    } else if count > 0 {
+                        ui.label(&words.totals);
+                    }
+                });
+            });
+        });
+        event
     }
+}
+
+/// The window's status bar: "Reading <path>" while the sources are read,
+/// the path shortened in its middle to the bar's width.
+fn status_bar_ui(ui: &mut egui::Ui, words: &GridWords, reading: bool) {
+    egui::Panel::bottom("helios.import.status")
+        .resizable(false)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // The bar keeps its height, reading or not.
+                ui.set_min_height(ui.spacing().interact_size.y);
+                let Some((before, after, path)) = words.reading.as_ref().filter(|_| reading) else {
+                    return;
+                };
+                ui.spinner();
+                let width = ui.available_width();
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let color = ui.visuals().weak_text_color();
+                let fits = |p: &str| {
+                    let text = format!("{before}{p}{after}");
+                    ui.painter()
+                        .layout_no_wrap(text, font.clone(), color)
+                        .size()
+                        .x
+                        <= width
+                };
+                let path = shorten_middle(path, fits);
+                ui.add(
+                    egui::Label::new(egui::RichText::new(format!("{before}{path}{after}")).weak())
+                        .truncate(),
+                );
+            });
+        });
 }
 
 /// The Sources column: cards first, then recent folders, favourites and
@@ -1405,29 +1618,8 @@ fn contents_ui(
     app: &egui_pop::api::app::AppHandle,
 ) -> Option<Vec<PathBuf>> {
     let c = &mut w.contents;
-    ui.horizontal(|ui| {
-        ui.label(&words.counts);
-        if reading && let Some((before, after, path)) = &words.reading {
-            ui.spinner();
-            // The path shortened in its middle to the line's width.
-            let width = ui.available_width();
-            let font = egui::TextStyle::Body.resolve(ui.style());
-            let color = ui.visuals().weak_text_color();
-            let fits = |p: &str| {
-                let text = format!("{before}{p}{after}");
-                ui.painter()
-                    .layout_no_wrap(text, font.clone(), color)
-                    .size()
-                    .x
-                    <= width
-            };
-            let path = shorten_middle(path, fits);
-            ui.add(
-                egui::Label::new(egui::RichText::new(format!("{before}{path}{after}")).weak())
-                    .truncate(),
-            );
-        }
-    });
+    // What is read now is said in the window's status bar.
+    ui.label(&words.counts);
     ui.horizontal_wrapped(|ui| {
         ui.checkbox(&mut c.new_only, &words.new_only);
         let mut types = c.types;

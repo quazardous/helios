@@ -1223,6 +1223,8 @@ fn the_import_contents_are_a_file_browser_that_lists_selects_and_imports() {
             "agenda"
         ]
     );
+    // The browser is the import window's, shared with its window: let go.
+    drop(browser);
     // A click selects that photo alone: one to import.
     h.get_by_label("IMG_0001.JPG").click();
     h.run_steps(3);
@@ -1631,8 +1633,10 @@ fn a_disk_cached_thumbnail_paints_with_its_cell() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The import window's status bar names what is read while its sources
+/// are read.
 #[test]
-fn the_reading_line_names_what_is_read_above_the_cells() {
+fn the_status_bar_names_what_is_read() {
     let dir = temp("reading");
     let folder = dir.join("Shoot");
     photos(&folder, 48, 1600, 1200);
@@ -1658,12 +1662,181 @@ fn the_reading_line_names_what_is_read_above_the_cells() {
             named.push(label);
         }
     }
-    assert!(!named.is_empty(), "no reading line while reading");
+    assert!(!named.is_empty(), "no status bar line while reading");
     for label in &named {
         assert!(
             label.starts_with("Reading ") && (label.contains("Shoot") || label.contains(".JPG")),
-            "the reading line does not name what it reads: {label:?}"
+            "the status bar does not name what it reads: {label:?}"
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The text a pass painted, each run of text apart.
+fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for s in shapes {
+        walk(&s.shape, &mut out);
+    }
+    out
+}
+
+/// The application windows the main window's last pass declared, egui's
+/// deferred viewports, as eframe would open them.
+fn declared(h: &Harness<'static, Shell>) -> Vec<egui::ViewportId> {
+    h.output()
+        .viewport_output
+        .iter()
+        .filter(|(v, o)| **v != egui::ViewportId::ROOT && o.viewport_ui_cb.is_some())
+        .map(|(v, _)| *v)
+        .collect()
+}
+
+/// A deferred window's own pass, as eframe runs it apart from the main
+/// window's (`close`: its close button pressed): the text it painted.
+fn window_pass(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    close: bool,
+) -> Vec<String> {
+    use egui::{Pos2, RawInput, Rect, ViewportEvent, ViewportId, ViewportInfo};
+    let cb = h.output().viewport_output[&window]
+        .viewport_ui_cb
+        .clone()
+        .expect("the window is declared by the main window's last pass");
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+    let mut info = ViewportInfo {
+        inner_rect: Some(rect),
+        focused: Some(true),
+        ..Default::default()
+    };
+    if close {
+        info.events.push(ViewportEvent::Close);
+    }
+    let mut input = RawInput {
+        viewport_id: window,
+        screen_rect: Some(rect),
+        time: Some(h.ctx.input(|i| i.time) + 1.0 / 60.0),
+        focused: true,
+        ..Default::default()
+    };
+    input.viewports.insert(window, info);
+    input
+        .viewports
+        .insert(ViewportId::ROOT, ViewportInfo::default());
+    let mut out = h.ctx.run_ui(input, |ui| cb(ui));
+    // No painter for it: its textures are uploaded nowhere (as egui-pop's
+    // `MultiWindow` does).
+    out.textures_delta.clear();
+    painted_text(&out.shapes)
+}
+
+/// The import focus in an OS window of its own (docs/design/windows.md,
+/// slice 4), with real viewports as on the desktop: File > Import… opens
+/// it as an application window (egui's deferred viewport, drawn in its
+/// own pass), not inside the main window; its status bar says what is
+/// read; agents name it (`window: "import"`); its close button closes the
+/// import focus and the main window stays.
+#[test]
+fn import_opens_in_its_own_window_reads_in_its_status_bar_and_closes_alone() {
+    let dir = temp("own-window");
+    let folder = dir.join("Shoot");
+    photos(&folder, 48, 1600, 1200);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.run();
+    assert!(declared(&h).is_empty(), "no window but the main one");
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "source": folder.display().to_string() }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run_steps(3);
+    assert!(h.state().import_window_open());
+    // Its own window, declared by the main window's pass.
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the import window's own: {windows:?}");
+    let window = windows[0];
+    let app = h.state().app().handle().clone();
+    let listed: Vec<_> = app
+        .windows()
+        .into_iter()
+        .map(|w| (w.id.to_string(), w.title))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("main".to_owned(), app.windows()[0].title.clone()),
+            ("import".to_owned(), "Import photos".to_owned())
+        ]
+    );
+    assert_eq!(
+        app.window_at(window).map(|w| w.to_string()).as_deref(),
+        Some("import")
+    );
+    // Nothing of it inside the main window.
+    assert!(headless::window_rect(&h, "Import photos").is_none());
+    assert!(h.query_by_label("Choose a folder…").is_none());
+    // Agents name it: a snapshot of its window, refused once it is gone.
+    assert!(app.debug_snapshot_in(Some("import")).is_ok());
+    // Its pass draws it; its status bar names what is read, while read.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut reading = Vec::new();
+    let mut drawn = Vec::new();
+    while !h.state().import_read() {
+        assert!(Instant::now() < deadline, "the sources not read in 20 s");
+        drawn = window_pass(&mut h, window, false);
+        reading.extend(drawn.iter().filter(|t| t.starts_with("Reading ")).cloned());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        h.state().import_window_viewport(),
+        Some(window),
+        "drawn in its own window"
+    );
+    assert!(drawn.iter().any(|t| t == "Choose a folder…"), "{drawn:?}");
+    assert!(!reading.is_empty(), "no status bar line while reading");
+    for line in &reading {
+        assert!(
+            line.contains("Shoot") || line.contains(".JPG"),
+            "the status bar does not name what it reads: {line:?}"
+        );
+    }
+    // Read through: the status bar says nothing more.
+    let drawn = window_pass(&mut h, window, false);
+    assert!(
+        !drawn.iter().any(|t| t.starts_with("Reading ")),
+        "{drawn:?}"
+    );
+    // Its close button: the import focus closes, the main window stays.
+    window_pass(&mut h, window, true);
+    h.run_steps(3);
+    assert!(!h.state().import_window_open());
+    assert!(declared(&h).is_empty(), "its window is gone");
+    let listed: Vec<_> = app
+        .windows()
+        .into_iter()
+        .map(|w| w.id.to_string())
+        .collect();
+    assert_eq!(listed, ["main"]);
+    assert!(app.debug_snapshot_in(Some("import")).is_err());
+    // The main window drawn as before: the Library panel's and the
+    // Filmstrip's "Import photos…".
+    assert_eq!(h.query_all_by_label("Import photos…").count(), 2);
+    // File > Import… opens it again, in a window of its own.
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    assert_eq!(declared(&h), [window]);
     let _ = std::fs::remove_dir_all(&dir);
 }
