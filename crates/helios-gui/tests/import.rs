@@ -2379,3 +2379,101 @@ fn a_window_closing_while_another_remains_leaves_the_vault_open() {
     drop(again);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An export is the node's job, not its window's: started from the main
+/// window, it goes on once that window closed (the import window moving
+/// into its place) and the window's handle on the exporter is gone; it
+/// finishes, its file written, its batch done in the jobs centre the
+/// remaining window shows.
+#[test]
+fn an_export_keeps_running_when_its_window_closes() {
+    use egui_pop::api::jobs::JOBS;
+    use egui_pop::model::jobs::JobState;
+    use helios_gui::export::Exporter;
+    use helios_gui::node::LocalNode;
+    use helios_vault_sqlite::SqliteStore;
+
+    let (mut h, _window, dir) = import_in_its_own_window("node-export");
+    let bus = Arc::new(helios_core::Bus::new());
+    let node = LocalNode::open(
+        SqliteStore::open(&dir.join("vault.db")).unwrap(),
+        bus.clone(),
+        Duration::from_hours(1),
+    );
+    let link = node.link();
+    let client = node.connect();
+    h.state_mut().attach_node(link.clone());
+    let persist = helios_gui::persist::Persist::on(node.vault().clone(), bus);
+    persist
+        .vault()
+        .import_file(&dir.join("Shoot").join("IMG_0000.JPG"), 1)
+        .unwrap();
+    persist.fill_library(h.state_mut()).unwrap();
+    h.run();
+    // The window's handle; the node holds the exporter too. Held until
+    // the window closed.
+    let exporter = Exporter::with_engine(
+        node.vault().clone(),
+        h.state().jobs(),
+        h.state().export_sink(),
+        || {},
+        1,
+        h.state().viewport().engine().clone(),
+    )
+    .adopted_by(&link);
+    exporter.pause();
+    let out = dir.join("out");
+    h.state_mut()
+        .run(
+            "library.export",
+            json!({ "scope": "shown", "format": "png", "folder": out }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let bundle = h
+        .state()
+        .workspace_bundle()
+        .unwrap_or_else(helios_template::workspace::blank);
+    let asks = h.state_mut().take_exports();
+    assert_eq!(asks.len(), 1, "one export asked");
+    let batch = exporter.run(&bundle, &asks[0]).unwrap();
+    assert_eq!(
+        link.running_jobs(),
+        std::slice::from_ref(&batch),
+        "the node's job"
+    );
+
+    // Its window closes; the window's handle goes with it.
+    assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Moved);
+    h.run_steps(2);
+    exporter.resume();
+    drop(exporter);
+
+    let deadline = Instant::now() + Duration::from_mins(1);
+    while !link.running_jobs().is_empty() {
+        assert!(Instant::now() < deadline, "the export did not end in 60 s");
+        h.run();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.run_steps(3);
+    let written: Vec<_> = std::fs::read_dir(&out)
+        .expect("the export's folder")
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(written, ["IMG_0000.png"], "the file exported");
+    let app = h.state().app().handle().clone();
+    let centre = app.service(&JOBS).expect("the jobs plugin");
+    assert_eq!(centre.job(&batch).expect("listed").state, JobState::Done);
+
+    assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
+    drop(persist);
+    drop(h);
+    drop(client);
+    assert!(
+        link.wait_stopped(Duration::from_secs(10)),
+        "the node stopped"
+    );
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}

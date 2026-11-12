@@ -11,6 +11,14 @@
 //! last client is gone: a last flush, then the vault is shut down (marked
 //! closed cleanly, later writes refused).
 //!
+//! The node runs the work that outlives a window ([`NodeJobs`], adopted
+//! with [`Link::adopt`]): the exports today. A window starts such work and
+//! watches it through the jobs API (the Queue panel, the jobs centre);
+//! closing it leaves the work running. The node's stop waits for that
+//! work, or cancels it first when the quit was confirmed as cancelling
+//! the running jobs ([`Link::quit_cancelling_jobs`]), before its last
+//! flush.
+//!
 //! A remote node's life is its own: its clients quitting does not stop
 //! it. Only the embedded node follows the desktop's quit.
 
@@ -24,13 +32,35 @@ use helios_vault::{Store, Vault};
 /// How often the node flushes the vault, whatever the windows do.
 pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
 
+/// Work the node runs for its clients, which outlives their windows
+/// (exports; backups and health checks can follow): what a quit asks
+/// about, and what the node's stop cancels or waits for.
+pub trait NodeJobs: Send + Sync {
+    /// The jobs running that a quit would cancel, by id.
+    fn running(&self) -> Vec<String>;
+    /// Cancels every job running.
+    fn cancel_all(&self);
+    /// Waits until every job ended, at most `deadline`; whether they did.
+    fn wait(&self, deadline: Duration) -> bool;
+}
+
+/// What the node's stop does with its running jobs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AtQuit {
+    /// Waits for them to end.
+    Wait,
+    /// Cancels them (the quit was confirmed as cancelling them).
+    Cancel,
+}
+
 /// Where the node's life stands, shared with its clients' links.
 #[derive(Debug, Default)]
 struct State {
     /// Clients connected (the desktop's GUI is one).
     clients: usize,
-    /// Quit was asked: the node stops once no client is left.
-    quit: bool,
+    /// Quit was asked: the node stops once no client is left, doing
+    /// this with its running jobs.
+    quit: Option<AtQuit>,
     /// Stop now, clients or not (the host ending the process).
     force: bool,
     /// The vault is shut down.
@@ -41,14 +71,24 @@ struct State {
 
 impl State {
     fn stopping(&self) -> bool {
-        self.force || (self.quit && self.clients == 0)
+        self.force || (self.quit.is_some() && self.clients == 0)
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Life {
     state: Mutex<State>,
     changed: Condvar,
+    /// The work the node runs for its clients.
+    jobs: Mutex<Vec<Arc<dyn NodeJobs>>>,
+}
+
+impl std::fmt::Debug for Life {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Life")
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Life {
@@ -62,6 +102,34 @@ impl Life {
     fn read<T>(&self, f: impl FnOnce(&State) -> T) -> T {
         f(&self.state.lock().unwrap_or_else(PoisonError::into_inner))
     }
+
+    fn jobs(&self) -> Vec<Arc<dyn NodeJobs>> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Before the last flush: the jobs cancelled when the quit said so,
+    /// waited for otherwise. Cancelled jobs are not waited for: they write
+    /// nothing to the vault, and their renders under way end on their own.
+    fn settle_jobs(&self) {
+        let jobs = self.jobs();
+        if self.read(|s| s.quit == Some(AtQuit::Cancel)) {
+            for j in &jobs {
+                j.cancel_all();
+            }
+            return;
+        }
+        for j in &jobs {
+            if !j.running().is_empty() {
+                crate::quit::mark("the node waits for its running jobs");
+            }
+            while !j.wait(Duration::from_mins(1)) {
+                log::info!(target: "helios::node", "still waiting for running jobs");
+            }
+        }
+    }
 }
 
 /// A client's way to the node's life, without its vault's type: what the
@@ -72,12 +140,34 @@ pub struct Link(Arc<Life>);
 impl Link {
     /// Asks the node to quit: it stops once its last client is gone.
     pub fn quit(&self) {
-        self.0.update(|s| s.quit = true);
+        self.0
+            .update(|s| s.quit = Some(s.quit.unwrap_or(AtQuit::Wait)));
+    }
+
+    /// Asks the node to quit, cancelling its running jobs (the quit
+    /// question was answered): it stops once its last client is gone.
+    pub fn quit_cancelling_jobs(&self) {
+        self.0.update(|s| s.quit = Some(AtQuit::Cancel));
+    }
+
+    /// The node runs `jobs` from now on: they outlive the window that
+    /// started them, and the node's stop settles them.
+    pub fn adopt(&self, jobs: Arc<dyn NodeJobs>) {
+        self.0
+            .jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(jobs);
+    }
+
+    /// The node's jobs running, by id: what a quit would cancel.
+    pub fn running_jobs(&self) -> Vec<String> {
+        self.0.jobs().iter().flat_map(|j| j.running()).collect()
     }
 
     /// Whether the node was asked to quit.
     pub fn quitting(&self) -> bool {
-        self.0.read(|s| s.quit)
+        self.0.read(|s| s.quit.is_some())
     }
 
     /// Whether the node stopped (its vault shut down).
@@ -206,8 +296,10 @@ fn run<S: Store>(vault: &Vault<S>, life: &Life, every: Duration) {
     close(vault, life);
 }
 
-/// The vault shut down (flushed, marked clean, closed to writes).
+/// The node's jobs settled, then the vault shut down (flushed, marked
+/// clean, closed to writes).
 fn close<S: Store>(vault: &Vault<S>, life: &Life) {
+    life.settle_jobs();
     let done = vault.shut_down();
     if let Err(e) = &done {
         log::warn!(target: "helios::node", "cannot close the vault cleanly: {e}");

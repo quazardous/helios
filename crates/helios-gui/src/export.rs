@@ -19,6 +19,12 @@
 //!
 //! What the batch says (failures, its end) goes back to the shell
 //! ([`crate::Shell::export_sink`]), which logs it and toasts the end.
+//!
+//! The exports are the local node's jobs ([`crate::node::NodeJobs`]): the
+//! host hands the exporter to the node ([`crate::node::Link::adopt`]), and
+//! a window only starts exports and watches them in the Queue panel.
+//! Closing that window leaves them running; the node's stop waits for
+//! them, or cancels them when the quit was confirmed as cancelling jobs.
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -76,7 +82,7 @@ pub struct Exporter<S: Store> {
     jobs: Jobs,
     lines: Sender<Line>,
     wake: Arc<dyn Fn() + Send + Sync>,
-    /// The batches run, by job id, cancelled when the window closes.
+    /// The batches run, by job id: what a quit cancels.
     batches: std::sync::Mutex<Vec<String>>,
 }
 
@@ -132,6 +138,18 @@ impl<S: Store + Send + 'static> Exporter<S> {
             wake: Arc::new(wake),
             batches: std::sync::Mutex::default(),
         }
+    }
+
+    /// Hands the exporter to the node: its exports become the node's jobs,
+    /// running on when the window that started them closes. The window
+    /// keeps the handle returned, to start exports.
+    pub fn adopted_by(self, node: &crate::node::Link) -> Arc<Self>
+    where
+        Self: Send + Sync,
+    {
+        let exporter = Arc::new(self);
+        node.adopt(exporter.clone());
+        exporter
     }
 
     /// The engine it renders with.
@@ -207,16 +225,37 @@ impl<S: Store + Send + 'static> Exporter<S> {
     }
 }
 
-impl<S: Store> Drop for Exporter<S> {
-    /// The window closes: the batches still running are cancelled (their
-    /// exports queued never run, those rendering write nothing), and the
-    /// scheduler, which waits for the renders under way, goes on a thread
-    /// of its own so the quit does not wait for them.
-    fn drop(&mut self) {
+impl<S: Store + Send + 'static> crate::node::NodeJobs for Exporter<S>
+where
+    Self: Send + Sync,
+{
+    fn running(&self) -> Vec<String> {
+        let running = self.jobs.cancellable();
+        let mut batches = self.batches.lock().expect("batches lock");
+        batches.retain(|id| running.contains(id));
+        batches.clone()
+    }
+
+    /// The batches still running cancelled: their exports queued never
+    /// run, those rendering write nothing.
+    fn cancel_all(&self) {
         for id in self.batches.lock().expect("batches lock").drain(..) {
             // A batch that ended refuses: nothing to do.
             let _ = self.jobs.cancel(&id);
         }
+    }
+
+    fn wait(&self, deadline: std::time::Duration) -> bool {
+        Exporter::wait(self, deadline)
+    }
+}
+
+impl<S: Store> Drop for Exporter<S> {
+    /// The last holder lets go (the node, as it stops): the scheduler,
+    /// which waits for the renders under way (a cancelled batch's), goes
+    /// on a thread of its own so the quit does not wait for them. Nothing
+    /// is cancelled here: that is the node's quit's decision.
+    fn drop(&mut self) {
         if let Some(scheduler) = self.scheduler.take() {
             let _ = std::thread::Builder::new()
                 .name("helios-export-stop".into())

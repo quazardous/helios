@@ -19,7 +19,9 @@
 //! Quitting is asked of the local node ([`crate::node`], attached with
 //! [`Shell::attach_node`]): the node owns the vault, and closes it once
 //! asked to quit and its last client (the GUI) is gone. No window saves
-//! or closes the vault.
+//! or closes the vault. The node also runs the work that outlives a
+//! window (the exports): the question before quitting counts its jobs,
+//! and a confirmed quit asks the node to cancel them.
 
 use egui::{Context, ViewportCommand, ViewportId};
 use egui_pop::api::windows::WindowId;
@@ -48,15 +50,28 @@ pub(super) struct Lifetime {
     asked_at: Option<u64>,
     /// The local node, asked to quit when Helios quits.
     node: Option<crate::node::Link>,
+    /// The quit cancels the running jobs (asked, or nothing to ask).
+    cancel_jobs: bool,
 }
 
 impl Lifetime {
-    /// Helios quits: the node is asked to quit too.
-    fn quitting(&mut self) {
+    /// Helios quits: the node is asked to quit too, cancelling its jobs
+    /// when `cancel_jobs` (the question answered), waiting for them if
+    /// not.
+    fn quitting(&mut self, cancel_jobs: bool) {
         self.quitting = true;
+        self.cancel_jobs |= cancel_jobs;
         if let Some(node) = &self.node {
-            node.quit();
+            tell(node, self.cancel_jobs);
         }
+    }
+}
+
+fn tell(node: &crate::node::Link, cancel_jobs: bool) {
+    if cancel_jobs {
+        node.quit_cancelling_jobs();
+    } else {
+        node.quit();
     }
 }
 
@@ -76,14 +91,14 @@ impl Shell {
     /// Attaches the local node: Helios quitting asks it to quit.
     pub fn attach_node(&mut self, node: crate::node::Link) {
         if self.lifetime.quitting {
-            node.quit();
+            tell(&node, self.lifetime.cancel_jobs);
         }
         self.lifetime.node = Some(node);
     }
 
     /// The system ends the session: Helios quits at once, asking nothing.
     pub fn session_ending(&mut self) {
-        self.lifetime.quitting();
+        self.lifetime.quitting(true);
     }
 
     /// Quits Helios, from any window: asks first when jobs are running.
@@ -101,9 +116,9 @@ impl Shell {
         }
     }
 
-    /// Quits, whatever runs.
+    /// Quits, whatever runs: the running jobs cancelled.
     pub(super) fn quit_confirmed(&mut self, ctx: &Context) {
-        self.lifetime.quitting();
+        self.lifetime.quitting(true);
         close_main_window(ctx);
     }
 
@@ -134,7 +149,7 @@ impl Shell {
         // The last window: closing it quits, as Quit does.
         let running = self.running_jobs();
         if running == 0 || self.core.assume_yes {
-            self.lifetime.quitting();
+            self.lifetime.quitting(true);
             return Closing::Quit;
         }
         ctx.send_viewport_cmd(ViewportCommand::CancelClose);
@@ -161,9 +176,16 @@ impl Shell {
         }
     }
 
-    /// The jobs a quit would cancel: those running in this process.
+    /// The jobs a quit would cancel: the node's (the exports, which
+    /// outlive their window) and the others running in this process.
     fn running_jobs(&self) -> usize {
-        self.core.jobs.cancellable().len()
+        let mut running = self.core.jobs.cancellable();
+        if let Some(node) = &self.lifetime.node {
+            running.extend(node.running_jobs());
+        }
+        running.sort_unstable();
+        running.dedup();
+        running.len()
     }
 
     /// The one question before quitting: what it would cancel.
