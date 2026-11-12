@@ -2281,6 +2281,9 @@ dependencies = [
 [[package]]
 name = "helios-calibrate"
 version = "0.79.0"
+dependencies = [
+ "helios-photo",
+]
 
 [[package]]
 name = "helios-colour"

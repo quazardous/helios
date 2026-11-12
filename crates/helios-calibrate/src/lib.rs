@@ -17,19 +17,26 @@
 //!   it;
 //! - [`sampler`]: each patch's robust statistics (trimmed means) and its
 //!   checks (clipping, darkness, uniformity), and the chart-wide checks on
-//!   the neutral patches, with their thresholds.
+//!   the neutral patches, with their thresholds;
+//! - [`solver`]: the 3×3 matrix keeping the neutral axis, solved by
+//!   weighted least squares, the chart's orientation, and the report.
 //!
-//! The solver comes in a later slice.
+//! The Delta E 2000 refinement comes in a later slice.
 
 pub mod chart;
 pub mod homography;
 pub mod lab;
 pub mod layout;
 pub mod sampler;
+pub mod solver;
 
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
 pub use layout::{ImageView, Layout, Point};
 pub use sampler::{
     ChartCheck, ClipSource, PatchCheck, PatchStats, THRESHOLDS, Thresholds, Warning, check_chart,
+};
+pub use solver::{
+    Measurement, Orientation, Oriented, PatchResult, Problem, Solution, SolveError, Stage, Summary,
+    quality, solve, solve_oriented,
 };
