@@ -22,17 +22,25 @@
 //!   published (see [`Inspector::stream`]).
 //!
 //! Responses: `{"ok": true, ...}` or `{"ok": false, "error": "...", ...}`.
+//!
+//! The same requests are served as JSON-RPC 2.0 ([`rpc`]): the method is
+//! the `cmd`, the params its other fields; `node.hello`, `commands.list`,
+//! `events.subscribe` (notifications on the same connection, with other
+//! calls) and `events.unsubscribe` are added, and `$/cancel` stops a
+//! `wait_event` or `wait_idle` still waiting. See `docs/protocol.md`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
 pub mod jobs;
+pub mod rpc;
 pub mod transport;
 
 use serde::de::DeserializeOwned;
@@ -40,7 +48,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub use transport::{
     Address, Bound, Client, Closer, Connection, Listen, new_token, request_at, request_within,
-    serve_at, serve_connections_at, write_token,
+    serve_at, serve_connections_at, serve_rpc_at, write_token,
 };
 
 /// A request, as sent on the wire.
@@ -87,7 +95,44 @@ pub struct Inspector {
     /// Names this process among others served at the same address: a
     /// node restarted has another, and its sequence numbers start over.
     instance: String,
+    /// The JSON-RPC subscriptions streaming, each with its stop flag.
+    subscriptions: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
+
+/// How often a wait looks whether it was cancelled.
+const CANCEL_POLL: Duration = Duration::from_millis(50);
+
+/// A subscription opened: the bus listened to before the journal was
+/// read, so an event published in between is seen once.
+struct Opened {
+    rx: Receiver<Envelope>,
+    journal: Vec<Envelope>,
+    since: u64,
+    last_seq: u64,
+    gap: bool,
+}
+
+/// What a stream sends: an event, or a heartbeat with the last sequence.
+enum Beat<'a> {
+    Event(&'a Envelope),
+    Heartbeat(u64),
+}
+
+/// The inspect endpoint's methods, as `commands.list` lists them there.
+const METHODS: &[(&str, &str)] = &[
+    ("node.hello", "What this endpoint and node are"),
+    ("commands.list", "The methods of this endpoint"),
+    ("state", "Every entity's snapshot"),
+    ("describe", "One entity's snapshot"),
+    ("events", "The journaled events after a sequence number"),
+    (
+        "wait_event",
+        "The first event of a kind after a sequence number",
+    ),
+    ("wait_idle", "Waits until the scheduler has nothing to do"),
+    ("events.subscribe", "Streams events as notifications"),
+    ("events.unsubscribe", "Stops a subscription"),
+];
 
 impl Inspector {
     pub fn new(bus: Arc<Bus>) -> Self {
@@ -96,6 +141,7 @@ impl Inspector {
             entities: BTreeMap::new(),
             scheduler: None,
             instance: new_token()[..16].to_string(),
+            subscriptions: Arc::default(),
         }
     }
 
@@ -152,18 +198,12 @@ impl Inspector {
                 kind,
                 since,
                 timeout_ms,
-            } => self.wait_event(kind, *since, Duration::from_millis(*timeout_ms)),
-            Request::WaitIdle { timeout_ms } => match &self.scheduler {
-                None => json!({ "ok": false, "error": "this process has no scheduler" }),
-                Some(s) if s.wait_until_idle(Duration::from_millis(*timeout_ms)) => {
-                    json!({ "ok": true, "idle": true })
-                }
-                Some(s) => json!({
-                    "ok": false,
-                    "error": format!("still busy after {timeout_ms} ms"),
-                    "scheduler": s.describe(),
-                }),
-            },
+            } => self
+                .wait_event(kind, *since, Duration::from_millis(*timeout_ms), &never)
+                .unwrap_or_default(),
+            Request::WaitIdle { timeout_ms } => self
+                .wait_idle(Duration::from_millis(*timeout_ms), &never)
+                .unwrap_or_default(),
             Request::Subscribe { .. } => json!({
                 "ok": false,
                 "error": "subscribe needs a connection of its own: send it on the socket",
@@ -208,6 +248,26 @@ impl Inspector {
         heartbeat: Duration,
         send: &mut dyn FnMut(&Value) -> io::Result<()>,
     ) {
+        let opened = self.open(since);
+        let ack = json!({
+            "ok": true,
+            "subscribed": prefix,
+            "instance": self.instance,
+            "last_seq": opened.last_seq,
+            "gap": opened.gap,
+        });
+        if send(&ack).is_err() {
+            return;
+        }
+        self.pump(opened, prefix, heartbeat, &never, &mut |beat| match beat {
+            Beat::Event(e) => send(&json!({ "event": e })),
+            Beat::Heartbeat(seq) => send(&json!({ "heartbeat": seq })),
+        });
+    }
+
+    /// Listens to the bus, then reads the journal after `since` (from now
+    /// when not given).
+    fn open(&self, since: Option<u64>) -> Opened {
         // Subscribe before reading the journal, so an event published in
         // between is seen by one or the other, and sent once.
         let rx = self.bus.subscribe();
@@ -215,67 +275,254 @@ impl Inspector {
         let since = since.unwrap_or(last_seq).min(last_seq);
         let journal = self.bus.since(since);
         let gap = since < last_seq && journal.first().is_none_or(|e| e.seq > since + 1);
-        let ack = json!({
-            "ok": true,
-            "subscribed": prefix,
-            "instance": self.instance,
-            "last_seq": last_seq,
-            "gap": gap,
-        });
-        if send(&ack).is_err() {
-            return;
+        Opened {
+            rx,
+            journal,
+            since,
+            last_seq,
+            gap,
         }
-        let mut sent = since;
-        for e in journal {
+    }
+
+    /// Sends the events of `opened` whose kind starts with `prefix`, the
+    /// journaled ones first, and a heartbeat after `heartbeat` without one,
+    /// until `send` fails or `stop` says so.
+    fn pump(
+        &self,
+        opened: Opened,
+        prefix: &str,
+        heartbeat: Duration,
+        stop: &dyn Fn() -> bool,
+        send: &mut dyn FnMut(Beat<'_>) -> io::Result<()>,
+    ) {
+        let mut sent = opened.since;
+        for e in &opened.journal {
             sent = e.seq;
-            if e.kind.starts_with(prefix) && send(&json!({ "event": e })).is_err() {
+            if e.kind.starts_with(prefix) && send(Beat::Event(e)).is_err() {
                 return;
             }
         }
+        let mut quiet = Instant::now();
         loop {
-            match rx.recv_timeout(heartbeat) {
+            if stop() {
+                return;
+            }
+            match opened.rx.recv_timeout(CANCEL_POLL.min(heartbeat)) {
                 Ok(e) if e.seq <= sent => {}
                 Ok(e) => {
                     sent = e.seq;
-                    if e.kind.starts_with(prefix) && send(&json!({ "event": e })).is_err() {
-                        return;
+                    if e.kind.starts_with(prefix) {
+                        quiet = Instant::now();
+                        if send(Beat::Event(&e)).is_err() {
+                            return;
+                        }
                     }
                 }
-                Err(RecvTimeoutError::Timeout) => {
-                    if send(&json!({ "heartbeat": self.bus.last_seq() })).is_err() {
-                        return;
-                    }
-                }
+                Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
+            }
+            if quiet.elapsed() >= heartbeat {
+                quiet = Instant::now();
+                if send(Beat::Heartbeat(self.bus.last_seq())).is_err() {
+                    return;
+                }
             }
         }
     }
 
-    fn wait_event(&self, kind: &str, since: u64, timeout: Duration) -> Value {
+    /// The first `kind` event after `since`, or the refusal on timeout;
+    /// `None` once `cancelled` says so.
+    fn wait_event(
+        &self,
+        kind: &str,
+        since: u64,
+        timeout: Duration,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Option<Value> {
         // Subscribe before reading the journal, so an event published in
         // between is seen by one or the other.
         let rx = self.bus.subscribe();
         let found = |e: &Envelope| e.seq > since && e.kind == kind;
         if let Some(e) = self.bus.since(since).into_iter().find(found) {
-            return json!({ "ok": true, "event": e });
+            return Some(json!({ "ok": true, "event": e }));
         }
         let deadline = Instant::now() + timeout;
         loop {
+            if cancelled() {
+                return None;
+            }
             let left = deadline.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left) {
-                Ok(e) if found(&e) => return json!({ "ok": true, "event": e }),
-                Ok(_) => {}
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
+            if left.is_zero() {
+                break;
+            }
+            match rx.recv_timeout(left.min(CANCEL_POLL)) {
+                Ok(e) if found(&e) => return Some(json!({ "ok": true, "event": e })),
+                Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
         let journal = self.bus.since(since);
         let recent: Vec<_> = journal.iter().rev().take(RECENT).rev().collect();
-        json!({
+        Some(json!({
             "ok": false,
             "error": format!("no `{kind}` event after seq {since} within {} ms", timeout.as_millis()),
             "last_seq": self.bus.last_seq(),
             "recent": recent,
-        })
+        }))
+    }
+
+    /// Waits until the scheduler is idle, or the refusal on timeout;
+    /// `None` once `cancelled` says so.
+    fn wait_idle(&self, timeout: Duration, cancelled: &dyn Fn() -> bool) -> Option<Value> {
+        let Some(scheduler) = &self.scheduler else {
+            return Some(json!({ "ok": false, "error": "this process has no scheduler" }));
+        };
+        let deadline = Instant::now() + timeout;
+        loop {
+            if cancelled() {
+                return None;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if scheduler.wait_until_idle(left.min(CANCEL_POLL)) {
+                return Some(json!({ "ok": true, "idle": true }));
+            }
+            if left <= CANCEL_POLL {
+                return Some(json!({
+                    "ok": false,
+                    "error": format!("still busy after {} ms", timeout.as_millis()),
+                    "scheduler": scheduler.describe(),
+                }));
+            }
+        }
+    }
+
+    /// `events.subscribe`: answers the subscription, then streams its
+    /// events as `events.event` notifications and heartbeats as
+    /// `events.heartbeat`, until `events.unsubscribe` or the client goes.
+    fn subscribe_rpc(&self, params: Value, call: &rpc::Call) -> Result<Value, rpc::Error> {
+        #[derive(Deserialize)]
+        struct Params {
+            #[serde(default)]
+            prefix: String,
+            #[serde(default)]
+            since: Option<u64>,
+        }
+        let Params { prefix, since } =
+            serde_json::from_value(params).map_err(rpc::Error::invalid_params)?;
+        let id = new_token()[..16].to_string();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.subscriptions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.clone(), stop.clone());
+        let opened = self.open(since);
+        let ack = json!({
+            "subscription": id,
+            "prefix": prefix,
+            "instance": self.instance,
+            "last_seq": opened.last_seq,
+            "gap": opened.gap,
+        });
+        let (this, sink) = (self.clone(), call.sink());
+        call.after_reply(move || {
+            this.pump(
+                opened,
+                &prefix,
+                HEARTBEAT,
+                &|| stop.load(Ordering::SeqCst),
+                &mut |beat| match beat {
+                    Beat::Event(e) => {
+                        sink.notify("events.event", json!({ "subscription": id, "event": e }))
+                    }
+                    Beat::Heartbeat(seq) => sink.notify(
+                        "events.heartbeat",
+                        json!({ "subscription": id, "last_seq": seq }),
+                    ),
+                },
+            );
+            this.subscriptions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&id);
+        });
+        Ok(ack)
+    }
+}
+
+/// Never cancelled: the older form has no `$/cancel`.
+fn never() -> bool {
+    false
+}
+
+impl rpc::Service for Inspector {
+    fn call(&self, method: &str, params: Value, call: &rpc::Call) -> Result<Value, rpc::Error> {
+        let cancelled = || call.is_cancelled();
+        match method {
+            "node.hello" => Ok(rpc::hello(&self.instance, "inspect", &["inspect"])),
+            "commands.list" => Ok(json!({
+                "commands": METHODS
+                    .iter()
+                    .map(|(id, label)| json!({ "id": id, "label": label, "enabled": true }))
+                    .collect::<Vec<_>>(),
+            })),
+            "events.subscribe" | "subscribe" => self.subscribe_rpc(params, call),
+            "events.unsubscribe" => {
+                let id = params["subscription"].as_str().ok_or_else(|| {
+                    rpc::Error::invalid_params("`events.unsubscribe` takes a `subscription`")
+                })?;
+                let stop = self
+                    .subscriptions
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(id);
+                if let Some(stop) = &stop {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                Ok(json!({ "unsubscribed": stop.is_some() }))
+            }
+            "state" | "describe" | "events" | "wait_event" | "wait_idle" => {
+                let mut fields = params;
+                if let Some(map) = fields.as_object_mut() {
+                    map.insert("cmd".into(), json!(method));
+                }
+                let request: Request =
+                    serde_json::from_value(fields).map_err(rpc::Error::invalid_params)?;
+                let answer = match &request {
+                    Request::WaitEvent {
+                        kind,
+                        since,
+                        timeout_ms,
+                    } => self.wait_event(
+                        kind,
+                        *since,
+                        Duration::from_millis(*timeout_ms),
+                        &cancelled,
+                    ),
+                    Request::WaitIdle { timeout_ms } => {
+                        self.wait_idle(Duration::from_millis(*timeout_ms), &cancelled)
+                    }
+                    other => Some(self.answer(other)),
+                };
+                let timed = matches!(
+                    request,
+                    Request::WaitEvent { .. } | Request::WaitIdle { .. }
+                );
+                match answer {
+                    None => Err(rpc::Error::cancelled()),
+                    Some(answer) => rpc::from_answer(answer).map_err(|mut e| {
+                        if timed && e.message.contains(" ms") {
+                            e.code = rpc::code::TIMED_OUT;
+                        }
+                        e
+                    }),
+                }
+            }
+            other => Err(rpc::Error::method_not_found(other)),
+        }
+    }
+
+    fn cancellable(&self, method: &str) -> bool {
+        matches!(method, "wait_event" | "wait_idle")
     }
 }
 
@@ -293,9 +540,15 @@ pub fn serve_inspector(
     listen: &Listen,
     token: Option<&str>,
 ) -> io::Result<Bound> {
-    serve_connections_at(listen, token, move |request: Request, connection| {
-        inspector.serve_request(&request, connection)
-    })
+    let service: Arc<dyn rpc::Service> = Arc::new(inspector.clone());
+    serve_rpc_at(
+        listen,
+        token,
+        move |request: Request, connection: &mut Connection<'_>| {
+            inspector.serve_request(&request, connection)
+        },
+        service,
+    )
 }
 
 /// Subscribes to the events of the endpoint at `address` whose kind

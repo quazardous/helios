@@ -119,6 +119,11 @@ says it by key (a file it cannot load, a node it does not have, a job
 already ended), a `message` comes beside it (`{"key", "args", "english"}`),
 as on a batch's lines.
 
+The inspect, control and batch endpoints also speak JSON-RPC 2.0, one call
+per line, with several calls and event notifications on one connection:
+see [protocol.md](protocol.md). `helios` still sends the older form above,
+which they keep answering.
+
 ## Batch
 
 ```bash

@@ -741,6 +741,9 @@ mod control {
     //! command (`helios_node::commands`), listed with whether it can run on
     //! this endpoint and node and why not, and run by id with its params
     //! checked against its schema.
+    //!
+    //! Both speak JSON-RPC 2.0 too ([`Rpc`]): the method is a command's id,
+    //! the params its schema's object, run as `command.run` would.
 
     use std::sync::Arc;
     use std::time::Duration;
@@ -748,6 +751,7 @@ mod control {
     use helios_core::{Event, JobId, Message};
     use helios_export::Format;
     use helios_inspect::control::{ControlRequest, FileFormat};
+    use helios_inspect::rpc;
     use helios_node::commands;
     use helios_node::workflow::runs::Submit;
     use helios_node_core::commands::{CommandSpec, Need, check_origin, validate};
@@ -965,6 +969,51 @@ mod control {
 
     /// The origin of an edit saved for a control client.
     const CONTROL: &str = "control";
+
+    /// A control endpoint's JSON-RPC methods: `node.hello`,
+    /// `commands.list`, and every command by its id, its params checked
+    /// against its schema and run under the origin `_meta.origin` names
+    /// (`control` when not given).
+    pub struct Rpc {
+        pub node: Arc<Node>,
+        pub scope: Scope,
+        /// The node instance, as the inspect endpoint names it.
+        pub instance: String,
+    }
+
+    impl rpc::Service for Rpc {
+        fn call(&self, method: &str, params: Value, call: &rpc::Call) -> Result<Value, rpc::Error> {
+            let mut params = params;
+            let meta = params.as_object_mut().and_then(|p| p.remove("_meta"));
+            let origin = meta
+                .as_ref()
+                .and_then(|m| m["origin"].as_str())
+                .unwrap_or(CONTROL);
+            match method {
+                "node.hello" => Ok(match self.scope {
+                    Scope::Debug => rpc::hello(&self.instance, "debug", &["batch", "debug"]),
+                    Scope::Batch => rpc::hello(&self.instance, "batch", &["batch"]),
+                }),
+                "commands.list" => {
+                    let filter = params["filter"].as_str();
+                    let enabled_only = params["enabled_only"].as_bool().unwrap_or(false);
+                    rpc::from_answer(list(&self.node, self.scope, filter, enabled_only))
+                }
+                id => {
+                    let answer = run(&self.node, self.scope, id, &params, origin);
+                    // A batch held by its client ends when the connection does.
+                    if id == "batch_start"
+                        && params["hold"] == true
+                        && let Some(batch) = answer["id"].as_str()
+                    {
+                        let (node, batch) = (self.node.clone(), batch.to_string());
+                        call.on_close(move || node.abandon_batch(&batch, "its client went away"));
+                    }
+                    rpc::from_answer(answer)
+                }
+            }
+        }
+    }
 
     pub fn answer(node: &Arc<Node>, scope: Scope, request: ControlRequest) -> Value {
         answer_as(node, scope, request, CONTROL)
@@ -1352,16 +1401,22 @@ const BATCH_TCP_REFUSED: &str = "--batch-control takes a Unix socket path, not a
 /// the node, as the user could anyway.
 fn serve_batch_control(
     node: &Arc<Node>,
+    instance: &str,
     listen: &Listen,
     token: Option<&str>,
 ) -> Result<String, String> {
     if matches!(listen, Listen::Tcp(_)) && cfg!(unix) {
         return Err(BATCH_TCP_REFUSED.into());
     }
-    let bound = helios_inspect::serve_connections_at(
+    let bound = helios_inspect::serve_rpc_at(
         listen,
         token,
         control_handler(node.clone(), control::Scope::Batch),
+        Arc::new(control::Rpc {
+            node: node.clone(),
+            scope: control::Scope::Batch,
+            instance: instance.to_string(),
+        }),
     )
     .map_err(|e| format!("cannot serve the batch endpoint on {listen:?}: {e}"))?;
     #[cfg(unix)]
@@ -1374,7 +1429,12 @@ fn serve_batch_control(
 }
 
 /// Serves the control endpoint, if this build and environment allow it.
-fn serve_control(node: &Arc<Node>, listen: &Listen, token: Option<&str>) -> Result<String, String> {
+fn serve_control(
+    node: &Arc<Node>,
+    instance: &str,
+    listen: &Listen,
+    token: Option<&str>,
+) -> Result<String, String> {
     #[cfg(debug_assertions)]
     {
         if std::env::var_os("HELIOS_DEBUG_CONTROL").is_none() {
@@ -1382,17 +1442,22 @@ fn serve_control(node: &Arc<Node>, listen: &Listen, token: Option<&str>) -> Resu
                 "the control endpoint is served only when HELIOS_DEBUG_CONTROL is set".into(),
             );
         }
-        helios_inspect::serve_connections_at(
+        helios_inspect::serve_rpc_at(
             listen,
             token,
             control_handler(node.clone(), control::Scope::Debug),
+            Arc::new(control::Rpc {
+                node: node.clone(),
+                scope: control::Scope::Debug,
+                instance: instance.to_string(),
+            }),
         )
         .map(|bound| bound.address)
         .map_err(|e| format!("cannot serve control on {listen:?}: {e}"))
     }
     #[cfg(not(debug_assertions))]
     {
-        let _ = (node, listen, token);
+        let _ = (node, instance, listen, token);
         Err("the control endpoint exists only in debug builds".into())
     }
 }
@@ -1802,6 +1867,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
             return ExitCode::from(1);
         }
     }
+    let instance = inspector.instance().to_string();
     let address = match serve_inspector(inspector, &args.socket, token.as_deref()) {
         Ok(bound) => bound.address,
         Err(e) => {
@@ -1811,7 +1877,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     };
     let control_address = match &args.control {
         None => None,
-        Some(listen) => match serve_control(&node, listen, token.as_deref()) {
+        Some(listen) => match serve_control(&node, &instance, listen, token.as_deref()) {
             Ok(address) => Some(address),
             Err(e) => {
                 eprintln!("helios-node: {e}");
@@ -1821,7 +1887,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     };
     let batch_address = match &args.batch_control {
         None => None,
-        Some(listen) => match serve_batch_control(&node, listen, token.as_deref()) {
+        Some(listen) => match serve_batch_control(&node, &instance, listen, token.as_deref()) {
             Ok(address) => Some(address),
             Err(e) => {
                 eprintln!("helios-node: {e}");

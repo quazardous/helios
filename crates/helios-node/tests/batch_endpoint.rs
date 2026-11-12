@@ -392,3 +392,101 @@ fn an_orphaned_batch_ends() {
     .unwrap();
     assert_eq!(late["ok"], false, "{late}");
 }
+
+/// One JSON-RPC call on `client`, with a deadline on its answer.
+fn rpc(client: &mut helios_inspect::Client, id: i64, method: &str, params: Value) -> Value {
+    let answer = client
+        .request(
+            &serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+        )
+        .unwrap();
+    assert_eq!(answer["id"], id, "{answer}");
+    answer
+}
+
+#[test]
+fn the_batch_endpoint_speaks_json_rpc() {
+    use helios_inspect::rpc::code;
+    use serde_json::json;
+
+    let node = Node::start("jsonrpc");
+    let connect = |socket: &str| {
+        let client =
+            helios_inspect::Client::connect(&helios_inspect::Address::Unix(node.dir.join(socket)))
+                .unwrap();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+            .unwrap();
+        client
+    };
+    let mut batch = connect("batch.sock");
+
+    // `node.hello` names the same instance as the inspect endpoint.
+    let hello = rpc(&mut batch, 1, "node.hello", json!({}));
+    let hello = &hello["result"];
+    assert_eq!(hello["endpoint"], "batch");
+    assert_eq!(hello["permissions"], json!(["batch"]));
+    assert_eq!(hello["protocol"], helios_inspect::rpc::PROTOCOL);
+    let inspect = rpc(&mut connect("node.sock"), 1, "node.hello", json!({}));
+    assert_eq!(hello["instance"], inspect["result"]["instance"]);
+
+    // The command list is the capability list.
+    let list = rpc(
+        &mut batch,
+        2,
+        "commands.list",
+        json!({ "enabled_only": true }),
+    );
+    let ids: Vec<&str> = list["result"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"workflow.runs"), "{ids:?}");
+    assert!(!ids.contains(&"pause"), "{ids:?}");
+
+    // A command by its id, under the origin `_meta` names.
+    let runs = rpc(
+        &mut batch,
+        3,
+        "workflow.runs",
+        json!({ "_meta": { "origin": "script:test" } }),
+    );
+    assert_eq!(runs["result"]["origin"], "script:test", "{runs}");
+    assert_eq!(runs["result"]["command"], "workflow.runs");
+
+    // Refusals carry their code.
+    let debug_only = rpc(&mut batch, 4, "pause", json!({}));
+    assert_eq!(debug_only["error"]["code"], code::DISABLED, "{debug_only}");
+    let unknown = rpc(&mut batch, 5, "no.such.command", json!({}));
+    assert_eq!(
+        unknown["error"]["code"],
+        code::METHOD_NOT_FOUND,
+        "{unknown}"
+    );
+    let params = rpc(&mut batch, 6, "workflow.items", json!({ "run": 3 }));
+    assert_eq!(params["error"]["code"], code::INVALID_PARAMS, "{params}");
+    let vault = rpc(
+        &mut batch,
+        7,
+        "settings.layer.get",
+        json!({ "layer": "user" }),
+    );
+    assert_eq!(vault["error"]["code"], code::NEEDS_VAULT, "{vault}");
+    let origin = rpc(
+        &mut batch,
+        8,
+        "workflow.runs",
+        json!({ "_meta": { "origin": "nobody" } }),
+    );
+    assert_eq!(origin["error"]["code"], code::ORIGIN_REFUSED, "{origin}");
+
+    // Nothing runs under that id any more.
+    let cancel = rpc(&mut batch, 9, "$/cancel", json!({ "id": 3 }));
+    assert_eq!(cancel["result"]["cancelled"], false, "{cancel}");
+
+    // The older form, on the same connection.
+    let old = batch.request(&json!({ "cmd": "workflow.runs" })).unwrap();
+    assert_eq!(old["ok"], true, "{old}");
+}
