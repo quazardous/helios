@@ -183,33 +183,39 @@ fragments: `breaking` bumps the major version (the minor one before 1.0),
 `added`, `changed`, `deprecated` and `removed` bump the minor version,
 `fixed` and `security` alone bump the patch version.
 
-`cargo xtask release` first runs the survival scenarios (`cargo
-survival`: the desktop and a node quit or killed with `kill -9`, then
-reopened, keep every edit step, rating and label saved; see
-docs/persistence.md) and refuses to release when one fails. It then
-writes the new section at the top of CHANGELOG.md,
-bumps the version and removes the fragments. It does not commit or tag:
-review the diff, run `cargo check` to refresh Cargo.lock, then commit
-"Release X.Y.Z" (and tag it only for a minor or major release, below).
+**Versions advance with each promotion (decided 2026-11-12).** No release
+is prepared by hand and there is no release pull request:
 
-**Releases go through `next` (decided 2026-11-12)**, like every other
-change; nothing is pushed to `main` by hand:
+1. Everything is merged into `next`. When CI passes on a commit of `next`,
+   `promote.yml` runs `cargo xtask promote` on that exact commit (never on
+   whatever `next` points to by then).
+2. With user-facing fragments in `changelog.d/`, it writes the release on
+   top of that commit: the CHANGELOG.md section, the version the fragments
+   decide, the in-tree plugins' Helios range, the `AppStream` metadata and
+   Cargo.lock, and commits "Release X.Y.Z" as the bot. Without one, there
+   is no bump: the commit alone is promoted. `internal` fragments wait for
+   the next user-facing one.
+3. `main` fast-forwards to the release commit, and `next` with it, so both
+   carry the same version. If `next` moved meanwhile, the release is merged
+   into it by a merge commit (nothing pushed is rewritten).
+4. **Tags by judgment.** Not every version is a public release: the
+   coordinator tags `vX.Y.Z` on its "Release X.Y.Z" commit on `main` when
+   `main` holds a real feature or a serious bug fix (a patch version can be
+   tagged), and pushes the tag. The tag starts the release workflow, which
+   builds and publishes (docs/releases.md). No workflow tags anything.
 
-1. The bench box prepares the release from `next`
-   (`cargo xtask bench-remote release branch=next`: survival, the
-   CHANGELOG section, the bump and Cargo.lock, as `out/release.patch`).
-2. On a branch `release/X.Y.Z` made from `origin/next`, apply the patch,
-   commit "Release X.Y.Z", open a pull request into `next` and merge it
-   once its quick checks pass.
-3. When CI on `next` is green, `promote.yml` fast-forwards `main` to it,
-   the release commit included.
-4. **Tags only for minor and major releases** (`vX.Y.0`): tag the
-   "Release X.Y.0" commit on `main` once it is there and push the tag; the
-   tag starts the public build (docs/releases.md). A patch release
-   (`X.Y.Z`, Z > 0) is a version bump and a CHANGELOG section only: no
-   tag, no GitHub Release; its changes reach users in the next minor
-   release's builds, and the "Helios Dev" builds of `next` carry its
-   number.
+The promotion does not run the survival scenarios (`cargo survival`: the
+desktop and a node quit or killed with `kill -9`, then reopened, keep every
+edit step, rating and label saved; see docs/persistence.md) again: CI ran
+them on the very commit the release is made on, and the release commit is
+refused unless it differs from that commit by a version bump only
+(versions, CHANGELOG.md, the metainfo, fragments removed, and in Cargo.lock
+nothing but the workspace's own versions). A stale Cargo.lock therefore
+stops the promotion: refresh it in a commit of its own, which CI tests.
 
-A release is cut whenever `next` holds user-facing fragments worth a
-version; the fragments decide which number moves.
+**The bench box is the fallback**, for when GitHub's CI is down:
+`cargo xtask bench-remote release branch=next` runs `cargo xtask release`
+(survival first, then the same release), refreshes Cargo.lock, runs the
+suite and returns the change as `out/release.patch`. Apply it on a branch
+from `origin/next`, commit "Release X.Y.Z" and merge it into `next`; run by
+hand, `cargo xtask release` does not commit or tag either.

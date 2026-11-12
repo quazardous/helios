@@ -3,8 +3,10 @@ name: ci
 on:
   push:
     # `next` is the buffer branch agents merge into; once this workflow
-    # passes there, promote.yml fast-forwards `main` (docs/bench.md, "The
-    # next branch").
+    # passes there, promote.yml releases that commit's fragments and
+    # fast-forwards `main` (docs/releases.md). Its "Release X.Y.Z" commit
+    # and merges are pushed with GITHUB_TOKEN, so they start no run here:
+    # they only bump versions, and the next push tests them.
     branches: [main, next]
   pull_request:
 
@@ -60,6 +62,7 @@ jobs:
       - run: cargo nextest run --workspace --profile ci
       - run: cargo test --workspace --doc
       # Quit, kill -9 and reopen: the scenarios that gate a release, by name.
+      # promote.yml releases this very commit without running them again.
       - name: survival scenarios
         run: cargo survival
       - name: slowest tests

@@ -1,17 +1,51 @@
 # Releases
 
-Each minor or major release of Helios is a tag `vX.Y.0` on `main` and a
-GitHub Release of the same name on the
+Helios's version moves with `main`; only some versions are published. A
+published release is a tag `vX.Y.Z` on `main` and a GitHub Release of the
+same name on the
 [Releases page](https://github.com/quazardous/helios/releases).
 
-## Where they come from
+## Versions: automatic, with each promotion
 
-A release is prepared on the bench box from `next`, merged into `next`
-as the commit "Release X.Y.Z" through a pull request, and reaches `main`
-when `promote.yml` promotes a green `next` (see CONTRIBUTING.md,
-"Versions and releases"). Only a minor or major release is tagged: the
-tag `vX.Y.0`, pushed on that commit on `main`, starts the release
-workflow (`.github/workflows/release.yml`) on GitHub Actions, which:
+Every change is merged into `next`. When CI passes on a commit of `next`,
+the promotion workflow (`.github/workflows/promote.yml`, running
+`cargo xtask promote`) moves `main` forward, and the version with it:
+
+- **It works on the exact commit CI validated**, the run's `head_sha`,
+  never on whatever `next` points to when the promotion runs. A commit CI
+  did not test never reaches `main`.
+- With user-facing fragments in `changelog.d/`, it commits
+  "Release X.Y.Z" on top of that commit, as the bot: the CHANGELOG.md
+  section, the version the fragments decide (CONTRIBUTING.md, "Versions
+  and releases"), the in-tree plugins' Helios range, the `AppStream`
+  metadata and Cargo.lock. With none, there is no bump: the commit alone
+  is promoted.
+- The release commit is refused unless it is the validated commit plus a
+  version bump and nothing else; in Cargo.lock only the workspace's own
+  versions may move. The survival scenarios are not run again: CI ran them
+  on the validated commit, and the bump changes no code.
+- `main` fast-forwards to the release commit. `next` does too, in the same
+  atomic push, if it still points at the validated commit. If `next` has
+  moved, `main` still gets the release (the validated tree plus the bump)
+  and the release is merged into `next` by a merge commit, so nothing
+  pushed is rewritten and both carry the same version. The promotion of the
+  newer commit then starts from that merge.
+- The workflow pushes with its own token, which starts no workflow: the
+  release commit and the merge do not rerun CI (they change versions
+  only); the next push to `next` tests them with whatever it brings.
+
+## Publishing: a tag, by judgment
+
+No workflow tags anything. The coordinator tags `vX.Y.Z` on the
+"Release X.Y.Z" commit on `main` when `main` holds a real feature or a
+serious bug fix (a patch version can be tagged), and pushes the tag:
+
+```bash
+git fetch origin && git tag vX.Y.Z <release-commit> && git push origin vX.Y.Z
+```
+
+The tag starts the release workflow (`.github/workflows/release.yml`) on
+GitHub Actions, which checks the tag against the workspace version, then:
 
 1. builds `helios`, `helios-node`, `helios-mcp`, `helios-gui` and the
    programs of the plugins Helios ships (`helios-darktable-library`) in
@@ -63,6 +97,14 @@ a tag and `publish`. With `publish` off, the default, it is a dry run: it
 builds, packages and tests, and keeps the files as the run's artefacts,
 without creating a Release. With `publish` on, it builds the tag given,
 which must exist and match the workspace version.
+
+## When GitHub's CI is down
+
+The bench box prepares a release instead (`cargo xtask bench-remote
+release branch=next`): survival, the CHANGELOG section, the bump and
+Cargo.lock, tested, as `out/release.patch`, which is committed as
+"Release X.Y.Z" on a branch from `next` and merged into it. The release
+workflow can also run by hand, as above, once Actions is back.
 
 ## The Windows installer
 
