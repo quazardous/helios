@@ -1,7 +1,9 @@
 //! The OAuth flow (`oauth::OAuth`) against a fake authorisation server
 //! on a local port: PKCE verified by the server, the state checked, a
-//! refused consent, a token renewed when it expired, a renewal refused
-//! leaving the account needing attention, and signing out revoking the
+//! refused consent, offline access asked (with a consent while no refresh
+//! token is kept), a token renewed with the refresh token when it expired
+//! without a new sign-in, a renewal refused leaving the account needing
+//! attention, and signing out revoking the
 //! token and forgetting it. The "browser" is a plain HTTP client that
 //! follows the consent page's redirect to Helios's loopback; no real
 //! browser is opened.
@@ -266,6 +268,10 @@ fn a_granted_consent_keeps_the_tokens_in_the_keyring_after_pkce_checks() {
     let q = pairs(url.split_once('?').unwrap().1);
     assert_eq!(q["scope"], "photos.read openid");
     assert_eq!(q["response_type"], "code");
+    // Offline access, with a consent on a first sign-in: Google hands a
+    // refresh token only so.
+    assert_eq!(q["access_type"], "offline");
+    assert_eq!(q["prompt"], "consent select_account");
     let seen = server.seen.lock().unwrap();
     assert_eq!(seen.method.as_deref(), Some("S256"));
     assert!(
@@ -362,8 +368,18 @@ fn an_expired_access_token_is_renewed_and_a_refused_renewal_needs_attention() {
         AccountState::Connected
     );
 
+    // A sign-in again while the refresh token is held asks no new
+    // consent; offline access still.
+    let (done, url) = sign_in(&server, &mut w);
+    assert_eq!(done, Ok(()));
+    let q = pairs(url.split_once('?').unwrap().1);
+    assert_eq!(q["access_type"], "offline");
+    assert!(!q.contains_key("prompt"), "{url}");
+
     // The person revoked Helios's access on the service's side.
     server.seen.lock().unwrap().live_refresh = None;
+    w.account.state = AccountState::Connected;
+    w.book.save(&w.account).unwrap();
     w.secrets.set(&id, oauth::ACCESS_EXPIRES, "1").unwrap();
     let why = flow().access_token(&w.book, &w.secrets, &id).unwrap_err();
     assert!(why.contains("sign in again"), "{why}");
@@ -371,6 +387,14 @@ fn an_expired_access_token_is_renewed_and_a_refused_renewal_needs_attention() {
         AccountState::NeedsAttention { step, .. } => assert_eq!(step.as_deref(), Some("sign-in")),
         other => panic!("{other:?}"),
     }
+    // The dead refresh token is forgotten: the next sign-in asks for
+    // consent again, to get a new one.
+    assert_eq!(w.secrets.get(&id, oauth::REFRESH_TOKEN).unwrap(), None);
+    w.account = w.book.account(&id).unwrap().unwrap();
+    let (done, url) = sign_in(&server, &mut w);
+    assert_eq!(done, Ok(()));
+    let q = pairs(url.split_once('?').unwrap().1);
+    assert_eq!(q["prompt"], "consent select_account");
 }
 
 #[test]

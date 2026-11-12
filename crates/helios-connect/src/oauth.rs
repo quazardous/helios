@@ -344,18 +344,25 @@ impl OAuth {
             .map_err(|e| format!("cannot listen for the sign-in's answer: {e}"))?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let redirect = format!("http://127.0.0.1:{port}");
-        let url = with_query(
-            authorize,
-            &[
-                ("response_type", "code"),
-                ("client_id", &client),
-                ("redirect_uri", &redirect),
-                ("scope", &scopes.join(" ")),
-                ("code_challenge", &challenge),
-                ("code_challenge_method", "S256"),
-                ("state", &state),
-            ],
-        );
+        let scope = scopes.join(" ");
+        let mut query = vec![
+            ("response_type", "code"),
+            ("client_id", client.as_str()),
+            ("redirect_uri", redirect.as_str()),
+            ("scope", scope.as_str()),
+            ("code_challenge", challenge.as_str()),
+            ("code_challenge_method", "S256"),
+            ("state", state.as_str()),
+            // A refresh token, so that the access lasts beyond its hour
+            // (Google gives none without it; other services ignore it).
+            ("access_type", "offline"),
+        ];
+        // Google hands the refresh token only on a consent: asked for when
+        // none is kept (a first sign-in, or one the service refused).
+        if secrets.get(&account.id, REFRESH_TOKEN)?.is_none() {
+            query.push(("prompt", "consent select_account"));
+        }
+        let url = with_query(authorize, &query);
         browser(&url);
         let code = wait_for_code(&listener, &state, self.wait, cancel)?;
         let mut form = vec![
@@ -448,10 +455,16 @@ impl OAuth {
                     .get(id, ACCESS_TOKEN)?
                     .ok_or_else(|| "the service gave no access token".into())
             }
-            Err(e) if e.code == "invalid_grant" => Err(expired(
-                &mut account,
-                "the sign-in expired or was revoked: sign in again",
-            )),
+            Err(e) if e.code == "invalid_grant" => {
+                // A refused refresh token is dead: the next sign-in asks
+                // for consent again, to get a new one.
+                secrets.delete(id, REFRESH_TOKEN)?;
+                account.secrets.retain(|s| s != REFRESH_TOKEN);
+                Err(expired(
+                    &mut account,
+                    "the sign-in expired or was revoked: sign in again",
+                ))
+            }
             Err(e) => Err(e.said()),
         }
     }
