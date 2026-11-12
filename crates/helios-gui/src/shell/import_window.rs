@@ -224,6 +224,9 @@ pub(crate) struct ImportWindow {
     /// The files whose glance came from the glance cache as they were
     /// found: the scan's own glance of them is left out.
     glanced_early: std::collections::HashSet<PathBuf>,
+    /// The files whose glances came, read or from the glance cache, in
+    /// the order they came: the cells in view come first.
+    glanced_in_order: Vec<PathBuf>,
     pub(super) contents: Contents,
     /// The import connectors (`helios_connect`): the Sources column lists
     /// their sources, a scan lists a source through its connector.
@@ -296,6 +299,7 @@ impl ImportWindow {
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
         self.glanced_early.clear();
+        self.glanced_in_order.clear();
         self.contents = Contents::new();
         self.published = None;
         self.selection_synced = None;
@@ -387,6 +391,7 @@ impl ImportWindow {
                             let (taken, camera, thumb) =
                                 (g.taken, g.camera.clone(), g.thumb.clone());
                             take_glance(&mut self.contents, &thumbs, &path, taken, camera, thumb);
+                            self.glanced_in_order.push(path.clone());
                             self.glanced_early.insert(path);
                         }
                     }
@@ -398,6 +403,7 @@ impl ImportWindow {
                     } => {
                         if !self.glanced_early.remove(&path) {
                             take_glance(&mut self.contents, &thumbs, &path, taken, camera, thumb);
+                            self.glanced_in_order.push(path);
                         }
                     }
                     Scanned::Done => *done = true,
@@ -736,6 +742,12 @@ impl Shell {
             .iter()
             .map(|(_, scan, _)| scan.glances())
             .fold(crate::import_scan::Glances::default(), |a, b| a + b)
+    }
+
+    /// The files whose glances the import window took, read or from the
+    /// glance cache, in the order they came.
+    pub fn import_glanced_in_order(&self) -> Vec<PathBuf> {
+        self.import.get().glanced_in_order.clone()
     }
 
     /// The photos the import window's browser last asked thumbnails of as

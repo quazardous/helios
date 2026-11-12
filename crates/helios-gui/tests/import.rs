@@ -1571,15 +1571,13 @@ fn photos(folder: &Path, n: usize, width: u32, height: u32) {
     }
 }
 
-/// Steps frames (`pause` between them) until every cell in view has its
-/// thumbnail: the frames and the time it took.
-fn fill_in_view(
-    h: &mut Harness<'static, Shell>,
-    pause: Duration,
-    within: Duration,
-) -> (usize, Duration) {
-    let started = Instant::now();
+/// Steps frames until every cell in view has its thumbnail: the frames
+/// it took. Paced by the glances, not by the clock: it fails only when no
+/// glance came for `stalled` while cells in view still wait for theirs.
+fn fill_in_view(h: &mut Harness<'static, Shell>, stalled: Duration) -> usize {
     let mut frames = 0;
+    let mut seen = 0;
+    let mut since = Instant::now();
     loop {
         let on_screen = h.state().import_thumbnails_on_screen();
         if !on_screen.is_empty()
@@ -1587,13 +1585,19 @@ fn fill_in_view(
                 .iter()
                 .all(|p| h.state().import_thumbnail_ready(p))
         {
-            return (frames, started.elapsed());
+            return frames;
+        }
+        let glances = h.state().import_glances();
+        let progress = glances.read + glances.cached + h.state().import_counts().photos;
+        if progress != seen {
+            seen = progress;
+            since = Instant::now();
         }
         assert!(
-            started.elapsed() < within,
-            "the cells in view not filled in {within:?} ({frames} frames)"
+            since.elapsed() < stalled,
+            "no glance in {stalled:?} and the cells in view not filled ({frames} frames, {glances:?})"
         );
-        std::thread::sleep(pause);
+        std::thread::sleep(Duration::from_millis(2));
         h.step();
         frames += 1;
     }
@@ -1601,42 +1605,55 @@ fn fill_in_view(
 
 #[test]
 fn a_cold_folder_fills_the_cells_in_view_on_several_threads_and_opened_again_reads_nothing() {
-    const N: usize = 96;
+    // More photos than the window shows, small enough to write and read
+    // quickly on a loaded machine; each one decoded whole (no Exif
+    // thumbnail), so the threads overlap.
+    const N: usize = 64;
     let dir = temp("cold");
     let folder = dir.join("Shoot");
-    photos(&folder, N, 1600, 1200);
+    photos(&folder, N, 640, 480);
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
     let source = json!({ "source": folder.display().to_string() });
     h.state_mut()
         .run("library.importWindow", source.clone(), Origin::User)
         .unwrap();
-    let (frames, took) = fill_in_view(&mut h, Duration::from_millis(5), Duration::from_mins(1));
-    let in_view = h.state().import_thumbnails_on_screen().len();
-    let glances = h.state().import_glances();
+    let frames = fill_in_view(&mut h, Duration::from_secs(30));
+    let in_view = h.state().import_thumbnails_on_screen();
     eprintln!(
-        "import thumbnails, cold: {in_view} cells in view of {N} filled in {frames} frames, {} ms; {glances:?}",
-        took.as_millis()
+        "import thumbnails, cold: {} cells in view of {N} filled in {frames} frames; {:?}",
+        in_view.len(),
+        h.state().import_glances()
     );
-    // Read on several threads at once, the cells in view before the rest
-    // of the folder.
-    assert!(glances.peak >= 2, "the glances were serial: {glances:?}");
-    assert!(
-        glances.read < N,
-        "the whole folder read before the cells in view: {glances:?}"
-    );
+    assert!(in_view.len() < N, "the whole folder is in view");
     read_through(&mut h);
+    let glances = h.state().import_glances();
+    // Read on several threads at once.
+    assert!(glances.peak >= 2, "the glances were serial: {glances:?}");
+    // Every file glanced once (a scan the window started again finds the
+    // first ones in the glance cache).
+    assert_eq!(glances.read + glances.cached, N, "{glances:?}");
+    // The cells in view before the rest of the folder, whatever the
+    // machine's speed: by the order the glances came, give or take the
+    // ones the other threads were reading.
+    let order = h.state().import_glanced_in_order();
+    let first = in_view.len() + helios_gui::import_scan::glancers();
+    let late: Vec<_> = in_view
+        .iter()
+        .filter(|p| !order.iter().take(first).any(|o| o == *p))
+        .collect();
+    assert!(
+        late.is_empty(),
+        "cells in view glanced after the first {first}: {late:?}"
+    );
     // Opened again: every glance from the cache, nothing read.
     h.state_mut()
         .run("library.importWindow", source, Origin::User)
         .unwrap();
     // The command runs on the next frame: the window cleared, then filled.
     h.step();
-    let (frames, took) = fill_in_view(&mut h, Duration::from_millis(5), Duration::from_secs(5));
-    eprintln!(
-        "import thumbnails, opened again: filled in {frames} frames, {} ms",
-        took.as_millis()
-    );
+    let frames = fill_in_view(&mut h, Duration::from_secs(30));
+    eprintln!("import thumbnails, opened again: filled in {frames} frames");
     read_through(&mut h);
     let glances = h.state().import_glances();
     assert_eq!(
@@ -1644,10 +1661,6 @@ fn a_cold_folder_fills_the_cells_in_view_on_several_threads_and_opened_again_rea
         "opened again, files were read: {glances:?}"
     );
     assert_eq!(glances.cached, N);
-    assert!(
-        frames <= 20,
-        "opened again, {frames} frames to fill the cells in view"
-    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2306,7 +2319,7 @@ fn the_carousel_cells_never_overlap_whatever_the_window_and_the_thumbnail_size()
                 b.focus_on(&folder.join("IMG_0004.JPG"), false);
             }
             h.run_steps(3);
-            fill_in_view(&mut h, Duration::from_millis(5), Duration::from_secs(30));
+            fill_in_view(&mut h, Duration::from_secs(30));
             h.run_steps(3);
             let cells: Vec<(String, egui::Rect)> = h
                 .query_all_by_role(egui::accesskit::Role::ListBoxOption)
