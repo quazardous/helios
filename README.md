@@ -2,6 +2,12 @@
 
 # Helios
 
+> [!WARNING]
+> 🚧 **Under construction: alpha.** Helios changes every day, its formats
+> and settings may change without notice, and features are missing or
+> unfinished. Try it on copies of your photos, keep your own backups, and
+> expect bugs. Bug reports and ideas are welcome.
+
 > A client/server, AI-first image processing framework. Its first
 > application is photo editing: the quality of darktable without having to
 > learn darktable.
