@@ -190,12 +190,26 @@ docs/persistence.md) and refuses to release when one fails. It then
 writes the new section at the top of CHANGELOG.md,
 bumps the version and removes the fragments. It does not commit or tag:
 review the diff, run `cargo check` to refresh Cargo.lock, then commit
-"Release X.Y.Z" and tag `vX.Y.Z`.
+"Release X.Y.Z" (and tag it only for a minor or major release, below).
 
-A merge to main is a release (decided 2026-10-13): each branch merged
-with user-facing fragments is released right after it lands, so the
-version a build reports says what it contains. The bench box prepares
-it (`cargo xtask bench-remote release branch=main`: survival, the
-CHANGELOG section, the bump and Cargo.lock, as `out/release.patch`);
-apply the patch on main, commit "Release X.Y.Z", tag `vX.Y.Z` and push
-both.
+**Releases go through `next` (decided 2026-11-12)**, like every other
+change; nothing is pushed to `main` by hand:
+
+1. The bench box prepares the release from `next`
+   (`cargo xtask bench-remote release branch=next`: survival, the
+   CHANGELOG section, the bump and Cargo.lock, as `out/release.patch`).
+2. On a branch `release/X.Y.Z` made from `origin/next`, apply the patch,
+   commit "Release X.Y.Z", open a pull request into `next` and merge it
+   once its quick checks pass.
+3. When CI on `next` is green, `promote.yml` fast-forwards `main` to it,
+   the release commit included.
+4. **Tags only for minor and major releases** (`vX.Y.0`): tag the
+   "Release X.Y.0" commit on `main` once it is there and push the tag; the
+   tag starts the public build (docs/releases.md). A patch release
+   (`X.Y.Z`, Z > 0) is a version bump and a CHANGELOG section only: no
+   tag, no GitHub Release; its changes reach users in the next minor
+   release's builds, and the "Helios Dev" builds of `next` carry its
+   number.
+
+A release is cut whenever `next` holds user-facing fragments worth a
+version; the fragments decide which number moves.
