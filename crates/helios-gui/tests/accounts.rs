@@ -3,7 +3,8 @@
 //! their steps in the window's dialog (here a fake connector's form and
 //! test), and the account appears in the column with its state;
 //! Settings > Accounts lists it with Reconnect and Sign out. An agent may
-//! fill a form, never a secret.
+//! fill a form, never a secret. Settings > Accounts also sets the
+//! person's own OAuth client of a connector signing in through OAuth.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -264,4 +265,112 @@ fn the_choices_follow_the_selected_source_and_hide_what_its_connector_cannot_hon
     });
     assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// A connector signing in through OAuth: the fake's, with an `oauth`
+/// step in place of its form.
+struct OauthProvider;
+
+impl helios_connect::ConnectorProvider for OauthProvider {
+    fn manifest(&self) -> helios_connect::ConnectorManifest {
+        let mut m = FakeProvider.manifest();
+        m.id = "fake-photos".into();
+        m.connect = vec![helios_connect::ConnectStep {
+            id: "sign-in".into(),
+            kind: helios_connect::StepKind::Oauth {
+                authorize: "http://127.0.0.1:9/authorize".into(),
+                token: "http://127.0.0.1:9/token".into(),
+                scopes: Vec::new(),
+                revoke: None,
+                client_id: None,
+            },
+        }];
+        m
+    }
+
+    fn create(
+        &self,
+        settings: &helios_connect::Settings,
+        services: &helios_connect::ConnectorServices,
+    ) -> Result<Box<dyn helios_connect::Connector>, helios_connect::ConnectorError> {
+        FakeProvider.create(settings, services)
+    }
+}
+
+#[test]
+fn settings_accounts_sets_the_person_s_own_oauth_client_over_helios_s() {
+    use helios_connect::oauth::{self, Client, OAuth};
+    let book = Arc::new(MemoryAccounts::default());
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(OauthProvider));
+    shell.set_import_sign_in(Arc::new(
+        OAuth::with_env(Arc::new(|_| None))
+            .with_built_in(Arc::new(|_| {
+                Client::of(Some("helios-id"), Some("helios-secret"))
+            }))
+            .with_own_in(secrets.clone()),
+    ));
+    shell.set_import_accounts(book, secrets.clone());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let row = |h: &mut Harness<'_, Shell>| {
+        run(h, "import.oauthClients", Value::Null, Origin::User).unwrap()["clients"][0].clone()
+    };
+    let r = row(&mut h);
+    assert_eq!(r["connector"], "fake-photos");
+    assert_eq!(r["source"], "builtIn");
+    assert_eq!(r["own"], false);
+    // An agent may not give the secret; the person types it.
+    let set = |id: &str, secret: &str| json!({ "connector": "fake-photos", "clientId": id, "clientSecret": secret });
+    assert!(
+        run(
+            &mut h,
+            "import.setOAuthClient",
+            set("mine", "my-secret"),
+            Origin::Agent("helper".into())
+        )
+        .is_err()
+    );
+    assert_eq!(oauth::own_client(secrets.as_ref(), "fake-photos"), None);
+    run(
+        &mut h,
+        "import.setOAuthClient",
+        set("mine", "my-secret"),
+        Origin::User,
+    )
+    .unwrap();
+    let r = row(&mut h);
+    assert_eq!(r["source"], "own");
+    assert_eq!((&r["own"], &r["clientId"]), (&json!(true), &json!("mine")));
+    assert_eq!(r["clientSecret"], "", "a secret is never read back");
+    assert_eq!(
+        oauth::own_client(secrets.as_ref(), "fake-photos"),
+        Client::of(Some("mine"), Some("my-secret"))
+    );
+    // "Use Helios's client" forgets it.
+    run(
+        &mut h,
+        "import.setOAuthClient",
+        json!({ "connector": "fake-photos", "own": false }),
+        Origin::User,
+    )
+    .unwrap();
+    assert_eq!(row(&mut h)["source"], "builtIn");
+    assert!(
+        secrets
+            .get("oauth-client/fake-photos", "client_secret")
+            .unwrap()
+            .is_none()
+    );
+    // A connector without an OAuth sign-in has no client to set.
+    assert!(
+        run(
+            &mut h,
+            "import.setOAuthClient",
+            json!({ "connector": ID, "clientId": "x" }),
+            Origin::User
+        )
+        .is_err()
+    );
 }

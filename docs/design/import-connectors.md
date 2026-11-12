@@ -380,18 +380,24 @@ sign-in only. **Signing out** posts the token to `revoke` when the
 service has one (a failure there is logged, not blocking), then forgets
 the secrets.
 
-**Client id.** Never built in. In order: the environment variable
-`HELIOS_<CONNECTOR>_CLIENT_ID` (the connector id upper-cased, `-` as
-`_`: `HELIOS_GOOGLE_PHOTOS_CLIENT_ID`), the account's own `client_id`
-(a form field asked before the sign-in), then the manifest's. Without
-one the step fails naming the variable to set. Google gives desktop
-clients a client secret it does not treat as confidential:
-`HELIOS_<CONNECTOR>_CLIENT_SECRET` or a secret field `client_secret`.
+**Client.** A client is an id and, for Google's desktop clients, a
+secret Google does not treat as confidential; both always come from one
+source. In order (`OAuth::client`): the person's own, set in Settings >
+Accounts ("Use my own OAuth client", `import.setOAuthClient`, kept in
+the keyring under the account `oauth-client/<connector>`); the
+environment, `HELIOS_<CONNECTOR>_CLIENT_ID` and `_CLIENT_SECRET` (the
+connector id upper-cased, `-` as `_`: `HELIOS_GOOGLE_PHOTOS_CLIENT_ID`);
+Helios's built-in client, compiled in from the same variables when the
+release build had them (`oauth::built_in`, from the repository's
+secrets); then the manifest's `client_id`. Without one the step fails
+and says where to set one in Settings. A renewal uses the secret of the
+source holding the client id the account signed in with.
 
 **Tests** (`crates/helios-connect/tests/oauth_flow.rs`) run against a
 fake authorisation server on a local port, the "browser" being an HTTP
 client that follows its redirect: PKCE checked by the server, a forged
-`state`, a refused consent, a missing client id, a renewal and a
+`state`, a refused consent, a missing client, the person's own client
+used over the environment's, a renewal and a
 refused one, signing out with revocation.
 
 ### 2.5 Rate limits, cuts, offline

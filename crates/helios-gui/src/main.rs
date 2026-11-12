@@ -1995,7 +1995,11 @@ fn main() -> Result<(), String> {
                 } else {
                     Arc::new(helios_connect::keyring::SystemSecrets)
                 };
-                shell.set_import_sign_in(Arc::new(helios_connect::oauth::OAuth::system()));
+                // The person's own OAuth clients (Settings > Accounts) are
+                // kept in the same keyring.
+                shell.set_import_sign_in(Arc::new(
+                    helios_connect::oauth::OAuth::system().with_own_in(secrets.clone()),
+                ));
                 shell.set_import_accounts(
                     Arc::new(helios_connect::account::VaultAccounts(vault)),
                     secrets,

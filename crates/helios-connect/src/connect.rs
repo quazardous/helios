@@ -192,6 +192,16 @@ pub trait WebSteps: Send + Sync {
     ) -> Result<String, String> {
         Err(format!("no sign-in for the account {id}"))
     }
+
+    /// Where the OAuth client a sign-in to `connector` would use comes
+    /// from (`declared`: its manifest's client id); `None` without one.
+    fn client_source(
+        &self,
+        _connector: &str,
+        _declared: Option<&str>,
+    ) -> Option<crate::oauth::ClientSource> {
+        None
+    }
 }
 
 struct Shared {

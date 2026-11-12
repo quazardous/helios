@@ -19,9 +19,31 @@ What to know before you start:
 
 ## Setting up access
 
-Google requires every desktop application reading Google Photos to have
-an OAuth client of its own. Helios does not ship one: you create yours
-once, in your own Google account. It is free.
+Google requires every desktop application reading Google Photos to sign
+in with an OAuth client. Helios looks for one in this order:
+
+1. **Your own**, set in **Settings > Accounts > Use my own OAuth
+   client**: the client ID and secret of a desktop application you
+   registered (below). Both stay in your system keyring. Sign in again
+   afterwards.
+2. **The environment**, for scripts and tests: the variables
+   `HELIOS_GOOGLE_PHOTOS_CLIENT_ID` and
+   `HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET`, read when Helios starts.
+3. **Helios's own**, built into the release packages. A build made
+   without it (a build from source, a development build) has none: use
+   your own.
+
+The client ID and the secret always come from the same place. For a
+desktop application Google does not treat the secret as confidential:
+it ends up in the program anyway, and what protects your sign-in is
+PKCE and the answer coming back to your own machine only.
+
+The same section of Settings says which client is used, and **Use
+Helios's client** forgets yours.
+
+### Creating your own client
+
+It is free, and done once, in your own Google account.
 
 1. Open the [Google Cloud console](https://console.cloud.google.com/)
    and create a project (any name, such as "Helios photos").
@@ -34,20 +56,41 @@ once, in your own Google account. It is free.
    - under **Data access** (scopes), add
      `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`;
    - under **Audience**, leave the app in **Testing** and add your own
-     Google account as a **test user**. Only test users can sign in
-     while the app is in testing, which is what you want.
+     Google account as a **test user**.
 4. In **APIs & Services > Credentials**, **Create credentials > OAuth
    client ID**, application type **Desktop app**. Google shows a client
-   ID and a client secret. For a desktop app Google does not treat the
-   secret as confidential, but keep both to yourself.
-5. Give them to Helios through the environment, before it starts:
+   ID and a client secret.
+5. Type them in **Settings > Accounts > Use my own OAuth client**, on
+   the Google Photos line.
 
-   ```sh
-   export HELIOS_GOOGLE_PHOTOS_CLIENT_ID="1234-abc.apps.googleusercontent.com"
-   export HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET="GOCSPX-…"
-   ```
+### Google's consent screen modes
 
-   (On Windows, set them as user environment variables.)
+A Google Cloud project's consent screen is in one of these states:
+
+- **Testing**: only the test users listed in the console can sign in,
+  at most 100, and Google ends their sign-in after seven days (Helios
+  then shows the account as needing attention: Reconnect).
+- **In production, unverified**: anyone can sign in, after clicking
+  through Google's "this app isn't verified" warning, up to a capped
+  number of users.
+- **In production, verified**: no warning. The Photos Picker scope is
+  sensitive, so going to production for everyone needs Google's
+  verification of the app (its home page, privacy policy, and a video
+  of the sign-in and of what the scope is used for).
+
+### For maintainers: the built-in client
+
+The release workflow (`.github/workflows/release.yml`) passes two
+repository secrets to the build as environment variables, and
+`helios-connect` compiles them in (`helios_connect::oauth::built_in`):
+
+- `HELIOS_GOOGLE_PHOTOS_CLIENT_ID`
+- `HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET`
+
+Without them the packages have no built-in client and every user sets
+their own. Their values never go into the repository. A local build
+made with these variables set compiles them in the same way. The
+Flatpak is built in its own sandbox and does not receive them yet.
 
 ## Signing in
 

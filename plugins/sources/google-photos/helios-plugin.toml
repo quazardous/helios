@@ -20,8 +20,8 @@ about = "The Photos Picker API's base address"
 
 # The connection process Helios drives (docs/design/import-connectors.md,
 # 2.4.1): Google's sign-in for desktop applications, then a call proving
-# the token works. The client id comes from HELIOS_GOOGLE_PHOTOS_CLIENT_ID
-# or the account's own (docs/google-photos.md).
+# the token works. The OAuth client is the person's own (Settings), the
+# environment's or Helios's built-in one (docs/google-photos.md).
 [[connect]]
 id = "google"
 kind = "oauth"

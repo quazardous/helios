@@ -317,19 +317,21 @@ fn a_refused_consent_or_a_forged_state_fails_the_step_and_keeps_nothing() {
 }
 
 #[test]
-fn a_missing_client_id_says_which_variable_to_set() {
+fn a_missing_client_says_where_to_set_one_in_settings() {
     let server = Server::start(Consent::Grant);
     let mut w = world();
     let opened = Mutex::new(None);
-    let done = OAuth::with_env(Arc::new(|_| None)).sign_in(
-        &mut w.account,
-        &server.step(),
-        &w.secrets,
-        &browser(&opened),
-        &Cancel::new(),
-    );
+    let done = OAuth::with_env(Arc::new(|_| None))
+        .with_built_in(Arc::new(|_| None))
+        .sign_in(
+            &mut w.account,
+            &server.step(),
+            &w.secrets,
+            &browser(&opened),
+            &Cancel::new(),
+        );
     let why = done.unwrap_err();
-    assert!(why.contains("HELIOS_FAKE_PHOTOS_CLIENT_ID"), "{why}");
+    assert!(why.contains("Use my own OAuth client"), "{why}");
     assert!(
         opened.lock().unwrap().is_none(),
         "no browser without a client id"
@@ -391,4 +393,28 @@ fn signing_out_revokes_the_token_and_forgets_it() {
     }
     // Signed out, a token is asked for in vain: sign in again.
     assert!(flow().access_token(&w.book, &w.secrets, &id).is_err());
+}
+
+#[test]
+fn the_person_s_own_client_signs_in_over_the_environment_s() {
+    let server = Server::start(Consent::Grant);
+    let mut w = world();
+    let opened = Mutex::new(None);
+    let mine = oauth::Client::of(Some("own-client"), Some("own-secret")).unwrap();
+    let own = mine.clone();
+    let done = flow()
+        .with_own(Arc::new(move |c| (c == CONNECTOR).then(|| own.clone())))
+        .sign_in(
+            &mut w.account,
+            &server.step(),
+            &w.secrets,
+            &browser(&opened),
+            &Cancel::new(),
+        );
+    assert_eq!(done, Ok(()));
+    assert_eq!(
+        server.seen.lock().unwrap().client.as_deref(),
+        Some("own-client")
+    );
+    assert_eq!(w.account.facts[oauth::CLIENT_ID], "own-client");
 }
