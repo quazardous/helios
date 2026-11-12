@@ -12,7 +12,8 @@
 //! modules. The local folder ([`folder`]) and the mounted card ([`card`])
 //! are its first two; plugins join it in a later slice.
 //!
-//! [`contract`] is the suite every connector passes.
+//! [`contract`] is the suite every connector passes; [`land`] is the part
+//! file fetched bytes land in, hashed as they arrive.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 pub mod card;
 pub mod contract;
 pub mod folder;
+pub mod land;
 pub mod local;
 pub mod ranged;
 
@@ -151,6 +153,20 @@ pub enum HashAlgo {
     Sha256,
     /// One Helios cannot compute: recorded, reported as unchecked.
     Other(String),
+}
+
+impl HashAlgo {
+    /// Its name, as manifests and the claimed-hash table write it
+    /// (`md5`, `sha1`…; an unknown one as given).
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Blake3 => "blake3",
+            Self::Md5 => "md5",
+            Self::Sha1 => "sha1",
+            Self::Sha256 => "sha256",
+            Self::Other(name) => name,
+        }
+    }
 }
 
 /// Whether a source's bytes are the ones uploaded.
