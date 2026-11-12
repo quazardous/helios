@@ -363,6 +363,20 @@ pub trait Store: Send {
     fn begin(&mut self) -> Result<(), String>;
     fn commit(&mut self) -> Result<(), String>;
     fn rollback(&mut self) -> Result<(), String>;
+
+    /// Makes what is committed durable in the store's own file (for a
+    /// database with a write-ahead log, a checkpoint), so a power loss
+    /// after it loses none of it. A store in memory has nothing to do.
+    fn flush(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Closes the store for its owner: what is committed is flushed, the
+    /// store is marked as closed cleanly, and every write after it is
+    /// refused. Reads go on. Closing twice does nothing more.
+    fn shut_down(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Rows in memory: the reference other stores are checked against.
@@ -1256,6 +1270,18 @@ impl<S: Store> Vault<S> {
                 Err(e)
             }
         }
+    }
+
+    /// Makes what is committed durable in the store's file
+    /// ([`Store::flush`]): the owner's save, on its own schedule.
+    pub fn flush(&self) -> Result<(), String> {
+        self.store.lock().expect("store lock").flush()
+    }
+
+    /// Closes the vault for its owner ([`Store::shut_down`]): flushed,
+    /// marked as closed cleanly, every write after it refused.
+    pub fn shut_down(&self) -> Result<(), String> {
+        self.store.lock().expect("store lock").shut_down()
     }
 
     pub fn reads(&self) -> Reads {
