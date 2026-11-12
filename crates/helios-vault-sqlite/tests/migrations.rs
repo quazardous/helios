@@ -467,7 +467,9 @@ fn schema_5_gains_the_text_index_and_keeps_its_rows() {
     // Back to schema 5 as an older Helios left it.
     {
         let db = Connection::open(&path).unwrap();
-        db.execute_batch("DROP INDEX fields_name_text; PRAGMA user_version = 5;")
+        db.execute_batch(
+            "DROP INDEX fields_name_text; ALTER TABLE versions DROP COLUMN meta; PRAGMA user_version = 5;",
+        )
             .unwrap();
     }
     let mut store = SqliteStore::open(&path).unwrap();
