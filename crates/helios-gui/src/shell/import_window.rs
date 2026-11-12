@@ -75,6 +75,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::import_accounts::PickAsked;
+use super::import_browsers::Shown;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
 use super::import_sources::SourceKey;
 use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
@@ -254,7 +255,7 @@ pub(crate) struct ImportWindow {
     /// The custom rename pattern is being edited.
     pub(super) custom: bool,
     /// The Contents column: egui-pop's file browser over the photos.
-    browser: Option<FileBrowser>,
+    pub(super) browser: Option<FileBrowser>,
     source: ImportSource,
     thumbs: Option<Arc<ImportThumbnails>>,
     /// The library's thumbnail cache, for the photos it has (an offline
@@ -284,6 +285,9 @@ pub(crate) struct ImportWindow {
     /// The "Add a source…" wizard, while it is open: the window's body
     /// shows its steps ([`super::import_wizard`]).
     pub(super) wizard: Option<super::import_wizard::Wizard>,
+    /// The browsers of the source the Contents column shows, and the one
+    /// shown ([`super::import_browsers`]).
+    pub(super) browsing: super::import_browsers::Browsing,
 }
 
 impl ImportWindow {
@@ -322,6 +326,8 @@ impl ImportWindow {
         self.glanced_in_order.clear();
         self.glances_shown.clear();
         self.contents = Contents::new();
+        // The source browsed is looked at afresh.
+        self.browsing.fresh = false;
         self.published = None;
         self.selection_synced = None;
         if let Some(t) = &self.thumbs {
@@ -597,6 +603,8 @@ struct GridWords {
     in_library: String,
     pair: String,
     offline: String,
+    /// The browsers' switch and words.
+    browse: super::import_browsers::BrowseWords,
 }
 
 /// The window's words, in the shell's language.
@@ -1435,6 +1443,7 @@ impl ImportWindow {
             )),
             pair: t(Message::new("gui-import-window-pair", "RAW+JPG")),
             offline: t(Message::new("gui-import-window-offline", "offline")),
+            browse: super::import_browsers::BrowseWords::new(t),
         }
     }
 
@@ -1454,6 +1463,8 @@ impl ImportWindow {
         // The Choices column shows the selected source's; a change made
         // in this pass is saved on it at its end.
         self.follow_selection();
+        // The Contents column shows the source browsed in its browser.
+        self.follow_browser();
         let shown = self.sources.showing.clone();
         let before = self.choices.clone();
         let sample = self.sample();
@@ -1693,8 +1704,24 @@ impl ImportWindow {
         });
         column(ui, "helios.import.contents", middle, &mut |ui| {
             ui.heading(&words.contents);
-            if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
-                event = Some(Event::Dropped(paths));
+            let browse = &words.grid.browse;
+            match super::import_browsers::switch_ui(ui, w, browse) {
+                Shown::Grid => {
+                    if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
+                        event = Some(Event::Dropped(paths));
+                    }
+                }
+                Shown::Picker(account) => {
+                    ui.separator();
+                    ui.label(&browse.pick_about);
+                    if ui.button(&browse.pick).clicked() {
+                        event = Some(Event::Account(super::import_accounts::Asked::Pick(account)));
+                    }
+                }
+                Shown::NotListed => {
+                    ui.separator();
+                    ui.weak(&browse.not_listed);
+                }
             }
         });
         column(ui, "helios.import.choices", right, &mut |ui| {
@@ -2210,6 +2237,33 @@ fn contents_ui(
         ui.weak(&words.empty);
     }
     w.sync_browser(words);
+    // The folder tree, when shown, takes a strip on the grid's left.
+    let tree = w.browsing.current == Some(helios_connect::Browser::Tree);
+    let room = ui.available_rect_before_wrap();
+    let grid_rect = if tree {
+        let width = (room.width() * 0.3).clamp(80.0, 220.0);
+        let strip = egui::Rect::from_min_size(room.min, egui::vec2(width, room.height()));
+        let mut strip_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("helios.import.tree.strip")
+                .max_rect(strip)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        strip_ui.set_clip_rect(strip.intersect(ui.clip_rect()));
+        super::import_browsers::tree_ui(&mut strip_ui, w, &words.browse);
+        let gap = ui.spacing().item_spacing.x;
+        egui::Rect::from_min_max(egui::pos2(strip.max.x + gap, room.min.y), room.max)
+    } else {
+        room
+    };
+    let mut grid_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("helios.import.grid")
+            .max_rect(grid_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    ui.advance_cursor_after_rect(room);
+    let ui = &mut grid_ui;
     let browser = w.browser.as_mut()?;
     let out = browser.show_in(ui, app, "helios.import");
     if out.selection_changed {
@@ -2365,6 +2419,7 @@ impl ImportWindow {
             self.source.publish(&place, entries, done);
             self.published = Some(sig);
         }
+        let made = self.browser.is_none();
         let browser = self.browser.get_or_insert_with(|| {
             let marks = self.marks.clone();
             let mut b = FileBrowser::new(
@@ -2391,6 +2446,9 @@ impl ImportWindow {
             b.set_mode("thumbnails");
             b
         });
+        if made {
+            Self::browser_made(browser, &mut self.browsing);
+        }
         if browser.place() != place {
             browser.open(place);
         }

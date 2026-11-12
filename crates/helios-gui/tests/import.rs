@@ -3104,3 +3104,80 @@ fn forget_this_source_takes_a_folder_off_the_column_and_undo_brings_it_back() {
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_folder_offers_three_browsers_the_grid_follows_the_choice_and_it_comes_back_after_a_restart() {
+    use helios_connect::Browser;
+    let dir = temp("browsers");
+    let shoot = dir.join("shoot");
+    let day2 = shoot.join("day2");
+    std::fs::create_dir_all(&day2).unwrap();
+    put(&shoot.join("a.jpg"), Ok(&jpeg("a")), 2);
+    put(&day2.join("b.jpg"), Ok(&jpeg("b")), 3);
+    let vault = dir.join("vault.db");
+    {
+        let (node, kept) = node_at(&vault);
+        let mut h = shell_keeping(&kept);
+        open_on(&mut h, &shoot);
+        // Three ways to browse a folder, all its photos to start with.
+        let (offered, current) = h.state().import_source_browsers();
+        assert_eq!(offered, [Browser::Folder, Browser::Tree, Browser::Timeline]);
+        assert_eq!(current, Some(Browser::Folder));
+        for label in ["Browse", "All photos", "Folder tree", "By date"] {
+            let _ = h.get_by_label(label);
+        }
+        assert!(h.query_by_label("Albums").is_none());
+        assert_eq!(h.state().import_counts().photos, 2);
+        // The tree: a subfolder clicked shows its photos alone.
+        click(&mut h, "Folder tree");
+        let _ = h.get_by_label("Every folder");
+        click(&mut h, "day2");
+        assert_eq!(h.state().import_counts().photos, 1);
+        assert_eq!(h.state().import_counts().selected, 1);
+        click(&mut h, "Every folder");
+        assert_eq!(h.state().import_counts().photos, 2);
+        click(&mut h, "day2");
+        // The timeline: every photo again, on the grid's agenda.
+        let mode = |h: &Harness<'static, Shell>| {
+            h.state()
+                .import_browser()
+                .map(|b| b.mode().to_owned())
+                .unwrap_or_default()
+        };
+        let before = mode(&h);
+        assert_ne!(before, "agenda");
+        click(&mut h, "By date");
+        assert_eq!(h.state().import_counts().photos, 2);
+        assert_eq!(mode(&h), "agenda");
+        // Back to all photos: the grid's mode before.
+        click(&mut h, "All photos");
+        assert_eq!(mode(&h), before);
+        click(&mut h, "By date");
+        let sources = h.state().import_sources();
+        assert_eq!(sources.len(), 1, "{sources:?}");
+        assert_eq!(sources[0].browser, Some(Browser::Timeline));
+        let text = kept
+            .read(helios_gui::shell::IMPORT_SOURCES)
+            .unwrap()
+            .expect("the sources kept by the node");
+        assert!(text.contains("browser = \"timeline\""), "{text}");
+        drop(h);
+        node.stop();
+    }
+    // After a restart, the folder opens by date.
+    let (node, kept) = node_at(&vault);
+    let mut h = shell_keeping(&kept);
+    open_on(&mut h, &shoot);
+    h.run_steps(3);
+    assert_eq!(
+        h.state().import_source_browsers().1,
+        Some(Browser::Timeline)
+    );
+    assert_eq!(
+        h.state().import_browser().map(|b| b.mode().to_owned()),
+        Some("agenda".to_owned())
+    );
+    drop(h);
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}

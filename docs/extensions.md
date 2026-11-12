@@ -454,7 +454,11 @@ labels, keywords, collections as tags; the schema it assumes is listed in
 its crate documentation). The first source, under `plugins/sources/`,
 is `google-photos`: the `import.source` service over Google's Photos
 Picker API, with its connection steps declared in `[[connect]]` (an
-`oauth` step, then a `test`); see docs/google-photos.md.
+`oauth` step, then a `test`); see docs/google-photos.md. Beside them, a
+source plugin lists how the import window browses its sources,
+`browsers = ["picker"]` (any of `tree`, `folder`, `collections`,
+`timeline`, `picker`, in the order offered; `picker` when absent): see
+docs/design/import-connectors.md, section 3.9.
 
 The test plugin `crates/helios-plugin/tests/fixtures/ratings-folder`
 (Python, standard library alone) reads a folder of JPEGs and the

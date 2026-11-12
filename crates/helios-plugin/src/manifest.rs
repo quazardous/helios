@@ -362,6 +362,11 @@ pub struct Manifest {
     /// A source's connection process (the `import.source` service).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connect: Vec<ConnectDecl>,
+    /// How the import window browses its sources (`tree`, `folder`,
+    /// `collections`, `timeline`, `picker`), in the order offered; empty:
+    /// `picker` (the `import.source` service picks).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browsers: Vec<String>,
     /// The plugin's own settings, each under its id (`<id>.<key>`): the
     /// configuration contract's first level.
     #[serde(default)]
@@ -515,6 +520,21 @@ impl Manifest {
         let mut p = Vec::new();
         if !self.connect.is_empty() && !self.services.iter().any(|s| s == "import.source") {
             p.push("`[[connect]]` without the service `import.source`".into());
+        }
+        if !self.browsers.is_empty() && !self.services.iter().any(|s| s == "import.source") {
+            p.push("`browsers` without the service `import.source`".into());
+        }
+        for name in &self.browsers {
+            if helios_connect::Browser::from_name(name).is_none() {
+                let known: Vec<_> = helios_connect::Browser::ALL
+                    .iter()
+                    .map(|b| b.name())
+                    .collect();
+                p.push(format!(
+                    "unknown browser `{name}` (known: {})",
+                    known.join(", ")
+                ));
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         for step in &self.connect {
@@ -765,5 +785,22 @@ kind = "form"
             "services = [\"metadata.read\"]",
             "`[source.settings]` without the service",
         );
+        refused(
+            "services = [\"import.source\"]",
+            "services = [\"import.source\"]\nbrowsers = [\"picker\", \"albums\"]",
+            "unknown browser `albums` (known: tree, folder, collections, timeline, picker)",
+        );
+    }
+
+    #[test]
+    fn google_photos_offers_its_picker_only() {
+        let text = include_str!("../../../plugins/sources/google-photos/helios-plugin.toml");
+        let m = Manifest::parse(text).unwrap();
+        assert_eq!(m.browsers, ["picker"]);
+        let p = problems(&SOURCE.replace(
+            "services = [\"import.source\"]",
+            "services = [\"import.source\"]\nbrowsers = [\"collections\", \"timeline\"]",
+        ));
+        assert_eq!(p, Vec::<String>::new());
     }
 }

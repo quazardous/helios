@@ -3,14 +3,15 @@
 //! the password `right` only. It lists nothing. Each of its sources
 //! has one parameter, the share it reads (`share`), and no copy or add
 //! choice: its photos are always copied. The import window's tests use
-//! it for "Add a source…", "Edit source…" and Settings > Accounts.
+//! it for "Add a source…", "Edit source…", Settings > Accounts and
+//! the switch between a source's browsers (it declares three).
 
 use helios_core::config::{ConfigKey, Contract, Contracts, KeyType};
 
 use crate::{
-    Access, AccountRef, Cancel, Caps, ConnectStep, Connector, ConnectorError, ConnectorInfo,
-    ConnectorManifest, ConnectorProvider, ConnectorServices, FetchSink, Fetched, INTERFACE,
-    ItemRef, Page, Probed, Settings, SourceRef, StepKind, Text,
+    Access, AccountRef, Browser, Cancel, Caps, ConnectStep, Connector, ConnectorError,
+    ConnectorInfo, ConnectorManifest, ConnectorProvider, ConnectorServices, FetchSink, Fetched,
+    INTERFACE, ItemRef, Page, Probed, Settings, SourceRef, StepKind, Text,
 };
 
 /// Its id.
@@ -60,6 +61,8 @@ impl ConnectorProvider for FakeProvider {
             settings: Settings::Null,
             platforms: Vec::new(),
             interface: INTERFACE,
+            // Three ways to browse, for the import window's switch.
+            browsers: vec![Browser::Folder, Browser::Collections, Browser::Timeline],
             connect: vec![
                 ConnectStep {
                     id: "server".into(),

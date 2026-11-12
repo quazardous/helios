@@ -7,6 +7,10 @@ license = "GPL-3.0-or-later"
 command = ["helios-google-photos"]
 services = ["import.source"]
 activation = ["onService:import.source"]
+# Google's API lets an application read only the photos picked in its own
+# page (the library-wide scopes were withdrawn in March 2025): the import
+# window browses this source through that page alone.
+browsers = ["picker"]
 
 [compat]
 helios = ">=0.86.0, <0.87.0"

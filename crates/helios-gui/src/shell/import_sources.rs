@@ -102,6 +102,10 @@ pub struct SavedSource {
     /// that are not choices, as set.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
+    /// The browser it was last shown in, among its connector's
+    /// ([`super::import_browsers`]); `None`: the connector's first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<helios_connect::Browser>,
 }
 
 impl SavedSource {
@@ -301,6 +305,35 @@ impl Sources {
                 account,
                 choices,
                 params: BTreeMap::new(),
+                browser: None,
+            });
+        }
+        self.store();
+    }
+
+    /// Sets the browser a source is shown in, saving the source when new;
+    /// not a step of the column's Undo (the view, not the source, changes).
+    pub(crate) fn set_browser(
+        &mut self,
+        key: &SourceKey,
+        connector: &str,
+        browser: helios_connect::Browser,
+    ) {
+        if let Some(s) = self.list.iter_mut().find(|s| s.key().as_ref() == Some(key)) {
+            s.browser = Some(browser);
+        } else {
+            let (path, account) = match key {
+                SourceKey::Folder(p) => (Some(p.clone()), None),
+                SourceKey::Account(a) => (None, Some(a.clone())),
+            };
+            self.list.push(SavedSource {
+                connector: connector.to_string(),
+                name: None,
+                path,
+                account,
+                choices: None,
+                params: BTreeMap::new(),
+                browser: Some(browser),
             });
         }
         self.store();
@@ -588,6 +621,19 @@ impl Shell {
         w.sources.write = Some(write);
         w.sources.read_kept();
         w.sources.showing = None;
+        w.browsing.fresh = false;
+    }
+
+    /// The browsers the import window's Contents column offers for the
+    /// source it shows, and the one shown.
+    pub fn import_source_browsers(
+        &self,
+    ) -> (
+        Vec<helios_connect::Browser>,
+        Option<helios_connect::Browser>,
+    ) {
+        let w = self.import.get();
+        (w.browsing.offered.clone(), w.browsing.current)
     }
 
     /// The import window's saved sources.
@@ -639,6 +685,7 @@ mod tests {
                         ..Choices::default()
                     }),
                     params: BTreeMap::new(),
+                    browser: Some(helios_connect::Browser::Timeline),
                 },
                 SavedSource {
                     connector: "google-photos".into(),
@@ -647,10 +694,12 @@ mod tests {
                     account: Some("google-photos-1".into()),
                     choices: None,
                     params: [("album".to_owned(), serde_json::json!("Holidays"))].into(),
+                    browser: None,
                 },
             ],
         };
         let text = toml::to_string(&doc).unwrap();
+        assert!(text.contains("browser = \"timeline\""), "{text}");
         let back: Document = toml::from_str(&text).unwrap();
         assert_eq!(back.sources, doc.sources, "{text}");
     }

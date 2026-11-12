@@ -1604,6 +1604,9 @@ pub struct Contents {
     pub types: Types,
     /// Images already in the Library are greyed and left out.
     pub new_only: bool,
+    /// The folder the import window's folder tree shows: the photos in it
+    /// and its subfolders alone; `None`: every photo.
+    folder: Option<PathBuf>,
     /// The cells shown, by day, in time order; rebuilt when stale.
     order: Option<Vec<(Option<NaiveDate>, Vec<usize>)>>,
     /// Bumped whenever a cell, its facts or the cells shown change.
@@ -1761,6 +1764,49 @@ impl Contents {
         self.revision += 1;
     }
 
+    /// The folder shown alone, with its subfolders; `None`: every photo.
+    pub fn set_folder(&mut self, folder: Option<PathBuf>) {
+        if self.folder != folder {
+            self.folder = folder;
+            self.order = None;
+            self.revision += 1;
+        }
+    }
+
+    pub fn folder(&self) -> Option<&Path> {
+        self.folder.as_deref()
+    }
+
+    /// Whether the cell is shown: of the types shown, in the folder shown.
+    fn shows(&self, c: &Cell) -> bool {
+        c.passes(self.types)
+            && self
+                .folder
+                .as_ref()
+                .is_none_or(|f| c.main().is_some_and(|m| m.starts_with(f)))
+    }
+
+    /// The folders holding the photos read, each with its source's
+    /// folders between them, in path order: the folder tree's.
+    pub fn folders(&self) -> Vec<(PathBuf, PathBuf)> {
+        let mut folders = std::collections::BTreeSet::new();
+        for c in &self.cells {
+            let Some(mut dir) = c.main().and_then(|m| m.parent()) else {
+                continue;
+            };
+            while dir.starts_with(&c.source) {
+                if !folders.insert((dir.to_path_buf(), c.source.clone())) {
+                    break;
+                }
+                match dir.parent() {
+                    Some(up) if dir != c.source => dir = up,
+                    _ => break,
+                }
+            }
+        }
+        folders.into_iter().collect()
+    }
+
     pub fn set_types(&mut self, types: Types) {
         if self.types != types {
             self.types = types;
@@ -1772,7 +1818,7 @@ impl Contents {
     /// Whether an Import takes the cell `i` when it is ticked.
     pub fn importable(&self, i: usize) -> bool {
         let c = &self.cells[i];
-        c.passes(self.types) && !c.offline && !(self.new_only && c.known())
+        self.shows(c) && !c.offline && !(self.new_only && c.known())
     }
 
     /// The cells shown, by day (oldest first), each day in time order.
@@ -1780,7 +1826,7 @@ impl Contents {
         if self.order.is_none() {
             let mut days: BTreeMap<Option<NaiveDate>, Vec<usize>> = BTreeMap::new();
             for (i, c) in self.cells.iter().enumerate() {
-                if c.passes(self.types) {
+                if self.shows(c) {
                     days.entry(c.day()).or_default().push(i);
                 }
             }
@@ -1808,7 +1854,7 @@ impl Contents {
     pub fn counts(&self) -> Counts {
         let mut n = Counts::default();
         for (i, c) in self.cells.iter().enumerate() {
-            if !c.passes(self.types) {
+            if !self.shows(c) {
                 continue;
             }
             n.photos += 1;
@@ -1826,9 +1872,11 @@ impl Contents {
 
     /// Ticks or unticks every cell shown.
     pub fn tick_all(&mut self, on: bool) {
-        let types = self.types;
-        for c in self.cells.iter_mut().filter(|c| c.passes(types)) {
-            c.ticked = on;
+        let shown: Vec<bool> = self.cells.iter().map(|c| self.shows(c)).collect();
+        for (c, shown) in self.cells.iter_mut().zip(shown) {
+            if shown {
+                c.ticked = on;
+            }
         }
     }
 

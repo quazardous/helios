@@ -740,6 +740,36 @@ Not yet: promoting an account listed under Accounts (only those saved
 are edited); a contract key's label and help in the person's language
 (the contract's English is shown).
 
+### 3.9 Several browsers per source (as built)
+
+A connector declares the ways its sources can be browsed, in the order
+offered (`ConnectorManifest::browsers`, `helios_connect::Browser`):
+
+| Browser | What the Contents column shows |
+|---|---|
+| `folder` | Every photo of the source in one flat grid ("All photos") |
+| `tree` | The folders holding photos beside the grid ("Folder tree"); a folder clicked shows its photos and its subfolders' alone, and Import takes only those |
+| `timeline` | The grid in its agenda, by capture day ("By date"); the grid's mode before comes back when another browser is chosen |
+| `collections` | A service's albums ("Albums"); declared, nothing lists an account's photos yet |
+| `picker` | The service's own picking page: "Pick photos…", the flow of 2.4.2 |
+
+The local folder offers `folder`, `tree` and `timeline`; a card `folder`
+and `timeline`; Google Photos `picker` alone, since Google's API no
+longer lets an application read a library (4.1). A connector declaring
+none gets `picker` when it picks (`caps.picks`), else `folder`. Built-in
+connectors declare theirs in code; a plugin in its manifest, beside
+`[[connect]]`: `browsers = ["picker"]` (an unknown name, or `browsers`
+without the `import.source` service, refuses the plugin).
+
+The Contents column follows the source browsed: the account selected,
+else the folder or card ticked last. When its connector offers more than
+one browser, a switch ("Browse") above the grid offers them. The browser
+chosen is remembered on the source (`browser`, a key of `[[source]]` in
+`user/import-sources`), a folder or an account being saved by it; it is
+not a step of the column's Undo, being a view, not a setting. A card not
+saved keeps its browser until Helios quits, as do sources when they are
+not kept. Editing a source keeps its browser.
+
 ## 4. The connectors surveyed
 
 ### 4.1 Google Photos
