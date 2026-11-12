@@ -1,6 +1,6 @@
 // The import window opened by a click (the Library panel's button, the
 // first of two with the filmstrip's), a folder picked, its photos
-// imported by a click on the Import button.
+// imported by a click on the Import button, in the import window.
 // Run live by tools/bench/scenarios.py: `$folder` is a folder of known
 // photos the run made, `$count` how many, the library a throwaway one.
 Scenario(
@@ -10,7 +10,10 @@ Scenario(
         Wait(Settled),
         Ui(Click(role: "Button", label: "Import photos…", nth: 0)),
         Wait(Settled),
-        Expect(Tree(has: (label: "Import photos"))),
+        // The import window is an OS window of its own: what follows reads
+        // and clicks in it.
+        Window("import"),
+        Expect(Tree(has: (role: "Window", label: "Import photos"))),
         Shot("opened"),
         // The folder chooser is the desktop's: the window is given the
         // folder as a dropped one would be, its photos added in place.

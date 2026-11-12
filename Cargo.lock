@@ -1167,6 +1167,20 @@ dependencies = [
  "egui",
  "egui-pop-api",
  "egui-pop-core",
+ "egui-pop-model",
+ "egui-pop-tokens",
+ "egui-pop-viewport",
+]
+
+[[package]]
+name = "egui-pop"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b04ea067c2bb490353a81d5e3cd3de710d9f15d08b261f6538c3bd16c21229b"
+dependencies = [
+ "egui",
+ "egui-pop-api",
+ "egui-pop-core",
  "egui-pop-editors",
  "egui-pop-i18n",
  "egui-pop-imaging",
@@ -1179,9 +1193,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-agent"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daa91eb1712b1850a1ce20e3a60f3901e9c2cee4fe694af5dd17ebf5ce20b5e8"
+checksum = "728f89ff12bae88c6c6d762d6349da12e71a1370427bf4fa1c5183d453bd6014"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1194,9 +1208,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-api"
-version = "0.9.0"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bff9c416027aeec245faf1f5a999760b6d7efcd12ad435ed64c87b5d9d56e2bd"
+checksum = "310ea3279e6a8d72477afb475e6354161b4d54843df6d868ec26bf65b1b4abad"
 dependencies = [
  "eframe",
  "egui",
@@ -1215,9 +1229,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-core"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "573c3d8e27663ffba6631e725ea030f8afa105d5e8bf59344258a447c043bd3a"
+checksum = "cb81b9b7686839cb8efac84c7040e5347f34e474267577bf7baeb0196cb87d6c"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1250,9 +1264,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-i18n"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bb18d2bf551b42e72554799406efba6dac1a8c3759d10502ef8b16ff6e75144"
+checksum = "8dd466394c6d667128b6fd3fdab7596a60e97f89ed62cb0be6667af2c4849957"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1329,9 +1343,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-test"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e52434f604d7f23e4a043023ba250e4773a8d9b99f1f58276b255ca37666237e"
+checksum = "a2e34f10255dc5b7777ab523f339a01cbe91428518aa69f3dd0b2321065b1eca"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1487,7 +1501,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47f7deef1086debcb72366591f00bb43556eb94c2cb306e2fe9d217a2bd4fa82"
 dependencies = [
- "egui-pop",
+ "egui-pop 0.9.0",
  "egui-pop-model",
  "egui_fit",
  "serde",
@@ -1529,9 +1543,9 @@ dependencies = [
 
 [[package]]
 name = "egui_stack"
-version = "0.25.8"
+version = "0.25.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26c39ced9b6b174fd71e0eb2b3063a1b0fee080b779cd1c24cda38576d4cf418"
+checksum = "a01a3458ee9d855c8a9a5fec3d28c5fc38c2ffa88bacfdeb1c9a7198e8a1ed29"
 dependencies = [
  "duplicate",
  "egui",
@@ -2334,7 +2348,7 @@ name = "helios-controls-gallery"
 version = "0.78.0"
 dependencies = [
  "eframe",
- "egui-pop",
+ "egui-pop 0.10.1",
  "egui_hud",
  "egui_kittest",
  "helios-controls",
@@ -2381,7 +2395,7 @@ dependencies = [
 name = "helios-declarations"
 version = "0.78.0"
 dependencies = [
- "egui-pop",
+ "egui-pop 0.10.1",
  "helios-gui",
  "helios-i18n",
  "helios-node",
@@ -2439,7 +2453,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
- "egui-pop",
+ "egui-pop 0.10.1",
  "egui-pop-agent",
  "egui-pop-test",
  "egui-pop-wayland",
