@@ -665,6 +665,8 @@ gui-import-window-remove-favourite = Remove from favourites
 
 gui-import-window-save-preset = Save as preset…
 
+gui-import-window-saved = Saved sources
+
 gui-import-window-select = Select:
 
 gui-import-window-select-all = all
@@ -1578,6 +1580,38 @@ gui-theme-unknown = theme { $name }: no theme `{ $name }`: { $default } is used 
 gui-vault-unreadable = Cannot read the library: { $error }
 
 gui-window-frame-error = window frame: { $error }
+
+gui-wizard-account = Account
+
+gui-wizard-add = Add the source
+
+gui-wizard-back = Back
+
+gui-wizard-card = Cards and cameras are listed on their own when they are inserted, with the default choices: there is nothing to add.
+
+gui-wizard-choices = How its photos are imported. You can change these later in the Choices column.
+
+gui-wizard-choose = Choose…
+
+gui-wizard-folder = Folder
+
+gui-wizard-kind = What kind of source is it?
+
+gui-wizard-name = Source name
+
+gui-wizard-name-help = How the source is listed in the Sources column
+
+gui-wizard-next = Next
+
+gui-wizard-no-account = No account yet
+
+gui-wizard-no-folder = No folder there
+
+gui-wizard-no-library = Open a library first: accounts are kept in it
+
+gui-wizard-sign-in = Sign in to an account…
+
+gui-wizard-title = Add a source
 
 gui-workshops-ai-left = AI per photo: { $junctions } junctions, { $calls } calls
 

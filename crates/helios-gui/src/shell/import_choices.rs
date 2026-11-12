@@ -423,9 +423,10 @@ impl ImportWindow {
                 "Metadata templates and time offsets come later.",
             )),
             shown_for: w.sources.showing.as_ref().map(|key| {
-                let source = match key {
-                    SourceKey::Folder(p) => folder_name(p),
-                    SourceKey::Account(id) => w.account_label(id),
+                let source = match (w.sources.name_of(key), key) {
+                    (Some(name), _) => name.to_string(),
+                    (None, SourceKey::Folder(p)) => folder_name(p),
+                    (None, SourceKey::Account(id)) => w.account_label(id),
                 };
                 if w.sources.own(key).is_some() {
                     t(Message::new(

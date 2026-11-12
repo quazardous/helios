@@ -82,6 +82,7 @@ mod import_accounts;
 mod import_choices;
 mod import_sources;
 mod import_window;
+mod import_wizard;
 mod lifetime;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use lifetime::Closing;

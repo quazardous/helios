@@ -1,9 +1,9 @@
 //! The import window's accounts (`docs/design/import-connectors.md`,
 //! sections 2.4.1 and 8.2): the Sources column lists the accounts of the
 //! connectors that declare a connection process, each with its state
-//! (connected, connecting, needs attention, not connected), and "Add a
-//! source…" offers those connectors. Picking one, or "Reconnect" on an
-//! account, runs its declared steps through the one generic flow
+//! (connected, connecting, needs attention, not connected), and the "Add
+//! a source…" wizard offers those connectors. Signing in there, or
+//! "Reconnect" on an account, runs its declared steps through the one generic flow
 //! ([`helios_connect::connect::Session`]), shown in a dialog of the
 //! window: a form's fields, a spinner while a step works, the page the
 //! browser was opened on, the reason a step failed.
@@ -431,9 +431,9 @@ pub(crate) enum Asked {
 }
 
 /// The accounts under their heading, each with its state and, in its
-/// menu, "Reconnect" and "Sign out"; then "Add a source…" with the
-/// connectors that declare a connection process. Nothing without a
-/// library, or when no account exists and no connector can be added.
+/// menu, "Reconnect" and "Sign out". An account is added through the
+/// "Add a source…" wizard ([`super::import_wizard`]). Nothing without a
+/// library, or when no account exists.
 pub(crate) fn accounts_ui(
     ui: &mut egui::Ui,
     accounts: &mut Accounts,
@@ -442,9 +442,8 @@ pub(crate) fn accounts_ui(
     t: &dyn Fn(Message) -> String,
 ) -> Option<Asked> {
     accounts.book.as_ref()?;
-    let addable = connectors.addable();
     let listed = accounts.listed().to_vec();
-    if listed.is_empty() && addable.is_empty() {
+    if listed.is_empty() {
         return None;
     }
     let mut asked = None;
@@ -511,22 +510,6 @@ pub(crate) fn accounts_ui(
         {
             asked = Some(Asked::Pick(account.id.clone()));
         }
-    }
-    if !addable.is_empty() {
-        ui.menu_button(
-            t(Message::new(
-                "gui-import-window-add-source",
-                "Add a source…",
-            )),
-            |ui| {
-                for (id, label) in &addable {
-                    if ui.button(t(Message::new(&label.key, &label.en))).clicked() {
-                        asked = Some(Asked::Add(id.clone()));
-                        ui.close();
-                    }
-                }
-            },
-        );
     }
     asked
 }
