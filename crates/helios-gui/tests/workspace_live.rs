@@ -383,6 +383,113 @@ fn files_changed_outside_are_seen_and_reloaded_as_one_step_part_by_part() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// The value of the `exposure` node's `exposure` parameter in a network.
+fn exposure(network: &Value) -> Value {
+    network["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["name"] == "exposure")
+        .unwrap()["params"]["exposure"]["float"]
+        .clone()
+}
+
+#[test]
+fn files_changed_outside_reload_the_part_changed_only_and_files_rewritten_as_they_were_nothing() {
+    use egui_pop::model::panels::Area;
+    use helios_template::workspace::STATE_DIR;
+    let root = temp("parts");
+    let (mut h, _config, _dir, files) = window(&root);
+    let state_dir = files.own.join(STATE_DIR);
+    let graph = panel("helios.graph");
+    // The window's own step writes the workspace's state.
+    h.state_mut()
+        .edit_workspace(&json!({ "name": "Mine" }), &Origin::User)
+        .unwrap();
+    h.run();
+    assert!(state_dir.is_dir());
+    // The user opens a panel after that: the copy of the layout written
+    // with the state follows at once.
+    let mut opened = h.state().layout();
+    assert!(!opened.shows(&graph));
+    opened.place(&graph, Area::Bottom);
+    h.state_mut().set_layout(opened);
+    h.run();
+    assert!(h.state().layout().shows(&graph));
+    assert!(files.load_on_disk().unwrap().bundle.layout.shows(&graph));
+    let before = steps(&h);
+    // Only the network changes outside Helios: the new network applies,
+    // the panel stays open.
+    let template = state_dir.join("template.json");
+    let mut json: Value =
+        serde_json::from_str(&std::fs::read_to_string(&template).unwrap()).unwrap();
+    for n in json["network"]["nodes"].as_array_mut().unwrap() {
+        if n["name"] == "exposure" {
+            n["params"]["exposure"]["float"] = json!(0.9);
+        }
+    }
+    std::fs::write(
+        &template,
+        format!("{}\n", serde_json::to_string_pretty(&json).unwrap()),
+    )
+    .unwrap();
+    assert!(
+        h.state().wait_workspace_files(DEADLINE),
+        "the change was not seen"
+    );
+    h.run();
+    let network = |h: &Harness<'static, Shell>| {
+        serde_json::to_value(&h.state().workspace_state().unwrap().bundle.template.network).unwrap()
+    };
+    assert_eq!(exposure(&network(&h)), json!(0.9));
+    assert!(h.state().layout().shows(&graph), "the panel stays open");
+    assert_eq!(steps(&h), before + 1);
+    // Only the layout changes outside Helios: the new layout applies,
+    // the network stays.
+    let copy = state_dir.join("layout.json");
+    let mut theirs =
+        egui_pop::model::layout::Layout::from_json(&std::fs::read_to_string(&copy).unwrap())
+            .unwrap();
+    theirs.hide(&graph);
+    std::fs::write(&copy, format!("{}\n", theirs.to_json())).unwrap();
+    assert!(
+        h.state().wait_workspace_files(DEADLINE),
+        "the change was not seen"
+    );
+    h.run();
+    assert!(!h.state().layout().shows(&graph), "the new layout applies");
+    assert_eq!(exposure(&network(&h)), json!(0.9));
+    assert_eq!(steps(&h), before + 2);
+    // The files rewritten with what they hold (touched, a sync tool
+    // copying them back): nothing is reloaded.
+    let mut all = vec![files.own.join(helios_template::workspace::POINTER)];
+    let mut dirs = vec![state_dir.clone()];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            if e.path().is_dir() {
+                dirs.push(e.path());
+            } else {
+                all.push(e.path());
+            }
+        }
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    for f in &all {
+        let bytes = std::fs::read(f).unwrap();
+        std::fs::write(f, bytes).unwrap();
+    }
+    assert!(
+        !h.state().wait_workspace_files(Duration::from_secs(2)),
+        "files holding what the window knows are no change"
+    );
+    assert_eq!(h.state_mut().check_workspace_files(), None);
+    h.run();
+    assert_eq!(steps(&h), before + 2);
+    assert!(!h.state().layout().shows(&graph));
+    drop(h);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn an_agent_moves_the_places_and_modes_of_the_desktop_holding_the_workspace() {
     let root = temp("context");

@@ -15,8 +15,11 @@
 //!   dropped and the agent told.
 //! - **Files changed outside it are reloaded.** A thread watches the
 //!   workspace's files and asks for a frame when they change; the desktop
-//!   then compares them with what it last wrote there and, when they
-//!   differ, takes the change in as one undo step, part by part
+//!   then compares them, part by part (the network and the rest, the
+//!   copy of the layout), with what it last wrote or read there: a part
+//!   whose files hold what it wrote (the same content, touched or not)
+//!   is no change, and a part left alone keeps what the desktop shows.
+//!   A change is taken in as one undo step, part by part
 //!   (`workspace::merge`): a part only the files changed is taken, a part
 //!   only the desktop changed is kept, and a part both changed is taken
 //!   from the files, the desktop's own version one Edit > Undo back, and
@@ -33,7 +36,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use helios_core::Message;
 use helios_shell::commands::Origin;
-use helios_template::workspace::{self, Files, Holder, State};
+use helios_template::workspace::{self, Files, Hashes, Holder, State};
 use serde_json::{Value, json};
 
 use super::{Shell, lock};
@@ -64,6 +67,9 @@ struct Shared {
     changed: AtomicBool,
     /// The desktop is closing: requests are sent back to the files.
     closed: AtomicBool,
+    /// What the files held, part by part, when the desktop last wrote or
+    /// read them: the watcher says nothing of files that still hold it.
+    known: Mutex<Option<Hashes>>,
     waker: Mutex<Option<egui::Context>>,
 }
 
@@ -98,8 +104,8 @@ fn socket_path() -> PathBuf {
 }
 
 /// The files the watcher looks at, with when each last changed and its
-/// size: the workspace's state and its pointer (its layout is egui-pop's
-/// to save, and a change made outside comes with the state).
+/// size: the workspace's state (the copy of its layout included) and its
+/// pointer; egui-pop's own layout document is its to save.
 fn fingerprint(files: &Files) -> Vec<(PathBuf, Option<SystemTime>, u64)> {
     fn walk(dir: &std::path::Path, out: &mut Vec<(PathBuf, Option<SystemTime>, u64)>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -160,6 +166,12 @@ impl Live {
                     seen = now;
                 } else if now != last {
                     last = now;
+                    // Files rewritten with what the desktop wrote (its
+                    // own save, a touch) are no change.
+                    let known = *lock(&shared.known);
+                    if known == Some(watched.hashes()) {
+                        continue;
+                    }
                     {
                         let _pending = lock(&shared.pending);
                         shared.changed.store(true, Ordering::Relaxed);
@@ -182,6 +194,11 @@ impl Live {
     /// Where agents reach the desktop for this workspace.
     pub(super) fn holder(&self) -> Option<&Holder> {
         self.holder.as_ref()
+    }
+
+    /// Tells the watcher what the files hold as the desktop knows them.
+    pub(super) fn know(&self, hashes: Hashes) {
+        *lock(&self.shared.known) = Some(hashes);
     }
 
     /// Stops serving: the requests waiting are sent back to the files,
@@ -357,11 +374,83 @@ impl Shell {
     }
 
     /// What the workspace's files hold now, when it is not what the
-    /// desktop last wrote or read there.
+    /// desktop last wrote or read there: a part whose files hold what it
+    /// knows (the network and the rest, or the copy of the layout) comes
+    /// as the desktop knows it, so only the part changed is compared and
+    /// reloaded.
     pub(super) fn changed_outside(&self) -> Option<State> {
         let edit = self.focus.edit.as_ref()?;
-        let theirs = edit.files.load_on_disk().ok()?;
+        let now = edit.files.hashes();
+        let (network, layout) = (
+            now.network != edit.known.network,
+            now.layout != edit.known.layout,
+        );
+        if !(network || layout) {
+            return None;
+        }
+        let mut theirs = edit.files.load_on_disk().ok()?;
+        let base = edit.disk_state().ok()?;
+        if !network {
+            theirs = State {
+                bundle: helios_template::Bundle {
+                    layout: theirs.bundle.layout,
+                    ..base.bundle.clone()
+                },
+                ..base.clone()
+            };
+        }
+        if !layout {
+            theirs.bundle.layout = base.bundle.layout;
+        }
         (theirs.to_json() != edit.disk).then_some(theirs)
+    }
+
+    /// Remembers what the workspace's files hold now as what the desktop
+    /// wrote or read there: the parts named, the others as they were (a
+    /// change made outside to them is still to be taken in).
+    pub(super) fn know_workspace_files(&mut self, network: bool, layout: bool) {
+        let Some(edit) = &mut self.focus.edit else {
+            return;
+        };
+        let now = edit.files.hashes();
+        if network {
+            edit.known.network = now.network;
+        }
+        if layout {
+            edit.known.layout = now.layout;
+        }
+        if let Some(live) = &edit.live {
+            live.know(edit.known);
+        }
+    }
+
+    /// Writes the copy of the layout kept with the workspace's state as
+    /// the layout shown (egui-pop just saved its own document), so a
+    /// reload never brings back an older one. Not while the files hold a
+    /// layout changed outside and not taken in yet.
+    pub(super) fn keep_layout_copy(&mut self) {
+        let layout = self.own_layout();
+        let Some(edit) = &mut self.focus.edit else {
+            return;
+        };
+        if edit.files.hashes().layout != edit.known.layout {
+            return;
+        }
+        match edit.files.save_layout_copy(&layout) {
+            Ok(_) => {
+                if let Ok(text) = serde_json::from_str::<Value>(&layout.to_json()) {
+                    edit.disk["layout"] = text;
+                }
+                self.know_workspace_files(false, true);
+            }
+            Err(e) => self.warn(
+                Message::new(
+                    "gui-layout-not-saved",
+                    "The layout was not saved: { $error }",
+                )
+                .with("error", e),
+            ),
+        }
     }
 
     /// Takes in a change made to the workspace's files outside the
@@ -379,21 +468,15 @@ impl Shell {
         let Some(edit) = self.focus.edit.as_ref() else {
             return Default::default();
         };
+        // The copy of the layout in the files is kept as the layout shown
+        // ([`Shell::keep_layout_copy`]): the desktop changed it when it
+        // differs from that copy.
         let base = edit.disk_state();
         let Some(ours) = self.workspace_state() else {
             return Default::default();
         };
-        // The layout is egui-pop's to save, as it changes: the desktop
-        // changed it when it differs from what egui-pop last saved, and
-        // the files compare with that too.
-        let saved = self.own_panels(
-            self.focus
-                .layout_saved
-                .clone()
-                .unwrap_or_else(|| self.layout()),
-        );
         let base = base.map(|mut b| {
-            b.bundle.layout = saved;
+            b.bundle.layout = self.own_panels(b.bundle.layout);
             b
         });
         let mut compared = theirs.clone();
@@ -415,6 +498,7 @@ impl Shell {
             // The files as they are now: what the step below writes over.
             edit.disk = theirs.to_json();
         }
+        self.know_workspace_files(true, true);
         if merged.taken.is_empty() {
             // Nothing new in the files; what the desktop shows goes there.
             if ours.to_json() != theirs.to_json() {

@@ -94,6 +94,9 @@ pub(super) struct Edited {
     /// (`State::to_json`, read as `Files::load_on_disk` reads it): a
     /// difference is a change made outside the desktop.
     pub(super) disk: Value,
+    /// What its files held, part by part, when the desktop last wrote
+    /// or read them: a part whose files hold the same is not compared.
+    pub(super) known: helios_template::workspace::Hashes,
     /// Its endpoint for agents and the watcher of its files.
     pub(super) live: Option<super::workspace_live::Live>,
     /// egui-pop's workspace keymap layer as the workspace's keys last
@@ -142,6 +145,7 @@ impl Shell {
         state.bundle.layout = self.own_layout();
         let origin = files.origin().transpose()?;
         let disk = files.load_on_disk()?.to_json();
+        let known = files.hashes();
         let text = state.to_json().to_string();
         lock(&self.core.values).declare_with(
             STATE,
@@ -165,10 +169,16 @@ impl Shell {
             network_changed: false,
             kept: BTreeSet::new(),
             disk,
+            known,
             live: Some(live),
             keys_loaded: Vec::new(),
             library: Vec::new(),
         });
+        self.know_workspace_files(true, true);
+        // The copy of the layout written with the state is the one shown
+        // from now on (one from an older session would read as the
+        // desktop's own change at the first reload).
+        self.keep_layout_copy();
         self.read_library();
         self.offer_workspace_keys();
         self.keys_loaded();
@@ -284,7 +294,7 @@ impl Shell {
 
     /// The layout shown, Helios's panels only: egui-pop's own (the jobs
     /// centre) belong to the application, not to a workspace.
-    fn own_layout(&self) -> Layout {
+    pub(super) fn own_layout(&self) -> Layout {
         self.own_panels(self.layout())
     }
 
@@ -478,10 +488,11 @@ impl Shell {
         // written over: taken in first, as a step of their own, which
         // writes the result.
         let outside = self.changed_outside();
+        // Applied first: the layout written with it is the one shown.
+        self.apply_workspace(Some(&before), &next);
         if outside.is_none() {
             self.write_workspace(&next);
         }
-        self.apply_workspace(Some(&before), &next);
         if before.bundle.template.tools != next.bundle.template.tools {
             self.keys_loaded();
         }
@@ -499,11 +510,18 @@ impl Shell {
     /// Writes a state to the workspace's files (its layout being
     /// egui-pop's to save), remembered as what the files hold.
     pub(super) fn write_workspace(&mut self, state: &State) {
+        // The copy of the layout written with it is the layout shown,
+        // never the one the state's step was made with.
+        let mut state = state.clone();
+        state.bundle.layout = self.own_layout();
         let Some(edit) = &mut self.focus.edit else {
             return;
         };
-        match edit.files.save(state, false) {
-            Ok(()) => edit.disk = state.to_json(),
+        match edit.files.save(&state, false) {
+            Ok(()) => {
+                edit.disk = state.to_json();
+                self.know_workspace_files(true, true);
+            }
             Err(e) => self.warn(
                 Message::new(
                     "gui-workspace-not-saved",
