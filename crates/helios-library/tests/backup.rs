@@ -405,13 +405,13 @@ fn an_import_triggers_a_backup_when_the_strategy_says_so() {
     // Without "on import": nothing.
     library_strategy(&w.vault, &[Trigger::ByHand]);
     let imported = import_into(&w.vault, &w.jobs, &[w.p.join("roll")], &library);
-    let none = backup::after_import(&w.vault, &w.jobs, &w.plugged, &imported, 500).unwrap();
+    let none = backup::after_import(&w.vault, &w.jobs, &w.plugged, &imported, 500, None).unwrap();
     assert!(none.is_empty());
     // With it: the new photo is copied.
     library_strategy(&w.vault, &[Trigger::OnImport]);
     photo(&w.p.join("roll2/b.raf"), 5);
     let imported = import_into(&w.vault, &w.jobs, &[w.p.join("roll2")], &library);
-    let done = backup::after_import(&w.vault, &w.jobs, &w.plugged, &imported, 500).unwrap();
+    let done = backup::after_import(&w.vault, &w.jobs, &w.plugged, &imported, 500, None).unwrap();
     assert_eq!(done.len(), 1);
     // Both photos were below the strategy: both copied.
     assert_eq!(done[0].copied, 2, "{done:?}");
@@ -420,7 +420,7 @@ fn an_import_triggers_a_backup_when_the_strategy_says_so() {
     photo(&w.p.join("roll3/c.raf"), 7);
     let imported = import_into(&w.vault, &w.jobs, &[w.p.join("roll3")], &library);
     assert!(
-        backup::after_import(&w.vault, &w.jobs, &w.plugged, &imported, 500)
+        backup::after_import(&w.vault, &w.jobs, &w.plugged, &imported, 500, None)
             .unwrap()
             .is_empty()
     );
@@ -545,7 +545,7 @@ fn a_card_import_makes_the_library_copy_then_the_strategy_s_backups() {
     library_strategy(&w.vault, &[Trigger::OnImport]);
     let report = import_into(&w.vault, &w.jobs, std::slice::from_ref(&card), &library);
     assert_eq!((report.added, report.copied), (2, 2), "{report:?}");
-    let done = backup::after_import(&w.vault, &w.jobs, &w.plugged, &report, 500).unwrap();
+    let done = backup::after_import(&w.vault, &w.jobs, &w.plugged, &report, 500, None).unwrap();
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].copied, 2, "{done:?}");
     for (_, id) in &report.cards[0].files {

@@ -77,9 +77,12 @@ after it. The host waits for that stop with a deadline
 and the next opening checks the file. Every step is already in the vault
 by then: nothing saved waits for the quit. A window closing while
 another remains leaves the node and its vault as they are, and the
-exports running: they are the node's jobs, not a window's. The node's
-stop waits for them, or cancels them first when the quit was confirmed
-(the question asked when jobs are running), before its last flush.
+exports, backups and health checks running: they are the node's jobs,
+not a window's (`helios_gui::node_jobs` for the backups and the health
+check). The node's stop waits for them, or cancels them first when the
+quit was confirmed (the question asked when jobs are running), before
+its last flush; a cancelled backup stops before its next photo, the copy
+under way recorded while the vault is still open.
 
 **Survival scenarios** gate a release (`cargo xtask release` runs them
 first, CI runs them by name): `cargo survival` runs the desktop's (quit

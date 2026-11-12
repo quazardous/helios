@@ -41,6 +41,7 @@ pub mod masks;
 pub mod modules;
 pub mod navigator;
 pub mod node;
+pub mod node_jobs;
 pub mod params;
 pub mod persist;
 pub mod platform;

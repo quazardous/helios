@@ -12,7 +12,8 @@
 //! closed cleanly, later writes refused).
 //!
 //! The node runs the work that outlives a window ([`NodeJobs`], adopted
-//! with [`Link::adopt`]): the exports today. A window starts such work and
+//! with [`Link::adopt`]): the exports, the backups and the health check
+//! ([`crate::node_jobs`]). A window starts such work and
 //! watches it through the jobs API (the Queue panel, the jobs centre);
 //! closing it leaves the work running. The node's stop waits for that
 //! work, or cancels it first when the quit was confirmed as cancelling
@@ -33,7 +34,7 @@ use helios_vault::{Store, Vault};
 pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
 
 /// Work the node runs for its clients, which outlives their windows
-/// (exports; backups and health checks can follow): what a quit asks
+/// (exports, backups, the health check): what a quit asks
 /// about, and what the node's stop cancels or waits for.
 pub trait NodeJobs: Send + Sync {
     /// The jobs running that a quit would cancel, by id.
@@ -111,8 +112,10 @@ impl Life {
     }
 
     /// Before the last flush: the jobs cancelled when the quit said so,
-    /// waited for otherwise. Cancelled jobs are not waited for: they write
-    /// nothing to the vault, and their renders under way end on their own.
+    /// waited for otherwise. Cancelled exports are not waited for: they
+    /// write nothing to the vault, and their renders under way end on
+    /// their own. A job whose last step writes to the vault (a backup
+    /// recording its copy) waits in its own `cancel_all`.
     fn settle_jobs(&self) {
         let jobs = self.jobs();
         if self.read(|s| s.quit == Some(AtQuit::Cancel)) {

@@ -62,6 +62,7 @@ fn earlier_layout(workspace: &Path, ui_settings: &Path) -> Option<Layout> {
 
 type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
 type LocalNode = helios_gui::node::LocalNode<helios_vault_sqlite::SqliteStore>;
+type Backups = helios_gui::node_jobs::Backups<helios_vault_sqlite::SqliteStore>;
 
 /// A problem worth knowing: on the terminal, and in the log file once the
 /// window's logs are set up.
@@ -338,44 +339,6 @@ fn health_plugins(broker: &helios_plugin::Broker) -> Vec<helios_health::plugins:
     out
 }
 
-/// One backup run at a time, whatever started it.
-static BACKUPS: helios_library::backup::Gate = helios_library::backup::Gate::new();
-
-/// Backs up, on a thread of its own, what is below the library's strategy
-/// when it runs on `trigger`, to each destination plugged in (see
-/// `helios_library::backup::run`); a run asked while one goes on is
-/// dropped. An import's report makes it the after-import trigger.
-fn back_up<S: helios_vault::Store + 'static>(
-    vault: Arc<helios_vault::Vault<S>>,
-    jobs: helios_core::jobs::Jobs,
-    trigger: helios_storage::strategy::Trigger,
-    imported: Option<helios_library::import::Report>,
-) {
-    std::thread::spawn(move || {
-        let mounted = helios_storage::system();
-        let ran = BACKUPS.run(|| match &imported {
-            Some(report) => helios_library::backup::after_import(
-                &vault,
-                &jobs,
-                mounted.as_ref(),
-                report,
-                seconds(),
-            ),
-            None => helios_library::backup::run(
-                &vault,
-                &jobs,
-                mounted.as_ref(),
-                trigger,
-                seconds(),
-                None,
-            ),
-        });
-        if let Some(Err(e)) = ran {
-            warn(&format!("backup: {e}"));
-        }
-    });
-}
-
 /// Fills, on a thread of its own, the capture fields (time, camera, lens,
 /// settings) of the photos imported before Helios kept them
 /// (`helios_library::capture::backfill`): a job in the jobs centre that
@@ -554,6 +517,7 @@ fn catalogue_commands(
 fn library_commands(
     shell: &mut Shell,
     persist: &Persist,
+    backups: Option<&Arc<Backups>>,
     plugins: &Arc<helios_plugin::Broker>,
     refill: &Arc<AtomicBool>,
     ctx: &egui::Context,
@@ -564,6 +528,8 @@ fn library_commands(
 
     let text = |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
     let (vault, jobs) = (persist.vault().clone(), shell.jobs());
+    // The node's backups, for the strategy's "after each import".
+    let after_import = backups.cloned();
     let (done, ctx) = (refill.clone(), ctx.clone());
     // Each file's line goes to the shell with the import's arguments (the
     // Duplicates panel, so a duplicate kept is imported again the same
@@ -594,6 +560,7 @@ fn library_commands(
     {
         let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
         let history = history.clone();
+        let backed = after_import.clone();
         shell.set_import_remote(Arc::new(move |connector, source, items| {
             let remote = helios_library::fetch::Remote {
                 connector,
@@ -612,12 +579,13 @@ fn library_commands(
             )?;
             let label = helios_gui::library_history::import_label(report.added + report.located);
             history.record(label, std::mem::take(&mut report.changes), seconds_f64());
-            back_up(
-                vault.clone(),
-                jobs.clone(),
-                helios_storage::strategy::Trigger::OnImport,
-                Some(report.clone()),
-            );
+            // The strategy's "after each import", run by the node.
+            if let Some(backups) = &backed {
+                backups.start(
+                    helios_storage::strategy::Trigger::OnImport,
+                    Some(report.clone()),
+                );
+            }
             done.store(true, Ordering::Relaxed);
             ctx.request_repaint();
             Ok(report.added)
@@ -644,8 +612,8 @@ fn library_commands(
             }
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
             let (lines, asked, history) = (lines.clone(), args.clone(), history.clone());
+            let backed = after_import.clone();
             std::thread::spawn(move || {
-                let backed = (vault.clone(), jobs.clone());
                 // The job's events say how it went; the lines feed the
                 // Duplicates panel.
                 let mut emit = |line: &Value| {
@@ -677,13 +645,14 @@ fn library_commands(
                         );
                         let changes = std::mem::take(&mut report.changes);
                         history.record(label, changes, seconds_f64());
-                        // The strategy's "after each import".
-                        back_up(
-                            backed.0,
-                            backed.1,
-                            helios_storage::strategy::Trigger::OnImport,
-                            Some(report.clone()),
-                        );
+                        // The strategy's "after each import", run by the
+                        // node.
+                        if let Some(backups) = &backed {
+                            backups.start(
+                                helios_storage::strategy::Trigger::OnImport,
+                                Some(report.clone()),
+                            );
+                        }
                         json!({ "ended": report })
                     }
                     Err(e) => {
@@ -698,34 +667,10 @@ fn library_commands(
             Ok(json!({ "queued": true }))
         },
     )?;
-    let (vault, backup_jobs) = (persist.vault().clone(), shell.jobs());
-    shell.register(
-        CommandSpec::new(
-            helios_gui::shell::BACKUP_NOW_COMMAND,
-            "Back up now: copy the photos short of the library's backup strategy to its disks plugged in, verified, as a job",
-            "Library",
-        ),
-        move |_, _| {
-            // The answer comes before the copies: errors a person must see
-            // first (no strategy, no disk plugged in).
-            let s = helios_storage::strategy::load(&vault, &helios_storage::strategy::Scope::Library)?
-                .ok_or("no backup strategy set: choose one on the Storage page")?;
-            let volumes = helios_storage::registry::merged(
-                &vault,
-                &helios_storage::system().volumes(),
-            )?;
-            if helios_storage::strategy::destinations_online(&s, &volumes).is_empty() {
-                return Err("no backup disk of the strategy is plugged in".into());
-            }
-            back_up(
-                vault.clone(),
-                backup_jobs.clone(),
-                helios_storage::strategy::Trigger::ByHand,
-                None,
-            );
-            Ok(json!({ "queued": true }))
-        },
-    )?;
+    // "Back up now": the node runs the copies.
+    if let Some(backups) = backups {
+        helios_gui::node_jobs::register_back_up_now(shell, backups)?;
+    }
     let vault = persist.vault().clone();
     shell.register(
         CommandSpec::new(
@@ -1952,6 +1897,17 @@ fn main() -> Result<(), String> {
             if let Some(link) = node_link.clone() {
                 shell.attach_node(link);
             }
+            // The node runs the backups (its jobs): they go on when the
+            // window that started them closes.
+            let backups = persist.as_ref().zip(node_link.as_ref()).map(|(p, link)| {
+                Backups::new(
+                    p.vault().clone(),
+                    shell.jobs(),
+                    helios_storage::system(),
+                    |e| warn(&e),
+                )
+                .adopted_by(link)
+            });
             let _ = WINDOW.set(cc.egui_ctx.clone());
             shell.library_mut().set_texture_budget(texture_budget);
             // The render cache's budget (`system.cache.budget` / `share`).
@@ -2001,15 +1957,11 @@ fn main() -> Result<(), String> {
                 shell.on_volumes_changed(move || scanner.poke());
                 // The strategy's "when a backup disk is plugged in": what
                 // is short goes to it.
-                let (backed, jobs) = (vault.clone(), shell.jobs());
-                shell.on_volumes_changed(move || {
-                    back_up(
-                        backed.clone(),
-                        jobs.clone(),
-                        helios_storage::strategy::Trigger::OnConnect,
-                        None,
-                    );
-                });
+                if let Some(backups) = backups.clone() {
+                    shell.on_volumes_changed(move || {
+                        backups.start(helios_storage::strategy::Trigger::OnConnect, None);
+                    });
+                }
                 // The Storage page, and the volumes offline photos name.
                 let marker = helios_library::import::library_root(&vault)
                     .ok()
@@ -2144,14 +2096,25 @@ fn main() -> Result<(), String> {
             // The health check (Help > Health check): Helios's checks
             // over this machine's volumes and the vault, a while after
             // start, daily and when a volume comes or goes.
+            // The node keeps its schedule (its job), with or without a
+            // window; the shell shows the same runner's findings.
             let (cards, settings) = (shell.waiting_cards(), shell.app().handle().store());
-            shell.set_health(health_runner(
+            let runner = health_runner(
                 health_vault.clone(),
                 health_file.clone(),
                 cards,
                 settings,
                 plugins.clone(),
-            ));
+            );
+            runner.report_to(shell.jobs());
+            if let Some(link) = &node_link {
+                helios_gui::node_jobs::Health::adopted_by(
+                    runner.clone(),
+                    link,
+                    std::time::Duration::from_secs(10),
+                );
+            }
+            shell.set_health(runner);
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );
@@ -2202,7 +2165,14 @@ fn main() -> Result<(), String> {
             }
             let refill = Arc::new(AtomicBool::new(false));
             if let Some(p) = &persist
-                && let Err(e) = library_commands(&mut shell, p, &plugins, &refill, &cc.egui_ctx)
+                && let Err(e) = library_commands(
+                    &mut shell,
+                    p,
+                    backups.as_ref(),
+                    &plugins,
+                    &refill,
+                    &cc.egui_ctx,
+                )
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
