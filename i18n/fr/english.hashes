@@ -1151,7 +1151,13 @@ menu-helios-masks-row-add.label ea5be6af4dfc4a82
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133
-node-batch-only 024c6eb45ab6eb37
+node-batch-only 4c5b1c030894c77b
+node-command-debug-only 567e960246ad044d
+node-command-needs-vault e304707e4a7d2ace
+node-command-needs-window e396d1bcf84e2c11
+node-command-origin 0ec35222dda3dfce
+node-command-params c982161f016803d8
+node-command-unknown 173dc16b73b51bb0
 node-edit-not-saved 6371e83fc812ed88
 node-job-unknown 39f3e78315b7e6c2
 node-load-refused 3c406345cb7a783e

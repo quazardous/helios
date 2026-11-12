@@ -663,6 +663,73 @@ pub mod control {
             #[serde(default = "yes")]
             dry_run: bool,
         },
+        /// The node's commands: every verb above as a command, with its
+        /// label, the JSON schema of its params, what it needs (a vault,
+        /// a window) and whether it can run here, with the reason when it
+        /// cannot. `filter` keeps the commands whose id or label holds
+        /// every one of its words; `enabled_only` those that can run.
+        #[serde(rename = "commands.list")]
+        CommandsList {
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            filter: Option<String>,
+            #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+            enabled_only: bool,
+        },
+        /// Runs a command by its id: its `params` are checked against its
+        /// schema, then it runs as the request it names would, its change
+        /// to the edit saved under `origin` (`user`, `cli`, `control`,
+        /// `agent:NAME`, `script:NAME`; `control` when not given).
+        #[serde(rename = "command.run")]
+        CommandRun {
+            id: String,
+            #[serde(default = "no_params")]
+            params: serde_json::Value,
+            #[serde(default = "control_origin")]
+            origin: String,
+        },
+    }
+
+    impl ControlRequest {
+        /// The verb that names it on the wire (its `cmd`), which is also
+        /// its command id.
+        pub fn verb(&self) -> &'static str {
+            match self {
+                Self::Render { .. } => "render",
+                Self::SetParam { .. } => "set_param",
+                Self::NodeBypass { .. } => "node.bypass",
+                Self::LoadSource { .. } => "load_source",
+                Self::Export { .. } => "export",
+                Self::Cancel { .. } => "cancel",
+                Self::JobCancel { .. } => "job.cancel",
+                Self::BatchStart { .. } => "batch_start",
+                Self::BatchEnd { .. } => "batch_end",
+                Self::Pause => "pause",
+                Self::Resume => "resume",
+                Self::Fault { .. } => "fault",
+                Self::Decisions => "decisions",
+                Self::DecisionResolve => "decision_resolve",
+                Self::DecisionAccept { .. } => "decision_accept",
+                Self::DecisionDecide { .. } => "decision_decide",
+                Self::DecisionReask { .. } => "decision_reask",
+                Self::WorkflowSubmit { .. } => "workflow.submit",
+                Self::WorkflowRuns => "workflow.runs",
+                Self::WorkflowItems { .. } => "workflow.items",
+                Self::WorkflowForget { .. } => "workflow.forget",
+                Self::WorkflowCancel { .. } => "workflow.cancel",
+                Self::WorkflowRetry { .. } => "workflow.retry",
+                Self::WorkflowPrioritize { .. } => "workflow.prioritize",
+                Self::WorkflowPause { .. } => "workflow.pause",
+                Self::WorkflowResume { .. } => "workflow.resume",
+                Self::LibraryImport { .. } => "library.import",
+                Self::SettingsLayerGet { .. } => "settings.layer.get",
+                Self::SettingsLayerSet { .. } => "settings.layer.set",
+                Self::CacheStats => "cache.stats",
+                Self::CacheClear { .. } => "cache.clear",
+                Self::CalibrateChart { .. } => "calibrate.chart",
+                Self::CommandsList { .. } => "commands.list",
+                Self::CommandRun { .. } => "command.run",
+            }
+        }
     }
 
     /// Where `workflow.prioritize` moves items within their run.
@@ -721,5 +788,60 @@ pub mod control {
 
     fn output() -> String {
         "output".into()
+    }
+
+    fn no_params() -> serde_json::Value {
+        serde_json::Value::Object(serde_json::Map::new())
+    }
+
+    fn control_origin() -> String {
+        "control".into()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::ControlRequest;
+
+        /// `verb` is the `cmd` the request is written with.
+        #[test]
+        fn the_verb_is_the_wire_name() {
+            for request in [
+                ControlRequest::Pause,
+                ControlRequest::WorkflowRuns,
+                ControlRequest::CacheStats,
+                ControlRequest::JobCancel {
+                    id: "export-1".into(),
+                },
+                ControlRequest::SettingsLayerGet {
+                    layer: "user".into(),
+                },
+                ControlRequest::CommandsList {
+                    filter: None,
+                    enabled_only: false,
+                },
+                ControlRequest::CommandRun {
+                    id: "pause".into(),
+                    params: serde_json::json!({}),
+                    origin: "cli".into(),
+                },
+            ] {
+                let wire = serde_json::to_value(&request).unwrap();
+                assert_eq!(wire["cmd"], request.verb(), "{wire}");
+            }
+        }
+
+        #[test]
+        fn a_command_run_defaults_its_params_and_origin() {
+            let request: ControlRequest =
+                serde_json::from_str(r#"{"cmd":"command.run","id":"pause"}"#).unwrap();
+            assert_eq!(
+                request,
+                ControlRequest::CommandRun {
+                    id: "pause".into(),
+                    params: serde_json::json!({}),
+                    origin: "control".into(),
+                }
+            );
+        }
     }
 }

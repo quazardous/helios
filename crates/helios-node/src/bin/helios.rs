@@ -28,6 +28,8 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
 //!                    | workflow-cancel RUN [ITEMS...] [--node NODE] | workflow-retry RUN [ITEMS...] [--node NODE]
 //!                    | workflow-prioritize RUN top|bottom ITEMS... | workflow-pause RUN | workflow-resume RUN
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] commands [FILTER] [--enabled]
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] run ID [PARAMS-JSON]
 //!
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
@@ -141,6 +143,8 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
                  | workflow-cancel RUN [ITEMS...] [--node NODE] | workflow-retry RUN [ITEMS...] [--node NODE]
                  | workflow-prioritize RUN top|bottom ITEMS... | workflow-pause RUN | workflow-resume RUN
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] commands [FILTER] [--enabled]
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] run ID [PARAMS-JSON]
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar] [--vault FILE] [--again] [--source NAME]
@@ -272,6 +276,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     let (mut port, mut area) = ("output".to_string(), None);
     let (mut format, mut quality, mut to) = (None, None, None);
     let mut again = false;
+    let mut enabled_only = false;
     let mut at = None;
     let mut jobs = None;
     let mut sets: BTreeMap<String, Params> = BTreeMap::new();
@@ -312,6 +317,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
             }
             "--to" => to = Some(absolute(&args.next().ok_or("--to needs a path")?)?),
             "--again" => again = true,
+            "--enabled" => enabled_only = true,
             "--node" => at = Some(args.next().ok_or("--node needs a node name")?),
             "--jobs" => {
                 jobs = Some(usize::try_from(number(args.next(), "--jobs")?).unwrap_or(usize::MAX));
@@ -515,6 +521,25 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
             },
             ["workflow-resume", run] => ControlRequest::WorkflowResume {
                 run: run.to_string(),
+            },
+            ["commands"] => ControlRequest::CommandsList {
+                filter: None,
+                enabled_only,
+            },
+            ["commands", filter] => ControlRequest::CommandsList {
+                filter: Some(filter.to_string()),
+                enabled_only,
+            },
+            ["run", id] => ControlRequest::CommandRun {
+                id: id.to_string(),
+                params: serde_json::json!({}),
+                origin: "cli".into(),
+            },
+            ["run", id, params] => ControlRequest::CommandRun {
+                id: id.to_string(),
+                params: serde_json::from_str(params)
+                    .map_err(|e| format!("run takes its params as JSON: {e}"))?,
+                origin: "cli".into(),
             },
             [] => return Err("control needs an action".into()),
             other => return Err(format!("unknown action `{}`", other.join(" "))),

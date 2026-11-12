@@ -43,6 +43,7 @@
 
 pub mod batch;
 pub mod calibrate;
+pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).
 pub use helios_library::darktable;
 pub mod mcp;

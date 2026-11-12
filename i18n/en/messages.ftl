@@ -1947,7 +1947,19 @@ health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
 
-node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import and settings.layer.*
+node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import, settings.layer.*, commands.list and command.run
+
+node-command-debug-only = only the debug control endpoint runs it (helios-node --control, debug builds)
+
+node-command-needs-vault = the node keeps no vault: start it with --vault
+
+node-command-needs-window = no desktop window holds this workspace
+
+node-command-origin = `{ $origin }` is not an origin: user, cli, control, agent:NAME or script:NAME
+
+node-command-params = `{ $id }` refused its params: { $error }
+
+node-command-unknown = no command `{ $id }`
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 

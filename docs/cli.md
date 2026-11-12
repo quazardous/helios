@@ -42,6 +42,25 @@ started with `--control` and `HELIOS_DEBUG_CONTROL` is set (a sandbox does
 both). `load-source`, `export`, `cancel` and `job-cancel` are also
 answered by the batch endpoint, which every build serves (see below).
 
+`commands [FILTER] [--enabled]` lists the node's commands (`commands.list`):
+every control verb, named by the id it takes on the wire (`export`,
+`workflow.submit`, `library.import`), with its label, the JSON schema of
+its params, what it needs (`vault`: a node started with `--vault`) and
+whether it can run here, with the reason when it cannot (a verb the
+endpoint does not serve, a vault verb on a node without one). `FILTER`
+keeps the commands whose id, label or category holds each of its words;
+`--enabled` those that can run. `run ID [PARAMS-JSON]` runs one
+(`command.run`): its params are checked against its schema first, then it
+answers as its request would, plus `command` and `origin` (`cli`). A
+change to the edit is saved under that origin, and its answer names its
+undo group (`group`, as `set exp.exposure`). Both are answered by the
+batch endpoint too.
+
+```bash
+helios control --socket control.sock commands workflow --enabled
+helios control --socket control.sock run set_param '{"node":"exp","param":"exposure","value":{"float":1.0}}'
+```
+
 `workflow-submit --format F --to DIR IMAGES...` submits the images as a
 **run** of the workflow level (see [workflow-level.md](workflow-level.md)):
 each image is exported through the network by the node itself, claimed
@@ -288,7 +307,8 @@ without Ctrl-C leaves a run on a node it attached to going.
 The batch works with release builds. The node it starts serves the
 *batch endpoint* (`helios-node --batch-control PATH`), not the debug
 control endpoint: it answers `load-source`, `export`, `cancel`,
-`job.cancel` and the runs' `workflow.*` only, on a Unix socket in a
+`job.cancel`, the runs' `workflow.*`, `commands.list` and `command.run`
+only, on a Unix socket in a
 directory made for that run and open to its user alone.
 The other control verbs (render, set-param, pause, fault injection,
 decisions) stay in debug builds. With `--socket` and `--control`, the batch

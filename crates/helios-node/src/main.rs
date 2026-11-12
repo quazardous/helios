@@ -736,6 +736,11 @@ mod control {
     //! endpoint (`--batch-control`, every build) answers only what a batch
     //! export needs: give a source a file, export, cancel a job, and the
     //! batch's own job.
+    //!
+    //! Both also answer `commands.list` and `command.run`: every verb as a
+    //! command (`helios_node::commands`), listed with whether it can run on
+    //! this endpoint and node and why not, and run by id with its params
+    //! checked against its schema.
 
     use std::sync::Arc;
     use std::time::Duration;
@@ -743,7 +748,9 @@ mod control {
     use helios_core::{Event, JobId, Message};
     use helios_export::Format;
     use helios_inspect::control::{ControlRequest, FileFormat};
+    use helios_node::commands;
     use helios_node::workflow::runs::Submit;
+    use helios_node_core::commands::{CommandSpec, Need, check_origin, validate};
     use serde::Serialize;
     use serde_json::{Value, json};
 
@@ -758,6 +765,18 @@ mod control {
 
     impl Event for Action<'_> {
         const KIND: &'static str = "control.action";
+    }
+
+    /// A command is run, by whom: the `control.action` of its request
+    /// follows.
+    #[derive(Serialize)]
+    struct CommandRan<'a> {
+        id: &'a str,
+        origin: &'a str,
+    }
+
+    impl Event for CommandRan<'_> {
+        const KIND: &'static str = "control.command";
     }
 
     fn now() -> u64 {
@@ -779,36 +798,148 @@ mod control {
         )]
         Debug,
         /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`,
-        /// `batch_end`, the runs' `workflow.*` requests, `library.import`
-        /// and `settings.layer.*`: the batch endpoint.
+        /// `batch_end`, the runs' `workflow.*` requests, `library.import`,
+        /// `settings.layer.*`, `commands.list` and `command.run`: the batch
+        /// endpoint.
         Batch,
     }
 
+    /// The verbs the batch endpoint answers.
+    const BATCH_VERBS: &[&str] = &[
+        "load_source",
+        "export",
+        "cancel",
+        "job.cancel",
+        "batch_start",
+        "batch_end",
+        "workflow.submit",
+        "workflow.runs",
+        "workflow.items",
+        "workflow.forget",
+        "workflow.cancel",
+        "workflow.retry",
+        "workflow.prioritize",
+        "workflow.pause",
+        "workflow.resume",
+        "library.import",
+        "settings.layer.get",
+        "settings.layer.set",
+        "commands.list",
+        "command.run",
+    ];
+
     impl Scope {
-        fn allows(self, request: &ControlRequest) -> bool {
-            self == Self::Debug
-                || matches!(
-                    request,
-                    ControlRequest::LoadSource { .. }
-                        | ControlRequest::Export { .. }
-                        | ControlRequest::Cancel { .. }
-                        | ControlRequest::JobCancel { .. }
-                        | ControlRequest::BatchStart { .. }
-                        | ControlRequest::BatchEnd { .. }
-                        | ControlRequest::WorkflowSubmit { .. }
-                        | ControlRequest::WorkflowRuns
-                        | ControlRequest::WorkflowItems { .. }
-                        | ControlRequest::WorkflowForget { .. }
-                        | ControlRequest::WorkflowCancel { .. }
-                        | ControlRequest::WorkflowRetry { .. }
-                        | ControlRequest::WorkflowPrioritize { .. }
-                        | ControlRequest::WorkflowPause { .. }
-                        | ControlRequest::WorkflowResume { .. }
-                        | ControlRequest::LibraryImport { .. }
-                        | ControlRequest::SettingsLayerGet { .. }
-                        | ControlRequest::SettingsLayerSet { .. }
-                )
+        fn allows(self, verb: &str) -> bool {
+            self == Self::Debug || BATCH_VERBS.contains(&verb)
         }
+    }
+
+    /// Why a command cannot run on this endpoint and node, if it cannot.
+    fn disabled(node: &Node, scope: Scope, spec: &CommandSpec) -> Option<Message> {
+        if !scope.allows(&spec.id) {
+            return Some(Message::new(
+                "node-command-debug-only",
+                "only the debug control endpoint runs it (helios-node --control, debug builds)",
+            ));
+        }
+        if spec.needs.contains(&Need::Vault) && node.importer.is_none() {
+            return Some(Message::new(
+                "node-command-needs-vault",
+                "the node keeps no vault: start it with --vault",
+            ));
+        }
+        if spec.needs.contains(&Need::Window) {
+            return Some(Message::new(
+                "node-command-needs-window",
+                "no desktop window holds this workspace",
+            ));
+        }
+        None
+    }
+
+    /// `commands.list`: each command with whether it can run here.
+    fn list(node: &Node, scope: Scope, filter: Option<&str>, enabled_only: bool) -> Value {
+        let commands: Vec<Value> = commands::registry()
+            .specs()
+            .filter(|spec| filter.is_none_or(|f| spec.matches(f)))
+            .filter_map(|spec| {
+                let reason = disabled(node, scope, spec);
+                if enabled_only && reason.is_some() {
+                    return None;
+                }
+                let mut entry = json!(spec);
+                entry["enabled"] = json!(reason.is_none());
+                if let Some(reason) = reason {
+                    entry["reason"] = json!(reason.english);
+                    entry["message"] = json!(reason);
+                }
+                Some(entry)
+            })
+            .collect();
+        json!({ "ok": true, "commands": commands })
+    }
+
+    /// `command.run`: the command's params checked against its schema, then
+    /// the request it names answered as the endpoint would, its change to
+    /// the edit saved under `origin`.
+    fn run(node: &Arc<Node>, scope: Scope, id: &str, params: &Value, origin: &str) -> Value {
+        let Some(spec) = commands::registry().spec(id) else {
+            return refused(
+                None,
+                &Message::new("node-command-unknown", "no command `{ $id }`").with("id", id),
+            );
+        };
+        if check_origin(origin).is_err() {
+            return refused(
+                None,
+                &Message::new(
+                    "node-command-origin",
+                    "`{ $origin }` is not an origin: user, cli, control, agent:NAME or script:NAME",
+                )
+                .with("origin", origin),
+            );
+        }
+        if let Err(error) = validate(&spec.params, params) {
+            return refused(
+                None,
+                &Message::new(
+                    "node-command-params",
+                    "`{ $id }` refused its params: { $error }",
+                )
+                .with("id", id)
+                .with("error", error),
+            );
+        }
+        if let Some(reason) = disabled(node, scope, spec) {
+            return refused(None, &reason);
+        }
+        let mut params = params.clone();
+        // A decision taken through a command is taken by whoever ran it.
+        if spec.params["properties"].get("who").is_some()
+            && let Some(fields) = params.as_object_mut()
+        {
+            fields.entry("who").or_insert_with(|| json!(origin));
+        }
+        let request = match serde_json::from_value::<ControlRequest>(commands::request(id, &params))
+        {
+            Ok(request) => request,
+            Err(error) => {
+                return refused(
+                    None,
+                    &Message::new(
+                        "node-command-params",
+                        "`{ $id }` refused its params: { $error }",
+                    )
+                    .with("id", id)
+                    .with("error", error.to_string()),
+                );
+            }
+        };
+        node.bus.publish(SOURCE, None, &CommandRan { id, origin });
+        let mut answer = answer_as(node, scope, request, origin);
+        answer["command"] = json!(id);
+        answer["origin"] = json!(origin);
+        answer
     }
 
     /// A refusal: its English in `error`, and the message itself in
@@ -836,14 +967,32 @@ mod control {
     const CONTROL: &str = "control";
 
     pub fn answer(node: &Arc<Node>, scope: Scope, request: ControlRequest) -> Value {
-        if !scope.allows(&request) {
+        answer_as(node, scope, request, CONTROL)
+    }
+
+    /// Answers a request; a change to the edit is saved under `origin`
+    /// unless the request names who made it.
+    fn answer_as(node: &Arc<Node>, scope: Scope, request: ControlRequest, origin: &str) -> Value {
+        if !scope.allows(request.verb()) {
             return refused(
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import and settings.layer.*",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import, settings.layer.*, commands.list and command.run",
                 ),
             );
+        }
+        match &request {
+            ControlRequest::CommandsList {
+                filter,
+                enabled_only,
+            } => return list(node, scope, filter.as_deref(), *enabled_only),
+            ControlRequest::CommandRun {
+                id,
+                params,
+                origin: by,
+            } => return run(node, scope, id, params, by),
+            _ => {}
         }
         let seq = node
             .bus
@@ -856,6 +1005,9 @@ mod control {
             answer
         };
         let result: Result<Value, Message> = match &request {
+            ControlRequest::CommandsList { .. } | ControlRequest::CommandRun { .. } => {
+                Err(Message::plain("a command request is answered above"))
+            }
             ControlRequest::Render {
                 node: name,
                 port,
@@ -1118,21 +1270,22 @@ mod control {
             }
         };
         // A change to the edit is saved before it is answered, under who
-        // made it: the request's `who` when it names one, else the
-        // control client.
+        // made it: the request's `who` when it names one, else the origin
+        // it came from (the control client, or a command run's). Its label
+        // is the step's undo group, answered as `group`.
         let label = match &request {
             ControlRequest::SetParam {
                 node: name, param, ..
-            } => Some((format!("set {name}.{param}"), CONTROL)),
+            } => Some((format!("set {name}.{param}"), origin)),
             ControlRequest::NodeBypass { node: name, on } => Some((
                 if *on {
                     format!("bypass {name}")
                 } else {
                     format!("restore {name}")
                 },
-                CONTROL,
+                origin,
             )),
-            ControlRequest::DecisionResolve => Some(("decisions resolved".into(), CONTROL)),
+            ControlRequest::DecisionResolve => Some(("decisions resolved".into(), origin)),
             ControlRequest::DecisionAccept {
                 node: name, who, ..
             } => Some((format!("decision {name} accepted"), who.as_str())),
@@ -1140,15 +1293,18 @@ mod control {
                 node: name, who, ..
             } => Some((format!("decision {name} decided"), who.as_str())),
             ControlRequest::DecisionReask { node: name } => {
-                Some((format!("decision {name} asked again"), CONTROL))
+                Some((format!("decision {name} asked again"), origin))
             }
             _ => None,
         };
         let result = match (result, label) {
             (Ok(mut extra), Some((label, origin))) => match node.save_edit(&label, origin) {
                 Ok(saved) => {
-                    if let (Some(id), Some(map)) = (saved, extra.as_object_mut()) {
-                        map.insert("saved".into(), json!(id));
+                    if let Some(map) = extra.as_object_mut() {
+                        if let Some(id) = saved {
+                            map.insert("saved".into(), json!(id));
+                        }
+                        map.insert("group".into(), json!(label));
                     }
                     Ok(extra)
                 }
