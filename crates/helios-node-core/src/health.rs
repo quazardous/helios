@@ -1,6 +1,7 @@
 //! What the health check reads, gathered by the node: the volumes mounted
 //! (with the roles the vault gives them), the vault's file, whose folder
-//! stands for the library's place, the library's backups, and what only
+//! stands for the library's place, what the SQLite driver reads of that
+//! file (it opens, its integrity), the library's backups, and what only
 //! the process running the node knows (a setting, the cards an import
 //! left short, the GPU, the plugins, the catalogue's snapshots), each
 //! given by a provider. The desktop fills the providers from its settings,
@@ -11,6 +12,7 @@ use std::sync::Arc;
 
 use helios_health::Context;
 use helios_health::backup::{Backup, CardShort, DESTINATION_DAYS};
+use helios_health::checks::Database;
 use helios_health::gpu::Gpu;
 use helios_health::plugins::Plugin;
 use helios_health::snapshots::Snapshots;
@@ -135,6 +137,10 @@ impl<S: Store + 'static> HealthInputs<S> {
                     .ok()
                     .map(|l| l.len())
             }),
+            database: file.map(|f| Database {
+                opens: helios_vault_sqlite::health::opens(f),
+                problems: helios_vault_sqlite::health::quick_check(f),
+            }),
         }
     }
 
@@ -181,6 +187,9 @@ mod tests {
         assert!(context.gpu.is_none() && context.plugins.is_empty());
         assert!(context.snapshots.is_none());
         assert_eq!(context.changed_outside, Some(0));
+        let database = context.database.as_ref().expect("the database read");
+        assert_eq!(database.opens, Ok(()));
+        assert_eq!(database.problems, Ok(Vec::new()));
 
         let runner = Runner::new(
             Registry::builtin(),
@@ -191,6 +200,33 @@ mod tests {
         assert!(runner.run_now(), "a run starts");
         assert!(runner.wait(Duration::from_secs(30)), "the run ends in 30 s");
         assert!(runner.findings().ran(), "the run's findings are in");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A vault file that is not a database is read by the driver and
+    /// reported by the integrity and library checks as a problem.
+    #[test]
+    fn a_corrupt_vault_is_reported() {
+        use helios_health::Level;
+        use helios_health::checks::{LIBRARY, VAULT_INTEGRITY};
+
+        let dir =
+            std::env::temp_dir().join(format!("helios-node-health-corrupt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("vault.db");
+        std::fs::write(&file, vec![0x5a; 8192]).unwrap();
+        let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
+        let inputs = HealthInputs::<SqliteStore>::new(volumes, None, Some(file));
+        let context = inputs.context();
+        let found: Vec<_> = Registry::builtin()
+            .checks()
+            .iter()
+            .flat_map(|c| c.run(&context))
+            .filter(|f| f.id == VAULT_INTEGRITY || f.id == LIBRARY)
+            .collect();
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|f| f.level == Level::Problem), "{found:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

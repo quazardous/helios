@@ -26,10 +26,6 @@ path = "crates/helios-node/src/mcp.rs"
 reason = "helios-mcp opens the vault for some tools; it moves to the node's Client"
 
 [[allow]]
-path = "crates/helios-health/src/checks.rs"
-reason = "the health check's integrity reads; they move behind a driver function the node calls"
-
-[[allow]]
 path = "crates/helios-gui/src/platform.rs"
 reason = "the desktop opens the vault for its embedded node; it moves to the node's Client"
 

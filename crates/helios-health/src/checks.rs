@@ -4,7 +4,6 @@
 //! [`crate::backup`]).
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use helios_core::Message;
 use helios_storage::{Role, Volume, capacity_text, registry};
@@ -137,24 +136,14 @@ pub const VAULT_INTEGRITY: &str = "vault.integrity";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VaultIntegrity;
 
-/// What `quick_check` says of the database at `path`: `ok`, else its
-/// complaints.
-pub fn quick_check(path: &Path) -> Result<Vec<String>, String> {
-    let db = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| e.to_string())?;
-    db.busy_timeout(std::time::Duration::from_secs(10))
-        .map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare("PRAGMA quick_check")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+/// What the node read of the vault's database file (through the SQLite
+/// driver), for [`VaultIntegrity`] and [`Library`].
+#[derive(Clone, Debug)]
+pub struct Database {
+    /// Whether the file opens and reads its schema.
+    pub opens: Result<(), String>,
+    /// The problems SQLite's `quick_check` finds; empty when sound.
+    pub problems: Result<Vec<String>, String>,
 }
 
 impl Check for VaultIntegrity {
@@ -167,12 +156,12 @@ impl Check for VaultIntegrity {
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some(path) = &ctx.vault else {
+        let (Some(path), Some(database)) = (&ctx.vault, &ctx.database) else {
             return Vec::new();
         };
         let file = path.display().to_string();
-        let finding = match quick_check(path) {
-            Ok(lines) if lines.len() == 1 && lines[0] == "ok" => Finding::new(
+        let finding = match &database.problems {
+            Ok(lines) if lines.is_empty() => Finding::new(
                 VAULT_INTEGRITY,
                 "",
                 Level::Ok,
@@ -203,7 +192,7 @@ impl Check for VaultIntegrity {
                 Message::new("health-vault-unreadable", "The catalogue cannot be checked"),
                 Message::new("health-vault-unreadable-detail", "{ $file }: { $error }")
                     .with("file", file)
-                    .with("error", e),
+                    .with("error", e.clone()),
             ),
         };
         vec![finding]
@@ -229,22 +218,6 @@ impl Default for Library {
     }
 }
 
-/// Whether the SQLite file at `path` opens and reads.
-pub fn opens(path: &Path) -> Result<(), String> {
-    let db = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| e.to_string())?;
-    db.busy_timeout(std::time::Duration::from_secs(10))
-        .map_err(|e| e.to_string())?;
-    db.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
-        r.get::<_, i64>(0)
-    })
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
 impl Check for Library {
     fn id(&self) -> &str {
         LIBRARY
@@ -255,7 +228,7 @@ impl Check for Library {
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some(path) = &ctx.vault else {
+        let (Some(path), Some(database)) = (&ctx.vault, &ctx.database) else {
             return Vec::new();
         };
         let file = path.display().to_string();
@@ -263,7 +236,7 @@ impl Check for Library {
             .parent()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        if let Err(e) = opens(path) {
+        if let Err(e) = &database.opens {
             return vec![
                 Finding::new(
                     LIBRARY,
@@ -272,7 +245,7 @@ impl Check for Library {
                     Message::new("health-library-closed", "The library cannot be opened"),
                     Message::new("health-library-closed-detail", "{ $file }: { $error }")
                         .with("file", file)
-                        .with("error", e),
+                        .with("error", e.clone()),
                 )
                 .fix(Fix {
                     command: "library.openFolder".into(),
@@ -463,25 +436,28 @@ mod tests {
 
     #[test]
     fn a_sound_vault_passes_and_garbage_is_a_problem() {
-        let dir = std::env::temp_dir().join(format!("helios-health-vault-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let good = dir.join("good.sqlite");
-        let _ = std::fs::remove_file(&good);
-        rusqlite::Connection::open(&good)
-            .unwrap()
-            .execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1);")
-            .unwrap();
-        let bad = dir.join("bad.sqlite");
-        std::fs::write(&bad, vec![0x5a; 8192]).unwrap();
-        let run = |p: &Path| {
+        let run = |database: Database| {
             VaultIntegrity.run(&Context {
-                vault: Some(p.to_path_buf()),
+                vault: Some(PathBuf::from("/lib/vault.sqlite")),
+                database: Some(database),
                 ..Context::default()
             })
         };
-        assert_eq!(run(&good)[0].level, Level::Ok);
-        assert_eq!(run(&bad)[0].level, Level::Problem);
+        let good = Database {
+            opens: Ok(()),
+            problems: Ok(Vec::new()),
+        };
+        let damaged = Database {
+            opens: Ok(()),
+            problems: Ok(vec!["row 3 missing from index".into()]),
+        };
+        let bad = Database {
+            opens: Err("file is not a database".into()),
+            problems: Err("file is not a database".into()),
+        };
+        assert_eq!(run(good)[0].level, Level::Ok);
+        assert_eq!(run(damaged)[0].level, Level::Problem);
+        assert_eq!(run(bad)[0].level, Level::Problem);
         assert!(VaultIntegrity.run(&Context::default()).is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
