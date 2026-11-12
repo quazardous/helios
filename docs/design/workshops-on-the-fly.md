@@ -1,10 +1,10 @@
 # Workshops made on the fly: designed by the AI, refined by hand, run within limits
 
 Status: **decided** (2026-11-11): the owner accepted every
-recommendation of section 9 (C1 to C8). A design note: slices 1 to 5
+recommendation of section 9 (C1 to C8). A design note: slices 1 to 6
 are built (semantic sliders, zone measures, the draft and its check,
 `workshop.design` through the user's own agent over MCP, the session
-record), the rest is not. It extends [workshops.md](workshops.md) (workshops v1,
+record, proposals while piloting), the rest is not. It extends [workshops.md](workshops.md) (workshops v1,
 built, experimental) and uses decision nodes and AI junctions
 ([module-contract.md](../module-contract.md)), macros
 ([macros.md](macros.md)), the undo design ([undo.md](undo.md)), the
@@ -342,6 +342,19 @@ unkept is dropped when the desktop opens the vault. `Set::aim` and
 Not built yet: `mask` and `structure` steps, a second test image in the
 same session, the History panel's aim column.
 
+Built (slice 6). `workshop.propose` (`helios_workshop_propose`: `values`
+by slider name, `aim`, `session`) records a `propose` step with its
+`proposal` and sets nothing; a slider the workshop lacks or a value out
+of its range is refused. The Workshops panel shows each value not
+answered yet as a ghost row ("backlight_lift: 0.80 proposed by
+agent:<id>", its aim below) with Accept and Reject. `workshop.answer`
+(the user's alone: `of`, the proposal's step, `param`, `action`) records
+the answer: `accept` sets the value as one undo step whose value-store
+step carries the proposal's aim, `override` sets the user's `value`
+instead, `reject` sets nothing and names the value turned down in its
+`proposal`; a user's own move of a proposed slider is recorded as an
+`override` of it. Each answer names its proposal in `of`.
+
 ## 3. Generalise: "Make it automatic"
 
 The user presses **Make it automatic** in the Workshops panel (or an
@@ -648,7 +661,7 @@ included.
    steps, the session id in version metadata. Test: a scripted pilot
    session (design, three slider moves, an undo) gives the expected
    record and net outcome.
-6. **Proposals while piloting** (S). `workshop.propose`, ghost values,
+6. **Proposals while piloting** (S, built 2026-11-11). `workshop.propose`, ghost values,
    Accept, Override, Reject recorded. Test: the fake agent proposes, the
    script overrides; the record holds proposal and override.
 7. **Generalisation** (L). The rules (targets that explain a value,

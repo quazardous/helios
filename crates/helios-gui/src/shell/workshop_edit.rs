@@ -54,6 +54,14 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "Experimental: the workshop session's record: each step piloting the workshop, its author, aim and zone measures (`action`: read, keep (yours alone: a session not kept is dropped when it ends) or close)",
     ),
     (
+        "workshop.propose",
+        "Experimental: propose values for the workshop being piloted, shown as ghost values the user accepts, overrides or rejects (`values`: by slider name; `aim`: the words it answers; `session`)",
+    ),
+    (
+        "workshop.answer",
+        "Experimental: answer a proposed value: accept it or set your own (one undo step each), or reject it; recorded in the session (`of`: the proposal's step; `param`; `action`: accept, override or reject; `value` for override); yours alone",
+    ),
+    (
         "workshop.send_proxy",
         "Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only",
     ),
@@ -95,6 +103,8 @@ impl Shell {
             "workshop.design" => self.design_workshop(args, origin),
             "workshop.send_proxy" => self.switch_send_proxy(args, origin),
             "workshop.session" => self.workshop_session(args, origin),
+            "workshop.propose" => self.propose_values(args, origin),
+            "workshop.answer" => self.answer_proposal(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }

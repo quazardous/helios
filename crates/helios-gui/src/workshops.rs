@@ -493,8 +493,8 @@ impl Panel {
         }
     }
 
-    /// The session recorded: its steps, and Keep (a session not kept is
-    /// dropped when it ends).
+    /// The session recorded: its steps, Keep (a session not kept is
+    /// dropped when it ends), and the AI's proposals as ghost values.
     fn session_ui(&self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
         let Some(p) = &self.pilot else {
             return;
@@ -522,6 +522,56 @@ impl Panel {
                 *run = Some(("workshop.session", json!({ "action": "keep" })));
             }
         });
+        // The AI's proposals not answered yet: ghost values, each with
+        // Accept and Reject; moving the slider overrides it.
+        for (of, param, value) in p.record.open_proposals() {
+            let step = p.record.step(of);
+            let author = step.map(|r| r.author.clone()).unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(text(
+                        Message::new(
+                            "gui-workshops-ghost",
+                            "{ $param }: { $value } proposed by { $author }",
+                        )
+                        .with("param", &param)
+                        .with(
+                            "value",
+                            value
+                                .as_f64()
+                                .map_or_else(|| value.to_string(), |v| format!("{v:.2}")),
+                        )
+                        .with("author", &author),
+                    ))
+                    .italics(),
+                );
+                if ui
+                    .small_button(text(Message::new("gui-workshops-ghost-accept", "Accept")))
+                    .on_hover_text(text(Message::new(
+                        "gui-workshops-ghost-accept-hint",
+                        "Set this value (one undo step); move the slider instead to override it",
+                    )))
+                    .clicked()
+                {
+                    *run = Some((
+                        "workshop.answer",
+                        json!({ "of": of, "param": param, "action": "accept" }),
+                    ));
+                }
+                if ui
+                    .small_button(text(Message::new("gui-workshops-ghost-reject", "Reject")))
+                    .clicked()
+                {
+                    *run = Some((
+                        "workshop.answer",
+                        json!({ "of": of, "param": param, "action": "reject" }),
+                    ));
+                }
+            });
+            if let Some(aim) = step.and_then(|r| r.aim.as_deref()) {
+                ui.weak(aim);
+            }
+        }
     }
 
     /// One workshop's row: its name and version, Apply (or, applied, its

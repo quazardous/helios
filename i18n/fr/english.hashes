@@ -222,10 +222,12 @@ command-workbench-quit.title fda91000eb874652
 command-workbench-run.title e0ffb620171da04e
 command-workbench-systemMenu.title f5046dbb28364688
 command-workshop-aim.title 2be281ee553bde4c
+command-workshop-answer.title a964783a072a2b13
 command-workshop-apply.title 2ea640ae55686843
 command-workshop-context.title 608e659ad197f7a6
 command-workshop-describe.title 81e28c5e0f43f797
 command-workshop-design.title 9aa93a4b7659928b
+command-workshop-propose.title ec5cd5e566cdfe0a
 command-workshop-save.title 65d5af81aeae4310
 command-workshop-send-proxy.title 18f403b94722beca
 command-workshop-session.title 70d9735f9e6631e1
@@ -875,6 +877,10 @@ gui-workshops-designed 5531a83e915a1447
 gui-workshops-experimental f53cc05f0eda3d87
 gui-workshops-find 2988612a9f2a1b68
 gui-workshops-find-hint e02f536d69cd0a36
+gui-workshops-ghost 6fd80712bbdc0699
+gui-workshops-ghost-accept 7c5af01faa9909b1
+gui-workshops-ghost-accept-hint fd7ad9f99b9e929f
+gui-workshops-ghost-reject 062b691eb88cd9cc
 gui-workshops-library 21952325425ed6c9
 gui-workshops-measure-clip 831834c8cd7909b7
 gui-workshops-measure-contrast 2c7312508b515193

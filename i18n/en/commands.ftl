@@ -601,6 +601,9 @@ command-workbench-systemMenu =
 command-workshop-aim =
     .title = Experimental: aim an applied workshop's targets again on the open image, one value step (`node`, the selected one by default; `dry_run`)
 
+command-workshop-answer =
+    .title = Experimental: answer a proposed value: accept it or set your own (one undo step each), or reject it; recorded in the session (`of`: the proposal's step; `param`; `action`: accept, override or reject; `value` for override); yours alone
+
 command-workshop-apply =
     .title = Experimental: apply a workshop after a node, aimed on the open image (`workshop`: id@version; `after`: the node the image is shown from by default; `aim`: true by default; `dry_run`)
 
@@ -612,6 +615,9 @@ command-workshop-describe =
 
 command-workshop-design =
     .title = Experimental: check a workshop draft on the open image and apply it as one undo step (`draft`; `intent`, the session's by default; `apply`: true by default; `replace`; `dry_run`)
+
+command-workshop-propose =
+    .title = Experimental: propose values for the workshop being piloted, shown as ghost values the user accepts, overrides or rejects (`values`: by slider name; `aim`: the words it answers; `session`)
 
 command-workshop-save =
     .title = Experimental: save a macro as a workshop, its next version with an intent, keywords and targets (`node`, the selected one by default; `intent`, `keywords`, `targets`; `dry_run`); without `intent`, a form asks

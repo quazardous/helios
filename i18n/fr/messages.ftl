@@ -1287,6 +1287,14 @@ gui-workshops-design-waiting = En attente de votre agent : il lit helios_worksho
 
 gui-workshops-designed = Conçu : { $workshop }
 
+gui-workshops-ghost = { $param } : { $value } proposé par { $author }
+
+gui-workshops-ghost-accept = Accepter
+
+gui-workshops-ghost-accept-hint = Mettre cette valeur (une étape d’annulation) ; déplacez plutôt le curseur pour la remplacer
+
+gui-workshops-ghost-reject = Rejeter
+
 gui-workshops-session = Session enregistrée : { $steps } étapes
 
 gui-workshops-session-keep = Garder

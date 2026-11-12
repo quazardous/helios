@@ -869,6 +869,32 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workshop_propose",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.propose",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): proposes values for the workshop being piloted, while the user refines it (a session starts when a workshop is designed or applied; helios_workshop_session reads it). Nothing is set: the values are shown as ghost values on the workshop's sliders, and the user accepts one (one undo step), overrides it by moving the slider, or rejects it; the proposal and each answer are steps of the session's record, with their author. Refused for a slider the workshop lacks or a value outside its range. Refused on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "values",
+                schema: object,
+                description: "The proposed values, by the workshop's slider names: {\"backlight_lift\": 0.8}",
+                default: None,
+            },
+            optional(
+                "aim",
+                optional_string,
+                "What the proposal answers, in words (the user's ask: the climber's face is too dark)",
+            ),
+            optional(
+                "session",
+                optional_string,
+                "The session it is for; the one going on when null",
+            ),
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_network_connect",
         endpoint: Endpoint::Workspace,
         cmd: "network.connect",
@@ -3456,6 +3482,7 @@ mod tests {
             ("helios_workshop_context", "workshop.context"),
             ("helios_workshop_design", "workshop.design"),
             ("helios_workshop_session", "workshop.session"),
+            ("helios_workshop_propose", "workshop.propose"),
         ] {
             let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
             assert_eq!(tool.cmd, cmd);

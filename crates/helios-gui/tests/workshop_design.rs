@@ -780,3 +780,154 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
     assert!(reopened.vault().workshop_session(&left).unwrap().is_none());
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
+    stand_ins();
+    let root = temp("propose");
+    let mut h = window(&root);
+    let (node, session) = designed(&mut h, &root);
+    let lift = format!("node/{node}/backlight_lift");
+    let sky = format!("node/{node}/sky");
+    let value = |h: &Harness<'static, Shell>, path: &str| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get(path)
+            .unwrap()
+            .value
+            .as_f64()
+            .unwrap()
+    };
+    let (lift_before, sky_before) = (value(&h, &lift), value(&h, &sky));
+    // Out of range, or a slider the workshop lacks: refused.
+    for values in [json!({ "backlight_lift": 3.0 }), json!({ "haze": 0.5 })] {
+        let out = agent(
+            &mut h,
+            &root,
+            json!({ "cmd": "workshop.propose", "values": values }),
+        );
+        assert_eq!(out["ok"], json!(false), "{out}");
+    }
+    // The agent proposes two values: nothing is set, both are ghosts.
+    let before = steps(&h);
+    let p = answer(agent(
+        &mut h,
+        &root,
+        json!({
+            "cmd": "workshop.propose",
+            "session": session,
+            "aim": "the climber's face is too dark",
+            "values": { "backlight_lift": 0.8, "sky": -0.3 }
+        }),
+    ));
+    let of = p["proposal"].as_u64().unwrap();
+    assert_eq!(steps(&h), before, "a proposal sets nothing");
+    assert_eq!(value(&h, &lift), lift_before);
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label_contains("backlight_lift: 0.80 proposed by agent:");
+    h.get_by_label_contains("sky: -0.30 proposed by agent:");
+    // Only the user answers.
+    let out = agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.answer", "of": of, "param": "sky", "action": "accept" }),
+    );
+    assert!(
+        out["error"].as_str().unwrap().contains("only the user"),
+        "{out}"
+    );
+    // The user accepts the lift (one undo step) and rejects the sky.
+    h.state_mut()
+        .run(
+            "workshop.answer",
+            json!({ "of": of, "param": "backlight_lift", "action": "accept" }),
+            Origin::User,
+        )
+        .unwrap();
+    follow(&mut h);
+    assert_eq!(steps(&h), before + 1, "accepting is one undo step");
+    assert_eq!(value(&h, &lift), 0.8);
+    h.state_mut()
+        .run(
+            "workshop.answer",
+            json!({ "of": of, "param": "sky", "action": "reject" }),
+            Origin::User,
+        )
+        .unwrap();
+    follow(&mut h);
+    assert_eq!(steps(&h), before + 1, "rejecting sets nothing");
+    assert_eq!(value(&h, &sky), sky_before);
+    assert!(
+        h.query_by_label_contains("proposed by").is_none(),
+        "no ghost left"
+    );
+
+    // The record holds the proposal and both answers, with their authors.
+    let out = record(&mut h, &root);
+    let steps_ = out["record"]["steps"].as_array().unwrap();
+    let kinds: Vec<&str> = steps_.iter().map(|s| s["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["design", "propose", "accept", "reject"], "{out}");
+    let propose = &steps_[1];
+    assert!(propose["author"].as_str().unwrap().starts_with("agent:"));
+    assert_eq!(propose["aim"], json!("the climber's face is too dark"));
+    assert_eq!(
+        propose["proposal"],
+        json!({ "backlight_lift": 0.8, "sky": -0.3 })
+    );
+    let accept = &steps_[2];
+    assert_eq!(accept["author"], json!("user"));
+    assert_eq!(accept["of"], json!(of));
+    assert_eq!(accept["aim"], json!("the climber's face is too dark"));
+    assert_eq!(accept["changes"][0]["param"], json!("backlight_lift"));
+    assert_eq!(accept["changes"][0]["new"], json!(0.8));
+    assert!(accept["measures"]["after"]["foreground.luma.median"].is_number());
+    let reject = &steps_[3];
+    assert_eq!(
+        (
+            reject["author"].clone(),
+            reject["of"].clone(),
+            reject["proposal"].clone()
+        ),
+        (json!("user"), json!(of), json!({ "sky": -0.3 }))
+    );
+    assert!(reject.get("changes").is_none());
+    assert_eq!(out["net"]["backlight_lift"]["value"], json!(0.8));
+    assert!(out["net"].get("sky").is_none());
+    // The store's step carries the proposal's words; undo takes it back.
+    {
+        let mut store = h.state().values().lock().unwrap();
+        assert_eq!(
+            store.undo_steps().last().unwrap().aim.as_deref(),
+            Some("the climber's face is too dark")
+        );
+        store.undo(&Origin::User).unwrap();
+    }
+    follow(&mut h);
+    assert_eq!(value(&h, &lift), lift_before);
+
+    // A user's own move of a proposed value overrides it.
+    let p = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.propose", "values": { "backlight_lift": 0.7 } }),
+    ));
+    set_value(&mut h, &lift, 0.6, Origin::User, None);
+    let out = record(&mut h, &root);
+    let last = out["record"]["steps"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(last["kind"], json!("override"), "{last}");
+    assert_eq!(last["of"], p["proposal"]);
+    assert_eq!(last["changes"][0]["new"], json!(0.6));
+    let _ = std::fs::remove_dir_all(&root);
+}
