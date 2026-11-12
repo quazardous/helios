@@ -38,20 +38,6 @@ env:
   CARGO_TERM_COLOR: never
 
 jobs:
-  # The repository variable UBUNTU_ARCHIVE_DOWN set to `true` (Ubuntu's
-  # archive unreachable from the runners, docs/bench.md, "When Ubuntu's
-  # archive is down") skips the Flatpak jobs, which install flatpak-builder
-  # with apt: the Release is published without the Flatpak bundle, which
-  # the bench box's `flatpak` job builds instead. This job says so in the run.
-  ubuntu-archive-down:
-    if: vars.UBUNTU_ARCHIVE_DOWN == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          msg="UBUNTU_ARCHIVE_DOWN is set: build-flatpak and smoke-flatpak (apt) are skipped; the Release has no Flatpak bundle (build it with the bench box's flatpak job and attach it)"
-          echo "::warning::$msg"
-          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
-
   # The binaries in release, on the oldest glibc GitHub offers (Ubuntu
   # 22.04, glibc 2.35), so they run on that and on anything newer.
   build-linux:
@@ -155,10 +141,20 @@ jobs:
           grep -q '^helios [0-9]' cli.txt
 
   # The Flatpak, built from source with no network inside the build
-  # (packaging/flatpak/build.sh), as a single-file bundle.
-  build-flatpak:
-    if: vars.UBUNTU_ARCHIVE_DOWN != 'true'
+  # (packaging/flatpak/build.sh), as a single-file bundle, then installed
+  # and smoke-tested as a user gets it. It runs in Flathub's builder image
+  # (flatpak, flatpak-builder, bubblewrap, appstreamcli and the cargo
+  # generator's Python modules, from the org.flatpak.Builder Flatpak),
+  # privileged so bubblewrap can sandbox each build step: no apt, so an
+  # outage of Ubuntu's archive (UBUNTU_ARCHIVE_DOWN, docs/bench.md) does
+  # not touch it, and no AppArmor user-namespace restriction to lift.
+  flatpak:
     runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    container:
+      # Its tag follows the manifest's runtime-version.
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -168,54 +164,30 @@ jobs:
       - name: version
         id: version
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-      # flatpak-builder sandboxes each step with bubblewrap, which Ubuntu
-      # 24.04's AppArmor keeps from creating user namespaces.
-      - name: flatpak-builder
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq flatpak flatpak-builder appstream desktop-file-utils
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: build
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           packaging/flatpak/build.sh all "$VERSION" dist "$RUNNER_TEMP/flatpak"
           (cd dist && sha256sum ./*.flatpak | sed 's| \./| |' >SHA256SUMS-flatpak && cat SHA256SUMS-flatpak)
+      # The bundle as a user installs it, with no GPU and no display: the
+      # command line in the sandbox says its version, imports a picture and
+      # exports it on the CPU, the window's program says its version. A
+      # session bus and a runtime folder of its own, as a desktop has.
+      - name: install, command line, uninstall
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime"
+          mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+          dbus-run-session -- bash packaging/flatpak/smoke.sh \
+            "dist/io.github.quazardous.Helios-$VERSION-x86_64.flatpak" \
+            crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
       - uses: actions/upload-artifact@v4
         with:
           name: helios-${{ steps.version.outputs.version }}-flatpak-x86_64
           path: dist/
           if-no-files-found: error
-
-  # The bundle as a user installs it, on a runner with no GPU and no
-  # display: the command line in the sandbox imports a picture and exports
-  # it, the window's program says its version.
-  smoke-flatpak:
-    needs: build-flatpak
-    if: vars.UBUNTU_ARCHIVE_DOWN != 'true'
-    runs-on: ubuntu-24.04
-    env:
-      VERSION: ${{ needs.build-flatpak.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: helios-${{ needs.build-flatpak.outputs.version }}-flatpak-x86_64
-          path: dist
-      - name: checksums
-        working-directory: dist
-        run: sha256sum -c SHA256SUMS-flatpak
-      - name: flatpak
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq flatpak
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: install, command line, uninstall
-        run: |
-          packaging/flatpak/smoke.sh "dist/io.github.quazardous.Helios-$VERSION-x86_64.flatpak" \
-            crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
 
   # The same programs for Windows x86_64 (MSVC), zipped with the licences,
   # and a per-user installer of the same folder (Inno Setup).
@@ -344,16 +316,13 @@ jobs:
             crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
 
   publish:
-    needs: [build-linux, smoke-linux, build-flatpak, smoke-flatpak, build-windows, smoke-windows]
-    # The Flatpak jobs skipped by UBUNTU_ARCHIVE_DOWN do not stop it (a
-    # skipped need otherwise skips this job); any job failed or cancelled does.
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true) }}
+    needs: [build-linux, smoke-linux, flatpak, build-windows, smoke-windows]
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     env:
       VERSION: ${{ needs.build-linux.outputs.version }}
-      FLATPAK: ${{ needs.smoke-flatpak.result == 'success' }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -364,9 +333,8 @@ jobs:
           name: helios-${{ needs.build-windows.outputs.version }}-windows-x86_64
           path: dist-windows
       - uses: actions/download-artifact@v4
-        if: env.FLATPAK == 'true'
         with:
-          name: helios-${{ needs.build-flatpak.outputs.version }}-flatpak-x86_64
+          name: helios-${{ needs.flatpak.outputs.version }}-flatpak-x86_64
           path: dist-flatpak
       # One SHA256SUMS for every file attached.
       - name: checksums
@@ -374,12 +342,8 @@ jobs:
           mv dist-windows/helios-"$VERSION"-windows-x86_64.zip dist/
           mv dist-windows/helios-"$VERSION"-windows-x86_64-setup.exe dist/
           cat dist-windows/SHA256SUMS-windows >> dist/SHA256SUMS
-          if [ "$FLATPAK" = true ]; then
-            mv dist-flatpak/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak dist/
-            cat dist-flatpak/SHA256SUMS-flatpak >> dist/SHA256SUMS
-          else
-            echo "::warning::no Flatpak bundle: its jobs were skipped (UBUNTU_ARCHIVE_DOWN)"
-          fi
+          mv dist-flatpak/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak dist/
+          cat dist-flatpak/SHA256SUMS-flatpak >> dist/SHA256SUMS
           (cd dist && sha256sum -c SHA256SUMS)
       - name: GitHub Release
         env:
@@ -390,11 +354,9 @@ jobs:
             dist/Helios-"$VERSION"-x86_64.AppImage
             dist/helios-"$VERSION"-windows-x86_64.zip
             dist/helios-"$VERSION"-windows-x86_64-setup.exe
+            dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak
             dist/SHA256SUMS
           )
-          if [ "$FLATPAK" = true ]; then
-            files+=(dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak)
-          fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Helios $VERSION" --notes-file dist/release-notes.md "${files[@]}"
 
