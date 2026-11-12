@@ -116,6 +116,31 @@ pub fn record<S: Store>(
     })
 }
 
+/// Records that a volume no scan detects (a remote account or source,
+/// [`Volume::remote`]) was reached at `now`: a new one is written as
+/// given, a known one keeps what the user set (name, roles, flags) and
+/// takes the new `last_seen`. Remote volumes belong to no node. Returns
+/// the volume as stored.
+pub fn remember<S: Store>(vault: &Vault<S>, volume: &Volume, now: u64) -> Result<Volume, String> {
+    vault.storage_transaction(|tx| {
+        let mut record = volume.clone();
+        if let Some(doc) = tx.volume(volume.id.as_str())? {
+            let old = decode(volume.id.as_str(), doc)?;
+            record.name = old.name;
+            record.roles = old.roles;
+            record.off_site = old.off_site;
+            record.raid = old.raid;
+        }
+        record.last_seen = Some(LastSeen {
+            at: now,
+            node: String::new(),
+            mount: None,
+        });
+        tx.set_volume(record.id.as_str(), Some(&encode(&record)?))?;
+        Ok(record)
+    })
+}
+
 /// Saves what the user set on a known volume: its name (its label when
 /// left blank), roles, off site and RAID flags. What a scan detects
 /// (kind, size, last seen) stays as recorded. Returns the volume as
@@ -188,6 +213,31 @@ mod tests {
             node: kind.is_fixed().then(|| "studio".into()),
             ..detect::weak(id, Some(1_000))
         }
+    }
+
+    #[test]
+    fn a_remote_volume_is_remembered_keeps_its_name_and_is_never_a_backup() {
+        let vault = Vault::new(MemoryStore::default());
+        let remote = Volume::remote("photos-service", "me@example.org", "My photos");
+        assert_eq!(remote.id.as_str(), "remote:photos-service:me@example.org");
+        assert_eq!(remote.connector(), Some("photos-service"));
+        assert!(!remote.online() && remote.roles.is_empty());
+        let stored = remember(&vault, &remote, 10).unwrap();
+        assert_eq!(stored.last_seen.as_ref().map(|s| s.at), Some(10));
+        // The user renames it; reaching it again keeps the name.
+        let mut renamed = stored.clone();
+        renamed.name = "Phone backup".into();
+        save(&vault, &renamed).unwrap();
+        let again = remember(&vault, &remote, 20).unwrap();
+        assert_eq!(again.name, "Phone backup");
+        assert_eq!(again.last_seen.as_ref().map(|s| s.at), Some(20));
+        assert_eq!(known(&vault).unwrap(), vec![again.clone()]);
+        // Even given the role, it never takes a backup.
+        let mut backup = again;
+        backup.roles.insert(Role::Backup);
+        assert!(crate::strategy::may_back_up_to(&backup).is_err());
+        assert!(Volume::remote("a", "b", "c").connector() == Some("a"));
+        assert_eq!(disk("uuid:x", "/x", VolumeKind::External).connector(), None);
     }
 
     #[test]

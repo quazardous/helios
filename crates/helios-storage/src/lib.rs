@@ -52,6 +52,9 @@ pub enum Identity {
     Uuid,
     Share,
     Weak,
+    /// An account or source of a non-local connector (`remote:…`): no
+    /// mount point, its items fetched through the connector.
+    Remote,
 }
 
 /// What a volume is. Only an internal disk is fixed: it belongs to its
@@ -174,6 +177,39 @@ impl Volume {
         } else {
             BTreeSet::new()
         }
+    }
+
+    /// The volume of one account or source of a non-local connector
+    /// (`docs/design/import-connectors.md`, section 2.3): kind
+    /// [`VolumeKind::Remote`], id `remote:<connector>:<source>`, never
+    /// mounted, no role. Its items are sightings on it, their place the
+    /// item id.
+    pub fn remote(connector: &str, source: &str, label: &str) -> Self {
+        Self {
+            id: VolumeId(format!("remote:{connector}:{source}")),
+            identified_by: Identity::Remote,
+            name: label.to_string(),
+            label: Some(label.to_string()),
+            kind: VolumeKind::Remote,
+            roles: BTreeSet::new(),
+            drive: None,
+            capacity: None,
+            free: None,
+            mount: None,
+            node: None,
+            last_seen: None,
+            has_dcim: false,
+            off_site: false,
+            raid: false,
+        }
+    }
+
+    /// The connector a remote volume belongs to, from its id.
+    pub fn connector(&self) -> Option<&str> {
+        if self.kind != VolumeKind::Remote {
+            return None;
+        }
+        self.id.as_str().strip_prefix("remote:")?.split(':').next()
     }
 }
 
