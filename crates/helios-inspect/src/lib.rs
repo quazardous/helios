@@ -605,6 +605,15 @@ pub mod control {
         WorkflowResume {
             run: String,
         },
+        /// Imports folders, cards or files into the node's vault (a node
+        /// started with `--vault`), referenced where they are, as a job;
+        /// answers once it ends, with its report. The import is announced
+        /// on the bus (`library.imported`), which starts the backup
+        /// strategy's after-import run. `paths` are absolute.
+        #[serde(rename = "library.import")]
+        LibraryImport {
+            paths: Vec<PathBuf>,
+        },
         /// What the node's caches hold: the cache service's tiers (budget,
         /// use) and, per scope, kind and tier, entries, bytes and
         /// statistics.

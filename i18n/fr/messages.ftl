@@ -741,7 +741,7 @@ health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
 
 health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
 
-node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end et aux requêtes workflow.*
+node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end, aux requêtes workflow.* et à library.import
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
 
@@ -752,6 +752,8 @@ node-load-refused = impossible de charger l’image : { $error }
 node-no-extent = `{ $name }` n’a pas d’étendue : donnez une région
 
 node-no-node = aucun nœud nommé `{ $name }`
+
+node-no-vault = le nœud n’a pas de coffre où importer : lancez-le avec --vault
 
 node-param-refused = impossible de régler { $node }.{ $param } : { $error }
 
