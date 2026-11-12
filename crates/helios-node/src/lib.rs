@@ -46,6 +46,7 @@ pub mod batch;
 pub use helios_library::darktable;
 pub mod mcp;
 pub mod sandbox;
+pub mod vault_node;
 pub mod workflow;
 
 use std::collections::{BTreeMap, BTreeSet};
