@@ -788,6 +788,10 @@ gui-new-workspace-title 3f6529e05bdd824f
 gui-new-workspace-unknown df9d6423e49d571f
 gui-new-workspace-verb bd8bd1041b1d098d
 gui-no-dialogs 043d25e5150191ec
+gui-oauth-client-built-in be40f2d0cf7fb1da
+gui-oauth-client-environment e722fb172787843b
+gui-oauth-client-none 123e75000c7bcd88
+gui-oauth-client-own 0135454fde708719
 gui-open-workspace-directory 790976655fc2525e
 gui-open-workspace-title 7ff73f083df7a8eb
 gui-open-workspace-verb 41f71ad49a338131
@@ -871,6 +875,14 @@ gui-scene-saved 60fcaa10812571b8
 gui-scopes-blue 4993860c16de56cd
 gui-scopes-green e75b76ee627e2c3a
 gui-scopes-red ec567f4422597e6a
+gui-settings-accounts-clients bfffdea791b20316
+gui-settings-client-helios a7caf88d35b44427
+gui-settings-client-id dc7517a25c6a50f8
+gui-settings-client-secret eca04f6d4ab67497
+gui-settings-client-secret-help ff6bef489d9fb945
+gui-settings-client-used d70743dff9830cdb
+gui-settings-clients-about 4f89dc59e77824ec
+gui-settings-clients-none fb198b093026243f
 gui-settings-health 7633e8a1583e45e7
 gui-settings-health-check c1e913ce62823067
 gui-settings-plugin-granted 2c8c84258a75df83

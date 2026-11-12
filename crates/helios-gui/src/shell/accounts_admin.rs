@@ -19,6 +19,16 @@
 //! - `import.connectionAnswer`: the form's `values`; `cancel: true` gives
 //!   the connection up.
 //!
+//! - `import.oauthClients` (read-only): the connectors signing in through
+//!   OAuth, as rows (`/clients`): `connector`, `connectorText`, `source`
+//!   (`own`, `environment`, `builtIn`, `manifest`, `null`: none),
+//!   `sourceText`, `own`, `clientId` (the person's own), `clientSecret`
+//!   (always empty: a secret is never read back).
+//! - `import.setOAuthClient`: the person's own client of `connector`
+//!   ("Use my own OAuth client"): `clientId`, `clientSecret` (typed by
+//!   the person only), each kept in the keyring, an empty one forgotten;
+//!   `own: false` forgets both, back to Helios's client.
+//!
 //! `import.addSource` and `import.reconnect` on a connector whose plugin
 //! lacks capabilities answer `consent` (the plugin's id) instead: the
 //! window asks the person first.
@@ -29,12 +39,13 @@ use std::sync::{Arc, PoisonError};
 use helios_connect::ProviderRef;
 use helios_connect::account::{Account, AccountBook, AccountState, Secrets};
 use helios_connect::connect::{FieldKind, Session, Status, WebSteps};
+use helios_connect::oauth::{self, ClientSource};
 use helios_core::Message;
 use helios_shell::commands::{CommandSpec, Origin};
 use serde_json::{Value, json};
 
 use super::Shell;
-use super::import_accounts::{Asked, Current, Labels, state_text};
+use super::import_accounts::{Asked, Current, Labels, OauthConnectors, state_text};
 
 /// Lists the accounts (read-only).
 pub const ACCOUNTS: &str = "import.accounts";
@@ -48,6 +59,10 @@ pub const SIGN_OUT: &str = "import.signOut";
 pub const CONNECTION: &str = "import.connection";
 /// Answers the connection's form, or cancels it.
 pub const CONNECTION_ANSWER: &str = "import.connectionAnswer";
+/// The OAuth clients sign-ins use (read-only).
+pub const OAUTH_CLIENTS: &str = "import.oauthClients";
+/// Sets or forgets the person's own OAuth client of a connector.
+pub const SET_OAUTH_CLIENT: &str = "import.setOAuthClient";
 
 fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
@@ -80,7 +95,9 @@ impl Shell {
             }
             (w.accounts.current.clone(), labels, w.accounts.web.clone())
         };
-        self.register_account_commands(&book, &secrets, web, &current, &labels);
+        self.register_account_commands(&book, &secrets, web.clone(), &current, &labels);
+        let oauth = self.import.get_mut().accounts.oauth.clone();
+        self.register_client_commands(&secrets, web, &oauth, &labels);
     }
 
     /// Runs the steps that reach a service (`oauth`: the browser sign-in,
@@ -102,6 +119,15 @@ impl Shell {
     pub fn add_import_connector(&mut self, provider: ProviderRef) {
         let manifest = provider.manifest();
         let mut w = self.import.get_mut();
+        for step in &manifest.connect {
+            if let helios_connect::StepKind::Oauth { client_id, .. } = &step.kind {
+                w.accounts
+                    .oauth
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(manifest.id.clone(), client_id.clone());
+            }
+        }
         if !manifest.connect.is_empty() {
             w.accounts
                 .labels
@@ -221,6 +247,77 @@ impl Shell {
         }
     }
 
+    /// `import.oauthClients` and `import.setOAuthClient`, declared once:
+    /// Settings > Accounts' "Use my own OAuth client".
+    fn register_client_commands(
+        &mut self,
+        secrets: &Arc<dyn Secrets>,
+        web: Option<Arc<dyn WebSteps>>,
+        oauth: &OauthConnectors,
+        labels: &Labels,
+    ) {
+        if self.has_command(OAUTH_CLIENTS) {
+            return;
+        }
+        let (s, o, l, i18n) = (
+            secrets.clone(),
+            oauth.clone(),
+            labels.clone(),
+            self.core.i18n.clone(),
+        );
+        let listed = self.register(
+            CommandSpec::new(
+                OAUTH_CLIENTS,
+                "List the OAuth clients sign-ins use, by source: the person's own, the environment's or Helios's",
+                "Library",
+            )
+            .read_only(),
+            move |_, _| {
+                let t = |m: Message| helios_i18n::message(&i18n, &m);
+                let connectors = o.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                let labels = l.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                let source = |connector: &str, declared: Option<&str>| {
+                    web.as_ref()
+                        .and_then(|w| w.client_source(connector, declared))
+                };
+                Ok(client_rows(&t, s.as_ref(), &connectors, &labels, &source))
+            },
+        );
+        let (s, o, i18n) = (secrets.clone(), oauth.clone(), self.core.i18n.clone());
+        let set = self.register(
+            CommandSpec::new(
+                SET_OAUTH_CLIENT,
+                "Use the person's own OAuth client for a connector (`connector`, `clientId`, `clientSecret` typed by the person), or Helios's again (`own: false`)",
+                "Library",
+            ),
+            move |args, origin| {
+                let connector = arg(args, "connector")?;
+                if !o
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains_key(connector)
+                {
+                    return Err(format!("{connector} does not sign in through OAuth"));
+                }
+                set_oauth_client(s.as_ref(), connector, args, origin).map_err(|m| match m {
+                    Refused::Secret => helios_i18n::message(
+                        &i18n,
+                        &Message::new(
+                            "gui-connect-secret-refused",
+                            "A secret is typed by the person, never given by an agent",
+                        ),
+                    ),
+                    Refused::Other(e) => e,
+                })
+            },
+        );
+        for r in [listed, set] {
+            if let Err(e) = r {
+                log::warn!("import accounts: {e}");
+            }
+        }
+    }
+
     /// `import.addSource` and `import.reconnect`, on the interface thread:
     /// the import window opens and the connection starts in its dialog.
     pub(super) fn account_command(&mut self, command: &str, args: &Value) -> Result<Value, String> {
@@ -294,6 +391,73 @@ fn account_rows(
         })
         .collect();
     json!({ "accounts": rows })
+}
+
+/// The OAuth connectors as Settings > Accounts' own-client rows.
+fn client_rows(
+    t: &dyn Fn(Message) -> String,
+    secrets: &dyn Secrets,
+    connectors: &BTreeMap<String, Option<String>>,
+    labels: &BTreeMap<String, helios_connect::Text>,
+    source: &dyn Fn(&str, Option<&str>) -> Option<ClientSource>,
+) -> Value {
+    let rows: Vec<Value> = connectors
+        .iter()
+        .map(|(id, declared)| {
+            let own = oauth::own_client(secrets, id);
+            let source = source(id, declared.as_deref());
+            let text = match source {
+                Some(ClientSource::Own) => Message::new("gui-oauth-client-own", "Your own client"),
+                Some(ClientSource::Environment) => {
+                    Message::new("gui-oauth-client-environment", "From the environment")
+                }
+                Some(ClientSource::BuiltIn | ClientSource::Manifest) => {
+                    Message::new("gui-oauth-client-built-in", "Helios's client")
+                }
+                None => Message::new("gui-oauth-client-none", "None in this build: use your own"),
+            };
+            json!({
+                "connector": id,
+                "connectorText": labels
+                    .get(id)
+                    .map_or_else(|| id.clone(), |l| t(Message::new(&l.key, &l.en))),
+                "source": source.map(ClientSource::name),
+                "sourceText": t(text),
+                "tone": if source.is_none() { json!("warning") } else { Value::Null },
+                "own": own.is_some(),
+                "clientId": own.map_or_else(String::new, |c| c.id),
+                "clientSecret": "",
+            })
+        })
+        .collect();
+    json!({ "clients": rows })
+}
+
+/// Keeps the parts of the person's own client `args` give; someone
+/// other than the person (an agent) never sets its secret.
+fn set_oauth_client(
+    secrets: &dyn Secrets,
+    connector: &str,
+    args: &Value,
+    origin: &Origin,
+) -> Result<Value, Refused> {
+    if args.get("own").and_then(Value::as_bool) == Some(false) {
+        oauth::set_own_client(secrets, connector, None).map_err(Refused::Other)?;
+        return Ok(json!({ "own": false }));
+    }
+    let text = |key: &str| args.get(key).and_then(Value::as_str);
+    if text("clientSecret").is_some() && *origin != Origin::User {
+        return Err(Refused::Secret);
+    }
+    for (key, name) in [
+        ("clientId", oauth::CLIENT_ID),
+        ("clientSecret", oauth::CLIENT_SECRET),
+    ] {
+        if let Some(v) = text(key) {
+            oauth::set_own_client_part(secrets, connector, name, v).map_err(Refused::Other)?;
+        }
+    }
+    Ok(json!({ "own": oauth::own_client(secrets, connector).is_some() }))
 }
 
 /// A connection, as data.

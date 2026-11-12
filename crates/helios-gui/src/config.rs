@@ -473,6 +473,9 @@ pub fn title(path: &str) -> Message {
         "health/check" => Message::new("gui-settings-health-check", "Health check"),
         "accounts" => Message::new("gui-settings-accounts", "Accounts"),
         "accounts/list" => Message::new("gui-settings-accounts-list", "Import accounts"),
+        "accounts/clients" => {
+            Message::new("gui-settings-accounts-clients", "Use my own OAuth client")
+        }
         "plugins" => Message::new("gui-settings-plugins", "Plugins"),
         "plugins/capabilities" => Message::new("gui-settings-plugins-capabilities", "Permissions"),
         "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
@@ -552,6 +555,9 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
     })
     .section("accounts/list", &tt("accounts/list"), |s| {
         accounts_section(s, t);
+    })
+    .section("accounts/clients", &tt("accounts/clients"), |s| {
+        clients_section(s, t);
     })
     .section("plugins/capabilities", &tt("plugins/capabilities"), |s| {
         plugins_section(s, t);
@@ -1005,6 +1011,74 @@ fn accounts_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             )),
             None,
         );
+    s.table(table);
+}
+
+/// Settings > Accounts' "Use my own OAuth client": each service signing
+/// in through OAuth, the client its sign-ins use (Helios's, the
+/// environment's or the person's own), the person's own client id and
+/// secret typed in place (kept in the keyring, the secret never shown
+/// again), and "Use Helios's client" (`import.oauthClients`,
+/// `import.setOAuthClient`).
+fn clients_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::shell::{OAUTH_CLIENTS_COMMAND, SET_OAUTH_CLIENT_COMMAND};
+    s.description(&t(Message::new(
+        "gui-settings-clients-about",
+        "Helios signs in to these services with its own OAuth client. To use yours instead (a desktop application you registered with the service), give its client ID and secret: they stay in this computer's keyring. Sign in again afterwards.",
+    )));
+    let table = Records::command(
+        "oauth-clients",
+        "",
+        OAUTH_CLIENTS_COMMAND,
+        "/clients",
+        "connector",
+    )
+    .column(
+        "connectorText",
+        &t(Message::new("gui-settings-account-source", "Source")),
+    )
+    .column(
+        "sourceText",
+        &t(Message::new("gui-settings-client-used", "Client used")),
+    )
+    .tone("tone")
+    .row_field(RowField::text(
+        "clientId",
+        &t(Message::new("gui-settings-client-id", "Your client ID")),
+        SET_OAUTH_CLIENT_COMMAND,
+        json!({ "connector": "${row.connector}", "clientId": "${value}" }),
+    ))
+    .row_field(
+        RowField::text(
+            "clientSecret",
+            &t(Message::new(
+                "gui-settings-client-secret",
+                "Your client secret",
+            )),
+            SET_OAUTH_CLIENT_COMMAND,
+            json!({ "connector": "${row.connector}", "clientSecret": "${value}" }),
+        )
+        .help(&t(Message::new(
+            "gui-settings-client-secret-help",
+            "Kept in the keyring and never shown again: type it again to change it.",
+        ))),
+    )
+    .row_action(
+        Action::command(SET_OAUTH_CLIENT_COMMAND)
+            .title(&t(Message::new(
+                "gui-settings-client-helios",
+                "Use Helios's client",
+            )))
+            .args(json!({ "connector": "${row.connector}", "own": false }))
+            .when("row.own"),
+    )
+    .empty(
+        &t(Message::new(
+            "gui-settings-clients-none",
+            "No service signing in through OAuth is installed.",
+        )),
+        None,
+    );
     s.table(table);
 }
 

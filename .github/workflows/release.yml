@@ -73,6 +73,12 @@ jobs:
       # plugins Helios ships. Their runtime data (catalogues, templates,
       # module declarations, the plugins' manifests) is compiled in.
       - name: build
+        env:
+          # Helios's Google Photos OAuth client, compiled in
+          # (docs/google-photos.md); without these secrets the build has
+          # none and users give their own in Settings.
+          HELIOS_GOOGLE_PHOTOS_CLIENT_ID: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_ID }}
+          HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET }}
         run: |
           cargo build --release --locked \
             -p helios-node -p helios-gui -p helios-plugin-darktable-library \
@@ -214,6 +220,12 @@ jobs:
         with:
           tool: cargo-deny
       - name: build
+        env:
+          # Helios's Google Photos OAuth client, compiled in
+          # (docs/google-photos.md); without these secrets the build has
+          # none and users give their own in Settings.
+          HELIOS_GOOGLE_PHOTOS_CLIENT_ID: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_ID }}
+          HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET }}
         run: |
           cargo build --release --locked \
             -p helios-node -p helios-gui -p helios-plugin-darktable-library \
@@ -332,6 +344,12 @@ jobs:
         with:
           tool: cargo-deny
       - name: build
+        env:
+          # Helios's Google Photos OAuth client, compiled in
+          # (docs/google-photos.md); without these secrets the build has
+          # none and users give their own in Settings.
+          HELIOS_GOOGLE_PHOTOS_CLIENT_ID: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_ID }}
+          HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET }}
         run: |
           uname -m
           cargo build --release --locked \

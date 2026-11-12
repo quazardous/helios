@@ -46,6 +46,9 @@ pub(crate) struct Accounts {
     pub(crate) current: Current,
     /// The connectors' names, by id, for Settings > Accounts.
     pub(crate) labels: Labels,
+    /// The connectors signing in through OAuth, with their manifest's
+    /// client id, for Settings > Accounts' own clients.
+    pub(crate) oauth: OauthConnectors,
     /// The picking running ("Pick photos…"), shown in the window's dialog.
     pub(crate) picking: Option<Picking>,
     /// How picked items are imported: `helios_library::fetch::import_remote`
@@ -134,6 +137,9 @@ impl Picking {
 pub(crate) type Current = Arc<Mutex<Option<Arc<Session>>>>;
 /// The connectors' names, by id.
 pub(crate) type Labels = Arc<Mutex<BTreeMap<String, Text>>>;
+/// The connectors with an `oauth` step, by id, with their manifest's
+/// client id.
+pub(crate) type OauthConnectors = Arc<Mutex<BTreeMap<String, Option<String>>>>;
 
 impl Default for Accounts {
     fn default() -> Self {
@@ -145,6 +151,7 @@ impl Default for Accounts {
             connecting: None,
             current: Current::default(),
             labels: Labels::default(),
+            oauth: OauthConnectors::default(),
             picking: None,
             import: None,
             plugins: None,

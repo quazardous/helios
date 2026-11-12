@@ -1131,6 +1131,14 @@ gui-new-workspace-verb = Create
 
 gui-no-dialogs = no dialogs to show this in
 
+gui-oauth-client-built-in = Helios's client
+
+gui-oauth-client-environment = From the environment
+
+gui-oauth-client-none = None in this build: use your own
+
+gui-oauth-client-own = Your own client
+
 gui-open-workspace-directory = directory
 
 gui-open-workspace-title = Open a workspace
@@ -1309,6 +1317,8 @@ gui-settings-accounts = Accounts
 
 gui-settings-accounts-about = The accounts Helios imports from. Their keys and tokens stay in this computer's keyring; the library keeps only their names.
 
+gui-settings-accounts-clients = Use my own OAuth client
+
 gui-settings-accounts-list = Import accounts
 
 gui-settings-accounts-none = No account yet: add one with "Add a source…" in the import window.
@@ -1320,6 +1330,20 @@ gui-settings-caches = Caches
 gui-settings-catalogue = Catalogue
 
 gui-settings-catalogue-about = Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.
+
+gui-settings-client-helios = Use Helios's client
+
+gui-settings-client-id = Your client ID
+
+gui-settings-client-secret = Your client secret
+
+gui-settings-client-secret-help = Kept in the keyring and never shown again: type it again to change it.
+
+gui-settings-client-used = Client used
+
+gui-settings-clients-about = Helios signs in to these services with its own OAuth client. To use yours instead (a desktop application you registered with the service), give its client ID and secret: they stay in this computer's keyring. Sign in again afterwards.
+
+gui-settings-clients-none = No service signing in through OAuth is installed.
 
 gui-settings-decisions = Decisions
 

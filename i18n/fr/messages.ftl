@@ -1868,3 +1868,27 @@ gui-settings-plugins-about = Ce que chaque extension peut faire. Une extension d
 gui-settings-plugins-capabilities = Autorisations
 
 gui-settings-plugins-none = Aucune extension ne demande d’autorisation.
+
+gui-oauth-client-built-in = Le client de Helios
+
+gui-oauth-client-environment = Celui de l’environnement
+
+gui-oauth-client-none = Aucun dans cette version : utilisez le vôtre
+
+gui-oauth-client-own = Votre propre client
+
+gui-settings-accounts-clients = Utiliser mon propre client OAuth
+
+gui-settings-client-helios = Utiliser le client de Helios
+
+gui-settings-client-id = Votre ID client
+
+gui-settings-client-secret = Votre code secret client
+
+gui-settings-client-secret-help = Gardé dans le trousseau et jamais réaffiché : saisissez-le de nouveau pour le changer.
+
+gui-settings-client-used = Client utilisé
+
+gui-settings-clients-about = Helios se connecte à ces services avec son propre client OAuth. Pour utiliser le vôtre à la place (une application de bureau que vous avez enregistrée auprès du service), donnez son ID client et son code secret : ils restent dans le trousseau de cet ordinateur. Reconnectez-vous ensuite.
+
+gui-settings-clients-none = Aucun service se connectant par OAuth n’est installé.
