@@ -388,3 +388,92 @@ fn a_probe_starts_a_plugin_hands_it_its_handshake_and_stops_it() {
     assert_eq!(b.probe(TESTEE).unwrap().0, Probed::Disabled);
     assert!(b.probe("org.example.nothing").is_err());
 }
+
+#[test]
+fn grants_go_to_their_keeper_and_come_back_on_the_next_start() {
+    let kept: Arc<std::sync::Mutex<Option<helios_plugin::grants::Grants>>> = Arc::default();
+    let b = testee(quick());
+    let k = kept.clone();
+    b.on_grants(move |g| *k.lock().unwrap() = Some(g.clone()));
+    assert_eq!(b.missing(TESTEE).unwrap().len(), 1);
+    b.grant(TESTEE, "images.read").unwrap();
+    let grants = kept.lock().unwrap().clone().expect("the keeper was told");
+    assert_eq!(grants[TESTEE], ["images.read".to_string()].into());
+    // Through the person's settings layer, as the desktop keeps them.
+    let layer = helios_plugin::grants::write("", &grants).unwrap();
+    // The next start: a new broker, given them back.
+    let again = testee(quick());
+    again.load_grants(&helios_plugin::grants::read(&layer));
+    assert!(again.missing(TESTEE).unwrap().is_empty());
+    assert_eq!(
+        again.list()["plugins"][0]["capabilities"][0]["granted"],
+        true
+    );
+}
+
+#[test]
+fn a_capability_an_updated_manifest_adds_is_asked_for_again() {
+    let mut grants = helios_plugin::grants::Grants::new();
+    // Kept from the earlier version, with one it no longer declares.
+    grants.insert(
+        TESTEE.into(),
+        ["images.read".to_string(), "gpu".to_string()].into(),
+    );
+    let dir = testee_copy("updated", |t| {
+        t + "\n[[capabilities]]\nname = \"network\"\nreason = \"fetches lens profiles\"\n"
+    });
+    let mut b = Broker::new(quick());
+    b.add(&dir, Scope::User).unwrap();
+    b.load_grants(&grants);
+    let missing: Vec<String> = b
+        .missing(TESTEE)
+        .unwrap()
+        .into_iter()
+        .map(|c| format!("{}: {}", c.name, c.reason))
+        .collect();
+    assert_eq!(missing, ["network: fetches lens profiles"]);
+    assert_eq!(b.grants()[TESTEE], ["images.read".to_string()].into());
+}
+
+#[test]
+fn revoking_a_capability_stops_the_plugin_and_is_kept() {
+    if !python() {
+        return;
+    }
+    let told = Arc::new(AtomicU64::new(0));
+    let b = testee(quick());
+    let t = told.clone();
+    b.on_grants(move |_| {
+        t.fetch_add(1, Ordering::Relaxed);
+    });
+    let mut registry = Registry::new();
+    helios_plugin::register(&mut registry, Arc::new(b)).unwrap();
+    let cx = Context::new();
+    let mut run = |id: &str, args: Json| registry.run(id, args, Origin::User, &cx);
+    let args = |on: bool| json!({"plugin": TESTEE, "capability": "images.read", "granted": on});
+    run("plugin.grant", args(true)).unwrap();
+    let rows = run("plugin.capabilities", Json::Null).unwrap();
+    assert_eq!(rows["capabilities"][0]["granted"], true, "{rows}");
+    assert_eq!(
+        rows["capabilities"][0]["id"],
+        format!("{TESTEE} images.read")
+    );
+    let list = run("plugin.list", Json::Null).unwrap();
+    assert_eq!(list["plugins"][0]["running"], false);
+    // A call starts it; taking the capability back stops it.
+    let image = scratch("revoke").join("a.png");
+    std::fs::write(&image, b"not really").unwrap();
+    let image = image.to_string_lossy().to_string();
+    run("metadata.read", json!({"image": image})).unwrap();
+    assert_eq!(
+        run("plugin.list", Json::Null).unwrap()["plugins"][0]["running"],
+        true
+    );
+    run("plugin.grant", args(false)).unwrap();
+    assert_eq!(
+        run("plugin.list", Json::Null).unwrap()["plugins"][0]["running"],
+        false
+    );
+    assert!(run("metadata.read", json!({"image": image})).is_err());
+    assert_eq!(told.load(Ordering::Relaxed), 2, "granted, then revoked");
+}

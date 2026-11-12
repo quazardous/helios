@@ -1796,6 +1796,29 @@ fn main() -> Result<(), String> {
                 r.problems.join("; ")
             ));
         }
+        // The capabilities the person allowed, kept in their settings
+        // layer through the node: given back now, written again each
+        // time one is granted or taken back.
+        if let Some(layers) = node_settings.clone() {
+            let user = helios_node_core::settings::USER;
+            match layers.read(user) {
+                Ok(text) => broker.load_grants(&helios_plugin::grants::read(
+                    text.as_deref().unwrap_or_default(),
+                )),
+                Err(e) => warn(&format!("the plugins' permissions: {e}")),
+            }
+            broker.on_grants(move |grants| {
+                let written = layers
+                    .read(user)
+                    .and_then(|text| {
+                        helios_plugin::grants::write(text.as_deref().unwrap_or_default(), grants)
+                    })
+                    .and_then(|text| layers.write(user, &text));
+                if let Err(e) = written {
+                    log::warn!(target: "helios", "the plugins' permissions not kept: {e}");
+                }
+            });
+        }
         Arc::new(broker)
     };
     let known_vault = vault.clone();
@@ -2090,6 +2113,8 @@ fn main() -> Result<(), String> {
                 );
             }
             shell.set_health(runner);
+            // The plugins' consent dialog and commands (Settings > Plugins).
+            shell.set_plugins(plugins.clone());
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );

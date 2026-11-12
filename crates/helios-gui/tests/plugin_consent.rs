@@ -1,0 +1,191 @@
+//! A plugin's capabilities asked for at the moment of need: "Add a
+//! source…" on a source plugin that lacks some shows the consent dialog
+//! (each capability with its manifest's reason); Allow grants them and
+//! starts the connection, Don't allow starts nothing. Settings > Plugins'
+//! commands list the capabilities and take one back.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use egui::vec2;
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable as _;
+use helios_connect::account::{MemoryAccounts, MemorySecrets};
+use helios_gui::{Shell, headless, helios_panels};
+use helios_plugin::{Broker, Policy, Scope};
+use helios_shell::commands::Origin;
+use serde_json::{Value, json};
+
+const PLUGIN: &str = "org.example.fake-source";
+const REASON: &str = "Talks to the fake service";
+
+fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, Shell>) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        h.step();
+        if done(h) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("never got there: {what}\n{:#?}", h.root());
+}
+
+fn shown(h: &Harness<'_, Shell>, label: &str) -> bool {
+    h.query_all_by_label(label).next().is_some()
+}
+
+fn run(h: &mut Harness<'_, Shell>, id: &str, args: Value) -> Result<Value, String> {
+    let r = h.state_mut().run(id, args, Origin::User);
+    h.run_steps(2);
+    r
+}
+
+/// A source plugin that never needs to run: its connection's first step
+/// is a form.
+fn plugin_dir() -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "helios-gui-consent-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("helios-plugin.toml"),
+        format!(
+            r#"
+id = "{PLUGIN}"
+name = "Fake source"
+version = "1.0.0"
+license = "GPL-3.0-or-later"
+command = ["false"]
+services = ["import.source"]
+activation = ["onService:import.source"]
+
+[compat]
+helios = ">=0.0.1"
+interfaces = {{ protocol = 1, "import.source" = 1 }}
+
+[[connect]]
+id = "who"
+kind = "form"
+schema = {{ fields = [{{ id = "user" }}] }}
+
+[[capabilities]]
+name = "network"
+reason = "{REASON}"
+"#
+        ),
+    )
+    .unwrap();
+    dir
+}
+
+fn world() -> (Arc<Broker>, Harness<'static, Shell>) {
+    let mut broker = Broker::new(Policy::default());
+    broker.add(&plugin_dir(), Scope::User).unwrap();
+    let broker = Arc::new(broker);
+    let mut shell = Shell::new(helios_panels(), None);
+    for p in helios_plugin::source::providers(&broker) {
+        shell.add_import_connector(Arc::new(p));
+    }
+    shell.set_plugins(broker.clone());
+    shell.set_import_accounts(
+        Arc::new(MemoryAccounts::default()),
+        Arc::new(MemorySecrets::default()),
+    );
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    (broker, h)
+}
+
+fn granted(broker: &Broker) -> bool {
+    broker.list()["plugins"][0]["capabilities"][0]["granted"] == true
+}
+
+fn connection(h: &mut Harness<'_, Shell>) -> Value {
+    h.state_mut()
+        .run("import.connection", Value::Null, Origin::User)
+        .unwrap()
+}
+
+#[test]
+fn an_ungranted_capability_is_asked_for_and_allow_starts_the_connection() {
+    let (broker, mut h) = world();
+    run(
+        &mut h,
+        "import.addSource",
+        json!({ "connector": "fake-source" }),
+    )
+    .unwrap();
+    until(&mut h, "the consent dialog", |h| {
+        shown(h, "Allow Fake source?") && shown(h, REASON)
+    });
+    assert!(connection(&mut h).is_null(), "held until the person allows");
+    h.get_by_label("Allow").click();
+    until(&mut h, "the connection's form", |h| {
+        connection(h)["state"] == "form"
+    });
+    assert!(granted(&broker));
+}
+
+#[test]
+fn dont_allow_starts_nothing_and_says_where_to_allow_later() {
+    let (broker, mut h) = world();
+    run(
+        &mut h,
+        "import.addSource",
+        json!({ "connector": "fake-source" }),
+    )
+    .unwrap();
+    until(&mut h, "the consent dialog", |h| shown(h, "Don't allow"));
+    h.get_by_label("Don't allow").click();
+    until(&mut h, "the calm word", |h| {
+        h.query_all_by_label_contains("allow them later in Settings > Plugins")
+            .next()
+            .is_some()
+    });
+    assert!(connection(&mut h).is_null());
+    assert!(!granted(&broker));
+    // Asked again later, it asks afresh.
+    h.get_by_label("Close").click();
+    h.run_steps(2);
+    run(
+        &mut h,
+        "import.addSource",
+        json!({ "connector": "fake-source" }),
+    )
+    .unwrap();
+    until(&mut h, "asked again", |h| shown(h, "Don't allow"));
+    assert!(connection(&mut h).is_null());
+}
+
+#[test]
+fn settings_plugins_lists_the_capabilities_and_takes_one_back() {
+    let (broker, mut h) = world();
+    let rows = run(&mut h, "plugin.capabilities", Value::Null).unwrap();
+    let row = &rows["capabilities"][0];
+    assert_eq!(row["plugin"], PLUGIN, "{rows}");
+    assert_eq!(row["capability"], "network");
+    assert_eq!(row["reason"], REASON);
+    assert_eq!(row["granted"], false);
+    let args = |on: bool| json!({ "plugin": PLUGIN, "capability": "network", "granted": on });
+    run(&mut h, "plugin.grant", args(true)).unwrap();
+    assert!(granted(&broker));
+    // Granted, the connection starts at once: nothing asked.
+    run(
+        &mut h,
+        "import.addSource",
+        json!({ "connector": "fake-source" }),
+    )
+    .unwrap();
+    until(&mut h, "the connection's form", |h| {
+        connection(h)["state"] == "form"
+    });
+    run(&mut h, "plugin.grant", args(false)).unwrap();
+    assert!(!granted(&broker));
+}

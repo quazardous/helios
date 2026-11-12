@@ -229,6 +229,20 @@ gui-connect-title = Connect { $source }
 
 gui-connect-working = Connecting…
 
+gui-consent-allow = Allow
+
+gui-consent-asks = { $plugin } asks for your permission to:
+
+gui-consent-declined = Nothing was changed: { $plugin } does not run without these permissions. You can allow them later in Settings > Plugins.
+
+gui-consent-deny = Don't allow
+
+gui-consent-from = Plugin { $id }
+
+gui-consent-later = Helios remembers your answer; Settings > Plugins changes it.
+
+gui-consent-title = Allow { $plugin }?
+
 gui-copied = copied { $text }
 
 gui-copied-files = copied { $count } files
@@ -1314,6 +1328,20 @@ gui-settings-history = History
 gui-settings-image-map = Image map
 
 gui-settings-library = Library
+
+gui-settings-plugin-granted = Allowed
+
+gui-settings-plugin-name = Plugin
+
+gui-settings-plugin-reason = Why
+
+gui-settings-plugins = Plugins
+
+gui-settings-plugins-about = What each plugin may do. A plugin asks the first time it needs a permission; Helios remembers your answer.
+
+gui-settings-plugins-capabilities = Permissions
+
+gui-settings-plugins-none = No plugin asks for a permission.
 
 gui-settings-snapshots = Snapshots
 

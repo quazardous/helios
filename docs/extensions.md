@@ -95,7 +95,7 @@ contribution points):
 
 `crates/helios-plugin` runs external plugins out of process, behind a
 broker. It covers what is needed to judge the design, not the packaging
-(no signed archives, no registry, grants held in memory only).
+(no signed archives, no registry).
 
 **Protocol.** A plugin is a directory holding `helios-plugin.toml` and any
 executable that speaks JSON-RPC 2.0 over its standard input and output,
@@ -127,8 +127,9 @@ next call restarts it, after a wait that doubles with each crash in a row.
 Three services: `importer` (see "Importers" below), `metadata.read` (an image path in, fields out, each with the
 tag it came from: camera, lens, exposure, GPS, keywords…) and `device`
 (`device.list`, `device.info`, `device.capture`, `device.download`, with
-progress). The shell commands are `plugin.list`, `plugin.enable`,
-`plugin.disable`, `plugin.grant`, `plugin.revoke`, `metadata.read`,
+progress). The shell commands are `plugin.list`, `plugin.capabilities`,
+`plugin.enable`, `plugin.disable`, `plugin.grant` (`granted: false` takes
+the capability back), `plugin.revoke`, `metadata.read`,
 `device.list`, `device.info`, `device.capture`, `device.download`, and the
 commands plugins contribute, each run in its plugin.
 
@@ -151,6 +152,26 @@ own:
 - `process.spawn`, `device.usb`, `network`, `secrets`, `gpu`, `ai.models`
   (ambient): the broker cannot police them, so it refuses to start the
   plugin until the user grants each one.
+
+**Asking, and remembering the answer.** The user grants capabilities
+when they are first needed: an action of a plugin that lacks some of the
+capabilities it declares (connecting a Google Photos account) opens a
+consent dialog instead of running, with the plugin's name and id and each
+capability it asks for, with the reason its manifest gives. Allow grants
+them all and runs the action again; Don't allow runs nothing and says
+where to allow them later. `source.read` is never asked: picking the
+source is its grant.
+
+The grants are kept in the user's settings layer (the node's `user`
+layer, so they follow the person), as the table `plugin-grants`: each
+plugin's id with the capabilities granted. The broker is given them at
+start and writes them back through the node each time one is granted or
+taken back. A capability the plugin no longer declares is not granted,
+so one a newer version of its manifest adds is asked for again; the
+grants of a plugin no longer installed are dropped when the grants are
+next written. Settings > Plugins lists every plugin's capabilities with
+a switch each (`plugin.capabilities`, `plugin.grant`); taking one back
+stops the plugin.
 
 A plugin's process still runs with the user's rights: it could read or
 write other files, or run programs it was not granted. Holding the process

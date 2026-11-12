@@ -1828,3 +1828,31 @@ gui-quit-title = Quitter Helios ?
 gui-quit-jobs-detail = { $count } tâches en cours ; quitter les annule
 
 gui-quit-verb = Quitter
+
+gui-consent-allow = Autoriser
+
+gui-consent-asks = { $plugin } vous demande l’autorisation de :
+
+gui-consent-declined = Rien n’a changé : { $plugin } ne fonctionne pas sans ces autorisations. Vous pourrez les accorder plus tard dans Réglages > Extensions.
+
+gui-consent-deny = Ne pas autoriser
+
+gui-consent-from = Extension { $id }
+
+gui-consent-later = Helios retient votre réponse ; Réglages > Extensions permet de la changer.
+
+gui-consent-title = Autoriser { $plugin } ?
+
+gui-settings-plugin-granted = Autorisé
+
+gui-settings-plugin-name = Extension
+
+gui-settings-plugin-reason = Pourquoi
+
+gui-settings-plugins = Extensions
+
+gui-settings-plugins-about = Ce que chaque extension peut faire. Une extension demande la première fois qu’elle a besoin d’une autorisation ; Helios retient votre réponse.
+
+gui-settings-plugins-capabilities = Autorisations
+
+gui-settings-plugins-none = Aucune extension ne demande d’autorisation.
