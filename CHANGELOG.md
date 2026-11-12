@@ -24,6 +24,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.79.0] - 2026-11-12
+
+### Added
+
+- The import window's Sources column gets "Add a source…" for sources that need connecting first, such as an online account: Helios walks through the steps the source asks for, then lists the account with its state. Settings > Accounts lists every account with Reconnect and Sign out; passwords and tokens never go into the library.
+- The Library has a Folders section: the folders holding your photos, each with how many photos are there or below, counted when the section opens. Clicking a folder shows only its photos (the rest of the search is kept); clicking it again shows the whole Library.
+- Import from a Lightroom Classic catalogue: pick a .lrcat file and Helios brings in its photos with their stars, rejects, colour labels, keywords (with their hierarchy) and collections (as tags under "Lightroom collection", until albums arrive). The catalogue is only read, from a copy while Lightroom has it open. Virtual copies are folded into their master photo; develop settings are not imported yet.
+- Lightroom catalogue import reads each photo's develop settings (from the catalogue, else its .xmp sidecar). Exposure, white balance as shot and orientation are mapped onto Helios's exposure, white balance and flip modules, not applied yet; every other basic-panel setting (contrast, highlights, shadows, whites, blacks, texture, clarity, dehaze, vibrance, saturation, custom white balance, crop) is listed per photo with its value in the import log.
+
 ## [0.78.0] - 2026-11-12
 
 ### Added
