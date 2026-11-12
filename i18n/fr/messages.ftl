@@ -1065,6 +1065,18 @@ gui-import-window-more = Plus
 
 gui-import-window-more-note = Les modèles de métadonnées et les décalages horaires viendront plus tard.
 
+gui-import-window-choices-own = { $source } : ses propres choix
+
+gui-import-window-choices-default = { $source } : les choix par défaut
+
+gui-import-window-own-choices = Ses propres choix d’import
+
+gui-import-window-choices-reset = Revenir aux choix par défaut
+
+gui-import-window-choices-reset-help = Cette source reprend les choix par défaut
+
+gui-import-window-choices-undo = Annuler
+
 gui-import-window-name = Nom
 
 gui-import-window-name-custom = Personnalisé

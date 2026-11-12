@@ -199,3 +199,69 @@ fn settings_accounts_lists_the_accounts_and_signs_out_and_reconnects() {
         AccountState::NeedsAttention { .. }
     ));
 }
+
+/// An account's source selected in the Sources column: the Choices column
+/// shows its choices, without those its connector cannot honour (a
+/// remote one always copies, and has no darktable sidecars); a folder
+/// ticked shows them again.
+#[test]
+fn the_choices_follow_the_selected_source_and_hide_what_its_connector_cannot_honour() {
+    let (world, mut h) = world();
+    let mut account = helios_connect::account::Account::new(ID, "ann@nas.local", &[]);
+    account.state = AccountState::Connected;
+    world.book.save(&account).unwrap();
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let (read, write) = (kept.clone(), kept.clone());
+    h.state_mut().keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+    let folder =
+        std::env::temp_dir().join(format!("helios-gui-accounts-src-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    run(
+        &mut h,
+        "library.importWindow",
+        json!({ "source": folder }),
+        Origin::User,
+    )
+    .unwrap();
+    until(&mut h, "the account listed", |h| shown(h, "ann@nas.local"));
+    assert!(shown(&h, "Add where they are") && shown(&h, "Read darktable edits"));
+    h.get_by_label("ann@nas.local").click();
+    until(&mut h, "the account's choices", |h| {
+        shown(h, "ann@nas.local: the default choices")
+    });
+    assert!(
+        !shown(&h, "Add where they are"),
+        "a remote source always copies"
+    );
+    assert!(!shown(&h, "Read darktable edits"), "no sidecars there");
+    assert!(h.state().import_copies());
+    // A choice changed is the account's own.
+    h.get_by_label("Keep").click();
+    until(&mut h, "the account's own choices", |h| {
+        shown(h, "ann@nas.local: its own choices")
+    });
+    let text = kept.borrow().clone().unwrap_or_default();
+    assert!(
+        text.contains(&account.id) && text.contains("keep"),
+        "{text}"
+    );
+    // A folder ticked: its choices, every one of them.
+    run(
+        &mut h,
+        "library.importWindow",
+        json!({ "source": folder }),
+        Origin::User,
+    )
+    .unwrap();
+    until(&mut h, "the folder's choices", |h| {
+        shown(h, "Add where they are") && shown(h, "Read darktable edits")
+    });
+    assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
+    let _ = std::fs::remove_dir_all(&folder);
+}

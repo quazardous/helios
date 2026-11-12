@@ -630,6 +630,37 @@ The last used choices may stay a per-machine file, as now. Today's
 `import/saved` (a preset becomes a saved import without a source; a
 workspace import source becomes a reference to one).
 
+### 3.6 Sources and their choices (as built)
+
+The owner's direction (2026-11-12): the Choices column's choices belong
+to each source, not to the window. A **source** is a saved object: a
+connector instance (its type and its own parameters: a folder's path,
+an account) and its own import choices (copy or add where they are,
+Into, the folder pattern, Name, Duplicates, Read darktable edits).
+
+- **Where.** The sources are one of the person's documents the node
+  keeps beside their settings layer, `user/import-sources` (TOML, a
+  `[[source]]` table each), read and written through the node's settings
+  (`NodeSettings`), so every client of one node sees the same sources.
+- **The column follows the selected source**: the folder ticked last,
+  or the account clicked last. Its first line says whose choices they
+  are ("trips: its own choices", "trips: the default choices").
+  Changing a choice saves it on that source; changes close together
+  are one step of the column's Undo; "Reset to defaults" gives the
+  source the window's choices again. The window's choices stay the last
+  used, per library, as before; a source without choices of its own
+  follows them.
+- **A card** stays an automatic source with the window's choices.
+- **Choices a connector cannot honour are hidden.** A connector reached
+  through an account (`caps.accounts`, Google Photos) is remote: its
+  photos are always copied ("Add where they are" hidden) and carry no
+  XMP sidecars ("Read darktable edits" hidden).
+- **Import** runs each folder ticked with its own choices.
+
+Still to come: the "Add a source…" wizard (the connector type, its own
+setup, the choices prefilled for that type, a name), and automatic
+imports hung on a source.
+
 ## 4. The connectors surveyed
 
 ### 4.1 Google Photos

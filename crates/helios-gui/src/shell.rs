@@ -56,6 +56,9 @@ pub use health::{
     findings_answer as health_findings_answer,
 };
 pub use import_choices::Choices;
+pub use import_sources::{
+    DOCUMENT as IMPORT_SOURCES, Honours, ReadSources, SavedSource, WriteSources,
+};
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use storage::{
     BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage,
@@ -75,6 +78,7 @@ mod health;
 mod import;
 mod import_accounts;
 mod import_choices;
+mod import_sources;
 mod import_window;
 mod lifetime;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};

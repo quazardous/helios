@@ -2,7 +2,11 @@
 //! library's (`project/<library folder>`), in its vault
 //! (docs/design/node-client-split.md, gap 13).
 //!
-//! Every client of one node reads and writes these two layers through it
+//! Beside the person's layer, the node keeps the person's documents
+//! (`user/<name>`): what is theirs but not a setting's value, such as the
+//! import window's saved sources (`user/import-sources`), in TOML too.
+//!
+//! Every client of one node reads and writes these layers through it
 //! ([`NodeSettings`], from [`crate::node::LocalNode::settings`]), so two
 //! clients of one node see the same values. A write that changes a layer
 //! is announced on the node's bus ([`LayerChanged`]) for its other
@@ -29,12 +33,16 @@ pub const USER: &str = "user";
 /// The prefix of a library's project layer: `project/<library folder>`.
 pub const PROJECT_PREFIX: &str = "project/";
 
-/// Whether `name` is a layer the node keeps: the person's, or a library's.
+/// The prefix of the person's documents: `user/<name>`.
+pub const USER_DOCUMENT_PREFIX: &str = "user/";
+
+/// Whether `name` is a layer the node keeps: the person's, one of the
+/// person's documents, or a library's.
 pub fn is_node_layer(name: &str) -> bool {
     name == USER
-        || name
-            .strip_prefix(PROJECT_PREFIX)
-            .is_some_and(|f| !f.is_empty())
+        || [PROJECT_PREFIX, USER_DOCUMENT_PREFIX]
+            .iter()
+            .any(|prefix| name.strip_prefix(prefix).is_some_and(|f| !f.is_empty()))
 }
 
 /// A layer the node keeps changed: its name. Clients read its new text
@@ -112,7 +120,7 @@ fn refuse_others(name: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "the node keeps only the `{USER}` and `{PROJECT_PREFIX}<folder>` settings layers, not `{name}`"
+            "the node keeps only the `{USER}`, `{USER_DOCUMENT_PREFIX}<name>` and `{PROJECT_PREFIX}<folder>` settings layers, not `{name}`"
         ))
     }
 }
@@ -156,8 +164,16 @@ mod tests {
         let event = heard.recv_timeout(Duration::from_secs(10)).expect("heard");
         assert_eq!(event.payload["layer"], project);
 
+        // One of the person's documents is the node's too.
+        let doc = "user/import-sources";
+        one.write(doc, "[[source]]\nconnector = \"folder\"\n")
+            .unwrap();
+        assert!(two.read(doc).unwrap().unwrap().contains("folder"));
+        let event = heard.recv_timeout(Duration::from_secs(10)).expect("heard");
+        assert_eq!(event.payload["layer"], doc);
+
         // The machine's layer and the interface's stay on the client.
-        for other in ["global", "interface", "project/", "run"] {
+        for other in ["global", "interface", "project/", "user/", "run"] {
             assert!(one.write(other, "a = 1").is_err(), "{other} refused");
             assert!(one.read(other).is_err(), "{other} refused");
         }
