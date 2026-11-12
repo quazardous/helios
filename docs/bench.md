@@ -497,7 +497,7 @@ what has a fallback without the archive uses it at once:
 |----------|-------------|--------------------|
 | ci | `test`, `commits`: software Vulkan | no apt: lavapipe from the pinned Mesa build of gfx-rs/ci-build (checked by SHA-256) |
 | ci | `lint`: shellcheck | unchanged: the runner image's own shellcheck, apt only if it is missing |
-| release | `build-flatpak`, `smoke-flatpak` | skipped; the Release is published without the Flatpak bundle |
+| release | `flatpak` | unchanged: it runs in Flathub's builder image, with no apt |
 | parity | `darktable` | skipped |
 
 Unset or `false`, the workflows behave as they always did. Skipped jobs
@@ -506,8 +506,7 @@ promotes `main`.
 
 The Linux tests still run on GitHub (lavapipe from the fallback Mesa);
 no full gate is run on the bench box in their place. Only what is skipped
-waits: the Flatpak bundle (build it with the box's `flatpak` job and attach
-it with `gh release upload` if a release cannot wait) and darktable parity.
+waits: darktable parity.
 Delete the variable once `apt-get update` works on the runners again.
 
 ## Rules for agents (a shared box)

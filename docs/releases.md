@@ -75,13 +75,17 @@ GitHub Actions, which checks the tag against the workspace version, then:
    temporary folder, the same tests from the installed folder, a silent
    uninstall, and a check that the files, the Start menu entry and the
    entry in Settings are gone;
-6. builds the Flatpak (`packaging/flatpak/build.sh`, on Ubuntu 24.04)
-   from the same source, as a single-file bundle
-   `io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak`, and tests it
-   (`packaging/flatpak/smoke.sh`): installed for the user, the command line
-   in the sandbox says its version, imports a picture and exports it on
-   the CPU, the window's program says its version (see "The Flatpak"
-   below);
+6. builds the Flatpak (`packaging/flatpak/build.sh`) from the same
+   source, as a single-file bundle
+   `io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak`, and tests it in
+   the same job (`packaging/flatpak/smoke.sh`), with no GPU and no
+   display: installed for the user, the command line in the sandbox says
+   its version, imports a picture and exports it on the CPU, the window's
+   program says its version (see "The Flatpak" below). The job runs in
+   Flathub's builder image (`ghcr.io/flathub-infra/flatpak-github-actions`,
+   the tag of the manifest's runtime), which brings flatpak-builder and
+   everything the script needs, so it installs nothing from Ubuntu's
+   archive;
 7. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
    CHANGELOG.md section as its notes, and attaches the files, with one
    `SHA256SUMS` for all of them;
@@ -98,7 +102,15 @@ The workflow also runs by hand (Actions, "release", "Run workflow"), with
 a tag and `publish`. With `publish` off, the default, it is a dry run: it
 builds, packages and tests, and keeps the files as the run's artefacts,
 without creating a Release. With `publish` on, it builds the tag given,
-which must exist and match the workspace version.
+which must exist and match the workspace version. A dry run from the
+command line, of the branch it is started on:
+
+```bash
+gh workflow run release.yml -R quazardous/helios --ref next -f tag=v0.0.0-dry
+```
+
+Each package's files, the Flatpak bundle among them (artefact
+`helios-X.Y.Z-flatpak-x86_64`), are then the run's artefacts.
 
 ## When GitHub's CI is down
 
