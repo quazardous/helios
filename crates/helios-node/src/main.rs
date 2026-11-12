@@ -27,7 +27,9 @@
 //! it on its own schedule, and runs what the desktop's node runs without a
 //! window: it watches the machine's volumes, runs the backups (a backup
 //! disk of the strategy plugged in starts one) and the health check on its
-//! schedule, each a job on its bus. A signal cancels the running backups
+//! schedule, each a job on its bus. An import through its control
+//! endpoints (`library.import`) is announced on the bus and starts the
+//! strategy's after-import backup. A signal cancels the running backups
 //! (the copy under way is recorded), then closes the vault cleanly.
 //!
 //! `--control` serves the debug control endpoint (render, set a parameter,
@@ -46,7 +48,8 @@
 //! `load-source`, `export`, `cancel`, `job.cancel`, the batch job's
 //! `batch_start` and `batch_end`, and the runs' `workflow.*` requests
 //! (`submit`, `runs`, `items`, `forget`, `cancel`, `retry`,
-//! `prioritize`, `pause`, `resume`), on a Unix socket only its user can
+//! `prioritize`, `pause`, `resume`) and `library.import` (with
+//! `--vault`), on a Unix socket only its user can
 //! open. `helios batch` starts its own node with it, on a socket in a
 //! private directory made for that run.
 //!
@@ -270,6 +273,8 @@ struct Node {
     decisions: BTreeMap<String, helios_decision::Mode>,
     /// The network's first export: what a run exports unless told.
     first_export: Option<String>,
+    /// Imports into the vault the node owns (`--vault`).
+    importer: Option<helios_node::vault_node::Importer>,
 }
 
 /// A batch job: the parent of the exports a batch asks for.
@@ -768,8 +773,8 @@ mod control {
         )]
         Debug,
         /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`,
-        /// `batch_end` and the runs' `workflow.*` requests: the batch
-        /// endpoint.
+        /// `batch_end`, the runs' `workflow.*` requests and
+        /// `library.import`: the batch endpoint.
         Batch,
     }
 
@@ -793,6 +798,7 @@ mod control {
                         | ControlRequest::WorkflowPrioritize { .. }
                         | ControlRequest::WorkflowPause { .. }
                         | ControlRequest::WorkflowResume { .. }
+                        | ControlRequest::LibraryImport { .. }
                 )
         }
     }
@@ -819,7 +825,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and the workflow.* requests",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests and library.import",
                 ),
             );
         }
@@ -1005,6 +1011,20 @@ mod control {
             }
             ControlRequest::WorkflowPause { run } => node.workflows.pause(run),
             ControlRequest::WorkflowResume { run } => node.workflows.resume(run),
+            ControlRequest::LibraryImport { paths } => match &node.importer {
+                None => Err(Message::new(
+                    "node-no-vault",
+                    "the node has no vault to import into: start it with --vault",
+                )),
+                Some(importer) => importer
+                    .import(
+                        paths,
+                        &helios_library::import::Options::default(),
+                        &mut |_| {},
+                    )
+                    .map(|report| json!({ "report": report }))
+                    .map_err(Message::plain),
+            },
             ControlRequest::Decisions => {
                 let book = node.book.lock().expect("book lock");
                 Ok(json!({ "decisions": helios_core::Describe::describe(&*book)["nodes"] }))
@@ -1441,12 +1461,16 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     let jobs = Jobs::new(bus.clone());
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.
-    let vault = vault.zip(args.vault.as_ref()).map(|(vault, file)| {
-        let node = VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
-        let vault = node.vault().clone();
-        stopper.hold(node);
-        vault
-    });
+    let (vault, importer) = vault
+        .zip(args.vault.as_ref())
+        .map(|(vault, file)| {
+            let node =
+                VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
+            let held = (node.vault().clone(), node.importer().clone());
+            stopper.hold(node);
+            held
+        })
+        .unzip();
     let edit = match (&vault, &loaded.frame_file) {
         (Some(vault), Some(file)) => match open_edit(
             vault,
@@ -1525,6 +1549,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         workflows: workflows.clone(),
         decisions: loaded.decisions.clone(),
         first_export: loaded.exports.first().map(|e| e.node.clone()),
+        importer,
     });
     // A batch whose client went without ending it ends on its own.
     {

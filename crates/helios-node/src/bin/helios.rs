@@ -16,6 +16,7 @@
 //!                    [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] import FOLDERS-OR-IMAGES...
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
@@ -119,6 +120,7 @@ const USAGE: &str = "usage:
                  [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] import FOLDERS-OR-IMAGES...
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
@@ -410,6 +412,13 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     concurrency: jobs,
                 }
             }
+            ["import", paths @ ..] if !paths.is_empty() => ControlRequest::LibraryImport {
+                paths: paths
+                    .iter()
+                    .copied()
+                    .map(absolute)
+                    .collect::<Result<_, _>>()?,
+            },
             ["workflow-runs"] => ControlRequest::WorkflowRuns,
             ["workflow-items", run] => ControlRequest::WorkflowItems {
                 run: run.to_string(),

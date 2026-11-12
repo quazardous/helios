@@ -10,30 +10,145 @@
 //! on its bus). Without a window, the check's inputs keep a windowless
 //! node's defaults ([`HealthInputs::new`]: no cards, no GPU, no plugins).
 //!
+//! Imports done through the node ([`Importer`], the control endpoint's
+//! `library.import`) publish their report on its bus
+//! ([`Imported`], `library.imported`); the node hears it and starts the
+//! strategy's after-import backup, as the desktop does after its imports.
+//!
 //! [`VaultNode::stop`] is the process's end (SIGTERM, Ctrl-C): the
 //! volume watch stops, running backups are cancelled (the copy under way
 //! is recorded first), a health run under way ends, then the vault is
 //! flushed and marked closed cleanly.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use helios_core::Bus;
 use helios_core::jobs::Jobs;
+use helios_core::{Bus, Envelope, Event};
 use helios_health::runner::{Runner, Schedule};
 use helios_health::{Findings, Registry};
+use helios_library::import::{self, Report};
 use helios_node_core::health::HealthInputs;
 use helios_node_core::jobs::{Backups, Health};
 use helios_node_core::node::{FLUSH_EVERY, Link, LocalNode};
 use helios_node_core::volumes::VolumeWatch;
 use helios_storage::Volumes;
+use helios_storage::strategy::Trigger;
 use helios_vault::Vault;
 use helios_vault_sqlite::SqliteStore;
+use serde::Serialize;
+use serde_json::Value;
 
 /// How often the node looks whether a health run is due (the desktop's
 /// pace).
 pub const HEALTH_CLOCK: Duration = Duration::from_secs(10);
+
+/// Who publishes the node's own events on its bus.
+pub const SOURCE: &str = "node";
+
+/// An import done through the node ended: its report (the files it
+/// added, located, whether it was cancelled...). The node's after-import
+/// backup starts on it.
+#[derive(Serialize)]
+pub struct Imported<'a> {
+    #[serde(flatten)]
+    pub report: &'a Report,
+}
+
+impl Event for Imported<'_> {
+    const KIND: &'static str = "library.imported";
+}
+
+/// What the after-import backup needs of an [`Imported`] event's
+/// payload: what came in, and whether the import was cancelled.
+fn imported(payload: &Value) -> Report {
+    let count = |key: &str| payload[key].as_u64().unwrap_or(0);
+    Report {
+        added: count("added"),
+        located: count("located"),
+        cancelled: payload["cancelled"].as_bool().unwrap_or(false),
+        ..Report::default()
+    }
+}
+
+/// Imports into the node's vault, each announced on its bus
+/// ([`Imported`]). A handle: the control endpoint keeps one.
+#[derive(Clone)]
+pub struct Importer {
+    vault: Arc<Vault<SqliteStore>>,
+    jobs: Jobs,
+    bus: Arc<Bus>,
+    link: Link,
+}
+
+impl Importer {
+    /// Imports `sources` (`helios_library::import`), the run a job on the
+    /// node's jobs, each file's line to `emit`; then announces the report.
+    /// Refused once the node is stopping.
+    pub fn import(
+        &self,
+        sources: &[PathBuf],
+        options: &import::Options,
+        emit: &mut impl FnMut(&Value),
+    ) -> Result<Report, String> {
+        if self.link.quitting() || self.link.stopped() {
+            return Err("the node is stopping: no import starts now".into());
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let report = import::import(&self.vault, &self.jobs, sources, options, now, emit)?;
+        self.bus
+            .publish(SOURCE, None, &Imported { report: &report });
+        Ok(report)
+    }
+}
+
+/// Hears the imports announced on the bus and starts the after-import
+/// backup of each, until stopped.
+struct AfterImports {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl AfterImports {
+    /// How often the listener looks whether it must stop.
+    const PACE: Duration = Duration::from_millis(100);
+
+    fn start(heard: Receiver<Envelope>, backups: &Arc<Backups<SqliteStore>>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (stopped, backups) = (stop.clone(), Arc::downgrade(backups));
+        let thread = std::thread::Builder::new()
+            .name("helios-after-import".into())
+            .spawn(move || {
+                while !stopped.load(Ordering::SeqCst) {
+                    match heard.recv_timeout(Self::PACE) {
+                        Ok(e) if e.kind == Imported::KIND => {
+                            if let Some(backups) = backups.upgrade() {
+                                backups.start(Trigger::OnImport, Some(imported(&e.payload)));
+                            }
+                        }
+                        Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            })
+            .map_err(|e| eprintln!("helios-node: no thread for the after-import backups: {e}"))
+            .ok();
+        Self { stop, thread }
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
 
 /// What the node watches and when its health check runs.
 pub struct Options {
@@ -63,6 +178,8 @@ pub struct VaultNode {
     watch: VolumeWatch,
     backups: Arc<Backups<SqliteStore>>,
     health: Arc<Health>,
+    importer: Importer,
+    after_imports: AfterImports,
 }
 
 impl VaultNode {
@@ -76,7 +193,9 @@ impl VaultNode {
         jobs: &Jobs,
         options: Options,
     ) -> Self {
-        let node = LocalNode::own(vault, bus, FLUSH_EVERY);
+        // Heard from now on: no import announced before the listener runs.
+        let heard = bus.subscribe();
+        let node = LocalNode::own(vault, bus.clone(), FLUSH_EVERY);
         let link = node.link();
         let watch = node.watch_volumes(options.volumes.clone());
         let backups = Backups::new(
@@ -87,6 +206,13 @@ impl VaultNode {
         )
         .adopted_by(&link);
         backups.follow(&watch);
+        let after_imports = AfterImports::start(heard, &backups);
+        let importer = Importer {
+            vault: node.vault().clone(),
+            jobs: jobs.clone(),
+            bus,
+            link: link.clone(),
+        };
         let inputs = HealthInputs::new(
             options.volumes,
             Some(node.vault().clone()),
@@ -105,6 +231,8 @@ impl VaultNode {
             watch,
             backups,
             health,
+            importer,
+            after_imports,
         }
     }
 
@@ -128,16 +256,24 @@ impl VaultNode {
         &self.backups
     }
 
+    /// Imports into the vault, each followed by the strategy's
+    /// after-import backup.
+    pub fn importer(&self) -> &Importer {
+        &self.importer
+    }
+
     /// The health check whose schedule the node keeps.
     pub fn health(&self) -> &Runner {
         self.health.runner()
     }
 
-    /// Stops the node (the process ends): the running backups cancelled
+    /// Stops the node (the process ends): no import starts a backup any
+    /// more, the running backups cancelled
     /// (their copy under way recorded), the health check's schedule
     /// stopped, then the vault flushed and marked closed cleanly. Waits
     /// for it.
-    pub fn stop(self) {
+    pub fn stop(mut self) {
+        self.after_imports.stop();
         self.node.link().quit_cancelling_jobs();
         self.node.stop();
     }
