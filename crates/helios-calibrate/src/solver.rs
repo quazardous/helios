@@ -529,9 +529,9 @@ mod tests {
     /// Test 3 on every solve: `P n = n`.
     fn assert_neutral_kept(solution: &Solution) {
         let n = solution.neutral;
-        let pn = apply(&solution.matrix, n);
+        let p_n = apply(&solution.matrix, n);
         for c in 0..3 {
-            assert!((pn[c] - n[c]).abs() < 1e-12, "P n = {pn:?}, n = {n:?}");
+            assert!((p_n[c] - n[c]).abs() < 1e-12, "P n = {p_n:?}, n = {n:?}");
         }
     }
 
