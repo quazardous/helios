@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$programs = 'helios', 'helios-node', 'helios-mcp', 'helios-gui', 'helios-darktable-library', 'helios-lightroom-catalog'
+$programs = 'helios', 'helios-node', 'helios-mcp', 'helios-gui', 'helios-darktable-library', 'helios-lightroom-catalog', 'helios-google-photos'
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $Out = (Resolve-Path $Out).Path

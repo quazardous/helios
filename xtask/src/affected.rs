@@ -175,6 +175,11 @@ pub fn rules() -> &'static [(&'static str, Rule)] {
                 "helios-gui",
             ]),
         ),
+        // the sources Helios ships, likewise
+        (
+            "plugins/sources/",
+            Crates(&["helios-plugin-google-photos", "helios-plugin", "helios-gui"]),
+        ),
         // read by no test
         ("docs/", Nothing),
         ("changelog.d/", Nothing),

@@ -6,6 +6,7 @@ members = [
     "plugins/examples/gphoto2-camera",
     "plugins/importers/darktable-library",
     "plugins/importers/lightroom-catalog",
+    "plugins/sources/google-photos",
     "xtask",
 ]
 # GUI prototypes build on their own: their dependencies stay out of the

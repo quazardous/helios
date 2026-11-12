@@ -450,7 +450,7 @@ fn apply_release(root: &Path, date: &str, release: Release) -> String {
 }
 
 /// The folders of the in-tree plugins whose manifest follows the release.
-const PLUGIN_DIRS: [&str; 2] = ["plugins/examples", "plugins/importers"];
+const PLUGIN_DIRS: [&str; 3] = ["plugins/examples", "plugins/importers", "plugins/sources"];
 
 /// The manifests (`helios-plugin.toml`) of the in-tree plugins.
 fn plugin_manifests(root: &Path) -> Vec<PathBuf> {
