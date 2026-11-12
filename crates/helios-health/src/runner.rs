@@ -2,9 +2,13 @@
 //! runs every check of the registry on a thread of its own and keeps
 //! their findings. [`Schedule`] says when: a while after start (never
 //! slowing it), then daily, and when the volumes mounted change.
+//!
+//! A [`Runner`] is a handle: its clones share one schedule, one run at a
+//! time and one set of findings, so the node that schedules the checks
+//! and the windows that show them hold the same runner.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use helios_core::jobs::{Jobs, Progress, Start};
@@ -66,23 +70,51 @@ impl Schedule {
 
 type Waker = Arc<Mutex<Option<Box<dyn Fn() + Send>>>>;
 
-/// Runs the checks in the background and keeps what they found.
+/// Whether a run is under way, and its end heard by [`Runner::wait`].
+#[derive(Default)]
+struct Running {
+    on: Mutex<bool>,
+    ended: Condvar,
+}
+
+impl Running {
+    /// Takes the run; false when one is under way.
+    fn take(&self) -> bool {
+        let mut on = self.on.lock().unwrap_or_else(PoisonError::into_inner);
+        !std::mem::replace(&mut *on, true)
+    }
+
+    fn end(&self) {
+        *self.on.lock().unwrap_or_else(PoisonError::into_inner) = false;
+        self.ended.notify_all();
+    }
+
+    fn on(&self) -> bool {
+        *self.on.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Runs the checks in the background and keeps what they found; its
+/// clones share all of it.
+#[derive(Clone)]
 pub struct Runner {
     registry: Registry,
     context: Arc<dyn Fn() -> Context + Send + Sync>,
     findings: Arc<Mutex<Findings>>,
-    jobs: Option<Jobs>,
-    running: Arc<AtomicBool>,
+    jobs: Arc<Mutex<Option<Jobs>>>,
+    running: Arc<Running>,
     waker: Waker,
-    schedule: Schedule,
-    runs: u64,
+    schedule: Arc<Mutex<Schedule>>,
+    runs: Arc<AtomicU64>,
+    /// No run starts any more (its owner stops).
+    stopped: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for Runner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Runner")
             .field("registry", &self.registry)
-            .field("runs", &self.runs)
+            .field("runs", &self.runs())
             .finish_non_exhaustive()
     }
 }
@@ -101,17 +133,18 @@ impl Runner {
             registry,
             context: Arc::new(context),
             findings: Arc::new(Mutex::new(findings)),
-            jobs: None,
+            jobs: Arc::default(),
             running: Arc::default(),
             waker: Arc::default(),
-            schedule,
-            runs: 0,
+            schedule: Arc::new(Mutex::new(schedule)),
+            runs: Arc::default(),
+            stopped: Arc::default(),
         }
     }
 
     /// Reports each run as a job there (the jobs centre).
-    pub fn report_to(&mut self, jobs: Jobs) {
-        self.jobs = Some(jobs);
+    pub fn report_to(&self, jobs: Jobs) {
+        *self.jobs.lock().unwrap_or_else(PoisonError::into_inner) = Some(jobs);
     }
 
     /// Called from the job's thread once a run's findings are in (to ask
@@ -131,33 +164,67 @@ impl Runner {
 
     /// How many runs started.
     pub fn runs(&self) -> u64 {
-        self.runs
+        self.runs.load(Ordering::SeqCst)
     }
 
     /// Whether a run is under way.
     pub fn running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
+        self.running.on()
     }
 
-    /// Each frame: starts a run when the schedule says one is due.
-    pub fn tick(&mut self, now: Instant, volumes: Option<u64>) -> bool {
-        self.schedule.due(now, volumes) && self.start()
+    /// Starts a run when the schedule says one is due (each frame of a
+    /// window, and the node's own clock).
+    pub fn tick(&self, now: Instant, volumes: Option<u64>) -> bool {
+        let due = self
+            .schedule
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .due(now, volumes);
+        due && self.start()
     }
 
     /// "Check now": a run at once (none while one is under way).
-    pub fn run_now(&mut self) -> bool {
-        self.schedule.ran(Instant::now());
+    pub fn run_now(&self) -> bool {
+        self.schedule
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .ran(Instant::now());
         self.start()
     }
 
-    fn start(&mut self) -> bool {
-        if self.running.swap(true, Ordering::SeqCst) {
+    /// No run starts from now on (the node stops); one under way ends.
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    /// Waits until no run is under way, at most `deadline`; whether none is.
+    pub fn wait(&self, deadline: Duration) -> bool {
+        let on = self
+            .running
+            .on
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (on, _) = self
+            .running
+            .ended
+            .wait_timeout_while(on, deadline, |on| *on)
+            .unwrap_or_else(PoisonError::into_inner);
+        !*on
+    }
+
+    fn start(&self) -> bool {
+        if self.stopped.load(Ordering::SeqCst) || !self.running.take() {
             return false;
         }
-        self.runs += 1;
-        let report = self.jobs.as_ref().map(|jobs| {
+        let runs = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
+        let jobs = self
+            .jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let report = jobs.as_ref().map(|jobs| {
             jobs.start(
-                Start::new(&format!("health-{}", self.runs), "Health check", KIND)
+                Start::new(&format!("health-{runs}"), "Health check", KIND)
                     .total(self.registry.checks().len() as u64)
                     .not_cancellable(),
             )
@@ -193,11 +260,11 @@ impl Runner {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .replace(found);
-                running.store(false, Ordering::SeqCst);
                 if let Some(r) = &report {
                     r.progress(Progress::new().counts(checks.len() as u64, checks.len() as u64));
                     r.finished();
                 }
+                running.end();
                 if let Some(wake) = waker
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -208,7 +275,7 @@ impl Runner {
             });
         if let Err(e) = spawned {
             log::warn!("health: no thread to run the checks: {e}");
-            self.running.store(false, Ordering::SeqCst);
+            self.running.end();
             return false;
         }
         true
@@ -239,7 +306,7 @@ mod tests {
     #[test]
     fn a_run_keeps_its_findings_and_wakes() {
         use std::sync::mpsc;
-        let mut runner = Runner::new(
+        let runner = Runner::new(
             Registry::builtin(),
             Context::default,
             Findings::default(),

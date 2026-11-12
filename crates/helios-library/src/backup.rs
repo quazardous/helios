@@ -456,16 +456,18 @@ pub fn run<S: Store>(
 }
 
 /// After an import: backs up when the strategy runs on import and the
-/// import brought photos in (not when it was cancelled).
+/// import brought photos in (not when it was cancelled). `cancel` stops
+/// it as [`run`]'s does.
 pub fn after_import<S: Store>(
     vault: &Vault<S>,
     jobs: &Jobs,
     mounted: &dyn Volumes,
     imported: &import::Report,
     now: u64,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<Report>, String> {
     if imported.cancelled || imported.added + imported.located == 0 {
         return Ok(Vec::new());
     }
-    run(vault, jobs, mounted, Trigger::OnImport, now, None)
+    run(vault, jobs, mounted, Trigger::OnImport, now, cancel)
 }

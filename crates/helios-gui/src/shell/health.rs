@@ -17,7 +17,10 @@
 //! while after start, daily, and when a volume comes or goes (the
 //! storage watch's listener). The status bar's badge shows the worst
 //! finding needing attention and their count; it opens the page. Nothing
-//! shows while all is well, and nothing is ever modal.
+//! shows while all is well, and nothing is ever modal. On the desktop the
+//! runner is the local node's job too ([`crate::node_jobs::Health`]): the
+//! node keeps its schedule with or without a window, and the shell holds
+//! a handle on the same runner to show its findings.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -153,7 +156,7 @@ impl Shell {
     /// Runs the health checks with `runner`, reported in the jobs centre;
     /// the desktop gives Helios's checks over the machine and the vault,
     /// tests their own.
-    pub fn set_health(&mut self, mut runner: Runner) {
+    pub fn set_health(&mut self, runner: Runner) {
         runner.report_to(self.jobs());
         let ctx = self.core.health.ctx.clone();
         runner.on_done(move || {
@@ -225,7 +228,7 @@ impl Shell {
         self.core
             .health
             .runner
-            .as_mut()
+            .as_ref()
             .is_some_and(Runner::run_now)
     }
 
@@ -291,7 +294,7 @@ impl Shell {
             .health
             .listening
             .then(|| self.core.health.volumes.load(Ordering::SeqCst));
-        let Some(runner) = self.core.health.runner.as_mut() else {
+        let Some(runner) = self.core.health.runner.as_ref() else {
             return;
         };
         runner.tick(Instant::now(), generation);
