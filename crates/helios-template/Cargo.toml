@@ -13,12 +13,13 @@ helios-photo.workspace = true
 helios-scopes.workspace = true
 # MIT: egui-pop's logic without egui (the layout document, panel specs).
 egui-pop-model.workspace = true
+# Generalising: an AI zone fitted with the parametric mask's own ranges.
+helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 helios-module-exposure = { path = "../../modules/exposure" }
-helios-module-masks = { path = "../../modules/masks" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
 # The raw chain, which reads a raw's camera (the Develop template's).
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
