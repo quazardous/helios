@@ -84,7 +84,9 @@ GitHub Actions, which checks the tag against the workspace version, then:
    below);
 7. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
    CHANGELOG.md section as its notes, and attaches the files, with one
-   `SHA256SUMS` for all of them.
+   `SHA256SUMS` for all of them;
+8. opens the winget-pkgs pull request for the new installer (see "winget"
+   below), when the `WINGET_TOKEN` secret is set.
 
 Nothing else is needed at run time: the catalogues, templates, module
 declarations and the shipped plugins' manifests are compiled into the
@@ -142,6 +144,71 @@ Its icon, version information and manifest (per-monitor DPI awareness,
 paths longer than 260 characters) are embedded at build time
 (`crates/helios-gui/build.rs`). Neither the installer nor the programs
 are signed yet, so SmartScreen warns on first start.
+
+## winget
+
+Helios is published on the Windows Package Manager as `Quazardous.Helios`,
+from the installer above (unsigned, decided 2026-11-12: no code signing
+for now, winget only):
+
+```powershell
+winget install Quazardous.Helios
+```
+
+The manifests live in
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), under
+`manifests/q/Quazardous/Helios/X.Y.Z/`. `packaging/winget/` holds the
+first set, for 0.77.0, in that same layout (schema 1.9.0): the version,
+the default locale (en-US) and the installer manifest. The installer
+manifest says what the Inno Setup script makes: `InstallerType: inno`,
+`Scope: user` (per-user, no elevation), silent switches
+`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` (`/SILENT …` with
+progress), the `ProductCode` `{833F5226-CF08-47A0-BF08-0B2A9389FFC3}_is1`
+(the script's `AppId` plus `_is1`, the key Inno Setup registers the
+uninstaller under), and the setup.exe URL and SHA-256 from the release's
+`SHA256SUMS`.
+
+Each tagged release then updates it on its own: the release workflow's
+`winget` job, after `publish`, runs
+[winget-releaser](https://github.com/vedantmgoyal9/winget-releaser)
+(pinned by commit), which takes the manifests of the previous version in
+winget-pkgs, swaps in the new setup.exe, its SHA-256 and the release notes
+link, and opens the pull request on microsoft/winget-pkgs from the
+`quazardous` fork. Microsoft's validation pipeline and moderators then
+merge it, usually within a few days. Without the `WINGET_TOKEN` secret the
+job leaves a notice in the run and does nothing; it never fails the
+release (the Release is already published when it runs). Its version of
+winget-releaser is bumped by hand, to a reviewed commit.
+
+### Setting it up (once, by the owner)
+
+1. Fork [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
+   under the `quazardous` account (the job opens its pull requests from
+   that fork).
+2. Create a **classic** personal access token (fine-grained tokens are not
+   supported by winget-releaser) with the `public_repo` scope. Adding the
+   `workflow` scope lets it sync the fork when winget-pkgs changes its own
+   workflows; without it, a sync that fails is done by hand from the
+   fork's page ("Sync fork"), then the job rerun.
+3. Store it as the repository secret `WINGET_TOKEN` (Settings, Secrets and
+   variables, Actions).
+
+### The first submission
+
+winget-releaser updates a package; it cannot create one. The first version
+is a manual pull request to microsoft/winget-pkgs adding
+`packaging/winget/manifests/q/Quazardous/Helios/0.77.0/` at the same path,
+opened by the coordinator once the owner agrees. Until it is merged, the
+`winget` job of a new release fails (no previous version to start from);
+that failure does not fail the release, and the job is rerun once 0.77.0
+is in.
+
+To check a manifest set on Windows before submitting it:
+
+```powershell
+winget validate --manifest packaging\winget\manifests\q\Quazardous\Helios\0.77.0
+winget install --manifest packaging\winget\manifests\q\Quazardous\Helios\0.77.0
+```
 
 ## The Flatpak
 
