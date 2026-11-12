@@ -217,13 +217,17 @@ gui-connect-cancel = Cancel
 
 gui-connect-close = Close
 
+gui-connect-copy-link = Copy link
+
 gui-connect-done = { $account } is connected.
 
 gui-connect-failed = Not connected: { $why }
 
+gui-connect-link-hint = The page's address, to paste in your browser if it did not open.
+
 gui-connect-next = Connect
 
-gui-connect-open-again = Open the page again
+gui-connect-open-again = Open again
 
 gui-connect-secret-refused = A secret is typed by the person, never given by an agent
 
@@ -1185,9 +1189,15 @@ gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
 
+gui-pick-account = Your browser must be signed in to the account connected as { $account }; if the page says it cannot open, sign in to that account and start again.
+
+gui-pick-again = Start again
+
 gui-pick-browser = Pick your photos in your browser, press Done, then come back here.
 
 gui-pick-done = { $count } photos imported.
+
+gui-pick-expired = The picking session expired, start again.
 
 gui-pick-failed = Not imported: { $why }
 

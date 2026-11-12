@@ -94,6 +94,13 @@ impl Session {
         })
     }
 
+    /// How long the session lasts from `now` (seconds since 1970):
+    /// zero once expired; `None` when the service gave no expiry.
+    pub fn expires_in(&self, now: i64) -> Option<Duration> {
+        let at = epoch(self.expires.as_deref()?)?;
+        Some(Duration::from_secs(u64::try_from(at - now).unwrap_or(0)))
+    }
+
     /// The picking page, closing its tab once the person is done.
     pub fn autoclose_uri(&self) -> String {
         format!("{}/autoclose", self.picker_uri.trim_end_matches('/'))
@@ -113,6 +120,13 @@ impl Download {
     pub fn url(&self) -> String {
         format!("{}={}", self.base_url, if self.video { "dv" } else { "d" })
     }
+}
+
+/// Seconds since 1970, now.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// A protobuf duration as JSON writes it: `"3.5s"`.
@@ -340,6 +354,8 @@ impl Picker {
     /// Polls a session until the person finished picking, at the interval
     /// the session asks, for as long as it says (`timeoutIn`), and never
     /// past `deadline`. `Ok(None)`: the time ran out with nothing picked.
+    /// A session past its `expireTime` is [`ConnectorError::Expired`]:
+    /// its page no longer opens, a new session is needed.
     pub fn wait(
         &self,
         id: &str,
@@ -356,6 +372,10 @@ impl Picker {
             if session.items_set {
                 return Ok(Some(session));
             }
+            let left = session.expires_in(now());
+            if left.is_some_and(|left| left.is_zero()) {
+                return Err(ConnectorError::Expired);
+            }
             if let Some(timeout) = session.poll_for {
                 if timeout.is_zero() {
                     return Ok(None);
@@ -369,7 +389,8 @@ impl Picker {
             if started.elapsed() + every > until {
                 return Ok(None);
             }
-            std::thread::sleep(every);
+            // Looked at again once expired, not a whole interval later.
+            std::thread::sleep(left.map_or(every, |left| every.min(left)));
         }
     }
 

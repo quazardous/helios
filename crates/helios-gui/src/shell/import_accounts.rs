@@ -8,6 +8,13 @@
 //! window: a form's fields, a spinner while a step works, the page the
 //! browser was opened on, the reason a step failed.
 //!
+//! A page for the browser (an OAuth consent, a picking) is opened the
+//! moment the step asks for it, from the step's own thread, through the
+//! platform's opener ([`system_opener`]) on a thread of its own: never
+//! at the end of a frame, so it does not wait for the window's next
+//! frame or hold the window while the opener runs. The dialog shows the
+//! link, to copy, and "Open again".
+//!
 //! Settings > Accounts lists the same accounts through the commands of
 //! [`super::accounts_admin`].
 //!
@@ -18,7 +25,7 @@
 //! allow (nothing runs).
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use helios_connect::Text;
 use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
@@ -60,6 +67,31 @@ pub(crate) struct Accounts {
     pub(crate) plugins: Option<Arc<helios_plugin::Broker>>,
     /// The consent asked, shown in the window's dialog.
     pub(crate) consent: Option<Consent>,
+    /// How a page is opened in the system browser.
+    pub(crate) opener: Opener,
+}
+
+/// Opens a page in the system browser; returns at once (the opening
+/// runs on a thread of its own).
+pub type Opener = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// The platform's own opener: `xdg-open` (the desktop portal inside a
+/// sandbox) on Linux, `open` on macOS, `ShellExecute` on Windows, run on a
+/// thread of its own so that the caller never waits on it.
+pub(crate) fn system_opener() -> Opener {
+    Arc::new(|url: &str| {
+        let url = url.to_owned();
+        let spawned = std::thread::Builder::new()
+            .name("open in browser".into())
+            .spawn(move || {
+                if let Err(e) = open::that_detached(&url) {
+                    log::warn!("cannot open the browser: {e}");
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("cannot open the browser: {e}");
+        }
+    })
 }
 
 /// A plugin's capabilities asked for before one of its actions runs.
@@ -109,6 +141,9 @@ pub(crate) enum PickStatus {
     },
     /// Nothing picked before the deadline.
     Nothing,
+    /// The picking session expired (or the service forgot it) before
+    /// the person was done: a new one is needed.
+    Expired,
     /// The service refused the sign-in: the account needs a reconnection.
     SignIn,
     Failed(String),
@@ -117,11 +152,11 @@ pub(crate) enum PickStatus {
 
 /// A picking running.
 pub(crate) struct Picking {
+    /// The account picked from.
+    account: String,
     label: String,
     status: Arc<Mutex<PickStatus>>,
     cancel: helios_connect::Cancel,
-    /// The browser was opened on this page.
-    opened: Option<String>,
 }
 
 impl Picking {
@@ -156,6 +191,7 @@ impl Default for Accounts {
             import: None,
             plugins: None,
             consent: None,
+            opener: system_opener(),
         }
     }
 }
@@ -169,8 +205,6 @@ pub(crate) struct Connecting {
     values: BTreeMap<String, String>,
     /// The form step the values are for.
     form: Option<String>,
-    /// The browser was opened on this page.
-    opened: Option<String>,
 }
 
 impl Accounts {
@@ -233,14 +267,24 @@ impl Accounts {
             secrets: self.secrets.clone(),
             web: self.web.clone(),
         };
-        let session = Arc::new(Session::start(context, account, new, wake));
+        // The browser opens the moment the session asks for it, from the
+        // session's thread: the window's frame is only told to show it.
+        let watched: Arc<OnceLock<Weak<Session>>> = Arc::default();
+        let look = Arc::new(browser_follower(watched.clone(), self.opener.clone()));
+        let then = look.clone();
+        let session = Arc::new(Session::start(context, account, new, move || {
+            then();
+            wake();
+        }));
+        let _ = watched.set(Arc::downgrade(&session));
+        // The page asked before the session was watched.
+        look();
         *self.current.lock().unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
         self.connecting = Some(Connecting {
             session,
             label,
             values: BTreeMap::new(),
             form: None,
-            opened: None,
         });
         Ok(())
     }
@@ -283,6 +327,7 @@ impl Accounts {
         let status = Arc::new(Mutex::new(PickStatus::Starting));
         let cancel = helios_connect::Cancel::new();
         let (st, stop, account_ref) = (status.clone(), cancel.clone(), account.account_ref());
+        let opener = self.opener.clone();
         let set = move |s: PickStatus| {
             *st.lock().unwrap_or_else(PoisonError::into_inner) = s;
             wake();
@@ -290,7 +335,10 @@ impl Accounts {
         std::thread::spawn(move || {
             use helios_connect::ConnectorError;
             let deadline = std::time::Instant::now() + PICK_WAIT;
+            // Every picking is a session of its own, its page opened at
+            // once: a session waits for nobody, it expires.
             let opened = |url: &str| {
+                opener(url);
                 set(PickStatus::Browser {
                     url: url.to_owned(),
                 });
@@ -313,6 +361,7 @@ impl Accounts {
                     }
                 }
                 Ok(None) => PickStatus::Nothing,
+                Err(ConnectorError::Expired | ConnectorError::Gone) => PickStatus::Expired,
                 Err(ConnectorError::Cancelled) => PickStatus::Cancelled,
                 Err(ConnectorError::AuthNeeded) => {
                     let why = "the source refused the sign-in: reconnect";
@@ -330,10 +379,10 @@ impl Accounts {
             set(end);
         });
         self.picking = Some(Picking {
+            account: account.id,
             label: account.label,
             status,
             cancel,
-            opened: None,
         });
         Ok(())
     }
@@ -409,6 +458,53 @@ impl Accounts {
         self.connecting = None;
         *self.current.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
+}
+
+/// What a session's wake also does: opens the browser on the page its
+/// status asks for, once per page.
+fn browser_follower(
+    watched: Arc<OnceLock<Weak<Session>>>,
+    opener: Opener,
+) -> impl Fn() + Send + Sync {
+    let opened = Mutex::new(None::<String>);
+    move || {
+        let Some(session) = watched.get().and_then(Weak::upgrade) else {
+            return;
+        };
+        if let Status::Browser { url, .. } = session.status() {
+            let mut last = opened.lock().unwrap_or_else(PoisonError::into_inner);
+            if last.as_deref() != Some(url.as_str()) {
+                *last = Some(url.clone());
+                drop(last);
+                opener(&url);
+            }
+        }
+    }
+}
+
+/// The page the browser was opened on: its link, to copy, and "Open
+/// again" in case the browser did not show it.
+fn browser_link(ui: &mut egui::Ui, url: &str, opener: &Opener, t: &dyn Fn(Message) -> String) {
+    let mut shown = url.to_owned();
+    ui.add(egui::TextEdit::singleline(&mut shown).desired_width(f32::INFINITY))
+        .on_hover_text(t(Message::new(
+            "gui-connect-link-hint",
+            "The page's address, to paste in your browser if it did not open.",
+        )));
+    ui.horizontal(|ui| {
+        if ui
+            .button(t(Message::new("gui-connect-open-again", "Open again")))
+            .clicked()
+        {
+            opener(url);
+        }
+        if ui
+            .button(t(Message::new("gui-connect-copy-link", "Copy link")))
+            .clicked()
+        {
+            ui.ctx().copy_text(url.to_owned());
+        }
+    });
 }
 
 /// A connector's text in the interface's language.
@@ -625,14 +721,9 @@ pub(crate) fn connect_dialog(
         return;
     };
     let status = connecting.session.status();
-    // A browser step opens the page once, in the system browser (never
-    // a web view: services refuse them).
-    if let Status::Browser { url, .. } = &status
-        && connecting.opened.as_deref() != Some(url.as_str())
-    {
-        connecting.opened = Some(url.clone());
-        ctx.open_url(egui::OpenUrl::new_tab(url));
-    }
+    // The browser's page was opened by the session itself (never a web
+    // view: services refuse them); the dialog offers it again.
+    let opener = accounts.opener.clone();
     let mut close = false;
     egui::Modal::new(egui::Id::unique("helios.import.connect")).show(ctx, |ui| {
         ui.set_width(360.0);
@@ -710,13 +801,7 @@ pub(crate) fn connect_dialog(
                         "Sign in in your browser, then come back here.",
                     )));
                 });
-                ui.hyperlink_to(
-                    t(Message::new(
-                        "gui-connect-open-again",
-                        "Open the page again",
-                    )),
-                    url,
-                );
+                browser_link(ui, url, &opener, t);
                 if ui
                     .button(t(Message::new("gui-connect-cancel", "Cancel")))
                     .clicked()
@@ -761,25 +846,21 @@ pub(crate) fn connect_dialog(
 }
 
 /// The picking's dialog, while one runs or until its end is seen: the
-/// browser opened once on the picking page (never a web view), a
-/// spinner while the person picks or the photos come in, then what was
-/// imported, or why not. Cancel stops the wait.
+/// account picked from (the browser must be signed in to it), the
+/// picking page (opened by the picking itself, never in a web view) to
+/// open again or copy, a spinner while the person picks or the photos
+/// come in, then what was imported, or why not. Cancel stops the wait;
+/// "Start again" (a session expired, or a page the browser refused)
+/// asks for a new picking, given back to run.
 pub(crate) fn pick_dialog(
     ctx: &egui::Context,
     accounts: &mut Accounts,
     t: &dyn Fn(Message) -> String,
-) {
-    let Some(picking) = accounts.picking.as_mut() else {
-        return;
-    };
+) -> Option<Asked> {
+    let opener = accounts.opener.clone();
+    let picking = accounts.picking.as_mut()?;
     let status = picking.status();
-    if let PickStatus::Browser { url } = &status
-        && picking.opened.as_deref() != Some(url.as_str())
-    {
-        picking.opened = Some(url.clone());
-        ctx.open_url(egui::OpenUrl::new_tab(url));
-    }
-    let mut close = false;
+    let (mut close, mut again) = (false, false);
     egui::Modal::new(egui::Id::unique("helios.import.pick")).show(ctx, |ui| {
         ui.set_width(360.0);
         ui.heading(t(Message::new(
@@ -814,13 +895,12 @@ pub(crate) fn pick_dialog(
                         "Pick your photos in your browser, press Done, then come back here.",
                     )),
                 );
-                ui.hyperlink_to(
-                    t(Message::new(
-                        "gui-connect-open-again",
-                        "Open the page again",
-                    )),
-                    url,
-                );
+                ui.weak(t(Message::new(
+                    "gui-pick-account",
+                    "Your browser must be signed in to the account connected as { $account }; if the page says it cannot open, sign in to that account and start again.",
+                )
+                .with("account", picking.label.clone())));
+                browser_link(ui, url, &opener, t);
             }
             PickStatus::Importing { items } => working(
                 ui,
@@ -843,6 +923,14 @@ pub(crate) fn pick_dialog(
                 )),
                 false,
             ),
+            PickStatus::Expired => ended(
+                ui,
+                t(Message::new(
+                    "gui-pick-expired",
+                    "The picking session expired, start again.",
+                )),
+                true,
+            ),
             PickStatus::SignIn => ended(
                 ui,
                 t(Message::new(
@@ -863,21 +951,43 @@ pub(crate) fn pick_dialog(
             status,
             PickStatus::Starting | PickStatus::Browser { .. } | PickStatus::Importing { .. }
         );
-        if running {
-            if ui
-                .button(t(Message::new("gui-connect-cancel", "Cancel")))
+        let restart = matches!(
+            status,
+            PickStatus::Browser { .. } | PickStatus::Expired | PickStatus::Nothing
+        );
+        ui.horizontal(|ui| {
+            if restart
+                && ui
+                    .button(t(Message::new("gui-pick-again", "Start again")))
+                    .clicked()
+            {
+                again = true;
+            }
+            if running {
+                if ui
+                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                    .clicked()
+                {
+                    picking.cancel.cancel();
+                }
+            } else if ui
+                .button(t(Message::new("gui-connect-close", "Close")))
                 .clicked()
             {
-                picking.cancel.cancel();
+                close = true;
             }
-        } else if ui
-            .button(t(Message::new("gui-connect-close", "Close")))
-            .clicked()
-        {
-            close = true;
-        }
+        });
     });
+    if again {
+        // A new session, never the old one: the picking running gives up.
+        let account = picking.account.clone();
+        picking.cancel.cancel();
+        accounts.picking = None;
+        ctx.request_repaint();
+        return Some(Asked::Pick(account));
+    }
     if close {
         accounts.picking = None;
     }
+    None
 }

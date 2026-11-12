@@ -2499,6 +2499,7 @@ dependencies = [
  "helios-xmp",
  "image",
  "log",
+ "open",
  "serde",
  "serde_json",
  "signal-hook",

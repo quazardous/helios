@@ -317,6 +317,7 @@ gui-caches-clear-all-title 527cd71ac2b99c12
 gui-caches-none 8c74d2e5736bf1f2
 gui-caches-size 4cbf792580ea4b9e
 gui-caches-size-of 4fb91f6696554978
+gui-caches-size-shown 8cdf72c29da69f63
 gui-caches-tier-disk cf3317f0c43db18d
 gui-caches-tier-ram f9b4860f21faa485
 gui-caches-tier-vram 885b6d94588ca46a
@@ -340,6 +341,9 @@ gui-compare-first 266fefe0e5a0945f
 gui-compare-rating 8d3d60f2b2f33084
 gui-compare-too-few bdc994e76c8e5b1c
 gui-confirmed-by-policy 3cbe35a902970f08
+gui-connect-copy-link ca6b9cb246b454ea
+gui-connect-link-hint 3368a303154df503
+gui-connect-open-again d90aa98aedbaaa99
 gui-consent-allow 4212ce82c4d5efa0
 gui-consent-asks a0f6d514da96185a
 gui-consent-declined 54f6ed2b2c0ddae4
@@ -815,8 +819,11 @@ gui-params-port-member 6b3de0179d0cc50e
 gui-params-show-values 1ca86a61fcd25ceb
 gui-params-unfold-section 08281fbd8b927666
 gui-params-values 0e265cf773d72c36
+gui-pick-account 554b5fe876fe24f2
+gui-pick-again 23d4f0d457964c7f
 gui-pick-browser 809da427a6f0f41b
 gui-pick-done 19c95ed7feb6813d
+gui-pick-expired f9be8eee7d97989e
 gui-pick-failed 0dc585e051a2e538
 gui-pick-importing a61d47728658ad72
 gui-pick-nothing 692269164c42d95d

@@ -1471,7 +1471,11 @@ impl ImportWindow {
                 self.account_asked(again);
             }
             super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
-            super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m));
+            if let Some(again) =
+                super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m))
+            {
+                self.account_asked(again);
+            }
         }
         // The chooser's answer comes in this window too.
         self.receive_chosen_folder();

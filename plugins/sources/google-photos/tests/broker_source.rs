@@ -128,7 +128,8 @@ fn a_picking_through_the_broker_imports_the_two_photos_picked() {
     .expect("picked before the deadline");
     let opened = opened.into_inner().unwrap();
     assert_eq!(opened.len(), 1);
-    assert!(opened[0].ends_with("/pick/s1/autoclose"), "{opened:?}");
+    // The probe's session was s1: the picking has one of its own.
+    assert!(opened[0].ends_with("/pick/s2/autoclose"), "{opened:?}");
     assert_eq!(source.connector, "google-photos");
     assert_eq!(source.id, account.id);
     let ids: Vec<&str> = items.iter().map(|i| i.id.0.as_str()).collect();
@@ -152,7 +153,7 @@ fn a_picking_through_the_broker_imports_the_two_photos_picked() {
     photos.end_pick().unwrap();
     let requests = fake.requests();
     assert!(requests.contains(&"GET /media/m2=d".to_string()));
-    assert_eq!(requests.last().unwrap(), "DELETE /v1/sessions/s1");
+    assert_eq!(requests.last().unwrap(), "DELETE /v1/sessions/s2");
 }
 
 #[test]
@@ -197,6 +198,30 @@ fn a_cancelled_wait_ends_the_picking() {
         assert!(Instant::now() < deadline, "the picking ended");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn an_expired_picking_session_is_said_expired_through_the_broker() {
+    let p = Place::new("expired");
+    let fake = FakePicker::expiring(u32::MAX, vec![], "2020-01-01T00:00:00Z");
+    let broker = broker(&p.0, &fake.base);
+    let photos = SourceProvider::new(broker, PLUGIN)
+        .unwrap()
+        .connector(token(TOKEN));
+    let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
+    let started = Instant::now();
+    let picked = source::pick_and_list(
+        &photos,
+        &account,
+        Instant::now() + Duration::from_mins(1),
+        &Cancel::new(),
+        &|_| {},
+    );
+    assert_eq!(picked.unwrap_err(), ConnectorError::Expired);
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "said at once, not waited out"
+    );
 }
 
 #[test]

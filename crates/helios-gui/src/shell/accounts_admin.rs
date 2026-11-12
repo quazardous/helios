@@ -107,6 +107,12 @@ impl Shell {
         self.import.get_mut().accounts.web = Some(web);
     }
 
+    /// How the import window opens a page in the system browser (a
+    /// sign-in, a picking): the platform's opener unless set (a test's).
+    pub fn set_import_browser(&mut self, opener: Arc<dyn Fn(&str) + Send + Sync>) {
+        self.import.get_mut().accounts.opener = opener;
+    }
+
     /// Imports what a connector's picking listed ("Pick photos…" on an
     /// account of a connector that picks), through `import`.
     pub fn set_import_remote(&mut self, import: super::import_accounts::ImportRemote) {
