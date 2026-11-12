@@ -375,7 +375,10 @@ wins). A program built for Windows may carry `.exe` where the manifest's
 command does not. A test checks that every manifest and catalogue of
 their folders is bundled. `cargo xtask release` moves their
 `compat.helios` range with each release. The first is
-`darktable-library` (see docs/darktable-library-import.md).
+`darktable-library` (see docs/darktable-library-import.md); the second,
+`lightroom-catalog`, reads a Lightroom Classic `.lrcat` (stars, rejects,
+labels, keywords, collections as tags; the schema it assumes is listed in
+its crate documentation).
 
 The test plugin `crates/helios-plugin/tests/fixtures/ratings-folder`
 (Python, standard library alone) reads a folder of JPEGs and the

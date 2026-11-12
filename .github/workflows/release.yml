@@ -89,7 +89,8 @@ jobs:
       - name: build
         run: |
           cargo build --release --locked \
-            -p helios-node -p helios-gui -p helios-plugin-darktable-library
+            -p helios-node -p helios-gui -p helios-plugin-darktable-library \
+            -p helios-plugin-lightroom-catalog
       - name: package
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -243,7 +244,8 @@ jobs:
       - name: build
         run: |
           cargo build --release --locked \
-            -p helios-node -p helios-gui -p helios-plugin-darktable-library
+            -p helios-node -p helios-gui -p helios-plugin-darktable-library \
+            -p helios-plugin-lightroom-catalog
       # Inno Setup 6, the installer's compiler, unless the image has it.
       - name: Inno Setup
         shell: pwsh

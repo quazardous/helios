@@ -1,0 +1,24 @@
+id = "io.github.quazardous.helios.lightroom-catalog"
+name = "Lightroom catalogue"
+title = "Lightroom catalogue"
+description = "Imports the photos of a Lightroom Classic catalogue with their stars, rejects, colour labels, keywords and collections"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+command = ["helios-lightroom-catalog"]
+services = ["importer"]
+activation = ["onImporter:lightroom-catalog"]
+
+[compat]
+helios = ">=0.77.0, <0.78.0"
+interfaces = { protocol = 1, importer = 2 }
+
+[[importers]]
+id = "lightroom-catalog"
+label = "Lightroom catalogue"
+source = "file"
+patterns = ["*.lrcat"]
+anywhere = true
+
+[[capabilities]]
+name = "source.read"
+reason = "Reads the .lrcat catalogue you pick, never writing it (while Lightroom has it open, from a private temporary copy)"

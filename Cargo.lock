@@ -2783,6 +2783,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-plugin-lightroom-catalog"
+version = "0.77.0"
+dependencies = [
+ "helios-plugin",
+ "helios-plugin-darktable-library",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-profile"
 version = "0.77.0"
 dependencies = [

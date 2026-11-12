@@ -242,10 +242,10 @@ cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-cargo build --locked --release -p helios-gui -p helios-plugin-darktable-library && cp /target/release/helios-gui /target/release/helios-darktable-library /out/ && git rev-parse --short HEAD > /out/commit.txt"""
+cargo build --locked --release -p helios-gui -p helios-plugin-darktable-library -p helios-plugin-lightroom-catalog && cp /target/release/helios-gui /target/release/helios-darktable-library /target/release/helios-lightroom-catalog /out/ && git rev-parse --short HEAD > /out/commit.txt"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
-outputs = { gui = { path = "helios-gui", kind = "file" }, darktable-library = { path = "helios-darktable-library", kind = "file" } }
+outputs = { gui = { path = "helios-gui", kind = "file" }, darktable-library = { path = "helios-darktable-library", kind = "file" }, lightroom-catalog = { path = "helios-lightroom-catalog", kind = "file" } }
 timeout = "1h"
 
 # how long the desktop takes to quit: helios-gui in release, in a headless
