@@ -12,6 +12,8 @@
 //!   The in-tree plugins' Helios range and the workspace's own Cargo.lock
 //!   lines follow the workspace version, so a branch that lands after a
 //!   version bump fails its own CI rather than `--locked` builds on `next`.
+//!   Only the vault driver and the node open the vault file or a raw SQLite
+//!   connection (see `vault_access.rs`).
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
 //!   catalogs of `i18n/` (see `i18n.rs`).
 //! - `lint [--fix] [--require-all]`: rustfmt, clippy and the optional
@@ -52,6 +54,7 @@ mod lint;
 mod promote;
 mod remote;
 mod test_times;
+mod vault_access;
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -706,8 +709,9 @@ fn main() -> ExitCode {
                 }
             }
             problems.extend(version_problems(&root));
+            problems.extend(vault_access::problems(&root));
             if problems.is_empty() {
-                println!("Changelog fragments, plugin ranges and Cargo.lock OK.");
+                println!("Changelog fragments, plugin ranges, Cargo.lock and vault access OK.");
                 ExitCode::SUCCESS
             } else {
                 fail(&problems)
