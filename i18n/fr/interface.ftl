@@ -125,7 +125,7 @@ setting-health-destinationDays =
     .label = Avertir quand un disque de sauvegarde est absent depuis (jours)
 
 setting-notifications-jobs =
-    .description = Affiche une notification sur le bureau quand un long export ou un lot se termine ou échoue alors qu’aucune fenêtre de Helios n’a le focus.
+    .description = Affiche une notification sur le bureau quand une longue tâche (un export, un lot, un import, une sauvegarde, un bilan de santé) se termine ou échoue alors qu’aucune fenêtre de Helios n’a le focus, quelle qu’en soit l’origine.
     .label = Notifier la fin d’une longue tâche
 
 setting-catalogue-snapshotEvery =

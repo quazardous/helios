@@ -41,8 +41,10 @@ fn import(jobs: &Jobs, files: &[std::path::PathBuf]) {
   (and what cancels them).
 - **Its id** names the job while it runs (`import-1`): unique among
   running jobs, and what `job.cancel` takes. Its kind (`export`, `batch`,
-  `calibration`, `import`) groups jobs; the desktop notification says
-  the end of a long `export` or `batch`.
+  `calibration`, `import`, `backup`, `health`) groups jobs and titles
+  the desktop notification of a long job's end; the node's background
+  upkeep (`map`, `stacks.suggest`) and a job inside another are not
+  notified.
 - **Progress** sends only what is set: `counts(done, total)` (or
   `done(n)` when the total is not known yet), `item` (a file name),
   `item_progress` (0 to 1), `step` and `step_counts` for a job declared

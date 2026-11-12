@@ -236,6 +236,10 @@ gui-import-backup-today = { $disk } (vu aujourd’hui)
 
 gui-import-backup-unusable = { $disk } (branché, ne peut pas recevoir de copies)
 
+gui-job-backup-done = Sauvegarde terminée
+
+gui-job-backup-failed = Échec de la sauvegarde
+
 gui-job-batch-done = Lot terminé
 
 gui-job-batch-failed = Échec du lot
@@ -243,6 +247,18 @@ gui-job-batch-failed = Échec du lot
 gui-job-export-done = Export terminé
 
 gui-job-export-failed = Échec de l’export
+
+gui-job-health-done = Bilan de santé terminé
+
+gui-job-health-failed = Échec du bilan de santé
+
+gui-job-import-done = Import terminé
+
+gui-job-import-failed = Échec de l’import
+
+gui-job-other-done = Tâche terminée
+
+gui-job-other-failed = Échec de la tâche
 
 gui-keys-from-template = modèle
 

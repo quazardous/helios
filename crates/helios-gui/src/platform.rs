@@ -6,9 +6,11 @@
 //!   in the viewport, a workspace in a window of its own (one process per
 //!   workspace, started with [`NEW_INSTANCE`]). `helios://` links take the
 //!   same path ([`link`]).
-//! - **Notifications**: a long export or batch that ends while no Helios
-//!   window has the focus says so on the desktop ([`job_finished`]), unless
-//!   the `notifications.jobs` setting is off.
+//! - **Notifications**: a long job that ends while no Helios window has
+//!   the focus says so on the desktop ([`job_finished`]), unless the
+//!   `notifications.jobs` setting is off: an export, a batch, an import, a
+//!   backup, a health check, whoever started it (a window, the node on its
+//!   own, an agent, a node the desktop follows).
 //! - **Logs and crash reports** go to the user's state directory
 //!   ([`log_dir`], [`crash_dir`]): egui-pop's log file, rotated, at the
 //!   `developer.log_level` setting, and its crash reports, written by a
@@ -176,11 +178,35 @@ pub fn destination_days(store: &egui_pop::core::binding::SharedStore) -> u64 {
 /// seconds.
 pub const LONG_JOB_SECONDS: f64 = 10.0;
 
-/// A job whose end may be notified.
+/// A job whose end may be notified, by its kind (`job.started`'s `kind`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Job {
     Export,
     Batch,
+    Import,
+    Backup,
+    Health,
+    /// Any other kind: said as a job.
+    Other,
+}
+
+/// Kinds of upkeep the node keeps running in the background, whose ends
+/// are not news: the image map, the stack suggestions.
+pub const QUIET_KINDS: [&str; 2] = ["map", "stacks.suggest"];
+
+impl Job {
+    /// The job of `kind`; `None` for the [`QUIET_KINDS`].
+    pub fn of_kind(kind: &str) -> Option<Self> {
+        Some(match kind {
+            "export" => Self::Export,
+            "batch" => Self::Batch,
+            "import" => Self::Import,
+            "backup" => Self::Backup,
+            "health" => Self::Health,
+            k if QUIET_KINDS.contains(&k) => return None,
+            _ => Self::Other,
+        })
+    }
 }
 
 /// How a job ended: what it did (`Ok`, a summary in the interface's
@@ -226,6 +252,14 @@ pub fn notification(end: &JobEnd, text: impl Fn(Message) -> String) -> Notificat
         (Job::Export, false) => Message::new("gui-job-export-failed", "Export failed"),
         (Job::Batch, true) => Message::new("gui-job-batch-done", "Batch finished"),
         (Job::Batch, false) => Message::new("gui-job-batch-failed", "Batch failed"),
+        (Job::Import, true) => Message::new("gui-job-import-done", "Import finished"),
+        (Job::Import, false) => Message::new("gui-job-import-failed", "Import failed"),
+        (Job::Backup, true) => Message::new("gui-job-backup-done", "Backup finished"),
+        (Job::Backup, false) => Message::new("gui-job-backup-failed", "Backup failed"),
+        (Job::Health, true) => Message::new("gui-job-health-done", "Health check finished"),
+        (Job::Health, false) => Message::new("gui-job-health-failed", "Health check failed"),
+        (Job::Other, true) => Message::new("gui-job-other-done", "Job finished"),
+        (Job::Other, false) => Message::new("gui-job-other-failed", "Job failed"),
     };
     let (body, level) = match &end.outcome {
         Ok(summary) => (summary.as_str(), notify::Level::Success),
@@ -469,7 +503,7 @@ impl Plugin for Platform {
         ctx.setting(
             SETTING_JOBS,
             Descriptor::bool("Notify when a long job ends", true).description(
-                "Shows a desktop notification when a long export or batch finishes or fails while no Helios window has the focus.",
+                "Shows a desktop notification when a long job (an export, a batch, an import, a backup, a health check) finishes or fails while no Helios window has the focus, whoever started it.",
             ),
         )?;
         ctx.setting(
