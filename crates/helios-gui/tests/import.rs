@@ -1042,7 +1042,8 @@ fn the_embedded_import_window_is_centred_and_closes() {
 /// scrolls (the Choices column would on its own, taller than the window),
 /// never the body as a whole; the grid takes the width it has, a column
 /// more as the window widens; its last row, scrolled to, ends above the
-/// footer. Opened in main windows of two sizes, on a folder of 120 photos.
+/// footer; the backup line, last of the Choices column, is in view. Opened
+/// in main windows of two sizes, on a folder of 120 photos.
 #[test]
 fn the_import_body_fits_the_window_and_only_its_grid_scrolls() {
     use egui::accesskit::Role;
@@ -1092,6 +1093,16 @@ fn the_import_body_fits_the_window_and_only_its_grid_scrolls() {
         assert!(
             entries.bottom() <= footer.top(),
             "{size:?}: the grid {entries:?} runs under the footer {footer:?}"
+        );
+        // The backup line, last of the Choices column, shows above it.
+        let storage = h
+            .query_all_by_label("Storage…")
+            .map(|n| n.rect())
+            .find(|r| window.contains_rect(*r))
+            .expect("the backup line's Storage… button");
+        assert!(
+            storage.bottom() <= footer.top() && storage.left() > entries.right(),
+            "{size:?}: the backup line {storage:?} is not shown above the footer {footer:?}"
         );
         // The cells of the first row: the grid's columns.
         let cell = |h: &Harness<'static, Shell>, name: &str| {
