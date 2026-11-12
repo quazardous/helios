@@ -24,6 +24,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.84.0] - 2026-11-12
+
+### Added
+
+- Each import source keeps its own choices. The import window's Choices column follows the source selected (the folder ticked last, or an account clicked): changing a choice saves it on that source, with Undo, and "Reset to defaults" gives it the default choices again. The sources are kept by the node with the person's settings, so they come back after a restart. Choices a source cannot honour are hidden: a remote source such as Google Photos always copies and has no darktable edits to read. Cards keep the default choices.
+- Plugins ask before they act: an action of a plugin that lacks a permission it declares (connecting a Google Photos account) opens a dialog listing each permission with the plugin's reason, Allow or Don't allow, instead of failing with "grant it with `plugin.grant`". The answer is remembered in your settings and follows you; Settings > Plugins lists every plugin's permissions with a switch each, and a permission a plugin's update adds is asked for again.
+
 ## [0.83.0] - 2026-11-12
 
 ### Added
