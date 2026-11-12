@@ -351,6 +351,8 @@ pub struct Entry {
 pub struct VolumeNote {
     pub name: String,
     pub last_seen: Option<(u64, String)>,
+    /// Mounted here, now.
+    pub online: bool,
 }
 
 impl VolumeNote {
@@ -719,7 +721,57 @@ enum FolderCounts {
     Wanted,
     /// The host took the ask ([`Library::take_folders_wanted`]).
     Asked,
-    Read(std::collections::BTreeMap<String, u64>),
+    Read(helios_vault::VolumeFolders),
+}
+
+/// A volume of the folders tree (`docs/design/library.md`, L5): a disk or
+/// card the photos' copies are on, its folders below it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VolumeNode {
+    /// Its id; `None` for the copies on no known volume.
+    pub id: Option<String>,
+    /// Its name (the user's, else its label); the id of one the registry
+    /// does not know; empty for the copies on no known volume.
+    pub name: String,
+    /// The photos with a copy on it.
+    pub count: u64,
+    /// Mounted here, now: an offline volume's folders still filter the
+    /// grid (their thumbnails are cached), its row greyed.
+    pub online: bool,
+    /// When it was last seen (seconds since the epoch), offline.
+    pub last_seen: Option<u64>,
+    pub folders: Vec<FolderNode>,
+}
+
+/// The volumes of the folders tree, each with its folders
+/// ([`folder_tree`]): online ones first, then offline ones, by name; the
+/// copies on no known volume last.
+fn volume_tree(
+    counts: &helios_vault::VolumeFolders,
+    volumes: &HashMap<String, VolumeNote>,
+) -> Vec<VolumeNode> {
+    let mut out: Vec<VolumeNode> = counts
+        .iter()
+        .map(|(id, folders)| {
+            let id = id.as_ref().map(|v| v.as_str().to_string());
+            let note = id.as_ref().and_then(|id| volumes.get(id));
+            VolumeNode {
+                name: note.map_or_else(|| id.clone().unwrap_or_default(), |n| n.name.clone()),
+                // The volume's root folder counts every photo on it.
+                count: folders.values().copied().max().unwrap_or(0),
+                // Only the registry says a volume is offline: copies on
+                // none, or on one it does not know, are not greyed.
+                online: note.is_none_or(|n| n.online),
+                last_seen: note.and_then(|n| n.last_seen.as_ref().map(|(at, _)| *at)),
+                folders: folder_tree(folders),
+                id,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        (a.id.is_none(), !a.online, &a.name).cmp(&(b.id.is_none(), !b.online, &b.name))
+    });
+    out
 }
 
 /// A folder of the folders tree (`docs/design/library.md`, L5).
@@ -809,6 +861,60 @@ fn folder_node(
         count,
         children,
     }
+}
+
+/// A volume's row in the Folders section, open first, its folders below:
+/// an offline one greyed, with the day it was last seen.
+fn volume_row(
+    ui: &mut Ui,
+    volume: &VolumeNode,
+    selected: Option<&str>,
+    chosen: &mut Option<String>,
+) {
+    let name = if volume.id.is_some() {
+        volume.name.clone()
+    } else {
+        crate::i18n::text(
+            ui.ctx(),
+            Message::new("gui-library-folders-elsewhere", "Other folders"),
+        )
+    };
+    let text = if volume.online {
+        format!("{name} {}", volume.count)
+    } else {
+        let day = volume
+            .last_seen
+            .and_then(|at| i64::try_from(at).ok())
+            .and_then(day_text)
+            .unwrap_or_else(|| "?".into());
+        crate::i18n::text(
+            ui.ctx(),
+            Message::new(
+                "gui-library-volume-offline",
+                "{ $volume } { $count }, offline, last seen { $date }",
+            )
+            .with("volume", name)
+            .with("count", volume.count.to_string())
+            .with("date", day),
+        )
+    };
+    let id = ui.make_persistent_id(("helios.library.volume", &volume.id));
+    let online = volume.online;
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+        .show_header(ui, |ui| {
+            let label = egui::RichText::new(text).strong();
+            let label = if online { label } else { label.weak() };
+            ui.label(label);
+        })
+        .body(|ui| {
+            if !online {
+                // Its folders greyed too: their photos are not at hand.
+                ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
+            }
+            for top in &volume.folders {
+                folder_row(ui, top, true, selected, chosen);
+            }
+        });
 }
 
 /// A folder's row in the Folders section, and the folders below it (open
@@ -1345,6 +1451,7 @@ impl Library {
                     VolumeNote {
                         name: v.name.clone(),
                         last_seen: v.last_seen.as_ref().map(|s| (s.at, s.node.clone())),
+                        online: v.online(),
                     },
                 )
             })
@@ -1406,15 +1513,15 @@ impl Library {
 
     /// The folders tree's counts, as the vault counted them
     /// ([`helios_vault::Vault::folders`] for the whole Library).
-    pub fn set_folders(&mut self, folders: std::collections::BTreeMap<String, u64>) {
+    pub fn set_folders(&mut self, folders: helios_vault::VolumeFolders) {
         self.folders = FolderCounts::Read(folders);
     }
 
-    /// The folders tree, once counted: the top folders, each with its
-    /// folders below.
-    pub fn folder_tree(&self) -> Option<Vec<FolderNode>> {
+    /// The folders tree, once counted: the volumes, each with its top
+    /// folders and theirs below.
+    pub fn folder_tree(&self) -> Option<Vec<VolumeNode>> {
         match &self.folders {
-            FolderCounts::Read(counts) => Some(folder_tree(counts)),
+            FolderCounts::Read(counts) => Some(volume_tree(counts, &self.volumes)),
             _ => None,
         }
     }
@@ -1478,6 +1585,7 @@ impl Library {
                 .unwrap_or_else(|| VolumeNote {
                     name: volume.to_string(),
                     last_seen: None,
+                    online: false,
                 }),
         )
     }
@@ -2669,8 +2777,8 @@ impl Library {
                     .id_salt("helios.library.folders.scroll")
                     .max_height(200.0)
                     .show(ui, |ui| {
-                        for top in &tree {
-                            folder_row(ui, top, true, selected.as_deref(), &mut chosen);
+                        for volume in &tree {
+                            volume_row(ui, volume, selected.as_deref(), &mut chosen);
                         }
                     });
             });

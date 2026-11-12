@@ -278,13 +278,10 @@ impl<S: Store> Vault<S> {
     }
 
     /// How many photos of a query have a copy in each folder or below it,
-    /// for every folder holding a copy and the folders above it
-    /// ([`crate::Store::folders`]): one store query, the Library's
-    /// folders tree (`docs/design/library.md`, L5).
-    pub fn folders(
-        &self,
-        query: &Query,
-    ) -> Result<std::collections::BTreeMap<String, u64>, String> {
+    /// for every folder holding a copy and the folders above it, apart for
+    /// each volume ([`crate::Store::folders`]): one store query, the
+    /// Library's folders tree (`docs/design/library.md`, L5).
+    pub fn folders(&self, query: &Query) -> Result<crate::VolumeFolders, String> {
         let folders = self.store.lock().expect("store lock").folders(query)?;
         self.count_query();
         Ok(folders)

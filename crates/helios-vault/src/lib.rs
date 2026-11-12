@@ -65,6 +65,11 @@ pub use stacks::Stack;
 pub use undo::{Change, Changes, ImageRows, Replayed};
 pub use versions::{Version, VersionId};
 
+/// The folders tree's counts ([`Store::folders`]): for each volume (`None`:
+/// copies on no known volume), how many photos have a copy in each folder
+/// or below it, by absolute path.
+pub type VolumeFolders = BTreeMap<Option<VolumeId>, BTreeMap<String, u64>>;
+
 /// An image, identified by the hash of its file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ImageId(pub ContentHash);
@@ -320,9 +325,12 @@ pub trait Store: Send {
     /// How many of the images a query selects have a copy in each folder
     /// or below it (present or not, as [`Query::folder`] takes them), for
     /// every folder holding a copy and each folder above it, by absolute
-    /// path without a trailing separator (the root keeps its own). A store
-    /// backed by a database answers in one statement.
-    fn folders(&self, query: &Query) -> Result<BTreeMap<String, u64>, String>;
+    /// path without a trailing separator (the root keeps its own), apart
+    /// for each volume the copies are on (`None`: copies on no known
+    /// volume). A photo with copies on two volumes counts on each; a
+    /// volume's root folder counts every photo on it. A store backed by a
+    /// database answers in one statement.
+    fn folders(&self, query: &Query) -> Result<VolumeFolders, String>;
     /// Records a change; returns its sequence number.
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String>;
     fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String>;
@@ -1001,9 +1009,10 @@ impl Store for MemoryStore {
         Ok(facets)
     }
 
-    fn folders(&self, query: &Query) -> Result<BTreeMap<String, u64>, String> {
+    fn folders(&self, query: &Query) -> Result<VolumeFolders, String> {
+        type Ids = BTreeMap<String, BTreeSet<ImageId>>;
         query.check()?;
-        let mut images: BTreeMap<String, BTreeSet<ImageId>> = BTreeMap::new();
+        let mut images: BTreeMap<Option<VolumeId>, Ids> = BTreeMap::new();
         for s in &self.sightings {
             let Some(id) = s.image.as_ref() else {
                 continue;
@@ -1011,10 +1020,10 @@ impl Store for MemoryStore {
             if !self.in_library(id) || !self.passes(id, query) {
                 continue;
             }
+            let on = images.entry(s.volume.clone()).or_default();
             for dir in s.path.parent().into_iter().flat_map(Path::ancestors) {
                 if !dir.as_os_str().is_empty() {
-                    images
-                        .entry(dir.to_string_lossy().into_owned())
+                    on.entry(dir.to_string_lossy().into_owned())
                         .or_default()
                         .insert(*id);
                 }
@@ -1022,7 +1031,13 @@ impl Store for MemoryStore {
         }
         Ok(images
             .into_iter()
-            .map(|(dir, ids)| (dir, ids.len() as u64))
+            .map(|(volume, dirs)| {
+                let counts = dirs
+                    .into_iter()
+                    .map(|(dir, ids)| (dir, ids.len() as u64))
+                    .collect();
+                (volume, counts)
+            })
             .collect())
     }
 

@@ -14,9 +14,11 @@ use helios_core::{Bus, ContentHash};
 use helios_gui::persist::Persist;
 use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_shell::commands::Origin;
+use helios_storage::{Identity, LastSeen, Volume, VolumeKind};
 use helios_vault::capture::{CAMERA_MODEL, CAPTURED, FILE_TYPE};
 use helios_vault::fields::{LABELS, RATING};
-use helios_vault::{Image, ImageId, Location, Store};
+use helios_vault::storage::VolumeId;
+use helios_vault::{Image, ImageId, Location, Presence, Store};
 use helios_vault_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
@@ -58,6 +60,13 @@ fn folder_of(dir: &Path, n: u8) -> PathBuf {
 }
 
 fn vault_file(dir: &Path) -> PathBuf {
+    vault_with(dir, |n, name| {
+        Location::seen(folder_of(dir, n).join(name), 10, 1, 1)
+    })
+}
+
+/// The photos, each copy where `place` puts it.
+fn vault_with(dir: &Path, place: impl Fn(u8, &str) -> Location) -> PathBuf {
     let path = dir.join("vault.db");
     let mut store = SqliteStore::open(&path).unwrap();
     for (n, name, camera, kind, labels, stars) in PHOTOS {
@@ -68,12 +77,7 @@ fn vault_file(dir: &Path) -> PathBuf {
                 partial: ContentHash([n; 32]),
             })
             .unwrap();
-        store
-            .put_location(
-                &id(n),
-                &Location::seen(folder_of(dir, n).join(name), 10, 1, 1),
-            )
-            .unwrap();
+        store.put_location(&id(n), &place(n, name)).unwrap();
         for (field, value) in [
             (CAPTURED, json!(u64::from(n) * 100)),
             (CAMERA_MODEL, json!(camera)),
@@ -192,7 +196,11 @@ fn the_folders_tree_counts_as_the_vault_and_a_click_scopes_the_grid() {
     );
     h.get_by_label("Folders").click();
     settle(&mut h, &mut persist, 1.0);
-    let tree = h.state().library().folder_tree().unwrap();
+    let volumes = h.state().library().folder_tree().unwrap();
+    assert_eq!(volumes.len(), 1, "on no known volume: {volumes:?}");
+    assert_eq!((volumes[0].id.as_deref(), volumes[0].count), (None, 3));
+    h.get_by_label("Other folders 3");
+    let tree = &volumes[0].folders;
     let top = root.to_string_lossy().into_owned();
     let raw = root.join("raw").to_string_lossy().into_owned();
     assert_eq!(tree.len(), 1, "{tree:?}");
@@ -232,6 +240,83 @@ fn the_folders_tree_counts_as_the_vault_and_a_click_scopes_the_grid() {
     h.state_mut().library_mut().set_folder(Some(&top));
     settle(&mut h, &mut persist, 12.0);
     assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() {
+    let root = temp("volumes");
+    let card = root.join("card").join("DCIM");
+    // The first two on the system disk, the third on a card not plugged in.
+    let path = vault_with(&root, |n, name| {
+        let (volume, dir, presence) = if n == 3 {
+            ("uuid:card", card.clone(), Presence::Offline)
+        } else {
+            ("uuid:disk", root.join("photos"), Presence::Present)
+        };
+        Location {
+            volume: Some(VolumeId(volume.into())),
+            rel_path: Some(PathBuf::from(name)),
+            presence,
+            ..Location::seen(dir.join(name), 10, 1, 1)
+        }
+    });
+    let (mut h, mut persist) = window(&root, &path);
+    let seen = 1_700_000_000;
+    let volume = |id: &str, name: &str, mount: Option<PathBuf>, at: u64| Volume {
+        id: VolumeId(id.into()),
+        identified_by: Identity::Uuid,
+        name: name.into(),
+        label: Some(name.into()),
+        kind: VolumeKind::Removable,
+        mount: mount.clone(),
+        last_seen: Some(LastSeen {
+            at,
+            node: "here".into(),
+            mount: mount.or_else(|| Some(card.clone())),
+        }),
+        ..Volume::remote("x", "y", name)
+    };
+    h.state_mut().library_mut().set_volumes(&[
+        volume("uuid:card", "EOS_CARD", None, seen),
+        volume("uuid:disk", "System", Some(PathBuf::from("/")), seen + 100),
+    ]);
+    h.get_by_label("Folders").click();
+    settle(&mut h, &mut persist, 1.0);
+
+    // Both volumes at the top, the one at hand first, with their counts.
+    let volumes = h.state().library().folder_tree().unwrap();
+    let tops: Vec<_> = volumes
+        .iter()
+        .map(|v| (v.name.as_str(), v.count, v.online))
+        .collect();
+    assert_eq!(tops, [("System", 2, true), ("EOS_CARD", 1, false)]);
+    h.get_by_label("System 2");
+    // The offline one says so and when it was last seen.
+    let day = helios_gui::library::day_text(seen as i64).unwrap();
+    assert_eq!(volumes[1].last_seen, Some(seen));
+    h.get_by_label(&format!("EOS_CARD 1, offline, last seen {day}"));
+
+    // Its folder still filters the grid: the photo is offline, its
+    // thumbnail cached.
+    let dcim = card.to_string_lossy().into_owned();
+    assert_eq!(volumes[1].folders[0].path, dcim);
+    let row = format!("{} 1", volumes[1].folders[0].name);
+    h.get_by_label(&row).click();
+    settle(&mut h, &mut persist, 5.0);
+    {
+        // The offline photo alone (named by its id: its file is not at hand).
+        let library = h.state().library();
+        let shown = library.shown();
+        assert_eq!(shown.len(), 1, "{:?}", grid(&h));
+        let entry = library.entry(&shown[0]).unwrap();
+        assert_eq!(entry.presence, Presence::Offline);
+    }
+    assert_eq!(h.state().library().folder(), Some(dcim));
+    h.get_by_label(&row).click();
+    settle(&mut h, &mut persist, 9.0);
+    assert_eq!(grid(&h).len(), 3);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
