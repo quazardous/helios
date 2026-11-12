@@ -31,8 +31,18 @@ fn id(n: u8) -> ImageId {
     ImageId(ContentHash([n; 32]))
 }
 
-/// Three photos: file name, camera, file type, labels, stars.
-const PHOTOS: [(u8, &str, &str, &str, &[&str], i64); 3] = [
+/// A photo: its id byte, file name, camera, file type, labels, stars.
+type Photo = (
+    u8,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    i64,
+);
+
+/// Three photos.
+const PHOTOS: [Photo; 3] = [
     (1, "a.jpg", "Z 8", "jpg", &["red"], 3),
     (2, "b.jpg", "Z 8", "jpg", &[], 1),
     (3, "c.nef", "R5", "nef", &["red"], 0),
