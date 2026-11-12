@@ -786,26 +786,14 @@ window's status bar and Queue panel (focus tags come with slice 7).
 
 ## 7. Closing and menus
 
-Status: **D1, D3 and D5 decided** (2026-11-12, the owner: Ctrl+Q quits
-the whole application, Ctrl+W closes one window as its close button
-does, Helios stays open while any of its windows exists, every window
-has a menu bar with at least a Window menu) and **built**, except
-reopening a closed main window (see "Built" below). D2, D4, D6 and D7
-keep their proposed defaults, not decided. Now that a focus can be an
-OS window of its own (the Import window, slice 4), this section settles
-what closes one window and what quits Helios, what happens to running
-work, which menus each window shows and where its keys act.
+Status: **proposed, not decided** (2026-11-12). Now that a focus can be
+an OS window of its own (the Import window, slice 4), this section
+settles what closes one window and what quits Helios, what happens to
+running work, which menus each window shows and where its keys act. It
+gives today's behaviour, how established applications do it, and a
+decision with a default for each question. Nothing here is built yet.
 
-**The boundary.** The process's core (the library, the vault, the jobs,
-the kernel) is Helios's local node; every OS window, the main one
-included, is a client view of it. No window owns the application:
-quitting is the core's policy (`shell/lifetime.rs`), which the desktop's
-host asks when the main window's close is requested. Ctrl+Q asks the
-core to quit; it does not close a window. The last window closed follows
-the same rule as Ctrl+Q. A node on a server keeps running when its
-desktop client quits, and so do its jobs.
-
-### Before this section was built
+### Today
 
 Read in Helios and in egui-pop 0.9 (`egui-pop-api`), the version Helios
 uses.
@@ -832,7 +820,7 @@ the vault closes within its deadline (`quit.rs`). Running exports are
 cancelled without a question (`export.rs`, `Drop for Exporter`). Nothing
 asks before quitting.
 
-**Found along the way** (read in the code, then checked headless):
+**Found along the way** (read in the code, not yet run):
 
 1. egui-pop's rule for a main window closed while other windows are
    open (the most recent one moves into the main window, T2) runs in
@@ -840,14 +828,9 @@ asks before quitting.
    closing pass, so in Helios the rule never runs: closing the main
    window with the Import window open quits, the Import window with it.
    Slice 4's text says otherwise; one of the two must change (see D3).
-   Fixed: the host asks the shell first (D3 decided, "Built" below).
-2. Ctrl+Q pressed in the Import window runs `app.quit`, whose `Close`
-   goes to the window it runs in. A window's keys are dispatched in its
-   own pass, but egui-pop runs their commands at the main window's next
-   pass, so that `Close` reaches the main window, not the Import window,
-   and quits only through finding 1; once the main window's close keeps
-   the other windows (D3), Ctrl+Q would close the main window alone.
-   Fixed either way: Quit is the core's (D1, "Built" below).
+2. Ctrl+Q pressed in the Import window runs `app.quit` in that window's
+   pass, so its `Close` goes to the Import window: it cancels the import
+   and closes that window instead of quitting.
 3. The system's end of session (SIGTERM, a logout, `WM_ENDSESSION`,
    `ending.rs`) closes the main window as Ctrl+Q does, so it quits, as
    wanted, but asks nothing and waits for nothing (8 s deadline).
@@ -925,12 +908,12 @@ tested, macOS quits as the others do.
   T2): the most recent other window moves into the main window and the
   application keeps going.
 
-Decided (2026-11-12): **another window takes its place**. Helios stays
-open while any of its windows exists: closing the main window with the
-Import window open moves the Import window into it, its scan and choices
-kept, and its Window menu lists the main window. (The default proposed
-here was "it quits", for the Import window is not a full focus; the
-owner chose the peers' way.)
+Default: **it quits**, for now. The Import window is not a full focus:
+moved into the main window it would leave Helios with no library, no
+menus and no jobs panel. When foci become peers with their own library
+view and menus (slice 7), egui-pop's rule comes back with them. Once decided,
+slice 4's text and T2 are amended to say so; the egui-pop rule stays
+available for applications whose windows are peers.
 
 **D4. Running work.**
 
@@ -962,13 +945,9 @@ Default: as above.
 - The alternative: a reduced bar in the Import window (File with Close
   and Quit, Edit, Window), as Firefox's Library window has.
 
-Decided (2026-11-12): **the reduced bar**. Every window has a menu bar
-with at least a Window menu, so any window can be opened or brought
-forward from any other. The Import window's bar has File (Close window,
-Quit) and Window: Switch to window…, Close window, Helios's windows
-(Main window, Import photos…) and the windows open, the one in front
-ticked. A later focus window that is a peer of the main one (slice 7)
-gets the full menus, as VS Code's windows do.
+Default: no menu bar in the Import window. A later focus window that is
+a peer of the main one (slice 7) gets the full menus, as VS Code's
+windows do.
 
 **D6. Where keys act.** Three scopes:
 
@@ -998,41 +977,12 @@ is not drawn on macOS. Until then the in-window bar stays.
 
 Default: as above, after a macOS build exists; nothing to do before.
 
-### Built (2026-11-12)
-
-- **Quit from any window.** egui-pop's `app.quit` (Ctrl+Q, File > Quit)
-  closes the window it runs in; the shell follows it in egui-pop's
-  journal and quits the application: it closes the main window, and
-  marks the core as quitting, so that close ends the process (finding 2).
-  Helios's `workbench.quit` (the system menu's Quit, the Import window's
-  File > Quit) does the same. With jobs running, one question first
-  (`helios.quit.confirmed` runs on its Quit button): D4's question,
-  about the jobs only for now.
-- **The main window's close** goes through the shell
-  (`Shell::main_window_closing`): it quits when the core is quitting or
-  no other window is open, and otherwise lets egui-pop move the window
-  worked in last into the main window (finding 1). The system's end of
-  session quits at once, asking nothing.
-- **Ctrl+W** is bound to egui-pop's `window.close`; `WindowsPlugin` is
-  installed (the Window menu, Switch to window…); Helios's own
-  `window.close` is gone. Alt+F4 and the close button were already the
-  system's close, which now follows the same rule.
-- **Tests** (`tests/import.rs`, real viewports): Ctrl+Q in the Import
-  window quits; Ctrl+W there closes it alone; closing the main window
-  keeps the Import window, moved into the main one with its Window menu
-  listing the main window, and closing it then quits; the last window
-  closed quits.
-
-**Not built yet: reopening the main window.** egui-pop 0.9 moves a
-window into the main one but has no way back: once the main window is
-closed, Window > Main window says it comes back when the window in its
-place closes. Reopening it needs egui-pop to move the content back to a
-window of its own and draw the shell again in the main window.
-
 ### Work this leads to
 
-- Reopening a closed main window from any window's Window menu, with
-  egui-pop's way back (above).
+- Quit from any window, and the main window's close running D3 and D4's
+  question (findings 1 and 2), in Helios.
+- Ctrl+W on `window.close`, `WindowsPlugin` installed, Helios's duplicate
+  command removed.
 - Window scope for commands (D6), in egui-pop, then Helios's commands
   marked.
 - The quit question (D4), with the jobs and workshop sessions it lists.

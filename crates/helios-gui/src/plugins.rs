@@ -517,18 +517,14 @@ mod tests {
     #[test]
     fn every_command_with_an_icon_is_one_of_helios() {
         // A command's English title is `command-<id, dots as dashes>`: an
-        // icon on an id no command has would never show. egui-pop's own
-        // commands Helios installs (its WindowsPlugin's) take Helios's
-        // icon too: their title comes from egui-pop.
+        // icon on an id no command has would never show.
         let catalog = include_str!("../../../i18n/en/commands.ftl");
-        let close = egui_pop::api::windows::CMD_CLOSE;
-        let egui_pop_own = [close.as_str()];
         let mut seen = std::collections::BTreeSet::new();
         for (id, _) in COMMAND_ICONS {
             assert!(seen.insert(*id), "{id} has two icons");
             let key = format!("\ncommand-{} =", id.replace('.', "-"));
             assert!(
-                catalog.contains(&key) || egui_pop_own.contains(id),
+                catalog.contains(&key),
                 "{id} is not one of Helios's commands"
             );
         }

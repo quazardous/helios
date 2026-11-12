@@ -181,9 +181,6 @@ command-helios-queue-dock =
 command-helios-queue-moveTo =
     .title = Move Queue to an area (`area`)
 
-command-helios-quit-confirmed =
-    .title = Quit Helios, cancelling the running jobs
-
 command-helios-scopes-detach =
     .title = Move Scopes to a new window
 
@@ -222,9 +219,6 @@ command-helios-viewport-dock =
 
 command-helios-viewport-moveTo =
     .title = Move Image to an area (`area`)
-
-command-helios-window-main =
-    .title = Main window
 
 command-helios-workshops-detach =
     .title = Move Workshops to a new window
@@ -576,6 +570,9 @@ command-viewport-zoom-in =
 
 command-viewport-zoom-out =
     .title = Image: zoom out
+
+command-window-close =
+    .title = Close the window
 
 command-window-maximize =
     .title = Maximize or restore the window

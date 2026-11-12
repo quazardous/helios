@@ -75,9 +75,7 @@ mod import;
 mod import_accounts;
 mod import_choices;
 mod import_window;
-mod lifetime;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
-pub use lifetime::Closing;
 mod storage;
 mod storage_admin;
 pub use storage_admin::{
@@ -203,12 +201,7 @@ enum Action {
     Fullscreen,
     Minimize,
     Maximize,
-    /// Quit Helios, from any window (`lifetime`).
-    Quit,
-    /// Quit, the question about running jobs answered.
-    QuitConfirmed,
-    /// Bring the main window forward, or back.
-    MainWindow,
+    Close,
     Detach(String),
     /// A floatable panel floats over the interface, at a place or
     /// cascaded.
@@ -530,8 +523,6 @@ pub struct Shell {
     focus: focus::Focus,
     /// The import focus, in an OS window of its own.
     import: import_window::ImportFocus,
-    /// The application's life, apart from its windows'.
-    lifetime: lifetime::Lifetime,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
 }
@@ -665,9 +656,6 @@ impl Shell {
             // asked for) and the agents' `history.*` commands, over
             // Helios's history owner (`crate::history::HeliosHistory`).
             .plugin(egui_pop::api::history_view::HistoryPlugin::default())
-            // The Window menu, Close window and Switch to window…: every
-            // window has them (docs/design/windows.md, section 7).
-            .plugin(egui_pop::api::windows::WindowsPlugin)
             // Copy and paste: egui-pop's clipboard (its default owner,
             // the Edit commands, the agents' `clipboard.*`), Helios's
             // types and sanitiser over it.
@@ -890,7 +878,6 @@ impl Shell {
             core,
             focus,
             import: import_window::ImportFocus::new(),
-            lifetime: lifetime::Lifetime::default(),
             notes: Vec::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
@@ -2309,19 +2296,7 @@ impl Shell {
         );
         add(
             CommandSpec::new("workbench.quit", "Quit Helios", "Window"),
-            Box::new(|_, _| Ok(Action::Quit)),
-        );
-        add(
-            CommandSpec::new(
-                lifetime::QUIT_CONFIRMED,
-                "Quit Helios, cancelling the running jobs",
-                "Window",
-            ),
-            Box::new(|_, _| Ok(Action::QuitConfirmed)),
-        );
-        add(
-            CommandSpec::new(lifetime::MAIN_WINDOW, "Main window", "Window"),
-            Box::new(|_, _| Ok(Action::MainWindow)),
+            Box::new(|_, _| Ok(Action::Close)),
         );
         add(
             CommandSpec::new(
@@ -2516,6 +2491,7 @@ impl Shell {
             ("window.maximize", "Maximize or restore the window", || {
                 Action::Maximize
             }),
+            ("window.close", "Close the window", || Action::Close),
             ("view.endSideBar.toggle", "Fold the end side bar", || {
                 Action::Fold(Area::EndSide)
             }),
@@ -3452,7 +3428,6 @@ impl Shell {
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
         use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
-        use egui_pop::api::windows::MENU_WINDOW;
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
         let command = |menu: MenuId, group: &str, order: i32, id: &str| {
@@ -3483,12 +3458,6 @@ impl Shell {
             // The same commands in the menu bar.
             // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
             command(MENU_FILE, "1_import", 0, import_window::COMMAND),
-            // The import window's File menu.
-            command(import_window::MENU, "1_window", 0, "window.close"),
-            command(import_window::MENU, "9_quit", 0, "workbench.quit"),
-            // Window: Helios's windows, open or not, to bring one forward.
-            command(MENU_WINDOW, "1_open", 0, lifetime::MAIN_WINDOW),
-            command(MENU_WINDOW, "1_open", 1, import_window::COMMAND),
             // File > Storage: the disks and what each is for.
             command(MENU_FILE, "1_import", 3, storage::COMMAND),
             // Help > Health check.
@@ -4440,9 +4409,7 @@ impl Shell {
             Action::Maximize => {
                 frame::request(self.core.app.handle(), ctx, FrameRequest::ToggleMaximize);
             }
-            Action::Quit => self.quit(ctx),
-            Action::QuitConfirmed => self.quit_confirmed(ctx),
-            Action::MainWindow => self.main_window(),
+            Action::Close => frame::request(self.core.app.handle(), ctx, FrameRequest::Close),
             Action::SystemMenu => {
                 // Under the title bar's start, where its menu button is
                 // (the window's top left when the system draws the frame).
@@ -5325,13 +5292,6 @@ impl Shell {
         let events = h.events_since(self.core.seen);
         self.core.seen = h.last_event();
         for e in events {
-            // egui-pop's Quit (Ctrl+Q, File > Quit), from any window: it
-            // closes the window it ran in, the application quits.
-            if e.name == "command.done"
-                && e.data["command"] == egui_pop::api::app::CMD_QUIT.as_str()
-            {
-                self.quit(ctx);
-            }
             if e.name == "workbench.refused"
                 && let Some(why) = e.data["reason"].as_str()
             {
