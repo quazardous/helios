@@ -756,7 +756,7 @@ window's status bar and Queue panel (focus tags come with slice 7).
 
 | # | Question | Proposed default |
 |---|----------|------------------|
-| P1 | Can every focus be closed, the application staying alive? | Closing the last focus quits on Linux and Windows; on macOS the application stays with the welcome window, as macOS applications do. |
+| P1 | Can every focus be closed, the application staying alive? | Closing the last focus quits on Linux and Windows; on macOS the application stays with the welcome window, as macOS applications do. See section 7, D2 and D3. |
 | P2 | After Import is pressed, does the import focus close (today) or stay? | It stays, follows its job, then offers "Cull these photos", which turns it into a cull focus scoped to the import; closing it leaves the job running. |
 | P3 | A focus closed while its job runs | The job goes on, listed in the jobs window under the focus's name; the focus stays in the recent list with a running badge. |
 | P4 | The same photo in two foci | One live edit shared by both windows, each step naming its focus; jobs that write take leases; the darkroom says "also open in 'Edit the wedding'". |
@@ -783,3 +783,208 @@ window's status bar and Queue panel (focus tags come with slice 7).
 | T9 | Crash recovery | The foci open at a crash reopen at the next start, with their jobs resumed where the journal allows. |
 | T10 | Web | Embedded windows first; one tab per focus later. |
 | T11 | Another library | Still a separate process (`--new-instance`), its windows grouped by the platform. |
+
+## 7. Closing and menus
+
+Status: **proposed, not decided** (2026-11-12). Now that a focus can be
+an OS window of its own (the Import window, slice 4), this section
+settles what closes one window and what quits Helios, what happens to
+running work, which menus each window shows and where its keys act. It
+gives today's behaviour, how established applications do it, and a
+decision with a default for each question. Nothing here is built yet.
+
+### Today
+
+Read in Helios and in egui-pop 0.9 (`egui-pop-api`), the version Helios
+uses.
+
+**Keys and commands**
+
+| What | Command | Key | What it does today |
+|------|---------|-----|--------------------|
+| Quit | `app.quit` (egui-pop, `app.rs`, File > Quit) | Ctrl+Q (Cmd+Q on macOS: egui-pop counts Command as Ctrl, `egui-pop-core/src/keys.rs`) | Sends `ViewportCommand::Close` to the viewport of the pass it runs in: the main window from the main window. |
+| Close window | `window.close` (Helios, `shell.rs`, a View command) | none | Asks the main window's frame to close (`frame::request(.., Close)`), whatever window it is run from. |
+| Close window | `window.close` (egui-pop's `WindowsPlugin`, `windows.rs`) | none | Closes the window named, or the active one. **Not installed by Helios**, so no Window menu either; it would clash with Helios's command of the same id. |
+| Close window | `app.window.close` (egui-pop's frame, `frame.rs`) | none | The title bar's system menu, Close: closes the window drawn by egui-pop's frame. |
+| Close the Import window | the window's close button, Cancel (`shell/import_window.rs`) | none (Escape is not bound there) | Cancels what the window reads (its scans) and closes the focus. Import starts the job and closes the window. |
+
+Ctrl+W is bound to nothing; the darktable keymap leaves darktable's
+Ctrl+W out on the ground that "Ctrl+W closes", which is not true yet.
+
+**The main window's close** (its ×, Alt+F4, Ctrl+Q, the window
+manager). Helios's `App::ui` (`main.rs`) sees the close request first:
+it writes what the user changed to the vault and returns without
+drawing. The root viewport closes and eframe ends, taking every other
+window with it; then `on_exit` saves the settings, keys and layout, and
+the vault closes within its deadline (`quit.rs`). Running exports are
+cancelled without a question (`export.rs`, `Drop for Exporter`). Nothing
+asks before quitting.
+
+**Found along the way** (read in the code, not yet run):
+
+1. egui-pop's rule for a main window closed while other windows are
+   open (the most recent one moves into the main window, T2) runs in
+   egui-pop's `App::show`. Helios returns before calling it in the
+   closing pass, so in Helios the rule never runs: closing the main
+   window with the Import window open quits, the Import window with it.
+   Slice 4's text says otherwise; one of the two must change (see D3).
+2. Ctrl+Q pressed in the Import window runs `app.quit` in that window's
+   pass, so its `Close` goes to the Import window: it cancels the import
+   and closes that window instead of quitting.
+3. The system's end of session (SIGTERM, a logout, `WM_ENDSESSION`,
+   `ending.rs`) closes the main window as Ctrl+Q does, so it quits, as
+   wanted, but asks nothing and waits for nothing (8 s deadline).
+4. The whole keymap is dispatched in the Import window too
+   (`dispatch_window_keys` in egui-pop's `windows.rs`, one shared
+   keymap, `appWindow == 'import'` in the context). A key whose command
+   acts on the shell (Ctrl+B folds a side bar, Ctrl+P, Ctrl+Shift+E)
+   fires from the Import window and acts on the main window, unless its
+   `when` clause rules the window out.
+
+**Menus.** egui-pop draws one menu bar, `MENU_MAIN`, inside the window,
+in the main window's pass only (`App::show`, `app.rs`; switched off by
+`AppBuilder::menu_bar(false)`). The Import window has no menu bar: its
+commands are its buttons. There is no native menu bar on macOS: the menu
+bar is drawn inside the window there as elsewhere (egui-pop's only native
+menu is the tray's, `egui-pop-platform/src/tray.rs`).
+
+**Per window already** (ADR 0025): each application window has its own
+toasts, dialogs and palette; a modal blocks its own window only; its keys
+run with `appWindow` set; agents name it (`window: "import"`).
+
+### How established applications do it
+
+| Application | Close a window / quit | The last window | The main window closed, others open | Running work | Menus per window |
+|-------------|-----------------------|-----------------|-------------------------------------|--------------|------------------|
+| Lightroom Classic | Ctrl+Q (Cmd+Q) quits; the secondary window has its own toggle | quits (one main window) | the secondary display window goes with it | users report a question before quitting during an export | menus on the main window only; Import is a modal dialog |
+| darktable | Ctrl+Q quits; Ctrl+W is focus detection | quits | the darkroom's second window goes with it | not checked | one window with no menu bar; import is a modal dialog |
+| Capture One | Cmd+W / Cmd+Q; Alt+F4 / Ctrl+Q on Windows | quits on Windows | viewer windows go with it | not checked | viewer windows have no menus of their own |
+| Photoshop | Ctrl+W closes a document; Ctrl+Q quits | on macOS the app stays with its Home screen | (documents, not windows) | asks for each unsaved document | one menu bar (global on macOS) |
+| VS Code | Ctrl+W closes an editor; Ctrl+Shift+W the window; Ctrl+Q quits (Alt+F4 on Windows) | quits on Linux and Windows; stays on macOS | windows are peers: the others stay | asks before ending running terminal processes | the full menu bar in every window; global on macOS |
+| Firefox | Ctrl+W tab, Ctrl+Shift+W window, Ctrl+Q quits (no Ctrl+Q on Windows, "following the OS convention") | quits on Linux and Windows; stays on macOS | windows are peers | warns before cancelling downloads | browser windows have the full menus; the Library window has a small menu of its own |
+| GIMP | Ctrl+W closes an image view, Ctrl+Q quits | an empty image window stays; closing it quits | (multi-window: image windows are peers) | lists the unsaved images before quitting | image windows have menus; docks have none |
+
+| Guideline | What it says |
+|-----------|--------------|
+| macOS HIG | Cmd+W closes the window, Cmd+Q quits. One menu bar, for the window in front. Document applications stay open with no window; single-window applications quit with it (Photos, Calendar). |
+| GNOME HIG | Ctrl+W closes the window or tab; Ctrl+Q "closes the app, including all its windows". Alt+F4 closes the focused window. Primary windows carry their menu; secondary windows do not. |
+| Windows | Alt+F4 closes the active window; File > Exit ends the application. There is no standard quit key, though Ctrl+Q is common. |
+
+The photo applications agree: one main window owns the others, closing
+it quits, and secondary windows (a second display, an import, a viewer)
+have no menus of their own. The editors and browsers whose windows are
+peers (VS Code, Firefox) keep the others when one closes and give every
+window the full menus.
+
+### Decisions
+
+**D1. Keys.**
+
+- Ctrl+W (Cmd+W) closes the window in front, whichever it is: the
+  Import window as its close button does, the main window as its own
+  close does (D3). Alt+F4 and the title bar's × do the same.
+- Ctrl+Q (Cmd+Q) and File > Quit end Helios from any window: the
+  command closes the main window, not the window it runs in (fixes
+  finding 2). On Windows the menu says "Exit", the key stays.
+- Escape does not close a focus window: it is not a dialog. It still
+  closes dialogs, menus and the palette.
+- One command, `window.close`, egui-pop's: Helios's own command of that
+  id goes, and Helios installs `WindowsPlugin` (the Window menu and
+  Switch to Window…). The darktable keymap's note then holds.
+
+Default: as above.
+
+**D2. The last window.** Closing it quits on Linux and Windows. On macOS
+Helios stays running with no window, as document applications do: the
+Dock icon reopens the main window, Cmd+Q quits. Until a macOS build is
+tested, macOS quits as the others do.
+
+**D3. The main window closed while others are open.** Two ways:
+
+- **It quits** (the photo applications' way): the main window is the
+  application (the library, the menus, the jobs); closing it asks D4's
+  question when work is at stake, then closes every window.
+- **Another window takes its place** (VS Code's way, egui-pop's rule
+  T2): the most recent other window moves into the main window and the
+  application keeps going.
+
+Default: **it quits**, for now. The Import window is not a full focus:
+moved into the main window it would leave Helios with no library, no
+menus and no jobs panel. When foci become peers with their own library
+view and menus (slice 7), egui-pop's rule comes back with them. Once decided,
+slice 4's text and T2 are amended to say so; the egui-pop rule stays
+available for applications whose windows are peers.
+
+**D4. Running work.**
+
+- Closing a window never cancels a job it started. An import or an
+  export runs in the core and shows in the main window's Queue panel and
+  status bar; the window that started it may close (P3).
+- Closing the Import window before Import is pressed cancels its scans:
+  they are the window's own reading, not jobs.
+- Quitting asks one question, app-modal (T4), only when work would be
+  lost: jobs running or queued (imports, exports), a workshop session not
+  kept. It lists them; "Quit" cancels them, "Cancel" keeps Helios open.
+  Edits need no question: they are written as they are made. Jobs that
+  run on a node are not the desktop's: they go on and are not asked
+  about.
+- The system's end of session asks nothing: the quit goes on within its
+  deadline, jobs are cancelled and listed at the next start as
+  interrupted (resumed later where the journal allows, T9).
+- Later, not now: "Quit when done", which waits for the jobs, then quits.
+
+Default: as above.
+
+**D5. Menus per window.**
+
+- The main window keeps the full menu bar.
+- The Import window has **no menu bar**: its commands are its buttons
+  and its own keys, as the photo applications' import dialogs and GNOME's
+  secondary windows have. Its palette lists its own commands and the
+  app-wide ones (D6).
+- The alternative: a reduced bar in the Import window (File with Close
+  and Quit, Edit, Window), as Firefox's Library window has.
+
+Default: no menu bar in the Import window. A later focus window that is
+a peer of the main one (slice 7) gets the full menus, as VS Code's
+windows do.
+
+**D6. Where keys act.** Three scopes:
+
+| Scope | Examples | Rule |
+|-------|----------|------|
+| App-wide | Quit, Settings, the palette, Import… (Ctrl+Shift+I), Switch to Window… | run in any window |
+| The window in front | Close window, Escape, undo in a text field, the Import window's own keys | act on the window they are pressed in |
+| The main window | the layout toggles (Ctrl+B, Ctrl+J), views, library and darkroom commands, Export, Ctrl+P | run only when the main window is in front |
+
+Today every command runs in every window (finding 4). The fix belongs
+to egui-pop: a command declares whether it is app-wide, and a command
+that does not say runs only in the window whose shell declared it (the
+main window for Helios's shell). `when: "appWindow == 'main'"` on each
+command would do it in Helios alone, but every new command would have
+to remember it.
+
+Default: the egui-pop scope, with `appWindow` clauses only for the
+exceptions.
+
+**D7. macOS's menu bar.** One native menu bar for the application,
+built from the same declared menus and following the window in front:
+the main window's menus when it is in front; with the Import window in
+front, the application menu (About, Settings…, Quit), Edit and Window,
+the main window's commands greyed by D6's scopes. egui-pop builds it
+(a native menu crate, as its tray already uses), and the in-window bar
+is not drawn on macOS. Until then the in-window bar stays.
+
+Default: as above, after a macOS build exists; nothing to do before.
+
+### Work this leads to
+
+- Quit from any window, and the main window's close running D3 and D4's
+  question (findings 1 and 2), in Helios.
+- Ctrl+W on `window.close`, `WindowsPlugin` installed, Helios's duplicate
+  command removed.
+- Window scope for commands (D6), in egui-pop, then Helios's commands
+  marked.
+- The quit question (D4), with the jobs and workshop sessions it lists.
+- macOS: the application kept alive and the native menu bar (D2, D7),
+  with the first macOS build.
