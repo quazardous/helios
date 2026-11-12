@@ -35,7 +35,6 @@ use egui_pop::platform::instance::{self, Instance, Launch, Single};
 use helios_core::Message;
 use helios_gui::contexts::{self, Opened};
 use helios_gui::platform::{self, Open};
-use helios_gui::shell::Closing;
 use helios_gui::{Shell, headless, helios_panels, helios_panels_with};
 use helios_gui::{quit, start};
 
@@ -406,10 +405,6 @@ static RESTART: AtomicBool = AtomicBool::new(false);
 /// system (`helios_gui::ending`) closes it as Ctrl+Q does.
 static WINDOW: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
 
-/// The system asked Helios to end (`helios_gui::ending`): the main
-/// window's close quits whatever windows are open, without a question.
-static SESSION_ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// SIGTERM, SIGINT and SIGHUP (on Windows, the console's events and the
 /// session's end) close Helios as Ctrl+Q does; ended before the window
 /// opens or past the deadline, the session is marked clean all the same.
@@ -421,8 +416,7 @@ fn listen_for_ending() -> Arc<helios_gui::ending::Ending> {
             let Some(ctx) = WINDOW.get() else {
                 return false;
             };
-            SESSION_ENDING.store(true, std::sync::atomic::Ordering::SeqCst);
-            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             ctx.request_repaint();
             true
         }),
@@ -1335,44 +1329,20 @@ impl App {
     }
 }
 
-impl App {
-    /// The main window closes after this pass and Helios with it: nothing
-    /// to draw (work waiting for a frame, thumbnails or tiles, would hold
-    /// the window up), only what the user changed to write.
-    fn closing(&mut self) {
-        quit::requested();
-        if let Some(persist) = &mut self.persist {
-            persist.frame(&mut self.shell, seconds_f64());
-            quit::mark("vault written (closing frame)");
-        }
-    }
-}
-
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if ui.ctx().input(|i| i.viewport().close_requested()) {
-            // The application's life is the shell's policy, not the main
-            // window's: closed while another window is open, that window
-            // moves into it and Helios goes on (egui-pop's rule, in the
-            // shell's pass below); Quit, the last window closed and the
-            // system's end of session end it.
-            let closing = if SESSION_ENDING.load(std::sync::atomic::Ordering::SeqCst) {
-                Closing::Quit
-            } else {
-                self.shell.main_window_closing(ui.ctx())
-            };
-            match closing {
-                Closing::Moved => {}
-                // A question first: nothing drawn in this pass.
-                Closing::Kept => return,
-                Closing::Quit => {
-                    self.closing();
-                    return;
-                }
+            // The window closes after this frame: nothing to draw (work
+            // waiting for a frame, thumbnails or tiles, would hold the
+            // window up), only what the user changed to write.
+            quit::requested();
+            if let Some(persist) = &mut self.persist {
+                persist.frame(&mut self.shell, seconds_f64());
+                quit::mark("vault written (closing frame)");
             }
+            return;
         }
         start::mark_in_first_frame("egui's pass begun (fonts ready)");
-
         self.shell.ui(ui);
         // The GPU path is installed by now: the image's own surface
         // follows the Wide-gamut preview setting.

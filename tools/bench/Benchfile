@@ -349,7 +349,7 @@ cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-UPDATE_SNAPSHOTS=${update:-1} cargo test --locked -p helios-gui --test ${test:-import_snapshots}; rc=$?; \
+UPDATE_SNAPSHOTS=1 cargo test --locked -p helios-gui --test ${test:-import_snapshots}; rc=$?; \
 mkdir -p /out/snapshots && find crates/helios-gui/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }

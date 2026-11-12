@@ -44,15 +44,6 @@ command-graph-select =
 command-graph-view =
     .description = Fits a node editor's graph (`fit`: true), zooms to a level (`level`: overview, ports or detail) or focuses a node (`focus`), at its next frame.
 
-command-window-close =
-    .description = Closes a window: the one named, or the active one.
-
-command-window-pick =
-    .description = Lists the open windows by title; the one chosen comes to the front.
-
-command-window-switch =
-    .description = Brings a window to the front: the one named, or the next one.
-
 frame-helios-compare =
     .title = Compare
 
@@ -77,9 +68,6 @@ frame-helios-sub-workspace =
 frame-helios-workspace =
     .title = Network
 
-menu-app-menu-window =
-    .label = Window
-
 menu-helios-file-importFrom =
     .label = Import from
 
@@ -97,9 +85,6 @@ menu-helios-system-themes =
 
 plugin-egui-pop-imaging =
     .title = Image tools
-
-plugin-egui-pop-windows =
-    .title = Windows
 
 plugin-helios =
     .title = Helios

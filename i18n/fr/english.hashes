@@ -82,7 +82,6 @@ command-helios-params-moveTo.title 048ae812819f4cb9
 command-helios-queue-detach.title 1b93583eb995188f
 command-helios-queue-dock.title b0c56e437d5e54d8
 command-helios-queue-moveTo.title 048e8198dfd79358
-command-helios-quit-confirmed.title 9aae7207f8cb44f4
 command-helios-scopes-detach.title 3ba293bd2eec43d1
 command-helios-scopes-dock.title 7175267febd284e6
 command-helios-scopes-float.title 0b0f989dbadd007e
@@ -96,7 +95,6 @@ command-helios-vault-moveTo.title 709524387bd57c5c
 command-helios-viewport-detach.title b50a7332638c7f29
 command-helios-viewport-dock.title b544485bfff8325e
 command-helios-viewport-moveTo.title 8653b4bdbc43ce4e
-command-helios-window-main.title 3ea1714dd40abad2
 command-helios-workshops-detach.title bdb5ee6f7681dbec
 command-helios-workshops-dock.title a77e0846c01395e5
 command-helios-workshops-moveTo.title 06334f8399557153
@@ -212,6 +210,7 @@ command-viewport-zoom-fill.title 50f8c8159088d565
 command-viewport-zoom-fit.title 6042270d43060d0e
 command-viewport-zoom-in.title 7a24f601c24aad20
 command-viewport-zoom-out.title 9526f42d761b042b
+command-window-close.title e391973c152d0a92
 command-window-maximize.title 3fbd837ee314e593
 command-window-minimize.title 3cc56699d77f2fe8
 command-workbench-fullscreen.title ae3886b1f1272280
@@ -488,8 +487,6 @@ gui-import-window-layout-flat 60ad7e2150fbb745
 gui-import-window-layout-month e1786549d2001be0
 gui-import-window-layout-year e4b3f8f5e245d9fd
 gui-import-window-library-folder 983bbd97d3133fb5
-gui-import-window-menu-file 181d912a9545ccc3
-gui-import-window-menu-window 091ff0a5b7d5ed9d
 gui-import-window-more 772834706edcda36
 gui-import-window-more-note 07b941e56520184f
 gui-import-window-name e8f800548ef8413c
@@ -635,7 +632,6 @@ gui-macro-publish-detail 8248d31001dcd165
 gui-macro-publish-title a77ca22465e4b2e3
 gui-macro-publish-verb 4cc33eb9cfcb9b7e
 gui-macro-published 9430c838aa4fd954
-gui-main-window-in-use 907dd0d752622406
 gui-mask-display e386310422b43af2
 gui-mask-display-grey a3252d1873c23889
 gui-mask-display-hint 08a963e3e539c9a9
@@ -792,9 +788,6 @@ gui-quick-open-source 0a91c26e765f385e
 gui-quick-open-subworkspace fa800e0bdb61e7c5
 gui-quick-open-title d9995403971598bf
 gui-quick-open-workspace 83fb01ff0702e457
-gui-quit-jobs-detail 70be8d39bb030494
-gui-quit-title 8d4beb9036a59719
-gui-quit-verb a4050ce0b3604cfc
 gui-recording-saved a76310c7e51efad9
 gui-recording-stopped 2162a30bfb25f825
 gui-scene-saved 60fcaa10812571b8
