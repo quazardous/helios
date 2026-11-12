@@ -140,6 +140,12 @@ fn closing_while_a_sources_connection_waits_gives_it_up_and_comes_back_at_once()
         h.query_by_label("Test server").is_some()
     });
     h.get_by_label("Test server").click();
+    h.run_steps(2);
+    h.get_by_label("Next").click();
+    until(&mut h, "the account step", |h| {
+        h.query_by_label("Sign in to an account…").is_some()
+    });
+    h.get_by_label("Sign in to an account…").click();
     // The connection's thread waits for the form's answer.
     until(&mut h, "the form", |h| connection(h)["state"] == "form");
     // Closed by the system's close button: the connection's dialog over
