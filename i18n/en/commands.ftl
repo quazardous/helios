@@ -631,6 +631,9 @@ command-workshop-describe =
 command-workshop-design =
     .title = Experimental: check a workshop draft on the open image and apply it as one undo step (`draft`; `intent`, the session's by default; `apply`: true by default; `replace`; `dry_run`)
 
+command-workshop-generalise =
+    .title = Experimental: make the workshop piloted automatic: one row per slider (a target a measure explains, else a fixed value, or kept as AI) and per AI zone (a fitted parametric mask, or kept as AI), with evidence, and J, A (the AI left, calls per photo) (`rows`: choices by name; `confirm`: write the next version, yours alone; `session`; `dry_run`)
+
 command-workshop-propose =
     .title = Experimental: propose values for the workshop being piloted, shown as ghost values the user accepts, overrides or rejects (`values`: by slider name; `aim`: the words it answers; `session`)
 
