@@ -540,7 +540,7 @@ merging (only your own part) and what happens after, is in
 - Run the narrowest job first. A Helios change is tested with `test-crate
   crate=<crate> test=<target> filter=<name>` on the crates and targets it
   touched, and nothing wider: no `test-affected` and no `--affected`
-  before a merge (rule 3 of "The next branch"). On Helios they reach
+  before a merge (rule 3 of [next.md](next.md)). On Helios they reach
   nearly the whole suite (2026-11-08: 1,370 to 1,440 of 1,440 tests),
   which `next`'s CI already runs. `test-affected` and `test` are for the
   daily run and releases.
