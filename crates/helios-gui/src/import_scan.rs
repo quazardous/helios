@@ -40,7 +40,7 @@ use egui::ColorImage;
 use helios_cache::{Counters, Disk, IMPORT_GLANCE, Scope, Service, Store, Tier, Usage};
 use helios_connect::{
     Access, Cancel, Connector, ConnectorError, ConnectorServices, Cursor, Item, ItemRef, PAGE,
-    Settings, SourceRef,
+    ProviderRef, Settings, SourceRef, Text,
 };
 use helios_core::ContentHash;
 use helios_storage::Card;
@@ -301,6 +301,10 @@ fn list_all(
 pub struct Connectors {
     /// By id, in the registry's order: cards, then folders.
     by_id: Vec<(&'static str, Arc<dyn Connector>)>,
+    /// Every provider, the registry's then those added (a plugin's, a
+    /// test's): what "Add a source…" offers and accounts connect through.
+    providers: Vec<ProviderRef>,
+    services: ConnectorServices,
     cards: Arc<Mutex<Vec<Card>>>,
     places: Arc<Mutex<Vec<PathBuf>>>,
 }
@@ -314,7 +318,10 @@ impl Default for Connectors {
             cards: Some(Arc::new(move || lock(&c).clone())),
             places: Some(Arc::new(move || lock(&p).clone())),
         };
-        let by_id = helios_connect::registry()
+        let services_kept = services.clone();
+        let registry = helios_connect::registry();
+        let providers = registry.values().cloned().collect();
+        let by_id = registry
             .into_iter()
             .filter_map(
                 |(id, provider)| match provider.create(&Settings::Null, &services) {
@@ -328,6 +335,8 @@ impl Default for Connectors {
             .collect();
         Self {
             by_id,
+            providers,
+            services: services_kept,
             cards,
             places,
         }
@@ -335,6 +344,38 @@ impl Default for Connectors {
 }
 
 impl Connectors {
+    /// Adds a connector's provider (a plugin's, a test's); one of the same
+    /// id replaces it.
+    pub fn add_provider(&mut self, provider: ProviderRef) {
+        let id = provider.manifest().id;
+        self.providers.retain(|p| p.manifest().id != id);
+        self.providers.push(provider);
+    }
+
+    /// The provider of a connector.
+    pub fn provider(&self, id: &str) -> Option<ProviderRef> {
+        self.providers
+            .iter()
+            .find(|p| p.manifest().id == id)
+            .cloned()
+    }
+
+    /// The connectors that declare a connection process, with their
+    /// labels, in the order added: what "Add a source…" offers.
+    pub fn addable(&self) -> Vec<(String, Text)> {
+        self.providers
+            .iter()
+            .map(|p| p.manifest())
+            .filter(|m| !m.connect.is_empty())
+            .map(|m| (m.id, m.label))
+            .collect()
+    }
+
+    /// What connectors are created with.
+    pub fn services(&self) -> ConnectorServices {
+        self.services.clone()
+    }
+
     /// The cards mounted, as the window last polled them.
     pub fn set_cards(&self, cards: &[Card]) {
         *lock(&self.cards) = cards.to_vec();

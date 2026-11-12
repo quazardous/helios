@@ -63,11 +63,16 @@ pub use storage::{
 };
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
+mod accounts_admin;
 mod core;
 mod export;
 mod focus;
+pub use accounts_admin::{
+    ACCOUNTS as ACCOUNTS_COMMAND, RECONNECT as RECONNECT_COMMAND, SIGN_OUT as SIGN_OUT_COMMAND,
+};
 mod health;
 mod import;
+mod import_accounts;
 mod import_choices;
 mod import_window;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
@@ -170,6 +175,8 @@ enum Action {
     ImportSource(Value, Origin),
     /// Open the import window (`library.importWindow`'s arguments).
     ImportWindow(Value),
+    /// `import.addSource` or `import.reconnect`, with its arguments.
+    Account(&'static str, Value),
     /// Open the Health page (`help.health`).
     Health,
     /// Run the health checks now (`health.checkNow`).
@@ -2824,6 +2831,21 @@ impl Shell {
             ),
             Box::new(|a, _| Ok(Action::ImportWindow(a.clone()))),
         );
+        for (id, about) in [
+            (
+                accounts_admin::ADD_SOURCE,
+                "Add a source that needs connecting: opens the import window and runs the connector's connection steps (`connector`)",
+            ),
+            (
+                accounts_admin::RECONNECT,
+                "Connect an import account again, from the step that failed (`account`)",
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, about, "Library"),
+                Box::new(move |a, _| Ok(Action::Account(id, a.clone()))),
+            );
+        }
         add(
             CommandSpec::new(
                 "library.importFiles",
@@ -4643,6 +4665,7 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
+            Action::Account(id, args) => return self.account_command(id, &args),
             Action::Health => return self.open_health(),
             Action::HealthFix(args) => return self.health_fix(&args),
             Action::HealthIgnore(args) => return self.health_ignore(&args),

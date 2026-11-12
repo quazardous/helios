@@ -232,6 +232,12 @@ command-helios-workshops-moveTo =
 command-help-health =
     .title = Health check…
 
+command-import-addSource =
+    .title = Add a source that needs connecting: opens the import window and runs the connector's connection steps (`connector`)
+
+command-import-reconnect =
+    .title = Connect an import account again, from the step that failed (`account`)
+
 command-keymap-package =
     .title = Add a keymap package's keys over the defaults (`name`: darktable-classic)
 

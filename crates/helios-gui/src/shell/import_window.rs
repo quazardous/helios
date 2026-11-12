@@ -215,7 +215,10 @@ pub(crate) struct ImportWindow {
     pub(super) contents: Contents,
     /// The import connectors (`helios_connect`): the Sources column lists
     /// their sources, a scan lists a source through its connector.
-    connectors: Connectors,
+    pub(super) connectors: Connectors,
+    /// The accounts of the connectors that need one, and the connection
+    /// running ([`super::import_accounts`]).
+    pub(super) accounts: super::import_accounts::Accounts,
     /// The choices, the last used until changed, and where they are kept.
     pub(super) choices: Choices,
     pub(super) choices_file: Option<PathBuf>,
@@ -518,6 +521,9 @@ enum Event {
     Storage,
     /// Folders or cards dropped on the window: its new sources.
     Dropped(Vec<PathBuf>),
+    /// An account asked of the Sources column: added, reconnected or
+    /// signed out.
+    Account(super::import_accounts::Asked),
 }
 
 /// The Contents column's and the status bar's words.
@@ -1035,6 +1041,7 @@ impl Shell {
             | Event::Choose
             | Event::ChooseInto
             | Event::Favourite(..)
+            | Event::Account(_)
             | Event::Preset(_)
             | Event::SavePreset(_)
             | Event::DeletePreset(_) => {}
@@ -1323,6 +1330,7 @@ impl ImportWindow {
                 }
                 self.save();
             }
+            Some(Event::Account(asked)) => self.account_asked(asked),
             Some(Event::Preset(name)) => self.apply_preset(name.as_deref()),
             Some(Event::SavePreset(name)) => self.save_preset(&name),
             Some(Event::DeletePreset(name)) => self.delete_preset(&name),
@@ -1332,8 +1340,53 @@ impl ImportWindow {
                 ctx.request_repaint_of(ViewportId::ROOT);
             }
         }
+        // The connection running, in a dialog over the window.
+        if let Some(texts) = self.texts.clone() {
+            super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
+        }
         // The chooser's answer comes in this window too.
         self.receive_chosen_folder();
+    }
+
+    /// Adds, reconnects or signs out an account, as the Sources column
+    /// asked; what fails is said in the window's toasts.
+    fn account_asked(&mut self, asked: super::import_accounts::Asked) {
+        use super::import_accounts::Asked;
+        let done = match asked {
+            Asked::Add(connector) => self.connect_account(&connector, None),
+            Asked::Reconnect(id) => {
+                let connector = self
+                    .accounts
+                    .listed()
+                    .iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.connector.clone());
+                match connector {
+                    Some(c) => self.connect_account(&c, Some(&id)),
+                    None => Err(format!("no account {id}")),
+                }
+            }
+            Asked::SignOut(id) => self.accounts.sign_out(&id),
+        };
+        if let Err(e) = done {
+            log::warn!("import accounts: {e}");
+        }
+    }
+
+    /// Starts connecting a new account of `connector`, or `account` again.
+    pub(super) fn connect_account(
+        &mut self,
+        connector: &str,
+        account: Option<&str>,
+    ) -> Result<(), String> {
+        let wake = self.waker();
+        self.accounts.connect(
+            &self.connectors,
+            connector,
+            account,
+            self.texts.as_ref(),
+            wake,
+        )
     }
 
     /// The window's body: its status bar at the bottom, the three columns
@@ -1567,6 +1620,14 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             ui.separator();
             if ui.button(&words.choose).clicked() {
                 *event = Some(Event::Choose);
+            }
+            if let Some(texts) = w.texts.clone()
+                && let Some(asked) =
+                    super::import_accounts::accounts_ui(ui, &mut w.accounts, &w.connectors, &|m| {
+                        texts(m)
+                    })
+            {
+                *event = Some(Event::Account(asked));
             }
         });
 }
