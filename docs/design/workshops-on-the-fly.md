@@ -402,8 +402,18 @@ values measure, and is aimed from the neutral value on each test photo.
 A row holds the user's values, the fixed value and spread, the
 tolerance, every candidate with its aimed values and error (the best
 first), the default and its note. With one test photo the targets that
-fit are offered but the fixed value stays the default. Not built yet:
-rules 3 and 4 (parametric fits of AI zones, junctions), `J` and `A`,
+fit are offered but the fixed value stays the default.
+
+Built (slice 7, second part). Rules 3 and 4: `generalise_zones` fits each
+AI zone (its recorded mask) with a `mask_parametric`, luminance bounds at
+the quantiles of the zone's own pixels (open or not) with or without hue
+bounds, each drawn as the module draws it; a zone's row holds the best
+fits with their overlap on each test photo, and defaults to the
+parametric mask when the best overlaps at least 0.9 on every one, else
+to the AI junction ("sky: the parametric mask overlaps 0.86 on the test
+photo; kept as AI, 1 call per photo"). `keep_ai_values` keeps a value the
+AI proposed as a junction when no target explains it and its values
+spread more than the tolerance. Not built yet: `J` and `A`,
 `workshop.generalise` and the panel's Make it automatic, `confirm`
 writing the next version, a second test photo in the session.
 

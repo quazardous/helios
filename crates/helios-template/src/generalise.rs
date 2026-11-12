@@ -20,6 +20,18 @@
 //!    value is the default and the targets that fit are offered.
 //! 2. **Otherwise a fixed value**: the mean of the user's values, with
 //!    their spread.
+//! 3. **AI proposals become deterministic rules where one fits.** A zone
+//!    the AI found (a `mask_object` answer, its mask among the case's
+//!    zones) is fitted with a `mask_parametric`: luminance and hue bounds
+//!    searched on the test photos, kept when the overlap (intersection
+//!    over union) is at least [`MIN_OVERLAP`] on every one
+//!    ([`generalise_zones`]). A value the AI proposed goes through rules
+//!    1 and 2 like a user's.
+//! 4. **An AI junction is kept only where nothing fits**: the zone stays
+//!    an AI object member, or a value the AI proposed that no target
+//!    explains and that differs between the test photos by more than the
+//!    tolerance stays a decision asked per photo ([`keep_ai_values`]).
+//!    The row says why.
 //!
 //! Nothing is written here: the rows are what the panel and the
 //! `workshop.generalise` verb show for the user to confirm. It is pure:
@@ -53,6 +65,8 @@ pub enum Choice {
     Target,
     /// The same value on every photo.
     Fixed,
+    /// The AI asked on every photo: a junction (rule 4).
+    Ai,
 }
 
 /// How one candidate target did on the test photos.
@@ -293,7 +307,7 @@ where
             "{param}: {on}; a fixed value fits them as well as a target, same value {}",
             show(fixed, range),
         ),
-        (None, _) => format!(
+        (None, _) | (Some(_), Choice::Ai) => format!(
             "{param}: {on}; no measure explains it, same value {} (spread {})",
             show(fixed, range),
             spread,
@@ -372,6 +386,332 @@ where
         error: round3(error),
         fits,
         note,
+    }
+}
+
+/// Rule 4 for values: each row of `proposed` (the sliders the AI set) that
+/// no target explains and whose values differ by more than the tolerance
+/// stays a decision asked per photo; one value holding them all is a
+/// fixed value, a target a target.
+pub fn keep_ai_values(rows: &mut [Row], proposed: &[String]) {
+    for row in rows.iter_mut() {
+        if !proposed.contains(&row.param) || row.target.is_some() {
+            continue;
+        }
+        if row.spread <= row.tolerance + 5e-4 {
+            continue;
+        }
+        row.default = Choice::Ai;
+        let head = row
+            .note
+            .split("; ")
+            .next()
+            .unwrap_or(&row.param)
+            .to_string();
+        row.note = format!(
+            "{head}; the AI's values, no measure explains them and they spread {} over a tolerance of {}; kept as AI, 1 call per photo",
+            row.spread, row.tolerance,
+        );
+    }
+}
+
+/// The overlap (intersection over union) a parametric fit of an AI zone
+/// must reach on every test photo to replace it.
+pub const MIN_OVERLAP: f64 = 0.9;
+
+/// What an AI zone's row proposes by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ZoneChoice {
+    /// A `mask_parametric` with the fitted bounds: no AI call.
+    Parametric,
+    /// The AI object member, asked per photo: a junction.
+    Ai,
+}
+
+/// One parametric mask tried on an AI zone.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZoneFit {
+    /// The `mask_parametric` parameters: `luminance`, and `hue` when
+    /// bounded, each low, high and no feather.
+    pub params: Params,
+    /// Its overlap with the AI's mask on each test photo.
+    pub overlaps: Vec<f64>,
+    /// The smallest of them.
+    pub overlap: f64,
+    /// At least [`MIN_OVERLAP`] on every test photo.
+    pub fits: bool,
+}
+
+/// One AI zone's row.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ZoneRow {
+    pub zone: String,
+    /// The best fit, when it fits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fit: Option<ZoneFit>,
+    pub default: ZoneChoice,
+    /// The best fits tried, the best first: the evidence.
+    pub candidates: Vec<ZoneFit>,
+    /// What the row says to the user.
+    pub note: String,
+}
+
+/// How many fits a zone's row keeps as evidence.
+const ZONE_EVIDENCE: usize = 5;
+
+/// The quantiles the bounds are searched at, of the zone's own pixels on
+/// the test photos: the lowest lows and the highest highs.
+const LOWS: [f64; 5] = [0.0, 0.01, 0.02, 0.05, 0.1];
+const HIGHS: [f64; 5] = [1.0, 0.99, 0.98, 0.95, 0.9];
+const HUES: [(f64, f64); 3] = [(0.0, 1.0), (0.02, 0.98), (0.05, 0.95)];
+
+/// A pixel as the parametric mask reads it.
+struct Px {
+    luminance: f32,
+    hue: f32,
+    inside: bool,
+}
+
+fn quantile(sorted: &[f32], q: f64) -> Option<f32> {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let i = ((sorted.len().checked_sub(1)? as f64) * q).round() as usize;
+    sorted.get(i).copied()
+}
+
+/// A bound rounded outwards to a ten-thousandth, so the pixel it came
+/// from stays inside (the mask is 0 at an unfeathered low).
+fn low_bound(v: f32) -> f64 {
+    ((f64::from(v) * 1e4).floor() / 1e4 - 1e-4).max(0.0)
+}
+
+fn high_bound(v: f32) -> f64 {
+    (f64::from(v) * 1e4).ceil() / 1e4
+}
+
+/// Rule 3 for zones: each of `ai` (the zones the AI found, their masks
+/// among each case's zones) fitted with a `mask_parametric` on the test
+/// photos' inputs. Luminance bounds at the quantiles of the zone's own
+/// pixels, open or not, with or without hue bounds, are each drawn as the
+/// module draws them and compared with the AI's mask; the best is kept
+/// when it overlaps at least [`MIN_OVERLAP`] on every test photo, else the
+/// zone stays an AI junction (rule 4). A zone missing on a case is an
+/// error.
+pub fn generalise_zones(cases: &[Case], ai: &[String]) -> Result<Vec<ZoneRow>, String> {
+    use helios_module_masks::{Channel, Range as Band, jzczhz, luminance};
+
+    if cases.is_empty() {
+        return Err("no test photo to generalise from".into());
+    }
+    let mut rows = Vec::new();
+    for zone in ai {
+        // Each photo's pixels, and the zone's luminance and hue, sorted.
+        let mut photos = Vec::with_capacity(cases.len());
+        let (mut lums, mut hues) = (Vec::new(), Vec::new());
+        for (i, c) in cases.iter().enumerate() {
+            let mask = c
+                .zones
+                .get(zone)
+                .ok_or_else(|| format!("zone `{zone}` has no mask on test photo {}", i + 1))?;
+            let n = c.input.channels() as usize;
+            let m = mask.channels() as usize;
+            if n < 3 || m == 0 || c.input.data().len() / n != mask.data().len() / m {
+                return Err(format!(
+                    "zone `{zone}`: its mask is not the size of test photo {}",
+                    i + 1
+                ));
+            }
+            let px: Vec<Px> = c
+                .input
+                .data()
+                .chunks_exact(n)
+                .zip(mask.data().chunks_exact(m))
+                .map(|(p, k)| Px {
+                    luminance: luminance(p),
+                    hue: jzczhz(p)[2],
+                    inside: k[0] >= 0.5,
+                })
+                .collect();
+            let mut l: Vec<f32> = px
+                .iter()
+                .filter(|p| p.inside)
+                .map(|p| p.luminance)
+                .collect();
+            let mut h: Vec<f32> = px.iter().filter(|p| p.inside).map(|p| p.hue).collect();
+            l.sort_by(f32::total_cmp);
+            h.sort_by(f32::total_cmp);
+            lums.push(l);
+            hues.push(h);
+            photos.push(px);
+        }
+        // The bounds: the lowest low and the highest high over the photos.
+        let low_at = |sets: &[Vec<f32>], q| {
+            sets.iter()
+                .filter_map(|s| quantile(s, q))
+                .min_by(f32::total_cmp)
+        };
+        let high_at = |sets: &[Vec<f32>], q| {
+            sets.iter()
+                .filter_map(|s| quantile(s, q))
+                .max_by(f32::total_cmp)
+        };
+        let span = f64::from(Channel::Luminance.span());
+        let mut lows: Vec<f64> = LOWS
+            .iter()
+            .filter_map(|q| low_at(&lums, *q).map(low_bound))
+            .collect();
+        lows.push(0.0);
+        let mut highs: Vec<f64> = HIGHS
+            .iter()
+            .filter_map(|q| high_at(&lums, *q).map(high_bound))
+            .collect();
+        highs.push(span);
+        lows.dedup();
+        highs.dedup();
+        let mut bands: Vec<Option<(f64, f64)>> = vec![None];
+        for (a, b) in HUES {
+            if let (Some(lo), Some(hi)) = (low_at(&hues, a), high_at(&hues, b)) {
+                let band = Some((low_bound(lo), high_bound(hi).min(1.0)));
+                if !bands.contains(&band) {
+                    bands.push(band);
+                }
+            }
+        }
+        let mut fits = Vec::new();
+        for &lo in &lows {
+            for &hi in &highs {
+                if hi < lo {
+                    continue;
+                }
+                #[allow(clippy::cast_possible_truncation)]
+                let l = Band::new(lo as f32, hi as f32, 0.0, 0.0, span as f32, false);
+                for band in &bands {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let h = band.map(|(a, b)| {
+                        Band::new(a as f32, b as f32, 0.0, 0.0, Channel::Hue.span(), false)
+                    });
+                    let overlaps: Vec<f64> = photos
+                        .iter()
+                        .map(|px| {
+                            let (mut both, mut either) = (0usize, 0usize);
+                            for p in px {
+                                let f = l.factor(p.luminance) * h.map_or(1.0, |h| h.factor(p.hue));
+                                let drawn = f >= 0.5;
+                                both += usize::from(drawn && p.inside);
+                                either += usize::from(drawn || p.inside);
+                            }
+                            #[allow(clippy::cast_precision_loss)]
+                            if either == 0 {
+                                1.0
+                            } else {
+                                round3(both as f64 / either as f64)
+                            }
+                        })
+                        .collect();
+                    let overlap = overlaps.iter().copied().fold(1.0, f64::min);
+                    let mut params =
+                        Params::new().with("luminance", Value::List(vec![lo, hi, 0.0, 0.0]));
+                    if let Some((a, b)) = band {
+                        params.set("hue", Value::List(vec![*a, *b, 0.0, 0.0]));
+                    }
+                    fits.push(ZoneFit {
+                        params,
+                        overlaps,
+                        overlap,
+                        fits: overlap >= MIN_OVERLAP,
+                    });
+                }
+            }
+        }
+        // The best overlap first; on a tie, the fewer channels.
+        fits.sort_by(|a, b| {
+            b.overlap.total_cmp(&a.overlap).then(
+                a.params
+                    .get("hue")
+                    .is_some()
+                    .cmp(&b.params.get("hue").is_some()),
+            )
+        });
+        fits.truncate(ZONE_EVIDENCE);
+        let best = fits.first().filter(|f| f.fits).cloned();
+        let note = match (&best, fits.first()) {
+            (Some(f), _) => format!(
+                "{zone}: a parametric mask ({}) overlaps the AI's {} {}; no AI call",
+                bounds(&f.params),
+                f.overlap,
+                if cases.len() == 1 {
+                    "on the test photo".to_string()
+                } else {
+                    "or more on each test photo".to_string()
+                },
+            ),
+            (None, Some(f)) => {
+                let worst = f
+                    .overlaps
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| a.1.total_cmp(b.1))
+                    .map_or(0, |(i, _)| i);
+                format!(
+                    "{zone}: the parametric mask overlaps {} on {}; kept as AI, 1 call per photo",
+                    f.overlap,
+                    photo_name(worst, cases.len()),
+                )
+            }
+            (None, None) => {
+                format!("{zone}: no parametric mask to try; kept as AI, 1 call per photo")
+            }
+        };
+        rows.push(ZoneRow {
+            zone: zone.clone(),
+            default: if best.is_some() {
+                ZoneChoice::Parametric
+            } else {
+                ZoneChoice::Ai
+            },
+            fit: best,
+            candidates: fits,
+            note,
+        });
+    }
+    Ok(rows)
+}
+
+/// The bounds of a fit, as a note reads them: `luminance 0.4 to open`.
+fn bounds(params: &Params) -> String {
+    let span = f64::from(helios_module_masks::Channel::Luminance.span());
+    let one = |name: &str, open: f64| {
+        let v = params.get(name).and_then(Value::as_list)?;
+        let lo = if v[0] <= 0.0 {
+            "open".to_string()
+        } else {
+            format!("{}", round3(v[0]))
+        };
+        let hi = if v[1] >= open {
+            "open".to_string()
+        } else {
+            format!("{}", round3(v[1]))
+        };
+        Some(format!("{name} {lo} to {hi}"))
+    };
+    [one("luminance", span), one("hue", 1.0)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `the first photo`, `the second photo`…, `the test photo` alone.
+fn photo_name(i: usize, n: usize) -> String {
+    const NTH: [&str; 5] = ["first", "second", "third", "fourth", "fifth"];
+    match (n, NTH.get(i)) {
+        (1, _) => "the test photo".into(),
+        (_, Some(nth)) => format!("the {nth} photo"),
+        _ => format!("test photo {}", i + 1),
     }
 }
 
@@ -574,5 +914,135 @@ mod tests {
         assert!(row.target.is_some(), "{row:?}");
         assert!(row.note.contains("one test photo"), "{}", row.note);
         assert_eq!(row.fixed, 2.0);
+    }
+
+    /// The sky band of [`masks`] with `extra`'s foreground pixels added.
+    fn ai_mask(extra: impl Fn(i64, i64) -> bool + 'static) -> Image {
+        Image::from_fn(Region::sized(W as u32, W as u32), 1, move |x, y, _| {
+            f32::from(u8::from(y < SKY_ROWS || extra(x, y)))
+        })
+    }
+
+    fn zone_rows(photos: &[Image], ai: &[(&str, &Image)]) -> Vec<ZoneRow> {
+        let mut zones = masks();
+        for (name, mask) in ai {
+            zones.insert((*name).to_string(), (*mask).clone());
+        }
+        let values = Params::new();
+        let cases: Vec<Case> = photos
+            .iter()
+            .map(|input| Case {
+                input,
+                zones: &zones,
+                values: &values,
+            })
+            .collect();
+        let names: Vec<String> = ai.iter().map(|(n, _)| (*n).to_string()).collect();
+        generalise_zones(&cases, &names).unwrap()
+    }
+
+    #[test]
+    fn an_ai_sky_a_parametric_mask_matches_becomes_parametric() {
+        let sky = ai_mask(|_, _| false);
+        let rows = zone_rows(
+            &[backlit(0.0, -4.0), backlit(-1.0, -4.0)],
+            &[("ai_sky", &sky)],
+        );
+        let row = &rows[0];
+        assert_eq!(row.default, ZoneChoice::Parametric, "{}", row.note);
+        let fit = row.fit.as_ref().unwrap();
+        assert!(fit.overlaps.iter().all(|o| *o >= MIN_OVERLAP), "{fit:?}");
+        assert_eq!(fit.overlap, 1.0, "{fit:?}");
+        // Luminance alone does it: no hue bound.
+        assert!(fit.params.get("hue").is_none(), "{fit:?}");
+        let l = fit
+            .params
+            .get("luminance")
+            .and_then(Value::as_list)
+            .unwrap();
+        assert!(l[0] > 0.0625 && l[0] <= 0.5, "{l:?}");
+        assert!(
+            row.note.starts_with("ai_sky: a parametric mask (luminance"),
+            "{}",
+            row.note
+        );
+        assert!(row.note.ends_with("no AI call"), "{}", row.note);
+    }
+
+    #[test]
+    fn an_ai_zone_no_parametric_mask_overlaps_enough_stays_ai() {
+        // The AI's sky also holds a figure in the foreground, as dark as
+        // what surrounds it: no range of luminance or hue tells them apart.
+        let sky = ai_mask(|x, y| y >= 16 && (8..16).contains(&x) && y % 2 == 0);
+        let rows = zone_rows(&[backlit(0.0, -4.0)], &[("sky", &sky)]);
+        let row = &rows[0];
+        assert_eq!(row.default, ZoneChoice::Ai, "{}", row.note);
+        assert!(row.fit.is_none(), "{row:?}");
+        let best = &row.candidates[0];
+        assert!(best.overlap < MIN_OVERLAP, "{best:?}");
+        assert_eq!(
+            row.note,
+            format!(
+                "sky: the parametric mask overlaps {} on the test photo; kept as AI, 1 call per photo",
+                best.overlap
+            )
+        );
+    }
+
+    #[test]
+    fn a_mix_of_ai_zones_keeps_only_the_one_nothing_fits() {
+        let sky = ai_mask(|_, _| false);
+        // Every other row of the foreground: half of the same tones.
+        let subject = Image::from_fn(Region::sized(W as u32, W as u32), 1, |_, y, _| {
+            f32::from(u8::from(y >= SKY_ROWS && y % 2 == 0))
+        });
+        let rows = zone_rows(
+            &[backlit(0.0, -4.0), backlit(-1.0, -4.0)],
+            &[("ai_sky", &sky), ("subject", &subject)],
+        );
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].default, ZoneChoice::Parametric, "{}", rows[0].note);
+        assert_eq!(rows[1].default, ZoneChoice::Ai, "{}", rows[1].note);
+        assert!(
+            rows[1]
+                .note
+                .contains("on the first photo; kept as AI, 1 call per photo"),
+            "{}",
+            rows[1].note
+        );
+        assert!(
+            rows[1].candidates[0].overlap <= 0.5,
+            "{:?}",
+            rows[1].candidates[0]
+        );
+    }
+
+    #[test]
+    fn ai_values_no_measure_explains_stay_a_junction() {
+        let mut rows = vec![
+            run(&[(backlit(0.0, -4.0), 2.0), (backlit(-1.0, -4.0), 0.5)]),
+            run(&[(backlit(0.0, -4.0), 1.5), (backlit(-1.0, -4.0), 1.5)]),
+            run(&[(backlit(0.0, -4.0), 2.0), (backlit(-1.0, -4.0), 1.0)]),
+        ];
+        // The AI proposed all three; a user's values stay as they were.
+        let mut user = rows[0].clone();
+        keep_ai_values(&mut rows, &["backlight_lift".to_string()]);
+        keep_ai_values(std::slice::from_mut(&mut user), &[]);
+        assert_eq!(rows[0].default, Choice::Ai, "{}", rows[0].note);
+        assert!(
+            rows[0]
+                .note
+                .starts_with("backlight_lift: 2 EV and 0.5 EV on the test photos; the AI's values"),
+            "{}",
+            rows[0].note
+        );
+        assert!(
+            rows[0].note.ends_with("kept as AI, 1 call per photo"),
+            "{}",
+            rows[0].note
+        );
+        assert_eq!(rows[1].default, Choice::Fixed, "{}", rows[1].note);
+        assert_eq!(rows[2].default, Choice::Target, "{}", rows[2].note);
+        assert_eq!(user.default, Choice::Fixed);
     }
 }
