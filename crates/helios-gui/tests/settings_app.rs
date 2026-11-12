@@ -1,7 +1,8 @@
 //! Helios's own settings (`helios-config`) in the Settings app: placed
 //! once in Helios's scopes, each with the value scopes of its concern,
 //! read from their layers (the library's as `library`, `--set` as the
-//! command line's) and written back to the layer they belong to.
+//! command line's) and written back to the layer they belong to; a
+//! layer another client of the node changes is read again.
 
 use std::sync::{Arc, Mutex};
 
@@ -222,4 +223,94 @@ fn the_search_lands_on_a_shortcut_and_every_setting_shows_once() {
         .filter(|n| n.accesskit_node().toggled() == Some(Toggled::True))
         .count();
     assert_eq!(marked, 1, "the shortcut's row is marked");
+}
+
+/// A layer the node keeps that another of its clients changes is read
+/// again: the Settings app shows the new values without a restart, and
+/// the desktop writes nothing back.
+#[test]
+fn a_layer_another_client_of_the_node_changes_is_read_again() {
+    use std::time::{Duration, Instant};
+
+    use helios_node_core::node::LocalNode;
+    use helios_vault_sqlite::SqliteStore;
+
+    let dir = std::env::temp_dir().join(format!("helios-settings-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+    let bus = Arc::new(helios_core::Bus::new());
+    let node = LocalNode::open(store, bus.clone(), Duration::from_hours(1));
+    let project = "project//photos";
+    let other = node.settings();
+    other
+        .write("user", "[interface.graph]\nzoom = \"overview\"\n")
+        .unwrap();
+
+    // The desktop: its settings read through the node, followed live.
+    let shell = Shell::new(helios_panels(), None);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    let heard = bus.subscribe();
+    let mine = node.settings();
+    let (sources, problems) = config::read(&dir, &|n| mine.read(n), Some(project.into()), &[]);
+    assert!(problems.is_empty(), "{problems:?}");
+    let written: Written = Arc::default();
+    let sink = written.clone();
+    let writer = node.settings();
+    config::install(
+        &app,
+        Settings::resolve(&sources),
+        Some(Box::new(move |name: &str, text: &str| {
+            sink.lock().unwrap().push((name.into(), text.into()));
+            writer.write(name, text)
+        })),
+        &dir,
+    );
+    let reader = node.settings();
+    config::follow(&app, heard, Box::new(move |n| reader.read(n)), || {});
+    h.run();
+    let id = |k: &str| SettingId::new(k).unwrap();
+    let zoom = |app: &egui_pop::api::AppHandle| app.setting::<String>(&id("interface.graph.zoom"));
+    assert_eq!(zoom(&app).as_deref(), Some("overview"));
+
+    // Another client of the node changes the person's layer and the
+    // library's.
+    other
+        .write("user", "[interface.graph]\nzoom = \"detail\"\n")
+        .unwrap();
+    other
+        .write(project, "[project.decisions]\nmode = \"human\"\n")
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(30);
+    let mode =
+        |app: &egui_pop::api::AppHandle| app.setting::<String>(&id("project.decisions.mode"));
+    while zoom(&app).as_deref() != Some("detail") || mode(&app).as_deref() != Some("human") {
+        assert!(
+            Instant::now() < end,
+            "not read again in 30 s: zoom {:?}, mode {:?}",
+            zoom(&app),
+            mode(&app)
+        );
+        h.run();
+    }
+    h.run();
+    h.run();
+    let admin = app.service(&ADMIN).unwrap();
+    assert_eq!(
+        admin.layers().origin("settings/project.decisions.mode"),
+        ValueScope::Library
+    );
+    assert!(
+        written.lock().unwrap().is_empty(),
+        "nothing written back by reading: {:?}",
+        written.lock().unwrap()
+    );
+    assert!(
+        mine.read("user").unwrap().unwrap().contains("detail"),
+        "the other client's change stays"
+    );
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
 }

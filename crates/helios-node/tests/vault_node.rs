@@ -1,7 +1,8 @@
 //! `helios-node --vault`: one node owns the vault, runs its jobs (the
 //! volume watch, the backups, the health check) and closes the vault
 //! cleanly when it stops, in process or on SIGTERM; an import through
-//! the node starts the strategy's after-import backup.
+//! the node starts the strategy's after-import backup; its settings
+//! layers are read and written through its control endpoint.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -400,4 +401,136 @@ fn the_control_endpoint_imports_into_the_nodes_vault() {
     stop(node);
     assert_eq!(answer["ok"], false, "{answer}");
     assert_eq!(answer["message"]["key"], "node-no-vault", "{answer}");
+}
+
+/// The binary: the settings layers the node keeps are read and written
+/// through its control endpoint (`helios control settings-get` and
+/// `settings-set`, on the batch endpoint), each change heard by the
+/// node's other clients (`settings.layerChanged` on its inspect
+/// endpoint); a layer the node does not keep, or a node with no vault,
+/// refuses.
+#[cfg(unix)]
+#[test]
+fn the_control_endpoint_reads_and_writes_the_nodes_settings_layers() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
+
+    let p = Place::new("control-settings");
+    let network = p.0.join("network.json");
+    std::fs::write(
+        &network,
+        r#"{
+  "sources": [{ "name": "src", "synthetic": { "kind": "ramp", "width": 8, "height": 8, "channels": 4 } }],
+  "modules": [{ "name": "exp", "module": "exposure" }],
+  "connections": [{ "from": "src", "port": "image", "to": "exp", "input": "input" }]
+}"#,
+    )
+    .unwrap();
+    let start = |name: &str, vault: Option<&Path>| -> Child {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_helios-node"));
+        command
+            .arg("--graph")
+            .arg(&network)
+            .arg("--socket")
+            .arg(p.0.join(format!("{name}.sock")))
+            .arg("--batch-control")
+            .arg(p.0.join(format!("{name}-batch.sock")))
+            .env_remove("HELIOS_DEBUG_CONTROL")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if let Some(vault) = vault {
+            command.arg("--vault").arg(vault);
+        }
+        let mut child = command.spawn().unwrap();
+        let mut ready = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert!(ready.starts_with("ready "), "{ready}");
+        child
+    };
+    let control = |name: &str, words: &[&str]| -> serde_json::Value {
+        let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+            .arg("control")
+            .arg("--socket")
+            .arg(p.0.join(format!("{name}-batch.sock")))
+            .args(words)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        serde_json::from_slice(&out.stdout).unwrap_or(serde_json::Value::Null)
+    };
+    let stop = |mut child: Child| {
+        let _ = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status();
+        let end = Instant::now() + Duration::from_secs(30);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > end {
+                let _ = child.kill();
+                panic!("the node did not stop in 30 s after SIGTERM");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+
+    let file = p.0.join("vault.db");
+    let node = start("owner", Some(&file));
+    // Another client of the node follows its settings events.
+    let (ack, mut heard) = helios_inspect::subscribe(
+        &helios_inspect::Address::Unix(p.0.join("owner.sock")),
+        "settings.",
+        None,
+    )
+    .unwrap();
+    assert_eq!(ack["ok"], true, "{ack}");
+    heard
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+
+    let empty = control("owner", &["settings-get", "user"]);
+    let text = "[interface.graph]\nzoom = \"detail\"\n";
+    let toml = p.0.join("user.toml");
+    std::fs::write(&toml, text).unwrap();
+    let set = control("owner", &["settings-set", "user", toml.to_str().unwrap()]);
+    // The event, after the subscription's own lines (a heartbeat says
+    // nothing).
+    let event = loop {
+        let line = heard.read().expect("the change heard in 30 s");
+        if !line["event"].is_null() {
+            break line["event"].clone();
+        }
+    };
+    let read = control("owner", &["settings-get", "user"]);
+    let refused = control("owner", &["settings-get", "global"]);
+    let refused_set = control(
+        "owner",
+        &["settings-set", "interface", toml.to_str().unwrap()],
+    );
+    drop(heard);
+    stop(node);
+
+    assert_eq!(empty["ok"], true, "{empty}");
+    assert!(empty["text"].is_null(), "{empty}");
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(event["kind"], "settings.layerChanged", "{event}");
+    assert_eq!(event["payload"]["layer"], "user", "{event}");
+    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["text"], text, "{read}");
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused_set["ok"], false, "{refused_set}");
+    // Kept in the vault, which closed cleanly.
+    let again = SqliteStore::open(&file).unwrap();
+    assert!(!again.report().unclean_shutdown, "the vault closed cleanly");
+    assert_eq!(
+        Vault::new(again).config_layer("user").unwrap().as_deref(),
+        Some(text)
+    );
+
+    let node = start("bare", None);
+    let answer = control("bare", &["settings-get", "user"]);
+    stop(node);
+    assert_eq!(answer["ok"], false, "{answer}");
+    assert_eq!(answer["message"]["key"], "node-no-settings", "{answer}");
 }

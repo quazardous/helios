@@ -614,6 +614,24 @@ pub mod control {
         LibraryImport {
             paths: Vec<PathBuf>,
         },
+        /// A settings layer the node keeps in its vault (a node started
+        /// with `--vault`): the person's (`user`) or a library's
+        /// (`project/<library folder>`); any other name is refused.
+        /// Answers its TOML `text`, `null` when the node keeps none.
+        #[serde(rename = "settings.layer.get")]
+        SettingsLayerGet {
+            layer: String,
+        },
+        /// Keeps `text` (TOML) as a settings layer the node keeps (as
+        /// [`ControlRequest::SettingsLayerGet`] names them). A change is
+        /// announced on the bus as `settings.layerChanged` (`{layer}`),
+        /// for the node's other clients to read it again; the same text
+        /// again announces nothing.
+        #[serde(rename = "settings.layer.set")]
+        SettingsLayerSet {
+            layer: String,
+            text: String,
+        },
         /// What the node's caches hold: the cache service's tiers (budget,
         /// use) and, per scope, kind and tier, entries, bytes and
         /// statistics.

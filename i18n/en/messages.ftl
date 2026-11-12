@@ -1847,7 +1847,7 @@ health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
 
-node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests and library.import
+node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import and settings.layer.*
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 
@@ -1858,6 +1858,8 @@ node-load-refused = cannot load the image: { $error }
 node-no-extent = `{ $name }` has no extent: give a region
 
 node-no-node = no node named `{ $name }`
+
+node-no-settings = the node keeps no settings: start it with --vault
 
 node-no-vault = the node has no vault to import into: start it with --vault
 

@@ -28,10 +28,16 @@
 //! `library` value the project layer (project settings only), and
 //! `--set` its `command line` origin. Edits are written back to their
 //! layer on the next pass; they take effect at the next start.
+//!
+//! **Followed live.** A layer the node keeps that another of its clients
+//! changed (`settings.layerChanged` on its bus) is read again on the next
+//! pass ([`follow`]): the Settings app shows its new values, and an edit
+//! made here afterwards no longer writes the old ones back.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::admin::model::{
@@ -219,6 +225,46 @@ impl Settings {
         }
         out
     }
+
+    /// The node layer named `name`, when it is one these settings read:
+    /// the person's, or the open library's project layer.
+    pub fn node_layer(&self, name: &str) -> Option<Layer> {
+        if name == USER_LAYER {
+            Some(Layer::User)
+        } else if self.project.as_deref() == Some(name) {
+            Some(Layer::Project)
+        } else {
+            None
+        }
+    }
+
+    /// Reads a layer the node keeps again, from its text there now
+    /// (`None`: it keeps none): its values replace the ones held, and it
+    /// counts as saved. Whether any of its values changed. What does not
+    /// read is left out and logged, as at the start.
+    pub fn reload(&mut self, layer: Layer, name: &str, text: Option<&str>) -> bool {
+        let before = self.config.layer_toml(layer);
+        let keys: Vec<&'static str> = self.config.schema().iter().map(|s| s.key).collect();
+        for key in keys {
+            self.config.unset(layer, key);
+        }
+        if let Some(text) = text {
+            let l = self.config.load_str_lenient(layer, text);
+            for key in l.moved {
+                let layer = layer.name();
+                log::warn!(
+                    target: "helios",
+                    "the settings: {name}: `{key}` is not set in the {layer} layer; read as this machine's"
+                );
+            }
+            for p in &l.problems {
+                log::warn!(target: "helios", "the settings: {name}: {p}");
+            }
+        }
+        let after = self.config.layer_toml(layer);
+        self.saved.insert(layer, after.clone());
+        before != after
+    }
 }
 
 /// A layer's text as compared: what its values give, whatever the
@@ -273,6 +319,17 @@ pub fn read(
 /// Writes a layer the node keeps (its name and text).
 pub type VaultWriter = Box<dyn Fn(&str, &str) -> Result<(), String> + Send>;
 
+/// Reads a layer the node keeps (its name): its text, `None` when it
+/// keeps none.
+pub type VaultReader = Box<dyn Fn(&str) -> Result<Option<String>, String> + Send>;
+
+/// The node's layers followed live ([`follow`]): the names of the layers
+/// it said changed, and how to read them.
+struct Followed {
+    changed: Receiver<String>,
+    read: VaultReader,
+}
+
 /// The Settings app's side: the settings as egui-pop settings, their
 /// manifest, and the values written back to their layers.
 pub const BRIDGE: ServiceToken<Bridge> = ServiceToken::new("helios.config");
@@ -289,6 +346,7 @@ struct State {
     /// The open workspace's settings file and its values as last saved.
     workspace: Option<(PathBuf, BTreeMap<String, Json>)>,
     problems: Vec<String>,
+    followed: Option<Followed>,
 }
 
 /// The service: see [`install`] and [`open_workspace`].
@@ -1149,6 +1207,7 @@ impl Plugin for BridgePlugin {
             let (Some(bridge), Some(admin)) = (app.service(&BRIDGE), app.service(&ADMIN)) else {
                 return;
             };
+            reload_followed(app, &bridge, &admin);
             if bridge.dirty.swap(false, Ordering::Relaxed) || admin.is_open() {
                 sync(app, &bridge, &admin);
             }
@@ -1189,22 +1248,12 @@ pub fn install(app: &AppHandle, settings: Settings, vault: Option<VaultWriter>, 
         return;
     };
     let schema = Schema::core();
-    for s in schema.iter() {
-        if let Some(v) = settings.app_value(s.key) {
-            write_store(app, s.key, &to_json(&s.kind, &v));
-        }
+    for (key, v) in app_values(&settings) {
+        write_store(app, key, &v);
     }
     let project = settings.project().is_some();
     admin.offer(ValueScope::Library, project);
-    let library: BTreeMap<String, Json> = schema
-        .iter()
-        .filter(|s| s.concern == Concern::Project)
-        .filter_map(|s| {
-            let v = settings.config().value_in(Layer::Project, s.key)?;
-            Some((s.key.to_string(), to_json(&s.kind, &v)))
-        })
-        .collect();
-    admin.load_layer(app, ValueScope::Library, library);
+    admin.load_layer(app, ValueScope::Library, library_values(&settings));
     for s in schema.iter() {
         if let Some(v) = settings.config().value_in(Layer::Run, s.key)
             && let Ok(id) = SettingId::new(s.key)
@@ -1219,6 +1268,119 @@ pub fn install(app: &AppHandle, settings: Settings, vault: Option<VaultWriter>, 
     st.config_dir = Some(config_dir.to_path_buf());
     drop(st);
     bridge.dirty.store(false, Ordering::Relaxed);
+}
+
+/// Every setting's `app` value, as the Settings app holds it.
+fn app_values(settings: &Settings) -> BTreeMap<&'static str, Json> {
+    Schema::core()
+        .iter()
+        .filter_map(|s| Some((s.key, to_json(&s.kind, &settings.app_value(s.key)?))))
+        .collect()
+}
+
+/// The project settings' values in the library's layer (the Settings
+/// app's `library` value scope).
+fn library_values(settings: &Settings) -> BTreeMap<String, Json> {
+    Schema::core()
+        .iter()
+        .filter(|s| s.concern == Concern::Project)
+        .filter_map(|s| {
+            let v = settings.config().value_in(Layer::Project, s.key)?;
+            Some((s.key.to_string(), to_json(&s.kind, &v)))
+        })
+        .collect()
+}
+
+/// Follows the layers the node keeps live: each `settings.layerChanged`
+/// heard on the node's bus (`heard`, from `Bus::subscribe`) that names
+/// the person's layer or the open library's is read again through `read`
+/// on the next pass, and its values shown in the Settings app (the
+/// interface's store, which egui-pop's readers of a setting see at
+/// once). A change this desktop wrote itself reads as no change. `wake` asks for that pass
+/// (the window may be idle when another client writes).
+pub fn follow(
+    app: &AppHandle,
+    heard: Receiver<helios_core::Envelope>,
+    read: VaultReader,
+    wake: impl Fn() + Send + 'static,
+) {
+    let Some(bridge) = app.service(&BRIDGE) else {
+        return;
+    };
+    let (tell, changed) = channel();
+    // The bus carries every event of the node: the layers' are picked
+    // off the UI thread. Ends with the bus, or once nothing reads them.
+    let picked = std::thread::Builder::new()
+        .name("helios-settings-follow".into())
+        .spawn(move || {
+            while let Ok(e) = heard.recv() {
+                if e.kind != <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND
+                {
+                    continue;
+                }
+                let Some(name) = e.payload["layer"].as_str() else {
+                    continue;
+                };
+                if tell.send(name.to_string()).is_err() {
+                    break;
+                }
+                wake();
+            }
+        });
+    if let Err(e) = picked {
+        log::warn!("settings: the node's layers are not followed: {e}");
+        return;
+    }
+    lock(&bridge.state).followed = Some(Followed { changed, read });
+}
+
+/// Reads again the node's layers it said changed ([`follow`]), and shows
+/// the values that moved in the Settings app.
+fn reload_followed(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
+    let mut st = lock(&bridge.state);
+    let State {
+        settings,
+        followed,
+        problems,
+        ..
+    } = &mut *st;
+    let (Some(settings), Some(followed)) = (settings.as_mut(), followed.as_ref()) else {
+        return;
+    };
+    let names: BTreeSet<String> = followed.changed.try_iter().collect();
+    if names.is_empty() {
+        return;
+    }
+    let before = app_values(settings);
+    let mut library = false;
+    for name in names {
+        let Some(layer) = settings.node_layer(&name) else {
+            continue;
+        };
+        match (followed.read)(&name) {
+            Ok(text) => {
+                if settings.reload(layer, &name, text.as_deref()) && layer == Layer::Project {
+                    library = true;
+                }
+            }
+            Err(e) => {
+                let p = format!("the {} settings: {e}", layer.name());
+                log::warn!("settings: {p}");
+                problems.push(p);
+            }
+        }
+    }
+    let after = app_values(settings);
+    let library = library.then(|| library_values(settings));
+    drop(st);
+    for (key, v) in &after {
+        if before.get(key) != Some(v) {
+            write_store(app, key, v);
+        }
+    }
+    if let Some(values) = library {
+        admin.load_layer(app, ValueScope::Library, values);
+    }
 }
 
 /// Opens a workspace's own values of the settings (the `workspace` value
