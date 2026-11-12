@@ -11,13 +11,15 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+
+use crate::rpc::{self, Closers, Running, Service, Sink, dispatch};
 
 /// Where a server listens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,21 +119,23 @@ pub fn write_token(path: &std::path::Path, token: &str) -> io::Result<()> {
 /// with more than one line ([`Connection::send`], a stream), and may ask
 /// to be told when the client goes ([`Connection::on_close`]).
 pub struct Connection<'a> {
-    out: &'a mut dyn Write,
-    closers: Vec<Box<dyn FnOnce() + Send>>,
+    out: &'a Sink,
+    closers: &'a Closers,
 }
 
 impl Connection<'_> {
     /// Sends one line now; fails once the client has gone.
     pub fn send(&mut self, value: &Value) -> io::Result<()> {
-        writeln!(self.out, "{value}")?;
-        self.out.flush()
+        self.out.send(value)
     }
 
     /// Runs `f` once the connection closes: the client hung up, or its
     /// process died.
     pub fn on_close(&mut self, f: impl FnOnce() + Send + 'static) {
-        self.closers.push(Box::new(f));
+        self.closers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Box::new(f));
     }
 }
 
@@ -158,6 +162,34 @@ where
     R: DeserializeOwned,
     H: Fn(R, &mut Connection<'_>) -> Option<Value> + Send + Sync + 'static,
 {
+    serve_both(listen, token, handler, None)
+}
+
+/// As [`serve_connections_at`], a line with `"jsonrpc": "2.0"` answered
+/// by `service` ([`crate::rpc`]), any other line by `handler` as before.
+pub fn serve_rpc_at<R, H>(
+    listen: &Listen,
+    token: Option<&str>,
+    handler: H,
+    service: Arc<dyn Service>,
+) -> io::Result<Bound>
+where
+    R: DeserializeOwned,
+    H: Fn(R, &mut Connection<'_>) -> Option<Value> + Send + Sync + 'static,
+{
+    serve_both(listen, token, handler, Some(service))
+}
+
+fn serve_both<R, H>(
+    listen: &Listen,
+    token: Option<&str>,
+    handler: H,
+    service: Option<Arc<dyn Service>>,
+) -> io::Result<Bound>
+where
+    R: DeserializeOwned,
+    H: Fn(R, &mut Connection<'_>) -> Option<Value> + Send + Sync + 'static,
+{
     let handler = Arc::new(handler);
     match listen {
         #[cfg(unix)]
@@ -169,10 +201,10 @@ where
             let listener = UnixListener::bind(path)?;
             thread::spawn(move || {
                 for stream in listener.incoming().flatten() {
-                    let handler = handler.clone();
+                    let (handler, service) = (handler.clone(), service.clone());
                     thread::spawn(move || {
                         if let Ok(reader) = stream.try_clone() {
-                            converse(reader, stream, None, &*handler);
+                            converse(reader, stream, None, &*handler, service);
                         }
                     });
                 }
@@ -200,9 +232,10 @@ where
             thread::spawn(move || {
                 for stream in listener.incoming().flatten() {
                     let (handler, token) = (handler.clone(), token.clone());
+                    let service = service.clone();
                     thread::spawn(move || {
                         if let Ok(reader) = stream.try_clone() {
-                            converse(reader, stream, Some(&token), &*handler);
+                            converse(reader, stream, Some(&token), &*handler, service);
                         }
                     });
                 }
@@ -216,8 +249,13 @@ where
 
 /// One connection: an optional authentication line, then requests; what
 /// the handler asked to run at the end runs once the client has gone.
-fn converse<R, H>(reader: impl Read, mut writer: impl Write, token: Option<&str>, handler: &H)
-where
+fn converse<R, H>(
+    reader: impl Read,
+    mut writer: impl Write + Send + 'static,
+    token: Option<&str>,
+    handler: &H,
+    service: Option<Arc<dyn Service>>,
+) where
     R: DeserializeOwned,
     H: Fn(R, &mut Connection<'_>) -> Option<Value>,
 {
@@ -240,26 +278,53 @@ where
             return;
         }
     }
-    let mut connection = Connection {
-        out: &mut writer,
-        closers: Vec::new(),
-    };
+    let sink = Sink::new(writer);
+    let closers: Closers = Arc::default();
+    let running = Running::default();
     for line in lines {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
             continue;
         }
-        let response = match serde_json::from_str::<R>(&line) {
+        let parsed = serde_json::from_str::<Value>(&line);
+        // A JSON-RPC line: a batch, or an object naming `jsonrpc`; a line
+        // that is not JSON is answered in the form it seems to use.
+        let rpc = match &parsed {
+            Ok(Value::Array(_)) => true,
+            Ok(value) => value.get("jsonrpc").is_some(),
+            Err(_) => line.contains("\"jsonrpc\""),
+        };
+        if let (true, Some(service)) = (rpc, &service) {
+            match parsed {
+                Ok(value) => dispatch(value, service, &sink, &closers, &running),
+                Err(e) => {
+                    let error = rpc::Error::new(rpc::code::PARSE_ERROR, e.to_string());
+                    if sink
+                        .send(&rpc::Response::new(rpc::Id::Null, Err(error)))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        let mut connection = Connection {
+            out: &sink,
+            closers: &closers,
+        };
+        let response = match parsed.and_then(serde_json::from_value::<R>) {
             Ok(request) => handler(request, &mut connection),
             Err(e) => Some(json!({ "ok": false, "error": format!("bad request: {e}") })),
         };
         if let Some(response) = response
-            && connection.send(&response).is_err()
+            && sink.send(&response).is_err()
         {
             break;
         }
     }
-    for close in connection.closers.drain(..) {
+    let closers = std::mem::take(&mut *closers.lock().unwrap_or_else(PoisonError::into_inner));
+    for close in closers {
         close();
     }
 }
