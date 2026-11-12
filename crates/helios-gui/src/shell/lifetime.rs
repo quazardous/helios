@@ -15,6 +15,11 @@
 //!
 //! The host (the desktop's `main.rs`) asks [`Shell::main_window_closing`]
 //! when the main window's close is requested, and quits only when told.
+//!
+//! Quitting is asked of the local node ([`crate::node`], attached with
+//! [`Shell::attach_node`]): the node owns the vault, and closes it once
+//! asked to quit and its last client (the GUI) is gone. No window saves
+//! or closes the vault.
 
 use egui::{Context, ViewportCommand, ViewportId};
 use egui_pop::api::windows::WindowId;
@@ -41,6 +46,18 @@ pub(super) struct Lifetime {
     /// A quit question was opened at this pass: the main window's close
     /// sent with the same Quit is cancelled, not taken for a close.
     asked_at: Option<u64>,
+    /// The local node, asked to quit when Helios quits.
+    node: Option<crate::node::Link>,
+}
+
+impl Lifetime {
+    /// Helios quits: the node is asked to quit too.
+    fn quitting(&mut self) {
+        self.quitting = true;
+        if let Some(node) = &self.node {
+            node.quit();
+        }
+    }
 }
 
 /// What the main window's close request does.
@@ -56,6 +73,19 @@ pub enum Closing {
 }
 
 impl Shell {
+    /// Attaches the local node: Helios quitting asks it to quit.
+    pub fn attach_node(&mut self, node: crate::node::Link) {
+        if self.lifetime.quitting {
+            node.quit();
+        }
+        self.lifetime.node = Some(node);
+    }
+
+    /// The system ends the session: Helios quits at once, asking nothing.
+    pub fn session_ending(&mut self) {
+        self.lifetime.quitting();
+    }
+
     /// Quits Helios, from any window: asks first when jobs are running.
     pub(super) fn quit(&mut self, ctx: &Context) {
         if self.lifetime.quitting {
@@ -73,7 +103,7 @@ impl Shell {
 
     /// Quits, whatever runs.
     pub(super) fn quit_confirmed(&mut self, ctx: &Context) {
-        self.lifetime.quitting = true;
+        self.lifetime.quitting();
         close_main_window(ctx);
     }
 
@@ -104,7 +134,7 @@ impl Shell {
         // The last window: closing it quits, as Quit does.
         let running = self.running_jobs();
         if running == 0 || self.core.assume_yes {
-            self.lifetime.quitting = true;
+            self.lifetime.quitting();
             return Closing::Quit;
         }
         ctx.send_viewport_cmd(ViewportCommand::CancelClose);

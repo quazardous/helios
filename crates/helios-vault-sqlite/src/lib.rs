@@ -1872,6 +1872,34 @@ impl Store for SqliteStore {
         }
         self.db.execute_batch("ROLLBACK").map_err(err)
     }
+
+    /// A passive checkpoint: the write-ahead log's committed pages are
+    /// copied into the database file and synced. Nothing in memory, nor
+    /// inside a transaction (its writes are not committed yet).
+    fn flush(&mut self) -> Result<(), String> {
+        if self.path.is_none() || !self.db.is_autocommit() {
+            return Ok(());
+        }
+        self.db
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))
+            .map_err(err)
+    }
+
+    /// The clean-shutdown marker written (a transaction left open is
+    /// rolled back), the log checkpointed, and the store read-only from
+    /// then on: a late writer is refused rather than writing after the
+    /// marker.
+    fn shut_down(&mut self) -> Result<(), String> {
+        if self.closed {
+            return Ok(());
+        }
+        let marked = self.mark_clean();
+        self.closed = true;
+        let flushed = self.flush();
+        self.read_only
+            .get_or_insert_with(|| "the vault is closed".to_string());
+        marked.and(flushed)
+    }
 }
 
 impl Drop for SqliteStore {

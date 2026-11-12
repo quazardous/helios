@@ -241,9 +241,15 @@ struct Shown {
 impl<S: Store> Persist<S> {
     /// A vault on `store`, announcing its changes on `bus`.
     pub fn new(store: S, bus: Arc<Bus>) -> Self {
+        Self::on(Arc::new(Vault::new(store).with_bus(bus.clone())), bus)
+    }
+
+    /// The link to a vault opened by its owner (the local node), whose
+    /// changes are announced on `bus`.
+    pub fn on(vault: Arc<Vault<S>>, bus: Arc<Bus>) -> Self {
         let events = bus.subscribe();
         Self {
-            vault: Arc::new(Vault::new(store).with_bus(bus.clone())),
+            vault,
             bus,
             events,
             editing: None,

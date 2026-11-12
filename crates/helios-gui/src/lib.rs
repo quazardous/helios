@@ -40,6 +40,7 @@ pub mod mask_tree;
 pub mod masks;
 pub mod modules;
 pub mod navigator;
+pub mod node;
 pub mod params;
 pub mod persist;
 pub mod platform;

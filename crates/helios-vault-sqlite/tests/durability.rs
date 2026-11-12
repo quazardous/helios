@@ -185,3 +185,45 @@ fn two_handles_with_stale_views_keep_each_others_fields() {
     drop((a, b, reopened));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// What the vault's owner relies on: a flush puts what is committed in
+/// the database file itself (a copy of the file alone, without its log,
+/// holds it), and a shut-down marks the vault closed cleanly and refuses
+/// the writes that come after it.
+#[test]
+fn a_flush_reaches_the_file_and_a_shut_down_closes_cleanly() {
+    let dir = scratch("flush");
+    let path = dir.join("vault.db");
+    let mut store = SqliteStore::open(&path).unwrap();
+    store
+        .set_document("t", "k", Some(&json!({ "saved": 1 })))
+        .unwrap();
+    let copy = |name: &str| {
+        let to = dir.join(name);
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::copy(&path, to.join("vault.db")).unwrap();
+        SqliteStore::open(&to.join("vault.db"))
+            .unwrap()
+            .document("t", "k")
+            .unwrap()
+    };
+    assert_eq!(copy("before"), None, "still in the log only");
+    store.flush().unwrap();
+    assert_eq!(copy("after"), Some(json!({ "saved": 1 })), "in the file");
+    store.shut_down().unwrap();
+    assert!(
+        store.set_document("t", "late", Some(&json!(2))).is_err(),
+        "a write after the shut-down is refused"
+    );
+    assert_eq!(
+        store.document("t", "k").unwrap(),
+        Some(json!({ "saved": 1 }))
+    );
+    store.shut_down().unwrap();
+    drop(store);
+    let again = SqliteStore::open(&path).unwrap();
+    assert!(!again.report().unclean_shutdown, "closed cleanly");
+    assert_eq!(again.document("t", "late").unwrap(), None);
+    drop(again);
+    let _ = std::fs::remove_dir_all(&dir);
+}

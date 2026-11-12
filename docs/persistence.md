@@ -64,13 +64,19 @@ longest history, then the greatest id); a session then continues the
 version it saved last, so two writers on one image make two heads and
 neither overwrites the other.
 
-**Quitting.** The frame that sees the close request draws nothing: it
-writes what the user changed since the last frame, and the window closes
-after it. The vault closes once the window is gone, on a thread of its
-own with a deadline (`helios_gui::quit`); past it, the process exits
-without the clean-shutdown marker, and the next opening checks the file.
-Every step is already in the vault by then: nothing saved waits for the
-quit.
+**Quitting.** The vault is the local node's (`helios_gui::node`, embedded
+in the desktop's process): it opens it, flushes it on its own schedule
+(a checkpoint every few seconds, with or without a window), and closes
+it when it stops. The frame that sees the close request draws nothing:
+it writes what the user changed since the last frame, and the window
+closes after it; the GUI then disconnects from the node. Quitting is
+asked of the node (`shell/lifetime.rs`), which stops once its last
+client is gone: a last flush, the clean-shutdown marker, writes refused
+after it. The host waits for that stop with a deadline
+(`helios_gui::quit`); past it, the process exits without the marker,
+and the next opening checks the file. Every step is already in the vault
+by then: nothing saved waits for the quit. A window closing while
+another remains leaves the node and its vault as they are.
 
 **Survival scenarios** gate a release (`cargo xtask release` runs them
 first, CI runs them by name): `cargo survival` runs the desktop's (quit

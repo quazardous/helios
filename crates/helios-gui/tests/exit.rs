@@ -48,19 +48,23 @@ fn exit_runs_on_exit_then_the_exit_step_saves() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// The desktop's quit, in its order: the closing frame writes what the
-/// user changed, the window (the shell, the vault's link) goes, and the
-/// vault closes after it on a thread of its own, within its deadline. A
-/// rating made just before the close is kept, and the vault was closed
-/// cleanly.
-#[test]
-fn the_vault_closes_after_the_window_and_keeps_the_last_rating() {
+/// A library with one photo, its vault owned by a local node the shell
+/// is attached to, the GUI connected as a client: the desktop at its
+/// start.
+struct Desktop {
+    dir: std::path::PathBuf,
+    node: helios_gui::node::LocalNode<helios_vault_sqlite::SqliteStore>,
+    client: Option<helios_gui::node::Client>,
+    persist: helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>,
+    image: helios_vault::ImageId,
+}
+
+fn desktop(name: &str) -> (Desktop, egui_kittest::Harness<'static, Shell>) {
+    use helios_gui::node::LocalNode;
     use helios_gui::persist::Persist;
-    use helios_gui::quit::{Finisher, VAULT_DEADLINE};
-    use helios_vault::fields::RATING;
     use helios_vault_sqlite::SqliteStore;
 
-    let dir = std::env::temp_dir().join(format!("helios-quit-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("helios-quit-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     image::RgbImage::from_fn(8, 6, |x, y| {
@@ -68,38 +72,94 @@ fn the_vault_closes_after_the_window_and_keeps_the_last_rating() {
     })
     .save(dir.join("photo.png"))
     .unwrap();
-    let db = dir.join("vault.db");
-    let image = {
-        let mut shell = Shell::new(helios_panels(), None);
-        let mut persist = Persist::new(
-            SqliteStore::open(&db).unwrap(),
-            std::sync::Arc::new(helios_core::Bus::new()),
-        );
-        let image = persist
-            .vault()
-            .import_file(&dir.join("photo.png"), 1)
-            .unwrap();
-        persist.fill_library(&mut shell).unwrap();
-        shell.library_mut().select(0);
-        // Held by the quit, as `main` holds it.
-        let vault = persist.vault().clone();
-        // Rated, then the window is asked to close: the closing frame
-        // writes the rating.
-        shell.library_mut().rate(4).unwrap();
-        persist.frame(&mut shell, 10.0);
-        drop(persist);
-        drop(shell);
-        // The window is gone; the vault closes against its deadline.
-        let mut finisher = Finisher::default();
-        finisher.spawn("vault closed", VAULT_DEADLINE, move || drop(vault));
-        assert!(finisher.finish().is_empty());
-        image
+    let bus = std::sync::Arc::new(helios_core::Bus::new());
+    // A long schedule: what reaches the file is the stop's doing.
+    let node = LocalNode::open(
+        SqliteStore::open(&dir.join("vault.db")).unwrap(),
+        bus.clone(),
+        std::time::Duration::from_hours(1),
+    );
+    let client = Some(node.connect());
+    let persist = Persist::on(node.vault().clone(), bus);
+    let image = persist
+        .vault()
+        .import_file(&dir.join("photo.png"), 1)
+        .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.attach_node(node.link());
+    persist.fill_library(&mut shell).unwrap();
+    shell.library_mut().select(0);
+    let mut h = helios_gui::headless::harness(shell, egui::vec2(800.0, 500.0));
+    h.ctx.set_embed_viewports(false);
+    h.run();
+    let d = Desktop {
+        dir,
+        node,
+        client,
+        persist,
+        image,
     };
-    let store = SqliteStore::open(&db).unwrap();
-    assert!(!store.report().unclean_shutdown, "closed cleanly");
-    let vault = helios_vault::Vault::new(store);
-    let row = vault.fields_of(&[image], &[RATING]).unwrap().remove(0);
-    assert_eq!(row.get(RATING), Some(&json!(4)));
-    drop(vault);
-    let _ = std::fs::remove_dir_all(&dir);
+    (d, h)
+}
+
+impl Desktop {
+    /// The GUI ends as the desktop's does: its closing frame sends the
+    /// last change, the window's link goes, and the client disconnects
+    /// (`on_exit`). Then the node, asked to quit, closes the vault on its
+    /// own; the host waits for it.
+    fn gui_ends(mut self, mut h: egui_kittest::Harness<'static, Shell>) {
+        self.persist.frame(h.state_mut(), 10.0);
+        drop(self.persist);
+        drop(h);
+        let link = self.node.link();
+        assert!(link.quitting(), "the shell asked the node to quit");
+        assert!(!link.stopped(), "the GUI is still connected");
+        drop(self.client.take());
+        assert!(
+            link.wait_stopped(std::time::Duration::from_secs(10)),
+            "the node closed the vault"
+        );
+        assert!(link.flushes() > 0, "flushed as it stopped");
+        self.node.stop();
+        let store = helios_vault_sqlite::SqliteStore::open(&self.dir.join("vault.db")).unwrap();
+        assert!(!store.report().unclean_shutdown, "closed cleanly");
+        let vault = helios_vault::Vault::new(store);
+        let row = vault
+            .fields_of(&[self.image], &[helios_vault::fields::RATING])
+            .unwrap()
+            .remove(0);
+        assert_eq!(row.get(helios_vault::fields::RATING), Some(&json!(4)));
+        drop(vault);
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// The last window closed: Helios quits through the node, which flushes
+/// and closes the vault once the GUI is gone; a rating made just before
+/// the close is kept.
+#[test]
+fn closing_the_last_window_closes_the_vault_through_the_node() {
+    let (d, mut h) = desktop("last-window");
+    h.state_mut().library_mut().rate(4).unwrap();
+    let ctx = h.ctx.clone();
+    assert_eq!(
+        h.state_mut().main_window_closing(&ctx),
+        helios_gui::shell::Closing::Quit
+    );
+    d.gui_ends(h);
+}
+
+/// Quit (the system menu's, File > Quit's command): the same, through the
+/// node.
+#[test]
+fn quitting_closes_the_vault_through_the_node() {
+    let (d, mut h) = desktop("quit");
+    h.state_mut().library_mut().rate(4).unwrap();
+    assert!(!d.node.link().quitting());
+    h.state_mut()
+        .run("workbench.quit", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    assert!(h.state().quitting());
+    d.gui_ends(h);
 }
