@@ -598,7 +598,7 @@ points settled:
   with its `bundled` SQLite (MIT and public domain) and its `backup`
   feature.
 - **Shipping.** The program is built beside Helios's (the bench box's
-  `build-gui` job keeps both, `tools/bench/fetch-gui.sh` fetches both).
+  `build-gui` job keeps both, `cargo xtask install-dev` installs both).
   Its manifest and catalogues are compiled into Helios
   (`helios_plugin::bundled`), and the desktop writes them out once with
   a copy of the program into a folder named by their contents under

@@ -232,8 +232,8 @@ timeout = "1h"
 # the desktop's release binary, kept as the output `gui`, and the
 # programs of the plugins Helios ships, which go beside it (the output
 # `darktable-library`): the owner's
-# "Helios Dev" launcher runs the latest one from main, fetched with
-# tools/bench/fetch-gui.sh, so no local build is needed
+# "Helios Dev" launcher runs the latest one of a branch, installed with
+# `cargo xtask install-dev`, so no local build is needed
 [jobs.build-gui]
 about = "helios-gui and the plugins it ships built in release, kept as outputs for the desktop launcher"
 first = [{ job = "check", pass = ["branch", "crate", "src"] }]

@@ -82,6 +82,22 @@ cargo xtask bench-remote bench-masks branch=main
 Exit 75 means the box could not serve the job (off, in maintenance, its
 GPU gone), never a test failure. See docs/bench.md.
 
+### A dev build on the desktop
+
+`cargo xtask install-dev` installs the box's latest `build-gui` of `next`
+(`--branch B` for another branch, `--local` for this checkout's own
+build) outside the checkout, in
+`${XDG_DATA_HOME:-~/.local/share}/helios-dev/<version>/` (`<version>` is
+the program's own, commit included: `0.79.1-dev.4+1a2b3c4d`), with the
+programs of the bundled plugins beside `helios-gui`. A `current` link
+points at it, and the "Helios Dev" launcher, named with the version,
+starts `current/helios-gui`: cleaning `target/` never breaks it. The
+three latest installs stay; `--list` shows them (`*` marks the current
+one), `--uninstall` removes them and the launcher. When the box's build
+is not the branch's head, it says so and how to queue a fresh one
+(`cargo xtask bench-remote build-gui branch=<B>`). It never starts
+Helios.
+
 ## Linters and formatters
 
 ```bash

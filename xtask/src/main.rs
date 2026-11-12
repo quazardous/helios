@@ -33,6 +33,10 @@
 //!   prints the box's queue.
 //! - `affected [BASE] [--filter | --critical]`: the crates, tests and box
 //!   jobs a change since BASE touches (see `affected.rs`).
+//! - `install-dev [--branch B | --local] | --list | --uninstall`: a dev
+//!   build (the box's latest of a branch, or this checkout's) installed
+//!   outside the checkout with its "Helios Dev" launcher (see
+//!   `install_dev.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, then one to three
@@ -43,6 +47,7 @@ mod affected;
 mod bench;
 mod commits;
 mod i18n;
+mod install_dev;
 mod lint;
 mod promote;
 mod remote;
@@ -641,7 +646,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local] | install-dev --list | install-dev --uninstall";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -734,6 +739,10 @@ fn main() -> ExitCode {
         }),
         ["affected", rest @ ..] => affected::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", affected::USAGE);
+            ExitCode::from(2)
+        }),
+        ["install-dev", rest @ ..] => install_dev::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", install_dev::USAGE);
             ExitCode::from(2)
         }),
         ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
