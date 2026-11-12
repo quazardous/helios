@@ -258,7 +258,7 @@ fn closing_the_settings_window_leaves_the_main_window() {
     assert_eq!(listed, ["main"]);
     // Opened again: in a window of its own again.
     h.state_mut()
-        .run("admin.open", json!({ "path": "appearance" }), Origin::User)
+        .run("admin.open", json!(null), Origin::User)
         .unwrap();
     h.run_steps(3);
     assert_eq!(declared(&h), [window]);
