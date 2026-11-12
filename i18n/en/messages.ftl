@@ -543,6 +543,16 @@ gui-import-window-change-into = Choose where copies go
 
 gui-import-window-choices = Choices
 
+gui-import-window-choices-default = { $source }: the default choices
+
+gui-import-window-choices-own = { $source }: its own choices
+
+gui-import-window-choices-reset = Reset to defaults
+
+gui-import-window-choices-reset-help = This source takes the default choices again
+
+gui-import-window-choices-undo = Undo
+
 gui-import-window-choose = Choose a folder…
 
 gui-import-window-contents = Contents
@@ -628,6 +638,8 @@ gui-import-window-nothing = Tick a card or a folder to import
 gui-import-window-offline = offline
 
 gui-import-window-open = Import photos…
+
+gui-import-window-own-choices = Its own import choices
 
 gui-import-window-pair = RAW+JPG
 

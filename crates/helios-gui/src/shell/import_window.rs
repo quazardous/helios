@@ -23,6 +23,8 @@
 //! - **Choices**, the right column ([`super::import_choices`]): copy or
 //!   add where they are, where copies go and how they are named, with
 //!   examples from the first photo ticked; duplicates; darktable edits.
+//!   It follows the selected source, each keeping its own choices
+//!   ([`super::import_sources`]).
 //! - **The footer**: the preset menu (Default, the presets saved, "Save
 //!   as preset…", "Delete preset"), the totals of the photos ticked,
 //!   Cancel and Import.
@@ -237,6 +239,9 @@ pub(crate) struct ImportWindow {
     /// The choices, the last used until changed, and where they are kept.
     pub(super) choices: Choices,
     pub(super) choices_file: Option<PathBuf>,
+    /// The saved sources, each with its own choices
+    /// ([`super::import_sources`]).
+    pub(super) sources: super::import_sources::Sources,
     /// Copy or add as the person switched it since the window opened.
     pub(super) copy: Option<bool>,
     /// The custom rename pattern is being edited.
@@ -831,6 +836,7 @@ impl Shell {
         w.ticked.clear();
         w.picked.clear();
         w.dropped.clear();
+        w.sources.account = None;
         let paths: Vec<PathBuf> = args
             .get("paths")
             .and_then(Value::as_array)
@@ -1109,21 +1115,39 @@ impl Shell {
             let mut w = self.import.get_mut();
             let copy = w.copies();
             let any_card = w.ticked.iter().any(|p| w.is_card(p));
-            if !any_card {
+            // The window's choices are kept as the last used; a saved
+            // source's are kept on it already.
+            if !any_card && w.sources.showing.is_none() {
                 w.choices.copy_folders = copy;
             }
-            w.save_choices();
+            if w.sources.showing.is_none() {
+                w.save_choices();
+            }
             (w.choices.clone(), copy, std::mem::take(&mut w.ticked))
         };
         for path in &ticked {
-            let (files, card) = {
+            let (files, card, own) = {
                 let mut w = self.import.get_mut();
-                (w.contents.selected_files(path), w.is_card(path))
+                // With saved sources, each folder imports with its own
+                // choices; copied or not as it says, unless switched.
+                let own = w.sources.kept().then(|| {
+                    let c = w.choices_for(path);
+                    let copy = if w.is_card(path) {
+                        w.copy.unwrap_or(true)
+                    } else {
+                        w.copy.unwrap_or(c.copy_folders)
+                    };
+                    (c, copy)
+                });
+                (w.contents.selected_files(path), w.is_card(path), own)
             };
             if files.is_empty() {
                 continue;
             }
-            let args = choices.args(&files, copy);
+            let args = match &own {
+                Some((c, copy)) => c.args(&files, *copy),
+                None => choices.args(&files, copy),
+            };
             if let Err(e) = self.import_files(&args, &Origin::User) {
                 self.warn(e);
             }
@@ -1320,6 +1344,11 @@ impl ImportWindow {
         }
         self.follow_cards();
         self.follow_scans();
+        // The Choices column shows the selected source's; a change made
+        // in this pass is saved on it at its end.
+        self.follow_selection();
+        let shown = self.sources.showing.clone();
+        let before = self.choices.clone();
         let sample = self.sample();
         let Some(words) = self.words(&ctx, sample.as_ref()) else {
             return;
@@ -1402,6 +1431,7 @@ impl ImportWindow {
         }
         // The chooser's answer comes in this window too.
         self.receive_chosen_folder();
+        self.keep_source_choices(shown, &before);
     }
 
     /// Adds, reconnects or signs out an account, as the Sources column
@@ -1413,6 +1443,10 @@ impl ImportWindow {
             return;
         }
         let done = match asked {
+            Asked::Select(id) => {
+                self.select_account(id);
+                Ok(())
+            }
             Asked::Add(connector) => self.connect_account(&connector, None),
             Asked::Reconnect(id) => {
                 let connector = self
@@ -1698,17 +1732,33 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                     *event = Some(e);
                 }
             }
+            // The folders saved with their own choices, listed neither
+            // as recent nor as favourites.
+            for path in w.sources.folders() {
+                if w.memory.recent.contains(&path) || w.memory.favourites.contains(&path) {
+                    continue;
+                }
+                if let Some(e) = source_row(ui, w, words, &path, label_of(&path), None) {
+                    *event = Some(e);
+                }
+            }
             ui.separator();
             if ui.button(&words.choose).clicked() {
                 *event = Some(Event::Choose);
             }
-            if let Some(texts) = w.texts.clone()
-                && let Some(asked) =
-                    super::import_accounts::accounts_ui(ui, &mut w.accounts, &w.connectors, &|m| {
-                        texts(m)
-                    })
-            {
-                *event = Some(Event::Account(asked));
+            if let Some(texts) = w.texts.clone() {
+                let selected = w.sources.account.clone().filter(|_| w.sources.kept());
+                match super::import_accounts::accounts_ui(
+                    ui,
+                    &mut w.accounts,
+                    &w.connectors,
+                    selected.as_deref(),
+                    &|m| texts(m),
+                ) {
+                    Some(super::import_accounts::Asked::Select(id)) => w.select_account(id),
+                    Some(asked) => *event = Some(Event::Account(asked)),
+                    None => {}
+                }
             }
         });
 }
@@ -1732,6 +1782,10 @@ fn source_row(
         if tick.changed() {
             w.tick(path, on);
             w.touched = true;
+            w.sources.account = None;
+        }
+        if w.sources.has_own(path) {
+            ui.weak("●").on_hover_text(&words.choices.own_choices);
         }
         tick.context_menu(|ui| {
             if ui

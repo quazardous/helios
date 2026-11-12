@@ -2656,3 +2656,126 @@ fn an_export_keeps_running_when_its_window_closes() {
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+type Kept = helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>;
+
+/// A node over the vault at `file`, and its settings, as the desktop
+/// keeps them.
+fn node_at(
+    file: &Path,
+) -> (
+    helios_node_core::node::LocalNode<helios_vault_sqlite::SqliteStore>,
+    Kept,
+) {
+    let store = helios_vault_sqlite::SqliteStore::open(file).unwrap();
+    let bus = Arc::new(helios_core::Bus::new());
+    let node = helios_node_core::node::LocalNode::open(store, bus, Duration::from_hours(1));
+    let kept = node.settings();
+    (node, kept)
+}
+
+/// A shell keeping its import sources through the node's settings.
+fn shell_keeping(kept: &Kept) -> Harness<'static, Shell> {
+    let doc = helios_gui::shell::IMPORT_SOURCES;
+    let (read, write) = (kept.clone(), kept.clone());
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.keep_import_sources_with(
+        Box::new(move || read.read(doc)),
+        Box::new(move |text| write.write(doc, text)),
+    );
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    h
+}
+
+/// The import window opened on `source`, read through (a spinner turns
+/// meanwhile: frames are stepped, not run to rest).
+fn open_on(h: &mut Harness<'static, Shell>, source: &Path) {
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "source": source }),
+            Origin::User,
+        )
+        .unwrap();
+    read_through(h);
+}
+
+#[test]
+fn a_sources_choices_are_saved_on_it_follow_the_selection_and_come_back_after_a_restart() {
+    let dir = temp("sources");
+    let (trips, family) = (dir.join("trips"), dir.join("family"));
+    for (folder, name) in [(&trips, "a"), (&family, "b")] {
+        std::fs::create_dir_all(folder).unwrap();
+        put(&folder.join(format!("{name}.jpg")), Ok(&jpeg(name)), 2);
+    }
+    let vault = dir.join("vault.db");
+    {
+        let (node, kept) = node_at(&vault);
+        let mut h = shell_keeping(&kept);
+        open_on(&mut h, &trips);
+        let _ = h.get_by_label("trips: the default choices");
+        // Changing a choice saves it on the selected source.
+        h.get_by_label("Copy into the Library").click();
+        h.run_steps(3);
+        h.get_by_label("By month").click();
+        h.run_steps(3);
+        h.get_by_label("Keep").click();
+        h.run_steps(3);
+        let _ = h.get_by_label("trips: its own choices");
+        let text = kept
+            .read(helios_gui::shell::IMPORT_SOURCES)
+            .unwrap()
+            .expect("the sources kept by the node");
+        assert!(
+            text.contains("trips") && text.contains("keep") && text.contains("month"),
+            "{text}"
+        );
+        // Another folder shows the default choices.
+        open_on(&mut h, &family);
+        let _ = h.get_by_label("family: the default choices");
+        assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
+        assert!(!h.state().import_copies());
+        // Back on the first: its own; Reset gives the defaults back, Undo
+        // takes the reset back.
+        open_on(&mut h, &trips);
+        assert_eq!(h.state().import_choices().duplicates.as_str(), "keep");
+        assert!(h.state().import_copies());
+        h.get_by_label("Reset to defaults").click();
+        h.run_steps(3);
+        assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
+        let _ = h.get_by_label("trips: the default choices");
+        h.get_by_label("Undo").click();
+        h.run_steps(3);
+        assert_eq!(h.state().import_choices().duplicates.as_str(), "keep");
+        // Import runs each folder with its own choices.
+        h.get_by_label("Import 1").click();
+        h.run_steps(3);
+        let imports = h.state_mut().take_imports();
+        assert_eq!(imports.len(), 1, "{imports:?}");
+        assert_eq!(
+            (
+                &imports[0]["copy"],
+                &imports[0]["layout"],
+                &imports[0]["duplicates"]
+            ),
+            (&json!(true), &json!("month"), &json!("keep"))
+        );
+        drop(h);
+        node.stop();
+    }
+    // After a restart, the source comes back with its choices.
+    let (node, kept) = node_at(&vault);
+    let mut h = shell_keeping(&kept);
+    assert_eq!(h.state().import_sources().len(), 1);
+    open_on(&mut h, &trips);
+    let choices = h.state().import_choices();
+    assert_eq!(
+        (choices.duplicates.as_str(), choices.layout.as_str()),
+        ("keep", "month")
+    );
+    let _ = h.get_by_label("trips: its own choices");
+    drop(h);
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}

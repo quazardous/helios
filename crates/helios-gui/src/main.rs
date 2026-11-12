@@ -2119,6 +2119,16 @@ fn main() -> Result<(), String> {
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );
             shell.remember_import_choices_in(import_choices);
+            // The import window's saved sources, with their own choices:
+            // one of the person's documents the node keeps.
+            if let Some(kept) = node_settings.clone() {
+                let write = kept.clone();
+                let doc = helios_gui::shell::IMPORT_SOURCES;
+                shell.keep_import_sources_with(
+                    Box::new(move || kept.read(doc)),
+                    Box::new(move |text| write.write(doc, text)),
+                );
+            }
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }

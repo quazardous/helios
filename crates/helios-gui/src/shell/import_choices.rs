@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::import_sources::{SourceAsked, SourceKey};
 use super::import_window::ImportWindow;
 
 /// The rename presets' patterns, in the order shown.
@@ -164,12 +165,22 @@ pub(super) struct ChoiceWords {
     pub darktable_help: String,
     pub more: String,
     pub more_note: String,
+    /// Whose choices the column shows: a source's, or the window's.
+    pub shown_for: Option<String>,
+    pub own_choices: String,
+    pub reset: String,
+    pub reset_help: String,
+    pub undo: String,
 }
 
 impl ImportWindow {
     /// Whether the import copies: as the person switched it, else a
     /// card's photos copied, a folder's as last chosen.
+    /// A source whose connector cannot add in place always copies.
     pub(super) fn copies(&self) -> bool {
+        if !self.sources.honours.add_in_place {
+            return true;
+        }
         self.copy.unwrap_or_else(|| {
             self.ticked.iter().any(|p| self.is_card(p)) || self.choices.copy_folders
         })
@@ -411,6 +422,38 @@ impl ImportWindow {
                 "gui-import-window-more-note",
                 "Metadata templates and time offsets come later.",
             )),
+            shown_for: w.sources.showing.as_ref().map(|key| {
+                let source = match key {
+                    SourceKey::Folder(p) => folder_name(p),
+                    SourceKey::Account(id) => w.account_label(id),
+                };
+                if w.sources.own(key).is_some() {
+                    t(Message::new(
+                        "gui-import-window-choices-own",
+                        "{ $source }: its own choices",
+                    )
+                    .with("source", source))
+                } else {
+                    t(Message::new(
+                        "gui-import-window-choices-default",
+                        "{ $source }: the default choices",
+                    )
+                    .with("source", source))
+                }
+            }),
+            own_choices: t(Message::new(
+                "gui-import-window-own-choices",
+                "Its own import choices",
+            )),
+            reset: t(Message::new(
+                "gui-import-window-choices-reset",
+                "Reset to defaults",
+            )),
+            reset_help: t(Message::new(
+                "gui-import-window-choices-reset-help",
+                "This source takes the default choices again",
+            )),
+            undo: t(Message::new("gui-import-window-choices-undo", "Undo")),
         }
     }
 }
@@ -434,6 +477,28 @@ pub(super) fn choices_ui(
 ) -> Option<Asked> {
     let mut asked = None;
     ui.heading(&words.heading);
+    // Whose choices these are, with Reset and Undo.
+    if let Some(shown_for) = &words.shown_for {
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(shown_for);
+            let own = w
+                .sources
+                .showing
+                .as_ref()
+                .is_some_and(|k| w.sources.own(k).is_some());
+            if own
+                && ui
+                    .small_button(&words.reset)
+                    .on_hover_text(&words.reset_help)
+                    .clicked()
+            {
+                w.sources.asked = Some(SourceAsked::Reset);
+            }
+            if w.can_undo_source() && ui.small_button(&words.undo).clicked() {
+                w.sources.asked = Some(SourceAsked::Undo);
+            }
+        });
+    }
     egui::ScrollArea::vertical()
         .id_salt("helios.import.choices")
         .auto_shrink([false, false])
@@ -441,9 +506,18 @@ pub(super) fn choices_ui(
             let mut copy = w.copies();
             let before = copy;
             ui.radio_value(&mut copy, true, &words.copy);
-            ui.radio_value(&mut copy, false, &words.add);
+            // A connector that cannot add in place always copies.
+            if w.sources.honours.add_in_place {
+                ui.radio_value(&mut copy, false, &words.add);
+            }
             if copy != before {
-                w.copy = Some(copy);
+                // A saved source keeps it among its choices.
+                if w.sources.showing.is_some() {
+                    w.choices.copy_folders = copy;
+                    w.copy = None;
+                } else {
+                    w.copy = Some(copy);
+                }
             }
             if w.ticked.iter().any(|p| w.is_card(p)) {
                 ui.add(egui::Label::new(egui::RichText::new(&words.card_note).weak()).wrap());
@@ -460,8 +534,10 @@ pub(super) fn choices_ui(
                 ui.radio_value(d, Duplicates::Keep, &words.keep);
                 ui.radio_value(d, Duplicates::Ask, &words.ask);
             });
-            ui.checkbox(&mut w.choices.darktable, &words.darktable)
-                .on_hover_text(&words.darktable_help);
+            if w.sources.honours.darktable {
+                ui.checkbox(&mut w.choices.darktable, &words.darktable)
+                    .on_hover_text(&words.darktable_help);
+            }
             egui::CollapsingHeader::new(&words.more)
                 .id_salt("helios.import.more")
                 .default_open(false)

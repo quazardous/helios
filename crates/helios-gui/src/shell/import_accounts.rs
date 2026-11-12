@@ -169,6 +169,14 @@ pub(crate) struct Connecting {
 impl Accounts {
     /// The accounts, read again (a pass of the window: a connection or a
     /// command may have changed them).
+    /// An account's name as last read.
+    pub(crate) fn label_of(&self, id: &str) -> Option<String> {
+        self.listed
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.label.clone())
+    }
+
     pub(crate) fn listed(&mut self) -> &[Account] {
         if let Some(book) = &self.book {
             match book.accounts() {
@@ -331,7 +339,7 @@ impl Accounts {
                 .iter()
                 .find(|a| &a.id == id)
                 .map(|a| a.connector.clone()),
-            Asked::SignOut(_) => None,
+            Asked::SignOut(_) | Asked::Select(_) => None,
         }
     }
 
@@ -406,6 +414,9 @@ pub(crate) fn state_text(state: &AccountState) -> Message {
 /// What the accounts' part of the Sources column asked.
 #[derive(Clone, Debug)]
 pub(crate) enum Asked {
+    /// The account clicked: its source selected, the Choices column
+    /// showing its choices.
+    Select(String),
     Add(String),
     Pick(String),
     Reconnect(String),
@@ -420,6 +431,7 @@ pub(crate) fn accounts_ui(
     ui: &mut egui::Ui,
     accounts: &mut Accounts,
     connectors: &Connectors,
+    selected: Option<&str>,
     t: &dyn Fn(Message) -> String,
 ) -> Option<Asked> {
     accounts.book.as_ref()?;
@@ -444,7 +456,12 @@ pub(crate) fn accounts_ui(
         };
         let row = ui
             .horizontal(|ui| {
-                ui.label(&account.label);
+                if ui
+                    .selectable_label(selected == Some(account.id.as_str()), &account.label)
+                    .clicked()
+                {
+                    asked = Some(Asked::Select(account.id.clone()));
+                }
                 ui.label(egui::RichText::new(&state).color(colour).small());
             })
             .response;

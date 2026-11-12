@@ -495,6 +495,11 @@ gui-import-window-card-note a41f26041f3c03f7
 gui-import-window-cards 733e4349d17c7ac9
 gui-import-window-change-into 3880a2f057085050
 gui-import-window-choices 268af863ae6a6aa7
+gui-import-window-choices-default 86ca7372f03bc56e
+gui-import-window-choices-own 0b92a785701e05c6
+gui-import-window-choices-reset c7f725faf218071d
+gui-import-window-choices-reset-help 91c0381c5ef67b36
+gui-import-window-choices-undo cc7022a2d9050a57
 gui-import-window-choose db696f6e530b1a77
 gui-import-window-contents ad5874f98f978353
 gui-import-window-copy 1910d5f23c0a4434
@@ -538,6 +543,7 @@ gui-import-window-none-ticked 38b0e076687b0618
 gui-import-window-nothing 564749d90c7b3363
 gui-import-window-offline 01064de9e41d67ce
 gui-import-window-open 36112b331ee04a37
+gui-import-window-own-choices 0ccd5ad8fef959ec
 gui-import-window-pair cd1d4bc78361cc21
 gui-import-window-preset 3d548db5268940b4
 gui-import-window-preset-default e7a4eba68fcaf9d4
@@ -947,6 +953,8 @@ gui-theme-problem 96dfd71611027a04
 gui-theme-unknown 440ee9790a2a4952
 gui-vault-unreadable f60fd7de770903dc
 gui-window-frame-error 72035247381882d2
+gui-workshops-ai-left ed60a8398b7ee934
+gui-workshops-ai-none 38d14681e004558e
 gui-workshops-aim caaedec277d28d20
 gui-workshops-aim-hint 8064bd845ec8256a
 gui-workshops-aimed 1b55329008f8a2c3
@@ -954,6 +962,10 @@ gui-workshops-applied 3a1ed5bfe60a6bc4
 gui-workshops-applied-hint 9bf80af04dc2c06c
 gui-workshops-apply 899b46da6ad579cb
 gui-workshops-apply-hint 510d93f84f7c1223
+gui-workshops-automatic ac3d5bd0e2d1a92f
+gui-workshops-automatic-hint a6dc170f55273f93
+gui-workshops-confirm f14519151ed25787
+gui-workshops-confirm-hint a4d292292bca9fb3
 gui-workshops-describe 45cb5a474e3b24bd
 gui-workshops-describe-hint aa993ec241af6285
 gui-workshops-design 45af977762f09b55
@@ -978,6 +990,9 @@ gui-workshops-no-image b4e54e7f4ca19c8d
 gui-workshops-none 562429491b4c555c
 gui-workshops-none-found 2c91e3865a939478
 gui-workshops-open b31cc700f565e36a
+gui-workshops-row-ai 01edb385bc3ec45c
+gui-workshops-row-fixed 1b4b00894d08e22b
+gui-workshops-row-target 8da7fe299b211df2
 gui-workshops-save-intent 2fcc280286ba8777
 gui-workshops-save-keywords fabd14e8df2fdd6f
 gui-workshops-save-target 3745e788fcd4e8fb
@@ -994,6 +1009,7 @@ gui-workshops-shipped 211c0e16125ce48c
 gui-workshops-unit-percent a1092ca158312426
 gui-workshops-unit-stops f904099c8af835b0
 gui-workshops-workspace fd397a7452b7fe8e
+gui-workshops-zone-parametric 90cf25cabb16d071
 gui-workspace-description 8b5e28fcfa8e55c1
 gui-workspace-edit-title 7de3e7bfc04e3f73
 gui-workspace-edit-verb 835b5f8f6d37f13e

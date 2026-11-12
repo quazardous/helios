@@ -78,6 +78,7 @@ helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde.workspace = true
 serde_json.workspace = true
+toml = "1"
 # MIT OR Apache-2.0: the `log` facade egui-pop's log file reads.
 log = "0.4"
 # MIT OR Apache-2.0 (egui, eframe, egui_kittest).
