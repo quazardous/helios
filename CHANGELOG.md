@@ -24,6 +24,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.81.0] - 2026-11-12
+
+### Added
+
+- Colour chart calibration, first call: `calibrate.chart` measures a ColorChecker shot (a decoded picture) from the centres of its four corner patches and answers the report, writing nothing: Delta E per patch before and after, the light found, the exposure, the matrix. As a node request (`helios control calibrate-chart`), the `helios_calibrate_chart` MCP tool and a desktop command. Raw shots come next.
+- `helios-node --vault` imports through its control endpoints (`helios control import FOLDERS-OR-IMAGES...`, the `library.import` request, also on the batch endpoint): each import is announced on the node's bus as `library.imported`, and the node then runs the backup strategy's after-import backup, as the desktop does.
+- `helios-node --vault` runs what the desktop runs without a window: it watches the machine's disks and cards, backs up to a backup disk of the strategy when one is plugged in, and runs the health check on its schedule. It opens the vault once, and SIGTERM or Ctrl-C now stops it cleanly: running backups are cancelled after their current copy, and the vault is closed and marked clean.
+- macOS on Apple silicon: each Release now carries `helios-<version>-macos-arm64.dmg`, a disk image holding Helios.app, with the command line inside it. It is not notarised yet: see the README for how to open it the first time.
+- Settings open in a window of their own, as the import window does: Helios's title bar, their own size and place kept, closing alone, and Window > Settings opens them. Closing the main window while they are open moves them into it. "Pop in" still shows them over the main window, and that choice is kept.
+- Experimental workshops: "Make it automatic" in the Workshops panel turns a piloted session into rows, one per slider you set (a target a measure explains, the same value, or kept as AI) and per AI zone (a fitted parametric mask), with how much AI per photo is left. Confirm writes the workshop's next version as one undo step. Agents read and amend the rows over MCP (`helios_workshop_generalise`); only you confirm.
+
+### Changed
+
+- The desktop notification of a long job's end now covers every job the desktop sees, whoever started it: imports, backups (an after-import backup, a disk plugged in), health checks and the jobs of a followed node, beside exports and batches. The image map's upkeep and the exports inside a batch stay quiet.
+
+### Fixed
+
+- Closing the main window while the import window is open moves the import window into it at the import window's size and place, with its title bar: its title and the minimize, maximize and close buttons. The import window draws Helios's title bar rather than the system's. The Window menu no longer offers Switch to window…; it keeps Helios's windows and the list of those open.
+
 ## [0.80.0] - 2026-11-12
 
 ### Added
