@@ -83,7 +83,7 @@ egui-pop-wayland = "0.2"
 egui_fit = { version = "0.1", features = ["serde"] }
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-egui_hud = "0.2.1"
+egui_hud = "0.3"
 blake3 = "1"
 # MIT OR Apache-2.0: the hashes connectors claim for their items (MD5,
 # SHA-1, SHA-256), checked while fetched bytes land.
