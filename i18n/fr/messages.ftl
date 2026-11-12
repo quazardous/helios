@@ -68,6 +68,8 @@ export-write-failed = impossible d’écrire { $path } : { $error }
 
 gui-about-description = Un framework de traitement d’image client/serveur, pensé d’abord pour l’IA.
 
+gui-account-pick = Choisir des photos…
+
 gui-backup-card-safe = { $card } peut être formatée : chaque photo a ses sauvegardes
 
 gui-caches-clear = Vider
@@ -435,6 +437,22 @@ gui-params-port-member = { $member } : { $value }
 gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
+
+gui-pick-browser = Choisissez vos photos dans votre navigateur, appuyez sur OK, puis revenez ici.
+
+gui-pick-done = { $count } photos importées.
+
+gui-pick-failed = Non importé : { $why }
+
+gui-pick-importing = Import de { $count } photos…
+
+gui-pick-nothing = Rien n'a été choisi à temps.
+
+gui-pick-sign-in = La source a refusé la connexion : reconnectez le compte.
+
+gui-pick-starting = Ouverture du choix…
+
+gui-pick-title = Choisir des photos dans { $source }
 
 gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 

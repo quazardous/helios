@@ -317,6 +317,7 @@ impl Default for Connectors {
         let services = ConnectorServices {
             cards: Some(Arc::new(move || lock(&c).clone())),
             places: Some(Arc::new(move || lock(&p).clone())),
+            token: None,
         };
         let services_kept = services.clone();
         let registry = helios_connect::registry();
@@ -369,6 +370,12 @@ impl Connectors {
             .filter(|m| !m.connect.is_empty())
             .map(|m| (m.id, m.label))
             .collect()
+    }
+
+    /// How connectors signed in through an `oauth` step get their
+    /// accounts' tokens.
+    pub fn set_token(&mut self, token: helios_connect::TokenFn) {
+        self.services.token = Some(token);
     }
 
     /// What connectors are created with.

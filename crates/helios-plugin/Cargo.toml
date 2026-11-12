@@ -7,10 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+helios-connect.workspace = true
 helios-shell.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml = "1"
+log = "0.4"
 
 [lints]
 workspace = true

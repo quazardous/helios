@@ -21,6 +21,7 @@
 //! - [`broker`]: discovery, activation, routing, capabilities, services;
 //! - [`importer`]: the importer protocol's checks (`importer.scan`);
 //! - [`commands`]: the broker as shell commands;
+//! - [`source`]: the `import.source` service as an import connector;
 //! - [`bundled`]: the plugins Helios ships, built beside it.
 
 pub mod broker;
@@ -29,6 +30,7 @@ pub mod commands;
 pub mod importer;
 pub mod manifest;
 pub mod rpc;
+pub mod source;
 
 pub use broker::{Broker, Notice, Policy, Probed, Scope, default_dirs};
 pub use commands::register;

@@ -40,6 +40,69 @@ pub(crate) struct Accounts {
     pub(crate) current: Current,
     /// The connectors' names, by id, for Settings > Accounts.
     pub(crate) labels: Labels,
+    /// The picking running ("Pick photos…"), shown in the window's dialog.
+    pub(crate) picking: Option<Picking>,
+    /// How picked items are imported: `helios_library::fetch::import_remote`
+    /// over the library, set by the desktop; none: "Pick photos…" is not
+    /// offered.
+    pub(crate) import: Option<ImportRemote>,
+}
+
+/// Imports the items a connector listed under a source: the items added.
+pub type ImportRemote = Arc<
+    dyn Fn(
+            &dyn helios_connect::Connector,
+            helios_connect::SourceRef,
+            Vec<helios_connect::Item>,
+        ) -> Result<u64, String>
+        + Send
+        + Sync,
+>;
+
+/// How long a picking waits for the person at most.
+const PICK_WAIT: std::time::Duration = std::time::Duration::from_mins(30);
+
+/// Where a picking stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PickStatus {
+    /// Starting the picking at the service.
+    Starting,
+    /// Waiting for the person, in the browser opened on `url`.
+    Browser {
+        url: String,
+    },
+    /// Downloading and importing `items` photos.
+    Importing {
+        items: usize,
+    },
+    /// Done: `added` photos added.
+    Done {
+        added: u64,
+    },
+    /// Nothing picked before the deadline.
+    Nothing,
+    /// The service refused the sign-in: the account needs a reconnection.
+    SignIn,
+    Failed(String),
+    Cancelled,
+}
+
+/// A picking running.
+pub(crate) struct Picking {
+    label: String,
+    status: Arc<Mutex<PickStatus>>,
+    cancel: helios_connect::Cancel,
+    /// The browser was opened on this page.
+    opened: Option<String>,
+}
+
+impl Picking {
+    pub(crate) fn status(&self) -> PickStatus {
+        self.status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 /// The connection running, shared with the commands.
@@ -57,6 +120,8 @@ impl Default for Accounts {
             connecting: None,
             current: Current::default(),
             labels: Labels::default(),
+            picking: None,
+            import: None,
         }
     }
 }
@@ -147,6 +212,89 @@ impl Accounts {
         Ok(())
     }
 
+    /// Starts picking under the account `id` ("Pick photos…"): the
+    /// connector's picking page opened in the system browser by the
+    /// dialog, the person waited for (cancellable), what was picked
+    /// imported. A sign-in the service refuses leaves the account needing
+    /// attention, its Reconnect offered.
+    pub(crate) fn pick(
+        &mut self,
+        connectors: &Connectors,
+        id: &str,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let book = self.book.clone().ok_or("accounts need a library open")?;
+        let import = self.import.clone().ok_or("no library to import into")?;
+        let account = book
+            .account(id)?
+            .ok_or_else(|| format!("no account {id}"))?;
+        let provider = connectors
+            .provider(&account.connector)
+            .ok_or_else(|| format!("no source of kind {}", account.connector))?;
+        let connector = provider
+            .create(&serde_json::Value::Null, &connectors.services())
+            .map_err(|e| helios_connect::connect::said(&e))?;
+        if let Some(p) = self.picking.take() {
+            p.cancel.cancel();
+        }
+        let status = Arc::new(Mutex::new(PickStatus::Starting));
+        let cancel = helios_connect::Cancel::new();
+        let (st, stop, account_ref) = (status.clone(), cancel.clone(), account.account_ref());
+        let set = move |s: PickStatus| {
+            *st.lock().unwrap_or_else(PoisonError::into_inner) = s;
+            wake();
+        };
+        std::thread::spawn(move || {
+            use helios_connect::ConnectorError;
+            let deadline = std::time::Instant::now() + PICK_WAIT;
+            let opened = |url: &str| {
+                set(PickStatus::Browser {
+                    url: url.to_owned(),
+                });
+            };
+            let listed = helios_plugin::source::pick_and_list(
+                connector.as_ref(),
+                &account_ref,
+                deadline,
+                &stop,
+                &opened,
+            );
+            let end = match listed {
+                Ok(Some((source, items))) => {
+                    set(PickStatus::Importing { items: items.len() });
+                    let done = import(connector.as_ref(), source, items);
+                    let _ = connector.end_pick();
+                    match done {
+                        Ok(added) => PickStatus::Done { added },
+                        Err(e) => PickStatus::Failed(e),
+                    }
+                }
+                Ok(None) => PickStatus::Nothing,
+                Err(ConnectorError::Cancelled) => PickStatus::Cancelled,
+                Err(ConnectorError::AuthNeeded) => {
+                    let why = "the source refused the sign-in: reconnect";
+                    if let Err(e) = helios_connect::account::needs_attention(
+                        book.as_ref(),
+                        &account_ref.id,
+                        why,
+                    ) {
+                        log::warn!("import accounts: {e}");
+                    }
+                    PickStatus::SignIn
+                }
+                Err(e) => PickStatus::Failed(helios_connect::connect::said(&e)),
+            };
+            set(end);
+        });
+        self.picking = Some(Picking {
+            label: account.label,
+            status,
+            cancel,
+            opened: None,
+        });
+        Ok(())
+    }
+
     /// The session is no longer shown.
     fn close(&mut self) {
         self.connecting = None;
@@ -178,6 +326,7 @@ pub(crate) fn state_text(state: &AccountState) -> Message {
 /// What the accounts' part of the Sources column asked.
 pub(crate) enum Asked {
     Add(String),
+    Pick(String),
     Reconnect(String),
     SignOut(String),
 }
@@ -245,6 +394,17 @@ pub(crate) fn accounts_ui(
                 .clicked()
         {
             asked = Some(Asked::Reconnect(account.id.clone()));
+        }
+        if matches!(account.state, AccountState::Connected)
+            && accounts.import.is_some()
+            && connectors
+                .provider(&account.connector)
+                .is_some_and(|p| p.manifest().caps.picks)
+            && ui
+                .small_button(t(Message::new("gui-account-pick", "Pick photos…")))
+                .clicked()
+        {
+            asked = Some(Asked::Pick(account.id.clone()));
         }
     }
     if !addable.is_empty() {
@@ -410,5 +570,127 @@ pub(crate) fn connect_dialog(
     });
     if close {
         accounts.close();
+    }
+}
+
+/// The picking's dialog, while one runs or until its end is seen: the
+/// browser opened once on the picking page (never a web view), a
+/// spinner while the person picks or the photos come in, then what was
+/// imported, or why not. Cancel stops the wait.
+pub(crate) fn pick_dialog(
+    ctx: &egui::Context,
+    accounts: &mut Accounts,
+    t: &dyn Fn(Message) -> String,
+) {
+    let Some(picking) = accounts.picking.as_mut() else {
+        return;
+    };
+    let status = picking.status();
+    if let PickStatus::Browser { url } = &status
+        && picking.opened.as_deref() != Some(url.as_str())
+    {
+        picking.opened = Some(url.clone());
+        ctx.open_url(egui::OpenUrl::new_tab(url));
+    }
+    let mut close = false;
+    egui::Modal::new(egui::Id::unique("helios.import.pick")).show(ctx, |ui| {
+        ui.set_width(360.0);
+        ui.heading(t(Message::new(
+            "gui-pick-title",
+            "Pick photos in { $source }",
+        )
+        .with("source", picking.label.clone())));
+        ui.add_space(4.0);
+        let working = |ui: &mut egui::Ui, text: String| {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(text);
+            });
+        };
+        let ended = |ui: &mut egui::Ui, text: String, warn: bool| {
+            if warn {
+                ui.colored_label(ui.visuals().warn_fg_color, text);
+            } else {
+                ui.label(text);
+            }
+        };
+        match &status {
+            PickStatus::Starting => working(
+                ui,
+                t(Message::new("gui-pick-starting", "Opening the picking…")),
+            ),
+            PickStatus::Browser { url } => {
+                working(
+                    ui,
+                    t(Message::new(
+                        "gui-pick-browser",
+                        "Pick your photos in your browser, press Done, then come back here.",
+                    )),
+                );
+                ui.hyperlink_to(
+                    t(Message::new(
+                        "gui-connect-open-again",
+                        "Open the page again",
+                    )),
+                    url,
+                );
+            }
+            PickStatus::Importing { items } => working(
+                ui,
+                t(
+                    Message::new("gui-pick-importing", "Importing { $count } photos…")
+                        .with("count", *items as i64),
+                ),
+            ),
+            PickStatus::Done { added } => ended(
+                ui,
+                t(Message::new("gui-pick-done", "{ $count } photos imported.")
+                    .with("count", *added as i64)),
+                false,
+            ),
+            PickStatus::Nothing => ended(
+                ui,
+                t(Message::new(
+                    "gui-pick-nothing",
+                    "Nothing was picked in time.",
+                )),
+                false,
+            ),
+            PickStatus::SignIn => ended(
+                ui,
+                t(Message::new(
+                    "gui-pick-sign-in",
+                    "The source refused the sign-in: reconnect the account.",
+                )),
+                true,
+            ),
+            PickStatus::Failed(why) => ended(
+                ui,
+                t(Message::new("gui-pick-failed", "Not imported: { $why }")
+                    .with("why", why.clone())),
+                true,
+            ),
+            PickStatus::Cancelled => close = true,
+        }
+        let running = matches!(
+            status,
+            PickStatus::Starting | PickStatus::Browser { .. } | PickStatus::Importing { .. }
+        );
+        if running {
+            if ui
+                .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                .clicked()
+            {
+                picking.cancel.cancel();
+            }
+        } else if ui
+            .button(t(Message::new("gui-connect-close", "Close")))
+            .clicked()
+        {
+            close = true;
+        }
+    });
+    if close {
+        accounts.picking = None;
     }
 }

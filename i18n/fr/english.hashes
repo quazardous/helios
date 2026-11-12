@@ -270,6 +270,7 @@ frame-helios-mask-editing.title 9d40fb207fdf75d9
 frame-helios-sub-workspace.title e8980ceace620065
 frame-helios-workspace.title e7a125cdd87cf1f5
 gui-about-description 6b6356eedfe61a4e
+gui-account-pick 59d1fb51925cc2e3
 gui-backup-card-safe c563f3ba220cc628
 gui-backup-wizard 405c12301ee0562b
 gui-backup-wizard-about c46c8208be55538e
@@ -749,6 +750,14 @@ gui-params-port-member 6b3de0179d0cc50e
 gui-params-show-values 1ca86a61fcd25ceb
 gui-params-unfold-section 08281fbd8b927666
 gui-params-values 0e265cf773d72c36
+gui-pick-browser 809da427a6f0f41b
+gui-pick-done 19c95ed7feb6813d
+gui-pick-failed 0dc585e051a2e538
+gui-pick-importing a61d47728658ad72
+gui-pick-nothing 692269164c42d95d
+gui-pick-sign-in 6770243a93dc36c8
+gui-pick-starting 18fd2f06bea071dd
+gui-pick-title 3a4d87e8049d52a3
 gui-pointer-choice-close 4ee816d1021e4e6e
 gui-pointer-choice-darktable 7be5d454e9047774
 gui-pointer-choice-keep bb433e2ea951769e

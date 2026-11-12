@@ -2775,7 +2775,9 @@ dependencies = [
 name = "helios-plugin"
 version = "0.78.0"
 dependencies = [
+ "helios-connect",
  "helios-shell",
+ "log",
  "serde",
  "serde_json",
  "toml 1.1.8+spec-1.1.0",

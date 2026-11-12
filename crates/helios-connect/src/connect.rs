@@ -182,6 +182,16 @@ pub trait WebSteps: Send + Sync {
     ) -> Result<Account, String> {
         crate::account::sign_out(book, secrets, id)
     }
+    /// A valid access token for the account `id`, renewed when it
+    /// expired; a renewal refused leaves the account needing attention.
+    fn access_token(
+        &self,
+        _book: &dyn AccountBook,
+        _secrets: &dyn Secrets,
+        id: &str,
+    ) -> Result<String, String> {
+        Err(format!("no sign-in for the account {id}"))
+    }
 }
 
 struct Shared {
