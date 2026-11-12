@@ -906,8 +906,9 @@ window the full menus.
 - Escape does not close a focus window: it is not a dialog. It still
   closes dialogs, menus and the palette.
 - One command, `window.close`, egui-pop's: Helios's own command of that
-  id goes, and Helios installs `WindowsPlugin` (the Window menu and
-  Switch to Window…). The darktable keymap's note then holds.
+  id goes, and Helios installs `WindowsPlugin` (the Window menu; its
+  Switch to Window… is not offered, see D5). The darktable keymap's note
+  then holds.
 
 Default: as above.
 
@@ -965,16 +966,18 @@ Default: as above.
 Decided (2026-11-12): **the reduced bar**. Every window has a menu bar
 with at least a Window menu, so any window can be opened or brought
 forward from any other. The Import window's bar has File (Close window,
-Quit) and Window: Switch to window…, Close window, Helios's windows
-(Main window, Import photos…) and the windows open, the one in front
-ticked. A later focus window that is a peer of the main one (slice 7)
+Quit) and Window: Close window, Helios's windows (Main window, Import
+photos…) and the windows open, the one in front ticked. egui-pop's
+switcher (Switch to window…, `window.pick`, and `window.switch` in the
+palette) is not offered (2026-11-12): the Window menu's list does its
+work. A later focus window that is a peer of the main one (slice 7)
 gets the full menus, as VS Code's windows do.
 
 **D6. Where keys act.** Three scopes:
 
 | Scope | Examples | Rule |
 |-------|----------|------|
-| App-wide | Quit, Settings, the palette, Import… (Ctrl+Shift+I), Switch to Window… | run in any window |
+| App-wide | Quit, Settings, the palette, Import… (Ctrl+Shift+I) | run in any window |
 | The window in front | Close window, Escape, undo in a text field, the Import window's own keys | act on the window they are pressed in |
 | The main window | the layout toggles (Ctrl+B, Ctrl+J), views, library and darkroom commands, Export, Ctrl+P | run only when the main window is in front |
 
@@ -1014,7 +1017,7 @@ Default: as above, after a macOS build exists; nothing to do before.
   worked in last into the main window (finding 1). The system's end of
   session quits at once, asking nothing.
 - **Ctrl+W** is bound to egui-pop's `window.close`; `WindowsPlugin` is
-  installed (the Window menu, Switch to window…); Helios's own
+  installed (the Window menu, without its switcher); Helios's own
   `window.close` is gone. Alt+F4 and the close button were already the
   system's close, which now follows the same rule.
 - **Tests** (`tests/import.rs`, real viewports): Ctrl+Q in the Import
