@@ -286,35 +286,60 @@ host's programs are not; a library or vault outside the folders above
 needs an override. Helios is not on Flathub yet: see
 [flathub.md](./flathub.md) for what submitting it takes.
 
-## macOS (first build)
+## macOS
 
 The workflow also builds Helios for macOS on Apple silicon (arm64), in
-its `macos` job on GitHub's `macos-15` runner. This is a first step: its
-files are kept as the run's artefacts, not attached to the Release, and
-the job may fail without stopping the Release (`continue-on-error`).
+its `macos` job on GitHub's `macos-15` runner. A red `macos` job does not
+hold the Release back: the Release then ships without the disk image.
 
 - It builds the same programs as on Linux and Windows for
   `aarch64-apple-darwin`. Helios links no C library of darktable's (its
   processing is ported to Rust), and the C its crates carry (the bundled
   SQLite and the like) builds with the runner's Xcode command line tools:
-  no Homebrew package is needed. The GPU goes through wgpu's Metal
-  backend; without a usable GPU Helios processes on the CPU.
-- `packaging/macos/release.sh` packages them as
-  `helios-X.Y.Z-macos-arm64.tar.gz`, a folder that runs in place
-  (`bin/helios-gui`, `bin/helios`...) with `COPYING`,
-  `THIRD-PARTY-LICENSES.txt` and `README.md`, and `SHA256SUMS-macos`.
-- The programs are signed ad hoc only (Apple silicon runs nothing
-  unsigned): no Developer ID, no notarisation. A tarball downloaded with a
-  browser is quarantined by Gatekeeper; clear it with
-  `xattr -dr com.apple.quarantine helios-X.Y.Z-macos-arm64` after
-  unpacking.
-- `packaging/macos/smoke.sh` tests the tarball on the runner, with no
-  display session: both programs say their version, `helios` imports a
+  no Homebrew package is needed. The programs link only system libraries
+  and frameworks; `release.sh` would copy any other library into
+  `Contents/Frameworks` and repoint the programs at it. The GPU goes
+  through wgpu's Metal backend; without a usable GPU Helios processes on
+  the CPU.
+- `packaging/macos/release.sh` builds `Helios.app`: `Info.plist`
+  (`packaging/macos/Info.plist`, bundle id `io.github.quazardous.Helios`,
+  the workspace version), an `.icns` icon made from the Linux icon set,
+  every program side by side in `Contents/MacOS` (`helios-gui` is the
+  app's executable; Helios finds its other programs and bundled plugins
+  beside it), the licences in `Contents/Resources`. It wraps the app in
+  `helios-X.Y.Z-macos-arm64.dmg` (with a link to Applications, `COPYING`,
+  `THIRD-PARTY-LICENSES.txt` and `README.md`) and writes
+  `SHA256SUMS-macos`, which `publish` adds to `SHA256SUMS`.
+- `packaging/macos/smoke.sh` mounts the image read-only, checks the app's
+  `Info.plist`, icon and signature, then runs from the mounted app, with
+  no display session: both programs say their version, `helios` imports a
   picture into a new vault and exports it as a JPEG.
 
-Still to come: an app bundle (`Helios.app`) in a disk image, and the
-macOS window behaviour (the global menu bar, the app staying open with no
-window). Signing and notarisation need an Apple Developer account.
+### Signing and notarisation
+
+Without secrets the programs and the app are signed ad hoc only (Apple
+silicon runs nothing unsigned): Gatekeeper refuses the first start until
+the user confirms it (README.md, "Download"). The job signs with a
+Developer ID and notarises when these repository secrets are set; each is
+checked, and the step is skipped with a notice when it is missing:
+
+| Secret | What |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | the Developer ID Application certificate and its private key, exported as `.p12`, base64-encoded |
+| `MACOS_CERTIFICATE_PASSWORD` | the `.p12`'s password |
+| `APPLE_NOTARY_KEY_P8` | an App Store Connect API key (`.p8`), base64-encoded, for `notarytool` |
+| `APPLE_NOTARY_KEY_ID` | that key's id |
+| `APPLE_NOTARY_ISSUER_ID` | that key's issuer id |
+| `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | instead of the API key: an Apple ID, an app-specific password and the team id |
+
+With the certificate, the code is signed with the hardened runtime and a
+secure timestamp; with notary credentials too, the disk image is
+submitted to Apple's notary service and the ticket stapled to it. That
+path has not run yet (no Developer account): expect a first fix when the
+secrets arrive.
+
+Still to come: the macOS window behaviour (the global menu bar, the app
+staying open with no window).
 
 ## Checking a download
 
