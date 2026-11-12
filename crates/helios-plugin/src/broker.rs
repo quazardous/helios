@@ -658,11 +658,33 @@ impl Broker {
         timeout: Duration,
         cancel: Option<&Cancel>,
     ) -> Result<Json, String> {
+        self.call_rpc(id, event, method, params, timeout, cancel)
+            .map_err(|e| match e {
+                CallError::Stopped(why) => why,
+                e => format!("plugin `{id}`, `{method}`: {e}"),
+            })
+    }
+
+    /// As [`Broker::call_with`], the error kept whole: a plugin's own
+    /// error code reads as [`CallError::Rpc`] (a source's -32010, "sign-in
+    /// needed"). A plugin that does not start, or stops during the call,
+    /// is [`CallError::Stopped`] with the reason in full.
+    pub fn call_rpc(
+        &self,
+        id: &str,
+        event: &str,
+        method: &str,
+        params: Json,
+        timeout: Duration,
+        cancel: Option<&Cancel>,
+    ) -> Result<Json, CallError> {
         self.stop_idle();
-        let slot = self.slot(id)?;
+        let slot = self.slot(id).map_err(CallError::Stopped)?;
         let process = {
             let mut st = slot.state.lock().expect("plugin lock");
-            let p = self.ensure(id, slot, &mut st, event)?;
+            let p = self
+                .ensure(id, slot, &mut st, event)
+                .map_err(CallError::Stopped)?;
             st.in_flight += 1;
             st.last_used = Instant::now();
             p
@@ -681,11 +703,10 @@ impl Broker {
                     "plugin `{id}` stopped during `{method}` ({why}); it restarts on the next call"
                 );
                 st.last_error = Some(e.clone());
-                Err(e)
+                Err(CallError::Stopped(e))
             }
             Err(e) => {
-                let e = format!("plugin `{id}`, `{method}`: {e}");
-                st.last_error = Some(e.clone());
+                st.last_error = Some(format!("plugin `{id}`, `{method}`: {e}"));
                 Err(e)
             }
         }

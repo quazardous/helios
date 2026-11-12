@@ -1353,6 +1353,7 @@ impl ImportWindow {
         // The connection running, in a dialog over the window.
         if let Some(texts) = self.texts.clone() {
             super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
+            super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m));
         }
         // The chooser's answer comes in this window too.
         self.receive_chosen_folder();
@@ -1377,6 +1378,10 @@ impl ImportWindow {
                 }
             }
             Asked::SignOut(id) => self.accounts.sign_out(&id),
+            Asked::Pick(id) => {
+                let wake = self.waker();
+                self.accounts.pick(&self.connectors, &id, wake)
+            }
         };
         if let Err(e) = done {
             log::warn!("import accounts: {e}");

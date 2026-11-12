@@ -66,14 +66,12 @@ sign-in aged out: Google ends them after seven days), the account shows
 
 ## Picking and importing
 
-*Status: the plugin and its connection steps are in; the import
-window's "Pick photos…" that drives them through the plugin broker is
-the next step.*
-
-Helios creates a picking session and opens Google Photos' picker in
+In the import window, a connected Google Photos account shows **Pick
+photos…**. Helios creates a picking session and opens Google Photos' picker in
 your browser. Select the photos, press **Done**; the tab closes and
 Helios lists what you picked, downloads each photo and imports it into
-your Library folder, then closes the session at Google. A photo you
+your Library folder, then closes the session at Google. **Cancel** stops waiting; a picking
+waits 30 minutes at most. A photo you
 already imported from Google Photos is recognised by its Google id and
 not downloaded again.
 
@@ -83,5 +81,11 @@ The plugin lives in `plugins/sources/google-photos`: a Rust program
 speaking the `import.source` service over JSON-RPC, and a library whose
 `GooglePhotos` type is a `helios_connect::Connector` over one picking
 session. Its tests run it against a fake Picker API on a local port
-(`tests/fake_picker`); they never reach Google. The design is in
+(`tests/fake_picker`); they never reach Google. Helios drives the
+program through its plugin broker as an import connector
+(`helios_plugin::source`): each call carries the account's access token,
+the plugin downloads each photo into a staging folder Helios gives, and
+its error -32010 marks the account "needs attention". The plugin runs
+only once its `network` and `folder.write` capabilities are granted
+(`plugin.grant`). The design is in
 [design/import-connectors.md](design/import-connectors.md), section 4.1.

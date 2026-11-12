@@ -68,6 +68,12 @@ impl Shell {
                     .unwrap_or_else(PoisonError::into_inner)
                     .insert(id, label);
             }
+            if let Some(web) = w.accounts.web.clone() {
+                let (book, secrets) = (book.clone(), secrets.clone());
+                w.connectors.set_token(Arc::new(move |id: &str| {
+                    web.access_token(book.as_ref(), secrets.as_ref(), id)
+                }));
+            }
             (w.accounts.current.clone(), labels, w.accounts.web.clone())
         };
         self.register_account_commands(&book, &secrets, web, &current, &labels);
@@ -78,6 +84,12 @@ impl Shell {
     /// [`Shell::set_import_accounts`], so signing out revokes too.
     pub fn set_import_sign_in(&mut self, web: Arc<dyn WebSteps>) {
         self.import.get_mut().accounts.web = Some(web);
+    }
+
+    /// Imports what a connector's picking listed ("Pick photos…" on an
+    /// account of a connector that picks), through `import`.
+    pub fn set_import_remote(&mut self, import: super::import_accounts::ImportRemote) {
+        self.import.get_mut().accounts.import = Some(import);
     }
 
     /// Adds an import connector (a plugin's, a test's): its sources join

@@ -100,6 +100,29 @@ pub trait Connector: Send + Sync {
         Err(ConnectorError::Unsupported)
     }
 
+    /// Starts a picking under an account, when `caps.picks`: the page
+    /// the person picks on, which Helios opens in the system browser.
+    /// What is picked is then listed under the account's source.
+    fn pick(&self, _account: &AccountRef, _cancel: &Cancel) -> Result<Pick, ConnectorError> {
+        Err(ConnectorError::Unsupported)
+    }
+
+    /// Waits for the person to finish picking, at most until `deadline`:
+    /// `true` once done, `false` at the deadline.
+    fn picked(
+        &self,
+        _deadline: std::time::Instant,
+        _cancel: &Cancel,
+    ) -> Result<bool, ConnectorError> {
+        Err(ConnectorError::Unsupported)
+    }
+
+    /// Ends the picking (the service forgets it), its items imported or
+    /// given up.
+    fn end_pick(&self) -> Result<(), ConnectorError> {
+        Ok(())
+    }
+
     /// How Helios reads the item's bytes: in place (a mounted folder) or
     /// fetched.
     fn access(&self, item: &ItemRef) -> Access;
@@ -163,6 +186,9 @@ pub struct Caps {
     /// A change feed ([`Connector::changes`]).
     pub changes: bool,
     pub originals: Originals,
+    /// Its items are picked by the person in the service's own page
+    /// ([`Connector::pick`]): the import window offers "Pick photos…".
+    pub picks: bool,
 }
 
 /// A hash algorithm a connector may claim.
@@ -207,6 +233,15 @@ pub enum Originals {
 pub struct AccountRef {
     pub connector: String,
     pub id: String,
+}
+
+/// A picking started ([`Connector::pick`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pick {
+    /// The page the person picks on.
+    pub url: String,
+    /// The source the picked items are listed under.
+    pub source: SourceRef,
 }
 
 /// What a connection's test found.
@@ -487,6 +522,9 @@ pub type CardsFn = Arc<dyn Fn() -> Vec<helios_storage::Card> + Send + Sync>;
 /// The folders a host gives the folder connector as its sources.
 pub type PlacesFn = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
+/// An account's access token, by account id.
+pub type TokenFn = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
+
 /// What the host gives connectors.
 #[derive(Clone, Default)]
 pub struct ConnectorServices {
@@ -496,6 +534,10 @@ pub struct ConnectorServices {
     /// The folders the person keeps (recent, favourites): the folder
     /// connector's sources.
     pub places: Option<PlacesFn>,
+    /// A valid access token for an account, by id, renewed when it
+    /// expired (`oauth::OAuth::access_token`): what a connector signed in
+    /// through an `oauth` step calls its service with.
+    pub token: Option<TokenFn>,
 }
 
 impl std::fmt::Debug for ConnectorServices {
@@ -503,6 +545,7 @@ impl std::fmt::Debug for ConnectorServices {
         f.debug_struct("ConnectorServices")
             .field("cards", &self.cards.is_some())
             .field("places", &self.places.is_some())
+            .field("token", &self.token.is_some())
             .finish()
     }
 }

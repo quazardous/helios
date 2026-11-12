@@ -347,6 +347,15 @@ impl WebSteps for OAuth {
     ) -> Result<Account, String> {
         OAuth::sign_out(self, book, secrets, id)
     }
+
+    fn access_token(
+        &self,
+        book: &dyn AccountBook,
+        secrets: &dyn Secrets,
+        id: &str,
+    ) -> Result<String, String> {
+        OAuth::access_token(self, book, secrets, id)
+    }
 }
 
 /// An OAuth error a service answered.

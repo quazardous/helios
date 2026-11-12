@@ -585,6 +585,43 @@ fn library_commands(
             r
         }));
     }
+    // The source plugins (`import.source`): their accounts in the import
+    // window, "Pick photos…" importing what was picked as fetched copies.
+    for provider in helios_plugin::source::providers(plugins) {
+        shell.add_import_connector(Arc::new(provider));
+    }
+    {
+        let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
+        let history = history.clone();
+        shell.set_import_remote(Arc::new(move |connector, source, items| {
+            let remote = helios_library::fetch::Remote {
+                connector,
+                source,
+                items,
+                new_only: false,
+            };
+            let options = helios_library::import::Options::default();
+            let mut report = helios_library::fetch::import_remote(
+                vault.as_ref(),
+                &jobs,
+                &remote,
+                &options,
+                seconds(),
+                &mut |_| {},
+            )?;
+            let label = helios_gui::library_history::import_label(report.added + report.located);
+            history.record(label, std::mem::take(&mut report.changes), seconds_f64());
+            back_up(
+                vault.clone(),
+                jobs.clone(),
+                helios_storage::strategy::Trigger::OnImport,
+                Some(report.clone()),
+            );
+            done.store(true, Ordering::Relaxed);
+            ctx.request_repaint();
+            Ok(report.added)
+        }));
+    }
     let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(

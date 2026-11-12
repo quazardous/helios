@@ -239,6 +239,23 @@ pub fn sign_out(
     Ok(account)
 }
 
+/// Marks an account "needs attention" (the source refused its sign-in
+/// during a listing or a fetch): reconnecting it replays its steps.
+/// An account already marked keeps its step and reason.
+pub fn needs_attention(book: &dyn AccountBook, id: &str, why: &str) -> Result<Account, String> {
+    let mut account = book
+        .account(id)?
+        .ok_or_else(|| format!("no account {id}"))?;
+    if !matches!(account.state, AccountState::NeedsAttention { .. }) {
+        account.state = AccountState::NeedsAttention {
+            step: None,
+            why: why.to_owned(),
+        };
+        book.save(&account)?;
+    }
+    Ok(account)
+}
+
 /// Forgets an account whole: its secrets and its document.
 pub fn remove(book: &dyn AccountBook, secrets: &dyn Secrets, id: &str) -> Result<(), String> {
     if let Some(account) = book.account(id)? {

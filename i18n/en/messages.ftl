@@ -77,6 +77,8 @@ gui-account-needs-attention = needs attention
 
 gui-account-not-connected = not connected
 
+gui-account-pick = Pick photos…
+
 gui-account-reconnect = Reconnect
 
 gui-account-sign-out = Sign out
@@ -1070,6 +1072,22 @@ gui-params-show-values = Show the values
 gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
+
+gui-pick-browser = Pick your photos in your browser, press Done, then come back here.
+
+gui-pick-done = { $count } photos imported.
+
+gui-pick-failed = Not imported: { $why }
+
+gui-pick-importing = Importing { $count } photos…
+
+gui-pick-nothing = Nothing was picked in time.
+
+gui-pick-sign-in = The source refused the sign-in: reconnect the account.
+
+gui-pick-starting = Opening the picking…
+
+gui-pick-title = Pick photos in { $source }
 
 gui-pointer-choice-close = Close the pointer profile notice
 
