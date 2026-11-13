@@ -2212,6 +2212,8 @@ impl Shell {
     /// The workspace's name, for the window's title.
     pub fn set_title(&mut self, title: &str) {
         self.focus.title = title.into();
+        // The Settings header names the main window's focus by it.
+        crate::config::name_workspace(self.core.app.handle(), Some(title));
     }
 
     /// The window's title: the workspace, then Helios. The frame's title

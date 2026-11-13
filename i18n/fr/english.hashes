@@ -963,6 +963,11 @@ gui-settings-client-secret-help ff6bef489d9fb945
 gui-settings-client-used d70743dff9830cdb
 gui-settings-clients-about 4f89dc59e77824ec
 gui-settings-clients-none fb198b093026243f
+gui-settings-focus-import c9acce9ea3b900c6
+gui-settings-focus-library c0fec54fd1dc7b49
+gui-settings-focus-main 3ea1714dd40abad2
+gui-settings-focus-workspace 1323f78c4b67c143
+gui-settings-focus-workspace-alone af450766fbb01885
 gui-settings-for-library 675618c602c695ec
 gui-settings-for-library-about fc084d12ec9c6881
 gui-settings-for-workspace fd397a7452b7fe8e

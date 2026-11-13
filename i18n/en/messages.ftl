@@ -1497,6 +1497,16 @@ gui-settings-display = Display
 
 gui-settings-experimental = Experimental
 
+gui-settings-focus-import = Import window
+
+gui-settings-focus-library = { $window }: library { $library }
+
+gui-settings-focus-main = Main window
+
+gui-settings-focus-workspace = { $window }: workspace { $workspace }, library { $library }
+
+gui-settings-focus-workspace-alone = { $window }: workspace { $workspace }
+
 gui-settings-for-library = This library
 
 gui-settings-for-library-about = while this library is open

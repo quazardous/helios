@@ -2088,6 +2088,16 @@ gui-settings-clients-about = Helios se connecte à ces services avec son propre 
 
 gui-settings-clients-none = Aucun service se connectant par OAuth n’est installé.
 
+gui-settings-focus-import = Fenêtre d’import
+
+gui-settings-focus-library = { $window } : bibliothèque { $library }
+
+gui-settings-focus-main = Fenêtre principale
+
+gui-settings-focus-workspace = { $window } : espace de travail { $workspace }, bibliothèque { $library }
+
+gui-settings-focus-workspace-alone = { $window } : espace de travail { $workspace }
+
 gui-settings-for-library = Cette bibliothèque
 
 gui-settings-for-library-about = tant que cette bibliothèque est ouverte

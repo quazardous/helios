@@ -30,8 +30,9 @@ selection; it is not a window per tool.
     in the left pane and the page in the right pane.
 
 This extends a decision already in the ROADMAP: **one window is one
-workspace** (2026-10-11), with auxiliary windows (detached panels)
-belonging to their workspace's window. A focus is that workspace, named
+workspace** (2026-10-11), reworded **one window is one focus**
+(2026-11-13, P11), with auxiliary windows (detached panels) belonging to
+their focus's window. A focus is that workspace, named
 by its intention (see "What a focus is").
 
 ## 1. What egui 0.37 and egui-pop offer today
@@ -785,8 +786,8 @@ an immediate viewport.
   same live, through egui-pop-test's window targeting.
 
 **Not done here.** Workspace-level values edited in the Settings window
-still belong to the main window's workspace (P9); it gets a header
-naming that focus once there are several. Quick settings are slice 6.
+still belonged to the main window's workspace (P9): done in slice 7's
+focus header below. Quick settings are slice 6.
 
 ### Built: slice 6, quick settings (2026-11-13)
 
@@ -803,6 +804,33 @@ lasts the session (not kept across runs), and the quick flag lives in
 manifests rather than in each setting's declaration, so Helios can mark
 egui-pop's own settings (theme, size, language).
 
+### Built: slice 7, the focus the Settings edit (2026-11-13)
+
+P9-A, as built. egui-pop's Settings app takes the host's foci
+(`Admin::set_foci`, `SettingsFoci`): each an id, a label and the
+application windows that belong to it. Opened from a window (`admin.open`,
+`Ctrl+,`, a deep link), the Settings edit that window's focus; asked in
+their own window, they keep the one edited. Once there are several foci,
+a header above the page names the focus edited ("Settings for") and its
+switch picks another (`admin.focus {id}` for agents). A focus that closes
+gives way to the first, the main window's.
+
+Helios's foci (`config/focus.rs`): the main window's, named by its
+workspace and library ("Main window: workspace Wedding, library photos"),
+and the import window's while it is open, named by the library it imports
+into. Editing one attaches the store holding its values and offers its
+scopes: the library's in both (one library per process), the workspace's
+only in the main window's focus. A setting with no such level is the
+app's, the same whatever the focus.
+
+Deviations from the plan, newer decisions winning: since each setting
+declares its own levels, no Helios setting has a workspace level yet, so in Helios the
+switch changes which scopes "Set for" offers, not values; egui-pop's
+tests show the values following a switch between foci that hold
+different ones. egui-pop resolves one value per setting in a process, so
+the layers of the focus edited are the ones applied: per-window values
+wait for foci as first-class (the remaining slice 7 of section 5).
+
 ## 6. Open questions
 
 ### Product choices (for the owner)
@@ -817,9 +845,9 @@ egui-pop's own settings (theme, size, language).
 | P6 | Is a focus a workspace? | Yes: a workspace with an intention and a scope; ephemeral foci (an import) archived once done and kept in the recent list for 30 days. |
 | P7 | Word in the interface | "Focus" in menus (File > New Focus…), or "Project"; Helios uses "workspace" for the network today, so one of the two terms should yield. |
 | P8 | Quick settings: what shows before typing, and where a change goes | Settings marked `quick`, then those changed lately; a change writes the layer the full settings would, its chip saying which. |
-| P9 | Settings window and workspace-layer values | They belong to the focus the window was opened from, named in its header and switchable. |
+| P9 | Settings window and workspace-layer values | Decided 2026-11-13 (P9-A): they belong to the focus the window was opened from, named in its header and switchable. Built in slice 7. |
 | P10 | The "Library" focus | Always available (Window > Library) and reopened when nothing else is; it is the whole library's focus. |
-| P11 | ROADMAP wording | "One window is one workspace" (2026-10-11) becomes "one window is one focus" once this is decided. |
+| P11 | ROADMAP wording | Done 2026-11-13: "One window is one workspace" (2026-10-11) now reads "one window is one focus". |
 
 ### Technical choices
 
@@ -1189,6 +1217,7 @@ Audit of the import window, 2026-11-13:
 | System file chooser (rfd, desktop portal) | Not used: Helios builds egui-pop without `native-dialogs`. egui-pop's native path sets no parent window at all | code | Open (egui-pop) |
 | Command palette | The import window | wbox `palette` | OK |
 | Quick settings (`Ctrl+Shift+Q`) | The window it is asked in, as the palette | Helios test on real viewports (`settings_window.rs`); egui-pop test | OK |
+| Settings (`Ctrl+,`) | The Settings window (one instance), editing the focus it was asked in: the import window's, its header saying so; the import window stays open | Helios test on real viewports (`settings_window.rs`); egui-pop test (`admin_focus.rs`) | OK |
 | egui-pop dialogs (confirmations) | The window they are opened from; each window has its own queue | egui-pop tests | OK |
 | Helios's own modals (consent, connection, picking) | Drawn in the import window's pass | code | OK |
 | Closing the window with an egui-pop dialog open | The dialog moves to the main window's queue | egui-pop docs, code | Open (to decide) |
