@@ -4,8 +4,8 @@
 //! - `release [--date YYYY-MM-DD]`: assemble the changelog fragments into
 //!   CHANGELOG.md, bump the workspace version, remove the fragments. Stops
 //!   there: reviewing, committing and tagging stay a human's call.
-//! - `gate <PR>… | gate --retest`: the tester's gate: pull requests merged
-//!   into `devel`, their manifests run on the box, `next` fast-forwarded
+//! - `gate <PR>…`: the tester's gate: pull requests merged on a temporary
+//!   branch from `next`, their manifests run on the box, `next` fast-forwarded
 //!   when green (see `gate.rs`).
 //! - `manifest check [FILE|-]`: the test manifest of a pull request into
 //!   `devel` (see `manifest.rs`).
