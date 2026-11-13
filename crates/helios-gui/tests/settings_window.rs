@@ -382,7 +382,11 @@ fn quick_settings_asked_in_the_import_window_open_there() {
         },
     );
     main_passes_in_the_back(&mut h, 2);
-    let nodes = window_pass(&mut h, import, Pass::default());
+    // Its overlay comes in over a few of the window's passes.
+    let mut nodes = Vec::new();
+    for _ in 0..4 {
+        nodes = window_pass(&mut h, import, Pass::default());
+    }
     let admin = h.state().app().handle().service(&ADMIN).unwrap();
     assert!(admin.quick_open_in(import), "open in the import window");
     assert!(
@@ -391,6 +395,7 @@ fn quick_settings_asked_in_the_import_window_open_there() {
     );
     assert!(
         nodes.iter().any(|n| n.name == "Often changed"),
-        "drawn in the import window"
+        "drawn in the import window: {:?}",
+        nodes.iter().map(|n| n.name.as_str()).collect::<Vec<_>>()
     );
 }
