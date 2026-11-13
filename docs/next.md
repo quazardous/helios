@@ -61,10 +61,13 @@ One agent, with a standing brief ([tester.md](tester.md)), takes the open
 pull requests into `next` in order (first in, first out):
 
 1. Picks a batch of one to three that do not touch the same files.
-2. Runs `cargo xtask gate <n>…`: the batch is merged on a temporary branch
-   `gate/<n>-…` made from `next`, and the union of their manifests runs on
-   the bench box on that branch (one build, the jobs side by side; the box
-   runs `check` and clippy first).
+2. Runs `cargo xtask gate <n>…`. First each pull request's own `check`
+   (clippy, every lint at once) runs on its own branch, side by side; one
+   that fails is left out of the batch with its lints, so it cannot turn
+   the batch red. The others are merged on a temporary branch `gate/<n>-…`
+   made from `next`, and the union of their manifests runs on the bench
+   box on that branch (one build, the jobs side by side; the box runs
+   `check` and clippy first).
 3. **Green:** `next` fast-forwards to the tested commit, GitHub marks the
    pull requests merged, their branches and the temporary one are deleted;
    the tester posts the result on each ticket. Beside the tests the box

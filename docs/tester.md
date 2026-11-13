@@ -12,14 +12,21 @@ open pull requests into `next`; it works through them and reports.
    files (`gh pr diff <n> --name-only`). A pull request whose manifest
    `cargo xtask manifest check` refuses is not picked: comment the reason
    on it and tell its ticket.
-3. **Run the gate:** `cargo xtask gate <n> <n>…`. It merges the batch on a
+3. **Run the gate:** `cargo xtask gate <n> <n>…`. It runs each pull
+   request's own `check` first and leaves out one whose lints fail (fix
+   them on its branch and gate it again). It merges the rest on a
    temporary branch `gate/<n>-…` from `next`, runs the union of the
-   manifests on the bench box (one build, jobs side by side) and
-   fast-forwards `next` when everything is green. Hand the wait to Monitor;
-   never block the session on it.
+   manifests on the bench box (one build, jobs side by side) beside the
+   desktop build of the tested commit, and fast-forwards `next` when
+   everything is green. Run it alone on its line, with no filter after it
+   (a `| grep` eats its verdict). Hand the wait to Monitor; never block
+   the session on it.
 4. **Green:** post the result on each pull request's ticket (the jobs that
    ran, `next`'s new head) with `then:"resolved"` when the ticket's plan is
-   complete, else `then:"continue"`.
+   complete, else `then:"continue"`. The gate prints the
+   `cargo xtask install-dev --from <dir>` that installs the tested build on
+   a workstation. With each green round, also give the release advice: no
+   release, patch or minor, from the fragments now on `next`.
 5. **Red, mechanical** (clippy, fmt, an i18n extract or stamp, a missing
    command icon, an empty filter): fix it on the pull request's own branch
    (push a commit there), and gate the batch again. Record each failed
