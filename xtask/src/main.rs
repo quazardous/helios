@@ -4,6 +4,9 @@
 //! - `release [--date YYYY-MM-DD]`: assemble the changelog fragments into
 //!   CHANGELOG.md, bump the workspace version, remove the fragments. Stops
 //!   there: reviewing, committing and tagging stay a human's call.
+//! - `gate <PR>… | gate --retest`: the tester's gate: pull requests merged
+//!   into `devel`, their manifests run on the box, `next` fast-forwarded
+//!   when green (see `gate.rs`).
 //! - `manifest check [FILE|-]`: the test manifest of a pull request into
 //!   `devel` (see `manifest.rs`).
 //! - `promote <SHA> [--remote NAME]`: what `promote.yml` runs once CI passed
@@ -51,6 +54,7 @@
 mod affected;
 mod bench;
 mod commits;
+mod gate;
 mod i18n;
 mod install_dev;
 mod lint;
@@ -798,6 +802,10 @@ fn main() -> ExitCode {
                 fail(&problems)
             }
         }
+        ["gate", rest @ ..] => gate::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", gate::USAGE);
+            ExitCode::from(2)
+        }),
         ["manifest", rest @ ..] => manifest::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", manifest::USAGE);
             ExitCode::from(2)
