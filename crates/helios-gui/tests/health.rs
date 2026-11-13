@@ -29,7 +29,7 @@ use helios_health::gpu::{Adapter, AdapterCheck, AdapterKind, Gpu, Kernel, Kernel
 use helios_health::plugins::{Plugin, Plugins, Status};
 use helios_health::runner::{Runner, Schedule};
 use helios_health::snapshots::{Snapshot, Snapshots, SnapshotsCheck};
-use helios_health::{Check, Context, Finding, Findings, Level, Registry};
+use helios_health::{Check, Context, Declaration, Finding, Findings, Level, Registry};
 use helios_shell::commands::Origin;
 use helios_storage::strategy::{self, Scope, Strategy};
 use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, detect, registry, scan};
@@ -49,6 +49,10 @@ impl Check for Broken {
         Message::plain("Broken")
     }
 
+    fn declaration(&self) -> Declaration {
+        Declaration::new("A flux capacitor").levels(&[Level::Problem])
+    }
+
     fn run(&self, _: &Context) -> Vec<Finding> {
         vec![Finding::new(
             "test.broken",
@@ -62,7 +66,7 @@ impl Check for Broken {
 
 fn shell() -> Shell {
     let mut registry = Registry::default();
-    registry.add(Arc::new(Broken));
+    registry.add("test", Arc::new(Broken)).unwrap();
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_health(Runner::new(
         registry,
@@ -524,7 +528,7 @@ fn the_library_opens_and_its_disk_needs_room() {
 /// Only `check`.
 fn only(check: Arc<dyn Check>) -> Registry {
     let mut r = Registry::default();
-    r.add(check);
+    r.add("test", check).unwrap();
     r
 }
 

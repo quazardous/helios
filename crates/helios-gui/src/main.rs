@@ -176,7 +176,12 @@ fn health_runner(
             .into_context();
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
     let mut registry = Registry::builtin();
-    registry.add(Arc::new(helios_health::gpu::Kernels::new(health_kernels())));
+    if let Err(problems) = registry.add(
+        helios_health::gpu::OWNER,
+        Arc::new(helios_health::gpu::Kernels::new(health_kernels())),
+    ) {
+        log::error!("health: {}", problems.join("; "));
+    }
     runner::Runner::new(
         registry,
         context,
