@@ -114,6 +114,16 @@ read-only one, `token_file` (TCP endpoints only) where the session token
 is. The node removes the file as it stops. A file left by a killed node is
 told apart by the lock: nobody holds it.
 
+The desktop's embedded node does the same while it holds its library
+(`helios_node_core::endpoint::advertise`): it serves the library's
+commands (`library.import`, `library.importDarktable`,
+`library.keepSidecar`, `library.edit.head`, `library.edit.save`,
+`library.stacks.*`, plus `node.hello` and `commands.list`) on a private
+socket (loopback TCP behind a session token where there are no Unix
+sockets), writes the rendezvous file, whose `inspect` names that same
+endpoint, and removes it as Helios quits. The CLI and `helios-mcp` then
+reach the desktop's node instead of starting another.
+
 A client (`helios_node::connect`):
 
 1. uses `--node ADDRESS` or `HELIOS_NODE` when given (the token of a TCP

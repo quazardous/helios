@@ -2747,10 +2747,12 @@ version = "0.87.0"
 dependencies = [
  "helios-core",
  "helios-health",
+ "helios-inspect",
  "helios-library",
  "helios-storage",
  "helios-vault",
  "helios-vault-sqlite",
+ "helios-xmp",
  "log",
  "serde",
  "serde_json",

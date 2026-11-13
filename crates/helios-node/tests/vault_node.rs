@@ -722,3 +722,94 @@ fn with_no_node_the_cli_starts_one_shared_and_it_exits_when_idle() {
         serde_json::json!([])
     );
 }
+
+/// The desktop's embedded node, played in process: its vault owned, its
+/// commands advertised (`helios_node_core::endpoint::advertise`). The
+/// CLI finds its rendezvous and runs through it, starting no node of its
+/// own; the rendezvous file and the lock go when it stops.
+#[cfg(unix)]
+#[test]
+fn the_cli_reaches_the_desktops_node_through_its_rendezvous() {
+    use helios_inspect::discovery::{Lock, Rendezvous, files};
+    use helios_node_core::endpoint::{VaultService, advertise};
+
+    let p = Place::new("desktop-rendezvous");
+    let roll = p.0.join("roll");
+    std::fs::create_dir_all(&roll).unwrap();
+    std::fs::write(roll.join("p0.raf"), vec![9u8; 20_000]).unwrap();
+    let file = p.0.join("vault.db");
+    let vault = Arc::new(Vault::new(SqliteStore::open(&file).unwrap()));
+    let bus = Arc::new(Bus::new());
+    let heard = bus.subscribe();
+    let service = VaultService::new(
+        vault.clone(),
+        bus.clone(),
+        Jobs::new(bus.clone()),
+        "desktop-test",
+    );
+    let advertised = advertise(&file, Arc::new(service), "desktop-test")
+        .unwrap()
+        .expect("nobody else holds the vault");
+    let node_files = files(&file);
+    let rendezvous = Rendezvous::read(&node_files.rendezvous)
+        .unwrap()
+        .expect("the desktop's rendezvous file");
+    assert_eq!(rendezvous.pid, std::process::id());
+    assert_eq!(rendezvous.instance, "desktop-test");
+    assert_eq!(rendezvous.address, advertised.address());
+    assert!(Lock::held(&node_files.lock).unwrap());
+    // A second advertiser on the same vault is not advertised.
+    let other = VaultService::new(vault.clone(), bus.clone(), Jobs::new(bus.clone()), "x");
+    assert!(advertise(&file, Arc::new(other), "x").unwrap().is_none());
+
+    let (code, out, err) = helios_cli(
+        &[
+            "import",
+            "--vault",
+            file.to_str().unwrap(),
+            roll.to_str().unwrap(),
+        ],
+        "2",
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    let report: serde_json::Value = serde_json::from_str(out.lines().last().unwrap()).unwrap();
+    assert_eq!(report["report"]["added"], 1, "{out}");
+    let (code, out, err) = helios_cli(&["stacks", "--vault", file.to_str().unwrap(), "list"], "2");
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap(),
+        serde_json::json!([])
+    );
+    // The desktop's node ran both, for the CLI, and imported the file.
+    let ran: Vec<(String, String)> = heard
+        .try_iter()
+        .filter(|e| e.kind == "control.command")
+        .map(|e| {
+            (
+                e.payload["id"].as_str().unwrap().to_string(),
+                e.payload["origin"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        ran,
+        [
+            ("library.import".to_string(), "cli".to_string()),
+            ("library.stacks.list".to_string(), "cli".to_string()),
+        ]
+    );
+    assert_eq!(vault.images().unwrap().len(), 1);
+    // The CLI started no node: no log of one, the rendezvous still ours.
+    assert!(!node_files.rendezvous.with_extension("log").exists());
+    assert_eq!(
+        Rendezvous::read(&node_files.rendezvous)
+            .unwrap()
+            .unwrap()
+            .pid,
+        std::process::id()
+    );
+
+    drop(advertised);
+    assert!(!node_files.rendezvous.exists(), "the rendezvous is removed");
+    assert!(!Lock::held(&node_files.lock).unwrap(), "the lock is let go");
+}

@@ -41,7 +41,6 @@ use helios_storage::Volumes;
 use helios_storage::strategy::Trigger;
 use helios_vault::Vault;
 use helios_vault_sqlite::SqliteStore;
-use serde::Serialize;
 use serde_json::Value;
 
 /// How often the node looks whether a health run is due (the desktop's
@@ -51,18 +50,9 @@ pub const HEALTH_CLOCK: Duration = Duration::from_secs(10);
 /// Who publishes the node's own events on its bus.
 pub const SOURCE: &str = "node";
 
-/// An import done through the node ended: its report (the files it
-/// added, located, whether it was cancelled...). The node's after-import
+/// An import done through the node ended: the node's after-import
 /// backup starts on it.
-#[derive(Serialize)]
-pub struct Imported<'a> {
-    #[serde(flatten)]
-    pub report: &'a Report,
-}
-
-impl Event for Imported<'_> {
-    const KIND: &'static str = "library.imported";
-}
+pub use helios_node_core::endpoint::Imported;
 
 /// What the after-import backup needs of an [`Imported`] event's
 /// payload: what came in, and whether the import was cancelled.

@@ -1,24 +1,30 @@
 //! The node's commands on its vault's library that are not control
-//! verbs: the stacks (`library.stacks.*`) and darktable's sidecars kept
-//! as versions (`library.importDarktable`). They are listed with the
-//! verbs ([`crate::commands::registry`]) and run here, on the vault the
-//! node owns, by whoever the call's origin names; the stacks' changes
-//! are announced on the node's bus.
+//! verbs: the stacks (`library.stacks.*`), darktable's sidecars kept as
+//! versions (`library.importDarktable`, one sidecar file with
+//! `library.keepSidecar`) and an image's edit read and saved
+//! (`library.edit.head`, `library.edit.save`). `helios-node` lists them
+//! with its verbs; the desktop's node serves them too
+//! ([`crate::endpoint`]). They run on the vault the node owns, by whoever
+//! the call's origin names; the stacks' changes are announced on the
+//! node's bus.
 //!
 //! An image is named by its id or by an absolute path the vault knows.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::commands::{CommandSpec, Need, object};
 use helios_core::Bus;
 use helios_library::stacks::{self as suggest, Resolvers, RuleResolver};
-use helios_node_core::commands::{CommandSpec, Need, object};
 use helios_vault::{ImageId, Store, Vault};
 use serde_json::{Value, json};
 
 /// The ids of the commands run here.
 pub const IDS: &[&str] = &[
     "library.importDarktable",
+    "library.keepSidecar",
+    "library.edit.head",
+    "library.edit.save",
     "library.stacks.list",
     "library.stacks.create",
     "library.stacks.dissolve",
@@ -37,6 +43,10 @@ pub fn handles(id: &str) -> bool {
 
 fn string() -> Value {
     json!({ "type": "string" })
+}
+
+fn absolute() -> Value {
+    json!({ "type": "string", "description": "an absolute path" })
 }
 
 fn images() -> Value {
@@ -59,6 +69,30 @@ pub fn specs() -> Vec<CommandSpec> {
             json!({ "type": "array", "items": { "type": "string", "description": "an absolute path" } }),
             true,
         )])),
+        library(
+            "library.keepSidecar",
+            "Keep one darktable sidecar of an image as a version",
+        )
+        .params(object(&[
+            ("image", absolute(), true),
+            ("sidecar", absolute(), true),
+            (
+                "version",
+                json!({ "type": "integer", "minimum": 0,
+                        "description": "darktable's duplicate number, 0 for the base sidecar" }),
+                true,
+            ),
+            ("exact", json!({ "type": "boolean" }), false),
+            ("base", json!({ "type": "boolean" }), false),
+        ])),
+        library("library.edit.head", "Read an image's newest edit")
+            .params(object(&[("image", string(), true)]))
+            .read_only(),
+        library("library.edit.save", "Save a step of an image's edit").params(object(&[
+            ("image", string(), true),
+            ("edit", json!({ "type": "object" }), true),
+            ("label", string(), true),
+        ])),
         library("library.stacks.list", "List the stacks").read_only(),
         library("library.stacks.create", "Stack images").params(object(&[
             ("images", images(), true),
@@ -97,6 +131,62 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(object(&[decision()])),
         library("library.stacks.decisions", "List the stack suggestions").read_only(),
     ]
+}
+
+/// The id of the import command, run by the node's importer.
+pub const IMPORT: &str = "library.import";
+
+/// `library.import`'s spec: files and folders imported into the library,
+/// copied or not.
+pub fn import_spec() -> CommandSpec {
+    let or_null = |kind: &str| json!({ "type": [kind, "null"] });
+    CommandSpec::new(IMPORT, "Import into the library", "Library")
+        .params(object(&[
+            ("paths", json!({ "type": "array", "items": absolute() }), true),
+            ("copy", json!({ "type": "boolean" }), false),
+            ("into", json!({ "type": ["string", "null"], "description": "an absolute path" }), false),
+            ("rename", json!({ "type": ["string", "null"], "description": "a rename pattern" }), false),
+            (
+                "layout",
+                json!({ "type": ["string", "null"], "enum": ["day", "month", "year", "flat", null] }),
+                false,
+            ),
+            (
+                "duplicates",
+                json!({ "type": ["string", "null"], "enum": ["skip", "keep", "ask", null] }),
+                false,
+            ),
+            ("signals", or_null("boolean"), false),
+        ]))
+        .needs(Need::Vault)
+}
+
+/// An import's options from `library.import`'s params; `cancel` stops it
+/// before its next file.
+pub fn import_options(
+    params: &Value,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<helios_library::import::Options, String> {
+    use helios_library::import::{Duplicates, Layout, Options, Placement};
+    let mut options = Options::default();
+    let into = params["into"].as_str().map(PathBuf::from);
+    if params["copy"] == true || into.is_some() {
+        options.placement = Placement::Copy { into };
+    }
+    if let Some(pattern) = params["rename"].as_str() {
+        options.rename = Some(helios_library::rename::Pattern::parse(pattern)?);
+    }
+    if let Some(layout) = params["layout"].as_str() {
+        options.layout = Layout::parse(layout)?;
+    }
+    if let Some(duplicates) = params["duplicates"].as_str() {
+        options.duplicates = Duplicates::parse(duplicates)?;
+    }
+    if let Some(signals) = params["signals"].as_bool() {
+        options.signals = signals;
+    }
+    options.cancel = cancel;
+    Ok(options)
 }
 
 fn now() -> u64 {
@@ -164,6 +254,46 @@ pub fn run<S: Store>(
                 },
             )?;
             Ok(json!({ "kept": kept, "files": files, "warnings": warnings }))
+        }
+        "library.keepSidecar" => {
+            let file = helios_xmp::files::SidecarFile {
+                path: PathBuf::from(text(params, "sidecar")),
+                version: params["version"]
+                    .as_u64()
+                    .and_then(|v| u32::try_from(v).ok())
+                    .unwrap_or(0),
+                exact: params["exact"].as_bool().unwrap_or(true),
+            };
+            let base = params["base"].as_bool().unwrap_or(false);
+            // Its import's warning is in the answer (`warning`).
+            Ok(helios_library::darktable::keep_file(
+                vault,
+                Path::new(text(params, "image")),
+                &file,
+                base,
+                now(),
+                &mut |_, _| {},
+            ))
+        }
+        "library.edit.head" => {
+            let id = image(vault, text(params, "image"))?;
+            let (_, head) = helios_vault::EditSession::open(vault, id)?;
+            Ok(json!({
+                "image": id.hex(),
+                "head": head.map(|v| json!({ "version": v.id.hex(), "edit": v.edit })),
+            }))
+        }
+        "library.edit.save" => {
+            let id = image(vault, text(params, "image"))?;
+            let (mut session, _) = helios_vault::EditSession::open(vault, id)?;
+            let saved = session.save(
+                vault,
+                params["edit"].clone(),
+                text(params, "label"),
+                origin,
+                now(),
+            )?;
+            Ok(json!({ "image": id.hex(), "version": saved.map(|v| v.id.hex()) }))
         }
         "library.stacks.list" => vault.stacks().map(|s| json!({ "stacks": to_json(&s) })),
         "library.stacks.create" => {
@@ -241,7 +371,7 @@ pub fn run<S: Store>(
 
 #[cfg(test)]
 mod tests {
-    use helios_node_core::commands::validate;
+    use crate::commands::validate;
 
     use super::*;
 
@@ -251,6 +381,9 @@ mod tests {
         assert_eq!(ids, IDS);
         let examples = [
             json!({ "paths": ["/photos"] }),
+            json!({ "image": "/p/a.raf", "sidecar": "/p/a.raf.xmp", "version": 0, "base": true }),
+            json!({ "image": "0a" }),
+            json!({ "image": "0a", "edit": {}, "label": "macro.make" }),
             json!({}),
             json!({ "images": ["/p/a.raf", "0a"], "top": null }),
             json!({ "stack": "s" }),

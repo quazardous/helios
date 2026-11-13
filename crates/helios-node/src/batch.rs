@@ -25,10 +25,11 @@
 //! With `--sidecar`, each image's base darktable sidecar is applied: its
 //! edit becomes the item's own parameters. Its folder is listed once to
 //! find it and its duplicates ([`helios_xmp::files`]). With `--vault FILE`
-//! as well, every sidecar of the image is kept in that vault
-//! ([`keep_sidecar`]): the image, each darktable edit (base and duplicates)
-//! as a version with origin `import:xmp`, and the base's rating when the
-//! vault has none.
+//! as well, every sidecar of the image is kept in that vault by the node
+//! holding it (`library.keepSidecar`, through [`crate::connect`]: the
+//! batch never opens the vault itself): the image, each darktable edit
+//! (base and duplicates) as a version with origin `import:xmp`, and the
+//! base's rating when the vault has none.
 //!
 //! On an interrupt, the batch's items are cancelled in the run
 //! (`workflow.cancel`: their exports stopped, a file is written whole or
@@ -48,8 +49,9 @@ use helios_inspect::control::{ControlRequest, FileFormat, RunItem};
 use helios_inspect::{Address, Request, request_at};
 use serde_json::{Value, json};
 
+use crate::darktable::Listings;
 pub use crate::darktable::{IMPORT_XMP, keep_sidecar, read_sidecar, read_sidecar_for};
-use crate::darktable::{Listings, keep_file};
+use helios_inspect::client::Client;
 
 /// What `helios batch` was asked.
 #[derive(Clone, Debug)]
@@ -638,11 +640,20 @@ pub fn run(
         .map(|i| std::path::absolute(i).unwrap_or_else(|_| i.clone()))
         .collect();
 
+    // The sidecars are kept by the vault's node, started when none holds it.
     let vault = match (&options.vault, options.sidecar) {
-        (Some(path), true) => Some(helios_vault::Vault::new(
-            helios_vault_sqlite::SqliteStore::open(path)
-                .map_err(|e| Message::plain(format!("{}: {e}", path.display())))?,
-        )),
+        (Some(path), true) => Some(
+            crate::connect::connect(Some(path), None, node_bin, "cli")
+                .map_err(|e| {
+                    Message::new(
+                        UNREACHABLE,
+                        "cannot reach the node at { $address }: { $error }",
+                    )
+                    .with("address", path.display().to_string())
+                    .with("error", e)
+                })?
+                .client,
+        ),
         _ => None,
     };
     let mut sidecars = Sidecars {
@@ -849,10 +860,40 @@ pub fn run(
     })
 }
 
-/// Where a batch finds sidecars, and the vault it keeps them in.
+/// Where a batch finds sidecars, and the node of the vault it keeps them
+/// in.
 struct Sidecars<'a> {
-    vault: Option<&'a helios_vault::Vault<helios_vault_sqlite::SqliteStore>>,
+    vault: Option<&'a Client>,
     listings: Listings,
+}
+
+/// Keeps one sidecar file of `image` in the vault, by its node
+/// (`library.keepSidecar`): what was kept, or the error.
+fn keep_on_node(
+    node: &Client,
+    image: &Path,
+    file: &helios_xmp::files::SidecarFile,
+    base: bool,
+) -> Value {
+    let params = json!({
+        "image": image,
+        "sidecar": file.path,
+        "version": file.version,
+        "exact": file.exact,
+        "base": base,
+    });
+    match node.request("library.keepSidecar", params) {
+        Ok(mut kept) => {
+            if let Some(fields) = kept.as_object_mut() {
+                fields.remove("command");
+                fields.remove("origin");
+            }
+            kept
+        }
+        Err(e) => {
+            json!({ "path": file.path, "version": file.version, "exact": file.exact, "error": e.message })
+        }
+    }
 }
 
 /// What an image's sidecars change, with `--sidecar`: the parameters of
@@ -870,10 +911,7 @@ fn sidecar_of(
     }
     let vault = sidecars.vault;
     let files = sidecars.listings.sidecars(image).map_err(Message::plain)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let mut warn = |path: &Path, warning: &str| {
+    let warn = |path: &Path, warning: &str| {
         // Once per import, beside the image's JSON line.
         eprintln!("helios batch: {}: {warning}", path.display());
     };
@@ -892,14 +930,17 @@ fn sidecar_of(
                     .with("error", e.to_string())
             })
             .and_then(|xml| {
-                let (sidecar, imported) = read_sidecar_for(&xml, image).map_err(Message::plain)?;
+                let (_, imported) = read_sidecar_for(&xml, image).map_err(Message::plain)?;
                 if let Some(warning) = imported.report.summary() {
                     warn(path, &warning.english);
                 }
                 let (params, mut report) = sidecar_params(&imported, modules);
                 if let Some(vault) = vault {
-                    report["vault"] = keep_sidecar(vault, image, 0, true, &sidecar, &imported, now)
-                        .map_err(Message::plain)?;
+                    let kept = keep_on_node(vault, image, base, true);
+                    if let Some(error) = kept["error"].as_str() {
+                        return Err(Message::plain(error));
+                    }
+                    report["vault"] = kept["vault"].clone();
                 }
                 Ok((params, report))
             });
@@ -917,7 +958,13 @@ fn sidecar_of(
         let others: Vec<Value> = others
             .iter()
             .map(|file| match vault {
-                Some(vault) => keep_file(vault, image, file, false, now, &mut warn),
+                Some(vault) => {
+                    let kept = keep_on_node(vault, image, file, false);
+                    if let Some(warning) = kept["warning"].as_str() {
+                        warn(&file.path, warning);
+                    }
+                    kept
+                }
                 None => {
                     json!({ "path": file.path, "version": file.version, "exact": file.exact })
                 }
