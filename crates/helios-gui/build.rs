@@ -6,13 +6,15 @@
 //! On every target, sets `HELIOS_VERSION`, the version the program shows:
 //! the workspace version on a release tag, and between releases a
 //! pre-release of the next patch counting the commits since the last tag
-//! (`0.76.1-dev.18+be34c639`), so every build has its own number.
+//! (`0.76.1-dev.18+be34c639`), so every build has its own number; and
+//! `HELIOS_COMMIT`, the commit built (empty without git), for bug reports.
 
 use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rustc-env=HELIOS_VERSION={}", version());
+    println!("cargo:rustc-env=HELIOS_COMMIT={}", commit());
     let windows = std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows");
     if !windows {
         return;
@@ -61,6 +63,17 @@ fn version() -> String {
     git(&["describe", "--tags", "--long", "--match", "v[0-9]*"])
         .and_then(|d| dev_version(&d))
         .unwrap_or(pkg)
+}
+
+/// The commit built, short; empty outside a git checkout.
+fn commit() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default()
 }
 
 /// `v0.76.0-18-gbe34c639` → `0.76.1-dev.18+be34c639`; `v0.76.0-0-g…` → `0.76.0`.

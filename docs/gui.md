@@ -893,9 +893,20 @@ recorded.
 
 - **Notice**: shown in the status bar; warnings and errors also as a
   toast at the bottom right, with an optional action (a command). A
-  notice never takes the focus; errors stay until dismissed.
+  notice never takes the focus; errors stay until dismissed. A failure
+  (an error, a command that failed) offers "Details" (`notice.details`):
+  an error dialog with the message and a collapsed "Details" section.
 
   ![A toast](gui/toast-helios-dark.png)
+
+- **Copy for a bug report**: every message, error and confirmation has a
+  Copy button that copies its title and text, then its details: Helios's
+  version and commit, the system and display server, the command or
+  action, the error and its causes, the plugin and the job when there is
+  one (`helios_gui::report::details`). An error shows them collapsed; a
+  question keeps them hidden, only in what is copied. No environment
+  variable is copied, a value that looks like a secret (a client id, a
+  token) is blanked wherever it appears, and the home folder is `~`.
 
 - **Window**: auxiliary windows share the window's frame (title bar
   and buttons) when Helios draws it, titled "`<panel>` — `<window>`"

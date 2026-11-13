@@ -56,6 +56,7 @@ pub mod queue;
 pub mod quick_open;
 pub mod quit;
 pub mod relay;
+pub mod report;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;

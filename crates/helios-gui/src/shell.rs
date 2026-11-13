@@ -113,6 +113,9 @@ mod workspace_live;
 /// over ([`Shell::take_imports`]); only with a library open.
 pub const IMPORT_COMMAND: &str = "library.import";
 
+/// Opens a failure's details as an error dialog, from its toast.
+pub const NOTICE_DETAILS: &str = "notice.details";
+
 /// The screen's own scale (physical pixels per point, the interface zoom
 /// left out) from which it is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
@@ -219,6 +222,8 @@ enum Action {
     Quit,
     /// Quit, the question about running jobs answered.
     QuitConfirmed,
+    /// A notice's details as an error dialog (`notice.details`).
+    NoticeDetails(Option<usize>),
     /// Bring the main window forward, or back.
     MainWindow,
     Detach(String),
@@ -2271,7 +2276,8 @@ impl Shell {
             Err(e) => Err(e.to_string()),
         };
         if let Err(e) = &result {
-            self.warn(e.clone());
+            let report = crate::report::Context::command(id).cause(e.clone());
+            self.notify_failure(Level::Warning, e.clone(), report);
         }
         result
     }
@@ -2344,6 +2350,18 @@ impl Shell {
             Box::new(|a, _| {
                 Ok(Action::AssumeYes(
                     a.get("on").and_then(Value::as_bool).unwrap_or(true),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                NOTICE_DETAILS,
+                "Show a failure's details (`notice`: its index; the last failure by default)",
+                "Window",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::NoticeDetails(
+                    a.get("notice").and_then(Value::as_u64).map(|i| i as usize),
                 ))
             }),
         );
@@ -3661,14 +3679,49 @@ impl Shell {
 
     /// Shows a notice, in the shell's language: the status bar always, a
     /// toast unless it is plain information. Kept in `notes` too.
+    /// An error offers its details (see [`Shell::notify_failure`]).
     pub fn notify(&mut self, level: Level, text: impl Into<Message>) {
         let message = text.into();
+        let report = (level == Level::Error)
+            .then(|| crate::report::Context::default().cause(message.english.clone()));
+        self.notify_with(level, message, report);
+    }
+
+    /// Shows a notice about a failure: its toast offers "Details", an
+    /// error dialog whose Copy button gives a bug report (`report`).
+    pub fn notify_failure(
+        &mut self,
+        level: Level,
+        text: impl Into<Message>,
+        report: crate::report::Context,
+    ) {
+        self.notify_with(level, text.into(), Some(report));
+    }
+
+    fn notify_with(
+        &mut self,
+        level: Level,
+        message: Message,
+        report: Option<crate::report::Context>,
+    ) {
         let text = self.text(message.clone());
         self.notes.push(text.clone());
+        let index = self.core.notices.len();
+        let details = report
+            .as_ref()
+            .map(|_| self.text(Message::new("gui-notice-details", "Details")));
         let toast = match level {
             Level::Info => None,
             Level::Warning => Some(Toast::warning(&text)),
             Level::Error => Some(Toast::error(&text)),
+        };
+        let toast = match (toast, &details) {
+            (Some(t), Some(label)) => Some(t.action(
+                label,
+                CommandId::from_static(NOTICE_DETAILS),
+                json!({ "notice": index }),
+            )),
+            (t, _) => t,
         };
         if let (Some(t), Some(toasts)) = (toast, self.core.app.handle().service(&TOASTS)) {
             toasts.notify(t);
@@ -3677,9 +3730,34 @@ impl Shell {
             level,
             text,
             key: message.key,
-            action: None,
+            action: details.map(|label| (label, NOTICE_DETAILS.to_string())),
             at: self.core.now,
+            report,
         });
+    }
+
+    /// Opens a notice's details (the last failure's by default) as an
+    /// error dialog: its text, and the report its Copy button adds.
+    fn notice_details(&mut self, index: Option<usize>) {
+        let notice = match index {
+            Some(i) => self.core.notices.get(i),
+            None => self.core.notices.iter().rev().find(|n| n.report.is_some()),
+        };
+        let Some((text, Some(report))) = notice.map(|n| (n.text.clone(), n.report.clone())) else {
+            return self.warn(Message::new(
+                "gui-notice-no-details",
+                "No failure to show the details of",
+            ));
+        };
+        let title = self.text(Message::new("gui-notice-failed", "Something went wrong"));
+        // Copied whole: no secret, the home folder written `~`, as in
+        // the details.
+        let system = crate::report::System::current();
+        let text = crate::report::redact(&text, &system);
+        self.open_dialog(dialogs::Info::error(&title, &text).details(
+            crate::report::details_with(&report, &system),
+            dialogs::DetailsMode::Auto,
+        ));
     }
 
     /// Says each snapshot restored since the last frame: in the status
@@ -3708,6 +3786,7 @@ impl Shell {
                 key: message.key,
                 action: Some((undo.clone(), egui_pop::api::app::CMD_UNDO.to_string())),
                 at: self.core.now,
+                report: None,
             });
         }
     }
@@ -3777,9 +3856,14 @@ impl Shell {
             Ok(id) => id,
             Err(e) => return self.warn(e.to_string()),
         };
+        let report = crate::report::Context::command(command.as_str());
         let mut d = dialogs::Confirm::new(&c.title, &c.verb, command)
             .detail(&c.detail)
-            .args(c.args);
+            .args(c.args)
+            .details(
+                crate::report::details(&report),
+                dialogs::DetailsMode::Hidden,
+            );
         if c.danger {
             d = d.danger();
         }
@@ -4789,6 +4873,7 @@ impl Shell {
             }
             Action::Quit => self.quit(ctx),
             Action::QuitConfirmed => self.quit_confirmed(),
+            Action::NoticeDetails(i) => self.notice_details(i),
             Action::MainWindow => self.main_window(),
             Action::SystemMenu => {
                 // Under the title bar's start, where its menu button is

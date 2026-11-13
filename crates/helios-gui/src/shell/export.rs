@@ -519,6 +519,7 @@ impl Shell {
             key: message.key,
             action: Some((open, OPEN_FOLDER.to_string())),
             at: self.core.now,
+            report: None,
         });
     }
 
