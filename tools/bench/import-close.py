@@ -5,7 +5,8 @@ Run by the bench box's `import-close` job (see docs/bench.md), with the
 Python that has the wbox library:
 
     import-close.py --gui helios-gui --out DIR [--folder DIR]
-                    [--ways cancel,escape,compositor,import] [--runs N]
+                    [--ways cancel,escape,compositor,import] [--covers shown,covered]
+                    [--runs N]
                     [--budget-ms MS]
 
 `helios-gui` starts in its own compositor on a throwaway library, with its
@@ -20,6 +21,12 @@ folder of photos, the raw corpus on the box), left to read it for
 - `escape`: the Escape key, pressed in it over the agent socket;
 - `import`: its Import button (the folder imported, the window closed);
 - `compositor`: the compositor's close (a window manager's close button).
+
+Each way runs twice (`--covers`): with the main window `shown` beside the
+import window, then `covered` (the import window full screen over it, as
+a browser opened for a sign-in or a picking covers it): a compositor
+sends a hidden window no frame callbacks, so its next frame waits until
+it shows again.
 
 From the close on, it times the first frame the main window begins, the
 first one it builds, and the first answer of the agent socket (served by
@@ -226,8 +233,10 @@ def close(comp, agent: Agent, way: str, title: str) -> None:
         )
 
 
-def one_close(args, comp, agent: Agent, trace: Path, pid, main_title: str, way: str) -> dict:
-    result: dict = {"close": way}
+def one_close(
+    args, comp, agent: Agent, trace: Path, pid, main_title: str, way: str, cover: str
+) -> dict:
+    result: dict = {"close": way, "cover": cover}
     agent.command("library.importWindow", {"source": str(args.folder), "copy": False})
     deadline = time.monotonic() + 30
     title = None
@@ -238,6 +247,17 @@ def one_close(args, comp, agent: Agent, trace: Path, pid, main_title: str, way: 
         return {**result, "error": "no import window listed"}
     # Left to read the folder (scans, glances, thumbnails).
     time.sleep(args.settle)
+    if cover == "covered":
+        # The import window over the whole screen: the main window is
+        # hidden, as behind a browser opened for a sign-in or a picking.
+        subprocess.run(
+            ["wlrctl", "toplevel", "fullscreen", f"title:{title}"],
+            env=comp._wl_env(),
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
+        time.sleep(1.5)
     asked = time.time()
     try:
         close(comp, agent, way, title)
@@ -347,12 +367,14 @@ def run(args, index: int) -> list[dict]:
         pid = helios_pid(w["state"])
         listed = comp.list_windows().get("windows", [])
         main_title = next((x["title"] for x in listed if x.get("app_id") == APP_ID), "")
-        for way in args.ways:
+        for way, cover in [(w, c) for c in args.covers for w in args.ways]:
             if not alive():
-                results.append({"run": index, "close": way, "error": "helios-gui exited"})
+                results.append(
+                    {"run": index, "close": way, "cover": cover, "error": "helios-gui exited"}
+                )
                 break
             try:
-                r = one_close(args, comp, agent, trace, pid, main_title, way)
+                r = one_close(args, comp, agent, trace, pid, main_title, way, cover)
             except Exception as exc:  # report and go on with the next way
                 r = {"close": way, "error": repr(exc)}
             r["run"] = index
@@ -375,7 +397,7 @@ def table(results: list[dict]) -> str:
         ("answered_ms", "agent socket answered"),
         ("longest_main_gap_ms", "longest gap between main frames"),
     )
-    head = ["", *[f"{r.get('run')}: {r.get('close')}" for r in results]]
+    head = ["", *[f"{r.get('run')}: {r.get('close')}, {r.get('cover')}" for r in results]]
     rows = [head, ["---"] * len(head)]
     for key, label in keys:
         rows.append([label, *["" if r.get(key) is None else f"{r[key]:.0f}" for r in results]])
@@ -393,6 +415,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--folder", type=Path, default=FIXTURES)
     parser.add_argument("--ways", default=",".join(WAYS))
+    parser.add_argument("--covers", default="shown,covered")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--settle", type=float, default=4.0)
     parser.add_argument("--timeout", type=float, default=40.0)
@@ -400,6 +423,10 @@ def main() -> int:
     parser.add_argument("--work", type=Path, default=Path("/tmp/import-close"))
     args = parser.parse_args()
     args.ways = [w for w in args.ways.replace("+", ",").split(",") if w]
+    args.covers = [c for c in args.covers.replace("+", ",").split(",") if c]
+    if set(args.covers) - {"shown", "covered"}:
+        print(f"unknown covers: {args.covers}", file=sys.stderr)
+        return 2
     unknown = set(args.ways) - set(WAYS)
     if unknown or not args.ways:
         print(f"unknown ways: {sorted(unknown)}", file=sys.stderr)
