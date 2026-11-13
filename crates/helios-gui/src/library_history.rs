@@ -95,6 +95,14 @@ pub fn album_label(
         E::Create { .. } => Message::new("gui-history-album-new", "New album “{ $name }”"),
         E::Rename { .. } => Message::new("gui-history-album-rename", "Rename album “{ $name }”"),
         E::Delete { .. } => Message::new("gui-history-album-delete", "Delete album “{ $name }”"),
+        E::CreateSet { .. } => Message::new("gui-history-set-new", "New album set “{ $name }”"),
+        E::Move { set: Some(_), .. } => {
+            Message::new("gui-history-album-move", "Move “{ $name }” into a set")
+        }
+        E::Move { set: None, .. } => Message::new(
+            "gui-history-album-move-out",
+            "Move “{ $name }” out of its set",
+        ),
         E::Add { .. } => Message::new(
             "gui-history-album-add",
             "Add { $count } photos to “{ $name }”",

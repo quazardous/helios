@@ -2911,7 +2911,7 @@ impl Shell {
         for (id, title) in [
             (
                 crate::library::COLLECTION_CREATE_COMMAND,
-                "New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys); without `name`, asks it. Answers its `id`",
+                "New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys), or with `kind: set` an album set (`set`: the set it goes in); without `name`, asks it. Answers its `id`",
             ),
             (
                 crate::library::COLLECTION_RENAME_COMMAND,
@@ -2919,7 +2919,11 @@ impl Shell {
             ),
             (
                 crate::library::COLLECTION_DELETE_COMMAND,
-                "Delete an album (`id`); its photos stay in the library",
+                "Delete an album or a set (`id`); its photos stay in the library. A set's albums move up into the set it was in, or with `members: true` are deleted too",
+            ),
+            (
+                crate::library::COLLECTION_MOVE_COMMAND,
+                "Move an album, a smart album or a set (`id`) into a set (`set`; null: the top); a set never goes inside itself. Without `set`, asks it",
             ),
             (
                 crate::library::COLLECTION_ADD_COMMAND,
@@ -2935,7 +2939,7 @@ impl Shell {
             ),
             (
                 crate::library::COLLECTION_LIST_COMMAND,
-                "List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`; and the quick collection's `quick` count",
+                "List the albums: `id`, `name`, `kind` (album, smart or set), the `set` it is in, how many photos each holds (a set: its albums' together), a smart album's `rules`; and the quick collection's `quick` count",
             ),
             (
                 crate::library::QUICK_TOGGLE_COMMAND,
@@ -4661,11 +4665,11 @@ impl Shell {
         use crate::library::{
             AlbumEdit, COLLECTION_ADD_COMMAND as ADD, COLLECTION_CREATE_COMMAND as CREATE,
             COLLECTION_DELETE_COMMAND as DELETE, COLLECTION_LIST_COMMAND as LIST,
-            COLLECTION_REMOVE_COMMAND as REMOVE, COLLECTION_RENAME_COMMAND as RENAME,
-            COLLECTION_RULES_COMMAND as RULES,
+            COLLECTION_MOVE_COMMAND as MOVE, COLLECTION_REMOVE_COMMAND as REMOVE,
+            COLLECTION_RENAME_COMMAND as RENAME, COLLECTION_RULES_COMMAND as RULES,
         };
         use crate::smart_album::SmartForm;
-        use helios_vault::collections::{ALBUM, SMART};
+        use helios_vault::collections::{ALBUM, SET, SMART};
         if command == crate::library::COLLECTION_RULES_EDIT_COMMAND {
             return self.rules_edit(args);
         }
@@ -4685,9 +4689,12 @@ impl Shell {
                     let mut item = json!({
                         "id": a.id,
                         "name": a.name,
-                        "kind": if a.is_smart() { SMART } else { ALBUM },
+                        "kind": a.kind,
                         "count": lib.album_count(a),
                     });
+                    if let Some(set) = &a.set {
+                        item["set"] = json!(set);
+                    }
                     if let Some(rules) = &a.rules {
                         item["rules"] = rules.to_json();
                     }
@@ -4744,12 +4751,40 @@ impl Shell {
             }
             Ok(None)
         };
+        if command == CREATE && args.get("kind").and_then(Value::as_str) == Some(SET) {
+            let parent = match args.get("set") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(set)) => {
+                    sets::check_target(&albums, set, None)?;
+                    Some(set.clone())
+                }
+                Some(other) => return Err(format!("`set`: {other} is not a set's id")),
+            };
+            let Some(name) = name else {
+                self.set_form(parent.as_deref());
+                return Ok(Value::Null);
+            };
+            if taken(name, "") {
+                return Err(format!("an album is already named “{name}”"));
+            }
+            let id =
+                helios_vault::collections::album_key(name, |k| albums.iter().any(|a| a.id == k));
+            self.focus
+                .library
+                .borrow_mut()
+                .edit_album(AlbumEdit::CreateSet {
+                    id: id.clone(),
+                    name: name.to_string(),
+                    set: parent.clone(),
+                });
+            return Ok(json!({ "id": id, "name": name, "kind": SET, "set": parent }));
+        }
         if command == CREATE {
             let smart = match args.get("kind").and_then(Value::as_str) {
                 None => args.get("rules").is_some() || SmartForm::in_args(args),
                 Some(SMART) => true,
                 Some(ALBUM) => false,
-                Some(other) => return Err(format!("`kind`: `{other}` is album or smart")),
+                Some(other) => return Err(format!("`kind`: `{other}` is album, smart or set")),
             };
             // Checked before a form opens: a fault is said at once.
             let tree = if smart { rules()? } else { None };
@@ -4817,6 +4852,32 @@ impl Shell {
                 album.name
             ));
         }
+        if album.is_set() && (command == ADD || command == REMOVE) {
+            return Err(format!(
+                "“{}” is an album set: its albums hold its photos",
+                album.name
+            ));
+        }
+        if command == MOVE {
+            let set = match args.get("set") {
+                None => {
+                    let album = album.clone();
+                    self.move_chooser(&album, &albums);
+                    return Ok(Value::Null);
+                }
+                Some(Value::Null) => None,
+                Some(Value::String(set)) => {
+                    sets::check_target(&albums, set, Some(&id))?;
+                    Some(set.clone())
+                }
+                Some(other) => return Err(format!("`set`: {other} is not a set's id")),
+            };
+            self.focus.library.borrow_mut().edit_album(AlbumEdit::Move {
+                id: id.clone(),
+                set: set.clone(),
+            });
+            return Ok(json!({ "id": id, "set": set }));
+        }
         let mut lib = self.focus.library.borrow_mut();
         let edit = match command {
             RENAME => {
@@ -4835,7 +4896,10 @@ impl Shell {
                     name: name.to_string(),
                 }
             }
-            DELETE => AlbumEdit::Delete { id },
+            DELETE => AlbumEdit::Delete {
+                id,
+                members: args.get("members").and_then(Value::as_bool) == Some(true),
+            },
             RULES => {
                 let Some(current) = album.rules.clone() else {
                     return Err(format!(
@@ -5151,6 +5215,72 @@ impl Shell {
 
     /// Asks an album's name (`current` to start from), then runs `command`
     /// with it.
+    /// The form a new album set's name is asked in, the set `parent`
+    /// it goes in kept with the answer.
+    fn set_form(&mut self, parent: Option<&str>) {
+        let command =
+            CommandId::new(crate::library::COLLECTION_CREATE_COMMAND).map_err(|e| e.to_string());
+        let command = match command {
+            Ok(id) => id,
+            Err(e) => return self.warn(e),
+        };
+        let title = self.text(Message::new("gui-library-set-new-title", "New album set"));
+        let verb = self.text(Message::new("gui-library-album-new-verb", "Create"));
+        let label = self.text(Message::new("gui-library-album-name", "name"));
+        let mut form = dialogs::Form::new(&title, &verb, command).field_at(
+            "name",
+            crate::dialogs::descriptor(&helios_values::Descriptor::text(&label, "")),
+            crate::dialogs::value(&helios_core::Value::Text(String::new())),
+        );
+        form.args = json!({ "kind": helios_vault::collections::SET, "set": parent });
+        self.open_dialog(form);
+    }
+
+    /// "Move to set…": the sets `album` may go in (not itself nor one
+    /// below it), the top first when it is in one; the choice runs
+    /// `library.collection.move` with its `set`.
+    fn move_chooser(
+        &mut self,
+        album: &helios_vault::collections::Album,
+        albums: &[helios_vault::collections::Album],
+    ) {
+        let mut options = Vec::new();
+        if album.set.is_some() {
+            let top = self.text(Message::new("gui-library-set-top", "No set (the top)"));
+            options.push(ChooseOption::new(&top, Value::Null));
+        }
+        let hint = self.text(Message::new("gui-library-set-hint", "album set"));
+        for set in albums.iter().filter(|a| {
+            a.is_set()
+                && album.set.as_deref() != Some(a.id.as_str())
+                && sets::check_target(albums, &a.id, Some(&album.id)).is_ok()
+        }) {
+            options.push(ChooseOption::new(&set.name, json!(set.id)).hint(&hint));
+        }
+        if options.is_empty() {
+            self.notify(
+                Level::Info,
+                Message::new(
+                    "gui-library-set-none",
+                    "No album set to move it to: make one with New set…",
+                ),
+            );
+            return;
+        }
+        let title = self.text(
+            Message::new("gui-library-set-move-title", "Move “{ $name }” to a set")
+                .with("name", album.name.as_str()),
+        );
+        let Ok(command) = CommandId::new(crate::library::COLLECTION_MOVE_COMMAND) else {
+            return;
+        };
+        self.open_dialog(
+            Choose::with_options(&title, options, command)
+                .args(json!({ "id": album.id }))
+                .value_key("set"),
+        );
+    }
+
     fn album_form(&mut self, command: &str, current: &str) {
         let (title, verb) = if current.is_empty() {
             (
@@ -6951,5 +7081,47 @@ fn tabs_holding<'a>(
             .then_some((panels.as_slice(), *active)),
         Node::Split { a, b, .. } => tabs_holding(a, panel).or_else(|| tabs_holding(b, panel)),
         Node::Grid { children, .. } => children.iter().find_map(|c| tabs_holding(c, panel)),
+    }
+}
+
+/// Album sets as the shell checks them before a change is queued: the
+/// vault checks again when it makes it.
+mod sets {
+    use helios_vault::collections::Album;
+
+    /// Refuses `set` as where `member` goes (none: a new set): not a set
+    /// of the list, or the member itself or a set below it.
+    pub(super) fn check_target(
+        albums: &[Album],
+        set: &str,
+        member: Option<&str>,
+    ) -> Result<(), String> {
+        let find = |id: &str| albums.iter().find(|a| a.id == id);
+        match find(set) {
+            None => return Err(format!("`set`: no set `{set}`")),
+            Some(a) if !a.is_set() => {
+                return Err(format!("`set`: “{}” is not an album set", a.name));
+            }
+            Some(_) => {}
+        }
+        let Some(member) = member else {
+            return Ok(());
+        };
+        // Up from the set: meeting the member, it would hold itself.
+        let mut at = Some(set);
+        for _ in 0..=albums.len() {
+            let Some(here) = at else {
+                break;
+            };
+            if here == member {
+                return Err(if here == set {
+                    format!("`set`: a set cannot hold itself (`{member}`)")
+                } else {
+                    format!("`set`: a set cannot hold itself (`{set}` is inside `{member}`)")
+                });
+            }
+            at = find(here).and_then(|a| a.set.as_deref());
+        }
+        Ok(())
     }
 }

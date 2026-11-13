@@ -21,6 +21,14 @@
 //! [`crate::Query::album`] naming it selects its photos as an album's.
 //! "Save as album" turns it into a plain album, emptying it or not.
 //!
+//! An **album set** groups collections, as Lightroom's collection sets:
+//! `{ "kind": "set", "name": "…" }`. A collection belongs to at most one
+//! set, named by its own `set` key (`{ "kind": "album", …, "set": "<id>"
+//! }`), so moving one is one document changed; sets nest, never inside
+//! themselves. A set's photos are the union of its members' (albums,
+//! smart albums and sets below it), which each store reads in the same
+//! query ([`set_rule`]).
+//!
 //! Each change answers what it changed as [`Changes`] holding the
 //! document before and after it, so the Library's undo takes it back
 //! ([`crate::Vault::revert`]) and puts it again ([`crate::Vault::replay`]).
@@ -40,11 +48,15 @@ pub const ALBUM: &str = "album";
 pub const SMART: &str = "smart";
 /// The quick collection's key and `kind`.
 pub const QUICK: &str = "quick";
+/// An album set's `kind`.
+pub const SET: &str = "set";
 
 /// An album: a name and the photos put in it, or for a smart album the
 /// rules choosing them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Album {
+    /// [`ALBUM`], [`SMART`] or [`SET`].
+    pub kind: &'static str,
     /// Its key in [`COLLECTIONS`]: made from its first name
     /// ([`album_key`]), kept when it is renamed.
     pub id: String,
@@ -55,8 +67,11 @@ pub struct Album {
     /// A smart album's rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rules: Option<Rule>,
-    /// How many photos of the Library a smart album selects, when
-    /// [`Vault::albums`] read it.
+    /// The set it is in, by id (none: at the top).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set: Option<String>,
+    /// How many photos of the Library a smart album or a set selects,
+    /// when [`Vault::albums`] read it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
 }
@@ -67,18 +82,30 @@ impl Album {
         self.rules.is_some()
     }
 
+    /// Whether it is an album set.
+    pub fn is_set(&self) -> bool {
+        self.kind == SET
+    }
+
     fn of(id: &str, doc: &Value) -> Option<Album> {
-        let rules = match doc.get("kind").and_then(Value::as_str) {
-            Some(ALBUM) => None,
+        let kind = match doc.get("kind").and_then(Value::as_str) {
+            Some(ALBUM) => ALBUM,
+            Some(SMART) => SMART,
+            Some(SET) => SET,
+            _ => return None,
+        };
+        let rules = match kind {
             // A tree that does not parse (written by hand) is shown as
             // an empty `all` group; the store refuses to run it.
-            Some(SMART) => Some(
+            SMART => Some(
                 Rule::parse(doc.get("rules").unwrap_or(&Value::Null))
                     .unwrap_or_else(|_| Rule::group(crate::rules::Match::All, Vec::new())),
             ),
-            _ => return None,
+            _ => None,
         };
         Some(Album {
+            kind,
+            set: parent_of(doc),
             id: id.to_string(),
             name: doc.get("name").and_then(Value::as_str)?.to_string(),
             rules,
@@ -97,10 +124,111 @@ impl Album {
     }
 
     fn doc(&self) -> Value {
-        match &self.rules {
+        let mut doc = match &self.rules {
             Some(rules) => json!({ "kind": SMART, "name": self.name, "rules": rules.to_json() }),
+            None if self.is_set() => json!({ "kind": SET, "name": self.name }),
             None => json!({ "kind": ALBUM, "name": self.name, "images": self.images }),
+        };
+        if let Some(set) = &self.set {
+            doc["set"] = json!(set);
         }
+        doc
+    }
+}
+
+/// The set a collection's document says it is in.
+fn parent_of(doc: &Value) -> Option<String> {
+    doc.get("set")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// The photos of the collection `id` as one rule tree, among the
+/// collections' documents `docs`: an album (or the quick collection) is
+/// an `album in` condition, a smart album its rules, a set an `any`
+/// group of its members' trees (an empty one selects nothing). `None`
+/// when `id` names no collection. A set met again on the way (a cycle
+/// written by hand) adds nothing. Sets named by `album` conditions are
+/// written out the same way ([`expand_sets`]).
+pub fn set_rule(id: &str, docs: &[(String, Value)]) -> Result<Option<Rule>, String> {
+    collection_rule(id, docs, &mut Vec::new())
+}
+
+fn collection_rule(
+    id: &str,
+    docs: &[(String, Value)],
+    seen: &mut Vec<String>,
+) -> Result<Option<Rule>, String> {
+    let Some((_, doc)) = docs.iter().find(|(k, _)| k == id) else {
+        return Ok(None);
+    };
+    let any = |rules| Rule::group(crate::rules::Match::Any, rules);
+    Ok(Some(match doc.get("kind").and_then(Value::as_str) {
+        Some(SMART) => {
+            let rules = Rule::parse(doc.get("rules").unwrap_or(&Value::Null))
+                .map_err(|e| format!("the smart album `{id}`: {e}"))?;
+            expand(&rules, docs, seen)?
+        }
+        Some(SET) => {
+            if seen.iter().any(|s| s == id) {
+                return Ok(Some(any(Vec::new())));
+            }
+            seen.push(id.to_string());
+            let mut members = Vec::new();
+            for (key, d) in docs {
+                if parent_of(d).as_deref() == Some(id)
+                    && let Some(rule) = collection_rule(key, docs, seen)?
+                {
+                    members.push(rule);
+                }
+            }
+            seen.pop();
+            any(members)
+        }
+        _ => Rule::condition("album", "in", json!(id))?,
+    }))
+}
+
+/// `rules` with each `album` condition naming a set written out as the
+/// set's tree ([`set_rule`]; `not_in`: none of it).
+pub fn expand_sets(rules: &Rule, docs: &[(String, Value)]) -> Result<Rule, String> {
+    expand(rules, docs, &mut Vec::new())
+}
+
+fn expand(rule: &Rule, docs: &[(String, Value)], seen: &mut Vec<String>) -> Result<Rule, String> {
+    Ok(match rule {
+        Rule::Group { mode, rules } => Rule::Group {
+            mode: *mode,
+            rules: rules
+                .iter()
+                .map(|r| expand(r, docs, seen))
+                .collect::<Result<_, _>>()?,
+        },
+        Rule::Condition(c)
+            if c.field.kind == crate::rules::RuleKind::Album
+                && docs.iter().any(|(k, d)| {
+                    k == c.text() && d.get("kind").and_then(Value::as_str) == Some(SET)
+                }) =>
+        {
+            let set = collection_rule(c.text(), docs, seen)?
+                .unwrap_or_else(|| Rule::group(crate::rules::Match::Any, Vec::new()));
+            if c.op == "in" {
+                set
+            } else {
+                Rule::group(crate::rules::Match::None, vec![set])
+            }
+        }
+        other @ Rule::Condition(_) => other.clone(),
+    })
+}
+
+/// Whether a rule tree names an album (so a store reads the collections
+/// to write sets out).
+pub fn names_album(rule: &Rule) -> bool {
+    match rule {
+        Rule::Group { rules, .. } => rules.iter().any(names_album),
+        Rule::Condition(c) => c.field.kind == crate::rules::RuleKind::Album,
     }
 }
 
@@ -170,12 +298,13 @@ fn check_free<S: Store + ?Sized>(store: &S, name: &str, id: &str) -> Result<(), 
 }
 
 impl<S: Store> Vault<S> {
-    /// Every album, by name; a smart album with how many photos of the
-    /// Library its rules select now (one store query each).
+    /// Every album and set, by name; a smart album with how many photos
+    /// of the Library its rules select now, a set how many its members
+    /// hold together (one store query each).
     pub fn albums(&self) -> Result<Vec<Album>, String> {
         let store = self.store.lock().expect("store lock");
         let mut albums = albums_of(&*store)?;
-        for album in albums.iter_mut().filter(|a| a.is_smart()) {
+        for album in albums.iter_mut().filter(|a| a.is_smart() || a.is_set()) {
             let query = Query {
                 album: Some(album.id.clone()),
                 ..Query::default()
@@ -243,8 +372,50 @@ impl<S: Store> Vault<S> {
         rules: Option<Rule>,
     ) -> Result<(Album, Changes), String> {
         let name = album_name(name)?;
-        let images: Vec<String> = images.iter().map(ImageId::hex).collect();
-        self.transaction(|store| create_in(store, id, name, images, rules))
+        let album = Album {
+            kind: if rules.is_some() { SMART } else { ALBUM },
+            id: String::new(),
+            name,
+            images: images.iter().map(ImageId::hex).collect(),
+            rules,
+            set: None,
+            count: None,
+        };
+        self.transaction(|store| create_in(store, id, album))
+    }
+
+    /// Makes an album set named `name`, empty, under `id` or a key made
+    /// from the name, inside the set `set` when given.
+    pub fn create_set(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        set: Option<&str>,
+    ) -> Result<(Album, Changes), String> {
+        let name = album_name(name)?;
+        let album = Album {
+            kind: SET,
+            id: String::new(),
+            name,
+            images: Vec::new(),
+            rules: None,
+            set: set.map(String::from),
+            count: None,
+        };
+        self.transaction(|store| create_in(store, id, album))
+    }
+
+    /// Moves a collection into the set `set`, or to the top with none.
+    /// A set is refused inside itself or a set below it; the same place
+    /// again changes nothing.
+    pub fn move_collection(&self, id: &str, set: Option<&str>) -> Result<Changes, String> {
+        self.change_album(id, |store, album| {
+            if let Some(set) = set {
+                check_set(store, set, Some(id))?;
+            }
+            album.set = set.map(String::from);
+            Ok(())
+        })
     }
 
     /// Renames an album; the same name again changes nothing.
@@ -257,14 +428,52 @@ impl<S: Store> Vault<S> {
         })
     }
 
-    /// Forgets an album (its photos stay in the Library).
+    /// Forgets an album (its photos stay in the Library); a set's
+    /// members move up into the set it was in.
     pub fn delete_album(&self, id: &str) -> Result<Changes, String> {
+        self.delete_collection(id, false)
+    }
+
+    /// Forgets a collection; a set's members move up into the set it was
+    /// in, or with `members` are forgotten too, the sets below it with
+    /// theirs. One change.
+    pub fn delete_collection(&self, id: &str, members: bool) -> Result<Changes, String> {
         self.transaction(|store| {
             let before = store
                 .document(COLLECTIONS, id)?
                 .filter(|d| Album::of(id, d).is_some())
                 .ok_or_else(|| format!("no album `{id}`"))?;
-            put(store, id, Some(before), None)
+            let up = parent_of(&before);
+            let mut changes = Changes::default();
+            let children: Vec<(String, Value)> = store
+                .documents(COLLECTIONS)?
+                .into_iter()
+                .filter(|(_, d)| parent_of(d).as_deref() == Some(id))
+                .collect();
+            for (key, doc) in children {
+                let done = if members {
+                    // Forgets its own members first.
+                    let mut inner = Changes::default();
+                    delete_below(store, &key, &mut inner, &mut vec![id.to_string()])?;
+                    changes.documents.extend(inner.documents);
+                    put(store, &key, Some(doc), None)?
+                } else {
+                    let mut moved = doc.clone();
+                    match &up {
+                        Some(up) => moved["set"] = json!(up),
+                        None => {
+                            if let Some(o) = moved.as_object_mut() {
+                                o.remove("set");
+                            }
+                        }
+                    }
+                    put(store, &key, Some(doc), Some(moved))?
+                };
+                changes.documents.extend(done.documents);
+            }
+            let gone = put(store, id, Some(before), None)?;
+            changes.documents.extend(gone.documents);
+            Ok(changes)
         })
     }
 
@@ -351,7 +560,16 @@ impl<S: Store> Vault<S> {
             if images.is_empty() {
                 return Err("the quick collection is empty".into());
             }
-            let (album, mut changes) = create_in(store, id, name, images, None)?;
+            let album = Album {
+                kind: ALBUM,
+                id: String::new(),
+                name,
+                images,
+                rules: None,
+                set: None,
+                count: None,
+            };
+            let (album, mut changes) = create_in(store, id, album)?;
             if clear {
                 let cleared = put(store, QUICK, before, Some(quick_doc(&[])))?;
                 changes.documents.extend(cleared.documents);
@@ -377,15 +595,76 @@ impl<S: Store> Vault<S> {
     }
 }
 
-/// Makes a collection in `store` (see [`Vault::create_album`]).
+/// Forgets what is below the set `id` in `store`, members' members
+/// first; `seen`, the sets on the way (a cycle written by hand stops).
+fn delete_below<S: Store>(
+    store: &mut S,
+    id: &str,
+    changes: &mut Changes,
+    seen: &mut Vec<String>,
+) -> Result<(), String> {
+    if seen.iter().any(|s| s == id) {
+        return Ok(());
+    }
+    seen.push(id.to_string());
+    let children: Vec<(String, Value)> = store
+        .documents(COLLECTIONS)?
+        .into_iter()
+        .filter(|(_, d)| parent_of(d).as_deref() == Some(id))
+        .collect();
+    for (key, doc) in children {
+        delete_below(store, &key, changes, seen)?;
+        let done = put(store, &key, Some(doc), None)?;
+        changes.documents.extend(done.documents);
+    }
+    Ok(())
+}
+
+/// Refuses `set` as the set to put `member` in (`None`: a new one): not
+/// a set, or the member itself or a set below it (a set cannot hold
+/// itself).
+fn check_set<S: Store + ?Sized>(store: &S, set: &str, member: Option<&str>) -> Result<(), String> {
+    let docs = store.documents(COLLECTIONS)?;
+    let doc = |k: &str| docs.iter().find(|(key, _)| key == k).map(|(_, d)| d);
+    let target = doc(set).ok_or_else(|| format!("no set `{set}`"))?;
+    if target.get("kind").and_then(Value::as_str) != Some(SET) {
+        return Err(format!("`{set}` is not an album set"));
+    }
+    let Some(member) = member else {
+        return Ok(());
+    };
+    // Up from the set: meeting the member means it would hold itself.
+    let mut at = Some(set.to_string());
+    let mut steps = 0;
+    while let Some(here) = at {
+        if here == member {
+            return Err(if here == set {
+                format!("a set cannot hold itself: `{member}` into `{set}`")
+            } else {
+                format!("a set cannot hold itself: `{set}` is inside `{member}`")
+            });
+        }
+        steps += 1;
+        if steps > docs.len() {
+            break;
+        }
+        at = doc(&here).and_then(parent_of);
+    }
+    Ok(())
+}
+
+/// Makes a collection in `store` (see [`Vault::create_album`]): `album`
+/// with its id to make.
 fn create_in<S: Store>(
     store: &mut S,
     id: Option<&str>,
-    name: String,
-    images: Vec<String>,
-    rules: Option<Rule>,
+    mut album: Album,
 ) -> Result<(Album, Changes), String> {
+    let name = album.name.clone();
     check_free(&*store, &name, "")?;
+    if let Some(set) = &album.set {
+        check_set(&*store, set, None)?;
+    }
     let id = match id {
         Some(id) if id.trim().is_empty() => return Err("an album needs an id".into()),
         Some(QUICK) => return Err(format!("`{QUICK}` is the quick collection's")),
@@ -404,18 +683,14 @@ fn create_in<S: Store>(
             album_key(&name, |k| keys.iter().any(|t| t == k))
         }
     };
-    let mut album = Album {
-        id,
-        name,
-        images: Vec::new(),
-        rules,
-        count: None,
-    };
-    for hex in images {
-        if !album.images.contains(&hex) {
-            album.images.push(hex);
+    album.id = id;
+    let mut images = Vec::new();
+    for hex in std::mem::take(&mut album.images) {
+        if !images.contains(&hex) {
+            images.push(hex);
         }
     }
+    album.images = images;
     let changes = put(store, &album.id, None, Some(album.doc()))?;
     Ok((album, changes))
 }
@@ -438,8 +713,14 @@ fn quick_doc(images: &[String]) -> Value {
     json!({ "kind": QUICK, "images": images })
 }
 
-/// Refuses to put photos in or take them out of a smart album.
+/// Refuses to put photos in or take them out of a smart album or a set.
 fn refuse_smart(album: &Album) -> Result<(), String> {
+    if album.is_set() {
+        return Err(format!(
+            "“{}” is an album set: its albums hold its photos",
+            album.name
+        ));
+    }
     if album.is_smart() {
         return Err(format!(
             "“{}” is a smart album: its rules choose its photos",

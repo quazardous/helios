@@ -423,15 +423,18 @@ impl Serialize for Rule {
 }
 
 /// A query as a store runs it: when its `album` is a smart album, the
-/// album's rules in its place (with the query's own rules, if any);
-/// `doc` reads a collection's document. A smart album whose rules no
+/// album's rules in its place (with the query's own rules, if any); when
+/// it is an album set, the union of its members as rules
+/// ([`crate::collections::set_rule`]); `album` conditions naming a set
+/// written out the same way. `docs` reads the collections' documents,
+/// only when the query names an album. A smart album whose rules no
 /// longer parse is an error. Relative dates are then resolved against
 /// the query's clock (`Query::now`), else [`now`].
 pub fn resolve(
     query: &crate::Query,
-    doc: impl FnOnce(&str) -> Result<Option<Value>, String>,
+    docs: impl FnOnce() -> Result<Vec<(String, Value)>, String>,
 ) -> Result<Cow<'_, crate::Query>, String> {
-    let mut resolved = smart(query, doc)?;
+    let mut resolved = smart(query, docs)?;
     if resolved.rules.as_ref().is_some_and(Rule::is_relative) {
         let at = resolved.now.unwrap_or_else(now);
         let q = resolved.to_mut();
@@ -442,20 +445,35 @@ pub fn resolve(
 
 fn smart(
     query: &crate::Query,
-    doc: impl FnOnce(&str) -> Result<Option<Value>, String>,
+    docs: impl FnOnce() -> Result<Vec<(String, Value)>, String>,
 ) -> Result<Cow<'_, crate::Query>, String> {
-    let Some(id) = &query.album else {
-        return Ok(Cow::Borrowed(query));
-    };
-    let Some(d) = doc(id)? else {
-        return Ok(Cow::Borrowed(query));
-    };
-    if d.get("kind").and_then(Value::as_str) != Some(crate::collections::SMART) {
+    use crate::collections::{SET, SMART, expand_sets, names_album, set_rule};
+    let rules_name_album = query.rules.as_ref().is_some_and(names_album);
+    if query.album.is_none() && !rules_name_album {
         return Ok(Cow::Borrowed(query));
     }
-    let rules = Rule::parse(d.get("rules").unwrap_or(&Value::Null))
-        .map_err(|e| format!("the smart album `{id}`: {e}"))?;
-    let mut q = query.clone();
+    let docs = docs()?;
+    let mut q = Cow::Borrowed(query);
+    if rules_name_album && let Some(own) = &query.rules {
+        let expanded = expand_sets(own, &docs)?;
+        if &expanded != own {
+            q.to_mut().rules = Some(expanded);
+        }
+    }
+    let Some(id) = &query.album else {
+        return Ok(q);
+    };
+    let kind = docs
+        .iter()
+        .find(|(k, _)| k == id)
+        .and_then(|(_, d)| d.get("kind").and_then(Value::as_str));
+    if !matches!(kind, Some(SMART | SET)) {
+        return Ok(q);
+    }
+    let Some(rules) = set_rule(id, &docs)? else {
+        return Ok(q);
+    };
+    let mut q = q.into_owned();
     q.album = None;
     q.rules = Some(match q.rules.take() {
         Some(own) => own.and(rules),

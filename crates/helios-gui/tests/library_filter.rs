@@ -1149,3 +1149,179 @@ fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Album sets (`docs/design/library.md`, L6): nested sets show as groups
+/// that open and close, each with the count of its albums' photos
+/// together; a click scopes the grid to that union; moves in and out
+/// undo; a set never goes inside itself (refused with the reason);
+/// deleting a set keeps its albums, moved up.
+#[test]
+fn album_sets_nest_count_the_union_and_move_with_undo() {
+    let root = temp("sets");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let undo = |h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at: f64| {
+        let undone = history.undo(
+            &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+            &egui_pop::model::commands::Origin::User,
+        );
+        assert!(
+            matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+            "{undone:?}"
+        );
+        settle(h, persist, at);
+    };
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+    let ids = |n: &[u8]| n.iter().map(|&n| id(n).hex()).collect::<Vec<_>>();
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "Trip", "images": ids(&[1, 2]) }),
+    );
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "Home", "images": ids(&[2, 3]) }),
+    );
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "kind": "set", "name": "Travel" }),
+    );
+    settle(&mut h, &mut persist, 2.0);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "kind": "set", "name": "Inner", "set": "travel" }),
+    );
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "New album set “Inner”"
+    );
+    // Moved into the nested set: both sets count the album's photos.
+    run(
+        &mut h,
+        "library.collection.move",
+        json!({ "id": "trip", "set": "inner" }),
+    );
+    settle(&mut h, &mut persist, 4.0);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Move “Trip” into a set"
+    );
+    h.get_by_label("Travel 2");
+    h.get_by_label("Inner 2");
+    h.get_by_label("Trip 2");
+    h.get_by_label("Show or hide the albums of Travel");
+    // A second album in the outer set: its count is the union.
+    run(
+        &mut h,
+        "library.collection.move",
+        json!({ "id": "home", "set": "travel" }),
+    );
+    settle(&mut h, &mut persist, 5.0);
+    h.get_by_label("Travel 3");
+    h.get_by_label("Travel 3").click();
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(h.state().library().collection().as_deref(), Some("travel"));
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    // Closed: its members hidden.
+    h.get_by_label("Show or hide the albums of Travel").click();
+    settle(&mut h, &mut persist, 7.0);
+    assert!(h.query_by_label("Inner 2").is_none());
+    h.get_by_label("Show or hide the albums of Travel").click();
+    settle(&mut h, &mut persist, 8.0);
+
+    // A set never inside itself, nor inside a set below it.
+    run(
+        &mut h,
+        "library.collection.move",
+        json!({ "id": "travel", "set": "inner" }),
+    );
+    run(
+        &mut h,
+        "library.collection.move",
+        json!({ "id": "inner", "set": "inner" }),
+    );
+    settle(&mut h, &mut persist, 9.0);
+    let said = warnings(&h);
+    assert!(
+        said.contains("`travel` is inside") || said.contains("cannot hold itself"),
+        "{said}"
+    );
+    assert!(
+        said.contains("a set cannot hold itself (`inner`)"),
+        "{said}"
+    );
+
+    // Undone: Home out of the set again.
+    undo(&mut h, &mut persist, 10.0);
+    h.get_by_label("Travel 2");
+    h.get_by_label("Home 2");
+
+    // Moved out, then the set deleted: its albums move up.
+    run(
+        &mut h,
+        "library.collection.move",
+        json!({ "id": "trip", "set": null }),
+    );
+    settle(&mut h, &mut persist, 11.0);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Move “Trip” out of its set"
+    );
+    h.get_by_label("Travel 0");
+    undo(&mut h, &mut persist, 12.0);
+    h.get_by_label("Travel 2");
+    run(
+        &mut h,
+        "library.collection.delete",
+        json!({ "id": "inner" }),
+    );
+    settle(&mut h, &mut persist, 13.0);
+    let kinds: Vec<(String, Option<String>)> = h
+        .state()
+        .library()
+        .albums()
+        .unwrap()
+        .iter()
+        .map(|a| (a.id.clone(), a.set.clone()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("home".to_string(), None),
+            ("travel".to_string(), None),
+            ("trip".to_string(), Some("travel".to_string())),
+        ]
+    );
+    h.get_by_label("Travel 2");
+    // Undone: the nested set is back, its album in it.
+    undo(&mut h, &mut persist, 14.0);
+    h.get_by_label("Inner 2");
+    assert_eq!(
+        albums(&h),
+        [
+            ("Home".to_string(), 2),
+            ("Inner".to_string(), 2),
+            ("Travel".to_string(), 2),
+            ("Trip".to_string(), 2),
+        ]
+    );
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

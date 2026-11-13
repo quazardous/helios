@@ -711,7 +711,18 @@ impl<S: Store> Persist<S> {
                     .vault
                     .rename_album(id, to)
                     .map(|c| (name.clone(), 0, c)),
-                E::Delete { id } => self.vault.delete_album(id).map(|c| (name.clone(), 0, c)),
+                E::Delete { id, members } => self
+                    .vault
+                    .delete_collection(id, *members)
+                    .map(|c| (name.clone(), 0, c)),
+                E::CreateSet { id, name, set } => self
+                    .vault
+                    .create_set(Some(id), name, set.as_deref())
+                    .map(|(a, c)| (a.name, 0, c)),
+                E::Move { id, set } => self
+                    .vault
+                    .move_collection(id, set.as_deref())
+                    .map(|c| (name.clone(), 0, c)),
                 E::Add { id, images } => ids(images)
                     .and_then(|i| self.vault.add_to_album(id, &i))
                     .map(|c| (name.clone(), images.len(), c)),
