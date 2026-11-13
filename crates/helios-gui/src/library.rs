@@ -59,6 +59,7 @@ use helios_core::{Image, Message, Region};
 
 use crate::head_render::HeadRender;
 use helios_vault::capture::CAPTURED;
+use helios_vault::cull;
 pub use helios_vault::fields::Op;
 use helios_vault::fields::{LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, TAGS};
 use serde_json::Value;
@@ -343,6 +344,12 @@ pub struct Entry {
     /// When its file was found changed by another application (seconds
     /// since 1970), until the user acknowledges it: a badge in the grid.
     pub changed_outside: Option<u64>,
+    /// Its culling focus (the vault's `focus` field), once measured.
+    pub focus: Option<f64>,
+    /// The largest share of one channel blown white, once measured.
+    pub clip_white: Option<f64>,
+    /// The largest share of one channel crushed black, once measured.
+    pub clip_black: Option<f64>,
 }
 
 /// A volume as the library names it: its name, and when and on which
@@ -484,6 +491,9 @@ impl Entry {
                 self.captured = value.and_then(Value::as_f64);
                 self.day = self.captured.map(helios_vault::capture::day_text);
             }
+            cull::FOCUS => self.focus = value.and_then(Value::as_f64),
+            cull::CLIP_WHITE => self.clip_white = value.and_then(Value::as_f64),
+            cull::CLIP_BLACK => self.clip_black = value.and_then(Value::as_f64),
             _ => {}
         }
     }
@@ -540,7 +550,7 @@ impl Change {
 /// dates (a date being the capture day by the camera's clock:
 /// `date:2024-06-01..2024-06-30` takes both days whole), and in its text
 /// Helios's own keys ([`helios_terms`]): `camera:`, `lens:`, `type:`,
-/// `folder:`, `collection:`, `presence:` and `backup:`; the other words are looked for
+/// `folder:`, `collection:`, `presence:`, `cull:` and `backup:`; the other words are looked for
 /// in the photo's name and tags. A `backup:` term is measured against no
 /// volume until the library sets its rule ([`Library::set_backup_rule`]).
 pub fn query_of(filter: &Filter) -> Query {
@@ -564,6 +574,7 @@ pub fn query_of(filter: &Filter) -> Query {
             rule: helios_vault::Backups::default(),
             states,
         }),
+        cull: terms.cull,
         ..Query::default()
     }
 }
@@ -581,6 +592,9 @@ pub struct Terms {
     pub presence: Vec<helios_vault::Presence>,
     /// The backup states every `backup:` term allows (`None`: no term).
     pub backup: Option<Vec<helios_vault::BackupState>>,
+    /// The culling states (`cull:sharp`, `soft`, `clipped`, `unmeasured`),
+    /// any of them.
+    pub cull: Vec<String>,
 }
 
 /// The backup states a `backup:` word takes: `met` (or `ok`), `short`
@@ -632,8 +646,9 @@ pub fn quoted(value: &str) -> String {
 /// Helios's own keys in a filter's text (the words egui-pop's grammar
 /// leaves): `camera:<model>`, `lens:<lens>`, `type:<cr3>` (each exact;
 /// several of one key take any of them), `folder:<path>` (a copy there
-/// or below), `collection:<id>` (in that album), `presence:present|offline|missing` and `backup:<state>`
-/// (several: every one holds). A key with a value it does not know stays
+/// or below), `collection:<id>` (in that album), `presence:present|offline|missing`,
+/// `cull:sharp|soft|clipped|unmeasured` (several: any of them) and
+/// `backup:<state>` (several: every one holds). A key with a value it does not know stays
 /// a word, as before.
 pub fn helios_terms(text: &str) -> Terms {
     let mut t = Terms::default();
@@ -662,6 +677,11 @@ pub fn helios_terms(text: &str) -> Terms {
             _ => None,
         }) {
             t.presence.push(p);
+        } else if let Some(state) = lower
+            .strip_prefix("cull:")
+            .filter(|v| cull::STATES.contains(v))
+        {
+            t.cull.push(state.to_string());
         } else if let Some(states) = lower.strip_prefix("backup:").and_then(backup_states) {
             t.backup = Some(match t.backup.take() {
                 None => states,
@@ -707,6 +727,16 @@ pub fn query_typed(text: &str) -> Result<Option<helios_template::QueryDesc>, Str
         tags: f.tags,
     };
     Ok((!q.is_empty()).then_some(q))
+}
+
+/// A culling state's name in the facets bar.
+fn cull_value(state: &str) -> Message {
+    match state {
+        cull::SHARP => Message::new("gui-library-cull-sharp", "sharp"),
+        cull::SOFT => Message::new("gui-library-cull-soft", "soft"),
+        cull::CLIPPED => Message::new("gui-library-cull-clipped", "clipped"),
+        _ => Message::new("gui-library-cull-unmeasured", "not measured"),
+    }
 }
 
 /// The filter term taking a facet's value (`label:red`, `camera:"Z 8"`).
@@ -1322,6 +1352,7 @@ fn sort_label(by: helios_vault::Sort) -> Message {
         Sort::Rating => Message::new("gui-library-sort-rating", "Rating"),
         Sort::Edited => Message::new("gui-library-sort-edited", "Last edit"),
         Sort::Size => Message::new("gui-library-sort-size", "File size"),
+        Sort::Focus => Message::new("gui-library-sort-focus", "Sharpness"),
         Sort::Id => Message::new("gui-library-sort-id", "Content"),
     }
 }
@@ -1455,6 +1486,9 @@ struct PresenceWords {
     unverified: String,
     no_backup: String,
     changed: String,
+    soft: String,
+    blown: String,
+    crushed: String,
 }
 
 impl PresenceWords {
@@ -1481,6 +1515,15 @@ impl PresenceWords {
             changed: crate::i18n::text(
                 ctx,
                 Message::new("gui-library-badge-changed-outside", "changed outside"),
+            ),
+            soft: crate::i18n::text(ctx, Message::new("gui-library-badge-soft", "soft focus")),
+            blown: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-blown", "blown highlights"),
+            ),
+            crushed: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-crushed", "crushed shadows"),
             ),
         }
     }
@@ -1558,6 +1601,17 @@ impl LibraryItems<String> for Items<'_> {
                 BackupMark::Unverified => Badge::new(w.unverified.clone()).tone(BadgeTone::Info),
                 BackupMark::None => Badge::new(w.no_backup.clone()).tone(BadgeTone::Danger),
             });
+        }
+        // The culling measures, once measured: soft focus, blown
+        // highlights, crushed shadows.
+        if entry.focus.is_some_and(cull::soft) {
+            badges.push(Badge::new(self.words.soft.clone()).tone(BadgeTone::Warning));
+        }
+        if entry.clip_white.is_some_and(|w| w > cull::CLIPPED_WHITE) {
+            badges.push(Badge::new(self.words.blown.clone()).tone(BadgeTone::Warning));
+        }
+        if entry.clip_black.is_some_and(|b| b > cull::CLIPPED_BLACK) {
+            badges.push(Badge::new(self.words.crushed.clone()).tone(BadgeTone::Warning));
         }
         badges
     }
@@ -1921,8 +1975,9 @@ impl Library {
     }
 
     /// The badges an image shows in the grid, in the interface's
-    /// language: RAW, offline, missing, changed outside Helios, and its
-    /// backups when the library has a strategy.
+    /// language: RAW, offline, missing, changed outside Helios, its
+    /// backups when the library has a strategy, and its culling measures
+    /// (soft focus, blown highlights, crushed shadows) once measured.
     pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
         let Some(&i) = self.index.get(id) else {
             return Vec::new();
@@ -3018,6 +3073,7 @@ impl Library {
                 Message::new("gui-library-facet-presence", "Presence"),
             ),
             ("backup", Message::new("gui-library-facet-backup", "Backup")),
+            ("cull", Message::new("gui-library-facet-cull", "Culling")),
         ] {
             let values = facets.of(facet);
             if values.is_empty() {
@@ -3028,6 +3084,8 @@ impl Library {
                 for (value, n) in values {
                     let shown = if facet == "rating" {
                         format!("{value}★")
+                    } else if facet == "cull" {
+                        crate::i18n::text(&ctx, cull_value(value))
                     } else {
                         value.to_string()
                     };
@@ -3197,12 +3255,15 @@ impl Library {
             .selected_text(current.clone())
             .show_ui(ui, |ui| {
                 for by in Sort::ALL.into_iter().filter(|s| *s != Sort::Id) {
+                    // Sharpness starts with the sharpest.
+                    let descending = if by == Sort::Focus && self.sort.by != Sort::Focus {
+                        true
+                    } else {
+                        self.sort.descending
+                    };
                     ui.selectable_value(
                         &mut chosen,
-                        Order {
-                            by,
-                            descending: self.sort.descending,
-                        },
+                        Order { by, descending },
                         word(sort_label(by)),
                     );
                 }
@@ -3735,6 +3796,45 @@ mod tests {
             query_of(&Filter::parse(&facet_term("camera", "Z 8"))).cameras,
             ["Z 8"]
         );
+    }
+
+    #[test]
+    fn cull_terms_and_badges_follow_the_measures() {
+        let q = query_of(&Filter::parse("cull:soft cull:Clipped cull:blurry"));
+        assert_eq!(q.cull, ["soft", "clipped"]);
+        assert_eq!(q.words, ["cull:blurry"]);
+        assert_eq!(facet_term("cull", "sharp"), "cull:sharp");
+        let entry = |id: &str, focus: Option<f64>, white: Option<f64>, black: Option<f64>| {
+            let mut e = Entry {
+                id: id.into(),
+                name: format!("{id}.jpg"),
+                ..Entry::default()
+            };
+            e.show(cull::FOCUS, focus.map(Value::from).as_ref());
+            e.show(cull::CLIP_WHITE, white.map(Value::from).as_ref());
+            e.show(cull::CLIP_BLACK, black.map(Value::from).as_ref());
+            e
+        };
+        let mut library = Library::default();
+        library.set_entries(vec![
+            entry("sharp", Some(0.02), Some(0.0), Some(0.0)),
+            entry("soft", Some(0.0002), Some(0.0), Some(0.0)),
+            entry("blown", Some(0.02), Some(0.06), Some(0.0)),
+            entry("crushed", Some(0.02), Some(0.0), Some(0.2)),
+            entry("all", Some(0.0001), Some(0.5), Some(0.5)),
+            entry("none", None, None, None),
+        ]);
+        let ctx = egui::Context::default();
+        let badges = |id: &str| library.badges_of(&ctx, id);
+        assert!(badges("sharp").is_empty());
+        assert_eq!(badges("soft"), ["soft focus"]);
+        assert_eq!(badges("blown"), ["blown highlights"]);
+        assert_eq!(badges("crushed"), ["crushed shadows"]);
+        assert_eq!(
+            badges("all"),
+            ["soft focus", "blown highlights", "crushed shadows"]
+        );
+        assert!(badges("none").is_empty(), "not measured: no badge");
     }
 
     #[test]

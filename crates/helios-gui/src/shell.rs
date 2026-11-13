@@ -2851,7 +2851,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 crate::library::SORT_COMMAND,
-                "Sort the library (`by`: captured, imported, name, rating, edited or size; \
+                "Sort the library (`by`: captured, imported, name, rating, edited, size or focus; \
                  `descending`); kept with the workspace. Without `by`, says how it is sorted",
                 "Library",
             ),

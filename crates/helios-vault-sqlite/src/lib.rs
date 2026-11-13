@@ -38,6 +38,7 @@ use serde_json::Value;
 use helios_core::ContentHash;
 use helios_vault::capture::CAPTURED;
 use helios_vault::capture::{CAMERA_MODEL, FILE_TYPE, LENS};
+use helios_vault::cull;
 use helios_vault::fields::{
     AuditEntry, Backups, Facets, LABELS, Order, PICKED, Query, RATING, REJECTED, Sort, TAGS,
 };
@@ -714,6 +715,7 @@ fn order_by(order: Order) -> String {
         Sort::Rating => "COALESCE(r.number, 0)".to_string(),
         Sort::Edited => "(SELECT MAX(v.at) FROM versions v WHERE v.image = i.id)".to_string(),
         Sort::Size => "i.size".to_string(),
+        Sort::Focus => cull_number("i", cull::FOCUS),
     };
     if order.by == Sort::Id && !order.descending {
         return key;
@@ -974,6 +976,15 @@ fn matched_sql(
         let _ = write!(sql, " AND {PRESENCE} IN ({})", marks(query.presence.len()));
         args.extend(query.presence.iter().map(|p| Sql::Text(p.as_str().into())));
     }
+    // Culling states: any of them, from the culling fields.
+    if !query.cull.is_empty() {
+        let ways: Vec<String> = query
+            .cull
+            .iter()
+            .map(|state| cull_state_sql("i", state))
+            .collect();
+        let _ = write!(sql, " AND ({})", ways.join(" OR "));
+    }
     if let Some(b) = &query.backup {
         if b.states.is_empty() {
             sql.push_str(" AND 0");
@@ -988,6 +999,31 @@ fn matched_sql(
         }
     }
     Ok((ctes.join(",\n"), sql, args))
+}
+
+/// A culling field's number on an image (`alias.id`), NULL when not
+/// measured.
+fn cull_number(alias: &str, field: &str) -> String {
+    format!("(SELECT f.number FROM fields f WHERE f.image = {alias}.id AND f.name = '{field}')")
+}
+
+/// Whether an image (`alias.id`) is in a culling state
+/// ([`cull::states_of`]), as one SQL expression; the thresholds are
+/// constants, written in the text.
+fn cull_state_sql(alias: &str, state: &str) -> String {
+    let focus = cull_number(alias, cull::FOCUS);
+    match state {
+        cull::SHARP => format!("({focus} >= {:?})", cull::SOFT_FOCUS),
+        cull::SOFT => format!("({focus} < {:?})", cull::SOFT_FOCUS),
+        cull::CLIPPED => format!(
+            "(COALESCE({} > {:?}, 0) OR COALESCE({} > {:?}, 0))",
+            cull_number(alias, cull::CLIP_WHITE),
+            cull::CLIPPED_WHITE,
+            cull_number(alias, cull::CLIP_BLACK),
+            cull::CLIPPED_BLACK
+        ),
+        _ => format!("({focus} IS NULL)"),
+    }
 }
 
 /// A rule tree as one SQL expression on `i`, never NULL (each condition
@@ -1121,8 +1157,11 @@ fn facets_sql(query: &Query, backups: Option<&Backups>) -> Result<(String, Vec<S
                       l.value AS labels,
                       CASE WHEN COALESCE(x.value, '') = 'true' THEN 'reject'
                            WHEN COALESCE(p.value, '') = 'true' THEN 'pick' ELSE 'none' END AS flag,
-                      {PRESENCE} AS presence, {backup} AS backup
-               {from})"
+                      {PRESENCE} AS presence, {backup} AS backup,
+                      {focus} AS focus, ({clipped}) AS clipped
+               {from})",
+        focus = cull_number("i", cull::FOCUS),
+        clipped = cull_state_sql("i", cull::CLIPPED),
     );
     let ctes = if ctes.is_empty() {
         matched
@@ -1144,6 +1183,18 @@ fn facets_sql(query: &Query, backups: Option<&Backups>) -> Result<(String, Vec<S
         text("file_type", FILE_TYPE),
         "SELECT 'presence', presence, COUNT(*) FROM m GROUP BY 2".to_string(),
         "SELECT 'backup', backup, COUNT(*) FROM m WHERE backup IS NOT NULL GROUP BY 2".to_string(),
+        format!(
+            "SELECT 'cull', CASE WHEN focus IS NULL THEN '{}' WHEN focus < {:?} THEN '{}' ELSE '{}' END,
+                    COUNT(*) FROM m GROUP BY 2",
+            cull::UNMEASURED,
+            cull::SOFT_FOCUS,
+            cull::SOFT,
+            cull::SHARP
+        ),
+        format!(
+            "SELECT 'cull', '{}', COUNT(*) FROM m WHERE clipped GROUP BY 2",
+            cull::CLIPPED
+        ),
     ];
     Ok((
         format!("WITH {ctes}\n{}", parts.join("\nUNION ALL\n")),

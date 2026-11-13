@@ -1112,6 +1112,15 @@ gui-library-facet-lens = Objectif
 gui-library-facet-type = Type
 gui-library-facet-presence = Présence
 gui-library-facet-backup = Sauvegarde
+gui-library-facet-cull = Qualité
+gui-library-cull-sharp = nette
+gui-library-cull-soft = floue
+gui-library-cull-clipped = écrêtée
+gui-library-cull-unmeasured = non mesurée
+gui-library-badge-soft = floue
+gui-library-badge-blown = hautes lumières brûlées
+gui-library-badge-crushed = ombres bouchées
+gui-library-sort-focus = Netteté
 gui-library-folders = Dossiers
 gui-library-folders-elsewhere = Autres dossiers
 gui-library-volume-offline = { $volume } { $count }, hors ligne, vu pour la dernière fois le { $date }
@@ -1246,6 +1255,7 @@ gui-stacks-suggest = Suggérer des piles
 gui-stacks-suggest-hint = Sur les images sélectionnées (deux ou plus), sinon sur toutes les images
 
 gui-stacks-top = Proposée au-dessus : la plus nette
+gui-stacks-top-why = Proposée au-dessus : { $why }
 
 gui-duplicates-asked = La garder comme copie de plus, ou l’ignorer ?
 

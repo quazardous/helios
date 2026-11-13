@@ -121,10 +121,10 @@ enum Link {
 /// The version of the rules, recorded with what they propose.
 pub const RULES_VERSION: &str = "2";
 
-/// The share of pixels blown to white, on any channel, above which a
-/// frame counts as clipped and is not proposed on top while a measured
-/// frame of its group is not.
-pub const CLIPPED_WHITE: f64 = 0.02;
+/// A frame with more than this share of one channel blown white is
+/// clipped: the vault's culling threshold, shared with the badges and the
+/// `cull` facet.
+pub use helios_vault::cull::CLIPPED_WHITE;
 
 impl RuleResolver {
     /// Whether `b`, taken after `a`, continues its group: the link and
