@@ -6,8 +6,8 @@
 //!
 //! 1. Each pull request must target `next` and carry a valid manifest
 //!    (`manifest.rs`); one that does not is left out with its reason.
-//! 1b. Each taken pull request's own `check` (clippy) runs first on its
-//!    branch, side by side; one that fails is left out with its lints.
+//!    Each taken pull request's own `check` (clippy) then runs first on
+//!    its branch, side by side; one that fails is left out with its lints.
 //! 2. A temporary branch `gate/<n>` is made from `origin/next` and each
 //!    pull request's branch merged into it (`--no-ff`, "Merge pull request
 //!    #N from …"). A branch that does not merge cleanly is left out.
