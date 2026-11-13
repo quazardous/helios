@@ -1,0 +1,430 @@
+"""Time how long the main window takes to draw again once the import window
+closes, in a headless labwc driven by wbox.
+
+Run by the bench box's `import-close` job (see docs/bench.md), with the
+Python that has the wbox library:
+
+    import-close.py --gui helios-gui --out DIR [--folder DIR]
+                    [--ways cancel,escape,compositor,import] [--runs N]
+                    [--budget-ms MS]
+
+`helios-gui` starts in its own compositor on a throwaway library, with its
+agent socket on (`EGUI_POP_AGENT_SOCKET`, `HELIOS_AGENT_WRITE=1`) and its
+frame trace (`HELIOS_FRAME_TRACE`: a line on standard error per frame
+begun, with the viewport, and when the import window closes). For each
+way of closing, in turn: the import window is opened on `--folder` (a
+folder of photos, the raw corpus on the box), left to read it for
+`--settle` seconds, then closed:
+
+- `cancel`: its Cancel button, clicked over the agent socket;
+- `escape`: the Escape key, pressed in it over the agent socket;
+- `import`: its Import button (the folder imported, the window closed);
+- `compositor`: the compositor's close (a window manager's close button).
+
+From the close on, it times the first frame the main window begins, the
+first one it builds, and the first answer of the agent socket (served by
+the interface's thread); while the main window draws nothing, the main
+thread's kernel wait channel (`/proc/<pid>/task/<pid>/wchan`) is sampled,
+to tell a wait on the GPU from a lock. One JSON line per close in
+`import-close.jsonl`, a table in `import-close.md`; with `--budget-ms`, a
+close after which the main window takes longer to draw fails the job.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+from wbox.server import build_compositor
+
+APP_ID = "helios-gui"
+HERE = Path(__file__).resolve().parent
+FIXTURES = HERE.parents[1] / "crates/helios-plugin/tests/fixtures/rated-photos"
+ROOT = "ViewportId(ROOT)"
+WAYS = ("cancel", "escape", "compositor", "import")
+
+
+def config(name: str) -> dict:
+    return {
+        "name": name,
+        "compositor": "labwc",
+        "screen": "1280x800",
+        "input_backend": "hybrid",
+        "headless": True,
+        "keyboard_layout": "us",
+        "clipboard_bridge": False,
+        "timeouts": {"app_render": 1, "stop": 20},
+    }
+
+
+def world(work: Path) -> dict:
+    shutil.rmtree(work, ignore_errors=True)
+    for d in ("config", "workspace", "state", "agent"):
+        (work / d).mkdir(parents=True)
+    os.chmod(work / "agent", 0o700)
+    ui = work / "config" / "helios" / "ui"
+    ui.mkdir(parents=True)
+    (ui / "settings.json").write_text(
+        json.dumps(
+            {
+                "kind": "settings",
+                "version": 1,
+                "values": {
+                    "settings/helios.pointer_profile_asked": True,
+                    "settings/tips.show": False,
+                },
+            }
+        )
+    )
+    return {
+        "vault": work / "library.db",
+        "workspace": work / "workspace",
+        "state": work / "state",
+        "socket": work / "agent" / "helios.sock",
+    }
+
+
+class Agent:
+    """helios-gui's agent socket: one JSON-RPC request per connection."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.next_id = 0
+
+    def request(self, method: str, params: dict, within: float = 30.0) -> dict:
+        self.next_id += 1
+        line = {"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params}
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(within)
+            s.connect(str(self.path))
+            s.sendall((json.dumps(line) + "\n").encode())
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        answer = json.loads(data.decode() or "{}")
+        if "error" in answer:
+            raise RuntimeError(f"{method}: {answer['error']}")
+        return answer.get("result", {})
+
+    def command(self, cid: str, args: dict) -> dict:
+        return self.request(
+            "call",
+            {"collector": "commands", "action": "run", "args": {"id": cid, "args": args}},
+        )
+
+    def ui(self, params: dict) -> dict:
+        return self.request("ui", params)
+
+
+def wait_socket(agent: Agent, alive, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and alive():
+        try:
+            agent.request("describe", {}, within=5)
+            return True
+        except (OSError, RuntimeError, ValueError):
+            time.sleep(0.2)
+    return False
+
+
+def frames(trace: Path) -> list[tuple[float, str]]:
+    found = []
+    try:
+        text = trace.read_text(errors="replace")
+    except OSError:
+        return found
+    for line in text.splitlines():
+        if not line.startswith("helios-frame "):
+            continue
+        parts = line.split(" ", 2)
+        if len(parts) == 3:
+            found.append((int(parts[1]) / 1e6, parts[2]))
+    return found
+
+
+def helios_pid(state: Path) -> int | None:
+    for marker in sorted((state / "helios" / "crashes").glob("session-*.json")):
+        try:
+            return int(marker.stem.removeprefix("session-"))
+        except ValueError:
+            continue
+    return None
+
+
+def wchan(pid: int | None) -> str:
+    if pid is None:
+        return "?"
+    try:
+        chan = Path(f"/proc/{pid}/task/{pid}/wchan").read_text().strip() or "0"
+        stat = Path(f"/proc/{pid}/task/{pid}/stat").read_text()
+        return f"{stat.rsplit(')', 1)[1].split()[0]}:{chan}"
+    except OSError:
+        return "?"
+
+
+def stack(pid: int | None) -> str | None:
+    """The main thread's stack, by gdb or eu-stack when the box has one."""
+    if pid is None:
+        return None
+    for cmd in (
+        ["eu-stack", "-1", "-p", str(pid)],
+        ["gdb", "-batch", "-p", str(pid), "-ex", "bt 40"],
+    ):
+        if shutil.which(cmd[0]):
+            try:
+                done = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                continue
+            return (done.stdout + done.stderr)[-6000:]
+    return None
+
+
+def import_title(comp, main_title: str) -> str | None:
+    listed = comp.list_windows()
+    for w in listed.get("windows", []):
+        if w.get("app_id") == APP_ID and w.get("title") != main_title:
+            return w.get("title")
+    return None
+
+
+def close(comp, agent: Agent, way: str, title: str) -> None:
+    if way == "cancel":
+        agent.ui({"action": "click", "window": "import", "role": "Button", "label": "Cancel"})
+    elif way == "escape":
+        agent.ui({"action": "key", "window": "import", "key": "Escape"})
+    elif way == "import":
+        tree = agent.ui({"action": "tree", "window": "import", "role": "Button"})
+        label = next(
+            (
+                n["label"]
+                for n in tree.get("nodes", [])
+                if str(n.get("label", "")).startswith("Import ") and not n.get("disabled")
+            ),
+            None,
+        )
+        if label is None:
+            raise RuntimeError("no Import button enabled")
+        agent.ui({"action": "click", "window": "import", "role": "Button", "label": label})
+    else:
+        subprocess.run(
+            ["wlrctl", "toplevel", "close", f"title:{title}"],
+            env=comp._wl_env(),
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
+
+
+def one_close(args, comp, agent: Agent, trace: Path, pid, main_title: str, way: str) -> dict:
+    result: dict = {"close": way}
+    agent.command("library.importWindow", {"source": str(args.folder), "copy": False})
+    deadline = time.monotonic() + 30
+    title = None
+    while time.monotonic() < deadline and title is None:
+        title = import_title(comp, main_title)
+        time.sleep(0.1)
+    if title is None:
+        return {**result, "error": "no import window listed"}
+    # Left to read the folder (scans, glances, thumbnails).
+    time.sleep(args.settle)
+    asked = time.time()
+    try:
+        close(comp, agent, way, title)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {**result, "error": f"close: {exc}"}
+    # The agent socket's first answer after the close, on a thread: it
+    # waits on the interface's thread.
+    answered: dict = {}
+
+    def ping() -> None:
+        try:
+            agent.request("describe", {}, within=args.timeout)
+            answered["at"] = time.time()
+        except (OSError, RuntimeError, ValueError) as exc:
+            answered["error"] = str(exc)
+
+    pinger = threading.Thread(target=ping, daemon=True)
+    pinger.start()
+    began = built = gone = None
+    waits: list[str] = []
+    stacked = False
+    end = time.monotonic() + args.timeout
+    while time.monotonic() < end:
+        marks = [(at, what) for at, what in frames(trace) if at >= asked]
+        if began is None:
+            began = next((at for at, w in marks if w == f"begins {ROOT}"), None)
+        closed = next((at for at, w in marks if w == "import window closed"), None)
+        if built is None and closed is not None:
+            # The first main window frame begun after the one that closed it.
+            built = next(
+                (at for at, w in marks if w == f"begins {ROOT}" and at > closed + 1e-4),
+                None,
+            )
+        if gone is None and import_title(comp, main_title) is None:
+            gone = time.time()
+        if built is not None and gone is not None and "at" in answered:
+            break
+        if built is None:
+            w = wchan(pid)
+            if not waits or waits[-1].split(" ", 1)[1] != w:
+                waits.append(f"{round((time.time() - asked) * 1e3)}ms {w}")
+            if not stacked and time.time() - asked > 3:
+                stacked = True
+                result["stack"] = stack(pid)
+        time.sleep(0.05)
+    pinger.join(timeout=1)
+
+    def since(at):
+        return None if at is None else round((at - asked) * 1e3, 1)
+
+    marks = [(at, what) for at, what in frames(trace) if at >= asked]
+    closed = next((at for at, w in marks if w == "import window closed"), None)
+    result["closed_ms"] = since(closed)
+    result["main_frame_after_close_ms"] = since(built)
+    result["window_gone_ms"] = since(gone)
+    result["answered_ms"] = since(answered.get("at"))
+    result["main_thread_waits"] = waits
+    # The longest gap between two main window frames after the close.
+    roots = [at for at, w in marks if w == f"begins {ROOT}"]
+    gaps = [b - a for a, b in zip(roots, roots[1:])]
+    result["longest_main_gap_ms"] = round(max(gaps) * 1e3, 1) if gaps else None
+    if built is None:
+        result["error"] = f"the main window drew nothing within {args.timeout:.0f} s of the close"
+    shot = comp.screenshot(f"after-{way}")
+    if "path" in shot:
+        shutil.copy(shot["path"], args.out / f"after-{way}.png")
+    return result
+
+
+def run(args, index: int) -> list[dict]:
+    work = args.work / f"run-{index}"
+    w = world(work)
+    trace = args.out / f"run-{index}.stderr"
+    comp = build_compositor(config(f"helios-import-close-{index}"))
+    if hasattr(comp, "set_log_dir"):
+        comp.set_log_dir(args.out / "wbox-log")
+    results: list[dict] = []
+    try:
+        cmd = [
+            "sh",
+            "-c",
+            'exec "$0" "$@" 2>"$HELIOS_TRACE_FILE"',
+            str(args.gui),
+            "--vault",
+            str(w["vault"]),
+            str(w["workspace"]),
+        ]
+        env = {
+            "XDG_CONFIG_HOME": str(work / "config"),
+            "XDG_STATE_HOME": str(w["state"]),
+            "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
+            "HELIOS_AGENT_WRITE": "1",
+            "HELIOS_FRAME_TRACE": "1",
+            "HELIOS_TRACE_FILE": str(trace),
+        }
+        launched = comp.launch(cmd, env)
+        if "error" in launched:
+            return [{"run": index, "error": f"launch: {launched['error']}"}]
+        proc = comp.state.app_proc
+
+        def alive() -> bool:
+            return proc is not None and proc.poll() is None
+
+        agent = Agent(w["socket"])
+        if not wait_socket(agent, alive, 90):
+            return [{"run": index, "error": "no agent socket"}]
+        pid = helios_pid(w["state"])
+        listed = comp.list_windows().get("windows", [])
+        main_title = next((x["title"] for x in listed if x.get("app_id") == APP_ID), "")
+        for way in args.ways:
+            if not alive():
+                results.append({"run": index, "close": way, "error": "helios-gui exited"})
+                break
+            try:
+                r = one_close(args, comp, agent, trace, pid, main_title, way)
+            except Exception as exc:  # report and go on with the next way
+                r = {"close": way, "error": repr(exc)}
+            r["run"] = index
+            results.append(r)
+            print(json.dumps(r), flush=True)
+            time.sleep(1)
+        return results
+    finally:
+        comp.stop()
+        state = w["state"]
+        if state.exists():
+            shutil.copytree(state, args.out / f"run-{index}-state", dirs_exist_ok=True)
+
+
+def table(results: list[dict]) -> str:
+    keys = (
+        ("closed_ms", "import window closed"),
+        ("main_frame_after_close_ms", "**main window's next frame**"),
+        ("window_gone_ms", "import window gone (compositor)"),
+        ("answered_ms", "agent socket answered"),
+        ("longest_main_gap_ms", "longest gap between main frames"),
+    )
+    head = ["", *[f"{r.get('run')}: {r.get('close')}" for r in results]]
+    rows = [head, ["---"] * len(head)]
+    for key, label in keys:
+        rows.append([label, *["" if r.get(key) is None else f"{r[key]:.0f}" for r in results]])
+    rows.append(["error", *[r.get("error", "") for r in results]])
+    return (
+        "Milliseconds since the close was asked.\n\n"
+        + "\n".join("| " + " | ".join(row) + " |" for row in rows)
+        + "\n"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gui", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--folder", type=Path, default=FIXTURES)
+    parser.add_argument("--ways", default=",".join(WAYS))
+    parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--settle", type=float, default=4.0)
+    parser.add_argument("--timeout", type=float, default=40.0)
+    parser.add_argument("--budget-ms", type=float, default=0.0)
+    parser.add_argument("--work", type=Path, default=Path("/tmp/import-close"))
+    args = parser.parse_args()
+    args.ways = [w for w in args.ways.replace("+", ",").split(",") if w]
+    unknown = set(args.ways) - set(WAYS)
+    if unknown or not args.ways:
+        print(f"unknown ways: {sorted(unknown)}", file=sys.stderr)
+        return 2
+    args.out.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("XDG_RUNTIME_DIR", "/tmp/xdg")
+    results: list[dict] = []
+    for i in range(args.runs):
+        results += run(args, i + 1)
+    with open(args.out / "import-close.jsonl", "w") as f:
+        for r in results:
+            f.write(json.dumps(r) + "\n")
+    report = table(results)
+    (args.out / "import-close.md").write_text(report)
+    print(report)
+    failed = [r for r in results if "error" in r]
+    if args.budget_ms > 0:
+        failed += [
+            r
+            for r in results
+            if (r.get("main_frame_after_close_ms") or float("inf")) > args.budget_ms
+        ]
+        print(f"budget: the main window draws within {args.budget_ms:.0f} ms of the close")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

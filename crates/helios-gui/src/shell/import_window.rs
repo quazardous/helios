@@ -305,6 +305,7 @@ impl ImportWindow {
     /// again.
     fn cancel(&mut self, ctx: &Egui) {
         let _stall = crate::stall::section("import window: closing");
+        crate::start::trace_frame("import window closed");
         self.open = false;
         self.wizard = None;
         self.clear_contents();
@@ -1265,6 +1266,7 @@ impl Shell {
         }
         let mut w = self.import.get_mut();
         w.save();
+        crate::start::trace_frame("import window closed");
         w.open = false;
         w.clear_contents();
     }
