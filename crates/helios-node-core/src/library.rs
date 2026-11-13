@@ -2,8 +2,8 @@
 //! verbs: the stacks (`library.stacks.*`), darktable's sidecars kept as
 //! versions (`library.importDarktable`, one sidecar file with
 //! `library.keepSidecar`) and an image's edit read and saved
-//! (`library.edit.head`, `library.edit.save`), photos' fields set
-//! (`library.fields.set`). `helios-node` lists them
+//! (`library.edit.head`, `library.edit.save`), photos' fields set and
+//! read (`library.fields.set`, `library.fields.get`). `helios-node` lists them
 //! with its verbs; the desktop's node serves them too
 //! ([`crate::endpoint`]). They run on the vault the node owns, by whoever
 //! the call's origin names; the stacks' changes are announced on the
@@ -27,6 +27,7 @@ pub const IDS: &[&str] = &[
     "library.edit.head",
     "library.edit.save",
     "library.fields.set",
+    "library.fields.get",
     "library.stacks.list",
     "library.stacks.create",
     "library.stacks.dissolve",
@@ -98,9 +99,21 @@ pub fn specs() -> Vec<CommandSpec> {
         library("library.fields.set", "Set photos' fields").params(object(&[(
             "changes",
             json!({ "type": "array", "items": { "type": "object" },
-                    "description": "{image, field, value}: a field set (value null clears it)" }),
+                    "description": "{image, field, value, op}: a field set (value null clears it); \
+                                    op `add` or `remove` puts a name in or out of a set field, \
+                                    `set_if_absent` sets only an empty field" }),
             true,
         )])),
+        library("library.fields.get", "Read photos' fields")
+            .params(object(&[
+                ("images", images(), true),
+                (
+                    "fields",
+                    json!({ "type": "array", "items": { "type": "string" } }),
+                    true,
+                ),
+            ]))
+            .read_only(),
         library("library.stacks.list", "List the stacks").read_only(),
         library("library.stacks.create", "Stack images").params(object(&[
             ("images", images(), true),
@@ -228,6 +241,30 @@ fn named<S: Store>(vault: &Vault<S>, params: &Value, field: &str) -> Result<Vec<
         .collect()
 }
 
+/// What one change of `library.fields.set` does: its `op` (`set` when
+/// not given) with its `value`.
+fn op_of(change: &Value) -> Result<helios_vault::fields::Op, String> {
+    use helios_vault::fields::Op;
+    let value = &change["value"];
+    let name = || {
+        value
+            .as_str()
+            .map(String::from)
+            .ok_or_else(|| "`add` and `remove` take a name as `value`".to_string())
+    };
+    Ok(match change["op"].as_str().unwrap_or("set") {
+        "set" => Op::Set(Some(value.clone()).filter(|v| !v.is_null())),
+        "set_if_absent" => Op::SetIfAbsent(value.clone()),
+        "add" => Op::Add(name()?),
+        "remove" => Op::Remove(name()?),
+        other => {
+            return Err(format!(
+                "`{other}` is not an op: set, set_if_absent, add or remove"
+            ));
+        }
+    })
+}
+
 fn text<'a>(params: &'a Value, field: &str) -> &'a str {
     params[field].as_str().unwrap_or_default()
 }
@@ -310,16 +347,28 @@ pub fn run<S: Store>(
                 let field = change["field"]
                     .as_str()
                     .ok_or("a change names its `field`")?;
-                commands.push(match &change["value"] {
-                    Value::Null => {
-                        helios_vault::Command::with(id, field, helios_vault::fields::Op::Set(None))
-                    }
-                    value => helios_vault::Command::set(id, field, value.clone()),
-                });
+                commands.push(helios_vault::Command::with(id, field, op_of(change)?));
             }
             vault
                 .apply(&commands, origin, None, now())
                 .map(|report| json!({ "report": to_json(&report) }))
+        }
+        "library.fields.get" => {
+            let ids = named(vault, params, "images")?;
+            let names: Vec<&str> = params["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let rows = vault.fields_of(&ids, &names)?;
+            Ok(json!({
+                "rows": ids
+                    .iter()
+                    .zip(rows)
+                    .map(|(id, fields)| json!({ "id": id.hex(), "fields": fields }))
+                    .collect::<Vec<_>>(),
+            }))
         }
         "library.stacks.list" => vault.stacks().map(|s| json!({ "stacks": to_json(&s) })),
         "library.stacks.create" => {

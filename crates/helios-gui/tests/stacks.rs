@@ -108,14 +108,14 @@ fn proposals_are_declined_corrected_or_accepted_from_the_panel() {
 
     // Asked, over every image: two groups, nothing applied.
     shell.stack_review_mut().suggest(Vec::new());
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     let first = shell.stack_review().decisions()[0].clone();
     assert_eq!(first.proposal.groups.len(), 2);
     assert!(persist.vault().stacks().unwrap().is_empty());
 
     // Declined: recorded, no stack made, the proposal leaves the panel.
     shell.stack_review_mut().decline(&first.id);
-    persist.frame(&mut shell, 11.0);
+    persist.frame_settled(&mut shell, 11.0);
     let declined = decision(&persist, &first.id);
     assert_eq!(declined.status, Status::Declined);
     assert_eq!(by(&declined), "human");
@@ -125,7 +125,7 @@ fn proposals_are_declined_corrected_or_accepted_from_the_panel() {
     // Asked again; the bracket unchecked: only the burst is taken, a
     // correction of the proposal.
     shell.stack_review_mut().suggest(Vec::new());
-    persist.frame(&mut shell, 12.0);
+    persist.frame_settled(&mut shell, 12.0);
     let second = shell.stack_review().decisions()[0].clone();
     let bracket_group = second
         .proposal
@@ -138,7 +138,7 @@ fn proposals_are_declined_corrected_or_accepted_from_the_panel() {
         .check(&second.id, bracket_group, false);
     assert!(!shell.stack_review().checked(&second.id, bracket_group));
     shell.stack_review_mut().accept_checked(&second.id).unwrap();
-    persist.frame(&mut shell, 13.0);
+    persist.frame_settled(&mut shell, 13.0);
     let corrected = decision(&persist, &second.id);
     assert_eq!(corrected.status, Status::Accepted);
     assert_eq!(by(&corrected), "corrected");
@@ -149,12 +149,12 @@ fn proposals_are_declined_corrected_or_accepted_from_the_panel() {
     // Asked again: the stacked burst is left out, the bracket accepted as
     // proposed.
     shell.stack_review_mut().suggest(Vec::new());
-    persist.frame(&mut shell, 14.0);
+    persist.frame_settled(&mut shell, 14.0);
     let third = shell.stack_review().decisions()[0].clone();
     assert_eq!(third.proposal.groups.len(), 1);
     assert_eq!(third.left_out.len(), 3);
     shell.stack_review_mut().accept_all(&third.id);
-    persist.frame(&mut shell, 15.0);
+    persist.frame_settled(&mut shell, 15.0);
     assert_eq!(by(&decision(&persist, &third.id)), "accepted");
     assert_eq!(persist.vault().stacks().unwrap().len(), 2);
     let tops: Vec<String> = persist
@@ -173,7 +173,7 @@ fn proposals_are_declined_corrected_or_accepted_from_the_panel() {
 fn accepting_with_nothing_checked_is_refused() {
     let (dir, mut shell, mut persist, _, _) = setup("none-checked");
     shell.stack_review_mut().suggest(Vec::new());
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     let d = shell.stack_review().decisions()[0].clone();
     for g in 0..d.proposal.groups.len() {
         shell.stack_review_mut().check(&d.id, g, false);
@@ -188,10 +188,10 @@ fn accepting_with_nothing_checked_is_refused() {
 fn stacks_show_collapsed_and_expand_on_demand() {
     let (dir, mut shell, mut persist, burst, bracket) = setup("collapsed");
     shell.stack_review_mut().suggest(Vec::new());
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     let d = shell.stack_review().decisions()[0].id.clone();
     shell.stack_review_mut().accept_all(&d);
-    persist.frame(&mut shell, 11.0);
+    persist.frame_settled(&mut shell, 11.0);
     let stack = persist
         .vault()
         .stacks()
@@ -234,7 +234,7 @@ fn stacks_show_collapsed_and_expand_on_demand() {
         .unwrap();
     h.run();
     assert!(h.state().library().is_expanded(&burst[1].hex()));
-    persist.frame(h.state_mut(), 12.0);
+    persist.frame_settled(h.state_mut(), 12.0);
     let kept = persist.vault().stack(&stack.id).unwrap().unwrap();
     assert!(kept.expanded);
     // Opened in the Stacks panel too: drawn without an answer waiting.

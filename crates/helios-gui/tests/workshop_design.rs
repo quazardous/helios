@@ -722,7 +722,7 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
         Origin::User,
         None,
     );
-    persist.frame(h.state_mut(), 1.0);
+    persist.frame_settled(h.state_mut(), 1.0);
     assert_eq!(sessions(&persist), [(dropped.clone(), false)]);
     // An agent cannot keep it.
     let out = agent(
@@ -740,7 +740,7 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
         json!({ "cmd": "workshop.session", "action": "close" }),
     ));
     assert_eq!(closed["dropped"], json!(true));
-    persist.frame(h.state_mut(), 2.0);
+    persist.frame_settled(h.state_mut(), 2.0);
     assert!(sessions(&persist).is_empty(), "nothing left behind");
 
     // A new design: a new session, kept by the user.
@@ -758,12 +758,12 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
     }
     h.get_by_label("Keep").click();
     follow(&mut h);
-    persist.frame(h.state_mut(), 3.0);
+    persist.frame_settled(h.state_mut(), 3.0);
     assert_eq!(sessions(&persist), [(kept.clone(), true)]);
     // One more design: the kept session ends and stays; the new one is
     // recorded, unkept, when the desktop goes.
     let (_, left) = designed(&mut h, &root);
-    persist.frame(h.state_mut(), 4.0);
+    persist.frame_settled(h.state_mut(), 4.0);
     assert_eq!(sessions(&persist).len(), 2);
     drop(persist);
     drop(h);

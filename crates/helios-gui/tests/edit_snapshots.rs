@@ -132,7 +132,7 @@ fn a_snapshot_is_pinned_to_the_version_of_the_next_save() {
     let snap = take(&shell, "Bright");
     assert_eq!(listed(&shell), ["Bright*"]);
     assert!(kept(&dir, image).is_empty());
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     // The save of that step pins it.
     assert_eq!(listed(&shell), ["Bright"]);
     let head = persist.session().unwrap().head().unwrap();
@@ -150,7 +150,7 @@ fn a_snapshot_is_pinned_to_the_version_of_the_next_save() {
         &PopOrigin::User,
     )
     .unwrap();
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     assert!(kept(&dir, image).is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -160,15 +160,15 @@ fn a_snapshot_never_saved_is_lost_when_the_desktop_quits() {
     let dir = scratch("pending");
     let (mut shell, mut persist, image) = open(&dir);
     set(&shell, 1.0);
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     take(&shell, "Kept");
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     // Taken, then another step before the edit is saved: its state is
     // never saved, so it stays pending.
     set(&shell, 1.5);
     take(&shell, "Passed");
     set(&shell, 2.0);
-    persist.frame(&mut shell, 3.0);
+    persist.frame_settled(&mut shell, 3.0);
     assert_eq!(listed(&shell), ["Kept", "Passed*"]);
     // And one taken after the last save, the desktop quitting first.
     take(&shell, "Late");
@@ -186,12 +186,12 @@ fn a_restore_is_one_step_an_undo_takes_back_after_reopening() {
     let (mut shell, mut persist, _) = open(&dir);
     // The image unedited, then two steps.
     let start = take(&shell, "Original");
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     set(&shell, 1.0);
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     let bright = take(&shell, "Bright");
     set(&shell, 2.0);
-    persist.frame(&mut shell, 3.0);
+    persist.frame_settled(&mut shell, 3.0);
     drop((shell, persist));
     // Reopened: both are there, restored from the vault.
     let (mut shell, mut persist, _) = open(&dir);
@@ -203,7 +203,7 @@ fn a_restore_is_one_step_an_undo_takes_back_after_reopening() {
     assert!(outcome.ok(), "{outcome:?}");
     assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
     assert_eq!(steps(&shell), before + 1, "one step");
-    persist.frame(&mut shell, 4.0);
+    persist.frame_settled(&mut shell, 4.0);
     shell.follow_snapshots();
     assert!(
         shell
@@ -229,7 +229,7 @@ fn a_restore_waits_for_a_drag_and_a_dry_run_changes_nothing() {
     let dir = scratch("drag");
     let (mut shell, mut persist, _) = open(&dir);
     let snap = take(&shell, "Original");
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     set(&shell, 1.0);
     let g = shell
         .values()

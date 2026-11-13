@@ -139,11 +139,11 @@ fn a_hovered_step_shows_its_values_and_leaving_restores_the_live_ones() {
     let dir = scratch("step");
     let (mut shell, mut persist, image) = open(&dir);
     set(&shell, 1.0);
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     // A live value no other float sums to, to see it come back exactly.
     let now = 0.1 + 0.2;
     set(&shell, now);
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     let snap = history::take_snapshot(
         shell.app().handle(),
         Some(&EDIT),
@@ -153,7 +153,7 @@ fn a_hovered_step_shows_its_values_and_leaving_restores_the_live_ones() {
         &PopOrigin::User,
     )
     .unwrap();
-    persist.frame(&mut shell, 3.0);
+    persist.frame_settled(&mut shell, 3.0);
     assert_eq!(rendered(&shell).to_bits(), now.to_bits());
     let before = (counters(&shell), versions(&dir, image));
     let kept = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap())
@@ -176,7 +176,7 @@ fn a_hovered_step_shows_its_values_and_leaving_restores_the_live_ones() {
     // Nothing written: the store's value, no step, no save, no vault
     // write, even after a frame of the vault's link.
     assert_eq!(live(&shell).to_bits(), now.to_bits());
-    persist.frame(&mut shell, 4.0);
+    persist.frame_settled(&mut shell, 4.0);
     assert_eq!((counters(&shell), versions(&dir, image)), before);
     let after = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap())
         .snapshots(&image)
@@ -207,7 +207,7 @@ fn a_drag_gets_no_preview_and_keeps_its_values() {
     let (mut shell, mut persist, _) = open(&dir);
     set(&shell, 1.0);
     set(&shell, 2.0);
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     let g = shell
         .values()
         .lock()
