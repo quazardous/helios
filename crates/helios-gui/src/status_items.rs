@@ -1,8 +1,8 @@
 //! Helios's items in egui-pop's status bar, each shown only where it
 //! means something (a `when` clause over the context stack's keys): the
 //! number of images in the library, the zoom and the history's length in
-//! the darkroom, the picks and rejects while culling. egui-pop's own
-//! breadcrumb and mode chips start the bar.
+//! the darkroom, the picks and rejects while culling, each after its
+//! icon. egui-pop's own breadcrumb and mode chips start the bar.
 //!
 //! Each frame [`Items::frame`] measures what the items say and publishes
 //! an event (`helios.status.<item>`) when it changed; each item's reducer
@@ -68,6 +68,7 @@ pub fn indicators(frames: &[FrameSpec]) -> Vec<Indicator> {
     let frame = |id| frames.iter().find(|f| f.id == id);
     let item = |id: &str, weight: i32, priority: i32| {
         Indicator::new(id, "", id)
+            .icon(icon(id))
             .weight(weight)
             .priority(priority)
             .reduce(reduce)
@@ -92,6 +93,16 @@ pub fn indicators(frames: &[FrameSpec]) -> Vec<Indicator> {
         items.push(item(CULLED, 30, PRIORITY_COUNTS).during(culling));
     }
     items
+}
+
+/// An item's icon, drawn before its text.
+fn icon(item: &str) -> &'static str {
+    match item {
+        IMAGES => "phosphor:images",
+        ZOOM => "phosphor:magnifying-glass",
+        HISTORY => "history",
+        _ => "phosphor:check-square",
+    }
 }
 
 /// The zoom's card: what it is, and the zooms one click away.

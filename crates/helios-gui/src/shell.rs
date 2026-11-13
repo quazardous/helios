@@ -3294,6 +3294,7 @@ impl Shell {
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
+            d.icons.insert(format!("theme.{name}"), "theme".into());
         }
     }
 
