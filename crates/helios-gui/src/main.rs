@@ -1336,7 +1336,9 @@ impl App {
         quit::requested();
         if let Some(persist) = &mut self.persist {
             let _stall = helios_gui::stall::section("vault written (closing frame)");
-            persist.frame(&mut self.shell, seconds_f64());
+            // The node's answers waited for: nothing changed is left
+            // unwritten as Helios closes.
+            persist.frame_settled(&mut self.shell, seconds_f64());
             quit::mark("vault written (closing frame)");
         }
     }
@@ -1460,6 +1462,12 @@ impl eframe::App for App {
             {
                 let _stall = helios_gui::stall::section("the library's changes sent to the vault");
                 persist.frame(&mut self.shell, seconds_f64());
+            }
+            // A write still with the node: its answer is picked up at a
+            // coming frame.
+            if persist.busy() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(16));
             }
             // A scan changed where copies are (a disk plugged in or
             // out): the photos' badges and thumbnails follow.

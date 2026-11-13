@@ -90,21 +90,21 @@ fn culling_keys_mark_the_vault_through_the_library_steps() {
     h.key_press(Key::Num4);
     h.key_press(Key::Num6);
     h.run();
-    persist.frame(h.state_mut(), 1.0);
+    persist.frame_settled(h.state_mut(), 1.0);
     assert_eq!(stored(&path, 1, PICKED), Some(json!(true)));
     assert_eq!(stored(&path, 1, RATING), Some(json!(4)));
     assert_eq!(stored(&path, 1, LABELS), Some(json!(["red"])));
     // X rejects: the pick goes, the stars stay.
     h.key_press(Key::X);
     h.run();
-    persist.frame(h.state_mut(), 2.0);
+    persist.frame_settled(h.state_mut(), 2.0);
     assert_eq!(stored(&path, 1, PICKED), None);
     assert_eq!(stored(&path, 1, REJECTED), Some(json!(true)));
     assert_eq!(stored(&path, 1, RATING), Some(json!(4)));
     // U unflags.
     h.key_press(Key::U);
     h.run();
-    persist.frame(h.state_mut(), 3.0);
+    persist.frame_settled(h.state_mut(), 3.0);
     assert_eq!(stored(&path, 1, REJECTED), None);
     let entry = h.state().library().entries[0].clone();
     assert_eq!(
@@ -145,7 +145,7 @@ fn an_agent_s_library_commands_reach_the_vault() {
     );
     h.run();
     h.run();
-    persist.frame(h.state_mut(), 1.0);
+    persist.frame_settled(h.state_mut(), 1.0);
     assert_eq!(stored(&path, 1, TAGS), Some(json!(["beach", "sea"])));
     assert_eq!(stored(&path, 1, PICKED), Some(json!(true)));
     assert_eq!(stored(&path, 1, LABELS), Some(json!(["blue"])));
@@ -260,18 +260,18 @@ fn the_search_filter_is_a_vault_query() {
     let query = helios_gui::library::query_of(&picked_and_rated);
     assert_eq!(query.min_rating, Some(3));
     assert_eq!(query.flags, ["pick"]);
-    persist.frame(h.state_mut(), 2.0);
+    persist.frame_settled(h.state_mut(), 2.0);
     assert_eq!(h.state().library().shown(), [id(2).hex()]);
     let tagged = Filter {
         tags: vec!["sea".into()],
         ..Filter::default()
     };
     h.state_mut().library_mut().set_filter(tagged);
-    persist.frame(h.state_mut(), 3.0);
+    persist.frame_settled(h.state_mut(), 3.0);
     assert_eq!(h.state().library().shown(), [id(3).hex()]);
     // Cleared: every image again.
     h.state_mut().library_mut().set_filter(Filter::default());
-    persist.frame(h.state_mut(), 4.0);
+    persist.frame_settled(h.state_mut(), 4.0);
     assert_eq!(h.state().library().shown().len(), 3);
     h.run();
     drop((h, persist, other));

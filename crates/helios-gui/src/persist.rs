@@ -4,10 +4,14 @@
 //! between them. Once per frame ([`Persist::frame`]) it
 //!
 //! - writes what the user changed in the library, as field commands in one
-//!   batch; whether the batch is kept or refused, the touched images are
-//!   read back and shown as the vault holds them, so a failed write never
-//!   leaves the grid showing a value that is not stored (and a field
-//!   another process changed meanwhile shows too);
+//!   batch, through the desktop's node (`library.fields.set` on its
+//!   in-process client, [`Persist::node`]): the call runs off the UI
+//!   thread and its answer is picked up at a later frame, the writes
+//!   sent one after the other in the order made. Whether the batch is
+//!   kept or refused, the touched images are read back through the node
+//!   (`library.fields.get`) and shown as the vault holds them, so a failed
+//!   write never leaves the grid showing a value that is not stored (and
+//!   a field another process changed meanwhile shows too);
 //! - applies the vault's `vault.field_changed` events (from any writer in
 //!   this process sharing its bus) to the library, and its stacks again
 //!   on `vault.stack_changed`;
@@ -33,20 +37,21 @@
 //!   pinned snapshots are kept in the vault; they are read back, with
 //!   the values of their versions, when the image opens.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
+use helios_inspect::client::{Client, Pending};
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
-use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
+use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::{
     CursorId, EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version,
     edit,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::Shell;
 use crate::dialogs::Level;
@@ -100,6 +105,60 @@ pub struct Persist<S: Store> {
     ///
     /// [`LibraryHistory::rev`]: crate::library_history::LibraryHistory::rev
     history_rev: u64,
+    /// The desktop's node, in this process: the library's writes go
+    /// through it.
+    node: Client,
+    /// The writes waiting their turn, in the order made.
+    writes: VecDeque<Write>,
+    /// The write the node runs now.
+    writing: Option<(Write, Pending)>,
+    /// The reads back of written images, with the images each names.
+    reading: Vec<(BTreeSet<String>, Pending)>,
+}
+
+/// A write of the library sent to the node.
+enum Write {
+    /// Fields of photos (`library.fields.set`).
+    Fields(Vec<Change>),
+    /// A stack expanded or collapsed (`library.stacks.expand`).
+    Expand(String, bool),
+}
+
+impl Write {
+    /// The node's method and params.
+    fn call(&self) -> (&'static str, Value) {
+        match self {
+            Self::Fields(changes) => (
+                "library.fields.set",
+                json!({ "changes": changes.iter().map(change_json).collect::<Vec<_>>() }),
+            ),
+            Self::Expand(stack, expanded) => (
+                "library.stacks.expand",
+                json!({ "stack": stack, "expanded": expanded }),
+            ),
+        }
+    }
+
+    /// The images whose fields it writes.
+    fn images(&self) -> impl Iterator<Item = &str> {
+        let changes = match self {
+            Self::Fields(changes) => changes.as_slice(),
+            Self::Expand(..) => &[],
+        };
+        changes.iter().map(|c| c.image.as_str())
+    }
+}
+
+/// One change of `library.fields.set`.
+fn change_json(change: &Change) -> Value {
+    use helios_vault::fields::Op;
+    let (op, value) = match &change.op {
+        Op::Set(value) => ("set", value.clone().unwrap_or(Value::Null)),
+        Op::SetIfAbsent(value) => ("set_if_absent", value.clone()),
+        Op::Add(name) => ("add", json!(name)),
+        Op::Remove(name) => ("remove", json!(name)),
+    };
+    json!({ "image": change.image, "field": change.field, "op": op, "value": value })
 }
 
 /// The edit of the image shown.
@@ -254,7 +313,7 @@ struct Shown {
     order: Order,
 }
 
-impl<S: Store> Persist<S> {
+impl<S: Store + 'static> Persist<S> {
     /// A vault on `store`, announcing its changes on `bus`.
     pub fn new(store: S, bus: Arc<Bus>) -> Self {
         Self::on(Arc::new(Vault::new(store).with_bus(bus.clone())), bus)
@@ -264,6 +323,13 @@ impl<S: Store> Persist<S> {
     /// changes are announced on `bus`.
     pub fn on(vault: Arc<Vault<S>>, bus: Arc<Bus>) -> Self {
         let events = bus.subscribe();
+        let service = helios_node_core::endpoint::VaultService::new(
+            vault.clone(),
+            bus.clone(),
+            helios_core::jobs::Jobs::new(bus.clone()),
+            &format!("desktop-{}", std::process::id()),
+        );
+        let node = Client::in_process(Arc::new(service)).with_origin(WHO);
         Self {
             vault,
             bus,
@@ -272,6 +338,141 @@ impl<S: Store> Persist<S> {
             locations_changed: false,
             shown: Mutex::new(None),
             history_rev: 0,
+            node,
+            writes: VecDeque::new(),
+            writing: None,
+            reading: Vec::new(),
+        }
+    }
+
+    /// The client of the desktop's node the library's writes go through.
+    pub fn node(&self) -> &Client {
+        &self.node
+    }
+
+    /// Whether a call to the node is still to be answered: the host
+    /// comes back at the next frame to pick its answer up.
+    pub fn busy(&self) -> bool {
+        self.writing.is_some() || !self.writes.is_empty() || !self.reading.is_empty()
+    }
+
+    /// Waits until the node has answered every call made, and shows what
+    /// they did: before Helios closes, so nothing the user changed is
+    /// left unwritten, and in tests that look at the vault right after.
+    pub fn settle(&mut self, shell: &mut Shell) {
+        // A node that never answers is not waited for forever.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while self.busy() && std::time::Instant::now() < deadline {
+            self.pump(shell);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        self.hear(shell);
+    }
+
+    /// [`Persist::frame`], then [`Persist::settle`].
+    pub fn frame_settled(&mut self, shell: &mut Shell, now: f64) {
+        self.frame(shell, now);
+        self.settle(shell);
+    }
+
+    /// Picks up the node's answers that came and sends the next write.
+    fn pump(&mut self, shell: &mut Shell) {
+        if let Some(answer) = self.writing.as_ref().and_then(|(_, p)| p.poll()) {
+            let (write, _) = self.writing.take().expect("a write runs");
+            self.written(shell, write, answer);
+        }
+        if self.writing.is_none()
+            && let Some(write) = self.writes.pop_front()
+        {
+            let (method, params) = write.call();
+            let pending = self.node.call(method, params);
+            self.writing = Some((write, pending));
+        }
+        let mut still = Vec::new();
+        for (images, pending) in std::mem::take(&mut self.reading) {
+            match pending.poll() {
+                None => still.push((images, pending)),
+                Some(answer) => self.show_read(shell, &images, answer),
+            }
+        }
+        self.reading = still;
+    }
+
+    /// A write answered: a refusal said, the written images read back.
+    fn written(
+        &mut self,
+        shell: &mut Shell,
+        write: Write,
+        answer: Result<Value, helios_inspect::rpc::Error>,
+    ) {
+        match (&write, answer) {
+            (_, Ok(_)) => {}
+            (Write::Fields(_), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-not-saved",
+                    "Not saved, the library shows what was saved last: { $error }",
+                )
+                .with("error", e.message),
+            ),
+            (Write::Expand(..), Err(e)) => shell.notify(Level::Warning, e.message),
+        }
+        let touched: BTreeSet<String> = write.images().map(String::from).collect();
+        if touched.is_empty() {
+            return;
+        }
+        // Kept or not, show what the vault holds now.
+        let pending = self.node.call(
+            "library.fields.get",
+            json!({ "images": touched, "fields": SHOWN }),
+        );
+        self.reading.push((touched, pending));
+    }
+
+    /// Shows the stored fields read back, but for images with a write
+    /// still to come: that write's own read back shows them.
+    fn show_read(
+        &self,
+        shell: &mut Shell,
+        images: &BTreeSet<String>,
+        answer: Result<Value, helios_inspect::rpc::Error>,
+    ) {
+        let rows = match answer {
+            Ok(answer) => answer["rows"].as_array().cloned().unwrap_or_default(),
+            Err(e) => {
+                shell.notify(
+                    Level::Error,
+                    Message::new(
+                        "gui-vault-unreadable",
+                        "Cannot read the library: { $error }",
+                    )
+                    .with("error", e.message),
+                );
+                return;
+            }
+        };
+        let coming: BTreeSet<&str> = self
+            .writing
+            .iter()
+            .map(|(w, _)| w)
+            .chain(&self.writes)
+            .flat_map(Write::images)
+            .collect();
+        let mut library = shell.library_mut();
+        for row in rows {
+            let Some(id) = row["id"].as_str() else {
+                continue;
+            };
+            if !images.contains(id) || coming.contains(id) {
+                continue;
+            }
+            for field in SHOWN {
+                library.show_field(
+                    id,
+                    field,
+                    Some(&row["fields"][field]).filter(|v| !v.is_null()),
+                );
+            }
         }
     }
 
@@ -806,7 +1007,7 @@ impl<S: Store> Persist<S> {
         let at = now.max(0.0) as u64;
         let changes = shell.take_library_changes();
         if !changes.is_empty() {
-            self.write(shell, changes, at);
+            self.writes.push_back(Write::Fields(changes));
         }
         shell.set_edited_image(self.editing.as_ref().map(|e| e.session.image().hex()));
         if let Some(e) = &mut self.editing {
@@ -817,11 +1018,12 @@ impl<S: Store> Persist<S> {
         self.pin_snapshots(shell);
         self.answer_stacks(shell, at);
         let expansions = shell.library_mut().take_expansions();
-        for (stack, expanded) in expansions {
-            if let Err(e) = self.vault.set_stack_expanded(&stack, expanded) {
-                shell.notify(Level::Warning, e);
-            }
-        }
+        self.writes.extend(
+            expansions
+                .into_iter()
+                .map(|(stack, expanded)| Write::Expand(stack, expanded)),
+        );
+        self.pump(shell);
         // The library sorted another way: read again in that order.
         if shell.library_mut().take_resort()
             && let Err(e) = self.fill_library(shell)
@@ -875,6 +1077,11 @@ impl<S: Store> Persist<S> {
                 ),
             }
         }
+        self.hear(shell);
+    }
+
+    /// Shows what the vault's events say changed.
+    fn hear(&mut self, shell: &mut Shell) {
         let mut stacks_changed = false;
         let mut decided = false;
         while let Ok(event) = self.events.try_recv() {
@@ -1030,55 +1237,6 @@ impl<S: Store> Persist<S> {
                     .with("error", err),
             );
         }
-    }
-
-    fn write(&self, shell: &mut Shell, changes: Vec<Change>, now: u64) {
-        let touched: BTreeSet<String> = changes.iter().map(|c| c.image.clone()).collect();
-        let commands: Result<Vec<Command>, String> = changes
-            .into_iter()
-            .map(|c| Ok(Command::with(ImageId::from_hex(&c.image)?, &c.field, c.op)))
-            .collect();
-        if let Err(e) = commands.and_then(|c| self.vault.apply(&c, WHO, None, now)) {
-            shell.notify(
-                Level::Warning,
-                Message::new(
-                    "gui-library-not-saved",
-                    "Not saved, the library shows what was saved last: { $error }",
-                )
-                .with("error", e),
-            );
-        }
-        // Kept or not, show what the vault holds now.
-        if let Err(e) = self.show_stored(shell, &touched) {
-            shell.notify(
-                Level::Error,
-                Message::new(
-                    "gui-vault-unreadable",
-                    "Cannot read the library: { $error }",
-                )
-                .with("error", e),
-            );
-        }
-    }
-
-    /// Shows the stored fields of some images of the library.
-    fn show_stored(&self, shell: &mut Shell, images: &BTreeSet<String>) -> Result<(), String> {
-        let ids = images
-            .iter()
-            .map(|h| ImageId::from_hex(h))
-            .collect::<Result<Vec<_>, _>>()?;
-        let rows = self.vault.fields_of(&ids, &SHOWN)?;
-        let mut library = shell.library_mut();
-        for (id, fields) in ids.iter().zip(rows) {
-            for field in SHOWN {
-                library.show_field(
-                    &id.hex(),
-                    field,
-                    fields.get(field).filter(|v| !Value::is_null(v)),
-                );
-            }
-        }
-        Ok(())
     }
 }
 

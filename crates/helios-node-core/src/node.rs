@@ -47,6 +47,31 @@ use crate::volumes::VolumeWatch;
 /// How often the node flushes the vault, whatever the windows do.
 pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
 
+/// Opens the library (vault file) at `path` for a node to own, its
+/// folder made first (the default library's, on the first launch). A
+/// catalogue snapshot whose restore was asked for
+/// (`library.catalogue.restore`) is put in place first, the catalogue it
+/// replaces kept aside; a restore that fails leaves the catalogue as it
+/// was, and says why in the log.
+pub fn open_library(path: &std::path::Path) -> Result<helios_vault_sqlite::SqliteStore, String> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    match helios_vault_sqlite::snapshot::apply_pending(path, now) {
+        Ok(Some(r)) => log::info!(
+            "catalogue restored from {}; the one it replaced is kept as {}",
+            r.from.display(),
+            r.aside.display()
+        ),
+        Ok(None) => {}
+        Err(e) => log::error!("catalogue restore refused: {e}"),
+    }
+    helios_vault_sqlite::SqliteStore::open(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Work the node runs for its clients, which outlives their windows
 /// (exports, backups, the health check): what a quit asks
 /// about, and what the node's stop cancels or waits for.

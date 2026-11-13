@@ -127,7 +127,7 @@ impl World {
     fn plug(&mut self, h: &mut Harness<'_, Shell>, volumes: &[&Volume], now: u64) {
         self.plugged.set(volumes);
         scan::scan(&self.vault, &self.plugged.volumes(), "studio-pc", now, None).unwrap();
-        self.persist.frame(h.state_mut(), now as f64);
+        self.persist.frame_settled(h.state_mut(), now as f64);
         assert!(self.persist.take_locations_changed(), "the scan is heard");
         h.state_mut().refresh_volumes();
         self.persist.fill_library(h.state_mut()).unwrap();
@@ -340,7 +340,7 @@ fn an_offline_photo_shows_its_badge_and_plugging_its_disk_in_clears_it() {
         None,
     )
     .unwrap();
-    world2.persist.frame(h.state_mut(), 0.0);
+    world2.persist.frame_settled(h.state_mut(), 0.0);
     assert!(world2.persist.take_locations_changed());
     world2.persist.fill_library(h.state_mut()).unwrap();
     assert_eq!(badges(&h), ["missing"]);
@@ -475,7 +475,7 @@ fn photos_show_their_backups_and_the_search_filters_on_them() {
         h.state()
             .library_mut()
             .set_filter(egui_pop::views::library::filter::Filter::parse(typed));
-        world.persist.frame(h.state_mut(), 1.0);
+        world.persist.frame_settled(h.state_mut(), 1.0);
         h.state().library().shown()
     };
     assert_eq!(

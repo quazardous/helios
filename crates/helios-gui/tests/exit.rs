@@ -108,7 +108,7 @@ impl Desktop {
     /// (`on_exit`). Then the node, asked to quit, closes the vault on its
     /// own; the host waits for it.
     fn gui_ends(mut self, mut h: egui_kittest::Harness<'static, Shell>) {
-        self.persist.frame(h.state_mut(), 10.0);
+        self.persist.frame_settled(h.state_mut(), 10.0);
         drop(self.persist);
         drop(h);
         let link = self.node.link();

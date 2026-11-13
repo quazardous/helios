@@ -168,7 +168,7 @@ fn grid(h: &Harness<'_, Shell>) -> Vec<String> {
 fn settle(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at: f64) {
     for i in 0..3 {
         h.run();
-        persist.frame(h.state_mut(), at + f64::from(i));
+        persist.frame_settled(h.state_mut(), at + f64::from(i));
     }
     h.run();
 }

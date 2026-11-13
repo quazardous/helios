@@ -14,9 +14,5 @@ reason = "reads a Lightroom catalog, a foreign database"
 
 # Until the clients go through the node.
 [[allow]]
-path = "crates/helios-gui/src/platform.rs"
-reason = "the desktop opens the vault for its embedded node; it moves to the node's Client"
-
-[[allow]]
 path = "crates/helios-node/src/main.rs"
 reason = "the headless node opens its vault; the opening moves into helios-node-core"
