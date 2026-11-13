@@ -1483,7 +1483,11 @@ impl eframe::App for App {
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        start::trace_frame(format_args!("begins {:?}", raw_input.viewport_id));
+        start::trace_frame(if raw_input.viewport_id == egui::ViewportId::ROOT {
+            "main window begins"
+        } else {
+            "another window begins"
+        });
         self.frames.begin();
     }
 

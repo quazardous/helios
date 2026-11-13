@@ -55,7 +55,7 @@ from wbox.server import build_compositor
 APP_ID = "helios-gui"
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE.parents[1] / "crates/helios-plugin/tests/fixtures/rated-photos"
-ROOT = "ViewportId(ROOT)"
+MAIN_BEGINS = "main window begins"
 WAYS = ("cancel", "escape", "compositor", "import")
 
 
@@ -197,12 +197,17 @@ def stack(pid: int | None) -> str | None:
     return None
 
 
-def import_title(comp, main_title: str) -> str | None:
+def import_title(comp, before: set) -> str | None:
+    """The window listed now that was not before the import window opened."""
     listed = comp.list_windows()
     for w in listed.get("windows", []):
-        if w.get("app_id") == APP_ID and w.get("title") != main_title:
+        if (w.get("app_id"), w.get("title")) not in before:
             return w.get("title")
     return None
+
+
+def listed_windows(comp) -> set:
+    return {(w.get("app_id"), w.get("title")) for w in comp.list_windows().get("windows", [])}
 
 
 def close(comp, agent: Agent, way: str, title: str) -> None:
@@ -237,14 +242,16 @@ def one_close(
     args, comp, agent: Agent, trace: Path, pid, main_title: str, way: str, cover: str
 ) -> dict:
     result: dict = {"close": way, "cover": cover}
+    before = listed_windows(comp)
     agent.command("library.importWindow", {"source": str(args.folder), "copy": False})
     deadline = time.monotonic() + 30
     title = None
     while time.monotonic() < deadline and title is None:
-        title = import_title(comp, main_title)
+        title = import_title(comp, before)
         time.sleep(0.1)
     if title is None:
-        return {**result, "error": "no import window listed"}
+        listed = comp.list_windows()
+        return {**result, "error": f"no import window listed: {listed}"}
     # Left to read the folder (scans, glances, thumbnails).
     time.sleep(args.settle)
     if cover == "covered":
@@ -283,15 +290,15 @@ def one_close(
     while time.monotonic() < end:
         marks = [(at, what) for at, what in frames(trace) if at >= asked]
         if began is None:
-            began = next((at for at, w in marks if w == f"begins {ROOT}"), None)
+            began = next((at for at, w in marks if w == MAIN_BEGINS), None)
         closed = next((at for at, w in marks if w == "import window closed"), None)
         if built is None and closed is not None:
             # The first main window frame begun after the one that closed it.
             built = next(
-                (at for at, w in marks if w == f"begins {ROOT}" and at > closed + 1e-4),
+                (at for at, w in marks if w == MAIN_BEGINS and at > closed + 1e-4),
                 None,
             )
-        if gone is None and import_title(comp, main_title) is None:
+        if gone is None and import_title(comp, before) is None:
             gone = time.time()
         if built is not None and gone is not None and "at" in answered:
             break
@@ -316,7 +323,7 @@ def one_close(
     result["answered_ms"] = since(answered.get("at"))
     result["main_thread_waits"] = waits
     # The longest gap between two main window frames after the close.
-    roots = [at for at, w in marks if w == f"begins {ROOT}"]
+    roots = [at for at, w in marks if w == MAIN_BEGINS]
     gaps = [b - a for a, b in zip(roots, roots[1:])]
     result["longest_main_gap_ms"] = round(max(gaps) * 1e3, 1) if gaps else None
     if built is None:
