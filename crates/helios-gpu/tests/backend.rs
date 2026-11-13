@@ -189,6 +189,40 @@ fn sigmoid_on_the_gpu_matches_the_cpu() {
     }
 }
 
+#[test]
+fn curve1d_on_the_gpu_matches_the_cpu_with_its_gamut_compression() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    // Every hue, scene luminance up to 2, channels up to several times
+    // their luminance: bright saturated pixels the gamut compression
+    // brings back under 1, and pixels within its knee.
+    let input = helios_core::Image::from_fn(Region::sized(72, 48), 4, |x, y, c| {
+        if c == 3 {
+            return 1.0;
+        }
+        let hue = x as f32 * std::f32::consts::TAU / 72.0;
+        let level = 0.02 * 100f32.powf(y as f32 / 47.0);
+        level * (1.0 + 0.9 * (hue + c as f32 * 2.094).cos())
+    });
+    let module = ModuleRef::new(helios_bricks::Curve1d);
+    let tone = vec![0.0, 0.0, 0.1, 0.2, 0.4, 0.6, 0.8, 0.85];
+    for chroma in [vec![], vec![1.0, 1.1, 1.2, 1.2, 1.1, 1.0, 0.9, 0.8]] {
+        let params = Params::new()
+            .with("tone", Value::List(tone.clone()))
+            .with("chroma", Value::List(chroma.clone()));
+        let c = check(
+            &gpu,
+            &module,
+            &params,
+            &Context::new(),
+            &input,
+            input.region(),
+        )
+        .unwrap();
+        assert!(c.max_abs < 1e-4, "chroma {chroma:?}: {c:?}");
+    }
+}
+
 /// exposure → blur → sigmoid over a region, on an engine with or without
 /// the GPU.
 fn chain(engine: &helios_core::Engine, input: &helios_core::Image) -> helios_core::Image {

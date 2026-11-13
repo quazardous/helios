@@ -30,6 +30,7 @@
 //! Same inputs, same bits: f64 throughout, every sum in a fixed order, no
 //! threads, no random start, fixed iteration counts.
 
+use helios_bricks::curve1d;
 use helios_photo::color::{IDENTITY, Mat3, apply as mat_apply};
 use helios_photo::compare::{delta_e_2000, lab};
 use serde::{Deserialize, Serialize};
@@ -53,7 +54,9 @@ pub use table::{
 ///
 /// 2: the hue/saturation table, the matrix refined on Delta E 2000, the
 /// tone-only look of near-black frames.
-pub const FITTER_VERSION: u32 = 2;
+/// 3: the render compresses the gamut toward the luminance before its
+/// clamp, so bright saturated pixels roll off instead of clipping.
+pub const FITTER_VERSION: u32 = 3;
 
 /// The proxy's long edge, in pixels.
 pub const PROXY: usize = 192;
@@ -408,7 +411,10 @@ pub struct Look {
 }
 
 /// The reference render of a look: a scene-linear working RGB pixel to
-/// display-linear working RGB, in [0, 1].
+/// display-linear working RGB, in [0, 1]. After the tone and chroma
+/// curves, a pixel whose brightest channel nears or passes 1 is
+/// desaturated toward its luminance (`core.curve1d@1`'s gamut
+/// compression), the hue and the luminance kept, before the clamp.
 pub fn apply(look: &Look, rgb: [f64; 3]) -> [f64; 3] {
     render(
         &look.matrix,
@@ -431,7 +437,28 @@ fn render(
         Some(c) => chroma_applied(c, o),
         None => o,
     };
-    o.map(|v| v.clamp(0.0, 1.0))
+    compressed(o).map(|v| v.clamp(0.0, 1.0))
+}
+
+/// `core.curve1d@1`'s gamut compression in double precision: `p`
+/// desaturated toward its luminance `d` once its brightest channel takes
+/// more than the knee's share of the room between `d` and 1, that share
+/// rolled off toward 1. Within the knee, or at white or above, unchanged.
+fn compressed(p: [f64; 3]) -> [f64; 3] {
+    let knee = f64::from(curve1d::KNEE);
+    let d = luma(p);
+    let room = 1.0 - d;
+    if !positive(room) {
+        return p;
+    }
+    let x = (p[0].max(p[1]).max(p[2]) - d) / room;
+    if !positive(x - knee) {
+        return p;
+    }
+    let y = (x - knee) / (1.0 - knee);
+    let g = knee + (1.0 - knee) * y / (1.0 + y);
+    let f = g / x;
+    p.map(|v| d + f * (v - d))
 }
 
 /// The colour stages: the matrix, then the table.
