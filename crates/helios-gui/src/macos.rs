@@ -197,6 +197,7 @@ mod dock {
     }
 
     /// Adds the reopen method to the application delegate's class, once.
+    #[allow(unsafe_code)] // AppKit: one method added to the delegate class through the Objective-C runtime
     pub fn follow_reopen(ctx: egui::Context) {
         if WAKER.set(ctx).is_err() {
             return;
