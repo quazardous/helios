@@ -551,11 +551,13 @@ fn search(
     rule: Option<&helios_vault::fields::Backups>,
 ) -> Result<(Vec<String>, helios_vault::Facets), String> {
     let query = query_json(query);
-    let rule = rule.map_or(Value::Null, helios_node_core::cursor::backups_json);
-    let counted = reader.read(
-        "library.facets",
-        json!({ "query": query.clone(), "rule": rule }),
-    )?;
+    // No rule, no `rule` term: the node's schema takes an object, never
+    // null, and refuses the whole call otherwise.
+    let mut params = json!({ "query": query.clone() });
+    if let Some(rule) = rule {
+        params["rule"] = helios_node_core::cursor::backups_json(rule);
+    }
+    let counted = reader.read("library.facets", params)?;
     let facets = serde_json::from_value(counted["facets"].clone())
         .map(helios_vault::Facets)
         .map_err(|e| format!("the node's facet counts: {e}"))?;
