@@ -2,7 +2,8 @@
 //! section 2): one document per session in `workshops/sessions`, keyed by
 //! the session's id. The vault only keeps them; what they hold is the
 //! desktop's (`helios_template::session`). Beside them, each workshop
-//! version's decision book in `workshops/books` (`helios_template::run`).
+//! version's decision book in `workshops/books` (`helios_template::run`),
+//! and each run's record in `workshops/runs`, which its review reads.
 
 use serde_json::Value;
 
@@ -14,6 +15,10 @@ pub const SESSIONS: &str = "workshops/sessions";
 /// The namespace of the workshops' decision books: one document per
 /// workshop version (`id@version`), its runs' junction answers.
 pub const BOOKS: &str = "workshops/books";
+
+/// The namespace of the runs' records: one document per run, by its id:
+/// each photo's state, flags, provenance and values, for the review.
+pub const RUNS: &str = "workshops/runs";
 
 impl<S: Store> Vault<S> {
     /// A session's record, by its id.
@@ -45,6 +50,16 @@ impl<S: Store> Vault<S> {
     /// Writes a workshop version's decision book.
     pub fn set_workshop_book(&self, workshop: &str, book: &Value) -> Result<(), String> {
         self.transaction(|store| store.set_document(BOOKS, workshop, Some(book)))
+    }
+
+    /// A run's record, by the run's id.
+    pub fn workshop_run(&self, run: &str) -> Result<Option<Value>, String> {
+        self.store.lock().expect("store lock").document(RUNS, run)
+    }
+
+    /// Writes (or, with `None`, drops) a run's record.
+    pub fn set_workshop_run(&self, run: &str, record: Option<&Value>) -> Result<(), String> {
+        self.transaction(|store| store.set_document(RUNS, run, record))
     }
 }
 

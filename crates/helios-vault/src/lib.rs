@@ -66,7 +66,7 @@ pub use fields::{
 };
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
-pub use undo::{Change, Changes, ImageRows, Replayed};
+pub use undo::{Change, Changes, DocumentChange, ImageRows, Replayed};
 pub use versions::{Version, VersionId};
 
 /// The folders tree's counts ([`Store::folders`]): for each volume (`None`:

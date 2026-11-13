@@ -675,6 +675,14 @@ gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo
 
+gui-history-workshop-accept = Workshop “{ $name }”: a photo accepted
+
+gui-history-workshop-decide = Workshop “{ $name }”: a junction decided
+
+gui-history-workshop-fix = Workshop “{ $name }”: a photo fixed
+
+gui-history-workshop-revert = Workshop “{ $name }”: a photo reverted
+
 gui-history-workshop-run = Workshop “{ $name }” on { $count } photos
 
 gui-image-not-reopened = The image left open could not be opened again: { $error }
@@ -2203,6 +2211,22 @@ gui-workshops-find = Find
 
 gui-workshops-find-hint = what you want: brighter, less contrast…
 
+gui-workshops-flag-ai-budget = AI budget spent
+
+gui-workshops-flag-at-limit = at its limit
+
+gui-workshops-flag-deviation = far from the test photos
+
+gui-workshops-flag-fallback = no AI: fallback used
+
+gui-workshops-flag-low-confidence = AI unsure
+
+gui-workshops-flag-not-monotonic = could not aim
+
+gui-workshops-flag-target-missed = target missed
+
+gui-workshops-flag-unlike = unlike the test photos
+
 gui-workshops-ghost = { $param }: { $value } proposed by { $author }
 
 gui-workshops-ghost-accept = Accept
@@ -2230,6 +2254,56 @@ gui-workshops-none = No workshops in this workspace yet
 gui-workshops-none-found = No workshop found for these words
 
 gui-workshops-open = Open in graph
+
+gui-workshops-review-accept = Accept
+
+gui-workshops-review-accept-hint = Write this photo with the values the run found, flags and all
+
+gui-workshops-review-accepted = accepted
+
+gui-workshops-review-applied = applied
+
+gui-workshops-review-close = Close
+
+gui-workshops-review-counts = { $photos } photos, { $flagged } to review, { $held } held; AI calls: { $calls }
+
+gui-workshops-review-decide = Decide
+
+gui-workshops-review-decide-hint = Answer this junction for this photo: recorded in the workshop's decision book, a re-run takes it
+
+gui-workshops-review-failed = failed
+
+gui-workshops-review-fixed = fixed by hand
+
+gui-workshops-review-flagged-only = Only photos to review
+
+gui-workshops-review-held = held
+
+gui-workshops-review-last = Review the last run
+
+gui-workshops-review-refresh = Refresh
+
+gui-workshops-review-rerun = Re-run held and decided ({ $count })
+
+gui-workshops-review-rerun-hint = Run the workshop again on the held photos and those with a junction decided: a new run, one undo step
+
+gui-workshops-review-revert = Revert
+
+gui-workshops-review-revert-hint = Take the run's version of this photo out: its edit before the run is current again
+
+gui-workshops-review-reverted = reverted
+
+gui-workshops-review-set = Set
+
+gui-workshops-review-set-hint = Fix this value on this photo by hand: a new version, its flag cleared
+
+gui-workshops-review-stopped = stopped the run
+
+gui-workshops-review-title = Review: { $name }, run { $n }
+
+gui-workshops-review-unchanged = unchanged
+
+gui-workshops-review-value = { $slider }: { $before } before, { $after } after ({ $source })
 
 gui-workshops-row-ai = Keep as AI
 
@@ -2262,6 +2336,16 @@ gui-workshops-session-keep-hint = Keep this session's record: who set what, why,
 gui-workshops-session-kept = Kept
 
 gui-workshops-shipped = Shipped with Helios
+
+gui-workshops-source-ai = AI
+
+gui-workshops-source-aimed = aimed
+
+gui-workshops-source-fallback = fallback
+
+gui-workshops-source-fixed = fixed
+
+gui-workshops-source-user = set by hand
 
 gui-workshops-unit-percent = %
 

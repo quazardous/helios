@@ -2338,12 +2338,16 @@ fn main() -> Result<(), String> {
                     shell.jobs(),
                     shell.library_history(),
                 ));
+                let reviewer = runner.clone();
                 shell.set_workshop_runner(Arc::new(move |ask, dry| {
                     if dry {
                         runner.plan(&ask)
                     } else {
                         runner.start(ask)
                     }
+                }));
+                shell.set_workshop_reviewer(Arc::new(move |args, who, ask| {
+                    reviewer.review(args, who, ask)
                 }));
             }
             // The node runs the exports (its jobs): they go on when the

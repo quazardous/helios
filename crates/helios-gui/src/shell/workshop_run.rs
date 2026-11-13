@@ -18,11 +18,82 @@ use crate::workshop_run::RunAsk;
 /// The host's runner: a run asked, and whether it is a dry run.
 pub type RunFn = Arc<dyn Fn(RunAsk, bool) -> Result<Value, String> + Send + Sync>;
 
+/// The host's review of runs (`Runner::review`): the arguments, who asks,
+/// and the workshop applied in the workspace (none when it is not).
+pub type ReviewFn =
+    Arc<dyn Fn(&Value, &str, Option<RunAsk>) -> Result<Value, String> + Send + Sync>;
+
 impl Shell {
     /// Where `workshop.run` hands its runs (the host, once the library is
     /// open).
     pub fn set_workshop_runner(&mut self, runner: RunFn) {
         self.core.workshop_runner = Some(runner);
+    }
+
+    /// Where `workshop.review` reads and changes runs (the host's runner).
+    pub fn set_workshop_reviewer(&mut self, reviewer: ReviewFn) {
+        self.core.workshop_reviewer = Some(reviewer);
+    }
+
+    /// The run the Workshops panel reviews, if any.
+    pub fn workshop_review(&self) -> Option<Value> {
+        self.focus.workshops.borrow().review.clone()
+    }
+
+    /// The workshop applied as `node` (the selected one by default) as a
+    /// run of it on no photo yet.
+    fn workshop_ask(&self, node: Option<&str>, origin: &Origin) -> Result<RunAsk, String> {
+        let node = match node.filter(|s| !s.is_empty()) {
+            Some(n) => n.to_string(),
+            None => crate::modules::selected(&super::lock(&self.core.values))
+                .ok_or("no workshop is selected")?,
+        };
+        let state = self.workspace_state().ok_or("no workspace is open")?;
+        let (r, file) = self.applied_workshop(&state, &node)?;
+        Ok(RunAsk {
+            node,
+            workshop: r.to_string(),
+            name: file.name.clone(),
+            catalogue: state.bundle.catalogue(&self.workspace_catalogue()),
+            bundle: state.bundle.clone(),
+            images: Vec::new(),
+            on_breach: None,
+            who: crate::persist::who(origin),
+        })
+    }
+
+    /// `workshop.review`: the run (`run`, the last one started here by
+    /// default) listed flagged photos first, or an action on one of its
+    /// photos (`action`: accept, revert, fix, decide, rerun); the Workshops
+    /// panel shows the answer.
+    pub(super) fn review_workshop(
+        &mut self,
+        args: &Value,
+        origin: &Origin,
+    ) -> Result<Value, String> {
+        let reviewer = self
+            .core
+            .workshop_reviewer
+            .clone()
+            .ok_or("no library is open: a run's review reads it")?;
+        let mut args = args.clone();
+        if args["run"].as_str().is_none_or(str::is_empty) {
+            let last = self.focus.workshops.borrow().last_run.clone();
+            args["run"] = Value::from(last.ok_or("no run to review: name its `run`")?);
+        }
+        let node = args["node"].as_str().map(String::from);
+        let ask = self.workshop_ask(node.as_deref(), origin).ok();
+        let who = crate::persist::who(origin);
+        let answer = reviewer(&args, &who, ask)?;
+        let mut panel = self.focus.workshops.borrow_mut();
+        if args["action"] == "rerun" {
+            panel.last_run = answer["run"].as_str().map(String::from);
+            panel.review = None;
+        } else {
+            panel.last_run = answer["run"].as_str().map(String::from);
+            panel.review = Some(answer.clone());
+        }
+        Ok(answer)
     }
 
     /// `workshop.run`: the applied workshop `node` (the selected one by
@@ -42,13 +113,7 @@ impl Shell {
             .workshop_runner
             .clone()
             .ok_or("no library is open: a run takes its photos from one")?;
-        let node = match args["node"].as_str().filter(|s| !s.is_empty()) {
-            Some(n) => n.to_string(),
-            None => crate::modules::selected(&super::lock(&self.core.values))
-                .ok_or("no workshop is selected")?,
-        };
-        let state = self.workspace_state().ok_or("no workspace is open")?;
-        let (r, file) = self.applied_workshop(&state, &node)?;
+        let mut ask = self.workshop_ask(args["node"].as_str(), origin)?;
         let ids: Vec<String> = match &args["images"] {
             Value::Array(a) => a
                 .iter()
@@ -83,16 +148,12 @@ impl Shell {
                 return Err(format!("`on_breach`: `{other}` is not flag, hold or stop"));
             }
         };
-        let ask = RunAsk {
-            node,
-            workshop: r.to_string(),
-            name: file.name.clone(),
-            catalogue: state.bundle.catalogue(&self.workspace_catalogue()),
-            bundle: state.bundle.clone(),
-            images,
-            on_breach,
-            who: crate::persist::who(origin),
-        };
-        runner(ask, dry)
+        ask.images = images;
+        ask.on_breach = on_breach;
+        let answer = runner(ask, dry)?;
+        if !dry {
+            self.focus.workshops.borrow_mut().last_run = answer["run"].as_str().map(String::from);
+        }
+        Ok(answer)
     }
 }

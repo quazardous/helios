@@ -6,7 +6,10 @@
 //! photo, writes each edit with its provenance as one library step; a
 //! second run asks nothing and writes nothing new; `hold` and `stop`
 //! keep photos unwritten; undo restores every edit but one edited after
-//! the run.
+//! the run. The review lists the photos to review first; a fix clears
+//! its flag and records provenance `user`; a junction decided by an
+//! agent goes into the decision book and a re-run takes it; a held photo
+//! accepted, a written one reverted, from the panel too.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -107,7 +110,7 @@ impl Asker for Fake {
 
 struct Library {
     vault: Arc<Vault<MemoryStore>>,
-    runner: Runner<MemoryStore>,
+    runner: Arc<Runner<MemoryStore>>,
     history: LibraryHistory,
     calls: Arc<Mutex<u64>>,
     images: Vec<ImageId>,
@@ -155,24 +158,26 @@ fn library(name: &str) -> Library {
     let history = LibraryHistory::default();
     let calls = Arc::new(Mutex::new(0));
     let counted = calls.clone();
-    let runner = Runner::new(
-        vault.clone(),
-        Arc::new(Engine::new(bus.clone())),
-        Jobs::new(bus),
-        history.clone(),
-    )
-    .with_load(Arc::new(move |path, _| {
-        let mut graph = Graph::new();
-        let src = graph.add_source("input", photo(index(path)));
-        let node = graph
-            .add_module(NODE, ModuleRef::composite(built.clone()), &Params::new())
-            .map_err(|e| e.to_string())?;
-        graph
-            .connect(src, helios_template::SOURCE_PORT, node, "input")
-            .map_err(|e| e.to_string())?;
-        Ok(graph)
-    }))
-    .with_askers(Arc::new(move || Box::new(Fake(counted.clone()))));
+    let runner = Arc::new(
+        Runner::new(
+            vault.clone(),
+            Arc::new(Engine::new(bus.clone())),
+            Jobs::new(bus),
+            history.clone(),
+        )
+        .with_load(Arc::new(move |path, _| {
+            let mut graph = Graph::new();
+            let src = graph.add_source("input", photo(index(path)));
+            let node = graph
+                .add_module(NODE, ModuleRef::composite(built.clone()), &Params::new())
+                .map_err(|e| e.to_string())?;
+            graph
+                .connect(src, helios_template::SOURCE_PORT, node, "input")
+                .map_err(|e| e.to_string())?;
+            Ok(graph)
+        }))
+        .with_askers(Arc::new(move || Box::new(Fake(counted.clone())))),
+    );
     Library {
         vault,
         runner,
@@ -352,4 +357,282 @@ fn undo_restores_every_edit_but_one_edited_after_the_run() {
             assert_eq!(head(&lib, i).id, lib.first[i].id, "photo {i} restored");
         }
     }
+}
+
+fn review(lib: &Library, args: Json, who: &str) -> Result<Json, String> {
+    lib.runner.review(&args, who, Some(ask(lib, None)))
+}
+
+fn photo_of<'a>(review: &'a Json, lib: &Library, i: usize) -> &'a Json {
+    let hex = lib.images[i].hex();
+    review["photos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["image"] == hex.as_str())
+        .unwrap()
+}
+
+#[test]
+fn the_review_lists_flagged_first_a_fix_records_user_and_a_decided_junction_is_rerun() {
+    let lib = library("review");
+    let o = run(&lib, None);
+    assert_eq!(o.written.len(), PHOTOS);
+    let r = review(&lib, json!({ "run": "run" }), "user").unwrap();
+    assert_eq!(r["counts"]["photos"], json!(PHOTOS), "{r}");
+    assert_eq!(r["counts"]["written"], json!(PHOTOS), "{r}");
+    // The photos to review first, each with its flags.
+    let photos = r["photos"].as_array().unwrap();
+    let flagged = |p: &Json| !p["flags"].as_array().unwrap().is_empty();
+    let first_clean = photos.iter().position(|p| !flagged(p)).unwrap();
+    assert!(first_clean > 0, "{r}");
+    assert!(
+        photos[first_clean..].iter().all(|p| !flagged(p)),
+        "flagged first"
+    );
+    assert_eq!(r["counts"]["flagged"], json!(first_clean), "{r}");
+    // Before and after, and where each value comes from.
+    let mid = photo_of(&r, &lib, PHOTOS / 2);
+    assert_eq!(
+        mid["provenance"]["brightness"]["kind"],
+        json!("aimed"),
+        "{mid}"
+    );
+    assert!(mid["after"]["brightness"].as_f64().unwrap() > 0.5, "{mid}");
+    assert!(mid["before"].is_object(), "{mid}");
+    assert_ne!(
+        mid["before"]["brightness"], mid["after"]["brightness"],
+        "{mid}"
+    );
+    // A filter per flag.
+    let low = review(
+        &lib,
+        json!({ "run": "run", "flag": "low_confidence" }),
+        "user",
+    )
+    .unwrap();
+    let low_photos = low["photos"].as_array().unwrap();
+    assert!(!low_photos.is_empty());
+    assert!(low_photos.iter().all(|p| {
+        p["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["flag"] == "low_confidence")
+    }));
+    // The darkest photos' junction is pending: the AI was unsure.
+    let pending = r["pending"].as_array().unwrap();
+    assert!(
+        pending
+            .iter()
+            .any(|j| j["image"] == lib.images[0].hex().as_str() && j["junction"] == "lift"),
+        "{r}"
+    );
+
+    // An agent decides photo 0's junction: in the book, with its author.
+    let steps = lib.history.line().undo.len();
+    let d = review(
+        &lib,
+        json!({ "run": "run", "action": "decide", "image": lib.images[0].hex(), "junction": "lift", "value": 0.03 }),
+        "agent:test",
+    )
+    .unwrap();
+    assert!(
+        !d["pending"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|j| j["image"] == lib.images[0].hex().as_str()),
+        "{d}"
+    );
+    assert!(
+        d["rerun"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(lib.images[0].hex())),
+        "{d}"
+    );
+    let book = lib.vault.workshop_book(WORKSHOP).unwrap().unwrap();
+    assert!(
+        book["decided"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|w| w == "agent:test"),
+        "{book}"
+    );
+    assert_eq!(lib.history.line().undo.len(), steps + 1, "one step");
+    // Accept, revert and rerun are the user's alone.
+    let e = review(
+        &lib,
+        json!({ "run": "run", "action": "revert", "image": lib.images[1].hex() }),
+        "agent:test",
+    )
+    .unwrap_err();
+    assert!(e.contains("user's alone"), "{e}");
+    // A re-run of photo 0 takes the decision from the book: no call, the
+    // value decided, its flag gone.
+    let calls = *lib.calls.lock().unwrap();
+    let mut again = ask(&lib, None);
+    again.images = vec![lib.images[0]];
+    let o = lib
+        .runner
+        .run(&again, "rerun", &AtomicBool::new(false), None)
+        .unwrap();
+    assert_eq!(o.calls, 0);
+    assert_eq!(*lib.calls.lock().unwrap(), calls);
+    let rr = review(&lib, json!({ "run": "rerun" }), "user").unwrap();
+    let p0 = photo_of(&rr, &lib, 0);
+    assert_eq!(p0["after"]["lift"].as_f64(), Some(0.03), "{p0}");
+    assert_eq!(p0["provenance"]["lift"]["kind"], json!("ai"), "{p0}");
+    assert!(
+        !p0["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["name"] == "lift"),
+        "{p0}"
+    );
+
+    // A fix by hand: a version, provenance `user`, its flag cleared.
+    let i = (0..PHOTOS)
+        .find(|&i| {
+            photo_of(&r, &lib, i)["flags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["name"] == "lift")
+                && i != 0
+        })
+        .expect("another photo with the junction flagged");
+    let f = review(
+        &lib,
+        json!({ "run": "run", "action": "fix", "image": lib.images[i].hex(), "values": { "lift": 0.02 } }),
+        "user",
+    )
+    .unwrap();
+    let p = photo_of(&f, &lib, i);
+    assert_eq!(p["state"], json!("fixed"), "{p}");
+    assert_eq!(p["provenance"]["lift"]["kind"], json!("user"), "{p}");
+    assert!(
+        !p["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["name"] == "lift"),
+        "{p}"
+    );
+    let h = head(&lib, i);
+    assert_eq!(
+        h.meta.as_ref().unwrap()["workshop_run"]["provenance"]["lift"]["kind"],
+        json!("user")
+    );
+    let params = &edit::modules(&h.edit).unwrap()[NODE].1;
+    assert_eq!(
+        params.get("lift").and_then(helios_core::Value::as_f64),
+        Some(0.02)
+    );
+    // Out of range: refused.
+    let e = review(
+        &lib,
+        json!({ "run": "run", "action": "fix", "image": lib.images[i].hex(), "values": { "lift": 5.0 } }),
+        "user",
+    )
+    .unwrap_err();
+    assert!(e.contains("outside its range"), "{e}");
+
+    // Revert a written photo: its first version is current again.
+    let m = PHOTOS / 2;
+    let v = review(
+        &lib,
+        json!({ "run": "run", "action": "revert", "image": lib.images[m].hex() }),
+        "user",
+    )
+    .unwrap();
+    assert_eq!(photo_of(&v, &lib, m)["state"], json!("reverted"));
+    assert_eq!(head(&lib, m).id, lib.first[m].id);
+}
+
+#[test]
+fn a_held_photo_is_accepted_and_the_held_ones_rerun() {
+    let lib = library("accept");
+    let o = run(&lib, Some(OnBreach::Hold));
+    let held = &o.held[0].image;
+    let i = lib.images.iter().position(|id| id.hex() == *held).unwrap();
+    let a = review(
+        &lib,
+        json!({ "run": "run", "action": "accept", "image": held }),
+        "user",
+    )
+    .unwrap();
+    assert_eq!(photo_of(&a, &lib, i)["state"], json!("accepted"));
+    let h = head(&lib, i);
+    assert_eq!(h.parents, vec![lib.first[i].id]);
+    assert_eq!(
+        h.label.as_deref(),
+        Some("workshop Backlit (run 1, accepted)")
+    );
+    // The other held photos re-run: a new run, its record when it ends.
+    let left = a["rerun"].as_array().unwrap().len();
+    assert_eq!(left, o.held.len() - 1, "{a}");
+    let started = review(&lib, json!({ "run": "run", "action": "rerun" }), "user").unwrap();
+    let id = started["run"].as_str().unwrap().to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(2);
+    let record = loop {
+        if let Some(r) = lib.vault.workshop_run(&id).unwrap() {
+            break r;
+        }
+        assert!(std::time::Instant::now() < deadline, "the re-run ends");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert_eq!(record["photos"].as_array().unwrap().len(), left);
+    let after = review(&lib, json!({ "run": "run" }), "user").unwrap();
+    assert!(after["rerun"].as_array().unwrap().is_empty(), "{after}");
+}
+
+#[test]
+fn the_panel_shows_the_review_and_accepts_a_held_photo() {
+    use egui_kittest::kittest::Queryable;
+    use helios_gui::{Experimental, Shell, headless, helios_panels_with};
+    use helios_shell::commands::Origin;
+
+    let lib = library("panel");
+    let o = run(&lib, Some(OnBreach::Hold));
+    assert!(!o.held.is_empty());
+    let config = temp("panel-config");
+    let panels = helios_panels_with(Experimental { workshops: true });
+    let mut shell = Shell::builder(panels, Some(config.join("ui"))).build();
+    shell.load_layout().unwrap();
+    let runner = lib.runner.clone();
+    let fixed = ask(&lib, None);
+    shell.set_workshop_reviewer(Arc::new(move |args, who, _| {
+        runner.review(args, who, Some(fixed.clone()))
+    }));
+    let mut h = headless::harness(shell, egui::vec2(1280.0, 1400.0));
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    h.state_mut()
+        .run("workshop.review", json!({ "run": "run" }), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    assert!(
+        h.query_by_label_contains("Review: Backlit, run 1")
+            .is_some()
+    );
+    assert!(h.query_all_by_label_contains("held").next().is_some());
+    h.get_all_by_label("Accept").next().unwrap().click();
+    for _ in 0..4 {
+        h.run();
+    }
+    let review = h.state().workshop_review().unwrap();
+    let accepted = review["photos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["state"] == "accepted")
+        .count();
+    assert_eq!(accepted, 1, "{review}");
 }

@@ -112,7 +112,7 @@ mod network_edit;
 mod workshop_design;
 mod workshop_edit;
 mod workshop_generalise;
-pub use workshop_run::RunFn as WorkshopRunFn;
+pub use workshop_run::{ReviewFn as WorkshopReviewFn, RunFn as WorkshopRunFn};
 mod workshop_run;
 mod workshop_session;
 mod workspace_edit;
@@ -960,6 +960,7 @@ impl Shell {
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
             workshop_runner: None,
+            workshop_reviewer: None,
             export_lines: std::sync::mpsc::channel(),
             log: Rc::default(),
             image_files: BTreeMap::new(),
