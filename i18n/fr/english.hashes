@@ -26,7 +26,7 @@ calibrate-default-no-camera 4311d2b263a53fdb
 calibrate-export-failed 34d8ef0da0f905fa
 calibrate-image-not-at-hand 234a30055bd04719
 calibrate-import-camera-key 513d600773f58bb4
-calibrate-import-format 537a1501a4a2b949
+calibrate-import-format f56dcbf52a309db4
 calibrate-import-id eb04288b397a9391
 calibrate-import-illuminant c68be10d4c6dba2a
 calibrate-import-matrix e899e96869e07ebf
@@ -1490,6 +1490,8 @@ panel-helios-viewport.title 4b07fc2a14723e58
 panel-helios-workshops.title 9745a6d842d9d02d
 param-blur-radius.description 54673d21b55e03e7
 param-blur-radius.label ef601b7d7553ac03
+param-chartprofile-lut.description 187e29d32c336bde
+param-chartprofile-lut.label d4647a49456d5af8
 param-chartprofile-matrix.description 0b23e5e5b646a82d
 param-chartprofile-matrix.label 77bd1893bb4fc0da
 param-chartprofile-profile.description 78e8ab50eddc3946

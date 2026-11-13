@@ -4,6 +4,10 @@ param-blur-radius =
     .description = écart type, en pixels de pleine résolution
     .label = rayon
 
+param-chartprofile-lut =
+    .description = la table résiduelle du profil : son neutre, puis le décalage de teinte (degrés) et l’échelle de saturation de chaque nœud, 72 teintes x 5 saturations x 5 valeurs ; vide pour aucune
+    .label = table
+
 param-chartprofile-matrix =
     .description = la matrice du profil, du RVB du boîtier à l’espace de travail, ligne par ligne ; toute à zéro pour aucun
     .label = matrice
