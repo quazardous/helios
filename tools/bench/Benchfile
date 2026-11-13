@@ -527,17 +527,21 @@ timeout = "15m"
 
 # kill -9 in the middle of the headless node's own jobs (a backup, an
 # import, a health run, a settings write), then a restart on the same
-# vault: the stability scenarios, on demand and before a release, never in
-# CI (`cargo stability`, the helios-node `stability` feature). JUnit and a
-# summary in /out; each scenario's log says where its kill landed
+# vault, and many clients on one node at once (`clients=`, 32 by default,
+# for `seconds=`, 60 by default, `seed=`): the stability scenarios, on
+# demand and before a release, never in CI (`cargo stability`, the
+# helios-node `stability` feature). JUnit and a summary in /out; each
+# scenario's log says where its kill landed; the stress run's report in
+# /out/many-clients.json
 [jobs.stability]
-about = "kill -9 in the node's own jobs and restart: the stability scenarios, not run by CI"
+about = "kill -9 in the node's own jobs and restart, many clients on one node: the stability scenarios, not run by CI"
 first = [{ job = "check", pass = ["branch", "crate", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+HELIOS_STRESS_CLIENTS="${clients:-32}" HELIOS_STRESS_SECONDS="${seconds:-60}" HELIOS_STRESS_SEED="${seed:-5005}" HELIOS_STRESS_REPORT=/out/many-clients.json \
 cargo stability --locked; rc=$?; \
 cp target/nextest/default/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \

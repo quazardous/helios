@@ -46,6 +46,16 @@ success-output = "final"
 filter = 'binary(stability)'
 success-output = "final"
 
+# The many-clients stress run prints its report (calls per second,
+# latencies, the node's memory and descriptors); the full run lasts a
+# minute by default (HELIOS_STRESS_SECONDS), past the 120 s hang guard
+# when it is set longer, so it gets a leash of its own. Each call and the
+# run itself have deadlines: it cannot hang.
+[[profile.default.overrides]]
+filter = 'binary(many_clients)'
+success-output = "final"
+slow-timeout = { period = "30s", terminate-after = 20 }
+
 # The library at scale: each test builds a vault of 30,000 to 100,000
 # photos, a fixed amount of work that a loaded, throttled box slows five
 # times over. Bound on counts (queries, stats), not seconds, they get a
