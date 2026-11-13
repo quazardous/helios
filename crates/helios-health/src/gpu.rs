@@ -8,7 +8,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 use helios_core::Message;
 use serde_json::json;
 
-use crate::{Check, Context, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Finding, Fix, Level};
+
+/// The owner of the GPU checks.
+pub const OWNER: &str = "gpu";
+
+/// The GPU module's checks known without the desktop: the adapter in use
+/// (the kernels' check, [`Kernels`], is added by the desktop).
+pub fn checks() -> Vec<Arc<dyn Check>> {
+    vec![Arc::new(AdapterCheck)]
+}
 
 pub const ADAPTER: &str = "gpu.adapter";
 pub const KERNELS: &str = "gpu.kernels";
@@ -114,6 +123,12 @@ impl Check for AdapterCheck {
 
     fn title(&self) -> Message {
         Message::new("health-gpu-adapter", "The GPU")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("The adapter Helios renders on, while a hardware one is present")
+            .levels(&[Level::Ok, Level::Warning])
+            .fixes(&["links.open"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -229,6 +244,12 @@ impl Check for Kernels {
 
     fn title(&self) -> Message {
         Message::new("health-gpu-kernels", "GPU kernels")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Each GPU kernel compiles on the adapter in use")
+            .levels(&[Level::Ok, Level::Warning])
+            .fixes(&["links.open"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
