@@ -65,25 +65,34 @@ for line in sys.stdin:
             reply["result"] = {"found": "nothing"}
         elif check == "rogue":
             # a level its declaration does not name
-            reply["result"] = {"findings": [{
-                "level": "problem",
-                "message": {"key": "", "english": "rogue"},
-            }]}
+            reply["result"] = {
+                "findings": [
+                    {
+                        "level": "problem",
+                        "message": {"key": "", "english": "rogue"},
+                    }
+                ]
+            }
         else:
-            reply["result"] = {"findings": [
-                {
-                    "about": "disk",
-                    "level": "warning",
-                    "message": {"key": "", "english": "The testee's disk is full"},
-                    "detail": {"key": "", "english": "accounts: %d" % len(params.get("accounts") or [])},
-                    "fix": {
-                        "command": "testee.repair",
-                        "args": {"disk": 1},
-                        "label": {"key": "", "english": "Repair"},
+            reply["result"] = {
+                "findings": [
+                    {
+                        "about": "disk",
+                        "level": "warning",
+                        "message": {"key": "", "english": "The testee's disk is full"},
+                        "detail": {
+                            "key": "",
+                            "english": f"accounts: {len(params.get('accounts') or [])}",
+                        },
+                        "fix": {
+                            "command": "testee.repair",
+                            "args": {"disk": 1},
+                            "label": {"key": "", "english": "Repair"},
+                        },
                     },
-                },
-                {"level": "ok", "message": {"key": "", "english": "The fan turns"}},
-            ]}
+                    {"level": "ok", "message": {"key": "", "english": "The fan turns"}},
+                ]
+            }
     else:
         reply["error"] = {"code": -32601, "message": f"no method {method}"}
     send(reply)
