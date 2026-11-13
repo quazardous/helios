@@ -43,7 +43,7 @@ use helios_core::{Engine, Graph, Image, Macro, ModuleRef, Params, Region, Value}
 use serde::Serialize;
 
 use crate::build::SOURCE_PORT;
-use crate::format::{At, Measure, Target, Workshop, Zone};
+use crate::format::{At, Junction, JunctionKind, Measure, Target, Workshop, Zone};
 use crate::workshop::{Range, aim_in, measure_in, ranges};
 
 /// A test photo of the session.
@@ -773,8 +773,9 @@ pub fn generalise_rendered(
 
 /// How little AI a generalised workshop keeps (section 3, "Minimum AI,
 /// measured"): `J`, the junctions left, and `A`, the AI calls expected
-/// per photo in a run. Each junction is asked once per photo until the
-/// cache and the parametric check's share are estimated, so `A = J`.
+/// per photo in a run. Each junction is asked once on a photo the
+/// decision book has not answered, so `A = J`; which photos of a set the
+/// book already answers (the cache's share) is the run's to say.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Minimum {
     #[serde(rename = "J")]
@@ -844,50 +845,68 @@ pub fn choose(
 /// the block the workshop has (`block`): a target row's target replaces
 /// any target of its slider; a fixed row drops it and its value becomes
 /// the slider's default; a zone fitted parametric is drawn by a
-/// `mask_parametric` with the fitted bounds. A junction cannot be written
-/// yet (a run asks it, slice 9): a row left on the AI is refused, saying
-/// which.
+/// `mask_parametric` with the fitted bounds. A row left on the AI is
+/// written as a junction (asked per photo by a run): a slider's with its
+/// fixed value as the default and the fallback, a zone's as the AI zone
+/// it is. Every other junction of the rows' sliders and zones is dropped.
 pub fn written(
     block: &Workshop,
     rows: &[Row],
     zones: &[ZoneRow],
 ) -> Result<(Workshop, Params), String> {
-    let junctions: Vec<&str> = rows
-        .iter()
-        .filter(|r| r.default == Choice::Ai)
-        .map(|r| r.param.as_str())
-        .chain(
-            zones
-                .iter()
-                .filter(|z| z.default == ZoneChoice::Ai)
-                .map(|z| z.zone.as_str()),
-        )
-        .collect();
-    if !junctions.is_empty() {
-        return Err(format!(
-            "an AI junction cannot be written into a workshop yet: choose a target, a value or a parametric mask for {}",
-            junctions.join(", ")
-        ));
-    }
     let mut out = block.clone();
     let mut defaults = Params::new();
     for row in rows {
         out.targets.retain(|t| t.param != row.param);
+        out.junctions.retain(|j| j.name != row.param);
         match (row.default, &row.target) {
             (Choice::Target, Some(fit)) => out.targets.push(fit.target.clone()),
+            (Choice::Ai, _) => {
+                defaults.set(&row.param, Value::Float(row.fixed));
+                out.junctions.push(Junction {
+                    kind: JunctionKind::Value,
+                    name: row.param.clone(),
+                    fallback: Some(row.fixed),
+                    note: Some(row.note.clone()),
+                });
+            }
             _ => defaults.set(&row.param, Value::Float(row.fixed)),
         }
     }
     for z in zones {
-        if let (ZoneChoice::Parametric, Some(fit)) = (z.default, &z.fit)
-            && let Some(zone) = out.zones.iter_mut().find(|x| x.name == z.zone)
-        {
-            *zone = Zone {
-                name: z.zone.clone(),
-                module: PARAMETRIC.into(),
-                params: fit.params.clone(),
-                port: "mask".into(),
-            };
+        out.junctions.retain(|j| j.name != z.zone);
+        let Some(zone) = out.zones.iter_mut().find(|x| x.name == z.zone) else {
+            return Err(format!(
+                "`{}`: the workshop has no zone of that name",
+                z.zone
+            ));
+        };
+        match (z.default, &z.fit) {
+            (ZoneChoice::Parametric, Some(fit)) => {
+                *zone = Zone {
+                    name: z.zone.clone(),
+                    module: PARAMETRIC.into(),
+                    params: fit.params.clone(),
+                    port: "mask".into(),
+                };
+            }
+            (ZoneChoice::Parametric, None) => {
+                return Err(format!("`{}`: no parametric mask was fitted", z.zone));
+            }
+            (ZoneChoice::Ai, _) => {
+                if zone.module != AI_ZONE {
+                    return Err(format!(
+                        "`{}`: drawn by `{}`, it cannot be asked to the AI",
+                        z.zone, zone.module
+                    ));
+                }
+                out.junctions.push(Junction {
+                    kind: JunctionKind::Zone,
+                    name: z.zone.clone(),
+                    fallback: None,
+                    note: Some(z.note.clone()),
+                });
+            }
         }
     }
     Ok((out, defaults))
@@ -1219,10 +1238,26 @@ mod tests {
                 params: Params::new(),
                 port: "mask".into(),
             }],
+            junctions: Vec::new(),
         };
-        // Junctions left: refused, naming them.
-        let e = written(&block, &rows, &zones).unwrap_err();
-        assert!(e.contains("haze, sky"), "{e}");
+        // Junctions left: written as such, the slider's fixed value its
+        // default and fallback, the zone still the AI's.
+        let (asked, defaults) = written(&block, &rows, &zones).unwrap();
+        let kinds: Vec<(JunctionKind, &str, Option<f64>)> = asked
+            .junctions
+            .iter()
+            .map(|j| (j.kind, j.name.as_str(), j.fallback))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (JunctionKind::Value, "haze", Some(1.5)),
+                (JunctionKind::Zone, "sky", None)
+            ]
+        );
+        assert!(asked.targets.iter().all(|t| t.param != "haze"));
+        assert_eq!(asked.zones[0].module, AI_ZONE);
+        assert_eq!(defaults.float("haze"), 1.5);
         // An unknown name, or a target where none fits: refused.
         let ask = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
             pairs
@@ -1250,5 +1285,8 @@ mod tests {
         assert!(defaults.get("backlight_lift").is_none());
         assert_eq!(out.zones[0].module, PARAMETRIC);
         assert_eq!(out.zones[0].params, fit.params);
+        // The junctions the earlier version had are dropped once decided.
+        let (again, _) = written(&asked, &rows, &zones).unwrap();
+        assert!(again.junctions.is_empty(), "{again:?}");
     }
 }

@@ -9,7 +9,9 @@ use egui_pop_model::panels::PanelSpec;
 use helios_core::{Composite, Macro, Manifest, ModuleKind, ModuleRef, Network, ParamKind};
 use serde_json::{Value as Json, json};
 
-use crate::format::{At, CompositeFile, CompositeRef, InnerDesc, Measure, PORTS, Workshop};
+use crate::format::{
+    At, CompositeFile, CompositeRef, InnerDesc, JunctionKind, Measure, PORTS, Workshop,
+};
 
 /// How deep composites may nest in one another.
 pub const MAX_DEPTH: usize = 8;
@@ -272,7 +274,9 @@ pub fn build(file: &CompositeFile, catalogue: &Catalogue, depth: usize) -> Resul
 /// its parameters fitting it. Each target: on an exposed number
 /// parameter, one per parameter, at a value its measure can take, its
 /// `zone` one of the zones, `against` given for `zones.ratio` only (a
-/// zone other than `zone`).
+/// zone other than `zone`). Each junction: once per name, a value one on
+/// an exposed number parameter no target aims, with a `fallback`, a zone
+/// one on a zone the AI draws (`mask_object`).
 fn check_workshop(
     w: &Workshop,
     built: &Macro,
@@ -346,6 +350,47 @@ fn check_workshop(
         if t.measure == Measure::ClipHigh && t.at == At::Output && !(0.0..=100.0).contains(&t.value)
         {
             return Err(at("a share of pixels is between 0 and 100 %"));
+        }
+    }
+    let mut asked = BTreeSet::new();
+    for (i, j) in w.junctions.iter().enumerate() {
+        let at = |e: &str| format!("junctions[{i}] ({}): {e}", j.name);
+        if !asked.insert(j.name.as_str()) {
+            return Err(at("a second junction of that name"));
+        }
+        match j.kind {
+            JunctionKind::Value => {
+                let p = params
+                    .iter()
+                    .find(|p| p.name == j.name)
+                    .ok_or_else(|| at("not an exposed parameter"))?;
+                if !matches!(p.kind, ParamKind::Float { .. } | ParamKind::Int { .. }) {
+                    return Err(at("a value junction is for a number parameter"));
+                }
+                if seen.contains(j.name.as_str()) {
+                    return Err(at("the parameter is aimed at a target, not asked"));
+                }
+                if !j.fallback.is_some_and(f64::is_finite) {
+                    return Err(at("a value junction needs a `fallback` number"));
+                }
+            }
+            JunctionKind::Zone => {
+                let z = w
+                    .zones
+                    .iter()
+                    .find(|z| z.name == j.name)
+                    .ok_or_else(|| at("no zone of that name"))?;
+                if z.module != crate::generalise::AI_ZONE {
+                    return Err(at(&format!(
+                        "the zone is drawn by `{}`, not asked to the AI (`{}`)",
+                        z.module,
+                        crate::generalise::AI_ZONE
+                    )));
+                }
+                if j.fallback.is_some() {
+                    return Err(at("a zone junction has no `fallback` value"));
+                }
+            }
         }
     }
     Ok(())

@@ -2057,7 +2057,7 @@ gui-workshops-automatic-hint = Turn what you set into a workshop for other photo
 
 gui-workshops-confirm = Confirm
 
-gui-workshops-confirm-hint = Write the workshop's next version with these choices, as one undo step; a row kept as AI cannot be written yet
+gui-workshops-confirm-hint = Write the workshop's next version with these choices, as one undo step; a row kept as AI is asked on each photo
 
 gui-workshops-describe = Describe what you want
 

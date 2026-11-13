@@ -37,15 +37,18 @@ impl Shell {
         origin: &Origin,
         aim: Option<&str>,
     ) {
-        self.end_session();
         let (top, rev) = {
             let store = lock(&self.core.values);
             (store.undo_steps().last().map(|s| s.id), store.history_rev())
         };
+        let image = self.open_photo();
+        if kind == Kind::Apply && self.join_session(node, workshop, &image, origin, top, rev) {
+            return;
+        }
+        self.end_session();
         let mut panel = self.focus.workshops.borrow_mut();
         panel.sessions += 1;
         let id = format!("s-{}-{}", session_stamp(), panel.sessions);
-        let image = panel.image.clone().unwrap_or_else(|| "unsaved".into());
         drop(panel);
         let mut record = Session {
             session: id,
@@ -67,8 +70,107 @@ impl Shell {
             ..Record::new(&who(origin), kind)
         });
         let mut panel = self.focus.workshops.borrow_mut();
-        panel.pilot = Some(Pilot { record, top, rev });
+        panel.pilot = Some(Pilot {
+            record,
+            top,
+            rev,
+            photo: 0,
+            photos: vec![None],
+            nodes: vec![node.into()],
+            away: None,
+        });
         panel.queue_write();
+        drop(panel);
+        self.keep_photo();
+    }
+
+    /// The vault image open, as the session names its test photos.
+    fn open_photo(&self) -> String {
+        let panel = self.focus.workshops.borrow();
+        panel.image.clone().unwrap_or_else(|| "unsaved".into())
+    }
+
+    /// A second test photo: the session's workshop applied on a photo
+    /// the session has not seen joins it, its apply a step of the record
+    /// on that photo. False when it does not join (another workshop, no
+    /// session, a photo already in it).
+    fn join_session(
+        &mut self,
+        node: &str,
+        workshop: &str,
+        image: &str,
+        origin: &Origin,
+        top: Option<u64>,
+        rev: u64,
+    ) -> bool {
+        let record = {
+            let mut panel = self.focus.workshops.borrow_mut();
+            let Some(p) = panel.pilot.as_mut() else {
+                return false;
+            };
+            if p.record.workshop != workshop || p.record.images.iter().any(|i| i == image) {
+                return false;
+            }
+            p.record.images.push(image.into());
+            p.photo = p.record.images.len() - 1;
+            p.photos.push(None);
+            p.nodes.push(node.into());
+            p.away = None;
+            p.record.node = node.into();
+            p.top = top;
+            p.rev = rev;
+            p.record.clone()
+        };
+        let measures = self
+            .session_measures(&record, true)
+            .ok()
+            .zip(self.session_measures(&record, false).ok());
+        let mut panel = self.focus.workshops.borrow_mut();
+        if let Some(p) = panel.pilot.as_mut() {
+            p.push(Record {
+                store_step: top,
+                measures: measures.map(|(before, after)| Measures { before, after }),
+                ..Record::new(&who(origin), Kind::Apply)
+            });
+        }
+        panel.queue_write();
+        drop(panel);
+        self.keep_photo();
+        true
+    }
+
+    /// Keeps the test photo open as it is now (what enters the workshop,
+    /// its values), for generalising once another is open. Nothing while
+    /// the image's network lacks the workshop's node.
+    pub(super) fn keep_photo(&mut self) {
+        let record = {
+            let panel = self.focus.workshops.borrow();
+            match &panel.pilot {
+                Some(p) if p.away.is_none() => p.record.clone(),
+                _ => return,
+            }
+        };
+        let Ok(input) = self.session_input(&record) else {
+            return;
+        };
+        let values = {
+            let Some(state) = self.workspace_state() else {
+                return;
+            };
+            let catalogue = state.bundle.catalogue(&self.workspace_catalogue());
+            let Some(file) = helios_template::network::composite_ref(&record.workshop)
+                .and_then(|r| catalogue.get_composite(&r).cloned())
+            else {
+                return;
+            };
+            self.session_values(&record, &file)
+        };
+        let mut panel = self.focus.workshops.borrow_mut();
+        if let Some(p) = panel.pilot.as_mut()
+            && let Some(slot) = p.photos.get_mut(p.photo)
+        {
+            *slot = Some(crate::workshops::Photo { input, values });
+        }
     }
 
     /// Ends the session going on: dropped from the vault unless kept.
@@ -151,14 +253,16 @@ impl Shell {
         super::workshop_edit::proxy(&viewport, graph, from, &port)
     }
 
-    /// Measures the session's first step once the image's network holds
-    /// the workshop's node (a design or an apply reaches the viewport a
-    /// frame or two after its step).
+    /// Measures the step that opened the session on the photo open (its
+    /// design or apply) once the image's network holds the workshop's
+    /// node (it reaches the viewport a frame or two after its step).
     fn measure_first_step(&mut self) {
         let record = {
             let panel = self.focus.workshops.borrow();
             match &panel.pilot {
-                Some(p) if p.record.steps.first().is_some_and(|r| r.measures.is_none()) => {
+                Some(p)
+                    if p.away.is_none() && p.record.steps.iter().any(|r| opening(r, p.photo)) =>
+                {
                     p.record.clone()
                 }
                 _ => return,
@@ -171,14 +275,15 @@ impl Shell {
             return;
         };
         let mut panel = self.focus.workshops.borrow_mut();
-        if let Some(first) = panel
-            .pilot
-            .as_mut()
-            .and_then(|p| p.record.steps.first_mut())
-        {
-            first.measures = Some(Measures { before, after });
+        if let Some(p) = panel.pilot.as_mut() {
+            let photo = p.photo;
+            if let Some(first) = p.record.steps.iter_mut().find(|r| opening(r, photo)) {
+                first.measures = Some(Measures { before, after });
+            }
         }
         panel.queue_write();
+        drop(panel);
+        self.keep_photo();
     }
 
     /// Records the value steps made on the session's node since the last
@@ -186,14 +291,21 @@ impl Shell {
     /// undo or a redo. Called each frame and right after a command that
     /// set values. Nothing without a session.
     pub(super) fn follow_session(&mut self, hint: Option<(Kind, u32)>) {
-        let (node, top, rev) = {
+        if !self.follow_photo() {
+            return;
+        }
+        let (node, top, rev, kept) = {
             let panel = self.focus.workshops.borrow();
             let Some(p) = &panel.pilot else {
                 return;
             };
-            (p.record.node.clone(), p.top, p.rev)
+            let kept = p.photos.get(p.photo).is_some_and(Option::is_some);
+            (p.record.node.clone(), p.top, p.rev, kept)
         };
         self.measure_first_step();
+        if !kept {
+            self.keep_photo();
+        }
         let prefix = format!("node/{node}/");
         let (step, kind, now_top, now_rev, origin) = {
             let store = lock(&self.core.values);
@@ -262,8 +374,8 @@ impl Shell {
             .borrow()
             .pilot
             .as_ref()
-            .map(|p| p.record.clone());
-        let Some(record) = record else {
+            .map(|p| (p.record.clone(), p.away.is_some(), p.photo));
+        let Some((record, away, photo)) = record else {
             return;
         };
         // A user's move of a value an open proposal holds overrides it.
@@ -281,12 +393,25 @@ impl Shell {
             _ => who(&step.origin),
         };
         let after = self.session_measures(&record, false).ok();
-        let before = record.last_measures().cloned();
+        // Where this photo's last step left it; nothing yet on a photo
+        // joining.
+        let before = if away {
+            None
+        } else {
+            record.last_measures_on(photo).cloned()
+        };
         let mut panel = self.focus.workshops.borrow_mut();
         let Some(p) = panel.pilot.as_mut() else {
             return;
         };
-        p.record.push(Record {
+        // A move made on another photo: it is the next test photo.
+        if let Some(image) = p.away.take() {
+            p.record.images.push(image);
+            p.photo = p.record.images.len() - 1;
+            p.photos.push(None);
+            p.nodes.push(node.clone());
+        }
+        p.push(Record {
             aim: step.aim.clone(),
             changes,
             of,
@@ -298,6 +423,51 @@ impl Shell {
             ..Record::new(&author, kind)
         });
         panel.queue_write();
+        drop(panel);
+        self.keep_photo();
+    }
+
+    /// Follows the photo open: back on a test photo, the session goes on
+    /// there, from the value store as it is now; on another photo, it
+    /// waits for a move of the workshop's values to take it as the next
+    /// test photo. False without a session.
+    fn follow_photo(&mut self) -> bool {
+        let image = self.open_photo();
+        let (top, rev) = {
+            let store = lock(&self.core.values);
+            (store.undo_steps().last().map(|s| s.id), store.history_rev())
+        };
+        let mut panel = self.focus.workshops.borrow_mut();
+        let Some(p) = panel.pilot.as_mut() else {
+            return false;
+        };
+        let Some(open) = p.record.images.get(p.photo) else {
+            return false;
+        };
+        if *open == image {
+            return true;
+        }
+        // A photo saved since the session started gets its vault id.
+        if open == "unsaved" && !p.record.images.contains(&image) {
+            let photo = p.photo;
+            p.record.images[photo] = image;
+            panel.queue_write();
+            return true;
+        }
+        match p.record.images.iter().position(|i| *i == image) {
+            Some(i) => {
+                p.photo = i;
+                if let Some(node) = p.nodes.get(i) {
+                    p.record.node.clone_from(node);
+                }
+                p.away = None;
+            }
+            None if p.away.as_deref() == Some(image.as_str()) => return true,
+            None => p.away = Some(image),
+        }
+        p.top = top;
+        p.rev = rev;
+        true
     }
 
     /// `workshop.session`: the session's record (`read`, the default),
@@ -423,7 +593,7 @@ impl Shell {
             .map(String::from);
         let mut panel = self.focus.workshops.borrow_mut();
         let p = panel.pilot.as_mut().ok_or(NO_SESSION)?;
-        let seq = p.record.push(Record {
+        let seq = p.push(Record {
             aim,
             proposal: proposal.clone(),
             ..Record::new(&who(origin), Kind::Propose)
@@ -479,7 +649,7 @@ impl Shell {
             "reject" => {
                 let mut panel = self.focus.workshops.borrow_mut();
                 let p = panel.pilot.as_mut().ok_or(NO_SESSION)?;
-                let seq = p.record.push(Record {
+                let seq = p.push(Record {
                     aim,
                     of: Some(of),
                     proposal: std::collections::BTreeMap::from([(param.clone(), proposed)]),
@@ -559,4 +729,10 @@ fn session_stamp() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     format!("{secs:x}")
+}
+
+/// A step that opened the session on `photo` (its design or apply), not
+/// measured yet.
+fn opening(r: &Record, photo: usize) -> bool {
+    r.image == photo && matches!(r.kind, Kind::Design | Kind::Apply) && r.measures.is_none()
 }

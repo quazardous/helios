@@ -1043,18 +1043,7 @@ fn make_it_automatic_writes_the_next_version_once_the_user_confirms() {
             .into_iter()
             .find(|f| f.id == "user.backlit-mountain" && f.version == v)
     };
-    // A junction cannot be written yet: nothing is.
     let before = steps(&h);
-    h.state_mut()
-        .run(
-            "workshop.generalise",
-            json!({ "rows": { "mountain_detail": "ai" }, "confirm": true }),
-            Origin::User,
-        )
-        .unwrap();
-    follow(&mut h);
-    assert_eq!(steps(&h), before);
-    assert!(version(&h, 2).is_none());
 
     // The user confirms: the lift a target, the detail its value, one
     // undo step.
@@ -1098,5 +1087,118 @@ fn make_it_automatic_writes_the_next_version_once_the_user_confirms() {
     let rec = record(&mut h, &root)["record"].clone();
     assert_eq!(rec["kept"], json!(true));
     assert_eq!(rec["workshop"], json!("user.backlit-mountain@2"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Opens `image` in place of the photo open, as the vault image `id`:
+/// the workspace's network, the workshop's node included, on it.
+fn open_photo(h: &mut Harness<'static, Shell>, image: &Image, id: &str) {
+    let built = h
+        .state()
+        .workspace_bundle()
+        .unwrap()
+        .build_with(&templates::modules(), Source::picture(image), None)
+        .unwrap();
+    h.state_mut()
+        .set_view_source(built.graph, built.view.0, &built.view.1)
+        .unwrap();
+    h.state_mut().set_edited_image(Some(id.into()));
+    follow(h);
+}
+
+/// The backlit photo with its sky a stop darker.
+fn darker_sky() -> Image {
+    let a = backlit();
+    Image::from_fn(a.region(), 4, |x, y, c| {
+        let v = a.data()[((y * 32 + x) * 4 + i64::from(c)) as usize];
+        if c == 3 || y >= 12 { v } else { v / 2.0 }
+    })
+}
+
+/// A second test photo joins the session with the first move made on it;
+/// generalising reads both, and a row kept as AI is written into the
+/// workshop as a junction.
+#[test]
+fn a_second_test_photo_joins_the_session_and_a_junction_is_written() {
+    stand_ins();
+    let root = temp("second-photo");
+    let mut h = window(&root);
+    h.state_mut().set_edited_image(Some("photo-a".into()));
+    let (node, session) = designed(&mut h, &root);
+    let lift = format!("node/{node}/backlight_lift");
+    let detail = format!("node/{node}/mountain_detail");
+    set_value(&mut h, &lift, 0.9, Origin::User, None);
+
+    // Another photo open: nothing recorded until the workshop moves on it.
+    open_photo(&mut h, &darker_sky(), "photo-b");
+    let rec = record(&mut h, &root)["record"].clone();
+    assert_eq!(rec["images"], json!(["photo-a"]), "{rec}");
+    set_value(&mut h, &lift, 0.5, Origin::User, None);
+    let rec = record(&mut h, &root)["record"].clone();
+    assert_eq!(rec["session"], json!(session));
+    assert_eq!(rec["images"], json!(["photo-a", "photo-b"]), "{rec}");
+    let last = rec["steps"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["image"], json!(1), "{last}");
+    assert_eq!(last["changes"][0]["new"], json!(0.5), "{last}");
+
+    // Back on the first photo, the session goes on there.
+    open_photo(&mut h, &backlit(), "photo-a");
+    set_value(&mut h, &detail, 0.1, Origin::User, None);
+    let rec = record(&mut h, &root)["record"].clone();
+    let last = rec["steps"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["image"], json!(0), "{last}");
+    assert_eq!(rec["images"].as_array().unwrap().len(), 2);
+
+    // Generalising reads both photos: each row holds a value per photo.
+    let a = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise" }),
+    ));
+    assert_eq!(a["photos"], json!(2), "{a}");
+    let rows = a["rows"].as_array().unwrap();
+    let row = |name: &str| {
+        rows.iter()
+            .find(|r| r["param"] == json!(name))
+            .unwrap_or_else(|| panic!("no row {name}: {a}"))
+            .clone()
+    };
+    let values = row("backlight_lift")["values"].clone();
+    assert_eq!(values.as_array().map(Vec::len), Some(2), "{values}");
+    assert!(values.as_array().unwrap().contains(&json!(0.5)), "{values}");
+
+    // The detail kept as AI: written as a junction, J = 1.
+    let a = answer(agent(
+        &mut h,
+        &root,
+        json!({ "cmd": "workshop.generalise", "rows": { "mountain_detail": "ai" } }),
+    ));
+    assert_eq!(a["J"], json!(1), "{a}");
+    let fixed = row("mountain_detail")["fixed"].as_f64().unwrap();
+    let before = steps(&h);
+    h.state_mut()
+        .run(
+            "workshop.generalise",
+            json!({ "rows": { "mountain_detail": "ai" }, "confirm": true }),
+            Origin::User,
+        )
+        .unwrap();
+    follow(&mut h);
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    let file = h
+        .state()
+        .workspace_bundle()
+        .unwrap()
+        .composites
+        .into_iter()
+        .find(|f| f.id == "user.backlit-mountain" && f.version == 2)
+        .expect("the next version");
+    let block = file.workshop.as_ref().unwrap();
+    assert_eq!(block.junctions.len(), 1, "{block:?}");
+    let j = &block.junctions[0];
+    assert_eq!(j.kind, helios_template::format::JunctionKind::Value);
+    assert_eq!(j.name, "mountain_detail");
+    assert_eq!(j.fallback, Some(fixed));
+    assert!(block.targets.iter().all(|t| t.param != "mountain_detail"));
     let _ = std::fs::remove_dir_all(&root);
 }

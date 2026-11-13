@@ -175,7 +175,24 @@
           "description": "Named parts of the image a target can be measured in, each a mask drawn once from what enters the workshop.",
           "type": "array",
           "items": { "$ref": "#/$defs/zone" }
+        },
+        "junctions": {
+          "description": "The decisions left to the AI on each photo the workshop runs on: a slider's value, or a zone the AI draws.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/junction" }
         }
+      }
+    },
+    "junction": {
+      "description": "A decision the AI makes on each photo: an exposed number parameter's value (with the fallback used when no AI answers), or a mask_object zone's mask.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "enum": ["value", "zone"] },
+        "name": { "description": "The exposed parameter it sets, or the zone it draws.", "type": "string" },
+        "fallback": { "description": "For a value: what is used when no AI answers.", "type": "number" },
+        "note": { "description": "Why it was kept.", "type": "string" }
       }
     },
     "zone": {
