@@ -355,7 +355,7 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
                 + &String::from_utf8_lossy(&o.stderr);
             text.lines()
                 .filter_map(|l| l.split("results in ").nth(1))
-                .last()
+                .next_back()
                 .map(|dir| Path::new(dir.trim()).join("out"))
         }
         Ok(o) => {
