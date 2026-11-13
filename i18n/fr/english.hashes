@@ -163,6 +163,7 @@ command-library-filter-pin.title 62e6f0bcdff6f1ec
 command-library-filter-recent.title 5ea26540ae874ceb
 command-library-filter-switch.title 1609e681d277603d
 command-library-folder.title 401442b888a6ce54
+command-library-importAutomatic-pause.title 28b2808bc7f059d3
 command-library-importFiles.title a7190ef3f937e18a
 command-library-importSource.title b212d23cfe694c9e
 command-library-importWindow.title 5cf073c01aa7d73f
@@ -590,10 +591,18 @@ gui-image-not-reopened 422cb049e7d6fe52
 gui-image-opened 8cddc04842c75210
 gui-image-opening 0a3761ae857369a4
 gui-import-auto 04cb4bc503badcd5
+gui-import-auto-ask 15f250bcbcdfc2e5
+gui-import-auto-confirm b150717406cb2314
+gui-import-auto-confirmed 40aa8bc824f31de1
 gui-import-auto-failed 37be8b9f419b44da
+gui-import-auto-held d6d2794276b0ef5c
 gui-import-auto-new-files 88a0cce69d7530d5
 gui-import-auto-off 9945105be618ca38
+gui-import-auto-open 41f71ad49a338131
+gui-import-auto-paused da95466763b053d6
 gui-import-auto-plugged 9650053d8cfc308a
+gui-import-auto-resume 1ac456f8743ad628
+gui-import-auto-resumed 0ca9b2460a3b3a6b
 gui-import-auto-started 8c1977b44dcb9718
 gui-import-backup-copies c5e2a9c008db2419
 gui-import-backup-days 7f3c0cfff2a6e70a
@@ -1150,6 +1159,7 @@ gui-settings-accounts-add 8fba0e5701043f96
 gui-settings-accounts-clients bfffdea791b20316
 gui-settings-accounts-no-service a0b4fd38a98e1a09
 gui-settings-accounts-none ef8676b55e98a031
+gui-settings-automatic-imports c1f97c7a8a7e5b1c
 gui-settings-client-helios a7caf88d35b44427
 gui-settings-client-id dc7517a25c6a50f8
 gui-settings-client-secret eca04f6d4ab67497
@@ -1830,6 +1840,12 @@ setting-display-wide-gamut-preview.description f0e0b6e09b6c09be
 setting-display-wide-gamut-preview.label 449f4dab4606e33d
 setting-health-destinationDays.description e15083cbcd7b1713
 setting-health-destinationDays.label 93fbf15e673b2706
+setting-import-automatic-ask-files.description c95eb8ac356b15bc
+setting-import-automatic-ask-files.label 161e1bf55847caaf
+setting-import-automatic-ask-gb.description f23eba19648975b8
+setting-import-automatic-ask-gb.label 63832bc77169d8dc
+setting-import-automatic-paused.description 04eea34f2bc27769
+setting-import-automatic-paused.label d90bcc5f739bd75e
 setting-notifications-jobs.description 6cba8e76fe09f324
 setting-notifications-jobs.label fffc31760e483d40
 tip-helios-decisions.text 0eb2bf98ebacbe5d
