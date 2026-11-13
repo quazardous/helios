@@ -745,6 +745,17 @@ impl helios_connect::Connector for PickConnector {
         })
     }
 
+    /// A reconnection's test step: the account the page is signed in to.
+    fn probe(
+        &self,
+        _account: Option<&helios_connect::AccountRef>,
+        _cancel: &helios_connect::Cancel,
+    ) -> Result<helios_connect::Probed, helios_connect::ConnectorError> {
+        Ok(helios_connect::Probed {
+            label: Some("ann@example.org".into()),
+        })
+    }
+
     fn pick(
         &self,
         account: &helios_connect::AccountRef,
