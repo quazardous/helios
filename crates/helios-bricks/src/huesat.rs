@@ -114,6 +114,11 @@ fn wrap(h: f32) -> f32 {
     h - 360.0 * (h / 360.0).floor()
 }
 
+/// `v > 0`, false for NaN.
+fn positive(v: f32) -> bool {
+    v > 0.0
+}
+
 fn luma(p: [f32; 3]) -> f32 {
     LUMA[0] * p[0] + LUMA[1] * p[1] + LUMA[2] * p[2]
 }
@@ -123,7 +128,7 @@ fn hsv([r, g, b]: [f32; 3]) -> [f32; 3] {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let c = max - min;
-    if !(max > 0.0) || !(c > 0.0) {
+    if !positive(max) || !positive(c) {
         return [0.0, 0.0, max];
     }
     let h = if max == r {
@@ -190,18 +195,18 @@ impl Table {
     pub fn pixel(&self, p: [f32; 3]) -> [f32; 3] {
         let n = self.neutral;
         let l = luma(p);
-        if !(l > 0.0) {
+        if !positive(l) {
             return p;
         }
         let [h, s, v] = hsv([p[0] / n[0], p[1] / n[1], p[2] / n[2]]);
-        if !(s > 0.0) {
+        if !positive(s) {
             return p;
         }
         let [dh, scale] = self.lookup(h, s, value_coordinate(v));
         let r = from_hsv([h + dh, s * scale, v]);
         let o = [r[0] * n[0], r[1] * n[1], r[2] * n[2]];
         let lo = luma(o);
-        if !(lo > 0.0) {
+        if !positive(lo) {
             return p;
         }
         let k = l / lo;
