@@ -668,3 +668,34 @@ fn a_probable_match_is_not_fetched_from_a_re_encoding_source_but_is_from_an_exac
     assert_eq!(lines[0]["duplicate"]["of"], "library");
     assert_eq!(phone.calls().len(), 1);
 }
+
+/// What the import window marks "in your Library" before any byte is
+/// fetched: an item imported before (by its id, unchanged) or whose claim
+/// names a Library image; a new item is not.
+#[test]
+fn in_library_tells_the_items_known_before_any_byte() {
+    let p = Place::new("in-library");
+    let (a, b) = (png(21), png(22));
+    let fake = Fake::new(Originals::Exact, &[("a", a.clone())]);
+    let vault = Vault::new(MemoryStore::default());
+    let listed = [
+        item("a", &a, None),
+        item("b", &b, None),
+        item("x", &a, None),
+    ];
+    let before = fetch::in_library(&vault, &source("me"), &listed).unwrap();
+    assert_eq!(before, [false, false, false]);
+    run(
+        &vault,
+        &fake,
+        "me",
+        vec![item("a", &a, None)],
+        true,
+        &options(&p.0),
+    );
+    let fetched = fake.calls().len();
+    // `a` by its id, `x` by its claim (the same bytes); `b` is new.
+    let after = fetch::in_library(&vault, &source("me"), &listed).unwrap();
+    assert_eq!(after, [true, false, true]);
+    assert_eq!(fake.calls().len(), fetched, "nothing fetched to tell");
+}
