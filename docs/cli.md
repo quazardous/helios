@@ -342,6 +342,27 @@ half-written copy).
 suggestions, which are recorded as decisions and applied only once
 accepted. Its answers are JSON. See [library.md](library.md) for both.
 
+## Through the vault's node
+
+`import`, `import-darktable` and `stacks` never open the vault themselves:
+they run on the node that holds it (`library.import`,
+`library.importDarktable`, `library.stacks.*`), so the node's caches,
+subscribers and after-import backup hear of every change.
+
+- The node holding a vault keeps a rendezvous file beside it,
+  `.helios/NAME.node.json` (see [protocol.md](protocol.md)); the CLI reads
+  it and connects.
+- `--node ADDRESS` or `$HELIOS_NODE` names a node's command endpoint
+  instead (a Unix socket path, or `tcp://HOST:PORT` with the session token
+  in `$HELIOS_TOKEN`); `--vault` may then be left out.
+- With no node holding the vault, the CLI starts one,
+  `helios-node --vault FILE --idle-exit 60`, its log in
+  `.helios/NAME.node.log`, and the node exits after a minute with no
+  client and no job (`$HELIOS_IDLE_EXIT` seconds instead). Two commands
+  at once start one node and share it.
+
+Exit code 3 when no node can be reached or started.
+
 ## Doctor
 
 ```sh

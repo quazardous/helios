@@ -317,6 +317,38 @@ pub struct Call {
 }
 
 impl Call {
+    /// A call made without a connection: the in-process transport's
+    /// ([`crate::client`]). Its notifications go to `sink`, what it asks
+    /// to run on close to `closers`, run when that client goes.
+    pub(crate) fn detached(
+        id: Option<Id>,
+        cancelled: Arc<AtomicBool>,
+        sink: Sink,
+        closers: Closers,
+    ) -> Self {
+        Self {
+            id,
+            cancelled,
+            sink,
+            closers,
+            after: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Runs what the call asked to run once its answer is given.
+    pub(crate) fn run_after(&self) {
+        let after = std::mem::take(&mut *self.after.lock().unwrap_or_else(PoisonError::into_inner));
+        for f in after {
+            f();
+        }
+    }
+
+    /// The flag `$/cancel` sets, for work that looks at it as it goes (an
+    /// import stops before its next file).
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
+    }
+
     /// The call's id; `None` for a notification.
     pub fn id(&self) -> Option<&Id> {
         self.id.as_ref()
@@ -444,10 +476,7 @@ pub(crate) fn dispatch(
                 return;
             }
         }
-        let after = std::mem::take(&mut *call.after.lock().unwrap_or_else(PoisonError::into_inner));
-        for f in after {
-            f();
-        }
+        call.run_after();
     });
 }
 

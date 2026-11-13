@@ -39,6 +39,9 @@ fn picture(path: &Path, shade: u8) {
 fn helios(args: &[&str]) -> (i32, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_helios"))
         .args(args)
+        // The node the command starts on the vault exits soon after.
+        .env("HELIOS_IDLE_EXIT", "2")
+        .env_remove("HELIOS_NODE")
         .output()
         .unwrap();
     (

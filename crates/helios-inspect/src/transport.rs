@@ -247,6 +247,50 @@ where
     }
 }
 
+/// The connections this process serves, open now, and when one last
+/// sent a line or closed: what a node that exits when idle looks at.
+static OPEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// How busy this process's endpoints are.
+#[derive(Clone, Copy, Debug)]
+pub struct Activity {
+    /// Connections open on any endpoint.
+    pub open: usize,
+    /// When a connection last sent a line or closed; `None` before any.
+    pub last: Option<std::time::Instant>,
+}
+
+/// This process's endpoints' [`Activity`].
+pub fn activity() -> Activity {
+    Activity {
+        open: OPEN.load(std::sync::atomic::Ordering::SeqCst),
+        last: *LAST.lock().unwrap_or_else(PoisonError::into_inner),
+    }
+}
+
+fn touch() {
+    *LAST.lock().unwrap_or_else(PoisonError::into_inner) = Some(std::time::Instant::now());
+}
+
+/// Counts a connection open while it lives.
+struct Open;
+
+impl Open {
+    fn new() -> Self {
+        OPEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        touch();
+        Open
+    }
+}
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        touch();
+        OPEN.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// One connection: an optional authentication line, then requests; what
 /// the handler asked to run at the end runs once the client has gone.
 fn converse<R, H>(
@@ -259,6 +303,7 @@ fn converse<R, H>(
     R: DeserializeOwned,
     H: Fn(R, &mut Connection<'_>) -> Option<Value>,
 {
+    let _open = Open::new();
     let mut lines = BufReader::new(reader).lines();
     if let Some(token) = token {
         let presented = lines
@@ -283,6 +328,7 @@ fn converse<R, H>(
     let running = Running::default();
     for line in lines {
         let Ok(line) = line else { break };
+        touch();
         if line.trim().is_empty() {
             continue;
         }
@@ -467,6 +513,21 @@ impl Client {
     /// returns.
     pub fn closer(&self) -> io::Result<Closer> {
         Ok(Closer(self.writer.try_clone()?))
+    }
+}
+
+impl Client {
+    /// Its reading half and its writing half, for a client that reads on
+    /// one thread and writes from others ([`crate::client`]).
+    #[allow(
+        clippy::type_complexity,
+        reason = "the three halves, named by their use"
+    )]
+    pub(crate) fn split(
+        self,
+    ) -> io::Result<(Box<dyn BufRead + Send>, Box<dyn Write + Send>, Closer)> {
+        let closer = Closer(self.writer.try_clone()?);
+        Ok((Box::new(self.reader), Box::new(self.writer), closer))
     }
 }
 

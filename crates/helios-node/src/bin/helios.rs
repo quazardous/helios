@@ -37,11 +37,11 @@
 //!                  [--name TEMPLATE] [--sidecar] [--vault FILE] [--again] [--source NAME]
 //!                  [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
 //!
-//!     helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
+//!     helios import-darktable --vault FILE|--node ADDRESS FOLDERS-OR-IMAGES...
 //!
-//!     helios import --vault FILE [--reference | --copy [--into DIR]] [--rename PATTERN]
+//!     helios import --vault FILE|--node ADDRESS [--reference | --copy [--into DIR]] [--rename PATTERN]
 //!                   [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
-//!     helios stacks --vault FILE list | create IMAGE... [--top IMAGE] | dissolve STACK
+//!     helios stacks --vault FILE|--node ADDRESS list | create IMAGE... [--top IMAGE] | dissolve STACK
 //!                   | expand STACK | collapse STACK | top STACK IMAGE
 //!                   | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
 //!                   | accept DECISION [--groups N,N...] | decline DECISION | decisions
@@ -99,6 +99,14 @@
 //! asks for stack suggestions (`helios_library::stacks`), which apply
 //! only once accepted. IMAGE is an image's id or a file the vault knows.
 //!
+//! `import`, `import-darktable` and `stacks` never open the vault: they
+//! run on the node holding it (`helios_node::connect`), found through the
+//! rendezvous file it keeps beside the vault, or named by `--node ADDRESS`
+//! or `$HELIOS_NODE`. With no node holding the vault, the CLI starts one
+//! (`helios-node --vault FILE --idle-exit SECONDS`, a minute, or
+//! `$HELIOS_IDLE_EXIT` seconds), which exits once idle; several commands
+//! at once share it. Exit code 3 when no node can be reached or started.
+//!
 //! The inspect socket defaults to `$HELIOS_SOCKET`, the control socket to
 //! `$HELIOS_CONTROL_SOCKET`. Output is JSON. Exit codes: 0 answered, 1 the
 //! node answered with an error (a wait that timed out prints what happened
@@ -112,8 +120,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use helios_core::{FaultKind, Params, Region, Value};
+use helios_inspect::client::Client;
 use helios_inspect::control::{ControlRequest, FileFormat, MoveTo, RunItem};
-use helios_inspect::{Address, Request, request_at};
+use helios_inspect::{Address, Request, request_at, rpc};
 use helios_node::batch::{Options, Outcome};
 
 const USAGE: &str = "usage:
@@ -149,10 +158,10 @@ const USAGE: &str = "usage:
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar] [--vault FILE] [--again] [--source NAME]
                [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
-  helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
-  helios import --vault FILE [--reference | --copy [--into DIR]] [--rename PATTERN]
+  helios import-darktable --vault FILE|--node ADDRESS FOLDERS-OR-IMAGES...
+  helios import --vault FILE|--node ADDRESS [--reference | --copy [--into DIR]] [--rename PATTERN]
                 [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
-  helios stacks --vault FILE list | create IMAGE... [--top IMAGE] | dissolve STACK
+  helios stacks --vault FILE|--node ADDRESS list | create IMAGE... [--top IMAGE] | dissolve STACK
                 | expand STACK | collapse STACK | top STACK IMAGE
                 | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
                 | accept DECISION [--groups N,N...] | decline DECISION | decisions
@@ -460,6 +469,12 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     .copied()
                     .map(absolute)
                     .collect::<Result<_, _>>()?,
+                copy: false,
+                into: None,
+                rename: None,
+                layout: None,
+                duplicates: None,
+                signals: None,
             },
             ["settings-get", layer] => ControlRequest::SettingsLayerGet {
                 layer: layer.to_string(),
@@ -675,130 +690,31 @@ fn batch(args: &[String]) -> ExitCode {
     }
 }
 
-/// `helios import-darktable --vault FILE PATH...`: see `helios_node::darktable::import`.
-fn import_darktable(args: &[String]) -> ExitCode {
-    let mut vault = None;
-    let mut paths = Vec::new();
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--vault" => match args.next() {
-                Some(v) => vault = Some(PathBuf::from(v)),
-                None => return usage("--vault needs a value"),
-            },
-            flag if flag.starts_with("--") => return usage(&format!("unknown option `{flag}`")),
-            _ => paths.push(PathBuf::from(arg)),
-        }
-    }
-    let Some(vault) = vault else {
-        return usage("import-darktable needs --vault FILE");
-    };
-    if paths.is_empty() {
-        return usage("import-darktable needs folders or images");
-    }
-    let store = match helios_vault_sqlite::SqliteStore::open(&vault) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("helios: {}: {e}", vault.display());
-            return ExitCode::from(1);
-        }
-    };
-    let vault = helios_vault::Vault::new(store);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let mut out = std::io::stdout();
-    let mut emit = |line: &serde_json::Value| {
-        let _ = writeln!(out, "{line}");
-        let _ = out.flush();
-    };
-    let mut warn = |path: &std::path::Path, warning: &str| {
-        eprintln!("helios import-darktable: {}: {warning}", path.display());
-    };
-    match helios_node::darktable::import(&vault, &paths, now, &mut emit, &mut warn) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::from(1),
+/// A client of the node holding `vault` (or of the node `--node` or
+/// `HELIOS_NODE` names), started on the vault when none holds it: the
+/// CLI never opens the vault itself. Exit code 3 when it cannot.
+fn vault_client(vault: Option<&std::path::Path>, node: Option<&str>) -> Result<Client, ExitCode> {
+    match helios_node::connect::connect(vault, node, &node_bin(), "cli") {
+        Ok(connected) => Ok(connected.client),
         Err(e) => {
             eprintln!("helios: {e}");
-            ExitCode::from(1)
+            Err(ExitCode::from(3))
         }
     }
 }
 
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
-
-type Library = helios_vault::Vault<helios_vault_sqlite::SqliteStore>;
-
-fn open_vault(path: &std::path::Path) -> Result<Library, String> {
-    helios_vault_sqlite::SqliteStore::open(path)
-        .map(helios_vault::Vault::new)
-        .map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn to_json<T: serde::Serialize>(value: &T) -> serde_json::Value {
-    serde_json::to_value(value).expect("library values serialize")
-}
-
-/// The options of `helios import`: the vault, the sources, how.
-fn import_options(
-    args: &[String],
-) -> Result<(PathBuf, Vec<PathBuf>, helios_library::Options), String> {
-    use helios_library::import::{Duplicates, Placement};
-    let mut vault = None;
-    let mut sources = Vec::new();
-    let (mut copy, mut into) = (false, None);
-    let mut options = helios_library::Options::default();
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        let mut value = || args.next().ok_or(format!("{arg} needs a value"));
-        match arg.as_str() {
-            "--vault" => vault = Some(PathBuf::from(value()?)),
-            "--copy" => copy = true,
-            "--reference" => copy = false,
-            "--into" => {
-                into = Some(PathBuf::from(value()?));
-                copy = true;
-            }
-            "--rename" => {
-                options.rename = Some(helios_library::rename::Pattern::parse(value()?)?);
-            }
-            "--layout" => {
-                options.layout = helios_library::import::Layout::parse(value()?)?;
-            }
-            "--duplicates" => options.duplicates = Duplicates::parse(value()?)?,
-            "--no-signals" => options.signals = false,
-            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
-            _ => sources.push(PathBuf::from(arg)),
-        }
+/// Runs `method` on the node and waits for its answer; with `interrupt`,
+/// Ctrl-C or SIGTERM asks the node to stop the call (`$/cancel`).
+fn on_node(
+    client: &Client,
+    method: &str,
+    params: serde_json::Value,
+    interrupt: bool,
+) -> Result<serde_json::Value, rpc::Error> {
+    let pending = client.call(method, params);
+    if !interrupt {
+        return pending.wait();
     }
-    if sources.is_empty() {
-        return Err("import needs folders, cards or files".into());
-    }
-    if copy {
-        options.placement = Placement::Copy { into };
-    }
-    Ok((vault.ok_or("import needs --vault FILE")?, sources, options))
-}
-
-/// `helios import`: see `helios_library::import`.
-fn import(args: &[String]) -> ExitCode {
-    let (vault, sources, mut options) = match import_options(args) {
-        Ok(p) => p,
-        Err(e) => return usage(&e),
-    };
-    let vault = match open_vault(&vault) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("helios: {e}");
-            return ExitCode::from(1);
-        }
-    };
-    // Ctrl-C stops the import before its next file, a copy under way
-    // removed; the files done stay imported.
     let interrupted = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
@@ -806,53 +722,204 @@ fn import(args: &[String]) -> ExitCode {
             eprintln!("helios: cannot watch for interrupts: {e}");
         }
     }
-    options.cancel = Some(interrupted);
-    let jobs = helios_core::jobs::Jobs::new(Arc::default());
+    let mut asked = false;
+    loop {
+        if let Some(answer) = pending.wait_timeout(std::time::Duration::from_millis(100)) {
+            return answer;
+        }
+        if !asked && interrupted.load(std::sync::atomic::Ordering::SeqCst) {
+            client.cancel(&pending);
+            asked = true;
+        }
+    }
+}
+
+/// Prints one JSON line.
+fn line(value: &serde_json::Value) {
     let mut out = std::io::stdout();
-    let mut emit = |line: &serde_json::Value| {
-        let _ = writeln!(out, "{line}");
-        let _ = out.flush();
+    let _ = writeln!(out, "{value}");
+    let _ = out.flush();
+}
+
+/// A path given on the command line, made absolute for the node.
+fn absolute_text(text: &str) -> Result<String, String> {
+    std::path::absolute(text)
+        .map(|p| p.display().to_string())
+        .map_err(|e| format!("{text}: {e}"))
+}
+
+/// `helios import-darktable --vault FILE PATH...`: see
+/// `helios_node::darktable::import`, run by the vault's node
+/// (`library.importDarktable`).
+fn import_darktable(args: &[String]) -> ExitCode {
+    let (mut vault, mut node) = (None, None);
+    let mut paths = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--vault" | "--node" => match args.next() {
+                Some(v) if arg == "--vault" => vault = Some(PathBuf::from(v)),
+                Some(v) => node = Some(v.clone()),
+                None => return usage(&format!("{arg} needs a value")),
+            },
+            flag if flag.starts_with("--") => return usage(&format!("unknown option `{flag}`")),
+            _ => match absolute_text(arg) {
+                Ok(path) => paths.push(path),
+                Err(e) => return usage(&e),
+            },
+        }
+    }
+    if vault.is_none() && helios_node::connect::explicit(node.as_deref()).is_none() {
+        return usage("import-darktable needs --vault FILE");
+    }
+    if paths.is_empty() {
+        return usage("import-darktable needs folders or images");
+    }
+    let client = match vault_client(vault.as_deref(), node.as_deref()) {
+        Ok(c) => c,
+        Err(code) => return code,
     };
-    match helios_library::import::import(&vault, &jobs, &sources, &options, now(), &mut emit) {
-        Ok(report) => {
-            emit(&serde_json::json!({ "report": report }));
-            if report.cancelled {
-                ExitCode::from(130)
-            } else if report.failed == 0 {
+    match on_node(
+        &client,
+        "library.importDarktable",
+        serde_json::json!({ "paths": paths }),
+        false,
+    ) {
+        Ok(answer) => {
+            for file in answer["files"].as_array().into_iter().flatten() {
+                line(file);
+            }
+            for w in answer["warnings"].as_array().into_iter().flatten() {
+                eprintln!(
+                    "helios import-darktable: {}: {}",
+                    w["path"].as_str().unwrap_or_default(),
+                    w["warning"].as_str().unwrap_or_default()
+                );
+            }
+            if answer["kept"] == true {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(1)
             }
         }
         Err(e) => {
-            eprintln!("helios: {e}");
+            eprintln!("helios: {}", e.message);
             ExitCode::from(1)
         }
     }
 }
 
-/// An image named on the command line: its id, or a file the vault knows.
-fn image_named(vault: &Library, text: &str) -> Result<helios_vault::ImageId, String> {
-    if let Ok(id) = helios_vault::ImageId::from_hex(text) {
-        return Ok(id);
+/// The options of `helios import`: the vault, the node, and
+/// `library.import`'s params.
+fn import_options(
+    args: &[String],
+) -> Result<(Option<PathBuf>, Option<String>, serde_json::Value), String> {
+    let (mut vault, mut node) = (None, None);
+    let mut sources = Vec::new();
+    let mut params = serde_json::Map::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let mut value = || args.next().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--vault" => vault = Some(PathBuf::from(value()?)),
+            "--node" => node = Some(value()?.clone()),
+            "--copy" => {
+                params.insert("copy".into(), true.into());
+            }
+            "--reference" => {
+                params.insert("copy".into(), false.into());
+            }
+            "--into" => {
+                params.insert("into".into(), absolute_text(value()?)?.into());
+                params.insert("copy".into(), true.into());
+            }
+            "--rename" => {
+                let pattern = value()?;
+                helios_library::rename::Pattern::parse(pattern)?;
+                params.insert("rename".into(), pattern.clone().into());
+            }
+            "--layout" => {
+                let layout = value()?;
+                helios_library::import::Layout::parse(layout)?;
+                params.insert("layout".into(), layout.clone().into());
+            }
+            "--duplicates" => {
+                let duplicates = value()?;
+                helios_library::import::Duplicates::parse(duplicates)?;
+                params.insert("duplicates".into(), duplicates.clone().into());
+            }
+            "--no-signals" => {
+                params.insert("signals".into(), false.into());
+            }
+            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
+            _ => sources.push(serde_json::Value::from(absolute_text(arg)?)),
+        }
     }
-    let path = std::path::absolute(text).map_err(|e| format!("{text}: {e}"))?;
-    vault
-        .at_path(&path)?
-        .map(|(id, _)| id)
-        .ok_or_else(|| format!("`{text}` is neither an image id nor a file the vault knows"))
+    if sources.is_empty() {
+        return Err("import needs folders, cards or files".into());
+    }
+    if vault.is_none() && helios_node::connect::explicit(node.as_deref()).is_none() {
+        return Err("import needs --vault FILE".into());
+    }
+    params.insert("paths".into(), sources.into());
+    Ok((vault, node, serde_json::Value::Object(params)))
+}
+
+/// `helios import`: see `helios_library::import`, run by the vault's node
+/// (`library.import`).
+fn import(args: &[String]) -> ExitCode {
+    let (vault, node, params) = match import_options(args) {
+        Ok(p) => p,
+        Err(e) => return usage(&e),
+    };
+    let client = match vault_client(vault.as_deref(), node.as_deref()) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    // Ctrl-C stops the import before its next file, a copy under way
+    // removed; the files done stay imported.
+    match on_node(&client, "library.import", params, true) {
+        Ok(answer) => {
+            for file in answer["files"].as_array().into_iter().flatten() {
+                line(file);
+            }
+            let report = &answer["report"];
+            line(&serde_json::json!({ "report": report }));
+            if report["cancelled"] == true {
+                ExitCode::from(130)
+            } else if report["failed"].as_u64().unwrap_or(0) == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
+        }
+        Err(e) => {
+            eprintln!("helios: {}", e.message);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// An image named on the command line: its id, or a file (made absolute
+/// for the node, which knows it).
+fn image_named(text: &str) -> Result<String, String> {
+    if helios_vault::ImageId::from_hex(text).is_ok() {
+        return Ok(text.to_string());
+    }
+    absolute_text(text)
 }
 
 /// The options of `helios stacks`.
 #[derive(Default)]
 struct StacksArgs {
     vault: Option<PathBuf>,
+    node: Option<String>,
     words: Vec<String>,
     top: Option<String>,
     resolver: Option<String>,
     groups: Option<Vec<usize>>,
-    /// Thresholds given for the rules, if any.
-    rules: Option<helios_library::stacks::Rules>,
+    window: Option<f64>,
+    distance: Option<u32>,
 }
 
 fn stacks_args(args: &[String]) -> Result<StacksArgs, String> {
@@ -862,17 +929,22 @@ fn stacks_args(args: &[String]) -> Result<StacksArgs, String> {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
         match arg.as_str() {
             "--vault" => parsed.vault = Some(PathBuf::from(value()?)),
+            "--node" => parsed.node = Some(value()?.clone()),
             "--top" => parsed.top = Some(value()?.clone()),
             "--resolver" => parsed.resolver = Some(value()?.clone()),
             "--window" => {
-                parsed.rules.get_or_insert_with(Default::default).window = value()?
-                    .parse()
-                    .map_err(|_| "--window takes seconds".to_string())?;
+                parsed.window = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "--window takes seconds".to_string())?,
+                );
             }
             "--distance" => {
-                parsed.rules.get_or_insert_with(Default::default).distance = value()?
-                    .parse()
-                    .map_err(|_| "--distance takes a number of bits".to_string())?;
+                parsed.distance = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "--distance takes a number of bits".to_string())?,
+                );
             }
             "--groups" => {
                 parsed.groups = Some(
@@ -890,83 +962,95 @@ fn stacks_args(args: &[String]) -> Result<StacksArgs, String> {
     Ok(parsed)
 }
 
-/// `helios stacks`: see the module documentation.
+/// `helios stacks`: see the module documentation; each run by the
+/// vault's node (`library.stacks.*`), the answer's value printed.
 fn stacks(args: &[String]) -> ExitCode {
-    use helios_library::stacks::{self as suggest, Resolvers, RuleResolver};
+    use serde_json::json;
     let parsed = match stacks_args(args) {
         Ok(p) => p,
         Err(e) => return usage(&e),
     };
-    let Some(path) = &parsed.vault else {
+    if parsed.vault.is_none() && helios_node::connect::explicit(parsed.node.as_deref()).is_none() {
         return usage("stacks needs --vault FILE");
-    };
-    let vault = match open_vault(path) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("helios: {e}");
-            return ExitCode::from(1);
-        }
-    };
-    let images = |names: &[&str]| -> Result<Vec<helios_vault::ImageId>, String> {
-        names.iter().map(|n| image_named(&vault, n)).collect()
+    }
+    let images = |names: &[&str]| -> Result<Vec<String>, String> {
+        names.iter().map(|n| image_named(n)).collect()
     };
     let words: Vec<&str> = parsed.words.iter().map(String::as_str).collect();
-    let done: Result<serde_json::Value, String> = match words.as_slice() {
-        ["list"] => vault.stacks().map(|s| to_json(&s)),
+    let call: Result<(&str, serde_json::Value, &str), String> = match words.as_slice() {
+        ["list"] => Ok(("library.stacks.list", json!({}), "stacks")),
         ["create", members @ ..] if !members.is_empty() => images(members).and_then(|ids| {
-            let top = parsed
-                .top
-                .as_deref()
-                .map(|t| image_named(&vault, t))
-                .transpose()?;
-            vault
-                .create_stack(&ids, top, "user", now())
-                .map(|s| to_json(&s))
+            let top = parsed.top.as_deref().map(image_named).transpose()?;
+            Ok((
+                "library.stacks.create",
+                json!({ "images": ids, "top": top }),
+                "stack",
+            ))
         }),
-        ["dissolve", id] => vault.dissolve_stack(id).map(|s| to_json(&s)),
-        ["expand", id] => vault.set_stack_expanded(id, true).map(|s| to_json(&s)),
-        ["collapse", id] => vault.set_stack_expanded(id, false).map(|s| to_json(&s)),
-        ["top", id, image] => image_named(&vault, image)
-            .and_then(|i| vault.set_stack_top(id, &i))
-            .map(|s| to_json(&s)),
-        ["suggest", selection @ ..] => images(selection).and_then(|ids| {
-            let resolvers = match &parsed.rules {
-                Some(rules) => Resolvers::new().with(
-                    suggest::RULES,
-                    Arc::new(RuleResolver {
-                        rules: rules.clone(),
-                    }),
-                ),
-                None => Resolvers::default(),
-            };
-            let resolver = parsed.resolver.as_deref().unwrap_or(suggest::RULES);
-            suggest::suggest(&vault, None, &resolvers, resolver, &ids, now())
-                .map(|d| suggest::to_json(&d))
+        ["dissolve", id] => Ok(("library.stacks.dissolve", json!({ "stack": id }), "stack")),
+        ["expand", id] => Ok((
+            "library.stacks.expand",
+            json!({ "stack": id, "expanded": true }),
+            "stack",
+        )),
+        ["collapse", id] => Ok((
+            "library.stacks.expand",
+            json!({ "stack": id, "expanded": false }),
+            "stack",
+        )),
+        ["top", id, image] => image_named(image).map(|image| {
+            (
+                "library.stacks.top",
+                json!({ "stack": id, "image": image }),
+                "stack",
+            )
         }),
-        ["accept", id] => {
-            suggest::accept(&vault, None, id, parsed.groups.as_deref(), "user", now())
-                .map(|d| suggest::to_json(&d))
-        }
-        ["decline", id] => {
-            suggest::decline(&vault, None, id, "user", now()).map(|d| suggest::to_json(&d))
-        }
-        ["decisions"] => suggest::decisions(&vault).map(|d| to_json(&d)),
+        ["suggest", selection @ ..] => images(selection).map(|ids| {
+            (
+                "library.stacks.suggest",
+                json!({ "images": ids, "resolver": parsed.resolver,
+                        "window": parsed.window, "distance": parsed.distance }),
+                "decision",
+            )
+        }),
+        ["accept", id] => Ok((
+            "library.stacks.accept",
+            json!({ "decision": id, "groups": parsed.groups }),
+            "decision",
+        )),
+        ["decline", id] => Ok((
+            "library.stacks.decline",
+            json!({ "decision": id }),
+            "decision",
+        )),
+        ["decisions"] => Ok(("library.stacks.decisions", json!({}), "decisions")),
         _ => {
             return usage(
                 "stacks takes: list | create IMAGE... | dissolve STACK | expand STACK | collapse STACK | top STACK IMAGE | suggest [IMAGE...] | accept DECISION | decline DECISION | decisions",
             );
         }
     };
-    match done {
+    let (method, params, field) = match call {
+        Ok(call) => call,
+        Err(e) => {
+            eprintln!("helios: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let client = match vault_client(parsed.vault.as_deref(), parsed.node.as_deref()) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    match on_node(&client, method, params, false) {
         Ok(answer) => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&answer).expect("JSON values serialize")
+                serde_json::to_string_pretty(&answer[field]).expect("JSON values serialize")
             );
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("helios: {e}");
+            eprintln!("helios: {}", e.message);
             ExitCode::from(1)
         }
     }

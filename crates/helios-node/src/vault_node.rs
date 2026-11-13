@@ -87,6 +87,16 @@ pub struct Importer {
 }
 
 impl Importer {
+    /// The node's vault, for its library commands ([`crate::library`]).
+    pub fn vault(&self) -> &Arc<Vault<SqliteStore>> {
+        &self.vault
+    }
+
+    /// The node's bus.
+    pub fn bus(&self) -> &Arc<Bus> {
+        &self.bus
+    }
+
     /// Imports `sources` (`helios_library::import`), the run a job on the
     /// node's jobs, each file's line to `emit`; then announces the report.
     /// Refused once the node is stopping.

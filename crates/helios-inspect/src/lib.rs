@@ -39,6 +39,8 @@ use std::time::{Duration, Instant};
 
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
+pub mod client;
+pub mod discovery;
 pub mod jobs;
 pub mod rpc;
 pub mod transport;
@@ -47,8 +49,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub use transport::{
-    Address, Bound, Client, Closer, Connection, Listen, new_token, request_at, request_within,
-    serve_at, serve_connections_at, serve_rpc_at, write_token,
+    Activity, Address, Bound, Client, Closer, Connection, Listen, activity, new_token, request_at,
+    request_within, serve_at, serve_connections_at, serve_rpc_at, write_token,
 };
 
 /// A request, as sent on the wire.
@@ -859,13 +861,31 @@ pub mod control {
             run: String,
         },
         /// Imports folders, cards or files into the node's vault (a node
-        /// started with `--vault`), referenced where they are, as a job;
-        /// answers once it ends, with its report. The import is announced
-        /// on the bus (`library.imported`), which starts the backup
-        /// strategy's after-import run. `paths` are absolute.
+        /// started with `--vault`), as a job; answers once it ends, with
+        /// its report and one line per file (`files`). Referenced where
+        /// they are, or copied (`copy`, into `into`) and renamed by a
+        /// pattern (`rename`), filed by `layout` (`day`, `month`, `year`,
+        /// `flat`); exact duplicates `skip`ped, kept or listed to `ask`
+        /// (`duplicates`); near-duplicate signals measured unless
+        /// `signals` is false. The import is announced on the bus
+        /// (`library.imported`), which starts the backup strategy's
+        /// after-import run; `$/cancel` stops it before its next file.
+        /// `paths` are absolute.
         #[serde(rename = "library.import")]
         LibraryImport {
             paths: Vec<PathBuf>,
+            #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+            copy: bool,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            into: Option<PathBuf>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            rename: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            layout: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            duplicates: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            signals: Option<bool>,
         },
         /// A settings layer the node keeps in its vault (a node started
         /// with `--vault`): the person's (`user`) or a library's
