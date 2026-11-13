@@ -1491,3 +1491,83 @@ fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refu
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The search filter's photos and facet counts are read through the
+/// desktop's node off the frame: the frame that takes the query does not
+/// wait for them, a coming frame shows what the node answered.
+#[test]
+fn the_filter_is_read_through_the_node_and_shown_at_a_coming_frame() {
+    let root = temp("off-frame");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    h.state_mut()
+        .library_mut()
+        .set_filter(Filter::parse("camera:R5"));
+    for i in 0..3 {
+        h.run();
+        persist.frame(h.state_mut(), f64::from(i));
+        if persist.busy() {
+            break;
+        }
+    }
+    assert!(persist.busy(), "the query's read waits for a coming frame");
+    assert!(h.state().library().facets().is_none(), "not shown yet");
+    persist.settle(h.state_mut());
+    h.run();
+    assert_eq!(grid(&h), ["c.nef"]);
+    let facets = h.state().library().facets().cloned().unwrap();
+    assert_eq!(facets.count("camera", "R5"), 1);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The grid's photos are read through the node's cursor, each window kept
+/// in the read cache until an event names one of its photos.
+#[test]
+fn the_grid_is_read_through_the_nodes_cursor_and_its_cache() {
+    let root = temp("cursor-cache");
+    let path = vault_file(&root);
+    let (h, persist) = window(&root, &path);
+    let reader = persist.reader();
+    let read = reader.cache().stats();
+    assert!(read.misses >= 1 && read.entries >= 1, "{read:?}");
+    // A rating set by another writer of this process: its event drops
+    // the window naming the photo.
+    persist
+        .vault()
+        .apply(
+            &[helios_vault::Command::set(id(2), RATING, json!(5))],
+            "test",
+            None,
+            1,
+        )
+        .unwrap();
+    let seq = persist.bus().last_seq();
+    assert!(
+        reader
+            .cache()
+            .wait_seen(seq, std::time::Duration::from_secs(10)),
+        "the cache hears the vault's events"
+    );
+    assert!(reader.cache().stats().entries < read.entries);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The library read again for the host (an import, a disk plugged in) is
+/// read off the frame, and its files handed over once shown.
+#[test]
+fn the_library_read_again_is_read_off_the_frame() {
+    let root = temp("refill");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    persist.ask_fill(h.state(), true);
+    assert!(persist.busy(), "read on a thread of its own");
+    assert!(persist.take_filled().is_none(), "not shown yet");
+    persist.settle(h.state_mut());
+    h.run();
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    assert_eq!(persist.take_filled().map(|f| f.len()), Some(3));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

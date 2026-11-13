@@ -24,7 +24,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use helios_inspect::rpc::{Call, Error};
-use helios_vault::{CursorId, ImageId, Order, Presence, Query, Sort, Store, Vault};
+use helios_vault::fields::{BackupFilter, BackupState, BackupVolume, Backups};
+use helios_vault::storage::VolumeId;
+use helios_vault::{CursorId, ImageId, Location, Order, Presence, Query, Sort, Store, Vault};
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, Need, object};
@@ -51,8 +53,9 @@ pub const MAX_LEASE: Duration = Duration::from_hours(1);
 /// The most rows one window reads.
 pub const MAX_WINDOW: usize = 10_000;
 
-/// Rows read between two looks at the call's cancellation.
-const CHUNK: usize = 500;
+/// Rows read between two looks at the call's cancellation: one store
+/// query each.
+pub const CHUNK: usize = 500;
 
 /// Whether `id` is a cursor command.
 pub fn handles(id: &str) -> bool {
@@ -92,6 +95,12 @@ pub fn specs() -> Vec<CommandSpec> {
                 (
                     "fields",
                     json!({ "type": "array", "items": { "type": "string" } }),
+                    false,
+                ),
+                (
+                    "locations",
+                    json!({ "type": "boolean",
+                            "description": "each row with where its copies are (`locations`)" }),
                     false,
                 ),
             ]))
@@ -222,15 +231,28 @@ impl Cursors {
                         return Err(Error::cancelled());
                     }
                     let n = CHUNK.min(end - at);
-                    let chunk = vault
-                        .fetch(handle, at, n, &names)
-                        .map_err(|e| missing_or(cursor, e))?;
-                    let read = chunk.len();
-                    rows.extend(
-                        chunk
-                            .into_iter()
-                            .map(|row| json!({ "id": row.id.hex(), "fields": row.fields })),
-                    );
+                    let read = if params["locations"] == true {
+                        let chunk = vault
+                            .fetch_library(handle, at, n, &names)
+                            .map_err(|e| missing_or(cursor, e))?;
+                        let read = chunk.len();
+                        rows.extend(chunk.into_iter().map(|row| {
+                            json!({ "id": row.id.hex(), "fields": row.fields,
+                                    "locations": locations_json(&row.locations) })
+                        }));
+                        read
+                    } else {
+                        let chunk = vault
+                            .fetch(handle, at, n, &names)
+                            .map_err(|e| missing_or(cursor, e))?;
+                        let read = chunk.len();
+                        rows.extend(
+                            chunk
+                                .into_iter()
+                                .map(|row| json!({ "id": row.id.hex(), "fields": row.fields })),
+                        );
+                        read
+                    };
                     if read < n {
                         break;
                     }
@@ -300,6 +322,145 @@ fn missing_or(cursor: u64, error: String) -> Error {
     }
 }
 
+/// Where an image's copies are, as a window or `library.fields.get`
+/// carries them: `path`, `size`, `modified`, `last_verified`, `volume`,
+/// `rel_path`, `presence` (a path that is not UTF-8 is written lossily).
+pub fn locations_json(locations: &[Location]) -> Value {
+    locations
+        .iter()
+        .map(|l| {
+            json!({
+                "path": l.path.to_string_lossy(),
+                "size": l.size,
+                "modified": l.modified,
+                "last_verified": l.last_verified,
+                "volume": l.volume.as_ref().map(VolumeId::as_str),
+                "rel_path": l.rel_path.as_ref().map(|p| p.to_string_lossy()),
+                "presence": l.presence.as_str(),
+            })
+        })
+        .collect()
+}
+
+/// A backup rule from its JSON form (`library.facets`' `rule`, a backup
+/// filter's): `{"volumes": [{"id", "drive", "off_site"}], "copies",
+/// "off_site_required"}`.
+///
+/// # Errors
+/// A term of the wrong type.
+pub fn backups_of(value: &Value) -> Result<Backups, String> {
+    let volumes = value["volumes"]
+        .as_array()
+        .ok_or("a backup rule's `volumes` is a list")?
+        .iter()
+        .map(|v| {
+            Ok(BackupVolume {
+                id: VolumeId(
+                    v["id"]
+                        .as_str()
+                        .ok_or("a backup volume has an `id`")?
+                        .to_string(),
+                ),
+                drive: v["drive"].as_str().unwrap_or_default().to_string(),
+                off_site: v["off_site"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(Backups {
+        volumes,
+        copies: value["copies"]
+            .as_u64()
+            .and_then(|c| u8::try_from(c).ok())
+            .unwrap_or(0),
+        off_site_required: value["off_site_required"].as_bool().unwrap_or(false),
+    })
+}
+
+/// A backup rule's JSON form, as [`backups_of`] reads it.
+pub fn backups_json(rule: &Backups) -> Value {
+    json!({
+        "volumes": rule.volumes.iter().map(|v| json!({
+            "id": v.id.as_str(), "drive": v.drive, "off_site": v.off_site,
+        })).collect::<Vec<_>>(),
+        "copies": rule.copies,
+        "off_site_required": rule.off_site_required,
+    })
+}
+
+/// A query's JSON form, as [`query_of`] reads it: only the terms it sets.
+pub fn query_json(query: &Query) -> Value {
+    let mut terms = serde_json::Map::new();
+    let mut put = |name: &str, value: Value| {
+        terms.insert(name.into(), value);
+    };
+    if let Some(r) = query.min_rating {
+        put("min_rating", json!(r));
+    }
+    if let Some(l) = &query.label {
+        put("label", json!(l));
+    }
+    for (name, list) in [
+        ("labels", &query.labels),
+        ("flags", &query.flags),
+        ("tags", &query.tags),
+        ("words", &query.words),
+        ("cameras", &query.cameras),
+        ("lenses", &query.lenses),
+        ("file_types", &query.file_types),
+        ("cull", &query.cull),
+    ] {
+        if !list.is_empty() {
+            put(name, json!(list));
+        }
+    }
+    if let Some(t) = query.captured_from {
+        put("captured_from", json!(t));
+    }
+    if let Some(t) = query.captured_before {
+        put("captured_before", json!(t));
+    }
+    if let Some(f) = &query.folder {
+        put("folder", json!(f));
+    }
+    if let Some(a) = &query.album {
+        put("album", json!(a));
+    }
+    if let Some(rules) = &query.rules {
+        put("rules", rules.to_json());
+    }
+    if let Some(now) = query.now {
+        put("now", json!(now));
+    }
+    if !query.presence.is_empty() {
+        put(
+            "presence",
+            json!(
+                query
+                    .presence
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    if let Some(b) = &query.backup {
+        put(
+            "backup",
+            json!({
+                "rule": backups_json(&b.rule),
+                "states": b.states.iter().map(|s| s.name()).collect::<Vec<_>>(),
+            }),
+        );
+    }
+    if query.order != Order::default() {
+        put(
+            "order",
+            json!({ "by": query.order.by.name(), "descending": query.order.descending }),
+        );
+    }
+    Value::Object(terms)
+}
+
 /// A query from its JSON form: every term optional, an empty or missing
 /// object selects the whole Library by id.
 ///
@@ -355,6 +516,23 @@ pub fn query_of(value: &Value) -> Result<Query, String> {
             "folder" => query.folder = Some(text(name, v)?),
             "album" => query.album = Some(text(name, v)?),
             "cull" => query.cull = strings(name, v)?,
+            "rules" => query.rules = Some(helios_vault::rules::Rule::parse(v)?),
+            "now" => query.now = Some(int(name, v)?),
+            "backup" => {
+                let states = strings("backup.states", &v["states"])?
+                    .iter()
+                    .map(|s| {
+                        BackupState::ALL
+                            .into_iter()
+                            .find(|b| b.name() == s)
+                            .ok_or_else(|| format!("`{s}` is not a backup state"))
+                    })
+                    .collect::<Result<_, _>>()?;
+                query.backup = Some(BackupFilter {
+                    rule: backups_of(&v["rule"])?,
+                    states,
+                });
+            }
             "presence" => {
                 query.presence = strings(name, v)?
                     .iter()

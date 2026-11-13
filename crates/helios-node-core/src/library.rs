@@ -3,8 +3,10 @@
 //! versions (`library.importDarktable`, one sidecar file with
 //! `library.keepSidecar`) and an image's edit read and saved
 //! (`library.edit.head`, `library.edit.save`), photos' fields set and
-//! read (`library.fields.set`, `library.fields.get`), the import history
-//! listed (`import.history.list`) and one import run again
+//! read (`library.fields.set`, `library.fields.get`), the facet counts of
+//! a query (`library.facets`), the photos changed outside Helios
+//! (`library.changed.list`), the import history listed
+//! (`import.history.list`) and one import run again
 //! (`import.history.again`, run as `library.import` by whoever serves
 //! it). `helios-node` lists them
 //! with its verbs; the desktop's node serves them too
@@ -31,6 +33,8 @@ pub const IDS: &[&str] = &[
     "library.edit.save",
     "library.fields.set",
     "library.fields.get",
+    "library.facets",
+    "library.changed.list",
     "library.stacks.list",
     "library.stacks.create",
     "library.stacks.dissolve",
@@ -141,8 +145,35 @@ pub fn specs() -> Vec<CommandSpec> {
                     json!({ "type": "array", "items": { "type": "string" } }),
                     true,
                 ),
+                (
+                    "locations",
+                    json!({ "type": "boolean",
+                            "description": "each row with where its copies are (`locations`)" }),
+                    false,
+                ),
             ]))
             .read_only(),
+        library("library.facets", "Count the photos of a query by facet")
+            .params(object(&[
+                (
+                    "query",
+                    json!({ "type": "object",
+                            "description": "which photos, as a cursor's query (docs/protocol.md, Cursors)" }),
+                    false,
+                ),
+                (
+                    "rule",
+                    json!({ "type": "object",
+                            "description": "the backup rule the `backup` facet counts against" }),
+                    false,
+                ),
+            ]))
+            .read_only(),
+        library(
+            "library.changed.list",
+            "List the photos changed outside Helios",
+        )
+        .read_only(),
         library("library.stacks.list", "List the stacks").read_only(),
         library("library.stacks.create", "Stack images").params(object(&[
             ("images", images(), true),
@@ -413,6 +444,16 @@ pub fn run<S: Store>(
                 .flatten()
                 .filter_map(Value::as_str)
                 .collect();
+            if params["locations"] == true {
+                let rows = vault.library_rows(&ids, &names)?;
+                return Ok(json!({
+                    "rows": rows
+                        .into_iter()
+                        .map(|row| json!({ "id": row.id.hex(), "fields": row.fields,
+                                           "locations": crate::cursor::locations_json(&row.locations) }))
+                        .collect::<Vec<_>>(),
+                }));
+            }
             let rows = vault.fields_of(&ids, &names)?;
             Ok(json!({
                 "rows": ids
@@ -422,6 +463,24 @@ pub fn run<S: Store>(
                     .collect::<Vec<_>>(),
             }))
         }
+        "library.facets" => {
+            let query = crate::cursor::query_of(&params["query"])?;
+            let rule = match &params["rule"] {
+                Value::Null => None,
+                rule => Some(crate::cursor::backups_of(rule)?),
+            };
+            vault
+                .facets(&query, rule.as_ref())
+                .map(|facets| json!({ "facets": to_json(&facets) }))
+        }
+        "library.changed.list" => vault.changed_outside_images().map(|images| {
+            json!({
+                "images": images
+                    .into_iter()
+                    .map(|(id, at)| json!({ "image": id.hex(), "at": at }))
+                    .collect::<Vec<_>>(),
+            })
+        }),
         "library.stacks.list" => vault.stacks().map(|s| json!({ "stacks": to_json(&s) })),
         "library.stacks.create" => {
             let members = named(vault, params, "images")?;
@@ -513,6 +572,8 @@ mod tests {
             json!({ "image": "0a", "edit": {}, "label": "macro.make" }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
+            json!({ "query": {} }),
+            json!({}),
             json!({}),
             json!({ "images": ["/p/a.raf", "0a"], "top": null }),
             json!({ "stack": "s" }),

@@ -158,7 +158,7 @@ never pulls a whole collection.
 | Method | Params | Answers |
 |---|---|---|
 | `cursor.open` | `query`, `lease` (seconds, 60 by default, at most 3600) | `cursor`, `count`, `version`, `lease` |
-| `cursor.window` | `cursor`, `offset`, `len` (at most 10,000), `fields` | `rows` (`id`, `fields`), `count`, `version`, `current`, `stale` |
+| `cursor.window` | `cursor`, `offset`, `len` (at most 10,000), `fields`, `locations` | `rows` (`id`, `fields`, and `locations` when asked), `count`, `version`, `current`, `stale` |
 | `cursor.rank` | `cursor`, `image` | `rank` (null when not in it) |
 | `cursor.refresh` | `cursor` | `changed`, `count`, `version`, `inserted`, `removed`, `replaced` |
 | `cursor.close` | `cursor` | `closed` |
@@ -181,8 +181,21 @@ never pulls a whole collection.
   `lenses`, `file_types`, `folder`, `album`, `presence` (`present`,
   `offline`, `missing`), `cull`, and `order` (`{"by": "captured",
   "descending": true}`; `by` one of `captured`, `imported`, `name`,
-  `rating`, `edited`, `size`, `focus`, `id`). Smart-album rules and
-  backup filters are not taken yet.
+  `rating`, `edited`, `size`, `focus`, `id`), `rules` (a smart album's
+  rule tree) with `now` (the clock its relative dates resolve against),
+  and `backup` (`{"rule": …, "states": ["met", "short", "unverified",
+  "none"]}`, the rule as `library.facets` takes it).
+- **Locations.** A window asked with `"locations": true` gives each row
+  where its copies are: `path`, `size`, `modified`, `last_verified`,
+  `volume`, `rel_path`, `presence` (`present`, `offline`, `missing`), as
+  the scans stored them; no file is read.
+
+`library.facets` (`query`, `rule`) counts the photos of a query by facet
+(`facets`: each facet, each value, how many photos); `rule` is the backup
+rule the `backup` facet counts against (`{"volumes": [{"id", "drive",
+"off_site"}], "copies", "off_site_required"}`), none: no `backup` facet.
+`library.changed.list` lists the photos another application changed
+(`images`: `image`, `at`), until acknowledged.
 
 `library.fields.set` (`changes`: `{image, field, value, op}`) writes
 photos' fields, audited under the call's origin and announced as
@@ -190,13 +203,18 @@ photos' fields, audited under the call's origin and announced as
 clears the field), `set_if_absent` (only an empty field), `add` or
 `remove` (the name `value` put in or taken out of a set field, such as
 the colour labels, the others kept). `library.fields.get` (`images`,
-`fields`) reads those fields as stored: `rows` (`id`, `fields`), in the
-order asked.
+`fields`, `locations`) reads those fields as stored: `rows` (`id`,
+`fields`, and `locations` when asked), in the order asked.
 
 The desktop's library writes its fields and its stacks' expansion this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
-answers are picked up at the next frames.
+answers are picked up at the next frames. Its grid reads the same way:
+the photos through a cursor kept open for an hour (refreshed when the
+catalog moves, read whole again when its sort changes or the cursor is
+gone), the search filter's photos through a cursor of their own and its
+counts through `library.facets`, each read on a thread of its own and
+shown at a coming frame, through a `ReadCache` fed by the bus's events.
 
 ## A client cache
 

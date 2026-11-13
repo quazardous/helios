@@ -15,8 +15,12 @@
 //! - applies the vault's `vault.field_changed` events (from any writer in
 //!   this process sharing its bus) to the library, and its stacks again
 //!   on `vault.stack_changed`;
-//! - runs the vault query of the library's search filter, and keeps a
-//!   stack expanded or collapsed as the user left it;
+//! - reads the library through the node, off the UI thread: its photos
+//!   through a cursor (`cursor.open`, `cursor.window`, `cursor.refresh`)
+//!   and a [`ReadCache`] the bus's events keep true, the search filter's
+//!   photos and facet counts (`library.facets`); a coming frame shows
+//!   what was read ([`Persist::ask_fill`]). Keeps a stack expanded or
+//!   collapsed as the user left it;
 //! - answers the Stacks panel: a new `stacks.suggest` proposal, a
 //!   proposal accepted (all of it or corrected) or declined, as the user,
 //!   and shows the proposals waiting again on `library.decision`;
@@ -43,19 +47,23 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
+use helios_inspect::cache::ReadCache;
 use helios_inspect::client::{Client, Pending};
+use helios_node_core::cursor::query_json;
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::{
-    CursorId, EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version,
-    edit,
+    EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version, edit,
 };
 use serde_json::{Value, json};
 
 use crate::Shell;
 use crate::dialogs::Level;
 use crate::library::{Change, Entry};
+
+/// A search filter's answer: the photos it takes and the facet counts.
+type Searched = (Vec<String>, helios_vault::Facets);
 
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match).
@@ -107,13 +115,25 @@ pub struct Persist<S: Store> {
     history_rev: u64,
     /// The desktop's node, in this process: the library's writes go
     /// through it.
-    node: Client,
+    node: Arc<Client>,
     /// The writes waiting their turn, in the order made.
     writes: VecDeque<Write>,
     /// The write the node runs now.
     writing: Option<(Write, Pending)>,
     /// The reads back of written images, with the images each names.
     reading: Vec<(BTreeSet<String>, Pending)>,
+    /// The library's reads through the node.
+    reader: Reader,
+    /// The library being read again ([`Persist::ask_fill`]).
+    filling: Option<Filling>,
+    /// Asked again while it was read (true: by the host): read once more.
+    fill_again: Option<bool>,
+    /// Where the images of the library the host asked read can be read,
+    /// once shown ([`Persist::take_filled`]).
+    filled: Option<Files>,
+    /// The search filter's query being run: the photos it takes and the
+    /// facet counts.
+    searching: Option<Receiver<Result<Searched, String>>>,
 }
 
 /// A write of the library sent to the node.
@@ -177,9 +197,43 @@ struct Editing {
     unsaved: bool,
 }
 
-/// How many images one window of the library's cursor holds: each window
-/// is one store query, fields and locations together.
-pub const PAGE: usize = 2_000;
+/// How many images one window of the library's cursor holds: the rows
+/// the node reads in one store query, fields and locations together.
+pub const PAGE: usize = helios_node_core::cursor::CHUNK;
+
+/// How long the cursor of the library shown lives unread on the node, in
+/// seconds: past it, the next refresh reads the library whole again.
+const SHOWN_LEASE: u64 = 3_600;
+
+/// The desktop's node as the library's reads reach it: its in-process
+/// client, and the cache of its answers ([`ReadCache`]) the bus's events
+/// keep true. Cloned to read on a thread of its own: the UI thread never
+/// waits for a read.
+#[derive(Clone)]
+pub struct Reader {
+    node: Arc<Client>,
+    cache: Arc<ReadCache>,
+}
+
+impl Reader {
+    /// Reads `method` from the cache, else from the node (waiting for it).
+    fn read(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.cache
+            .read(&self.node, method, params)
+            .map_err(|e| e.message)
+    }
+
+    /// Lets cursor `cursor` go, without waiting for the node.
+    fn close(&self, cursor: u64) {
+        self.cache.forget_cursor(cursor);
+        drop(self.node.call("cursor.close", json!({ "cursor": cursor })));
+    }
+
+    /// The cache of the node's reads.
+    pub fn cache(&self) -> &ReadCache {
+        &self.cache
+    }
+}
 
 /// The library as the vault holds it: its entries (each with its
 /// presence: present, offline or missing), and where each image can be
@@ -187,9 +241,9 @@ pub const PAGE: usize = 2_000;
 pub struct LibraryRows {
     entries: Vec<Entry>,
     files: Vec<(String, PathBuf)>,
-    /// The cursor it was read through, kept open so the library shown is
-    /// refreshed by its delta ([`Persist::fill_library`]).
-    cursor: Option<CursorId>,
+    /// The node's cursor it was read through, kept open so the library
+    /// shown is refreshed by its delta ([`Persist::fill_library`]).
+    cursor: Option<u64>,
     /// The order it was read in.
     order: Order,
 }
@@ -210,50 +264,66 @@ impl LibraryRows {
     }
 }
 
-/// Reads the library from the vault through a cursor, a window of
-/// [`PAGE`] images at a time: one query opens it, one query per window
-/// reads the images' fields and locations, one more the photos changed
-/// outside Helios. Nothing is asked of the files: presence (present,
-/// offline, missing) is what the scans stored, and the file's size and
-/// date are those of its location. Nothing of the window either: a thread
-/// of its own can read it while the window opens
+/// Reads the library through the desktop's node: a cursor opened on it
+/// (`cursor.open`), read a window of [`PAGE`] images at a time
+/// (`cursor.window`, fields and locations together), and the photos
+/// changed outside Helios (`library.changed.list`). Nothing is asked of
+/// the files: presence (present, offline, missing) is what the scans
+/// stored, and the file's size and date are those of its location. It
+/// waits for the node: a thread of its own reads it
 /// ([`Persist::show_library`] shows it).
 ///
 /// The photos come in `order` (the library's sort), sorted by the vault in
 /// the query that opens the cursor.
-pub fn read_library<S: Store>(vault: &Vault<S>, order: Order) -> Result<LibraryRows, String> {
-    let cursor = vault.open_cursor(Query {
+pub fn read_library(reader: &Reader, order: Order) -> Result<LibraryRows, String> {
+    let query = Query {
         order,
         ..Query::default()
-    })?;
-    let read = read_cursor(vault, cursor.id, cursor.count);
+    };
+    let opened = reader.read(
+        "cursor.open",
+        json!({ "query": query_json(&query), "lease": SHOWN_LEASE }),
+    )?;
+    let cursor = opened["cursor"]
+        .as_u64()
+        .ok_or("the node opened no cursor")?;
+    let count = to_usize(&opened["count"]);
+    let read = read_cursor(reader, cursor, count);
     if read.is_err() {
-        vault.close_cursor(cursor.id);
+        reader.close(cursor);
     }
     let (entries, files) = read?;
     Ok(LibraryRows {
         entries,
         files,
-        cursor: Some(cursor.id),
+        cursor: Some(cursor),
         order,
     })
+}
+
+fn to_usize(value: &Value) -> usize {
+    value
+        .as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0)
 }
 
 /// Where each image can be read, by id.
 type Files = Vec<(String, PathBuf)>;
 
 /// Every image of a cursor as the library shows it, window by window.
-fn read_cursor<S: Store>(
-    vault: &Vault<S>,
-    cursor: CursorId,
-    count: usize,
-) -> Result<(Vec<Entry>, Files), String> {
-    let changed = changed_outside(vault)?;
+fn read_cursor(reader: &Reader, cursor: u64, count: usize) -> Result<(Vec<Entry>, Files), String> {
+    let changed = changed_outside(reader)?;
     let mut entries = Vec::with_capacity(count);
     let mut files = Vec::with_capacity(count);
     for offset in (0..count).step_by(PAGE) {
-        for row in vault.fetch_library(cursor, offset, PAGE, &SHOWN)? {
-            let (entry, path) = entry_of(row, &changed);
+        let window = reader.read(
+            "cursor.window",
+            json!({ "cursor": cursor, "offset": offset, "len": PAGE,
+                    "fields": SHOWN, "locations": true }),
+        )?;
+        for row in window["rows"].as_array().into_iter().flatten() {
+            let (entry, path) = entry_of(row_of(row)?, &changed);
             if let Some(path) = path {
                 files.push((entry.id.clone(), path));
             }
@@ -263,14 +333,71 @@ fn read_cursor<S: Store>(
     Ok((entries, files))
 }
 
+/// The ids a cursor holds from `offset`, `len` of them, in its order.
+fn cursor_ids(reader: &Reader, cursor: u64, len: usize) -> Result<Vec<String>, String> {
+    let window = helios_node_core::cursor::MAX_WINDOW;
+    let mut ids = Vec::with_capacity(len);
+    for offset in (0..len).step_by(window) {
+        let read = reader.read(
+            "cursor.window",
+            json!({ "cursor": cursor, "offset": offset, "len": window, "fields": [] }),
+        )?;
+        ids.extend(
+            read["rows"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r["id"].as_str().map(String::from)),
+        );
+    }
+    Ok(ids)
+}
+
 /// The photos another application changed, until acknowledged.
-fn changed_outside<S: Store>(vault: &Vault<S>) -> Result<HashMap<ImageId, u64>, String> {
-    Ok(vault.changed_outside_images()?.into_iter().collect())
+fn changed_outside(reader: &Reader) -> Result<HashMap<String, u64>, String> {
+    let listed = reader.read("library.changed.list", json!({}))?;
+    Ok(listed["images"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| Some((i["image"].as_str()?.to_string(), i["at"].as_u64()?)))
+        .collect())
+}
+
+/// A row of a window (or of `library.fields.get`) read with its
+/// locations.
+fn row_of(row: &Value) -> Result<LibraryRow, String> {
+    let location = |l: &Value| Location {
+        path: PathBuf::from(l["path"].as_str().unwrap_or_default()),
+        size: l["size"].as_u64().unwrap_or(0),
+        modified: l["modified"].as_u64().unwrap_or(0),
+        last_verified: l["last_verified"].as_u64().unwrap_or(0),
+        volume: l["volume"]
+            .as_str()
+            .map(|v| helios_vault::storage::VolumeId(v.to_string())),
+        rel_path: l["rel_path"].as_str().map(PathBuf::from),
+        presence: Presence::parse(l["presence"].as_str().unwrap_or_default()),
+    };
+    Ok(LibraryRow {
+        id: ImageId::from_hex(row["id"].as_str().unwrap_or_default())?,
+        fields: row["fields"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        locations: row["locations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(location)
+            .collect(),
+    })
 }
 
 /// An image as the library shows it, and where it can be read (its first
 /// present copy).
-fn entry_of(row: LibraryRow, changed: &HashMap<ImageId, u64>) -> (Entry, Option<PathBuf>) {
+fn entry_of(row: LibraryRow, changed: &HashMap<String, u64>) -> (Entry, Option<PathBuf>) {
     let presence = Presence::of(&row.locations);
     // The volume to plug in, for an image with no copy at hand.
     let offline_on = row
@@ -285,7 +412,7 @@ fn entry_of(row: LibraryRow, changed: &HashMap<ImageId, u64>) -> (Entry, Option<
         id: id.clone(),
         presence,
         offline_on,
-        changed_outside: changed.get(&row.id).copied(),
+        changed_outside: changed.get(&id).copied(),
         name: present
             .as_ref()
             .and_then(|l| l.path.file_name())
@@ -304,13 +431,190 @@ fn entry_of(row: LibraryRow, changed: &HashMap<ImageId, u64>) -> (Entry, Option<
     (entry, present.map(|l| l.path))
 }
 
-/// The library shown: the cursor it was read through and where each of
-/// its images can be read.
+/// The library shown: the node's cursor it was read through and where
+/// each of its images can be read.
 struct Shown {
-    cursor: CursorId,
+    cursor: u64,
     files: BTreeMap<String, PathBuf>,
     /// The order its cursor sorts by.
     order: Order,
+}
+
+/// What a read of the library brings back to the UI thread.
+enum Fetched {
+    /// Read whole, through a new cursor.
+    Whole(LibraryRows),
+    /// The cursor shown, brought up to date: what moved, if anything did.
+    Delta(Shown, Option<Moved>),
+}
+
+/// What moved in the library shown since it was read.
+struct Moved {
+    /// Every image now, in the library's order.
+    order: Vec<String>,
+    removed: Vec<String>,
+    /// The images read again: added, their copies moved, or not shown.
+    read: Vec<(Entry, Option<PathBuf>)>,
+    changed: HashMap<String, u64>,
+}
+
+/// Reads the library in `order`: the cursor `shown` brought up to date
+/// when it is still in that order (the images `known` are shown already),
+/// else the library read whole through a new cursor. Waits for the node.
+fn fetch(
+    reader: &Reader,
+    shown: Option<Shown>,
+    order: Order,
+    known: &BTreeSet<String>,
+) -> Result<Fetched, String> {
+    if let Some(mut shown) = shown {
+        if shown.order == order {
+            match refresh(reader, &mut shown, known) {
+                Ok(moved) => return Ok(Fetched::Delta(shown, moved)),
+                // Read whole again, through a new cursor.
+                Err(_) => reader.close(shown.cursor),
+            }
+        } else {
+            reader.close(shown.cursor);
+        }
+    }
+    read_library(reader, order).map(Fetched::Whole)
+}
+
+/// Brings the cursor shown up to date (`cursor.refresh`): nothing is read
+/// when the catalog did not change, else the images added and those whose
+/// copies moved (an import, a scan, an undo), in windows of [`PAGE`].
+fn refresh(
+    reader: &Reader,
+    shown: &mut Shown,
+    known: &BTreeSet<String>,
+) -> Result<Option<Moved>, String> {
+    let delta = reader.read("cursor.refresh", json!({ "cursor": shown.cursor }))?;
+    if delta["changed"] != true {
+        return Ok(None);
+    }
+    // The windows kept of the old snapshot no longer page it.
+    reader.cache.forget_cursor(shown.cursor);
+    let ids = |name: &str| -> Vec<String> {
+        delta[name]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    };
+    let (inserted, replaced, removed) = (ids("inserted"), ids("replaced"), ids("removed"));
+    for id in &removed {
+        shown.files.remove(id);
+    }
+    let order = cursor_ids(reader, shown.cursor, to_usize(&delta["count"]))?;
+    // The images added, those whose copies moved, and any the library
+    // does not show (it was filled from elsewhere).
+    let mut wanted: Vec<String> = inserted.clone();
+    wanted.extend(replaced);
+    wanted.extend(
+        order
+            .iter()
+            .filter(|id| !known.contains(*id) && !inserted.contains(id))
+            .cloned(),
+    );
+    let changed = changed_outside(reader)?;
+    let mut read = Vec::with_capacity(wanted.len());
+    for ids in wanted.chunks(PAGE) {
+        let rows = reader.read(
+            "library.fields.get",
+            json!({ "images": ids, "fields": SHOWN, "locations": true }),
+        )?;
+        for row in rows["rows"].as_array().into_iter().flatten() {
+            let (entry, path) = entry_of(row_of(row)?, &changed);
+            match &path {
+                Some(path) => shown.files.insert(entry.id.clone(), path.clone()),
+                None => shown.files.remove(&entry.id),
+            };
+            read.push((entry, path));
+        }
+    }
+    Ok(Some(Moved {
+        order,
+        removed,
+        read,
+        changed,
+    }))
+}
+
+/// The photos a query takes, in its order, and how many of them carry
+/// each value of each facet: `library.facets`, then a cursor opened on
+/// the query and read for its ids. Waits for the node.
+fn search(
+    reader: &Reader,
+    query: &Query,
+    rule: Option<&helios_vault::fields::Backups>,
+) -> Result<(Vec<String>, helios_vault::Facets), String> {
+    let query = query_json(query);
+    // No rule, no `rule` term: the node's schema takes an object, never
+    // null, and refuses the whole call otherwise.
+    let mut params = json!({ "query": query.clone() });
+    if let Some(rule) = rule {
+        params["rule"] = helios_node_core::cursor::backups_json(rule);
+    }
+    let counted = reader.read("library.facets", params)?;
+    let facets = serde_json::from_value(counted["facets"].clone())
+        .map(helios_vault::Facets)
+        .map_err(|e| format!("the node's facet counts: {e}"))?;
+    let opened = reader.read("cursor.open", json!({ "query": query }))?;
+    let cursor = opened["cursor"]
+        .as_u64()
+        .ok_or("the node opened no cursor")?;
+    let ids = cursor_ids(reader, cursor, to_usize(&opened["count"]));
+    reader.close(cursor);
+    Ok((ids?, facets))
+}
+
+/// A read of the library going on, on a thread of its own.
+struct Filling {
+    answer: Receiver<Result<Fetched, String>>,
+    /// The host asked it, for the thumbnails ([`Persist::take_filled`]).
+    host: bool,
+}
+
+/// Runs `read` on a thread of its own; its answer comes on the receiver.
+fn spawn<T: Send + 'static>(
+    name: &str,
+    read: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Receiver<Result<T, String>> {
+    let (send, answer) = std::sync::mpsc::channel();
+    let sender = send.clone();
+    let spawned = std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let _ = sender.send(read());
+        });
+    if let Err(e) = spawned {
+        let _ = send.send(Err(format!("no thread to read the library: {e}")));
+    }
+    answer
+}
+
+/// The images the library shows.
+fn known(shell: &Shell) -> BTreeSet<String> {
+    shell
+        .library()
+        .entries
+        .iter()
+        .map(|e| e.id.clone())
+        .collect()
+}
+
+/// Says the library could not be read.
+fn unreadable(shell: &mut Shell, error: String) {
+    shell.notify(
+        Level::Error,
+        Message::new(
+            "gui-vault-unreadable",
+            "Cannot read the library: { $error }",
+        )
+        .with("error", error),
+    );
 }
 
 impl<S: Store + 'static> Persist<S> {
@@ -329,7 +633,30 @@ impl<S: Store + 'static> Persist<S> {
             helios_core::jobs::Jobs::new(bus.clone()),
             &format!("desktop-{}", std::process::id()),
         );
-        let node = Client::in_process(Arc::new(service)).with_origin(WHO);
+        let node = Arc::new(Client::in_process(Arc::new(service)).with_origin(WHO));
+        let cache = Arc::new(ReadCache::new());
+        // The cache hears the vault's events on a thread of its own, so a
+        // read on any thread never shows a value older than a change
+        // announced (docs/protocol.md, "A client cache").
+        let heard = bus.subscribe();
+        let fed = cache.clone();
+        let following = std::thread::Builder::new()
+            .name("helios-read-cache".into())
+            .spawn(move || {
+                for event in heard {
+                    fed.event(&json!({
+                        "seq": event.seq, "kind": event.kind, "payload": event.payload,
+                    }));
+                }
+            });
+        if following.is_err() {
+            // Unfollowed, it keeps nothing.
+            cache.reset("no thread to follow the vault's events");
+        }
+        let reader = Reader {
+            node: node.clone(),
+            cache,
+        };
         Self {
             vault,
             bus,
@@ -342,7 +669,18 @@ impl<S: Store + 'static> Persist<S> {
             writes: VecDeque::new(),
             writing: None,
             reading: Vec::new(),
+            reader,
+            filling: None,
+            fill_again: None,
+            filled: None,
+            searching: None,
         }
+    }
+
+    /// The library's reads through the node, for a thread of its own
+    /// ([`read_library`]).
+    pub fn reader(&self) -> Reader {
+        self.reader.clone()
     }
 
     /// The client of the desktop's node the library's writes go through.
@@ -353,7 +691,11 @@ impl<S: Store + 'static> Persist<S> {
     /// Whether a call to the node is still to be answered: the host
     /// comes back at the next frame to pick its answer up.
     pub fn busy(&self) -> bool {
-        self.writing.is_some() || !self.writes.is_empty() || !self.reading.is_empty()
+        self.writing.is_some()
+            || !self.writes.is_empty()
+            || !self.reading.is_empty()
+            || self.filling.is_some()
+            || self.searching.is_some()
     }
 
     /// Waits until the node has answered every call made, and shows what
@@ -396,6 +738,57 @@ impl<S: Store + 'static> Persist<S> {
             }
         }
         self.reading = still;
+        self.pump_reads(shell);
+    }
+
+    /// Shows the library's reads that came: the library read again, the
+    /// search filter's photos and facet counts.
+    fn pump_reads(&mut self, shell: &mut Shell) {
+        use std::sync::mpsc::TryRecvError;
+        if let Some(filling) = &self.filling {
+            let read = match filling.answer.try_recv() {
+                Ok(read) => Some(read),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("the library's reading stopped (a panic)".to_string()))
+                }
+            };
+            if let Some(read) = read {
+                let host = filling.host;
+                self.filling = None;
+                match read.and_then(|fetched| self.apply(shell, fetched)) {
+                    Ok(files) => {
+                        if host {
+                            self.filled = Some(files);
+                        }
+                    }
+                    Err(e) => unreadable(shell, e),
+                }
+                if let Some(host) = self.fill_again.take() {
+                    self.ask_fill(shell, host);
+                }
+            }
+        }
+        if let Some(searching) = &self.searching {
+            let read = match searching.try_recv() {
+                Ok(read) => Some(read),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("the search stopped (a panic)".to_string()))
+                }
+            };
+            if let Some(read) = read {
+                self.searching = None;
+                match read {
+                    Ok((ids, facets)) => {
+                        let mut library = shell.library_mut();
+                        library.set_facets(facets);
+                        library.set_matches(ids);
+                    }
+                    Err(e) => unreadable(shell, e),
+                }
+            }
+        }
     }
 
     /// A write answered: a refusal said, the written images read back.
@@ -492,32 +885,54 @@ impl<S: Store + 'static> Persist<S> {
         std::mem::take(&mut self.locations_changed)
     }
 
-    /// Fills the library with the vault's images; returns where each one
-    /// can be read (its first present copy), for thumbnails. Once shown,
-    /// the library is brought up to date by its cursor's delta: nothing is
-    /// read when the catalog did not change, else the images added and
-    /// those whose copies moved (an import, a scan, an undo), in windows
-    /// of [`PAGE`]; the others keep their entries as shown.
+    /// Fills the library with the vault's images, read through the node;
+    /// returns where each one can be read (its first present copy), for
+    /// thumbnails. Once shown, the library is brought up to date by its
+    /// cursor's delta: nothing is read when the catalog did not change,
+    /// else the images added and those whose copies moved (an import, a
+    /// scan, an undo), in windows of [`PAGE`]; the others keep their
+    /// entries as shown.
     ///
     /// A library sorted another way since is read whole again, in its
     /// sort, through a new cursor.
+    ///
+    /// It waits for the node: the host asks [`Persist::ask_fill`] instead,
+    /// read off the UI thread.
     pub fn fill_library(&self, shell: &mut Shell) -> Result<Vec<(String, PathBuf)>, String> {
-        let order = shell.library().sort();
         let shown = self.shown.lock().expect("library lock").take();
-        if let Some(shown) = shown {
-            let cursor = shown.cursor;
-            if shown.order == order {
-                match self.refresh_library(shell, shown) {
-                    Ok(files) => return Ok(files),
-                    // Read whole again, through a new cursor.
-                    Err(_) => self.vault.close_cursor(cursor),
-                }
-            } else {
-                self.vault.close_cursor(cursor);
-            }
+        let fetched = fetch(&self.reader, shown, shell.library().sort(), &known(shell))?;
+        self.apply(shell, fetched)
+    }
+
+    /// Reads the library again as [`Persist::fill_library`] does, on a
+    /// thread of its own: a coming frame shows it. `host`: the host takes
+    /// where its images can be read once shown ([`Persist::take_filled`]),
+    /// for thumbnails.
+    pub fn ask_fill(&mut self, shell: &Shell, host: bool) {
+        if self.filling.is_some() {
+            self.fill_again = Some(self.fill_again.unwrap_or(false) || host);
+            return;
         }
-        let rows = read_library(&self.vault, order)?;
-        self.show_library(shell, rows)
+        let shown = self.shown.lock().expect("library lock").take();
+        let (reader, order, known) = (self.reader.clone(), shell.library().sort(), known(shell));
+        let answer = spawn("helios-library-fill", move || {
+            fetch(&reader, shown, order, &known)
+        });
+        self.filling = Some(Filling { answer, host });
+    }
+
+    /// Where each image of the library the host asked read
+    /// ([`Persist::ask_fill`]) can be read, once shown.
+    pub fn take_filled(&mut self) -> Option<Vec<(String, PathBuf)>> {
+        self.filled.take()
+    }
+
+    /// Shows a read of the library; returns where each image can be read.
+    fn apply(&self, shell: &mut Shell, fetched: Fetched) -> Result<Files, String> {
+        match fetched {
+            Fetched::Whole(rows) => self.show_library(shell, rows),
+            Fetched::Delta(shown, moved) => self.show_moved(shell, shown, moved),
+        }
     }
 
     /// Shows the library [`read_library`] read (on another thread, say),
@@ -543,21 +958,21 @@ impl<S: Store + 'static> Persist<S> {
             None => None,
         };
         if let Some(old) = old {
-            self.vault.close_cursor(old.cursor);
+            self.reader.close(old.cursor);
         }
         self.show_stacks(shell)?;
         self.show_decisions(shell)?;
         Ok(rows.files)
     }
 
-    /// Brings the library shown up to date by its cursor's delta.
-    fn refresh_library(
+    /// Shows the library brought up to date by its cursor's delta.
+    fn show_moved(
         &self,
         shell: &mut Shell,
-        mut shown: Shown,
+        shown: Shown,
+        moved: Option<Moved>,
     ) -> Result<Vec<(String, PathBuf)>, String> {
-        let delta = self.vault.refresh(shown.cursor)?;
-        if delta.changed {
+        if let Some(moved) = moved {
             // The entries shown, their fields kept up to date by the
             // vault's events.
             let mut entries: HashMap<String, Entry> = shell
@@ -566,36 +981,18 @@ impl<S: Store + 'static> Persist<S> {
                 .iter()
                 .map(|e| (e.id.clone(), e.clone()))
                 .collect();
-            for id in &delta.removed {
-                entries.remove(&id.hex());
-                shown.files.remove(&id.hex());
+            for id in &moved.removed {
+                entries.remove(id);
             }
-            let order = self.vault.cursor_ids(shown.cursor, 0, delta.count)?;
-            // The images added, those whose copies moved, and any the
-            // library does not show (it was filled from elsewhere).
-            let mut read: Vec<ImageId> = delta.inserted.clone();
-            read.extend(&delta.replaced);
-            read.extend(
-                order
-                    .iter()
-                    .filter(|id| !entries.contains_key(&id.hex()) && !delta.inserted.contains(id)),
-            );
-            let changed = changed_outside(&self.vault)?;
-            for ids in read.chunks(PAGE) {
-                for row in self.vault.library_rows(ids, &SHOWN)? {
-                    let (entry, path) = entry_of(row, &changed);
-                    match path {
-                        Some(path) => shown.files.insert(entry.id.clone(), path),
-                        None => shown.files.remove(&entry.id),
-                    };
-                    entries.insert(entry.id.clone(), entry);
-                }
+            for (entry, _) in moved.read {
+                entries.insert(entry.id.clone(), entry);
             }
-            let entries = order
+            let entries = moved
+                .order
                 .iter()
                 .filter_map(|id| {
-                    let mut entry = entries.remove(&id.hex())?;
-                    entry.changed_outside = changed.get(id).copied();
+                    let mut entry = entries.remove(id)?;
+                    entry.changed_outside = moved.changed.get(id).copied();
                     Some(entry)
                 })
                 .collect();
@@ -610,7 +1007,10 @@ impl<S: Store + 'static> Persist<S> {
             .iter()
             .map(|(id, path)| (id.clone(), path.clone()))
             .collect();
-        *self.shown.lock().expect("library lock") = Some(shown);
+        let old = self.shown.lock().expect("library lock").replace(shown);
+        if let Some(old) = old {
+            self.reader.close(old.cursor);
+        }
         self.show_stacks(shell)?;
         self.show_decisions(shell)?;
         Ok(files)
@@ -677,14 +1077,6 @@ impl<S: Store + 'static> Persist<S> {
         if let Err(e) = self.show_decisions(shell) {
             shell.notify(Level::Error, e);
         }
-    }
-
-    /// The images the vault holds for a query, in its order.
-    fn select(&self, query: Query) -> Result<Vec<String>, String> {
-        let cursor = self.vault.open_cursor(query)?;
-        let rows = self.vault.fetch(cursor.id, 0, cursor.count, &[]);
-        self.vault.close_cursor(cursor.id);
-        Ok(rows?.into_iter().map(|r| r.id.hex()).collect())
     }
 
     /// Shows an image's network in the viewport with the image's saved
@@ -1025,17 +1417,8 @@ impl<S: Store + 'static> Persist<S> {
         );
         self.pump(shell);
         // The library sorted another way: read again in that order.
-        if shell.library_mut().take_resort()
-            && let Err(e) = self.fill_library(shell)
-        {
-            shell.notify(
-                Level::Error,
-                Message::new(
-                    "gui-vault-unreadable",
-                    "Cannot read the library: { $error }",
-                )
-                .with("error", e),
-            );
+        if shell.library_mut().take_resort() {
+            self.ask_fill(shell, false);
         }
         // The Folders section open: its counts, one store query.
         if shell.library_mut().take_folders_wanted() {
@@ -1054,28 +1437,15 @@ impl<S: Store + 'static> Persist<S> {
         self.edit_albums(shell, now);
         let query = shell.library_mut().take_query();
         if let Some(query) = query {
-            // The photos it takes, then how many carry each value of each
-            // facet: two store queries, whatever the library's size.
+            // How many photos carry each value of each facet, then the
+            // photos it takes, read through the node on a thread of its
+            // own: a coming frame shows them. A newer query replaces one
+            // still running, whose answer is not shown.
             let rule = shell.library().facet_rule().cloned();
-            let answer = self
-                .vault
-                .facets(&query, rule.as_ref())
-                .and_then(|facets| self.select(query).map(|ids| (ids, facets)));
-            match answer {
-                Ok((ids, facets)) => {
-                    let mut library = shell.library_mut();
-                    library.set_facets(facets);
-                    library.set_matches(ids);
-                }
-                Err(e) => shell.notify(
-                    Level::Error,
-                    Message::new(
-                        "gui-vault-unreadable",
-                        "Cannot read the library: { $error }",
-                    )
-                    .with("error", e),
-                ),
-            }
+            let reader = self.reader.clone();
+            self.searching = Some(spawn("helios-library-search", move || {
+                search(&reader, &query, rule.as_ref())
+            }));
         }
         self.hear(shell);
     }
