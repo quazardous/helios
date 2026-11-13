@@ -86,6 +86,8 @@ export-write-failed = impossible d’écrire { $path } : { $error }
 
 gui-about-description = Un framework de traitement d’image client/serveur, pensé d’abord pour l’IA.
 
+gui-account-identity-missing = Reconnectez pour voir le compte
+
 gui-account-pick = Choisir des photos…
 
 gui-backup-card-safe = { $card } peut être formatée : chaque photo a ses sauvegardes
@@ -553,6 +555,10 @@ gui-pick-expired = La session de choix a expiré, recommencez.
 gui-pick-failed = Non importé : { $why }
 
 gui-pick-importing = Import de { $count } photos…
+
+gui-pick-known = { $count } déjà dans la bibliothèque, laissées telles quelles.
+
+gui-pick-more = Choisir d'autres photos…
 
 gui-pick-library-folder = Les photos choisies sont copiées dans le dossier de la bibliothèque. Choisissez-le une fois : il est retenu.
 

@@ -15,7 +15,7 @@
   <nav><a href="index.html">Helios</a><a href="https://github.com/quazardous/helios">Source code</a></nav>
 </header>
 
-<p>Last updated: 12 November 2026.</p>
+<p>Last updated: 13 November 2026.</p>
 
 <h2>In short</h2>
 <p>Helios is a desktop application that runs on your own computer. It has
@@ -34,17 +34,21 @@ yourself (such as an AI provider you configure).</p>
 <h2>Google Photos</h2>
 <p>If you choose to import from Google Photos:</p>
 <ul>
-  <li>Helios asks Google for one permission only:
+  <li>Helios asks Google for these permissions only:
   <code>photospicker.mediaitems.readonly</code>, which lets Helios read the
-  photos <strong>you pick</strong> in Google's own picking page. Helios
-  cannot see the rest of your Google Photos library, your albums or your
-  account details beyond what Google's sign-in shows.</li>
+  photos <strong>you pick</strong> in Google's own picking page, and
+  <code>openid</code> with <code>email</code>, which give the e-mail
+  address of the Google account you signed in with. Helios cannot see the
+  rest of your Google Photos library, your albums or any other account
+  details.</li>
   <li>The photos you pick are downloaded directly from Google to your
   computer and copied into your Helios library folder. They are not sent
   to the developers of Helios or to anyone else.</li>
   <li>Helios keeps the sign-in tokens Google gives it in your operating
   system's keyring (password store), on your computer, so you do not have
-  to sign in at each use. Nothing else from your Google account is
+  to sign in at each use. It also keeps the account's e-mail address in
+  your library, to show which account is connected (for example "Google
+  Photos — name@example.com"). Nothing else from your Google account is
   stored.</li>
   <li>You can disconnect the account in Helios (Settings, Accounts), and
   revoke Helios's access at any time from your Google account's

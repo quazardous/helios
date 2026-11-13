@@ -2,8 +2,10 @@
 //! connector (`helios_plugin::source`), against a fake Photos Picker
 //! API: a picking opened (its page handed to the opener, never a real
 //! browser), waited for, listed and imported through
-//! `helios_library::fetch::import_remote`; a cancelled wait; a refused
-//! token leaving the account needing attention.
+//! `helios_library::fetch::import_remote`; two pickings adding to one
+//! source without duplicates, an expired download address renewed on the
+//! way; a cancelled wait; a refused token leaving the account needing
+//! attention.
 
 mod fake_picker;
 
@@ -154,6 +156,81 @@ fn a_picking_through_the_broker_imports_the_two_photos_picked() {
     let requests = fake.requests();
     assert!(requests.contains(&"GET /media/m2=d".to_string()));
     assert_eq!(requests.last().unwrap(), "DELETE /v1/sessions/s2");
+}
+
+#[test]
+fn two_pickings_add_to_one_source_without_duplicates_and_expired_addresses_are_renewed() {
+    let p = Place::new("again");
+    let (a, b, c) = (png(1), png(2), png(3));
+    let fake = FakePicker::start(1, vec![("m1", "IMG_1.png", false, a.clone())]);
+    let broker = broker(&p.0, &fake.base);
+    let photos = SourceProvider::new(broker, PLUGIN)
+        .unwrap()
+        .connector(token(TOKEN));
+    let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
+    let vault = Vault::new(MemoryStore::default());
+    let jobs = Jobs::new(Arc::default());
+    let into = p.0.join("library");
+    let pick = || {
+        let (source, items) = source::pick_and_list(
+            &photos,
+            &account,
+            Instant::now() + Duration::from_secs(30),
+            &Cancel::new(),
+            &|_| {},
+        )
+        .unwrap()
+        .expect("picked");
+        let remote = Remote {
+            connector: &photos,
+            source,
+            items,
+            new_only: false,
+        };
+        let report =
+            fetch::import_remote(&vault, &jobs, &remote, &options(&into), 1000, &mut |_| {})
+                .unwrap();
+        photos.end_pick().unwrap();
+        report
+    };
+    let first = pick();
+    assert_eq!((first.added, first.failed), (1, 0), "{first:?}");
+    // A new picking, whenever wanted: m1 again, already imported, and two
+    // new ones, the first download's address expired meanwhile.
+    fake.pick(vec![
+        ("m1", "IMG_1.png", false, a.clone()),
+        ("m2", "IMG_2.png", false, b.clone()),
+        ("m3", "IMG_3.png", false, c.clone()),
+    ]);
+    fake.expire_downloads(1);
+    let second = pick();
+    assert_eq!((second.added, second.failed), (2, 0), "{second:?}");
+    assert_eq!(second.unfetched, 1, "m1 known by its id: {second:?}");
+    assert_eq!(std::fs::read(into.join("IMG_2.png")).unwrap(), b);
+    assert_eq!(std::fs::read(into.join("IMG_3.png")).unwrap(), c);
+    let requests = fake.requests();
+    let sessions: Vec<&String> = requests
+        .iter()
+        .filter(|r| r.as_str() == "POST /v1/sessions")
+        .collect();
+    assert_eq!(sessions.len(), 2, "a session of its own each time");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.as_str() == "GET /media/m1=d")
+            .count(),
+        1,
+        "m1 fetched once: {requests:?}"
+    );
+    // The expired address made the picking be listed again.
+    let listings = requests
+        .iter()
+        .filter(|r| r.starts_with("GET /v1/mediaItems?sessionId=s2"))
+        .count();
+    assert!(
+        listings >= 3,
+        "listed, then again for fresh addresses: {requests:?}"
+    );
 }
 
 #[test]

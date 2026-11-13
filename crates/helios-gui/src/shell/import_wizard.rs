@@ -668,7 +668,7 @@ impl ImportWindow {
                 for account in accounts {
                     ui.horizontal(|ui| {
                         let chosen = wz.account.as_deref() == Some(account.id.as_str());
-                        if ui.selectable_label(chosen, &account.label).clicked() {
+                        if ui.selectable_label(chosen, account.shown()).clicked() {
                             wz.account = Some(account.id.clone());
                         }
                         ui.label(egui::RichText::new(t(state_text(&account.state))).small());

@@ -91,6 +91,8 @@ gui-account-connected = connected
 
 gui-account-connecting = connecting…
 
+gui-account-identity-missing = Reconnect to see the account
+
 gui-account-needs-attention = needs attention
 
 gui-account-not-connected = not connected
@@ -1267,7 +1269,11 @@ gui-pick-failed = Not imported: { $why }
 
 gui-pick-importing = Importing { $count } photos…
 
+gui-pick-known = { $count } already in the library, left as they are.
+
 gui-pick-library-folder = Picked photos are copied into the library folder. Choose it once: it is remembered.
+
+gui-pick-more = Pick more photos…
 
 gui-pick-nothing = Nothing was picked in time.
 

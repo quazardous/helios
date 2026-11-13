@@ -273,6 +273,43 @@ impl PluginSource {
         answer.map_err(error_of)
     }
 
+    /// The plugin's download of one item listed into the staging folder:
+    /// its answer, or why the item failed.
+    fn fetch_one(&self, item: &ItemRef, cancel: &Cancel) -> Result<Json, ConnectorError> {
+        let listed = lock(&self.downloads)
+            .get(&item.id.0)
+            .cloned()
+            .ok_or(ConnectorError::Expired)?;
+        let answer = self.call(
+            &item.source.id,
+            "source.fetch",
+            json!({ "items": [listed], "staging": self.staging }),
+            FETCH,
+            cancel,
+        )?;
+        if let Some(failed) = answer["failed"].as_array().and_then(|f| f.first()) {
+            let code = failed["code"].as_i64().unwrap_or(-32000);
+            let message = failed["message"].as_str().unwrap_or_default().to_owned();
+            return Err(error_of(CallError::Rpc { code, message }));
+        }
+        Ok(answer)
+    }
+
+    /// The picking going listed again, every page: each item's download
+    /// address renewed.
+    fn refresh(&self, cancel: &Cancel) -> Result<(), ConnectorError> {
+        let (account, _) = self.session()?;
+        let source = self.source(&account);
+        let mut from = None;
+        loop {
+            let page = self.list(&source, from.as_ref(), helios_connect::PAGE, cancel)?;
+            match page.next {
+                Some(next) if !page.complete => from = Some(next),
+                _ => return Ok(()),
+            }
+        }
+    }
+
     /// The picking going, its account and session.
     fn session(&self) -> Result<(String, String), ConnectorError> {
         lock(&self.session).clone().ok_or(ConnectorError::Expired)
@@ -456,24 +493,18 @@ impl Connector for PluginSource {
         if offset > 0 {
             return Err(ConnectorError::Unsupported);
         }
-        let listed = lock(&self.downloads)
-            .get(&item.id.0)
-            .cloned()
-            .ok_or(ConnectorError::Expired)?;
         std::fs::create_dir_all(&self.staging)
             .map_err(|e| ConnectorError::Fatal(format!("{}: {e}", self.staging.display())))?;
-        let answer = self.call(
-            &item.source.id,
-            "source.fetch",
-            json!({ "items": [listed], "staging": self.staging }),
-            FETCH,
-            cancel,
-        )?;
-        if let Some(failed) = answer["failed"].as_array().and_then(|f| f.first()) {
-            let code = failed["code"].as_i64().unwrap_or(-32000);
-            let message = failed["message"].as_str().unwrap_or_default().to_owned();
-            return Err(error_of(CallError::Rpc { code, message }));
-        }
+        // A download address the service let expire (Google's last an
+        // hour) is no error: the picking is listed again for fresh ones,
+        // and the item fetched once more.
+        let answer = match self.fetch_one(item, cancel) {
+            Err(ConnectorError::Expired) => {
+                self.refresh(cancel)?;
+                self.fetch_one(item, cancel)?
+            }
+            other => other?,
+        };
         let done = answer["fetched"]
             .as_array()
             .and_then(|f| f.iter().find(|d| d["id"] == item.id.0.as_str()))

@@ -64,6 +64,10 @@ pub(crate) struct Accounts {
     /// The connectors signing in through OAuth, with their manifest's
     /// client id, for Settings > Accounts' own clients.
     pub(crate) oauth: OauthConnectors,
+    /// The connectors whose sign-in asks who the account is (the `email`
+    /// scope): their accounts are shown with their address, and one signed
+    /// in before has "Reconnect to see the account".
+    pub(crate) identity: IdentityConnectors,
     /// The picking running ("Pick photos…"), shown in the window's dialog.
     pub(crate) picking: Option<Picking>,
     /// How picked items are imported: `helios_library::fetch::import_remote`
@@ -271,10 +275,18 @@ pub type ImportRemote = Arc<
             helios_connect::SourceRef,
             Vec<helios_connect::Item>,
             Option<PathBuf>,
-        ) -> Result<u64, String>
+        ) -> Result<Imported, String>
         + Send
         + Sync,
 >;
+
+/// What a picking's import did: `added` photos new to the library,
+/// `known` already in it (picked before), left as they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Imported {
+    pub added: u64,
+    pub known: u64,
+}
 
 /// The library folder a fetched item is copied into: the library's
 /// (`helios_library::import::library_root`) on the desktop. A picking
@@ -303,9 +315,10 @@ pub(crate) enum PickStatus {
     Importing {
         items: usize,
     },
-    /// Done: `added` photos added.
+    /// Done: `added` photos added, `known` already imported.
     Done {
         added: u64,
+        known: u64,
     },
     /// Nothing picked before the deadline.
     Nothing,
@@ -346,6 +359,8 @@ pub(crate) type Labels = Arc<Mutex<BTreeMap<String, Text>>>;
 /// The connectors with an `oauth` step, by id, with their manifest's
 /// client id.
 pub(crate) type OauthConnectors = Arc<Mutex<BTreeMap<String, Option<String>>>>;
+/// The connectors whose sign-in asks the account's address, by id.
+pub(crate) type IdentityConnectors = Arc<Mutex<std::collections::BTreeSet<String>>>;
 
 impl Default for Accounts {
     fn default() -> Self {
@@ -360,6 +375,7 @@ impl Default for Accounts {
             current: Current::default(),
             labels: Labels::default(),
             oauth: OauthConnectors::default(),
+            identity: IdentityConnectors::default(),
             picking: None,
             import: None,
             library: None,
@@ -382,12 +398,34 @@ pub(crate) struct Connecting {
 }
 
 impl Accounts {
-    /// An account's name as last read.
+    /// An account's name as last read, with its address once known
+    /// ("Google Photos — name@example.com").
     pub(crate) fn label_of(&self, id: &str) -> Option<String> {
-        self.listed
-            .iter()
-            .find(|a| a.id == id)
-            .map(|a| a.label.clone())
+        self.listed.iter().find(|a| a.id == id).map(Account::shown)
+    }
+
+    /// Whether "Pick photos…" is offered on the account `id`: connected,
+    /// its connector picks, and picked photos have a library to go to.
+    pub(crate) fn picks(&self, id: &str, connectors: &Connectors) -> bool {
+        self.import.is_some()
+            && self.listed.iter().any(|a| {
+                a.id == id
+                    && matches!(a.state, AccountState::Connected)
+                    && connectors
+                        .provider(&a.connector)
+                        .is_some_and(|p| p.manifest().caps.picks)
+            })
+    }
+
+    /// Whether the account signed in before its connector asked who it
+    /// is: one reconnection shows its address.
+    pub(crate) fn identity_missing(&self, account: &Account) -> bool {
+        let asks = self
+            .identity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(&account.connector);
+        account.identity_missing(asks)
     }
 
     /// The accounts, read again off the interface's thread: as the read
@@ -549,7 +587,7 @@ impl Accounts {
                     let done = import(connector.as_ref(), source, items, into);
                     let _ = connector.end_pick();
                     match done {
-                        Ok(added) => PickStatus::Done { added },
+                        Ok(Imported { added, known }) => PickStatus::Done { added, known },
                         Err(e) => PickStatus::Failed(e),
                     }
                 }
@@ -881,7 +919,7 @@ pub(crate) fn accounts_ui(
         let row = ui
             .horizontal(|ui| {
                 if ui
-                    .selectable_label(selected == Some(account.id.as_str()), &account.label)
+                    .selectable_label(selected == Some(account.id.as_str()), account.shown())
                     .clicked()
                 {
                     asked = Some(Asked::Select(account.id.clone()));
@@ -910,7 +948,14 @@ pub(crate) fn accounts_ui(
                 ui.close();
             }
         });
-        if matches!(account.state, AccountState::NeedsAttention { .. })
+        let unknown = accounts.identity_missing(account);
+        if unknown {
+            ui.weak(t(Message::new(
+                "gui-account-identity-missing",
+                "Reconnect to see the account",
+            )));
+        }
+        if (unknown || matches!(account.state, AccountState::NeedsAttention { .. }))
             && ui
                 .small_button(t(Message::new("gui-account-reconnect", "Reconnect")))
                 .clicked()
@@ -1225,12 +1270,21 @@ pub(crate) fn pick_dialog(
                         .with("count", *items as i64),
                 ),
             ),
-            PickStatus::Done { added } => ended(
-                ui,
-                t(Message::new("gui-pick-done", "{ $count } photos imported.")
-                    .with("count", *added as i64)),
-                false,
-            ),
+            PickStatus::Done { added, known } => {
+                ended(
+                    ui,
+                    t(Message::new("gui-pick-done", "{ $count } photos imported.")
+                        .with("count", *added as i64)),
+                    false,
+                );
+                if *known > 0 {
+                    ui.weak(t(Message::new(
+                        "gui-pick-known",
+                        "{ $count } already in the library, left as they are.",
+                    )
+                    .with("count", *known as i64)));
+                }
+            }
             PickStatus::Nothing => ended(
                 ui,
                 t(Message::new(
@@ -1290,6 +1344,15 @@ pub(crate) fn pick_dialog(
             if restart
                 && ui
                     .button(t(Message::new("gui-pick-again", "Start again")))
+                    .clicked()
+            {
+                again = true;
+            }
+            // Picking again, whenever wanted: a new session, its photos
+            // added to the same source, those already in left as they are.
+            if matches!(status, PickStatus::Done { .. })
+                && ui
+                    .button(t(Message::new("gui-pick-more", "Pick more photos…")))
                     .clicked()
             {
                 again = true;

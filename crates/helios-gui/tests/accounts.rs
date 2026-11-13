@@ -5,6 +5,9 @@
 //! Settings > Accounts lists it with Reconnect and Sign out. An agent may
 //! fill a form, never a secret. Settings > Accounts also sets the
 //! person's own OAuth client of a connector signing in through OAuth.
+//! An account is shown with its address once its sign-in read it; one
+//! signed in before its connector asked who it is offers a reconnection;
+//! a picking done offers "Pick more photos…", a new picking each time.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -773,7 +776,9 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
         ready: false,
     }));
     shell.set_import_browser(opened.opener());
-    shell.set_import_remote(Arc::new(|_, _, _, _| Ok(0)));
+    shell.set_import_remote(Arc::new(|_, _, _, _| {
+        Ok(helios_gui::shell::PickImported::default())
+    }));
     shell.set_import_accounts(book, secrets);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -938,7 +943,9 @@ fn picking_world(
     let seen = imported.clone();
     shell.set_import_remote(Arc::new(move |_, _, _, into| {
         seen.lock().unwrap().push(into);
-        Ok(0)
+        // The second picking finds the first one's photo again.
+        let known = u64::from(seen.lock().unwrap().len() > 1);
+        Ok(helios_gui::shell::PickImported { added: 1, known })
     }));
     shell.set_import_library_folder(folder.clone());
     shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
@@ -991,7 +998,7 @@ fn with_no_library_folder_it_is_asked_before_the_picking_opens_then_the_photos_g
     assert_eq!(folder.0.lock().unwrap().as_deref(), Some(dir.as_path()));
     assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
     assert_eq!(imported.lock().unwrap()[0].as_deref(), Some(dir.as_path()));
-    until(&mut h, "said imported", |h| shown(h, "0 photos imported."));
+    until(&mut h, "said imported", |h| shown(h, "1 photos imported."));
 }
 
 #[test]
@@ -1097,5 +1104,121 @@ fn a_picking_source_shows_only_its_picker_in_the_contents_column() {
         .click();
     until(&mut h, "the library folder asked", |h| {
         shown(h, "Choose the library folder…")
+    });
+}
+
+/// [`Picks`] signing in through OAuth asking who the account is (the
+/// `email` scope), as Google Photos does.
+struct PicksAsking(Picks);
+
+impl helios_connect::ConnectorProvider for PicksAsking {
+    fn manifest(&self) -> helios_connect::ConnectorManifest {
+        let mut m = self.0.manifest();
+        m.connect.insert(
+            0,
+            helios_connect::ConnectStep {
+                id: "sign-in".into(),
+                kind: helios_connect::StepKind::Oauth {
+                    authorize: "https://accounts.example.org/auth".into(),
+                    token: "https://accounts.example.org/token".into(),
+                    scopes: vec!["photos".into(), "openid".into(), "email".into()],
+                    revoke: None,
+                    client_id: None,
+                },
+            },
+        );
+        m
+    }
+
+    fn create(
+        &self,
+        settings: &helios_connect::Settings,
+        services: &helios_connect::ConnectorServices,
+    ) -> Result<Box<dyn helios_connect::Connector>, helios_connect::ConnectorError> {
+        self.0.create(settings, services)
+    }
+}
+
+#[test]
+fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection() {
+    use helios_connect::account::{Account, EMAIL};
+    use helios_connect::oauth::CLIENT_ID;
+    let book = Arc::new(MemoryAccounts::default());
+    let mut known = Account::new(PICKS, "Fake picks", &[]);
+    known.state = AccountState::Connected;
+    known.facts.insert(CLIENT_ID.into(), "client".into());
+    known.facts.insert(EMAIL.into(), "ann@example.com".into());
+    book.save(&known).unwrap();
+    let mut old = Account::new(PICKS, "Fake picks", std::slice::from_ref(&known));
+    old.state = AccountState::Connected;
+    old.facts.insert(CLIENT_ID.into(), "client".into());
+    book.save(&old).unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(PicksAsking(Picks {
+        sessions: Arc::default(),
+        expired: 0,
+        ready: true,
+    })));
+    shell.set_import_remote(Arc::new(|_, _, _, _| {
+        Ok(helios_gui::shell::PickImported::default())
+    }));
+    shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(&mut h, "the account's address", |h| {
+        shown(h, "Fake picks — ann@example.com")
+    });
+    assert!(shown(&h, "Reconnect to see the account"));
+    assert_eq!(
+        h.query_all_by_label("Reconnect to see the account").count(),
+        1,
+        "the old account only"
+    );
+    // Settings > Accounts says the same.
+    let rows = run(&mut h, "import.accounts", Value::Null, Origin::User).unwrap();
+    let row = |id: &str| {
+        rows["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    let (k, o) = (row(&known.id), row(&old.id));
+    assert_eq!(k["label"], "Fake picks — ann@example.com");
+    assert_eq!(k["email"], "ann@example.com");
+    assert_eq!(k["tone"], "success");
+    assert_eq!(o["label"], "Fake picks");
+    assert_eq!(o["why"], "Reconnect to see the account");
+    assert_eq!(o["tone"], "warning");
+}
+
+#[test]
+fn a_picking_done_offers_to_pick_more_in_a_new_session() {
+    let doc = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
+    let (mut h, opened, _folder, imported, sessions) = picking_world(Some(doc.into()));
+    h.get_by_label("Pick photos…").click();
+    until(&mut h, "the first picking done", |h| {
+        shown(h, "1 photos imported.")
+    });
+    h.run_steps(4);
+    h.get_by_label("Pick more photos…").click();
+    until(&mut h, "the second picking done", |_| {
+        imported.lock().unwrap().len() == 2
+    });
+    // A session of its own, its photos added to the same source, the one
+    // already in said so.
+    assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        opened.urls(),
+        [
+            "https://picker.example.org/pick/s1",
+            "https://picker.example.org/pick/s2"
+        ]
+    );
+    until(&mut h, "the known photo said", |h| {
+        shown(h, "1 already in the library, left as they are.")
     });
 }
