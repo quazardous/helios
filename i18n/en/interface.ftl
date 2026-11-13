@@ -29,6 +29,9 @@ clip-application-x-helios-nodes-json =
 clip-application-x-helios-param-json =
     .title = a parameter
 
+command-admin-quick =
+    .description = The settings changed often and those changed lately, edited without opening Settings.
+
 command-graph-edit =
     .description = Asks a node editor for an edit, done at its next frame as the user's (a connection type-checked, then its graph.* step): `edit` is `connect` (`from`, `to`, and `replaces`: wires whose end it moves, one edit), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) or `add` (`nodes`).
 
