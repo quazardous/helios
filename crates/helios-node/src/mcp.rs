@@ -2609,6 +2609,9 @@ fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
     let check = |text: &str, access: Access| roots.check(Path::new(text), access).map(|_| ());
     for param in tool.params {
         let value = &request[param.name];
+        // One key per arm, each said on its own, even where two give the
+        // same access.
+        #[allow(clippy::match_same_arms)]
         let access = match param.name {
             "path" if cmd == "export" => Access::Write,
             // A template's id or a workspace's folder; elsewhere a node or

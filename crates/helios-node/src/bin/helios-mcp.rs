@@ -38,7 +38,7 @@ fn main() -> ExitCode {
             ("--control", Some(p)) => control = Some(p),
             ("--read-root", Some(d)) => read_roots.push(PathBuf::from(d)),
             ("--write-root", Some(d)) if write_root.is_none() => {
-                write_root = Some(PathBuf::from(d))
+                write_root = Some(PathBuf::from(d));
             }
             ("--token-file", Some(f)) => match std::fs::read_to_string(&f) {
                 Ok(t) => token = Some(t.trim().to_string()),
