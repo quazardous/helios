@@ -11,6 +11,17 @@
 //!   `import.automatic.ask_gb`): more files or bytes than that are
 //!   offered, not imported.
 //! - Otherwise the import runs.
+//!
+//! Shared by both runners too: an automatic import's origin in the import
+//! history ([`origin`], `auto:<source>`), how often watched folders are
+//! looked at ([`Timing`]) and which of their files held still long
+//! enough to be imported ([`Settling`]).
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
+
+use serde::Serialize;
 
 /// The setting that pauses every automatic import.
 pub const PAUSED: &str = "import.automatic.paused";
@@ -60,7 +71,8 @@ pub struct Batch {
 }
 
 /// What becomes of a batch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Verdict {
     /// Imported.
     Run,
@@ -84,6 +96,94 @@ pub fn verdict(limits: &Limits, batch: &Batch) -> Verdict {
         Verdict::Ask
     } else {
         Verdict::Run
+    }
+}
+
+/// Who asked for an automatic import from the source named `source`, as
+/// the import history records it: `auto:<source>`.
+pub fn origin(source: &str) -> String {
+    format!("auto:{source}")
+}
+
+/// How often watched folders are looked at, and how long a file must hold
+/// still (its size and time) before it is imported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timing {
+    pub poll: Duration,
+    pub settle: Duration,
+}
+
+impl Default for Timing {
+    fn default() -> Self {
+        Self {
+            poll: Duration::from_secs(2),
+            settle: Duration::from_secs(3),
+        }
+    }
+}
+
+/// A file as last seen in a watched folder.
+struct Seen {
+    size: u64,
+    modified: Option<SystemTime>,
+    since: Instant,
+    sent: bool,
+}
+
+/// The files of watched folders, followed from look to look: a file is
+/// ready once its size and time held still for the settling delay (a copy
+/// in progress is left alone), and ready once while its folder is watched.
+#[derive(Default)]
+pub struct Settling {
+    folders: HashMap<PathBuf, HashMap<PathBuf, Seen>>,
+}
+
+impl Settling {
+    /// Forgets the folders no longer watched: watched again, their files
+    /// are all new.
+    pub fn keep(&mut self, folders: &[PathBuf]) {
+        self.folders.retain(|f, _| folders.contains(f));
+    }
+
+    /// One look at `folder`: its image files that held still for `settle`
+    /// at `now` and were not ready before. A folder that cannot be read
+    /// has none.
+    pub fn look(&mut self, folder: &Path, settle: Duration, now: Instant) -> Vec<PathBuf> {
+        let Ok(files) = helios_connect::local::files_of(folder) else {
+            return Vec::new();
+        };
+        let state = self.folders.entry(folder.to_path_buf()).or_default();
+        state.retain(|p, _| files.binary_search(p).is_ok());
+        let mut ready = Vec::new();
+        for file in files {
+            let Ok(meta) = std::fs::metadata(&file) else {
+                continue;
+            };
+            let (size, modified) = (meta.len(), meta.modified().ok());
+            match state.get_mut(&file) {
+                None => {
+                    state.insert(
+                        file,
+                        Seen {
+                            size,
+                            modified,
+                            since: now,
+                            sent: false,
+                        },
+                    );
+                }
+                Some(seen) if seen.sent => {}
+                Some(seen) if (seen.size, seen.modified) != (size, modified) => {
+                    (seen.size, seen.modified, seen.since) = (size, modified, now);
+                }
+                Some(seen) if now.duration_since(seen.since) >= settle => {
+                    seen.sent = true;
+                    ready.push(file);
+                }
+                Some(_) => {}
+            }
+        }
+        ready
     }
 }
 
@@ -133,5 +233,36 @@ mod tests {
                 ask_bytes: 20_000_000_000
             }
         );
+    }
+
+    #[test]
+    fn auto_import_a_file_is_ready_once_it_held_still() {
+        let dir = std::env::temp_dir().join(format!("helios-settling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let photo = dir.join("a.jpg");
+        std::fs::write(&photo, b"one").unwrap();
+        let settle = Duration::from_secs(3);
+        let start = Instant::now();
+        let mut settling = Settling::default();
+        assert!(settling.look(&dir, settle, start).is_empty(), "first seen");
+        assert!(
+            settling
+                .look(&dir, settle, start + Duration::from_secs(1))
+                .is_empty(),
+            "not still long enough"
+        );
+        let later = start + Duration::from_secs(4);
+        assert_eq!(settling.look(&dir, settle, later), vec![photo.clone()]);
+        assert!(settling.look(&dir, settle, later).is_empty(), "ready once");
+        settling.keep(&[]);
+        assert!(settling.look(&dir, settle, later).is_empty(), "new again");
+        assert_eq!(
+            settling.look(&dir, settle, later + settle),
+            vec![photo],
+            "watched again, ready again"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(origin("Camera"), "auto:Camera");
     }
 }

@@ -18,7 +18,8 @@
 //!   content: an automatic import never keeps nor asks about one,
 //!   whatever the source's choices say.
 //! - The import is the host's job, as the window's: one undo step of the
-//!   Library, its report in the Log panel and its end said.
+//!   Library, its report in the Log panel and its end said; the import
+//!   history records it as `auto:<source>`.
 //! - **Another client's change** to the sources (`settings.layerChanged`
 //!   naming the document) is read again ([`Shell::follow_import_sources`]).
 //! - **Safeguards** ([`helios_library::auto_import`], section 3.3): with
@@ -29,18 +30,17 @@
 //!   (`import.automatic.ask_files`, `import.automatic.ask_gb`) is a toast
 //!   whose Open shows it in the import window.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use egui::Context as Egui;
 use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
-use helios_library::auto_import::{self as guard, Batch, Limits, Verdict};
-use helios_shell::commands::Origin;
+use helios_library::auto_import::{self as guard, Batch, Limits, Settling, Timing, Verdict};
 use helios_storage::Card;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -88,23 +88,6 @@ pub(super) fn off_message() -> Message {
 /// "Import automatically", the menus' title.
 pub(super) fn title_message() -> Message {
     Message::new("gui-import-auto", "Import automatically")
-}
-
-/// How often the watched folders are rescanned, and how long a file must
-/// hold still before it is imported.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Timing {
-    pub poll: Duration,
-    pub settle: Duration,
-}
-
-impl Default for Timing {
-    fn default() -> Self {
-        Self {
-            poll: Duration::from_secs(2),
-            settle: Duration::from_secs(3),
-        }
-    }
 }
 
 /// The automatic imports' state, kept in the import window's.
@@ -158,15 +141,7 @@ impl AutoImports {
     }
 }
 
-/// A file as last seen by the watch.
-struct Seen {
-    size: u64,
-    modified: Option<SystemTime>,
-    since: Instant,
-    sent: bool,
-}
-
-/// The watch's thread: each folder rescanned every `timing.poll`; the
+/// The watch's thread: each folder looked at every `timing.poll`; the
 /// files settled for `timing.settle` and not sent yet sent. Ends once
 /// the window dropped its end of `shared`.
 fn watch_folders(
@@ -175,49 +150,15 @@ fn watch_folders(
     timing: Timing,
     ctx: &Arc<Mutex<Option<Egui>>>,
 ) {
-    let mut states: HashMap<PathBuf, HashMap<PathBuf, Seen>> = HashMap::new();
+    let mut settling = Settling::default();
     while Arc::strong_count(shared) > 1 {
         let folders = shared
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        states.retain(|f, _| folders.contains(f));
+        settling.keep(&folders);
         for folder in folders {
-            let Ok(files) = helios_connect::local::files_of(&folder) else {
-                continue;
-            };
-            let state = states.entry(folder.clone()).or_default();
-            state.retain(|p, _| files.binary_search(p).is_ok());
-            let now = Instant::now();
-            let mut ready = Vec::new();
-            for file in files {
-                let Ok(meta) = std::fs::metadata(&file) else {
-                    continue;
-                };
-                let (size, modified) = (meta.len(), meta.modified().ok());
-                match state.get_mut(&file) {
-                    None => {
-                        state.insert(
-                            file,
-                            Seen {
-                                size,
-                                modified,
-                                since: now,
-                                sent: false,
-                            },
-                        );
-                    }
-                    Some(seen) if seen.sent => {}
-                    Some(seen) if (seen.size, seen.modified) != (size, modified) => {
-                        (seen.size, seen.modified, seen.since) = (size, modified, now);
-                    }
-                    Some(seen) if now.duration_since(seen.since) >= timing.settle => {
-                        seen.sent = true;
-                        ready.push(file);
-                    }
-                    Some(_) => {}
-                }
-            }
+            let ready = settling.look(&folder, timing.settle, Instant::now());
             if !ready.is_empty() {
                 if tx.send((folder, ready)).is_err() {
                     return;
@@ -511,7 +452,7 @@ impl Shell {
         let mut args = choices.args(&files, copy);
         args["duplicates"] = json!("skip");
         let count = files.len();
-        if let Err(e) = self.import_files(&args, &Origin::User) {
+        if let Err(e) = self.import_files_automatically(&args, &name) {
             self.core.log.borrow_mut().push(
                 Level::Warning,
                 Message::new(
