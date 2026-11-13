@@ -1449,6 +1449,124 @@ gui-recording-saved = recording saved to { $path }
 
 gui-recording-stopped = recording stopped: { $error }
 
+gui-rule-add-condition = + Condition
+
+gui-rule-add-group = + Group
+
+gui-rule-and = and
+
+gui-rule-apply = Apply
+
+gui-rule-cancel = Cancel
+
+gui-rule-down = Move down
+
+gui-rule-field-album = album
+
+gui-rule-field-aperture = aperture
+
+gui-rule-field-camera = camera
+
+gui-rule-field-captured = capture date
+
+gui-rule-field-description = description
+
+gui-rule-field-file-type = file type
+
+gui-rule-field-flag = flag
+
+gui-rule-field-focal-length = focal length
+
+gui-rule-field-folder = folder
+
+gui-rule-field-iso = ISO
+
+gui-rule-field-label = colour label
+
+gui-rule-field-lens = lens
+
+gui-rule-field-make = camera make
+
+gui-rule-field-name = Field
+
+gui-rule-field-rating = rating
+
+gui-rule-field-shutter = shutter speed
+
+gui-rule-field-tag = tag
+
+gui-rule-field-title = title
+
+gui-rule-high-name = Second value
+
+gui-rule-match-all = All
+
+gui-rule-match-any = Any
+
+gui-rule-match-name = Rules to match
+
+gui-rule-match-none = None
+
+gui-rule-of-rules = of these rules
+
+gui-rule-op-between = is between
+
+gui-rule-op-contains = contains
+
+gui-rule-op-eq = is
+
+gui-rule-op-ge = is at least
+
+gui-rule-op-gt = is above
+
+gui-rule-op-has = has
+
+gui-rule-op-in = is in
+
+gui-rule-op-is = is
+
+gui-rule-op-is-not = is not
+
+gui-rule-op-lacks = lacks
+
+gui-rule-op-le = is at most
+
+gui-rule-op-lt = is below
+
+gui-rule-op-name = Comparison
+
+gui-rule-op-ne = is not
+
+gui-rule-op-not-in = is not in
+
+gui-rule-op-within = is in
+
+gui-rule-period-last = the last
+
+gui-rule-period-this-year = this year
+
+gui-rule-period-today = today
+
+gui-rule-redo = Redo
+
+gui-rule-remove = Remove
+
+gui-rule-title = The smart album's rules
+
+gui-rule-undo = Undo
+
+gui-rule-unit-days = days
+
+gui-rule-unit-months = months
+
+gui-rule-unit-name = Unit
+
+gui-rule-unit-weeks = weeks
+
+gui-rule-up = Move up
+
+gui-rule-value-name = Value
+
 gui-scene-saved = viewport.scene saved to { $path }
 
 gui-scopes-blue = Blue

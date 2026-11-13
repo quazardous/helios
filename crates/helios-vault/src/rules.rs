@@ -9,8 +9,14 @@
 //! fields, their kinds and the operators each kind takes are in
 //! [`RULE_FIELDS`]; anything else is refused with its reason
 //! ([`Rule::parse`]).
+//!
+//! The capture date also takes relative values, `{"field": "captured",
+//! "op": "within", "value": {"last": 30, "unit": "days"}}` (or `"today"`,
+//! `"this_year"`): kept relative in the tree, they are resolved against a
+//! clock each time a query runs ([`resolve`], [`Relative`]).
 
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde::{Serialize, Serializer};
 use serde_json::{Value, json};
@@ -69,6 +75,9 @@ pub enum RuleKind {
     /// An album (its id): `in`, `not_in`. A smart album holds no photo
     /// here: its rules are written out instead.
     Album,
+    /// A capture time (seconds, the camera's clock read as UTC): a
+    /// number's operators, and `within` a [`Relative`] period.
+    Date,
 }
 
 impl RuleKind {
@@ -76,6 +85,7 @@ impl RuleKind {
     pub fn ops(self) -> &'static [&'static str] {
         match self {
             RuleKind::Number => &["=", "!=", "<", "<=", ">", ">=", "between"],
+            RuleKind::Date => &["=", "!=", "<", "<=", ">", ">=", "between", "within"],
             RuleKind::Set => &["has", "lacks"],
             RuleKind::Text => &["is", "is_not", "contains"],
             RuleKind::Flag => &["is", "is_not"],
@@ -105,7 +115,7 @@ pub const RULE_FIELDS: &[RuleField] = &[
     f("flag", "", RuleKind::Flag),
     f("folder", "", RuleKind::Folder),
     f("album", "", RuleKind::Album),
-    f("captured", capture::CAPTURED, RuleKind::Number),
+    f("captured", capture::CAPTURED, RuleKind::Date),
     f("camera", capture::CAMERA_MODEL, RuleKind::Text),
     f("make", capture::CAMERA_MAKE, RuleKind::Text),
     f("lens", capture::LENS, RuleKind::Text),
@@ -203,7 +213,10 @@ fn check_value(spec: &RuleField, op: &str, value: Value) -> Result<Value, String
             .ok_or_else(|| format!("`{name}`: {v} is not a text"))
     };
     match spec.kind {
-        RuleKind::Number if op == "between" => {
+        RuleKind::Date if op == "within" => Relative::parse(&value)
+            .map(Relative::to_json)
+            .map_err(|e| format!("`{name}`: {e}")),
+        RuleKind::Number | RuleKind::Date if op == "between" => {
             let pair = value
                 .as_array()
                 .filter(|a| a.len() == 2)
@@ -214,7 +227,7 @@ fn check_value(spec: &RuleField, op: &str, value: Value) -> Result<Value, String
             }
             Ok(json!([pair[0], pair[1]]))
         }
-        RuleKind::Number => {
+        RuleKind::Number | RuleKind::Date => {
             number(&value)?;
             Ok(value)
         }
@@ -300,6 +313,38 @@ impl Rule {
         Rule::group(Match::All, vec![self, other])
     }
 
+    /// Whether the tree holds a relative date (`within`).
+    pub fn is_relative(&self) -> bool {
+        match self {
+            Rule::Condition(c) => c.op == "within",
+            Rule::Group { rules, .. } => rules.iter().any(Rule::is_relative),
+        }
+    }
+
+    /// The tree with each relative date resolved against `now` (the
+    /// camera's clock read as UTC, in seconds): `within` becomes the
+    /// range `[start, end)` of [`Relative::range`], as two conditions.
+    pub fn at(&self, now: i64) -> Rule {
+        match self {
+            Rule::Group { mode, rules } => Rule::Group {
+                mode: *mode,
+                rules: rules.iter().map(|r| r.at(now)).collect(),
+            },
+            Rule::Condition(c) if c.op == "within" => {
+                let (start, end) = Relative::parse(&c.value).map_or((0, 0), |r| r.range(now));
+                let bound = |op: &'static str, at: i64| {
+                    Rule::Condition(Condition {
+                        field: c.field,
+                        op,
+                        value: json!(at),
+                    })
+                };
+                Rule::group(Match::All, vec![bound(">=", start), bound("<", end)])
+            }
+            other @ Rule::Condition(_) => other.clone(),
+        }
+    }
+
     /// Whether `test` holds for the tree, each condition answered by
     /// `test`: how the memory store reads a tree.
     pub fn holds(&self, test: &mut impl FnMut(&Condition) -> bool) -> bool {
@@ -377,8 +422,22 @@ impl Serialize for Rule {
 /// A query as a store runs it: when its `album` is a smart album, the
 /// album's rules in its place (with the query's own rules, if any);
 /// `doc` reads a collection's document. A smart album whose rules no
-/// longer parse is an error.
+/// longer parse is an error. Relative dates are then resolved against
+/// the query's clock (`Query::now`), else [`now`].
 pub fn resolve(
+    query: &crate::Query,
+    doc: impl FnOnce(&str) -> Result<Option<Value>, String>,
+) -> Result<Cow<'_, crate::Query>, String> {
+    let mut resolved = smart(query, doc)?;
+    if resolved.rules.as_ref().is_some_and(Rule::is_relative) {
+        let at = resolved.now.unwrap_or_else(now);
+        let q = resolved.to_mut();
+        q.rules = q.rules.as_ref().map(|r| r.at(at));
+    }
+    Ok(resolved)
+}
+
+fn smart(
     query: &crate::Query,
     doc: impl FnOnce(&str) -> Result<Option<Value>, String>,
 ) -> Result<Cow<'_, crate::Query>, String> {
@@ -400,6 +459,135 @@ pub fn resolve(
         None => rules,
     });
     Ok(Cow::Owned(q))
+}
+
+/// The unit of a `last` period.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    Days,
+    Weeks,
+    Months,
+}
+
+impl Unit {
+    pub const ALL: [Unit; 3] = [Unit::Days, Unit::Weeks, Unit::Months];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Unit::Days => "days",
+            Unit::Weeks => "weeks",
+            Unit::Months => "months",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Unit> {
+        Unit::ALL.into_iter().find(|u| u.name() == name)
+    }
+}
+
+/// The most a `last` period counts.
+pub const MAX_LAST: u32 = 10_000;
+
+/// A period relative to the day a query runs, by the capture clock's
+/// days: `"today"`, `"this_year"`, or `{"last": n, "unit": "days" |
+/// "weeks" | "months"}`, the `n` days (weeks, months) ending today, today
+/// included.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Relative {
+    Today,
+    ThisYear,
+    Last(u32, Unit),
+}
+
+impl Relative {
+    /// The period a `within` value names.
+    pub fn parse(value: &Value) -> Result<Relative, String> {
+        let bad = || {
+            format!(
+                "`within` takes \"today\", \"this_year\" or {{\"last\": n, \"unit\": \"days\"}}, not {value}"
+            )
+        };
+        match value {
+            Value::String(s) if s == "today" => Ok(Relative::Today),
+            Value::String(s) if s == "this_year" => Ok(Relative::ThisYear),
+            Value::Object(o) => {
+                if let Some(k) = o.keys().find(|k| *k != "last" && *k != "unit") {
+                    return Err(format!("`within` takes no `{k}`"));
+                }
+                let n = o.get("last").and_then(Value::as_u64).ok_or_else(bad)?;
+                if !(1..=u64::from(MAX_LAST)).contains(&n) {
+                    return Err(format!("`last`: {n} is not in [1, {MAX_LAST}]"));
+                }
+                let unit = o
+                    .get("unit")
+                    .and_then(Value::as_str)
+                    .and_then(Unit::parse)
+                    .ok_or_else(|| "`unit` is days, weeks or months".to_string())?;
+                Ok(Relative::Last(n as u32, unit))
+            }
+            _ => Err(bad()),
+        }
+    }
+
+    pub fn to_json(self) -> Value {
+        match self {
+            Relative::Today => json!("today"),
+            Relative::ThisYear => json!("this_year"),
+            Relative::Last(n, unit) => json!({ "last": n, "unit": unit.name() }),
+        }
+    }
+
+    /// The capture times `[start, end)` it covers on the day of `now`
+    /// (seconds, the camera's clock read as UTC): whole days, up to the
+    /// end of today. A month back from the 31st lands on its month's
+    /// last day.
+    pub fn range(self, now: i64) -> (i64, i64) {
+        let today = now.div_euclid(86_400);
+        let end = (today + 1) * 86_400;
+        let start = match self {
+            Relative::Today => today,
+            Relative::ThisYear => {
+                let (y, _, _) = capture::civil(today);
+                capture::days_from_civil(y, 1, 1)
+            }
+            Relative::Last(n, Unit::Days) => today - i64::from(n) + 1,
+            Relative::Last(n, Unit::Weeks) => today - 7 * i64::from(n) + 1,
+            Relative::Last(n, Unit::Months) => {
+                let (y, m, d) = capture::civil(today);
+                let months = y * 12 + i64::from(m) - 1 - i64::from(n);
+                let (y, m) = (months.div_euclid(12), months.rem_euclid(12) as u32 + 1);
+                let first = capture::days_from_civil(y, m, 1);
+                let next = if m == 12 {
+                    capture::days_from_civil(y + 1, 1, 1)
+                } else {
+                    capture::days_from_civil(y, m + 1, 1)
+                };
+                // The same day `n` months back (its month's last at most),
+                // then the day after.
+                first + i64::from(d).min(next - first)
+            }
+        };
+        (start * 86_400, end)
+    }
+}
+
+/// The local clock's offset from UTC, in seconds ([`set_local_offset`]).
+static LOCAL_OFFSET: AtomicI64 = AtomicI64::new(0);
+
+/// Sets how far the local clock is from UTC (seconds, east positive), so
+/// [`now`] reads the time as a camera set to local time would: an
+/// application sets it once at its start.
+pub fn set_local_offset(seconds: i64) {
+    LOCAL_OFFSET.store(seconds, Ordering::Relaxed);
+}
+
+/// The time now as capture times count it: the system's clock, moved by
+/// the local offset ([`set_local_offset`]).
+pub fn now() -> i64 {
+    let utc = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    utc + LOCAL_OFFSET.load(Ordering::Relaxed)
 }
 
 #[cfg(test)]
@@ -450,5 +638,52 @@ mod tests {
             deep = json!({"match": "all", "rules": [deep]});
         }
         assert!(bad(deep).contains("nest at most"));
+        let e = bad(json!({"match": "all", "rules": [
+            {"field": "captured", "op": "within", "value": {"last": 0, "unit": "days"}},
+        ]}));
+        assert!(e.contains("not in [1,"), "{e}");
+        let e = bad(json!({"match": "all", "rules": [
+            {"field": "rating", "op": "within", "value": "today"},
+        ]}));
+        assert!(e.contains("takes no operator `within`"), "{e}");
+    }
+
+    #[test]
+    fn relative_dates_cover_whole_days_up_to_today() {
+        let day = |t: &str| capture::day_start(t).unwrap();
+        let now = day("2024-03-31") + 15 * 3600;
+        let end = day("2024-04-01");
+        assert_eq!(Relative::Today.range(now), (day("2024-03-31"), end));
+        assert_eq!(Relative::ThisYear.range(now), (day("2024-01-01"), end));
+        assert_eq!(
+            Relative::Last(7, Unit::Days).range(now),
+            (day("2024-03-25"), end)
+        );
+        assert_eq!(
+            Relative::Last(2, Unit::Weeks).range(now),
+            (day("2024-03-18"), end)
+        );
+        assert_eq!(
+            Relative::Last(1, Unit::Months).range(now),
+            (day("2024-03-01"), end),
+            "from the day after a month back (Feb 29th)"
+        );
+        assert_eq!(
+            Relative::Last(14, Unit::Months).range(now),
+            (day("2023-02-01"), end),
+            "January 31st 2023, then a day on"
+        );
+        let tree = Rule::parse(&json!({"match": "all", "rules": [
+            {"field": "captured", "op": "within", "value": {"last": 7, "unit": "days"}},
+        ]}))
+        .unwrap();
+        assert!(tree.is_relative());
+        assert_eq!(
+            tree.at(now).to_json(),
+            json!({"match": "all", "rules": [{"match": "all", "rules": [
+                {"field": "captured", "op": ">=", "value": day("2024-03-25")},
+                {"field": "captured", "op": "<", "value": end},
+            ]}]})
+        );
     }
 }

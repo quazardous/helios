@@ -61,6 +61,8 @@ pub mod quick_open;
 pub mod quit;
 pub mod relay;
 pub mod report;
+pub mod rule_editor;
+pub mod rule_editor_ui;
 pub mod scopes;
 pub mod shell;
 pub mod smart_album;

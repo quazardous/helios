@@ -318,7 +318,7 @@ impl Editor {
                     .collect::<Vec<_>>()
                     .join(", ");
                 if x.is_driven() {
-                    text = format!("〜 {text}");
+                    text = format!("~ {text}");
                 }
                 if ui
                     .selectable_label(self.selected == Some(i), text)

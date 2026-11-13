@@ -629,10 +629,35 @@ colour label, flag, tag, camera, file type, folder, a range of days);
 shows, else says to set them with `rules`.
 `library.collection.create` takes `kind: "smart"` and `rules` (or the
 form's keys); `library.collection.rules` sets them, one undoable step;
-photos are never added to or removed from a smart album. Not built yet:
-a tree editor for nested groups, relative dates ("the last 30 days"),
+photos are never added to or removed from a smart album.
+
+Built (2026-11-13), third part: **the rule editor and relative dates**.
+"Edit the rules…" (`library.collection.rules` without `rules`) opens a
+dialog over the window the Library is in, on any tree: each group with
+its all, any or none and its "+ Condition" and "+ Group", each
+condition with its field, operator and value boxes by the field's kind
+(a number, two bounds for `between`, a day for the capture date, a
+choice for the flag, colour labels and albums), moved up or down or
+removed. The draft keeps each condition as typed: one not valid shows
+the vault's reason under it, and Apply waits until none is left. Each
+edit is one step of the dialog's own undo (typing on in one box is one
+step); Apply is one step of the library's history, as before. Agents
+make the same edits with `library.collection.rules.edit` (`edit`, `at`
+a path of indexes, the edit's own keys; `undo`, `redo`, `apply`,
+`cancel`), which answers the draft, its faults and the rules when valid.
+The tree does not fit the declarative forms (flat fields): the dialog is
+drawn by hand, its words through the catalogues.
+The capture date (`captured`) takes `within` a relative period,
+`"today"`, `"this_year"` or `{"last": n, "unit": "days" | "weeks" |
+"months"}` (the n days, weeks or months ending today, today included),
+stored as written. A store resolves it when it runs the query
+(`rules::resolve`): against `Query::now` when set (tests), else the
+system clock moved by the local offset the application sets at its
+start, so "today" is the local day, as cameras write local times. It
+becomes a whole-day range `[start, end)` in the tree the store compiles,
+so SQLite and the memory store select the same photos. Not built yet:
 the quick collection and B, Ctrl+K recent filters, album sets, drag and
-drop onto an album.
+drop onto an album, keyboard undo in the dialog (its buttons only).
 
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste

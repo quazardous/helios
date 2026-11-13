@@ -275,7 +275,10 @@ command-library-collection-rename =
     .title = Rename an album (`id`, `name`); without `name`, asks it
 
 command-library-collection-rules =
-    .title = Set a smart album's rules (`id`; `rules`, a tree, or the form's keys); without them, asks them. Unknown fields and invalid rules are refused with the reason
+    .title = Set a smart album's rules (`id`; `rules`, a tree, or the form's keys); without them, opens the rule editor on them. Unknown fields and invalid rules are refused with the reason
+
+command-library-collection-rules-edit =
+    .title = Edit the rules in the open rule editor, one undoable edit at a time: `edit` (add_condition, add_group, remove, move with `to`, match with `match`: all, any or none, field with `field`, op with `op`, value with `value`, `high` (between's second bound, or within's count) and `unit` (days, weeks or months), undo, redo, apply, cancel) at `at`, a path of indexes from the top group ([]). A capture date takes a day (YYYY-MM-DD) or, with `op: within`, today, this_year or last. Answers the draft, each condition's fault and the rules when valid
 
 command-library-compare =
     .title = Compare photos side by side (`images`: ids, else the selection; two to four)

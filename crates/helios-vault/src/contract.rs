@@ -55,6 +55,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     albums_are_made_filled_renamed_and_forgotten(make());
     an_album_s_changes_are_undone_and_redone(make());
     smart_album_rules_select_in_one_query(make());
+    relative_dates_follow_the_query_s_clock(make());
     smart_albums_scope_count_and_undo(make());
 }
 
@@ -2375,6 +2376,106 @@ fn smart_album_rules_select_in_one_query<S: Store>(s: S) {
         ]})),
         pick(&[3])
     );
+}
+
+/// A relative date (`within`) is kept relative and resolved against the
+/// clock of each query: the same tree selects other photos on another
+/// day, in one query, nested or in a smart album.
+fn relative_dates_follow_the_query_s_clock<S: Store>(s: S) {
+    use crate::capture::{Capture, day_start};
+    use crate::rules::Rule;
+    let v = Vault::new(with_images(s, 5));
+    let ids: Vec<ImageId> = (1..=5).map(|i| image(i).id).collect();
+    let at = |day: &str, hour: i64| (day_start(day).unwrap() + hour * 3600) as f64;
+    let shot = |captured: f64| Capture {
+        captured: Some(captured),
+        ..Capture::default()
+    };
+    v.set_captures(
+        &[
+            (ids[0], shot(at("2024-06-15", 9))),
+            (ids[1], shot(at("2024-06-14", 23))),
+            (ids[2], shot(at("2024-06-02", 12))),
+            (ids[3], shot(at("2024-01-01", 0))),
+            (ids[4], shot(at("2023-12-31", 23))),
+        ],
+        None,
+    )
+    .unwrap();
+    let pick = |n: &[usize]| n.iter().map(|&i| ids[i]).collect::<Vec<_>>();
+    let run = |query: Query| {
+        let q0 = v.reads().queries;
+        let cursor = v.open_cursor(query).unwrap();
+        assert_eq!(v.reads().queries - q0, 1, "one query");
+        let got = v.cursor_ids(cursor.id, 0, 99).unwrap();
+        v.close_cursor(cursor.id);
+        got
+    };
+    let within = |value: serde_json::Value| {
+        Rule::parse(&json!({"match": "all", "rules": [
+            {"field": "captured", "op": "within", "value": value},
+        ]}))
+        .unwrap()
+    };
+    let on = |rules: Rule, day: &str| {
+        run(Query {
+            rules: Some(rules),
+            now: Some(day_start(day).unwrap() + 15 * 3600),
+            ..Query::default()
+        })
+    };
+    let sorted = |n: &[usize]| {
+        let mut p = pick(n);
+        p.sort_by_key(super::ImageId::hex);
+        p
+    };
+    assert_eq!(on(within(json!("today")), "2024-06-15"), sorted(&[0]));
+    assert_eq!(on(within(json!("today")), "2024-06-14"), sorted(&[1]));
+    let week = within(json!({"last": 1, "unit": "weeks"}));
+    assert_eq!(on(week.clone(), "2024-06-15"), sorted(&[0, 1]));
+    assert_eq!(on(week, "2024-06-21"), sorted(&[0]), "a week later");
+    assert_eq!(
+        on(within(json!({"last": 14, "unit": "days"})), "2024-06-15"),
+        sorted(&[0, 1, 2])
+    );
+    assert_eq!(
+        on(within(json!({"last": 1, "unit": "months"})), "2024-07-02"),
+        sorted(&[0, 1]),
+        "from June 3rd"
+    );
+    assert_eq!(
+        on(within(json!({"last": 1, "unit": "months"})), "2024-07-01"),
+        sorted(&[0, 1, 2]),
+        "from June 2nd"
+    );
+    assert_eq!(
+        on(within(json!("this_year")), "2024-06-15"),
+        sorted(&[0, 1, 2, 3])
+    );
+    assert_eq!(on(within(json!("this_year")), "2023-12-31"), sorted(&[4]));
+    // Nested, and negated.
+    let tree = Rule::parse(&json!({"match": "any", "rules": [
+        {"match": "none", "rules": [
+            {"field": "captured", "op": "within", "value": "this_year"},
+        ]},
+        {"field": "captured", "op": "within", "value": "today"},
+    ]}))
+    .unwrap();
+    assert_eq!(on(tree, "2024-06-15"), sorted(&[0, 4]));
+    // Kept relative in a smart album: its count follows the clock.
+    let today = within(json!("today"));
+    v.create_smart_album(None, "Today", today.clone()).unwrap();
+    let kept = v.album("today").unwrap().unwrap().rules.unwrap();
+    assert_eq!(kept, today, "stored relative");
+    let album = |day: &str| {
+        run(Query {
+            album: Some("today".into()),
+            now: Some(day_start(day).unwrap()),
+            ..Query::default()
+        })
+    };
+    assert_eq!(album("2024-06-15"), sorted(&[0]));
+    assert_eq!(album("2024-06-02"), sorted(&[2]));
 }
 
 /// A smart album is a collection of its own kind: a query naming it runs

@@ -590,7 +590,7 @@ impl MemoryStore {
                 .unwrap_or(false)
         };
         let positive = match c.field.kind {
-            RuleKind::Number => {
+            RuleKind::Number | RuleKind::Date => {
                 let n = field(c.field.field).and_then(serde_json::Value::as_f64);
                 let n = if c.field.field == fields::RATING {
                     Some(n.unwrap_or(0.0))
