@@ -747,38 +747,28 @@ fn library_commands(
             Ok(json!({ "cleared": cleared }))
         },
     )?;
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    // The stacks' commands run on the desktop's node, as whoever ran
+    // them; the answer is the node's, without its envelope.
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.suggest",
             "Suggest stacks (`images`: ids, every image when absent; `resolver`)",
             "Library",
         ),
-        move |args, _| {
-            let images = args
-                .get("images")
-                .and_then(Value::as_array)
-                .map(|ids| {
-                    ids.iter()
-                        .map(|i| helios_vault::ImageId::from_hex(i.as_str().unwrap_or("")))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()?
-                .unwrap_or_default();
+        move |args, origin| {
+            let images = args.get("images").cloned().unwrap_or_else(|| json!([]));
             let resolver = text(args, "resolver").unwrap_or_else(|| stacks::RULES.into());
-            let resolvers = stacks::Resolvers::default();
-            stacks::suggest(
-                vault.as_ref(),
-                Some(bus.as_ref()),
-                &resolvers,
-                &resolver,
-                &images,
-                seconds(),
+            on_node(
+                &node,
+                "library.stacks.suggest",
+                json!({ "images": images, "resolver": resolver }),
+                origin,
+                "decision",
             )
-            .map(|d| stacks::to_json(&d))
         },
     )?;
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.accept",
@@ -787,26 +777,20 @@ fn library_commands(
         ),
         move |args, origin| {
             let id = text(args, "decision").ok_or("`decision` is missing")?;
-            let groups: Option<Vec<usize>> =
-                args.get("groups").and_then(Value::as_array).map(|g| {
-                    g.iter()
-                        .filter_map(Value::as_u64)
-                        .map(|n| n as usize)
-                        .collect()
-                });
-            let who = helios_gui::persist::who(origin);
-            stacks::accept(
-                vault.as_ref(),
-                Some(bus.as_ref()),
-                &id,
-                groups.as_deref(),
-                &who,
-                seconds(),
+            let groups: Option<Vec<u64>> = args
+                .get("groups")
+                .and_then(Value::as_array)
+                .map(|g| g.iter().filter_map(Value::as_u64).collect());
+            on_node(
+                &node,
+                "library.stacks.accept",
+                json!({ "decision": id, "groups": groups }),
+                origin,
+                "decision",
             )
-            .map(|d| stacks::to_json(&d))
         },
     )?;
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.decline",
@@ -815,9 +799,13 @@ fn library_commands(
         ),
         move |args, origin| {
             let id = text(args, "decision").ok_or("`decision` is missing")?;
-            let who = helios_gui::persist::who(origin);
-            stacks::decline(vault.as_ref(), Some(bus.as_ref()), &id, &who, seconds())
-                .map(|d| stacks::to_json(&d))
+            on_node(
+                &node,
+                "library.stacks.decline",
+                json!({ "decision": id }),
+                origin,
+                "decision",
+            )
         },
     )?;
     // The image map: forget a folder or a volume (its sightings not in
@@ -853,30 +841,55 @@ fn library_commands(
                 .map(|n| serde_json::json!({ "forgotten": n }))
         },
     )?;
-    let vault = persist.vault().clone();
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new("library.stacks.list", "List the stacks", "Library"),
-        move |_, _| {
-            vault
-                .stacks()
-                .map(|s| serde_json::to_value(s).expect("stacks serialize"))
-        },
+        move |_, origin| on_node(&node, "library.stacks.list", json!({}), origin, "stacks"),
     )?;
-    let vault = persist.vault().clone();
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.dissolve",
             "Dissolve a stack, keeping its images (`stack`)",
             "Library",
         ),
-        move |args, _| {
+        move |args, origin| {
             let id = text(args, "stack").ok_or("`stack` is missing")?;
-            vault
-                .dissolve_stack(&id)
-                .map(|s| serde_json::to_value(s).expect("stacks serialize"))
+            on_node(
+                &node,
+                "library.stacks.dissolve",
+                json!({ "stack": id }),
+                origin,
+                "stack",
+            )
         },
     )?;
     Ok(())
+}
+
+/// How long a command run on the desktop's node is waited for.
+const NODE_ANSWER: std::time::Duration = std::time::Duration::from_mins(1);
+
+/// Runs `method` on the desktop's node as `origin` ran it, waiting for
+/// the node, and returns the answer's `key`.
+fn on_node(
+    node: &helios_inspect::client::Client,
+    method: &str,
+    params: serde_json::Value,
+    origin: &helios_shell::commands::Origin,
+    key: &str,
+) -> Result<serde_json::Value, String> {
+    let who = helios_gui::persist::who(origin);
+    let pending = node.call_with(
+        method,
+        params,
+        helios_inspect::client::CallMeta::origin(&who),
+    );
+    match pending.wait_timeout(NODE_ANSWER) {
+        Some(Ok(mut answer)) => Ok(answer[key].take()),
+        Some(Err(e)) => Err(e.message),
+        None => Err(format!("the node did not answer `{method}`")),
+    }
 }
 
 /// A file through the workspace's network (its template's, as edited;

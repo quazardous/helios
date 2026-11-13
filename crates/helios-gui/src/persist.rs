@@ -13,17 +13,21 @@
 //!   write never leaves the grid showing a value that is not stored (and
 //!   a field another process changed meanwhile shows too);
 //! - applies the vault's `vault.field_changed` events (from any writer in
-//!   this process sharing its bus) to the library, and its stacks again
-//!   on `vault.stack_changed`;
+//!   this process sharing its bus) to the library, and reads its stacks
+//!   again on `vault.stack_changed`;
 //! - reads the library through the node, off the UI thread: its photos
 //!   through a cursor (`cursor.open`, `cursor.window`, `cursor.refresh`)
 //!   and a [`ReadCache`] the bus's events keep true, the search filter's
 //!   photos and facet counts (`library.facets`); a coming frame shows
 //!   what was read ([`Persist::ask_fill`]). Keeps a stack expanded or
 //!   collapsed as the user left it;
-//! - answers the Stacks panel: a new `stacks.suggest` proposal, a
-//!   proposal accepted (all of it or corrected) or declined, as the user,
-//!   and shows the proposals waiting again on `library.decision`;
+//! - answers the Stacks panel through the node: a new `stacks.suggest`
+//!   proposal, a proposal accepted (all of it or corrected) or declined,
+//!   as the user (`library.stacks.suggest`, `.accept`, `.decline`), in
+//!   turn with the library's other writes; the stacks and the proposals
+//!   waiting (`library.stacks.list`, `library.stacks.decisions`) are read
+//!   with the library, and again off the UI thread on
+//!   `vault.stack_changed` and `library.decision`;
 //! - saves the edit of the image shown ([`Persist::open_image`]), with
 //!   the labels and locks of its mask nodes (its `marks`) and the modules
 //!   bypassed, as a version each time the value store commits a step: a
@@ -134,6 +138,11 @@ pub struct Persist<S: Store> {
     /// The search filter's query being run: the photos it takes and the
     /// facet counts.
     searching: Option<Receiver<Result<Searched, String>>>,
+    /// The stacks and the proposals waiting being read again
+    /// ([`Persist::ask_stacks`]).
+    stacking: Option<Receiver<Result<Stacked, String>>>,
+    /// Asked again while they were read: read once more.
+    stack_again: bool,
 }
 
 /// A write of the library sent to the node.
@@ -142,6 +151,14 @@ enum Write {
     Fields(Vec<Change>),
     /// A stack expanded or collapsed (`library.stacks.expand`).
     Expand(String, bool),
+    /// Stacks proposed over images, every image when none
+    /// (`library.stacks.suggest`).
+    Suggest(Vec<String>),
+    /// A proposal accepted: the groups taken, all when none
+    /// (`library.stacks.accept`).
+    Accept(String, Option<Vec<usize>>),
+    /// A proposal declined (`library.stacks.decline`).
+    Decline(String),
 }
 
 impl Write {
@@ -156,6 +173,12 @@ impl Write {
                 "library.stacks.expand",
                 json!({ "stack": stack, "expanded": expanded }),
             ),
+            Self::Suggest(images) => ("library.stacks.suggest", json!({ "images": images })),
+            Self::Accept(decision, groups) => (
+                "library.stacks.accept",
+                json!({ "decision": decision, "groups": groups }),
+            ),
+            Self::Decline(decision) => ("library.stacks.decline", json!({ "decision": decision })),
         }
     }
 
@@ -163,7 +186,7 @@ impl Write {
     fn images(&self) -> impl Iterator<Item = &str> {
         let changes = match self {
             Self::Fields(changes) => changes.as_slice(),
-            Self::Expand(..) => &[],
+            Self::Expand(..) | Self::Suggest(_) | Self::Accept(..) | Self::Decline(_) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
     }
@@ -246,6 +269,8 @@ pub struct LibraryRows {
     cursor: Option<u64>,
     /// The order it was read in.
     order: Order,
+    /// Its stacks and the proposals waiting.
+    stacked: Stacked,
 }
 
 impl LibraryRows {
@@ -289,16 +314,48 @@ pub fn read_library(reader: &Reader, order: Order) -> Result<LibraryRows, String
         .ok_or("the node opened no cursor")?;
     let count = to_usize(&opened["count"]);
     let read = read_cursor(reader, cursor, count);
+    let read = read.and_then(|read| Ok((read, read_stacked(reader)?)));
     if read.is_err() {
         reader.close(cursor);
     }
-    let (entries, files) = read?;
+    let ((entries, files), stacked) = read?;
     Ok(LibraryRows {
         entries,
         files,
         cursor: Some(cursor),
         order,
+        stacked,
     })
+}
+
+/// The library's stacks and the `stacks.suggest` proposals, as the node
+/// lists them.
+struct Stacked {
+    stacks: Vec<helios_vault::Stack>,
+    decisions: Vec<helios_library::stacks::Decision>,
+}
+
+/// Reads the stacks and the proposals through the node
+/// (`library.stacks.list`, `library.stacks.decisions`): the read cache
+/// keeps both until a stack or a decision changes. Waits for the node.
+fn read_stacked(reader: &Reader) -> Result<Stacked, String> {
+    let listed = reader.read("library.stacks.list", json!({}))?;
+    let stacks = serde_json::from_value(listed["stacks"].clone())
+        .map_err(|e| format!("the node's stacks: {e}"))?;
+    let waiting = reader.read("library.stacks.decisions", json!({}))?;
+    let decisions = serde_json::from_value(waiting["decisions"].clone())
+        .map_err(|e| format!("the node's stack proposals: {e}"))?;
+    Ok(Stacked { stacks, decisions })
+}
+
+/// [`read_stacked`] once the read cache heard the bus up to `seq`, so a
+/// change announced before is never shown older (a cache that cannot
+/// follow is read as it stands: the node is asked whatever it dropped).
+fn read_stacked_after(reader: &Reader, seq: u64) -> Result<Stacked, String> {
+    reader
+        .cache
+        .wait_seen(seq, std::time::Duration::from_secs(10));
+    read_stacked(reader)
 }
 
 fn to_usize(value: &Value) -> usize {
@@ -444,8 +501,9 @@ struct Shown {
 enum Fetched {
     /// Read whole, through a new cursor.
     Whole(LibraryRows),
-    /// The cursor shown, brought up to date: what moved, if anything did.
-    Delta(Shown, Option<Moved>),
+    /// The cursor shown, brought up to date: what moved, if anything did,
+    /// and the stacks and proposals read again.
+    Delta(Shown, Option<Moved>, Stacked),
 }
 
 /// What moved in the library shown since it was read.
@@ -469,8 +527,10 @@ fn fetch(
 ) -> Result<Fetched, String> {
     if let Some(mut shown) = shown {
         if shown.order == order {
-            match refresh(reader, &mut shown, known) {
-                Ok(moved) => return Ok(Fetched::Delta(shown, moved)),
+            match refresh(reader, &mut shown, known)
+                .and_then(|moved| Ok((moved, read_stacked(reader)?)))
+            {
+                Ok((moved, stacked)) => return Ok(Fetched::Delta(shown, moved, stacked)),
                 // Read whole again, through a new cursor.
                 Err(_) => reader.close(shown.cursor),
             }
@@ -605,6 +665,13 @@ fn known(shell: &Shell) -> BTreeSet<String> {
         .collect()
 }
 
+/// Shows the stacks in the library and the proposals waiting in the
+/// Stacks panel.
+fn show_stacked(shell: &mut Shell, stacked: Stacked) {
+    shell.library_mut().set_stacks(&stacked.stacks);
+    shell.stack_review_mut().set_decisions(stacked.decisions);
+}
+
 /// Says the library could not be read.
 fn unreadable(shell: &mut Shell, error: String) {
     shell.notify(
@@ -674,6 +741,8 @@ impl<S: Store + 'static> Persist<S> {
             fill_again: None,
             filled: None,
             searching: None,
+            stacking: None,
+            stack_again: false,
         }
     }
 
@@ -684,7 +753,7 @@ impl<S: Store + 'static> Persist<S> {
     }
 
     /// The client of the desktop's node the library's writes go through.
-    pub fn node(&self) -> &Client {
+    pub fn node(&self) -> &Arc<Client> {
         &self.node
     }
 
@@ -696,6 +765,7 @@ impl<S: Store + 'static> Persist<S> {
             || !self.reading.is_empty()
             || self.filling.is_some()
             || self.searching.is_some()
+            || self.stacking.is_some()
     }
 
     /// Waits until the node has answered every call made, and shows what
@@ -704,11 +774,18 @@ impl<S: Store + 'static> Persist<S> {
     pub fn settle(&mut self, shell: &mut Shell) {
         // A node that never answers is not waited for forever.
         let deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
-        while self.busy() && std::time::Instant::now() < deadline {
-            self.pump(shell);
-            std::thread::sleep(std::time::Duration::from_millis(1));
+        loop {
+            while self.busy() && std::time::Instant::now() < deadline {
+                self.pump(shell);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            // What the events heard ask read again (the stacks) is waited
+            // for too.
+            self.hear(shell);
+            if !self.busy() || std::time::Instant::now() >= deadline {
+                break;
+            }
         }
-        self.hear(shell);
     }
 
     /// [`Persist::frame`], then [`Persist::settle`].
@@ -789,6 +866,25 @@ impl<S: Store + 'static> Persist<S> {
                 }
             }
         }
+        if let Some(stacking) = &self.stacking {
+            let read = match stacking.try_recv() {
+                Ok(read) => Some(read),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("the stacks' reading stopped (a panic)".to_string()))
+                }
+            };
+            if let Some(read) = read {
+                self.stacking = None;
+                match read {
+                    Ok(stacked) => show_stacked(shell, stacked),
+                    Err(e) => shell.notify(Level::Error, e),
+                }
+                if std::mem::take(&mut self.stack_again) {
+                    self.ask_stacks();
+                }
+            }
+        }
     }
 
     /// A write answered: a refusal said, the written images read back.
@@ -808,7 +904,16 @@ impl<S: Store + 'static> Persist<S> {
                 )
                 .with("error", e.message),
             ),
-            (Write::Expand(..), Err(e)) => shell.notify(Level::Warning, e.message),
+            (
+                Write::Expand(..) | Write::Suggest(_) | Write::Accept(..) | Write::Decline(_),
+                Err(e),
+            ) => shell.notify(Level::Warning, e.message),
+        }
+        if matches!(
+            write,
+            Write::Suggest(_) | Write::Accept(..) | Write::Decline(_)
+        ) {
+            self.ask_stacks();
         }
         let touched: BTreeSet<String> = write.images().map(String::from).collect();
         if touched.is_empty() {
@@ -931,7 +1036,9 @@ impl<S: Store + 'static> Persist<S> {
     fn apply(&self, shell: &mut Shell, fetched: Fetched) -> Result<Files, String> {
         match fetched {
             Fetched::Whole(rows) => self.show_library(shell, rows),
-            Fetched::Delta(shown, moved) => self.show_moved(shell, shown, moved),
+            Fetched::Delta(shown, moved, stacked) => {
+                Ok(self.show_moved(shell, shown, moved, stacked))
+            }
         }
     }
 
@@ -960,8 +1067,7 @@ impl<S: Store + 'static> Persist<S> {
         if let Some(old) = old {
             self.reader.close(old.cursor);
         }
-        self.show_stacks(shell)?;
-        self.show_decisions(shell)?;
+        show_stacked(shell, rows.stacked);
         Ok(rows.files)
     }
 
@@ -971,7 +1077,8 @@ impl<S: Store + 'static> Persist<S> {
         shell: &mut Shell,
         shown: Shown,
         moved: Option<Moved>,
-    ) -> Result<Vec<(String, PathBuf)>, String> {
+        stacked: Stacked,
+    ) -> Vec<(String, PathBuf)> {
         if let Some(moved) = moved {
             // The entries shown, their fields kept up to date by the
             // vault's events.
@@ -1011,72 +1118,35 @@ impl<S: Store + 'static> Persist<S> {
         if let Some(old) = old {
             self.reader.close(old.cursor);
         }
-        self.show_stacks(shell)?;
-        self.show_decisions(shell)?;
-        Ok(files)
+        show_stacked(shell, stacked);
+        files
     }
 
-    /// Shows the vault's stacks in the library.
-    pub fn show_stacks(&self, shell: &mut Shell) -> Result<(), String> {
-        let stacks = self.vault.stacks()?;
-        shell.library_mut().set_stacks(&stacks);
-        Ok(())
-    }
-
-    /// Shows the `stacks.suggest` proposals waiting in the Stacks panel.
-    pub fn show_decisions(&self, shell: &mut Shell) -> Result<(), String> {
-        let decisions = helios_library::stacks::decisions(self.vault.as_ref())?;
-        shell.stack_review_mut().set_decisions(decisions);
-        Ok(())
-    }
-
-    /// Runs what the Stacks panel asked: a proposal, an answer.
-    fn answer_stacks(&self, shell: &mut Shell, now: u64) {
-        use crate::stack_review::Request;
-        use helios_library::stacks;
-        let requests = shell.stack_review_mut().take_requests();
-        if requests.is_empty() {
+    /// Reads the stacks and the proposals waiting again through the node,
+    /// on a thread of its own: a coming frame shows them. Asked while a
+    /// read goes on, they are read once more after it.
+    fn ask_stacks(&mut self) {
+        if self.stacking.is_some() {
+            self.stack_again = true;
             return;
         }
-        let bus = Some(self.bus.as_ref());
-        for r in requests {
-            let done = match r {
-                Request::Suggest { images } => images
-                    .iter()
-                    .map(|h| ImageId::from_hex(h))
-                    .collect::<Result<Vec<_>, _>>()
-                    .and_then(|ids| {
-                        let resolvers = stacks::Resolvers::default();
-                        stacks::suggest(
-                            self.vault.as_ref(),
-                            bus,
-                            &resolvers,
-                            stacks::RULES,
-                            &ids,
-                            now,
-                        )
-                    })
-                    .map(|_| ()),
-                Request::Accept { decision, groups } => stacks::accept(
-                    self.vault.as_ref(),
-                    bus,
-                    &decision,
-                    groups.as_deref(),
-                    WHO,
-                    now,
-                )
-                .map(|_| ()),
-                Request::Decline { decision } => {
-                    stacks::decline(self.vault.as_ref(), bus, &decision, WHO, now).map(|_| ())
-                }
-            };
-            if let Err(e) = done {
-                shell.notify(Level::Warning, e);
-            }
-        }
-        if let Err(e) = self.show_decisions(shell) {
-            shell.notify(Level::Error, e);
-        }
+        let (reader, seq) = (self.reader.clone(), self.bus.last_seq());
+        self.stacking = Some(spawn("helios-stacks-read", move || {
+            read_stacked_after(&reader, seq)
+        }));
+    }
+
+    /// Sends what the Stacks panel asked to the node: a proposal, an
+    /// answer, as the user. Each is written in its turn with the library's
+    /// other writes; the proposals waiting are read again once answered.
+    fn answer_stacks(&mut self, shell: &mut Shell) {
+        use crate::stack_review::Request;
+        let requests = shell.stack_review_mut().take_requests();
+        self.writes.extend(requests.into_iter().map(|r| match r {
+            Request::Suggest { images } => Write::Suggest(images),
+            Request::Accept { decision, groups } => Write::Accept(decision, groups),
+            Request::Decline { decision } => Write::Decline(decision),
+        }));
     }
 
     /// Shows an image's network in the viewport with the image's saved
@@ -1396,7 +1466,6 @@ impl<S: Store + 'static> Persist<S> {
     /// Writes what the user changed and shows what other writers did;
     /// `now` is the time in seconds (since the epoch for a real clock).
     pub fn frame(&mut self, shell: &mut Shell, now: f64) {
-        let at = now.max(0.0) as u64;
         let changes = shell.take_library_changes();
         if !changes.is_empty() {
             self.writes.push_back(Write::Fields(changes));
@@ -1408,7 +1477,7 @@ impl<S: Store + 'static> Persist<S> {
         self.save_edit(shell, now);
         self.write_sessions(shell);
         self.pin_snapshots(shell);
-        self.answer_stacks(shell, at);
+        self.answer_stacks(shell);
         let expansions = shell.library_mut().take_expansions();
         self.writes.extend(
             expansions
@@ -1472,11 +1541,8 @@ impl<S: Store + 'static> Persist<S> {
                 }
             }
         }
-        if stacks_changed && let Err(e) = self.show_stacks(shell) {
-            shell.notify(Level::Error, e);
-        }
-        if decided && let Err(e) = self.show_decisions(shell) {
-            shell.notify(Level::Error, e);
+        if stacks_changed || decided {
+            self.ask_stacks();
         }
     }
 
