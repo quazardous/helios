@@ -37,6 +37,7 @@
 
 pub mod apply;
 pub mod chart;
+pub mod exchange;
 pub mod homography;
 pub mod lab;
 pub mod layout;

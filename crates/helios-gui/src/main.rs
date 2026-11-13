@@ -1001,11 +1001,14 @@ fn show_prepared(
     let Prepared {
         image, graph, node, ..
     } = prepared;
-    match (persist, image) {
-        (Some(persist), Some(image)) => persist
+    if let (Some(persist), Some(image)) = (persist, image) {
+        persist
             .open_image(shell, image, graph, node, "output")
-            .map(|_| ()),
-        _ => shell.set_view_source(graph, node, "output"),
+            .map(|_| ())
+    } else {
+        // Not in the library: no profile to offer.
+        helios_gui::calibrate::set_offer(shell.values(), None);
+        shell.set_view_source(graph, node, "output")
     }
 }
 

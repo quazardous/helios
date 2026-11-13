@@ -1148,6 +1148,8 @@ impl Params {
                         .map_or(paths.len(), |i| start + i);
                     ui.add_space(4.0);
                     ui.strong(node);
+                    // A module's own header (the chart profile's choice).
+                    crate::calibrate::header_ui(ui, store, node);
                     let rows: Vec<(&str, Option<&str>)> = paths[start..end]
                         .iter()
                         .map(|(_, p, g)| (p.as_str(), g.as_deref()))

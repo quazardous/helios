@@ -1002,6 +1002,7 @@ impl Shell {
             crate::viewport::declare(&mut store);
             crate::mask_display::declare(&mut store);
             crate::masks::declare(&mut store);
+            crate::calibrate::declare(&mut store);
             crate::graph::declare(&mut store);
             store.declare(
                 crate::params::SELECTION,

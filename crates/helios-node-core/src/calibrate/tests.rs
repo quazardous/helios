@@ -190,6 +190,8 @@ fn every_command_has_a_schema_its_example_fits() {
         json!({ "profile": "ab" }),
         json!({ "profiles": ["ab"], "camera": null, "dry_run": true }),
         json!({ "images": ["/a.nef"], "profile": "auto", "dry_run": false }),
+        json!({ "profile": "ab", "path": "/profiles" }),
+        json!({ "path": null, "file": { "kind": "helios.chartprofile" }, "dry_run": true }),
     ];
     let specs = specs();
     assert_eq!(specs.len(), examples.len());
@@ -405,5 +407,169 @@ fn auto_refuses_with_its_reason_and_writes_nothing() {
         0,
     )
     .unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn an_exported_profile_imports_into_another_library_as_the_same_profile() {
+    let (vault, path, _, id) = applied_vault("exchange");
+    let dir = path.parent().unwrap();
+    let out = run(
+        Some(&vault),
+        EXPORT,
+        &json!({ "profile": id, "path": dir }),
+        0,
+    )
+    .unwrap();
+    assert!(out.changes.is_empty());
+    let file = PathBuf::from(out.answer["path"].as_str().unwrap());
+    assert_eq!(
+        file.file_name().unwrap().to_str().unwrap(),
+        "Flash.helios-chartprofile.json"
+    );
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(!text.contains(dir.to_str().unwrap()), "no local path");
+
+    let other = self::vault();
+    let dry = run(
+        Some(&other),
+        IMPORT,
+        &json!({ "path": file, "dry_run": true }),
+        0,
+    )
+    .unwrap();
+    assert!(dry.changes.is_empty());
+    assert!(other.calibration_profiles().unwrap().is_empty());
+    let done = run(Some(&other), IMPORT, &json!({ "path": file }), 0).unwrap();
+    assert_eq!(done.answer["profile"]["id"], id.as_str());
+    assert_eq!(done.answer["existed"], false);
+    // The same profile, its numbers as JSON text gives them back.
+    let read = |v: &Vault<MemoryStore>| -> Profile {
+        serde_json::from_value(v.calibration_profile(&id).unwrap().unwrap()).unwrap()
+    };
+    let (theirs, ours) = (read(&other), read(&vault));
+    assert_eq!(
+        (&theirs.name, &theirs.camera, &theirs.measured),
+        (&ours.name, &ours.camera, &ours.measured)
+    );
+    for (a, b) in theirs
+        .matrix
+        .iter()
+        .flatten()
+        .zip(ours.matrix.iter().flatten())
+    {
+        assert!((a - b).abs() <= 1e-12 * b.abs().max(1.0), "{a} against {b}");
+    }
+    // Undone like a save.
+    other.revert(&done.changes).unwrap();
+    assert!(other.calibration_profile(&id).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_bad_profile_file_is_refused_with_its_reasons_and_nothing_added() {
+    let (vault, path, _, id) = applied_vault("bad-file");
+    let mut file = run(Some(&vault), EXPORT, &json!({ "profile": id }), 0)
+        .unwrap()
+        .answer["file"]
+        .clone();
+    file["profile"]["illuminant"]["xy"] = json!([0.9, 0.5]);
+    let other = self::vault();
+    let refused = run(Some(&other), IMPORT, &json!({ "file": file }), 0).unwrap_err();
+    assert_eq!(refused.key, "calibrate-import-refused");
+    assert!(
+        refused.english.contains("outside the diagram"),
+        "{}",
+        refused.english
+    );
+    let junk = path.parent().unwrap().join("junk.json");
+    std::fs::write(&junk, "not json").unwrap();
+    let unreadable = run(Some(&other), IMPORT, &json!({ "path": junk }), 0).unwrap_err();
+    assert_eq!(unreadable.key, "calibrate-import-unreadable-file");
+    assert!(other.calibration_profiles().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_raw_opened_the_first_time_gets_its_camera_s_default_once() {
+    let (vault, path, image, id) = applied_vault("on-open");
+    as_camera(&vault, &id, "daylight", "nikon z 6", D65);
+    as_camera(&vault, &id, "tungsten", "nikon z 6", TUNGSTEN);
+    let shot = Photo {
+        camera: "nikon z 6".into(),
+        light: Some([0.3130, 0.3295]),
+    };
+    // No default rule: nothing happens.
+    assert!(matches!(
+        default_on_open(&vault, image, &shot, "user", 50).unwrap(),
+        OnOpen::NoDefault
+    ));
+    assert_eq!(head(&vault, image), None);
+    run(
+        Some(&vault),
+        SET_DEFAULT,
+        &json!({ "profiles": ["daylight", "tungsten"] }),
+        0,
+    )
+    .unwrap();
+    let OnOpen::Applied {
+        profile, changes, ..
+    } = default_on_open(&vault, image, &shot, "user", 50).unwrap()
+    else {
+        panic!("the default applies")
+    };
+    assert_eq!(profile, "daylight");
+    assert_eq!(changes.images.len(), 1);
+    assert_eq!(
+        apply::applied(&head(&vault, image).unwrap()).as_deref(),
+        Some("daylight")
+    );
+    // Opened again: the edit is the user's now, left alone.
+    let tungsten = Photo {
+        light: Some(TUNGSTEN),
+        ..shot.clone()
+    };
+    assert!(matches!(
+        default_on_open(&vault, image, &tungsten, "user", 60).unwrap(),
+        OnOpen::Edited
+    ));
+    assert_eq!(vault.versions(&image).unwrap().len(), 1);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_default_that_picks_none_leaves_the_photo_untouched_with_its_reason() {
+    let (vault, path, image, id) = applied_vault("on-open-refused");
+    as_camera(&vault, &id, "daylight", "nikon z 6", D65);
+    run(
+        Some(&vault),
+        SET_DEFAULT,
+        &json!({ "profiles": ["daylight"] }),
+        0,
+    )
+    .unwrap();
+    let under = |light| Photo {
+        camera: "nikon z 6".into(),
+        light,
+    };
+    for (light, key) in [
+        (Some(TUNGSTEN), "calibrate-auto-too-far"),
+        (None, "calibrate-auto-no-light"),
+    ] {
+        match default_on_open(&vault, image, &under(light), "user", 50).unwrap() {
+            OnOpen::Refused(m) => assert_eq!(m.key, key, "{}", m.english),
+            other => panic!("refused, not {other:?}"),
+        }
+    }
+    assert_eq!(head(&vault, image), None, "untouched");
+    // A picture never gets one.
+    let picture = Photo {
+        camera: "picture".into(),
+        light: None,
+    };
+    assert!(matches!(
+        default_on_open(&vault, image, &picture, "user", 50).unwrap(),
+        OnOpen::NoDefault
+    ));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

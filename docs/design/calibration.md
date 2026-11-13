@@ -423,6 +423,34 @@ Profiles live in the library's vault as documents
   id only); import checks the format and the camera key and adds it. A
   DCP export for other software is a later slice (section 10, Q2).
 
+#### The shared file (`helios_calibrate::exchange`)
+
+```jsonc
+{
+  "kind": "helios.chartprofile",   // what the file is
+  "id": "<the profile's id>",      // BLAKE3 of the document without name and created
+  "profile": { /* the profile document above, as the vault keeps it */ }
+}
+```
+
+- The name is the profile's, characters a file system may refuse
+  (`/ \ : * ? " < > |`, controls) replaced by `_`, then
+  `.helios-chartprofile.json`. Written as pretty JSON, UTF-8.
+- Import refuses the file, with every reason found, each keyed for
+  translation: not `helios.chartprofile`; a `profile.format` other than
+  the one this Helios reads; a document that does not read as a profile;
+  a camera key that is not the make and model's key (`picture` with no
+  make or model); a matrix not finite or not invertible, a correction or
+  camera matrix not finite; an illuminant `xy` outside the diagram; a
+  residual LUT (not taken yet); an `id` that is not a 64-digit hex
+  hash. The profile keeps the `id` the file names (the content's hash
+  when it names none), so a profile shared back to its library is the
+  same profile; the hash is not checked against the content, since a
+  number read back from JSON text may differ in its last bit.
+- An imported profile is added under its id; one already there is
+  replaced (its name becomes the file's). The import is undone like a
+  save.
+
 ### Choosing a profile for a photo
 
 A camera may have several profiles, one per illuminant. When a raw of
@@ -469,6 +497,8 @@ writes has a dry run.
 | `calibrate.apply` | `images`, `profile` (or `none`), `dry_run` | per image the parameters it would set; one undo step per image |
 | `calibrate.default` | `camera`, `profiles` (or empty to clear), `dry_run` | the rule before and after |
 | `calibrate.remove`, `calibrate.export`, `calibrate.import` | `profile` / `path` | the profile; removing one in use leaves edits unchanged (they hold their values) |
+| `calibrate.profiles.export`, `calibrate.profiles.import` (built) | `profile`, `path?` / `path` or `file`, `dry_run` | the file's content and name / the profile added (id, name, camera) and whether it was there; a refusal lists its reasons |
+| `calibrate.choose` (desktop) | `profile` (an id of the open photo's camera, or `none`) | the node set; one step of the edit's history |
 | `calibrate.open` | `image?` | opens the Calibration focus (desktop only) |
 
 The default dry run makes the first call safe: an agent can try corner
@@ -695,6 +725,38 @@ usable. Slices 1 to 5 need no GUI.
    open, the module in "Develop one image" (a template version 3), the
    module's header (profile name, quality, "Make a profile…"), export
    and import.
+   **Built, second part** (2026-11-13):
+   - **The camera default at open.** When the desktop opens a raw of the
+     library that has no edit yet, and its camera has a default rule,
+     the rule's `auto` pick is saved as its first edit (by `user`), so it
+     happens once (`helios_node_core::calibrate::default_on_open`). A
+     pick refused (no as-shot light, the nearest light too far) leaves
+     the photo untouched and the status bar says why; nothing pops up.
+     The camera and its as-shot light are read from the `chartprofile`
+     node's context, which now also declares the make, the model and the
+     white balance (never read at render), so the raw is not decoded
+     twice. Photos imported but never opened get it at their first open.
+   - **"Develop one image", version 3**, writes `chartprofile` between
+     `colorin` and `channelmixerrgb`, bypassed: its renders are version
+     2's bit for bit until a profile is applied. A version 2 copy still
+     reads and builds; its edits load into version 3 (the node absent
+     from them stays bypassed).
+   - **The module's header** in the Parameters panel, under the node's
+     name: the profile it applies (or "No profile"), the camera, the
+     profile's light and quality, and a list of the camera's profiles
+     and "No profile". Choosing runs `calibrate.choose {profile}` on the
+     open photo: the profile's values written into the node and the node
+     turned on (or bypassed), one step of the edit's history, so Ctrl+Z
+     takes it back and the edit is saved as any change. A profile of
+     another camera is refused. The list is kept in the transient value
+     `view/calibration/offer`, set when a photo opens and after a save,
+     a deletion or an import. "Make a profile…" waits for the
+     Calibration focus (slice 7).
+   - **Export and import:** `calibrate.profiles.export {profile, path?}`
+     (a folder, then named after the profile, or a file; without one the
+     content is answered) and `calibrate.profiles.import {path | file,
+     dry_run}`, on the node, the CLI's `command.run` and the desktop's
+     commands; the file is described in section 6.
    With the camera look (camera-look.md): its modules are not in the chain
    yet; when they come, the chart rules the colour half and the look's
    tone half may stay on top (camera-look.md, Q3, answer A), and the

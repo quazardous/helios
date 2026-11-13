@@ -33,6 +33,7 @@
 use std::path::{Path, PathBuf};
 
 use helios_calibrate::apply::{self, Candidate, PickError, Rule};
+use helios_calibrate::exchange;
 use helios_calibrate::raw::RAW_FRONT;
 use helios_calibrate::{
     ChartArgs, ChartError, Profile, ProfileSource, RawFront, SolveError, calibrate_picture,
@@ -56,10 +57,14 @@ pub const DELETE: &str = "calibrate.profiles.delete";
 pub const SET_DEFAULT: &str = "calibrate.profiles.setDefault";
 /// Puts a profile on photos' edits.
 pub const APPLY: &str = "calibrate.apply";
+/// Writes a profile as a file to share (`<name>.helios-chartprofile.json`).
+pub const EXPORT: &str = "calibrate.profiles.export";
+/// Adds a profile from a shared file, once checked.
+pub const IMPORT: &str = "calibrate.profiles.import";
 
 /// The commands that need the vault (`calibrate.chart` aside: a node
 /// without a vault answers its dry run).
-pub const PROFILE_IDS: &[&str] = &[LIST, GET, DELETE, SET_DEFAULT, APPLY];
+pub const PROFILE_IDS: &[&str] = &[LIST, GET, DELETE, SET_DEFAULT, APPLY, EXPORT, IMPORT];
 
 /// Whether `id` is one of the commands run here.
 pub fn handles(id: &str) -> bool {
@@ -166,6 +171,28 @@ pub fn profile_specs() -> Vec<CommandSpec> {
             ),
             ("dry_run", json!({ "type": "boolean" }), false),
         ])),
+        calibration(EXPORT, "Export a calibration profile to a file").params(object(&[
+            ("profile", string(), true),
+            (
+                "path",
+                json!({ "type": ["string", "null"],
+                        "description": "a folder (the file named after the profile) or a file; none: the file's content is answered only" }),
+                false,
+            ),
+        ])),
+        calibration(IMPORT, "Import a calibration profile from a file").params(object(&[
+            (
+                "path",
+                json!({ "type": ["string", "null"], "description": "the .helios-chartprofile.json file" }),
+                false,
+            ),
+            (
+                "file",
+                json!({ "type": ["object", "null"], "description": "the file's content, instead of `path`" }),
+                false,
+            ),
+            ("dry_run", json!({ "type": "boolean" }), false),
+        ])),
     ]
 }
 
@@ -239,6 +266,12 @@ pub fn run_as<S: Store>(
     }
     if id == CHART {
         return chart(vault, params, now);
+    }
+    if id == EXPORT {
+        return export(vault.ok_or_else(needs_vault)?, params);
+    }
+    if id == IMPORT {
+        return import(vault.ok_or_else(needs_vault)?, params);
     }
     let vault = vault.ok_or_else(needs_vault)?;
     let profile_id = params["profile"].as_str().unwrap_or_default();
@@ -574,6 +607,172 @@ pub fn set_default<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Done, M
     Ok(Done {
         answer: json!({ "camera": camera, "before": before, "after": after }),
         changes,
+    })
+}
+
+/// `calibrate.profiles.export`: the profile as a shared file's content
+/// and the file's name; with `path` (a folder, the file named after the
+/// profile, or a file), written there too.
+///
+/// # Errors
+/// The profile is unknown, or the file cannot be written.
+pub fn export<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Done, Message> {
+    let id = params["profile"].as_str().unwrap_or_default();
+    let profile = profile_doc(vault, id)?;
+    let file = exchange::write(&profile);
+    let name = exchange::file_name(&profile);
+    let written = match params["path"].as_str() {
+        None => None,
+        Some(path) => {
+            let path = PathBuf::from(path);
+            let path = if path.is_dir() {
+                path.join(&name)
+            } else {
+                path
+            };
+            let text = serde_json::to_string_pretty(&file).expect("a profile serialises");
+            std::fs::write(&path, text + "\n").map_err(|e| {
+                Message::new(
+                    "calibrate-export-failed",
+                    "cannot write { $path }: { $error }",
+                )
+                .with("path", path.display().to_string())
+                .with("error", e.to_string())
+            })?;
+            Some(path)
+        }
+    };
+    Ok(Done::read(json!({
+        "id": id,
+        "name": profile.name,
+        "file_name": name,
+        "path": written,
+        "file": file,
+    })))
+}
+
+/// `calibrate.profiles.import`: a shared file (`path`, or its content as
+/// `file`) checked, then its profile added to the vault under its id
+/// (one already there is replaced, so its name is the file's).
+///
+/// # Errors
+/// The file cannot be read, or is refused: the answer names every
+/// reason ([`exchange::read`]).
+pub fn import<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Done, Message> {
+    let file = match (params["file"].as_object(), params["path"].as_str()) {
+        (Some(f), _) => Value::Object(f.clone()),
+        (None, Some(path)) => {
+            let unreadable = |e: String| {
+                Message::new(
+                    "calibrate-import-unreadable-file",
+                    "cannot read { $path }: { $error }",
+                )
+                .with("path", path)
+                .with("error", e)
+            };
+            let text = std::fs::read_to_string(path).map_err(|e| unreadable(e.to_string()))?;
+            serde_json::from_str(&text).map_err(|e| unreadable(e.to_string()))?
+        }
+        (None, None) => {
+            return Err(Message::new(
+                "calibrate-import-nothing",
+                "calibrate.profiles.import needs `path` or `file`",
+            ));
+        }
+    };
+    let (id, profile) = exchange::read(&file).map_err(|reasons| {
+        let listed: Vec<String> = reasons.iter().map(|m| m.english.clone()).collect();
+        Message::new(
+            "calibrate-import-refused",
+            "the profile is refused: { $reasons }",
+        )
+        .with("reasons", listed.join("; "))
+    })?;
+    let existed = vault
+        .calibration_profile(&id)
+        .map_err(store_error)?
+        .is_some();
+    let changes = if params["dry_run"].as_bool().unwrap_or(false) {
+        Changes::default()
+    } else {
+        let doc = serde_json::to_value(&profile).expect("a profile serialises");
+        vault
+            .set_calibration_profile(&id, Some(&doc))
+            .map_err(store_error)?
+    };
+    Ok(Done {
+        answer: json!({
+            "profile": { "id": id, "name": profile.name, "camera": profile.camera },
+            "existed": existed,
+        }),
+        changes,
+    })
+}
+
+/// What opening a photo did with its camera's default profile
+/// ([`default_on_open`]).
+#[derive(Debug)]
+pub enum OnOpen {
+    /// The photo has an edit already: opened before, left as it is.
+    Edited,
+    /// A picture, or a camera with no default rule: nothing to apply.
+    NoDefault,
+    /// The default's pick, put on the photo's first edit.
+    Applied {
+        profile: String,
+        name: String,
+        changes: Changes,
+    },
+    /// The default picks none for this photo (no as-shot light, the
+    /// nearest light too far…): the photo is left untouched, the reason
+    /// said.
+    Refused(Message),
+}
+
+/// The camera's default profile put on a raw opened for the first time:
+/// a photo never edited, of a camera with a default rule
+/// (`calibration/defaults`), gets the profile `auto` picks from the rule,
+/// saved as its first edit by `origin`. A photo with an edit is left
+/// alone, so it happens once; a pick refused leaves the photo untouched
+/// and answers why.
+///
+/// # Errors
+/// The vault cannot be read or written.
+pub fn default_on_open<S: Store>(
+    vault: &Vault<S>,
+    image: ImageId,
+    photo: &Photo,
+    origin: &str,
+    now: u64,
+) -> Result<OnOpen, Message> {
+    if !vault.versions(&image).map_err(store_error)?.is_empty() {
+        return Ok(OnOpen::Edited);
+    }
+    if photo.camera == "picture" {
+        return Ok(OnOpen::NoDefault);
+    }
+    let has_rule = vault
+        .calibration_default(&photo.camera)
+        .map_err(store_error)?
+        .and_then(|r| serde_json::from_value::<Rule>(r).ok())
+        .is_some_and(|r| !r.profiles.is_empty());
+    if !has_rule {
+        return Ok(OnOpen::NoDefault);
+    }
+    let picked = match auto(vault, &image, photo) {
+        Ok(p) => p,
+        Err(m) if m.key.starts_with("calibrate-auto-") => return Ok(OnOpen::Refused(m)),
+        Err(m) => return Err(m),
+    };
+    let params = json!({ "images": [image.hex()], "profile": picked });
+    let done = apply_with(vault, &params, origin, now, &|_: &Path| Ok(photo.clone()))?;
+    Ok(OnOpen::Applied {
+        name: done.answer["images"][0]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        profile: picked,
+        changes: done.changes,
     })
 }
 

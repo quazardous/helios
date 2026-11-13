@@ -497,6 +497,11 @@ impl<S: Store> Persist<S> {
         node: NodeId,
         port: &str,
     ) -> Result<Option<Version>, String> {
+        // Opened for the first time, a raw gets its camera's default
+        // calibration profile (as its first edit, read just below).
+        if let Some(said) = crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
+            shell.notify(Level::Info, said);
+        }
         let (session, head) = EditSession::open(&self.vault, image)?;
         // The image with no edit: what a snapshot pinned to no version
         // restores.
