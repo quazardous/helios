@@ -50,13 +50,11 @@ calibrate-export-failed = impossible d’écrire { $path } : { $error }
 
 calibrate-import-camera-key = la clé de boîtier « { $key } » ne correspond pas à la marque et au modèle « { $make } { $model } »
 
-calibrate-import-format = le format du profil est { $found } ; ce Helios lit le format { $expected }
+calibrate-import-format = le format du profil est { $found } ; ce Helios lit les formats { $expected }
 
 calibrate-import-id = l’identifiant du profil n’est pas une empreinte hexadécimale de 64 chiffres
 
 calibrate-import-illuminant = la chromaticité de la lumière { $x }, { $y } est hors du diagramme
-
-calibrate-import-lut = le profil porte une LUT résiduelle, que ce Helios ne prend pas encore
 
 calibrate-import-matrix = la matrice du profil n’est pas une matrice finie et inversible
 
@@ -67,6 +65,8 @@ calibrate-import-nothing = calibrate.profiles.import demande `path` ou `file`
 calibrate-import-numbers = la correction ou la matrice du boîtier du profil contient des nombres non finis
 
 calibrate-import-refused = le profil est refusé : { $reasons }
+
+calibrate-import-table = la table résiduelle du profil n’est pas une table que ce Helios peut appliquer
 
 calibrate-import-unreadable = le profil est illisible : { $error }
 
@@ -389,6 +389,14 @@ gui-calibrate-quality = Qualité : { $quality }
 gui-calibrate-report = Rapport
 
 gui-calibrate-report-none = Placer les quatre coins sur les centres des pastilles des coins
+
+gui-calibrate-residual-after = Delta E avec la table : moyenne { $mean }, max { $max }
+
+gui-calibrate-residual-dropped = Table résiduelle : écartée
+
+gui-calibrate-residual-held-out = Delta E hors ajustement : { $without } sans la table, { $with } avec
+
+gui-calibrate-residual-kept = Table résiduelle : gardée
 
 gui-calibrate-save = Enregistrer le profil
 

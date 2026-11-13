@@ -40,7 +40,10 @@ mod table;
 #[cfg(test)]
 mod tests;
 
-pub use table::{HUES, HueSatTable, SATURATIONS, VALUES, fit_table, value_coordinate};
+pub use table::{
+    HUES, HueSatTable, Kernels, LOOK_KERNELS, MAX_HUE_SHIFT, MAX_SAT_SCALE, SATURATIONS, VALUES,
+    fit_table, fit_table_with, value_coordinate,
+};
 
 /// The fitter's version, stored in every [`Look`]: a later fitter changes
 /// no stored look.

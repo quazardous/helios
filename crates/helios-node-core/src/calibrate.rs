@@ -513,9 +513,9 @@ pub fn apply_with<S: Store>(
         let (edit, label, params, name) = match &profile {
             Some(p) => {
                 let doc = profile_doc(vault, p)?;
-                let params = apply::params(p, &doc.matrix);
+                let params = apply::params(p, &doc.matrix, doc.lut.as_ref());
                 (
-                    apply::with_profile(&before_edit, p, &doc.matrix),
+                    apply::with_profile(&before_edit, p, &doc.matrix, doc.lut.as_ref()),
                     format!("Calibration profile “{}”", doc.name),
                     params,
                     Some(doc.name),

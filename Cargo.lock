@@ -2262,9 +2262,11 @@ name = "helios-calibrate"
 version = "0.87.0"
 dependencies = [
  "blake3",
+ "helios-bricks",
  "helios-colour",
  "helios-core",
  "helios-module-channelmixerrgb",
+ "helios-module-chartprofile",
  "helios-module-demosaic",
  "helios-module-highlights",
  "helios-module-rawprepare",

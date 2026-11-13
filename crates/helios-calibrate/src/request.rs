@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chart::chart_by_id;
 use crate::layout::{ImageView, Point};
+use crate::look::HueSatTable;
 use crate::run::{Report, Request, RunError, Shot, calibrate};
 use crate::sampler::{ClipSource, PICTURE_CLIP_LEVEL, Warning};
 use crate::solver::{SolveError, Summary};
@@ -195,6 +196,25 @@ pub enum ChartWarning {
     NeutralCast { value: f64 },
 }
 
+/// The residual table's check: whether it was kept, the held-out mean
+/// Delta E 2000 without and with it, the means through it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResidualAnswer {
+    /// `kept` or `dropped`: whether the table lowered the held-out mean
+    /// by the margin ([`crate::residual::MARGIN`], [`crate::residual::MIN_GAIN`]).
+    pub status: String,
+    /// The held-out mean Delta E 2000 through the matrix alone.
+    pub held_out_without: f64,
+    /// The held-out mean Delta E 2000 through the matrix and the table.
+    pub held_out_with: f64,
+    /// Over the kept patches, through the matrix and the table.
+    pub after: SummaryAnswer,
+    /// The table, when kept: what a profile saved from this answer
+    /// carries (`lut`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<HueSatTable>,
+}
+
 /// `calibrate.chart`'s answer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChartAnswer {
@@ -223,6 +243,43 @@ pub struct ChartAnswer {
     pub patches: Vec<PatchAnswer>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<ChartWarning>,
+    /// The residual table after the matrix; `None` when none could be
+    /// checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual: Option<ResidualAnswer>,
+}
+
+fn residual(report: &Report) -> Option<ResidualAnswer> {
+    let r = report.residual.as_ref()?;
+    let patches = report.layout.chart.patches;
+    let deltas: Vec<(usize, f64)> = r
+        .patches
+        .iter()
+        .enumerate()
+        .filter_map(|(k, d)| d.map(|d| (k, d)))
+        .collect();
+    let mean = if deltas.is_empty() {
+        0.0
+    } else {
+        deltas.iter().map(|(_, d)| d).sum::<f64>() / deltas.len() as f64
+    };
+    let mut worst = deltas.clone();
+    worst.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    Some(ResidualAnswer {
+        status: if r.kept { "kept" } else { "dropped" }.into(),
+        held_out_without: r.held_out_without,
+        held_out_with: r.held_out_with,
+        after: SummaryAnswer {
+            mean,
+            max: worst.first().map_or(0.0, |w| w.1),
+            worst: worst
+                .iter()
+                .take(3)
+                .map(|&(k, _)| patches[k].name.into())
+                .collect(),
+        },
+        table: r.kept_table().cloned(),
+    })
 }
 
 fn summary(report: &Report, s: &Summary) -> SummaryAnswer {
@@ -309,6 +366,7 @@ pub fn answer(report: &Report, exclude: &[String]) -> ChartAnswer {
         camera_matrix: report.camera_matrix,
         patches,
         warnings,
+        residual: residual(report),
     }
 }
 
