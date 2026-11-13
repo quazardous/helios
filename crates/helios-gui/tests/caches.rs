@@ -106,7 +106,7 @@ fn the_caches_page_shows_each_kind_and_clears_it() {
 #[test]
 fn the_caches_page_lists_the_caches_with_their_actions() {
     let schema = helios_config::Schema::core();
-    let manifest = config::manifest(&schema, &|m| m.english.clone());
+    let manifest = config::manifest(&schema, &[], &|m| m.english.clone());
     let text = serde_json::to_string(&manifest).unwrap();
     for needle in [caches::STATS_COMMAND, caches::CLEAR_COMMAND, "Clear caches"] {
         assert!(text.contains(needle), "the manifest lacks {needle}");

@@ -79,7 +79,13 @@ struct Inner {
     machine: PathBuf,
     keys: BTreeSet<&'static str>,
     watchers: Mutex<BTreeMap<ValueScope, OnChange>>,
+    /// Told of each layer the node says changed, after these settings
+    /// read it again (the plugins' settings keep values there too).
+    also: Mutex<Vec<Follower>>,
 }
+
+/// Told of a node layer that changed, by name.
+pub type Follower = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl std::fmt::Debug for NodeSettingsStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -105,8 +111,20 @@ impl NodeSettingsStore {
                 machine: config_dir.join(GLOBAL_FILE),
                 keys: Schema::core().iter().map(|s| s.key).collect(),
                 watchers: Mutex::new(BTreeMap::new()),
+                also: Mutex::new(Vec::new()),
             }),
         }
+    }
+
+    /// The node, when a vault is open.
+    pub fn node(&self) -> Option<Arc<dyn NodeLayers>> {
+        self.inner.node.clone()
+    }
+
+    /// Tells `follower` of each layer the node says changed, once these
+    /// settings read it again ([`NodeSettingsStore::follow`]).
+    pub fn also_follow(&self, follower: Follower) {
+        lock(&self.inner.also).push(follower);
     }
 
     /// The settings as kept now.
@@ -130,6 +148,10 @@ impl NodeSettingsStore {
                     }
                     if let Some(name) = e.payload["layer"].as_str() {
                         me.layer_changed(name);
+                        let also = lock(&me.inner.also).clone();
+                        for f in also {
+                            f(name);
+                        }
                     }
                 }
             });
@@ -140,7 +162,7 @@ impl NodeSettingsStore {
 
     /// Reads a layer the node said changed again, and tells the watchers
     /// what moved.
-    fn layer_changed(&self, name: &str) {
+    pub(super) fn layer_changed(&self, name: &str) {
         let Some(node) = &self.inner.node else { return };
         let (app, library) = {
             let mut settings = lock(&self.inner.settings);
@@ -278,11 +300,12 @@ impl SettingsStore for NodeSettingsStore {
 }
 
 /// The store the Settings app is given: Helios's settings through
-/// `node`, everything else in a file store, the interface's own in
-/// [`INTERFACE_FILE`] in `config_dir` and the open workspace's in its
-/// file.
+/// `node`, the plugins' through `plugins`, everything else in a file
+/// store, the interface's own in [`INTERFACE_FILE`] in `config_dir` and
+/// the open workspace's in its file.
 pub fn composite(
     node: &NodeSettingsStore,
+    plugins: Option<&super::plugins::PluginSettingsStore>,
     config_dir: &Path,
     workspace: Option<&Path>,
 ) -> CompositeStore {
@@ -290,7 +313,11 @@ pub fn composite(
     if let Some(file) = workspace {
         files = files.file(WORKSPACE.scope, file);
     }
-    CompositeStore::new(files).handler(node.clone())
+    let store = CompositeStore::new(files).handler(node.clone());
+    match plugins {
+        Some(p) => store.handler(p.clone()),
+        None => store,
+    }
 }
 
 #[cfg(test)]
@@ -336,7 +363,7 @@ mod tests {
             Some(layers.clone()),
             &dir,
         );
-        let store = composite(&node, &dir, Some(&dir.join("workspace.json")));
+        let store = composite(&node, None, &dir, Some(&dir.join("workspace.json")));
         assert_eq!(store.owner("interface.graph.zoom"), Some(0));
         assert_eq!(store.owner("project.decisions.mode"), Some(0));
         assert_eq!(store.owner("system.ai.calls"), Some(0));
