@@ -361,7 +361,7 @@ impl<S: Store + 'static> Persist<S> {
     /// left unwritten, and in tests that look at the vault right after.
     pub fn settle(&mut self, shell: &mut Shell) {
         // A node that never answers is not waited for forever.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
         while self.busy() && std::time::Instant::now() < deadline {
             self.pump(shell);
             std::thread::sleep(std::time::Duration::from_millis(1));
