@@ -67,9 +67,11 @@ pull requests into `next` in order (first in, first out):
    runs `check` and clippy first).
 3. **Green:** `next` fast-forwards to the tested commit, GitHub marks the
    pull requests merged, their branches and the temporary one are deleted;
-   the tester posts the result on each ticket. The gate then has the box
-   build the new `next` for the desktop (`build-gui branch=next`), so
-   `cargo xtask install-dev` installs it on a workstation at once.
+   the tester posts the result on each ticket. Beside the tests the box
+   builds the tested commit for the desktop (`build-gui`, red if it fails),
+   and the gate brings its programs back: it prints the
+   `cargo xtask install-dev --from <dir>` that installs them on a
+   workstation at once.
 4. **Mechanical red** (clippy, fmt, an i18n stamp or extract, a missing
    command icon, an empty filter): fixes it on the pull request's own
    branch and gates the batch again.
