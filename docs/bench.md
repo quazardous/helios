@@ -36,7 +36,7 @@ Jobs of the Benchfile:
 | `i18n-extract` | the translation catalogues regenerated on a branch: `cargo xtask i18n extract`, then `i18n stamp fr`, then `i18n check` (its report in `out/i18n.txt`); the change as `out/i18n.patch`, applied on the branch with `git apply --index` and committed there | 5 cores, 6 GB |
 | `dt-asan-rgbcurve` | darktable at `dt_ref=<sha>` (the fork) built with AddressSanitizer (recovering) and Lua, then the rgbcurve scroll scenario (`tools/bench/rgbcurve`: a wheel step away from every node on R, and a wheel with the zoom key held over a node) in a headless labwc (wbox); per case the history before and after, the ASan reports and screenshots in `out/<case>/`, `out/SUMMARY.txt` | 8 cores, 10 GB |
 | `flatpak` | the Flatpak bundle (`packaging/flatpak/build.sh`) built from source with flatpak-builder, as the release workflow builds it, into `out/`, then installed and smoke-tested (`packaging/flatpak/smoke.sh`); the runtime, the SDK and the downloaded sources stay in the `flatpak` storage | 5 cores, 8 GB |
-| `build-gui` | `helios-gui` in release, kept as the output `gui`, with the programs of the plugins Helios ships (the outputs `darktable-library`, `lightroom-catalog`, `google-photos`); `cargo xtask install-dev [--branch B]` installs the latest outside the checkout (`helios-gui` and the programs beside it) with the "Helios Dev" launcher (see CONTRIBUTING.md, "A dev build on the desktop") | 5 cores, 6 GB |
+| `build-gui` | `helios-gui` in release, kept as the output `gui`, with the programs of the plugins Helios ships (the outputs `darktable-library`, `lightroom-catalog`, `google-photos`); `cargo xtask install-dev [--branch B]` installs the latest (`--from DIR` the outputs a gate brought back) outside the checkout (`helios-gui` and the programs beside it) with the "Helios Dev" launcher (see CONTRIBUTING.md, "A dev build on the desktop") | 5 cores, 6 GB |
 | `egui-pop-gallery` | egui-pop's gallery in release (`egui_pop=` picks the branch), kept as the output `gallery`; `tools/bench/fetch-gallery.sh [branch]` fetches the latest into `target/release/egui-pop-gallery`, where the gallery's launcher points | 5 cores, 6 GB |
 | `egui-pop-wbox` | egui-pop's gallery in release in a headless labwc (wbox), driven by a scenario of egui-pop's `tools/wbox` (`script=`, `titlebar.py` by default: hover after a move by the gallery's own title bar); its JSON lines in the log, its screenshots in `out/`. `compositor=mutter` runs the same scenario in a headless mutter (GNOME's compositor, egui-pop's `tools/wbox/mutter.py`: input through its RemoteDesktop D-Bus API, frames through ScreenCast and PipeWire), for bugs seen only on GNOME | 5 cores, 6 GB |
 | `egui-pop-perf` | a timing job, after `egui-pop-perf-build` (its `first`, which builds it): egui-pop's performance gate, the gallery's `perf` example headless and deterministic (fixed frames, fixed input) on six heavy pages (`pages=` picks some, comma-separated): frame build and tessellation times, vertices, allocations, the heap's peak, one JSON line per page in `out/perf.jsonl`. Each full run is kept per egui-pop branch in the `egui-pop-perf` storage (`latest.jsonl`, `history.jsonl`) and compared with next's latest: a figure beyond its threshold is a warning in `out/regressions.txt`, never a failure. Run it on egui-pop's `next` after a merge to move the baseline | 4 cores, 4 GB, timing (the machine alone) |
@@ -135,9 +135,11 @@ characters): a few seconds here instead of a failed job on the box.
 It also refuses a job missing a parameter its command needs. Before any job
 that builds, the box itself runs the short `check` job (`egui-pop-check` for
 egui-pop's jobs), declared as the job's `first` in the Benchfile and run
-once per commit: `cargo check --tests` on the crate the job names, else
-the workspace, with no code generated and no link, stopping at the first
-crate that fails. The job itself is queued only if that check passes:
+once per commit: `cargo clippy --tests --keep-going` on the crate the job
+names, else the workspace, with no code generated and no link. Lints are
+warnings rather than errors, so one pass shows every lint of every crate,
+dependents and tests included; any warning or compile error makes the
+check red. The job itself is queued only if that check passes:
 **a compile error never takes a test job's place** (owner, 2026-11-08). The
 check also warms the branch's target for the job that follows.
 `first=none` on a run skips it; `HELIOS_BENCH_LOCAL_CHECK=1` also runs the

@@ -20,7 +20,7 @@ thumbnails = true
 limits = { per_minute = 120, per_day = 10000 }
 
 [compat]
-helios = ">=0.87.0, <0.88.0"
+helios = ">=0.88.0, <0.89.0"
 interfaces = { protocol = 1, "import.source" = 1, health = 1 }
 
 # Where the Picker API answers; only tests change it.
