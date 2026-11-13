@@ -441,6 +441,10 @@ fn choose<S: Store>(
 /// the profile's light and quality, and a list to choose another of the
 /// camera's profiles or none ([`CHOOSE`], one undoable step of the
 /// edit). Nothing for another node, or a photo without a camera.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the header reads, lists and offers in one place"
+)]
 pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Store>, node: &str) {
     use helios_values::{bypass_path, node_path};
     let (offer, current, bypassed) = {

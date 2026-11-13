@@ -59,6 +59,10 @@ fn finite(values: impl IntoIterator<Item = f64>) -> bool {
 ///
 /// # Errors
 /// Every reason the file is refused for, each keyed for translation.
+#[allow(
+    clippy::too_many_lines,
+    reason = "every check of the file, in the order the refusals list them"
+)]
 pub fn read(file: &Value) -> Result<(String, Profile), Vec<Message>> {
     if file["kind"] != KIND {
         return Err(vec![Message::new(
