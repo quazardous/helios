@@ -7,7 +7,12 @@
 //! person's own OAuth client of a connector signing in through OAuth.
 //! An account is shown with its address once its sign-in read it; one
 //! signed in before its connector asked who it is offers a reconnection;
-//! a picking done offers "Pick more photos…", a new picking each time.
+//! the Google Photos-like source's screen shows the account once (one
+//! row under Services, one header line with its menu) and one primary
+//! action per state: choose photos, the wait for the service's page as a
+//! status line with Cancel, what came back ("Choose more photos…", a new
+//! page each time), and for each error one sentence and one action; it
+//! never asks for a folder, Into does.
 //! Settings > Accounts manages them: the sources using each, its last
 //! use and status (a refused token says so), rename, reconnect, and
 //! disconnect asking what to do with the sources; never a token shown.
@@ -124,8 +129,9 @@ fn add_a_source_runs_the_connectors_form_and_test_and_lists_the_account_connecte
     until(&mut h, "connected", |h| {
         connection(h)["state"] == "connected"
     });
+    // Connected: its name alone, no word beside it.
     until(&mut h, "the account in the Sources column", |h| {
-        shown(h, "ann@nas.local") && shown(h, "connected")
+        shown(h, "ann@nas.local") && !shown(h, "connecting…")
     });
     let accounts = world.book.accounts().unwrap();
     assert_eq!(accounts.len(), 1);
@@ -205,8 +211,8 @@ fn settings_accounts_lists_the_accounts_and_signs_out_and_reconnects() {
     .unwrap();
     until(&mut h, "refused", |h| connection(h)["state"] == "failed");
     assert_eq!(connection(&mut h)["why"], "the source refused the sign-in");
-    until(&mut h, "needs attention in the Sources column", |h| {
-        shown(h, "needs attention")
+    until(&mut h, "needs reconnecting in the Sources column", |h| {
+        shown(h, "needs reconnecting")
     });
     assert!(matches!(
         world.book.accounts().unwrap()[0].state,
@@ -629,12 +635,27 @@ fn a_sign_in_opens_the_browser_at_once_without_waiting_for_a_frame() {
 }
 
 /// A connector that picks: each picking a new session (`s1`, `s2`…), the
-/// first `expired` of them expiring before the person is done; with
-/// `ready`, the person is done at once.
+/// first `expired` of them expiring before the person is done; `end`
+/// says how the others end.
 struct Picks {
     sessions: Arc<std::sync::atomic::AtomicU32>,
     expired: u32,
-    ready: bool,
+    end: End,
+}
+
+/// How the fake service's page ends.
+#[derive(Clone, Copy)]
+enum End {
+    /// The person is still choosing, until the deadline or Cancel.
+    Wait,
+    /// Done at once.
+    Done,
+    /// Left without Done: nothing chosen.
+    Nothing,
+    /// The service refuses the account's sign-in.
+    Refused,
+    /// The service cannot be reached.
+    Down,
 }
 
 const PICKS: &str = "fake-picks";
@@ -657,7 +678,7 @@ impl helios_connect::ConnectorProvider for Picks {
         Ok(Box::new(PickConnector {
             sessions: self.sessions.clone(),
             expired: self.expired,
-            ready: self.ready,
+            end: self.end,
             current: std::sync::Mutex::new(0),
         }))
     }
@@ -666,7 +687,7 @@ impl helios_connect::ConnectorProvider for Picks {
 struct PickConnector {
     sessions: Arc<std::sync::atomic::AtomicU32>,
     expired: u32,
-    ready: bool,
+    end: End,
     current: std::sync::Mutex<u32>,
 }
 
@@ -678,7 +699,7 @@ impl helios_connect::Connector for PickConnector {
             caps: Picks {
                 sessions: Arc::default(),
                 expired: 0,
-                ready: false,
+                end: End::Wait,
             }
             .manifest()
             .caps,
@@ -736,8 +757,12 @@ impl helios_connect::Connector for PickConnector {
             std::thread::sleep(Duration::from_millis(20));
             return Err(helios_connect::ConnectorError::Expired);
         }
-        if self.ready {
-            return Ok(true);
+        match self.end {
+            End::Wait => {}
+            End::Done => return Ok(true),
+            End::Nothing => return Ok(false),
+            End::Refused => return Err(helios_connect::ConnectorError::AuthNeeded),
+            End::Down => return Err(helios_connect::ConnectorError::Offline),
         }
         while Instant::now() < deadline {
             if cancel.is_cancelled() {
@@ -776,7 +801,7 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
     shell.add_import_connector(Arc::new(Picks {
         sessions: sessions.clone(),
         expired: 1,
-        ready: false,
+        end: End::Wait,
     }));
     shell.set_import_browser(opened.opener());
     shell.set_import_remote(Arc::new(|_, _, _, _| {
@@ -786,21 +811,27 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "Pick photos…", |h| shown(h, "Pick photos…"));
-    h.get_by_label("Pick photos…").click();
+    until(&mut h, "the account listed", |h| {
+        shown(h, "ann@example.org")
+    });
+    click(&mut h, "ann@example.org");
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
     let clicked = Instant::now();
     h.step();
     let took = opened.nth_after(1, clicked);
     assert!(took < Duration::from_millis(200), "opened after {took:?}");
     assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
-    // The first session expires: said so, not waited out, and a new
-    // session replaces it.
-    until(&mut h, "the session said expired", |h| {
-        shown(h, "The picking session expired, start again.")
+    // The first page runs out: said so, not waited out, and a new page
+    // replaces it.
+    until(&mut h, "the page said closed", |h| {
+        shown(
+            h,
+            "The Test server page has closed. Open it again to choose your photos.",
+        )
     });
-    // The dialog settles where it now stands before the click.
     h.run_steps(4);
-    h.get_by_label("Start again").click();
+    h.get_by_label(CHOOSE).click();
     until(&mut h, "the new session's page opened", |_| {
         opened.urls().len() == 2
     });
@@ -812,13 +843,20 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
         ]
     );
     assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 2);
-    // The dialog names the account the browser must be signed in to.
+    // The status line names the account the browser must be signed in
+    // to, and the page opens again on demand.
     until(&mut h, "the account named", |h| {
-        h.query_all_by_label_contains("signed in to the account connected as ann@example.org")
+        h.query_all_by_label_contains("signed in to: ann@example.org")
             .next()
             .is_some()
     });
+    click(&mut h, "Open it again");
+    assert_eq!(opened.urls().len(), 3, "opened again when asked");
 }
+
+/// The primary button of a connected account of [`Picks`] (its manifest
+/// says "Test server").
+const CHOOSE: &str = "Choose photos in Test server…";
 
 /// "Edit source…" on an account's source: its connector's own parameter
 /// (the fake's `share`) set and kept; add where they are never offered,
@@ -932,18 +970,14 @@ impl helios_gui::shell::LibraryFolder for Folder {
     fn get(&self) -> Result<Option<std::path::PathBuf>, String> {
         Ok(self.0.lock().unwrap().clone())
     }
-
-    fn set(&self, dir: &std::path::Path) -> Result<(), String> {
-        *self.0.lock().unwrap() = Some(dir.to_path_buf());
-        Ok(())
-    }
 }
 
 /// The folders the picked photos were imported into, by import.
 type Imported = Arc<std::sync::Mutex<Vec<Option<std::path::PathBuf>>>>;
 
-/// A window with a connected account of a connector whose picking is done
-/// at once, the library folder and the imports the test's.
+/// A window with a connected account of a connector whose page is done
+/// at once, the library folder and the imports the test's; the account
+/// selected, its primary button shown.
 fn picking_world(
     sources: Option<String>,
 ) -> (
@@ -953,9 +987,28 @@ fn picking_world(
     Imported,
     Arc<std::sync::atomic::AtomicU32>,
 ) {
+    let world = picking_world_with(sources, End::Done, AccountState::Connected);
+    let (mut h, rest) = (world.0, (world.1, world.2, world.3, world.4));
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    (h, rest.0, rest.1, rest.2, rest.3)
+}
+
+/// [`picking_world`] with the service's page ending as `end`, the
+/// account in `state`; the account selected.
+fn picking_world_with(
+    sources: Option<String>,
+    end: End,
+    state: AccountState,
+) -> (
+    Harness<'static, Shell>,
+    Opened,
+    Arc<Folder>,
+    Imported,
+    Arc<std::sync::atomic::AtomicU32>,
+) {
     let book = Arc::new(MemoryAccounts::default());
     let mut account = helios_connect::account::Account::new(PICKS, "ann@example.org", &[]);
-    account.state = AccountState::Connected;
+    account.state = state;
     book.save(&account).unwrap();
     let sessions = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let (opened, folder, imported) = (
@@ -967,7 +1020,7 @@ fn picking_world(
     shell.add_import_connector(Arc::new(Picks {
         sessions: sessions.clone(),
         expired: 0,
-        ready: true,
+        end,
     }));
     shell.set_import_browser(opened.opener());
     let seen = imported.clone();
@@ -989,19 +1042,21 @@ fn picking_world(
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "Pick photos…", |h| shown(h, "Pick photos…"));
+    until(&mut h, "the account listed", |h| {
+        shown(h, "ann@example.org")
+    });
+    click(&mut h, "ann@example.org");
     (h, opened, folder, imported, sessions)
 }
 
 #[test]
-fn with_no_library_folder_it_is_asked_before_the_picking_opens_then_the_photos_go_there() {
+fn with_no_into_and_no_library_folder_into_is_asked_before_the_page_opens() {
     let (mut h, opened, folder, imported, sessions) = picking_world(None);
-    h.get_by_label("Pick photos…").click();
-    until(&mut h, "the library folder asked", |h| {
-        shown(h, "Choose the library folder…")
-    });
-    // No picking page, no session at the service: the folder comes first,
-    // and the command line's wording never shows.
+    h.get_by_label(CHOOSE).click();
+    let no_into = "Choose where the photos are copied first: Into, in the Choices column.";
+    until(&mut h, "Into asked for", |h| shown(h, no_into));
+    // No page, no session at the service: Into comes first, and the
+    // command line's wording never shows.
     h.run_steps(4);
     assert!(opened.urls().is_empty());
     assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
@@ -1009,10 +1064,10 @@ fn with_no_library_folder_it_is_asked_before_the_picking_opens_then_the_photos_g
         h.query_all_by_label_contains("--into").next().is_none(),
         "the command line's wording"
     );
-    h.get_by_label("Choose the library folder…").click();
+    h.get_by_label("Choose the folder…").click();
     h.run_steps(3);
-    // The folder chooser answers.
-    let dir = std::env::temp_dir().join(format!("helios-pick-library-{}", std::process::id()));
+    // The Choices column's folder chooser answers.
+    let dir = std::env::temp_dir().join(format!("helios-choose-into-{}", std::process::id()));
     let app = h.state().app().handle().clone();
     let files = app
         .service(&egui_pop::api::files::FILES)
@@ -1020,12 +1075,16 @@ fn with_no_library_folder_it_is_asked_before_the_picking_opens_then_the_photos_g
     let ids = files.open_ids();
     assert_eq!(ids.len(), 1, "one folder chooser open");
     files.deliver(ids[0], Some(vec![dir.clone()])).unwrap();
-    until(&mut h, "the picked photos imported", |_| {
+    // Back to the primary action; the photos go to Into, the connector
+    // never remembering a folder of its own.
+    until(&mut h, "the primary action back", |h| {
+        shown(h, CHOOSE) && !shown(h, no_into)
+    });
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the chosen photos imported", |_| {
         !imported.lock().unwrap().is_empty()
     });
-    // Remembered as the library folder, then the picking opened and its
-    // photos imported there.
-    assert_eq!(folder.0.lock().unwrap().as_deref(), Some(dir.as_path()));
+    assert_eq!(*folder.0.lock().unwrap(), None);
     assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
     assert_eq!(imported.lock().unwrap()[0].as_deref(), Some(dir.as_path()));
     until(&mut h, "said imported", |h| shown(h, "1 photos imported."));
@@ -1036,7 +1095,7 @@ fn a_source_s_own_into_folder_takes_the_picked_photos_without_asking() {
     let doc = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
     let (mut h, opened, folder, imported, _) = picking_world(Some(doc.into()));
     assert_eq!(h.state().import_sources().len(), 1, "the source read");
-    h.get_by_label("Pick photos…").click();
+    h.get_by_label(CHOOSE).click();
     until(&mut h, "the picked photos imported", |_| {
         !imported.lock().unwrap().is_empty()
     });
@@ -1046,7 +1105,7 @@ fn a_source_s_own_into_folder_takes_the_picked_photos_without_asking() {
     );
     assert_eq!(opened.urls().len(), 1);
     // Nothing asked, nothing remembered as the library's.
-    assert!(!shown(&h, "Choose the library folder…"));
+    assert!(!shown(&h, "Choose the folder…"));
     assert_eq!(*folder.0.lock().unwrap(), None);
 }
 
@@ -1072,7 +1131,7 @@ fn an_account_source_offers_its_connectors_three_browsers_and_keeps_the_one_chos
     for label in ["Browse", "All photos", "Albums", "By date"] {
         assert!(shown(&h, label), "{label}");
     }
-    assert!(!shown(&h, "Folder tree") && !shown(&h, "Pick in the service"));
+    assert!(!shown(&h, "Folder tree") && !shown(&h, "Choose in the service's page"));
     // Nothing lists an account's photos yet: said, no grid of folders.
     assert!(shown(
         &h,
@@ -1108,18 +1167,16 @@ fn an_account_source_offers_its_connectors_three_browsers_and_keeps_the_one_chos
 }
 
 /// A connector that picks in its service's page alone (Google Photos):
-/// no switch, the Contents column offers its picking.
+/// no switch, the Contents column shows the account once, its menu, and
+/// its one primary action.
 #[test]
-fn a_picking_source_shows_only_its_picker_in_the_contents_column() {
+fn a_picking_source_shows_its_account_once_and_one_primary_action() {
     use helios_connect::Browser;
-    let (mut h, _opened, _folder, _imported, _) = picking_world(None);
-    click(&mut h, "ann@example.org");
-    until(&mut h, "the picker shown", |h| {
-        shown(
-            h,
-            "Choose the photos in the service's own page: they are imported once picked.",
-        )
-    });
+    let (h, _opened, _folder, _imported, _) = picking_world(None);
+    assert!(shown(
+        &h,
+        "Test server opens in your browser. Choose your photos, press Done there, then come back here."
+    ));
     assert_eq!(
         h.state().import_source_browsers(),
         (vec![Browser::Picker], Some(Browser::Picker))
@@ -1127,13 +1184,138 @@ fn a_picking_source_shows_only_its_picker_in_the_contents_column() {
     for label in ["Browse", "All photos", "By date", "Albums", "Folder tree"] {
         assert!(!shown(&h, label), "{label}");
     }
-    // Its button runs the picking, the library folder asked first.
-    h.query_all_by_label("Pick photos…")
-        .last()
-        .expect("the Contents column's")
+    // Under Services, one row; the header line names the same account,
+    // with its menu.
+    assert!(shown(&h, "Services"));
+    assert!(!shown(&h, "Accounts"));
+    assert_eq!(h.query_all_by_label("ann@example.org").count(), 2);
+    assert!(shown(&h, "⋯"));
+    // One button only says "Choose photos", and none says "pick".
+    assert_eq!(h.query_all_by_label(CHOOSE).count(), 1);
+    for word in ["Pick photos", "Pick more", "picking"] {
+        assert!(
+            h.query_all_by_label_contains(word).next().is_none(),
+            "{word}"
+        );
+    }
+}
+
+/// While the service's page is open: a status line in the Contents
+/// column, never a dialog, with Cancel back to the primary action.
+#[test]
+fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
+    let (mut h, opened, _folder, imported, _) =
+        picking_world_with(None, End::Wait, AccountState::Connected);
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the status line", |h| {
+        shown(
+            h,
+            "Choose your photos in the browser, press Done there, then come back here.",
+        )
+    });
+    assert_eq!(opened.urls().len(), 1);
+    for label in [
+        "The page did not open?",
+        "Open it again",
+        "Copy the link",
+        "Cancel",
+    ] {
+        assert!(shown(&h, label), "{label}");
+    }
+    // The window stays usable: the Sources column still answers.
+    assert!(shown(&h, "Add a source…"));
+    h.run_steps(4);
+    // The status line's Cancel, above the footer's.
+    h.query_all_by_label("Cancel")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .expect("the status line's Cancel")
         .click();
-    until(&mut h, "the library folder asked", |h| {
-        shown(h, "Choose the library folder…")
+    until(&mut h, "back to the primary action", |h| shown(h, CHOOSE));
+    assert!(h.state().import_window_open(), "the window still open");
+    assert!(imported.lock().unwrap().is_empty());
+}
+
+/// Left without Done: said plainly, and the primary action again.
+#[test]
+fn nothing_chosen_says_so_and_offers_to_choose_again() {
+    let (mut h, opened, _folder, imported, _) =
+        picking_world_with(None, End::Nothing, AccountState::Connected);
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "nothing said", |h| {
+        shown(h, "No photos were chosen.")
+    });
+    assert!(shown(&h, CHOOSE));
+    assert_eq!(opened.urls().len(), 1);
+    assert!(imported.lock().unwrap().is_empty());
+}
+
+/// The service unreachable: why, and "Try again", which opens a new page.
+#[test]
+fn an_unreachable_service_says_why_and_offers_to_try_again() {
+    let (mut h, opened, _folder, _imported, _) =
+        picking_world_with(None, End::Down, AccountState::Connected);
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the reason said", |h| {
+        h.query_all_by_label_contains("Could not reach Test server: ")
+            .next()
+            .is_some()
+    });
+    h.run_steps(4);
+    h.get_by_label("Try again").click();
+    until(&mut h, "a new page", |_| opened.urls().len() == 2);
+}
+
+/// The service refuses the account: said in one sentence, the row marked
+/// "needs reconnecting", and the one action is its reconnection.
+#[test]
+fn a_refused_account_says_so_and_offers_its_reconnection() {
+    let (mut h, _opened, _folder, _imported, _) =
+        picking_world_with(None, End::Refused, AccountState::Connected);
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    let refused = "▲ Test server no longer lets Helios read this account.";
+    until(&mut h, "refused said", |h| {
+        shown(h, refused) && shown(h, "Reconnect ann@example.org")
+    });
+    until(&mut h, "the row marked", |h| shown(h, "needs reconnecting"));
+    // An account already known to need it opens on the same state.
+    let needs = AccountState::NeedsAttention {
+        step: None,
+        why: "refused".into(),
+        refused: true,
+    };
+    let (mut h, ..) = picking_world_with(None, End::Done, needs);
+    until(&mut h, "refused said", |h| {
+        shown(h, refused) && shown(h, "Reconnect ann@example.org") && !shown(h, CHOOSE)
+    });
+    h.get_by_label("Reconnect ann@example.org").click();
+    h.run_steps(3);
+}
+
+/// The account's menu: "Manage accounts…" opens Settings > Accounts.
+#[test]
+fn the_account_menu_opens_settings_accounts() {
+    let (mut h, ..) = picking_world(None);
+    click(&mut h, "⋯");
+    for label in ["Reconnect", "Use another account…", "Manage accounts…"] {
+        assert!(shown(&h, label), "{label}");
+    }
+    click(&mut h, "Manage accounts…");
+    until(&mut h, "Settings > Accounts", |h| {
+        h.state()
+            .app()
+            .handle()
+            .service(&egui_pop::api::admin::ADMIN)
+            .is_some_and(|a| {
+                a.is_open()
+                    && a.shown()
+                        .0
+                        .as_deref()
+                        .is_some_and(|p| p.starts_with("accounts"))
+            })
     });
 }
 
@@ -1187,7 +1369,7 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
     shell.add_import_connector(Arc::new(PicksAsking(Picks {
         sessions: Arc::default(),
         expired: 0,
-        ready: true,
+        end: End::Done,
     })));
     shell.set_import_remote(Arc::new(|_, _, _, _| {
         Ok(helios_gui::shell::PickImported::default())
@@ -1196,15 +1378,25 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    // Each account once: its name, its address under it; the old one
+    // marked, in a word on its row.
     until(&mut h, "the account's address", |h| {
-        shown(h, "Fake picks — ann@example.com")
+        shown(h, "ann@example.com")
     });
-    assert!(shown(&h, "Reconnect to see the account"));
+    assert_eq!(h.query_all_by_label("Fake picks").count(), 2);
     assert_eq!(
-        h.query_all_by_label("Reconnect to see the account").count(),
+        h.query_all_by_label("needs reconnecting").count(),
         1,
         "the old account only"
     );
+    // Selected, the old account's one action is its reconnection.
+    h.query_all_by_label("Fake picks")
+        .nth(1)
+        .expect("the old account's row")
+        .click();
+    until(&mut h, "the reconnection offered", |h| {
+        shown(h, "Reconnect once to show which account this is.") && shown(h, "Reconnect")
+    });
     // Settings > Accounts says the same.
     let rows = run(&mut h, "import.accounts", Value::Null, Origin::User).unwrap();
     let row = |id: &str| {
@@ -1226,15 +1418,15 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
 }
 
 #[test]
-fn a_picking_done_offers_to_pick_more_in_a_new_session() {
+fn photos_chosen_and_imported_offer_to_choose_more_in_a_new_page() {
     let doc = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
     let (mut h, opened, _folder, imported, sessions) = picking_world(Some(doc.into()));
-    h.get_by_label("Pick photos…").click();
-    until(&mut h, "the first picking done", |h| {
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the first photos imported", |h| {
         shown(h, "1 photos imported.")
     });
     h.run_steps(4);
-    h.get_by_label("Pick more photos…").click();
+    h.get_by_label("Choose more photos…").click();
     until(&mut h, "the second picking done", |_| {
         imported.lock().unwrap().len() == 2
     });
@@ -1249,7 +1441,7 @@ fn a_picking_done_offers_to_pick_more_in_a_new_session() {
         ]
     );
     until(&mut h, "the known photo said", |h| {
-        shown(h, "1 already in the library, left as they are.")
+        shown(h, "1 were already in your Library.")
     });
 }
 

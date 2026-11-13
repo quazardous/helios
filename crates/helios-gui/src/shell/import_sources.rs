@@ -653,11 +653,6 @@ impl ImportWindow {
         self.accounts.label_of(id).unwrap_or_else(|| id.to_string())
     }
 
-    /// Whether "Pick photos…" is offered on the account `id`.
-    pub(super) fn account_picks(&self, id: &str) -> bool {
-        self.accounts.picks(id, &self.connectors)
-    }
-
     /// Selects an account's source: the column shows its choices.
     pub(super) fn select_account(&mut self, id: String) {
         self.sources.account = Some(id);
