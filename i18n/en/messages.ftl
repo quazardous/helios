@@ -1197,6 +1197,22 @@ gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet
 
+gui-look-header-chart = Colour half off: the chart profile rules the colours
+
+gui-look-header-fit = Fit to the camera's JPEG
+
+gui-look-header-fit-about = Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit
+
+gui-look-header-fitted = Fitted to the camera's JPEG: Delta E { $held } (default { $baseline })
+
+gui-look-header-none = Not fitted yet: the look starts from the camera's own JPEG
+
+gui-look-header-refit = Refit
+
+gui-look-header-refused = Not fitted: { $reason }
+
+gui-look-header-switch = Camera look
+
 gui-macro-fold-detail = Changed: { $changes }
 
 gui-macro-fold-discard = Discard

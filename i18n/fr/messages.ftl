@@ -548,6 +548,22 @@ gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
+gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
+
+gui-look-header-fit = Ajuster au JPEG de l’appareil
+
+gui-look-header-fit-about = Ajuste une matrice, une table teinte et saturation et des courbes de tons au JPEG intégré de l’appareil, vérifiés sur des pixels qui n’ont pas servi à l’ajustement
+
+gui-look-header-fitted = Ajusté au JPEG de l’appareil : Delta E { $held } (par défaut { $baseline })
+
+gui-look-header-none = Pas encore ajusté : le rendu part du JPEG de l’appareil lui-même
+
+gui-look-header-refit = Réajuster
+
+gui-look-header-refused = Non ajusté : { $reason }
+
+gui-look-header-switch = Rendu boîtier
+
 gui-mask-display = Afficher le masque
 
 gui-mask-display-grey = le masque seul en gris

@@ -840,6 +840,14 @@ gui-library-tags d8aadaa7f12dec16
 gui-library-volume-offline 5f2b93239dade10c
 gui-log-clear 238f7a82e564b550
 gui-log-empty 204c4ef685556125
+gui-look-header-chart 1a3e64ad95dd7ed6
+gui-look-header-fit abdf56943d9b004b
+gui-look-header-fit-about 4a67652cacc37dd8
+gui-look-header-fitted 3ea09dd786644131
+gui-look-header-none c3605523df2773b1
+gui-look-header-refit 44ee1821930d2c47
+gui-look-header-refused d1a4beeb3927ea68
+gui-look-header-switch ca79fd41d3155331
 gui-macro-fold-detail d63939bfb0cb05f6
 gui-macro-fold-discard b8d533c186819cc9
 gui-macro-fold-discard-hint f6c2cea0052fa938
