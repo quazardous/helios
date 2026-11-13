@@ -617,6 +617,10 @@ gui-history-album-add = Add { $count } photos to “{ $name }”
 
 gui-history-album-delete = Delete album “{ $name }”
 
+gui-history-album-move = Move “{ $name }” into a set
+
+gui-history-album-move-out = Move “{ $name }” out of its set
+
 gui-history-album-new = New album “{ $name }”
 
 gui-history-album-new-smart = New smart album “{ $name }”
@@ -656,6 +660,8 @@ gui-history-quick-clear = Clear the quick collection
 gui-history-quick-remove = Remove { $count } photos from the quick collection
 
 gui-history-quick-save = Save the quick collection as “{ $name }”
+
+gui-history-set-new = New album set “{ $name }”
 
 gui-history-snapshot-restored = Restored “{ $name }”
 
@@ -965,6 +971,8 @@ gui-library-album-add = Add the selected photos
 
 gui-library-album-delete = Delete the album
 
+gui-library-album-move = Move to set…
+
 gui-library-album-name = name
 
 gui-library-album-new = New album…
@@ -1108,6 +1116,28 @@ gui-library-read = { $count } images in the library
 gui-library-reading = Reading the library…
 
 gui-library-search = Search images
+
+gui-library-set-delete = Delete the set, keep its albums
+
+gui-library-set-delete-all = Delete the set and its albums
+
+gui-library-set-hint = album set
+
+gui-library-set-move-title = Move “{ $name }” to a set
+
+gui-library-set-new = New set…
+
+gui-library-set-new-in = New set inside…
+
+gui-library-set-new-title = New album set
+
+gui-library-set-none = No album set to move it to: make one with New set…
+
+gui-library-set-tip = Album set: its albums' photos together
+
+gui-library-set-toggle = Show or hide the albums of { $name }
+
+gui-library-set-top = No set (the top)
 
 gui-library-sort-ascending = Ascending: oldest, smallest or A first
 

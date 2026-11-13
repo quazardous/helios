@@ -263,13 +263,16 @@ command-library-collection-add =
     .title = Add photos to an album (`id`; `images`: ids, else the selection)
 
 command-library-collection-create =
-    .title = New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys); without `name`, asks it. Answers its `id`
+    .title = New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys), or with `kind: set` an album set (`set`: the set it goes in); without `name`, asks it. Answers its `id`
 
 command-library-collection-delete =
-    .title = Delete an album (`id`); its photos stay in the library
+    .title = Delete an album or a set (`id`); its photos stay in the library. A set's albums move up into the set it was in, or with `members: true` are deleted too
 
 command-library-collection-list =
-    .title = List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`; and the quick collection's `quick` count
+    .title = List the albums: `id`, `name`, `kind` (album, smart or set), the `set` it is in, how many photos each holds (a set: its albums' together), a smart album's `rules`; and the quick collection's `quick` count
+
+command-library-collection-move =
+    .title = Move an album, a smart album or a set (`id`) into a set (`set`; null: the top); a set never goes inside itself. Without `set`, asks it
 
 command-library-collection-remove =
     .title = Remove photos from an album (`id`; `images`: ids, else the selection); they stay in the library
