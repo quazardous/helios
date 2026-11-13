@@ -20,8 +20,10 @@
 //! under Services, and the Contents column shows it with one header line
 //! and its menu, then the one primary action of where it stands
 //! ([`choose_ui`]): connect, choose photos, the wait for the service's
-//! page as a status line with Cancel (never a dialog), what came back, or
-//! one plain sentence and one action when something went wrong. The
+//! page as a status line with Cancel (never a dialog), or one plain
+//! sentence and one action when something went wrong. The photos chosen
+//! fill the ordinary grid under the same header, "Choose more…" in it
+//! ([`chosen_header_ui`], [`super::import_chosen`]). The
 //! connector never asks for a folder: the Choices column's Into decides
 //! where the photos are copied, as for any source.
 //!
@@ -81,10 +83,16 @@ pub(crate) struct Accounts {
     /// The photos being chosen in the service's page ("Choose photos
     /// in Google Photos…"), shown in the Contents column.
     pub(crate) picking: Option<Picking>,
+    /// The photos chosen, by account, until the footer's Import takes
+    /// them: they fill the Contents column's grid.
+    pub(crate) chosen: Chosen,
     /// How the chosen items are imported:
     /// `helios_library::fetch::import_remote` over the library, set by
     /// the desktop; none: choosing photos is not offered.
     pub(crate) import: Option<ImportRemote>,
+    /// Which chosen items the Library holds already, asked off the
+    /// interface's thread as they come; none: none is marked.
+    pub(crate) known: Option<KnownRemote>,
     /// The library folder copies go to when Into names none, read off the
     /// interface's thread; none: never looked at.
     pub(crate) library: Option<Arc<dyn LibraryFolder>>,
@@ -276,27 +284,67 @@ fn read_accounts(shared: &(Mutex<Read>, Condvar)) {
     }
 }
 
-/// Imports the items a connector listed under a source: the items added.
-///
-/// The items are copied into the folder given, else into the library
-/// folder.
+/// The photos chosen under an account that the footer's Import takes.
+pub struct RemoteImport {
+    /// The connector whose page they were chosen in, its picking still
+    /// open: it fetches them.
+    pub connector: Arc<dyn helios_connect::Connector>,
+    pub source: helios_connect::SourceRef,
+    pub items: Vec<helios_connect::Item>,
+    /// The import's choices, as `library.import` takes them (`copy`,
+    /// `into`, `layout`, `rename`, `duplicates`, `darktable`).
+    pub args: serde_json::Value,
+}
+
+/// Imports photos chosen under an account, as a card's import runs: a
+/// job, each item's line given to `emit`, its undo step and backups; the
+/// import's report (as `library.import` ends with it) when it ends. Run
+/// off the interface's thread; the items are copied into the choices'
+/// `into`, else into the library folder.
 pub type ImportRemote = Arc<
-    dyn Fn(
-            &dyn helios_connect::Connector,
-            helios_connect::SourceRef,
-            Vec<helios_connect::Item>,
-            Option<PathBuf>,
-        ) -> Result<Imported, String>
+    dyn Fn(RemoteImport, &mut dyn FnMut(&serde_json::Value)) -> Result<serde_json::Value, String>
         + Send
         + Sync,
 >;
 
-/// What the import of the chosen photos did: `added` photos new to the
-/// library, `known` already in it (chosen before), left as they are.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Imported {
-    pub added: u64,
-    pub known: u64,
+/// Which of the items listed under a source the Library holds already
+/// (`helios_library::fetch::in_library` on the desktop), one answer per
+/// item. Run off the interface's thread.
+pub type KnownRemote =
+    Arc<dyn Fn(&helios_connect::SourceRef, &[helios_connect::Item]) -> Vec<bool> + Send + Sync>;
+
+/// The photos one visit to the service's page chose: listed, not
+/// fetched; its connector keeps the page's session until they are
+/// imported or given up.
+pub(crate) struct Batch {
+    pub(crate) connector: Arc<dyn helios_connect::Connector>,
+    pub(crate) source: helios_connect::SourceRef,
+    pub(crate) items: Vec<helios_connect::Item>,
+    /// Each item already in the Library.
+    pub(crate) known: Vec<bool>,
+}
+
+/// The photos chosen, by account, each visit to the page a batch.
+pub(crate) type Chosen = Arc<Mutex<BTreeMap<String, Vec<Arc<Batch>>>>>;
+
+/// Ends the pickings of `batches` (the service forgets their sessions),
+/// on a thread of its own: each is a request to the service.
+pub(crate) fn end_picks(batches: Vec<Arc<Batch>>) {
+    if batches.is_empty() {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("end-picks".into())
+        .spawn(move || {
+            for b in batches {
+                if let Err(e) = b.connector.end_pick() {
+                    log::debug!("import accounts: end of a picking: {e:?}");
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!("import accounts: {e}");
+    }
 }
 
 /// The library folder a fetched item is copied into when the Choices
@@ -321,15 +369,8 @@ pub(crate) enum PickStatus {
     Browser {
         url: String,
     },
-    /// Downloading and importing `items` photos.
-    Importing {
-        items: usize,
-    },
-    /// Done: `added` photos added, `known` already imported.
-    Done {
-        added: u64,
-        known: u64,
-    },
+    /// Photos chosen: they fill the grid, until the footer's Import.
+    Chosen,
     /// Nothing chosen before the deadline.
     Nothing,
     /// The service's page closed or ran out (or the service forgot it)
@@ -342,7 +383,7 @@ pub(crate) enum PickStatus {
     NoInto,
     /// The service could not be reached, or answered an error.
     Unreachable(String),
-    /// The photos came back but their import failed.
+    /// The library folder could not be read.
     Failed(String),
     Cancelled,
 }
@@ -389,7 +430,9 @@ impl Default for Accounts {
             oauth: OauthConnectors::default(),
             identity: IdentityConnectors::default(),
             picking: None,
+            chosen: Chosen::default(),
             import: None,
+            known: None,
             library: None,
             plugins: None,
             consent: None,
@@ -524,31 +567,37 @@ impl Accounts {
 
     /// Starts choosing photos under the account `id` ("Choose photos in
     /// Google Photos…"): the service's page opened in the system browser,
-    /// the person waited for (cancellable), what was chosen imported. A
-    /// sign-in the service refuses leaves the account needing attention,
-    /// its Reconnect offered.
+    /// the person waited for (cancellable), what was chosen listed with
+    /// the account's chosen photos ([`Accounts::chosen`]), each marked
+    /// when the Library holds it; nothing is fetched before the footer's
+    /// Import. A sign-in the service refuses leaves the account needing
+    /// attention, its Reconnect offered.
     ///
-    /// The photos are copied `into` that folder (the Choices column's
-    /// Into), else into the library folder; with neither, it stops at
+    /// The photos will be copied into the Choices column's Into (`into`
+    /// set), else into the library folder; with neither, it stops at
     /// [`PickStatus::NoInto`] before the service is asked.
     pub(crate) fn pick(
         &mut self,
         connectors: &Connectors,
         id: &str,
-        into: Option<PathBuf>,
+        into: bool,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Result<(), String> {
         let book = self.book.clone().ok_or("accounts need a library open")?;
-        let import = self.import.clone().ok_or("no library to import into")?;
+        if self.import.is_none() {
+            return Err("no library to import into".into());
+        }
         let account = book
             .account(id)?
             .ok_or_else(|| format!("no account {id}"))?;
         let provider = connectors
             .provider(&account.connector)
             .ok_or_else(|| format!("no source of kind {}", account.connector))?;
-        let connector = provider
-            .create(&serde_json::Value::Null, &connectors.services())
-            .map_err(|e| helios_connect::connect::said(&e))?;
+        let connector: Arc<dyn helios_connect::Connector> = Arc::from(
+            provider
+                .create(&serde_json::Value::Null, &connectors.services())
+                .map_err(|e| helios_connect::connect::said(&e))?,
+        );
         if let Some(p) = self.picking.take() {
             p.cancel.cancel();
         }
@@ -557,6 +606,8 @@ impl Accounts {
         let (st, stop, account_ref) = (status.clone(), cancel.clone(), account.account_ref());
         let opener = self.opener.clone();
         let folder = self.library.clone();
+        let (chosen, known_of, account_id) =
+            (self.chosen.clone(), self.known.clone(), account.id.clone());
         let set = move |s: PickStatus| {
             *st.lock().unwrap_or_else(PoisonError::into_inner) = s;
             wake();
@@ -565,9 +616,9 @@ impl Accounts {
             use helios_connect::ConnectorError;
             // Where the photos go is settled before the service is asked:
             // its page waits for nobody.
-            let known = match (&into, &folder) {
-                (Some(_), _) | (None, None) => Ok(true),
-                (None, Some(f)) => f.get().map(|d| d.is_some()),
+            let known = match (into, &folder) {
+                (true, _) | (false, None) => Ok(true),
+                (false, Some(f)) => f.get().map(|d| d.is_some()),
             };
             match known {
                 Ok(true) => {}
@@ -592,12 +643,40 @@ impl Accounts {
             );
             let end = match listed {
                 Ok(Some((source, items))) => {
-                    set(PickStatus::Importing { items: items.len() });
-                    let done = import(connector.as_ref(), source, items, into);
-                    let _ = connector.end_pick();
-                    match done {
-                        Ok(Imported { added, known }) => PickStatus::Done { added, known },
-                        Err(e) => PickStatus::Failed(e),
+                    // Chosen again: listed once, as first chosen.
+                    let before: std::collections::HashSet<helios_connect::ItemId> = chosen
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .get(&account_id)
+                        .into_iter()
+                        .flatten()
+                        .filter(|b| b.source.id == source.id)
+                        .flat_map(|b| b.items.iter().map(|i| i.id.clone()))
+                        .collect();
+                    let items: Vec<_> = items
+                        .into_iter()
+                        .filter(|i| !before.contains(&i.id))
+                        .collect();
+                    if items.is_empty() {
+                        let _ = connector.end_pick();
+                        PickStatus::Nothing
+                    } else {
+                        let known = known_of
+                            .as_ref()
+                            .map_or_else(|| vec![false; items.len()], |k| k(&source, &items));
+                        let batch = Batch {
+                            connector,
+                            source,
+                            items,
+                            known,
+                        };
+                        chosen
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .entry(account_id)
+                            .or_default()
+                            .push(Arc::new(batch));
+                        PickStatus::Chosen
                     }
                 }
                 Ok(None) => PickStatus::Nothing,
@@ -751,13 +830,73 @@ impl Accounts {
 
     /// The import window closed: the connection running gives up (its
     /// session's thread sees the cancel and ends on its own, never
-    /// joined) and its dialog is gone; a picking goes on, detached.
+    /// joined) and its dialog is gone; the photos chosen and not imported
+    /// are given up, their pickings ended; a picking goes on, detached.
     pub(crate) fn window_closed(&mut self) {
         if let Some(c) = &self.connecting {
             c.session.cancel();
         }
         self.consent = None;
         self.close();
+        let all = std::mem::take(&mut *self.chosen.lock().unwrap_or_else(PoisonError::into_inner));
+        end_picks(all.into_values().flatten().collect());
+        if self
+            .picking
+            .as_ref()
+            .is_some_and(|p| p.status() == PickStatus::Chosen)
+        {
+            self.picking = None;
+        }
+    }
+
+    /// The photos chosen under the account `id`, each visit to the
+    /// service's page a batch.
+    pub(crate) fn chosen(&self, id: &str) -> Vec<Arc<Batch>> {
+        self.chosen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The photos chosen under the account `id`, taken for their import.
+    pub(crate) fn take_chosen(&mut self, id: &str) -> Vec<Arc<Batch>> {
+        if self
+            .picking
+            .as_ref()
+            .is_some_and(|p| p.account == id && p.status() == PickStatus::Chosen)
+        {
+            self.picking = None;
+        }
+        self.chosen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id)
+            .unwrap_or_default()
+    }
+
+    /// Whether the Contents column shows the photos chosen under the
+    /// account `id` in the grid: some are chosen, and the service's page
+    /// is neither open nor ended in a problem to say.
+    pub(crate) fn shows_chosen(&self, id: &str) -> bool {
+        let waits = self
+            .picking
+            .as_ref()
+            .filter(|p| p.account == id)
+            .is_some_and(|p| {
+                !matches!(
+                    p.status(),
+                    PickStatus::Chosen | PickStatus::Nothing | PickStatus::Cancelled
+                )
+            });
+        !waits
+            && self
+                .chosen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(id)
+                .is_some_and(|b| !b.is_empty())
     }
 
     /// The session is no longer shown.
@@ -1238,38 +1377,18 @@ pub(crate) fn connect_dialog(
     }
 }
 
-/// The Contents column for an account whose photos are chosen in the
-/// service's own page (`service`, "Google Photos"): one header line, the
-/// account with its menu ("Reconnect", "Use another account…", "Manage
-/// accounts…"), then where it stands, each state with its one primary
-/// action:
-///
-/// - connected, nothing chosen: "Choose photos in Google Photos…";
-/// - the service's page open in the browser: a status line, the account
-///   the browser must be signed in to, the page to open again or copy,
-///   and Cancel; the rest of the window stays usable;
-/// - the photos imported: how many, and "Choose more photos…";
-/// - nothing chosen, the page closed: said, and choose again;
-/// - access refused, or an account signed in before Helios asked who it
-///   is: "Reconnect";
-/// - no folder to copy into: the Choices column's Into asked for;
-/// - the service unreachable, or the import failed: why, "Try again".
-pub(crate) fn choose_ui(
+/// The header line of an account in the Contents column: the account
+/// once, then at the end of the line its menu ("Reconnect", "Use another
+/// account…", "Manage accounts…") and, with `more`, "Choose more…".
+fn header_ui(
     ui: &mut egui::Ui,
-    accounts: &mut Accounts,
-    connectors: &Connectors,
-    id: &str,
+    account: &Account,
     header: &str,
-    service: &str,
+    more: bool,
     t: &dyn Fn(Message) -> String,
-) -> Option<ChooseAsked> {
+) -> Option<Asked> {
     let mut asked = None;
-    let account = accounts.listed().iter().find(|a| a.id == id).cloned();
-    let Some(account) = account else {
-        ui.weak(header);
-        return None;
-    };
-    // The header: the account once, its menu at the end of the line.
+    let id = account.id.as_str();
     ui.horizontal(|ui| {
         ui.strong(header);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1301,8 +1420,74 @@ pub(crate) fn choose_ui(
             })
             .response
             .on_hover_text(t(Message::new("gui-account-menu", "Account")));
+            if more
+                && ui
+                    .button(t(Message::new("gui-choose-more-short", "Choose more…")))
+                    .on_hover_text(t(Message::new(
+                        "gui-choose-more-hint",
+                        "Opens the page again: the photos chosen there are added to these",
+                    )))
+                    .clicked()
+            {
+                asked = Some(Asked::Pick(id.to_owned()));
+            }
         });
     });
+    asked
+}
+
+/// The Contents column's header above the grid of the photos chosen
+/// under the account `id`: the account with its menu, and "Choose
+/// more…", which opens the service's page again.
+pub(crate) fn chosen_header_ui(
+    ui: &mut egui::Ui,
+    accounts: &mut Accounts,
+    id: &str,
+    header: &str,
+    t: &dyn Fn(Message) -> String,
+) -> Option<Asked> {
+    let account = accounts.listed().iter().find(|a| a.id == id).cloned();
+    let Some(account) = account else {
+        ui.weak(header);
+        return None;
+    };
+    let asked = header_ui(ui, &account, header, true, t);
+    ui.separator();
+    asked
+}
+
+/// The Contents column for an account whose photos are chosen in the
+/// service's own page (`service`, "Google Photos"): one header line, the
+/// account with its menu ("Reconnect", "Use another account…", "Manage
+/// accounts…"), then where it stands, each state with its one primary
+/// action:
+///
+/// - connected, nothing chosen: "Choose photos in Google Photos…";
+/// - the service's page open in the browser: a status line, the account
+///   the browser must be signed in to, the page to open again or copy,
+///   and Cancel; the rest of the window stays usable;
+/// - photos chosen: the grid instead ([`chosen_header_ui`]);
+/// - nothing chosen, the page closed: said, and choose again;
+/// - access refused, or an account signed in before Helios asked who it
+///   is: "Reconnect";
+/// - no folder to copy into: the Choices column's Into asked for;
+/// - the service unreachable, or the library folder unread: why, "Try
+///   again".
+pub(crate) fn choose_ui(
+    ui: &mut egui::Ui,
+    accounts: &mut Accounts,
+    connectors: &Connectors,
+    id: &str,
+    header: &str,
+    service: &str,
+    t: &dyn Fn(Message) -> String,
+) -> Option<ChooseAsked> {
+    let account = accounts.listed().iter().find(|a| a.id == id).cloned();
+    let Some(account) = account else {
+        ui.weak(header);
+        return None;
+    };
+    let mut asked = header_ui(ui, &account, header, false, t);
     ui.separator();
     ui.add_space(8.0);
     let who = account.email().unwrap_or(&account.label).to_owned();
@@ -1472,31 +1657,10 @@ pub(crate) fn choose_ui(
                     .clicked();
             });
         }
-        Some(PickStatus::Importing { items }) => spinning(
-            ui,
-            t(
-                Message::new("gui-choose-importing", "Importing { $count } photos…")
-                    .with("count", items as i64),
-            ),
-        ),
-        Some(PickStatus::Done { added, known }) => {
-            ui.label(t(Message::new(
-                "gui-choose-done",
-                "{ $count } photos imported.",
-            )
-            .with("count", added as i64)));
-            if known > 0 {
-                ui.weak(t(Message::new(
-                    "gui-choose-known",
-                    "{ $count } were already in your Library.",
-                )
-                .with("count", known as i64)));
-            }
-            ui.add_space(8.0);
-            if primary(
-                ui,
-                t(Message::new("gui-choose-more", "Choose more photos…")),
-            ) {
+        // The photos chosen fill the grid ([`chosen_header_ui`]); none
+        // left there: chosen again.
+        Some(PickStatus::Chosen) => {
+            if primary(ui, choose) {
                 asked = pick;
             }
         }
@@ -1557,8 +1721,8 @@ pub(crate) fn choose_ui(
             warned(
                 ui,
                 t(Message::new(
-                    "gui-choose-failed",
-                    "The photos were not imported: { $why }",
+                    "gui-choose-library-unread",
+                    "Could not read the library folder: { $why }",
                 )
                 .with("why", why)),
             );

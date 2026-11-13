@@ -10,9 +10,10 @@
 //! the Google Photos-like source's screen shows the account once (one
 //! row under Services, one header line with its menu) and one primary
 //! action per state: choose photos, the wait for the service's page as a
-//! status line with Cancel, what came back ("Choose more photos…", a new
-//! page each time), and for each error one sentence and one action; it
-//! never asks for a folder, Into does.
+//! status line with Cancel, and for each error one sentence and one
+//! action; it never asks for a folder, Into does. The photos chosen fill
+//! the ordinary grid ("in your Library" marked, "Choose more…" adding a
+//! new page's), and the footer's Import imports them as a card's.
 //! Settings > Accounts manages them: the sources using each, its last
 //! use and status (a refused token says so), rename, reconnect, and
 //! disconnect asking what to do with the sources; never a token shown.
@@ -713,6 +714,8 @@ impl helios_connect::Connector for PickConnector {
         Ok(Vec::new())
     }
 
+    /// What the page chose: `p1` and `p2` the first time, `p2` again and
+    /// `p3` the next.
     fn list(
         &self,
         _source: &helios_connect::SourceRef,
@@ -720,7 +723,13 @@ impl helios_connect::Connector for PickConnector {
         _page: usize,
         _cancel: &helios_connect::Cancel,
     ) -> Result<helios_connect::Page, helios_connect::ConnectorError> {
+        let ids: &[&str] = if *self.current.lock().unwrap() <= 1 {
+            &["p1", "p2"]
+        } else {
+            &["p2", "p3"]
+        };
         Ok(helios_connect::Page {
+            items: ids.iter().map(|id| chosen_item(id)).collect(),
             complete: true,
             ..helios_connect::Page::default()
         })
@@ -804,9 +813,9 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
         end: End::Wait,
     }));
     shell.set_import_browser(opened.opener());
-    shell.set_import_remote(Arc::new(|_, _, _, _| {
-        Ok(helios_gui::shell::PickImported::default())
-    }));
+    shell.set_import_remote(Arc::new(
+        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| Ok(json!({})),
+    ));
     shell.set_import_accounts(book, secrets);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -852,6 +861,23 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
     });
     click(&mut h, "Open it again");
     assert_eq!(opened.urls().len(), 3, "opened again when asked");
+}
+
+/// An item the fake page chose: `IMG_<n>.JPG`, taken on 2026-10-30.
+fn chosen_item(id: &str) -> helios_connect::Item {
+    helios_connect::Item {
+        id: helios_connect::ItemId(id.into()),
+        path: format!("IMG_000{}.JPG", &id[1..]),
+        size: Some(1000),
+        modified: None,
+        taken: Some(1_793_350_800),
+        kind: helios_connect::ItemKind::Photo,
+        mime: Some("image/jpeg".into()),
+        metadata: std::collections::BTreeMap::new(),
+        claim: None,
+        revision: None,
+        group: None,
+    }
 }
 
 /// The primary button of a connected account of [`Picks`] (its manifest
@@ -972,8 +998,9 @@ impl helios_gui::shell::LibraryFolder for Folder {
     }
 }
 
-/// The folders the picked photos were imported into, by import.
-type Imported = Arc<std::sync::Mutex<Vec<Option<std::path::PathBuf>>>>;
+/// What each import of the chosen photos took: its Into, and the items'
+/// ids.
+type Imported = Arc<std::sync::Mutex<Vec<(Option<String>, Vec<String>)>>>;
 
 /// A window with a connected account of a connector whose page is done
 /// at once, the library folder and the imports the test's; the account
@@ -1024,11 +1051,21 @@ fn picking_world_with(
     }));
     shell.set_import_browser(opened.opener());
     let seen = imported.clone();
-    shell.set_import_remote(Arc::new(move |_, _, _, into| {
-        seen.lock().unwrap().push(into);
-        // The second picking finds the first one's photo again.
-        let known = u64::from(seen.lock().unwrap().len() > 1);
-        Ok(helios_gui::shell::PickImported { added: 1, known })
+    shell.set_import_remote(Arc::new(
+        move |job: helios_gui::shell::RemoteImport, emit: &mut dyn FnMut(&Value)| {
+            let ids: Vec<String> = job.items.iter().map(|i| i.id.0.clone()).collect();
+            for id in &ids {
+                emit(&json!({ "item": id, "status": "added" }));
+            }
+            let into = job.args["into"].as_str().map(String::from);
+            let added = ids.len();
+            seen.lock().unwrap().push((into, ids));
+            Ok(json!({ "added": added, "files": added }))
+        },
+    ));
+    // `p1` is in the Library already.
+    shell.set_import_remote_known(Arc::new(|_, items| {
+        items.iter().map(|i| i.id.0 == "p1").collect()
     }));
     shell.set_import_library_folder(folder.clone());
     shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
@@ -1081,27 +1118,38 @@ fn with_no_into_and_no_library_folder_into_is_asked_before_the_page_opens() {
         shown(h, CHOOSE) && !shown(h, no_into)
     });
     h.get_by_label(CHOOSE).click();
+    until(&mut h, "the chosen photos in the grid", |h| {
+        h.state().import_cells().len() == 2
+    });
+    assert!(imported.lock().unwrap().is_empty(), "nothing before Import");
+    click(&mut h, "Import 1");
     until(&mut h, "the chosen photos imported", |_| {
         !imported.lock().unwrap().is_empty()
     });
     assert_eq!(*folder.0.lock().unwrap(), None);
     assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
-    assert_eq!(imported.lock().unwrap()[0].as_deref(), Some(dir.as_path()));
-    until(&mut h, "said imported", |h| shown(h, "1 photos imported."));
+    let dir = dir.display().to_string();
+    assert_eq!(imported.lock().unwrap()[0].0.as_deref(), Some(dir.as_str()));
 }
+
+/// A saved source of the account, its own Into set.
+const OWN_INTO: &str = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
 
 #[test]
 fn a_source_s_own_into_folder_takes_the_picked_photos_without_asking() {
-    let doc = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
-    let (mut h, opened, folder, imported, _) = picking_world(Some(doc.into()));
+    let (mut h, opened, folder, imported, _) = picking_world(Some(OWN_INTO.into()));
     assert_eq!(h.state().import_sources().len(), 1, "the source read");
     h.get_by_label(CHOOSE).click();
-    until(&mut h, "the picked photos imported", |_| {
+    until(&mut h, "the chosen photos in the grid", |h| {
+        shown(h, "Import 1")
+    });
+    click(&mut h, "Import 1");
+    until(&mut h, "the chosen photos imported", |_| {
         !imported.lock().unwrap().is_empty()
     });
     assert_eq!(
-        imported.lock().unwrap()[0].as_deref(),
-        Some(std::path::Path::new("/photos/picked"))
+        imported.lock().unwrap()[0].0.as_deref(),
+        Some("/photos/picked")
     );
     assert_eq!(opened.urls().len(), 1);
     // Nothing asked, nothing remembered as the library's.
@@ -1371,9 +1419,9 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
         expired: 0,
         end: End::Done,
     })));
-    shell.set_import_remote(Arc::new(|_, _, _, _| {
-        Ok(helios_gui::shell::PickImported::default())
-    }));
+    shell.set_import_remote(Arc::new(
+        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| Ok(json!({})),
+    ));
     shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -1417,21 +1465,60 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
     assert_eq!(o["tone"], "warning");
 }
 
+/// Done on the service's page fills the ordinary grid: the photos
+/// chosen, the one in the Library marked and left out while "New only"
+/// is on, Select and the footer as for a card; nothing is fetched before
+/// Import.
 #[test]
-fn photos_chosen_and_imported_offer_to_choose_more_in_a_new_page() {
-    let doc = "[[source]]\nconnector = \"fake-picks\"\naccount = \"{account}\"\n\n[source.choices]\ninto = \"/photos/picked\"\n";
-    let (mut h, opened, _folder, imported, sessions) = picking_world(Some(doc.into()));
+fn the_chosen_photos_fill_the_grid_with_the_library_s_marked() {
+    let (mut h, opened, _folder, imported, _) = picking_world(Some(OWN_INTO.into()));
     h.get_by_label(CHOOSE).click();
-    until(&mut h, "the first photos imported", |h| {
-        shown(h, "1 photos imported.")
+    until(&mut h, "the chosen photos in the grid", |h| {
+        h.state().import_cells().len() == 2
     });
-    h.run_steps(4);
-    h.get_by_label("Choose more photos…").click();
-    until(&mut h, "the second picking done", |_| {
-        imported.lock().unwrap().len() == 2
+    let cells = h.state().import_cells();
+    let names: Vec<&str> = cells.iter().map(|c| c.0.as_str()).collect();
+    assert_eq!(names, ["IMG_0001.JPG", "IMG_0002.JPG"]);
+    // `p1` is in the Library: marked, and not taken while New only is on.
+    assert_eq!(cells.iter().map(|c| c.2).collect::<Vec<_>>(), [true, false]);
+    assert_eq!(h.state().import_counts().selected, 1);
+    for label in ["New only", "Select:", "Choose more…", "⋯", "Import 1"] {
+        assert!(shown(&h, label), "{label}");
+    }
+    assert!(!shown(&h, CHOOSE), "the grid replaces the primary action");
+    until(&mut h, "the badge shown", |h| {
+        h.query_all_by_label_contains("in your Library")
+            .next()
+            .is_some()
     });
-    // A session of its own, its photos added to the same source, the one
-    // already in said so.
+    // New only off: both are taken; Select none: none.
+    click(&mut h, "New only");
+    until(&mut h, "both taken", |h| shown(h, "Import 2"));
+    click(&mut h, "none");
+    until(&mut h, "none taken", |h| {
+        h.state().import_counts().selected == 0
+    });
+    click(&mut h, "all");
+    until(&mut h, "both taken again", |h| shown(h, "Import 2"));
+    assert!(imported.lock().unwrap().is_empty(), "nothing fetched yet");
+    assert_eq!(opened.urls().len(), 1);
+}
+
+/// "Choose more…" opens a new page; what it chose joins the grid (a photo
+/// chosen twice listed once), and the footer's Import imports them all,
+/// as a card's import ends: the window closed, the end in the Log panel.
+#[test]
+fn choose_more_adds_to_the_grid_and_import_takes_them_at_once() {
+    let (mut h, opened, _folder, imported, sessions) = picking_world(Some(OWN_INTO.into()));
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the first photos in the grid", |h| {
+        h.state().import_cells().len() == 2
+    });
+    h.run_steps(2);
+    click(&mut h, "Choose more…");
+    until(&mut h, "the second page's photos added", |h| {
+        h.state().import_cells().len() == 3
+    });
     assert_eq!(sessions.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(
         opened.urls(),
@@ -1440,8 +1527,23 @@ fn photos_chosen_and_imported_offer_to_choose_more_in_a_new_page() {
             "https://picker.example.org/pick/s2"
         ]
     );
-    until(&mut h, "the known photo said", |h| {
-        shown(h, "1 were already in your Library.")
+    until(&mut h, "two new taken", |h| shown(h, "Import 2"));
+    assert!(imported.lock().unwrap().is_empty(), "nothing before Import");
+    click(&mut h, "Import 2");
+    until(&mut h, "both pages' photos imported", |_| {
+        imported.lock().unwrap().len() == 2
+    });
+    // Each page's photos through its own session, into the source's Into.
+    let done = imported.lock().unwrap().clone();
+    assert_eq!(done[0], (Some("/photos/picked".into()), vec!["p2".into()]));
+    assert_eq!(done[1], (Some("/photos/picked".into()), vec!["p3".into()]));
+    assert!(!h.state().import_window_open(), "closed as a card's import");
+    until(&mut h, "the import's end said", |h| {
+        h.state()
+            .log()
+            .entries()
+            .iter()
+            .any(|e| e.message.english.starts_with("2 photos imported"))
     });
 }
 

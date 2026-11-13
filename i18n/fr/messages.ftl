@@ -236,19 +236,20 @@ gui-choose-connecting = Connectez-vous dans votre navigateur, puis revenez ici.
 
 gui-choose-copy-link = Copier le lien
 
-gui-choose-done = { $count } photos importées.
 
-gui-choose-failed = Les photos n'ont pas été importées : { $why }
 
 gui-choose-identity = Reconnectez-vous une fois pour voir de quel compte il s'agit.
 
-gui-choose-importing = Import de { $count } photos…
+
+gui-choose-library-unread = Impossible de lire le dossier de la bibliothèque : { $why }
+
+gui-choose-more-hint = Rouvre la page : les photos choisies là-bas s'ajoutent à celles-ci
+
+gui-choose-more-short = En choisir d'autres…
 
 gui-choose-into = Choisir le dossier…
 
-gui-choose-known = { $count } étaient déjà dans votre bibliothèque.
 
-gui-choose-more = Choisir d'autres photos…
 
 gui-choose-no-into = Choisissez d'abord où copier les photos : Dans, dans la colonne Choix.
 

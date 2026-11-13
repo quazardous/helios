@@ -128,24 +128,28 @@ Select the account in the import window: the Contents column shows one
 button, **Choose photos in Google Photos…**. Google Photos opens in your
 browser. Select the photos and press **Done**; meanwhile the Contents
 column says so in a status line, with the page to open again or copy and
-**Cancel**, and the rest of the window stays usable. Helios lists what you
-chose, downloads each photo and imports it, then closes the page at
-Google. Google's page waits 30 minutes at most. A photo you already
-imported from Google Photos is recognised by its Google id and not
-downloaded again.
+**Cancel**, and the rest of the window stays usable. Google's page waits
+30 minutes at most.
 
-The photos are copied where the Choices column's **Into** says, as for
-any source, else into your Library folder; the connector never asks for a
-folder. With neither, the Contents column asks you to choose Into first,
-before Google's page opens.
+Nothing is imported yet: the photos you chose fill the import window's
+ordinary grid, under the account's header line. Their thumbnails are
+Google's small previews; a photo you already imported from Google Photos
+(recognised by its Google id) is marked **in your Library** and left out
+while **New only** is on. **Select: all · none · day** and the types work
+as for a card. **Choose more…** in the header opens a new page at Google;
+what you choose there joins the grid, a photo chosen twice listed once.
 
-Choose again whenever you want: once imported, the Contents column offers
-**Choose more photos…**. Each is a new page at Google; its photos are
-added to the same source, and those already in the Library are said so
-and left as they are. Google's download addresses last an hour: one that
-expired during an import is renewed by listing the photos again, never
-shown as an error. Each problem gets one sentence and one button: nothing
-chosen, Google's page closed, Google unreachable, access refused.
+The footer's **Import** downloads the photos ticked and imports them as a
+card's import runs: a job with its progress, a toast at the end, one undo
+step. The photos are copied where the Choices column's **Into** says, as
+for any source, else into your Library folder; the connector never asks
+for a folder. With neither, the Contents column asks you to choose Into
+first, before Google's page opens. Google's pages are closed once their
+photos are imported, or when the window closes without importing them.
+Google's download addresses last an hour: one that expired during an
+import is renewed by listing the photos again, never shown as an error.
+Each problem gets one sentence and one button: nothing chosen, Google's
+page closed, Google unreachable, access refused.
 
 ## For developers
 
