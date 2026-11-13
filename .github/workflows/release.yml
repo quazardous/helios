@@ -172,7 +172,19 @@ jobs:
       - name: build
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          HELIOS_GOOGLE_PHOTOS_CLIENT_ID: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_ID }}
+          HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET: ${{ secrets.HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET }}
         run: |
+          # The sandboxed build sees no job environment: the built-in OAuth
+          # client goes in through build.env, read by the manifest's build
+          # command, never committed, removed once the build is done.
+          trap 'rm -f packaging/flatpak/build.env' EXIT
+          if [ -n "$HELIOS_GOOGLE_PHOTOS_CLIENT_ID" ]; then
+            umask 077
+            printf 'HELIOS_GOOGLE_PHOTOS_CLIENT_ID=%q\nHELIOS_GOOGLE_PHOTOS_CLIENT_SECRET=%q\n' \
+              "$HELIOS_GOOGLE_PHOTOS_CLIENT_ID" "$HELIOS_GOOGLE_PHOTOS_CLIENT_SECRET" \
+              > packaging/flatpak/build.env
+          fi
           packaging/flatpak/build.sh all "$VERSION" dist "$RUNNER_TEMP/flatpak"
           (cd dist && sha256sum ./*.flatpak | sed 's| \./| |' >SHA256SUMS-flatpak && cat SHA256SUMS-flatpak)
       # The bundle as a user installs it, with no GPU and no display: the

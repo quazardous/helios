@@ -45,7 +45,12 @@ modules:
       # helios (the command line), helios-node and helios-mcp (which helios
       # starts), helios-gui (the window) and the programs of the plugins
       # Helios ships, as the release workflow builds them.
-      - cargo build --release --locked --offline -p helios-node -p helios-gui -p helios-plugin-darktable-library -p helios-plugin-lightroom-catalog -p helios-plugin-google-photos
+      # A release build's built-in OAuth clients come from build.env, which
+      # the release workflow writes from its secrets and never commits;
+      # without it the build has none (docs/google-photos.md).
+      - |
+        if [ -f packaging/flatpak/build.env ]; then set -a; . packaging/flatpak/build.env; set +a; fi
+        cargo build --release --locked --offline -p helios-node -p helios-gui -p helios-plugin-darktable-library -p helios-plugin-lightroom-catalog -p helios-plugin-google-photos
       - |
         for p in helios helios-node helios-mcp helios-gui helios-darktable-library helios-lightroom-catalog helios-google-photos; do
           install -Dm755 "target/release/$p" "$FLATPAK_DEST/bin/$p"
