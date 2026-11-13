@@ -260,3 +260,149 @@ fn a_run_on_the_debug_endpoint_keeps_its_undo_group() {
         json!({ "id": "set_param", "origin": "cli" })
     );
 }
+
+/// Runs `helios` with `args`: exit code, stdout, stderr.
+fn helios(args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args(args)
+        .env_remove("HELIOS_NODE")
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+/// The `control.command` events of the node: (id, origin).
+fn ran(node: &Node) -> Vec<(String, String)> {
+    let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args(["inspect", "--socket"])
+        .arg(node.dir.join("node.sock"))
+        .arg("events")
+        .output()
+        .unwrap();
+    let events: Value = serde_json::from_slice(&out.stdout).unwrap();
+    events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "control.command")
+        .map(|e| {
+            (
+                e["payload"]["id"].as_str().unwrap().to_string(),
+                e["payload"]["origin"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+/// `helios commands` and `helios run` reach a running node by its address,
+/// as `helios-mcp`'s generic pair does: the list says why a command is
+/// greyed, a run is the CLI's (or the agent's), a greyed command and bad
+/// params are refused with their reasons.
+#[test]
+fn the_cli_and_the_mcp_pair_list_and_run_commands_on_a_running_node() {
+    let node = Node::start("surface");
+    let address = node.dir.join("batch.sock");
+    let address = address.to_str().unwrap();
+
+    let (code, out, err) = helios(&["commands", "--node", address, "--filter", "pause"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let list: Value = serde_json::from_str(&out).unwrap();
+    let pause = command(&list, "pause");
+    assert_eq!(pause["enabled"], false, "{pause}");
+    assert_eq!(pause["scope"], "node", "{pause}");
+    assert!(
+        pause["disabledReason"]
+            .as_str()
+            .unwrap()
+            .starts_with("only the debug control endpoint"),
+        "{pause}"
+    );
+
+    let (code, out, err) = helios(&["run", "workflow.runs", "--node", address]);
+    assert_eq!(code, 0, "{out}{err}");
+    let run: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(run["origin"], "cli", "{run}");
+    let (code, _, err) = helios(&["run", "pause", "--node", address]);
+    assert_eq!(code, 1);
+    assert!(err.contains("only the debug control endpoint"), "{err}");
+    let (code, _, err) = helios(&[
+        "run",
+        "export",
+        "--node",
+        address,
+        "--json",
+        r#"{"node":"exp","path":"/x.gif"}"#,
+        "--param",
+        "format=gif",
+    ]);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains(r#"params.format: expected one of "jpeg", "png", "tiff""#),
+        "{err}"
+    );
+
+    // The MCP pair, on the same node.
+    let mut sockets = helios_node::mcp::Sockets {
+        inspect: None,
+        control: None,
+        node_bin: PathBuf::from(env!("CARGO_BIN_EXE_helios-node")),
+        ai: None,
+    };
+    let mut tool = |name: &str, arguments: Value| {
+        let answer = helios_node::mcp::handle(
+            &mut sockets,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": name, "arguments": arguments } }),
+        )
+        .unwrap();
+        let result = &answer["result"];
+        let text = result["content"][0]["text"].as_str().unwrap().to_string();
+        (
+            result["isError"] == true,
+            serde_json::from_str(&text).unwrap_or(json!(text)),
+        )
+    };
+    let (failed, list) = tool(
+        "helios_commands_list",
+        json!({ "node": address, "enabled_only": true }),
+    );
+    assert!(!failed, "{list}");
+    assert!(
+        list["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["enabled"] == true),
+        "{list}"
+    );
+    let (failed, run) = tool(
+        "helios_command_run",
+        json!({ "node": address, "id": "workflow.runs" }),
+    );
+    assert!(!failed, "{run}");
+    assert_eq!(run["origin"], "agent:mcp", "{run}");
+    let (failed, refused) = tool(
+        "helios_command_run",
+        json!({ "node": address, "id": "pause" }),
+    );
+    assert!(failed);
+    assert!(
+        refused
+            .as_str()
+            .unwrap()
+            .starts_with("only the debug control endpoint"),
+        "{refused}"
+    );
+
+    assert_eq!(
+        ran(&node),
+        [
+            ("workflow.runs".to_string(), "cli".to_string()),
+            ("workflow.runs".to_string(), "agent:mcp".to_string()),
+        ]
+    );
+}

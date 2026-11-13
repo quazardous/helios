@@ -37,7 +37,8 @@ direction. Why JSON-RPC, and what other projects do, is in
 | Method | Endpoint | What it does |
 |---|---|---|
 | `node.hello` | all | `protocol` (semver), `oldest` (the oldest version still served), `instance` (the node's, the same on its three endpoints; a restarted node has another), `endpoint` (`inspect`, `debug`, `batch`), `permissions` (`inspect`; `batch`; `batch` and `debug`), `server` (name and version) |
-| `commands.list` | all | the capability list: on control and batch, every command with its schema, needs, and whether it runs here (`filter`, `enabled_only`); on inspect, its methods |
+| `commands.list` | all | the capability list: on control and batch, every command with its schema, needs, `scope` (`node`), and whether it runs here, with `disabledReason` when it does not (`filter`, `enabled_only`); on inspect, its methods |
+| `command.run` | control, batch, a vault's | `{id, params, origin}` (and on a desktop's, `window`, `scope`): runs a listed command by its id, its params checked against its schema, a greyed one refused with its reason; the same as calling the id as a method |
 | `events.subscribe` | inspect | `{prefix, since}`: answers `{subscription, last_seq, gap, instance}`, then sends the events whose kind starts with `prefix` as notifications on the same connection |
 | `events.unsubscribe` | inspect | `{subscription}`: stops it |
 | `$/cancel` | all | `{id}`: stops a call still running |
@@ -134,6 +135,12 @@ Helios window", "Does not apply here (…)"). `command.run` (`id`,
 id) runs a window command on the interface's thread in that open window,
 announced on the bus as `control.command` with its origin, and refuses
 it with that reason where it does not apply.
+
+The `helios commands` and `helios run` CLI verbs and `helios-mcp`'s
+generic pair (`helios_commands_list`, `helios_command_run`) are these two
+methods on the node a client finds this way: every command, the node's
+and a desktop's window commands, reached without a tool or a verb of its
+own, run as `cli` or `agent:mcp`.
 
 A client (`helios_node::connect`):
 

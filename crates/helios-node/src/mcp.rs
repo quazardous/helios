@@ -59,6 +59,15 @@
 //! left its values alone. The histories live in that window, so without
 //! one they are refused.
 //!
+//! `helios_commands_list` and `helios_command_run` are the generic pair
+//! over the command registry of a vault's node (`commands.list`,
+//! `command.run`): every command, the node's and a desktop's window
+//! commands, listed with its params' schema, `enabled` and
+//! `disabledReason`, and run by id as `agent:mcp`, without a tool of its
+//! own. The hand-written tools stay where they add what the pair cannot:
+//! typed arguments and documentation for the processing node's verbs, and
+//! the server's own (sandbox, AI, workspace files).
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::PathBuf;
@@ -80,6 +89,10 @@ pub enum Endpoint {
     Ai,
     /// Handled by the server itself, on a workspace's files.
     Workspace,
+    /// `commands.list` and `command.run` on the node of a vault (or the
+    /// one `node` names, else the control socket): the generic pair over
+    /// its command registry, a desktop's window commands included.
+    Commands,
 }
 
 /// A tool: its name, the request it sends, and its arguments.
@@ -468,7 +481,77 @@ const SOURCE: Param = Param {
 };
 
 /// Every tool. Tests check each node tool maps onto a request type.
+/// Where the generic command pair goes: a vault's node, or one by address.
+const COMMANDS_VAULT: Param = optional(
+    "vault",
+    optional_string,
+    "The vault whose node runs the commands (a desktop holding it serves its window commands too); started on it when no node holds it",
+);
+const COMMANDS_NODE: Param = optional(
+    "node",
+    optional_string,
+    "The node's command endpoint (a socket path or tcp://HOST:PORT, with HELIOS_TOKEN), instead of `vault`; else HELIOS_NODE, else the control socket",
+);
+
 pub const TOOLS: &[Tool] = &[
+    Tool {
+        name: "helios_commands_list",
+        endpoint: Endpoint::Commands,
+        cmd: "commands.list",
+        description: "Every command of the node's registry, generated rather than one tool each: id, label, category, the JSON schema of its params, keys, `scope` (node, or window for a desktop's window commands), `enabled` and, when greyed, `disabledReason` (\"Only in the Helios window\"). Run one with helios_command_run",
+        params: &[
+            COMMANDS_VAULT,
+            COMMANDS_NODE,
+            optional(
+                "window",
+                optional_string,
+                "The desktop window the window commands are evaluated in (main, import, settings...); main when left out",
+            ),
+            optional(
+                "filter",
+                optional_string,
+                "Keeps the commands whose id, label or category holds every word",
+            ),
+            Param {
+                name: "enabled_only",
+                schema: boolean,
+                description: "Only the commands that can run now",
+                default: Some(no),
+            },
+        ],
+    },
+    Tool {
+        name: "helios_command_run",
+        endpoint: Endpoint::Commands,
+        cmd: "command.run",
+        description: "Runs a command of helios_commands_list by its id, as the agent (origin agent:mcp): its params are checked against its schema, a greyed one is refused with its reason, a window command runs in that desktop window as its menu would",
+        params: &[
+            COMMANDS_VAULT,
+            COMMANDS_NODE,
+            Param {
+                name: "id",
+                schema: string,
+                description: "The command's id, as listed",
+                default: None,
+            },
+            Param {
+                name: "params",
+                schema: object,
+                description: "The command's params, an object its listed schema accepts",
+                default: Some(empty_object),
+            },
+            optional(
+                "window",
+                optional_string,
+                "The desktop window a window command runs in; main when left out",
+            ),
+            optional(
+                "scope",
+                optional_string,
+                "node or window, when an id is in both (library.import): the node's wins when left out",
+            ),
+        ],
+    },
     Tool {
         name: "helios_workspace_parts",
         endpoint: Endpoint::Workspace,
@@ -2486,6 +2569,12 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
     if tool.endpoint == Endpoint::Ai {
         return ai_call(sockets, &request);
     }
+    if tool.endpoint == Endpoint::Commands {
+        return match commands_client(sockets, &request) {
+            Ok(client) => commands_call(&client, &request),
+            Err(e) => tool_result(e, true),
+        };
+    }
     if tool.endpoint == Endpoint::Workspace {
         return match workspace_call(&request, &sockets.node_bin) {
             Ok(answer) => tool_result(
@@ -2496,7 +2585,7 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
         };
     }
     let socket = match (tool.endpoint, &sockets.inspect, &sockets.control) {
-        (Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace, _, _) => {
+        (Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace | Endpoint::Commands, _, _) => {
             unreachable!("handled above")
         }
         (Endpoint::Inspect, Some(path), _) | (Endpoint::Control, _, Some(path)) => path,
@@ -2520,6 +2609,60 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
             answer["ok"] != true,
         ),
         Err(e) => tool_result(e, true),
+    }
+}
+
+/// The node the generic command pair talks to: the one of `vault`, or
+/// at `node` (else `HELIOS_NODE`), else the control socket.
+fn commands_client(
+    sockets: &Sockets,
+    request: &Value,
+) -> Result<helios_inspect::client::Client, String> {
+    let vault = request["vault"].as_str().filter(|s| !s.is_empty());
+    let node = request["node"].as_str().filter(|s| !s.is_empty());
+    if vault.is_some() || crate::connect::explicit(node).is_some() {
+        return crate::connect::connect(
+            vault.map(std::path::Path::new),
+            node,
+            &sockets.node_bin,
+            MCP_ORIGIN,
+        )
+        .map(|c| c.client);
+    }
+    let control = sockets
+        .control
+        .as_ref()
+        .ok_or("no node: give `vault` or `node`, or pass --control or call helios_sandbox_start")?;
+    helios_inspect::client::Client::connect(control)
+        .map(|c| c.with_origin(MCP_ORIGIN))
+        .map_err(|e| format!("cannot reach the node at {control}: {e}"))
+}
+
+/// `helios_commands_list` or `helios_command_run` (`request`, the tool's
+/// request) answered by the node behind `client`; a run is the agent's
+/// (`agent:mcp`).
+pub fn commands_call(client: &helios_inspect::client::Client, request: &Value) -> Value {
+    let pick = |keys: &[&str]| -> Value {
+        let picked: Map<String, Value> = keys
+            .iter()
+            .filter(|k| !request[**k].is_null())
+            .map(|k| ((*k).to_string(), request[*k].clone()))
+            .collect();
+        Value::Object(picked)
+    };
+    let (method, params) = if request["cmd"] == "command.run" {
+        let mut params = pick(&["id", "params", "window", "scope"]);
+        params["origin"] = json!(MCP_ORIGIN);
+        ("command.run", params)
+    } else {
+        ("commands.list", pick(&["window", "filter", "enabled_only"]))
+    };
+    match client.request(method, params) {
+        Ok(answer) => tool_result(
+            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
+            false,
+        ),
+        Err(e) => tool_result(e.message, true),
     }
 }
 
@@ -2847,7 +2990,7 @@ mod tests {
         for tool in TOOLS.iter().filter(|t| {
             !matches!(
                 t.endpoint,
-                Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace
+                Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace | Endpoint::Commands
             )
         }) {
             let request = tool.request(&example(tool)).unwrap();
@@ -2856,7 +2999,7 @@ mod tests {
                 Endpoint::Control => {
                     serde_json::from_value::<ControlRequest>(request.clone()).map(|_| ())
                 }
-                Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace => {
+                Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace | Endpoint::Commands => {
                     unreachable!("filtered out")
                 }
             };
@@ -2908,7 +3051,7 @@ mod tests {
             .filter(|t| {
                 !matches!(
                     t.endpoint,
-                    Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace
+                    Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace | Endpoint::Commands
                 )
             })
             .count();
@@ -3690,5 +3833,140 @@ mod tests {
             assert!(e.contains("no desktop holds it"), "{e}");
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A desktop's windows, as its node sees them: `theme.select` applies
+    /// in `main`, `edit.undo` is greyed with the reason its menu gives.
+    struct Windows(std::sync::Mutex<Vec<(String, String)>>);
+
+    impl helios_node_core::endpoint::WindowCommands for Windows {
+        fn list(
+            &self,
+            window: &str,
+        ) -> Result<Vec<helios_node_core::endpoint::WindowCommand>, String> {
+            let command =
+                |id: &str, reason: Option<&str>| helios_node_core::endpoint::WindowCommand {
+                    id: id.into(),
+                    label: id.into(),
+                    category: "Edit".into(),
+                    description: String::new(),
+                    params: json!({ "type": "object" }),
+                    keys: Vec::new(),
+                    icon: None,
+                    read_only: false,
+                    enabled: reason.is_none(),
+                    disabled_reason: reason.map(String::from),
+                };
+            assert_eq!(window, "main");
+            Ok(vec![
+                command("edit.undo", Some("Does not apply here (canUndo)")),
+                command("theme.select", None),
+            ])
+        }
+
+        fn run(&self, id: &str, _: Value, origin: &str, _: &str) -> Result<Value, String> {
+            if id == "edit.undo" {
+                return Err("Does not apply here (canUndo)".into());
+            }
+            self.0.lock().unwrap().push((id.into(), origin.into()));
+            Ok(json!({ "ran": id }))
+        }
+    }
+
+    #[test]
+    fn the_generic_pair_lists_and_runs_node_and_window_commands_as_the_agent() {
+        use helios_core::Bus;
+        use helios_core::jobs::Jobs;
+        use helios_node_core::endpoint::VaultService;
+        use helios_vault::{MemoryStore, Vault};
+
+        let bus = Arc::new(Bus::new());
+        let heard = bus.subscribe();
+        let windows = Arc::new(Windows(std::sync::Mutex::default()));
+        let service = VaultService::new(
+            Arc::new(Vault::new(MemoryStore::default())),
+            bus.clone(),
+            Jobs::new(bus.clone()),
+            "mcp-test",
+        )
+        .with_windows(windows.clone());
+        let client = helios_inspect::client::Client::in_process(Arc::new(service));
+        let tool = |name: &str, arguments: Value| {
+            let tool = TOOLS.iter().find(|t| t.name == name).unwrap();
+            let result = commands_call(&client, &tool.request(&arguments).unwrap());
+            let text = result["content"][0]["text"].as_str().unwrap().to_string();
+            (
+                result["isError"] == true,
+                serde_json::from_str(&text).unwrap_or(json!(text)),
+            )
+        };
+
+        // The node's commands and the window's, in one list, each saying
+        // whether it runs and why not.
+        let (failed, listed) = tool("helios_commands_list", json!({}));
+        assert!(!failed, "{listed}");
+        let commands = listed["commands"].as_array().unwrap();
+        let find = |id: &str| commands.iter().find(|c| c["id"] == id).unwrap().clone();
+        assert_eq!(find("library.stacks.list")["scope"], "node");
+        assert_eq!(find("library.stacks.list")["enabled"], true);
+        let undo = find("edit.undo");
+        assert_eq!(undo["scope"], "window");
+        assert_eq!(undo["enabled"], false);
+        assert_eq!(undo["disabledReason"], "Does not apply here (canUndo)");
+        let (_, only) = tool(
+            "helios_commands_list",
+            json!({ "filter": "edit", "enabled_only": true }),
+        );
+        assert_eq!(only["commands"], json!([]), "{only}");
+
+        // A window command runs as the agent, and the bus hears who.
+        let (failed, ran) = tool(
+            "helios_command_run",
+            json!({ "id": "theme.select", "params": { "name": "helios-light" } }),
+        );
+        assert!(!failed, "{ran}");
+        assert_eq!(ran["origin"], "agent:mcp");
+        assert_eq!(
+            *windows.0.lock().unwrap(),
+            [("theme.select".to_string(), "agent:mcp".to_string())]
+        );
+        // So does a node command.
+        let (failed, stacks) = tool("helios_command_run", json!({ "id": "library.stacks.list" }));
+        assert!(!failed, "{stacks}");
+        let ran: Vec<(String, String)> = heard
+            .try_iter()
+            .filter(|e| e.kind == "control.command")
+            .map(|e| {
+                (
+                    e.payload["id"].as_str().unwrap().to_string(),
+                    e.payload["origin"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            ran,
+            [
+                ("theme.select".to_string(), "agent:mcp".to_string()),
+                ("library.stacks.list".to_string(), "agent:mcp".to_string()),
+            ]
+        );
+
+        // A greyed one is refused with its reason, bad params with the
+        // schema's.
+        let (failed, refused) = tool("helios_command_run", json!({ "id": "edit.undo" }));
+        assert!(failed);
+        assert_eq!(refused, "Does not apply here (canUndo)");
+        let (failed, refused) = tool(
+            "helios_command_run",
+            json!({ "id": "library.stacks.dissolve", "params": {} }),
+        );
+        assert!(failed);
+        assert!(
+            refused
+                .as_str()
+                .unwrap()
+                .ends_with("params: `stack` is missing"),
+            "{refused}"
+        );
     }
 }
