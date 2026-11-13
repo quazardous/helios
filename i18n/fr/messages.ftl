@@ -1972,10 +1972,6 @@ gui-library-sort-ascending = Croissant : la plus ancienne, la plus petite ou A d
 
 gui-library-sort-descending = Décroissant : la plus récente, la plus grande ou Z d’abord
 
-gui-import-window-menu-file = Fichier
-
-gui-import-window-menu-window = Fenêtre
-
 gui-quit-title = Quitter Helios ?
 
 gui-quit-jobs-detail = { $count } tâches en cours ; quitter les annule
