@@ -3995,6 +3995,7 @@ impl Library {
                     items: vec![
                         crate::dialogs::MenuItem::command("library.export"),
                         crate::dialogs::MenuItem::command("library.copyFiles"),
+                        crate::dialogs::MenuItem::command("library.fitCameraLook"),
                     ],
                 },
             );

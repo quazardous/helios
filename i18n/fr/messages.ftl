@@ -440,6 +440,8 @@ gui-history-quick-clear = Vider la collection rapide
 gui-history-quick-save = Enregistrer la collection rapide sous « { $name } »
 gui-history-album-rules = Modifier les règles de « { $name } »
 
+gui-history-camera-look-default = Modifier le rendu boîtier par défaut de { $name }
+
 gui-history-camera-look-fit = Ajuster le rendu boîtier au JPEG de l’appareil
 
 gui-history-preview-applied = appliqué
@@ -548,6 +550,14 @@ gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
+gui-look-default-applied = Rendu boîtier appliqué : celui par défaut de { $camera }
+
+gui-look-fit-selection-done = Rendu boîtier de { $camera } ajusté sur { $fitted } photos sur { $photos } : Delta E { $held } (par défaut { $baseline })
+
+gui-look-fit-selection-job = Ajuster un rendu boîtier sur { $count } photos
+
+gui-look-fit-selection-none = Aucun rendu boîtier ajusté : { $reasons }
+
 gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
 
 gui-look-header-compare = Comparer au JPEG de l’appareil
@@ -557,6 +567,16 @@ gui-look-header-compare-about = Affiche le JPEG intégré de l’appareil à gau
 gui-look-header-compare-no-jpeg = Aucun JPEG de l’appareil à comparer : le raw n’en contient pas
 
 gui-look-header-compare-not-raw = Aucun JPEG de l’appareil à comparer : la photo n’est pas un raw
+
+gui-look-header-default-clear = Effacer le défaut
+
+gui-look-header-default-in-use = Le rendu par défaut de { $camera } : ses nouvelles photos s’ouvrent avec lui
+
+gui-look-header-default-other = { $camera } a un autre rendu par défaut : ses nouvelles photos s’ouvrent avec celui-là
+
+gui-look-header-default-save = Enregistrer comme défaut du boîtier
+
+gui-look-header-default-save-about = Les nouvelles photos de { $camera } s’ouvrent avec ce rendu boîtier ; les photos déjà retouchées gardent le leur
 
 gui-look-header-fit = Ajuster au JPEG de l’appareil
 
@@ -1130,6 +1150,18 @@ health-snapshots-old = Le dernier instantané du catalogue a { $days } jours
 health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
 
 health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
+
+look-default-bad-params = les paramètres { $node } du rendu : { $error }
+
+look-default-no-camera = le rendu par défaut d’un boîtier demande `camera`
+
+look-default-not-fitted = aucun rendu boîtier ajusté à garder : ajustez-en d’abord un au JPEG de l’appareil
+
+look-default-what = donnez un seul de `look`, `image` ou `clear`
+
+look-fit-cancelled = l’ajustement du rendu boîtier a été annulé : rien n’a été écrit
+
+look-mixed-cameras = les photos viennent de { $count } boîtiers ({ $cameras }) : un rendu boîtier s’ajuste sur les photos d’un seul boîtier ; sélectionnez les photos d’un boîtier
 
 node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end, aux requêtes workflow.*, à library.import, à settings.layer.*, à commands.list et à command.run
 
