@@ -90,7 +90,10 @@ repository secrets to the build as environment variables, and
 Without them the packages have no built-in client and every user sets
 their own. Their values never go into the repository. A local build
 made with these variables set compiles them in the same way. The
-Flatpak is built in its own sandbox and does not receive them yet.
+Flatpak is built in its own sandbox, which sees no job environment: the
+release workflow writes them to `packaging/flatpak/build.env` (ignored by
+git, removed after the build), which the manifest's build command reads
+before compiling.
 
 ## Signing in
 
