@@ -21,7 +21,6 @@ use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::core::icon::Icon;
 use helios_core::Message;
 use helios_library::import::Card;
-use helios_shell::commands::Origin;
 use helios_storage::strategy::{self, BackupStatus, Destination, Scope, Strategy};
 use helios_storage::{Role, Volume, VolumeId, VolumeKind, Volumes, registry};
 use helios_vault::{Store, Vault};
@@ -365,11 +364,7 @@ impl Shell {
             Some(v) => format!("storage/volumes/{v}"),
             None => "storage/volumes".into(),
         };
-        self.run(
-            egui_pop::api::admin::CMD_OPEN.as_str(),
-            serde_json::json!({ "path": path }),
-            Origin::User,
-        )
+        self.open_settings_page(&path)
     }
 }
 

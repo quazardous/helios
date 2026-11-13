@@ -302,7 +302,7 @@ timeout = "40m"
 # from the import window, checked to land there; in /out/window-audit.md
 # and .jsonl, a screenshot per probe (tools/bench/window-audit.py)
 [jobs.window-audit]
-about = "what the import window opens lands in it: picker, Escape, palette, close with a picker open"
+about = "what the import window opens lands in it: picker, Escape, palette, Storage…, close with a picker or a dialog open"
 first = [{ job = "check", pass = ["branch", "crate", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
