@@ -1174,6 +1174,13 @@ fn a_second_test_photo_joins_the_session_and_a_junction_is_written() {
         json!({ "cmd": "workshop.generalise", "rows": { "mountain_detail": "ai" } }),
     ));
     assert_eq!(a["J"], json!(1), "{a}");
+    // The limits a run stays within, prefilled from the two test photos.
+    assert_eq!(
+        a["limits"]["junctions"]["mountain_detail"]["min_confidence"],
+        json!(0.7),
+        "{a}"
+    );
+    assert_eq!(a["limits"]["input_span"].as_array().map(Vec::len), Some(2));
     let fixed = row("mountain_detail")["fixed"].as_f64().unwrap();
     let before = steps(&h);
     h.state_mut()
@@ -1200,5 +1207,13 @@ fn a_second_test_photo_joins_the_session_and_a_junction_is_written() {
     assert_eq!(j.name, "mountain_detail");
     assert_eq!(j.fallback, Some(fixed));
     assert!(block.targets.iter().all(|t| t.param != "mountain_detail"));
+    // Its limits written with it: the detail's bounds around its test
+    // value, the junction's confidence.
+    let limits = block.limits.as_ref().expect("the limits");
+    let detail = &limits.sliders["mountain_detail"];
+    assert_eq!(detail.value, fixed);
+    assert!(detail.min <= fixed && fixed <= detail.max, "{detail:?}");
+    assert!(limits.sliders.contains_key("backlight_lift"), "{limits:?}");
+    assert!(limits.junctions.contains_key("mountain_detail"));
     let _ = std::fs::remove_dir_all(&root);
 }

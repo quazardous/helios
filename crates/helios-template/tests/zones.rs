@@ -378,3 +378,54 @@ fn junctions_fit_the_schema_and_refusals_name_them() {
         "not asked to the AI",
     );
 }
+
+#[test]
+fn limits_fit_the_schema_and_refusals_name_them() {
+    let with = |limits: Json| {
+        let mut json = json_of(&json!([
+            { "param": "brightness", "measure": "luma.median", "value": -1.0 }
+        ]));
+        json["workshop"]["limits"] = limits;
+        json
+    };
+    let json = with(json!({
+        "sliders": { "brightness": { "min": -1.0, "max": 1.5, "value": 0.4, "max_deviation": 0.6 } },
+        "targets": { "brightness": { "tolerance": 0.1 } },
+        "input_span": [ { "measure": "luma.median", "min": -5.0, "max": -1.0 } ],
+        "max_ai_calls": 12,
+        "on_breach": "hold"
+    }));
+    let problems = schema::check(&schema::composite(), &json);
+    assert!(problems.is_empty(), "{problems:?}");
+    let f = parse_composite(&json.to_string()).unwrap();
+    let again = parse_composite(&serde_json::to_string(&f).unwrap()).unwrap();
+    assert_eq!(again, f);
+    built(&f).unwrap();
+    let wrong = with(json!({ "on_breach": "panic" }));
+    assert!(!schema::check(&schema::composite(), &wrong).is_empty());
+    let refused = |limits: Json, want: &str| {
+        let f = parse_composite(&with(limits).to_string()).unwrap();
+        let e = built(&f).map(|_| ()).unwrap_err();
+        assert!(e.contains("limits.") && e.contains(want), "{want}: {e}");
+    };
+    refused(
+        json!({ "sliders": { "nope": { "min": 0.0, "max": 1.0, "value": 0.5, "max_deviation": 0.1 } } }),
+        "not an exposed number parameter",
+    );
+    refused(
+        json!({ "sliders": { "brightness": { "min": 1.0, "max": 0.0, "value": 0.5, "max_deviation": 0.1 } } }),
+        "`min` is above `max`",
+    );
+    refused(
+        json!({ "targets": { "brightness": { "tolerance": 0.0 } } }),
+        "`tolerance`",
+    );
+    refused(
+        json!({ "junctions": { "sky": { "min_confidence": 0.7 } } }),
+        "no junction of that name",
+    );
+    refused(
+        json!({ "input_span": [ { "measure": "zones.ratio", "min": 0.0, "max": 1.0 } ] }),
+        "a measure of the whole image",
+    );
+}

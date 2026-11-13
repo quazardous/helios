@@ -276,7 +276,8 @@ pub fn build(file: &CompositeFile, catalogue: &Catalogue, depth: usize) -> Resul
 /// `zone` one of the zones, `against` given for `zones.ratio` only (a
 /// zone other than `zone`). Each junction: once per name, a value one on
 /// an exposed number parameter no target aims, with a `fallback`, a zone
-/// one on a zone the AI draws (`mask_object`).
+/// one on a zone the AI draws (`mask_object`). Its limits, as
+/// [`crate::limits::validate`] says.
 fn check_workshop(
     w: &Workshop,
     built: &Macro,
@@ -392,6 +393,14 @@ fn check_workshop(
                 }
             }
         }
+    }
+    if let Some(limits) = &w.limits {
+        let numbers: Vec<&str> = params
+            .iter()
+            .filter(|p| matches!(p.kind, ParamKind::Float { .. } | ParamKind::Int { .. }))
+            .map(|p| p.name.as_str())
+            .collect();
+        crate::limits::validate(limits, w, &numbers)?;
     }
     Ok(())
 }

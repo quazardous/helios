@@ -425,13 +425,24 @@ impl Shell {
                     .collect()
             })
             .unwrap_or_default();
-        let workshop = Workshop {
+        let mut workshop = Workshop {
             intent: intent.trim().to_string(),
             keywords,
             targets,
             zones,
             junctions,
+            limits: None,
         };
+        // Limits: the file's, while their sliders, targets and junctions
+        // stay.
+        let exposed: Vec<&str> = interface.exposed.iter().map(|e| e.name.as_str()).collect();
+        workshop.limits = state
+            .bundle
+            .catalogue(&catalogue)
+            .get_composite(&interface.composite)
+            .and_then(|f| f.workshop.as_ref())
+            .and_then(|w| w.limits.clone())
+            .map(|l| helios_template::limits::prune(l, &workshop, &exposed));
         let label = format!("save {node} as a workshop");
         self.macro_step(&label, args, origin, |now, values| {
             now.workshop_saved(&catalogue, &node, &workshop, values)
@@ -475,6 +486,7 @@ impl Shell {
             targets: Vec::new(),
             zones: Vec::new(),
             junctions: Vec::new(),
+            limits: None,
         });
         let port = file
             .outputs

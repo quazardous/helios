@@ -180,7 +180,66 @@
           "description": "The decisions left to the AI on each photo the workshop runs on: a slider's value, or a zone the AI draws.",
           "type": "array",
           "items": { "$ref": "#/$defs/junction" }
-        }
+        },
+        "limits": { "$ref": "#/$defs/limits" }
+      }
+    },
+    "limits": {
+      "description": "The bounds a run of the workshop stays within on each photo, prefilled from the test photos, and what a breach does.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sliders": {
+          "description": "By exposed number parameter: the values it may take (clamped, at_limit) and how far from the test value (clamped, deviation).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["min", "max", "value", "max_deviation"],
+            "properties": {
+              "min": { "type": "number" },
+              "max": { "type": "number" },
+              "value": { "description": "The test photos' value.", "type": "number" },
+              "max_deviation": { "type": "number" }
+            }
+          }
+        },
+        "targets": {
+          "description": "By the exposed parameter a target aims: how far the measure may land from the goal (target_missed).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tolerance"],
+            "properties": { "tolerance": { "type": "number" } }
+          }
+        },
+        "input_span": {
+          "description": "What a photo's input may measure: outside, it is unlike the test photos (unlike_test_cases).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["measure", "min", "max"],
+            "properties": {
+              "measure": { "enum": ["luma.median", "luma.high", "clip.high"] },
+              "min": { "type": "number" },
+              "max": { "type": "number" }
+            }
+          }
+        },
+        "junctions": {
+          "description": "By junction name: below min_confidence the fallback is used (low_confidence).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["min_confidence"],
+            "properties": { "min_confidence": { "type": "number", "minimum": 0 } }
+          }
+        },
+        "max_ai_calls": { "description": "The AI calls a whole run may make; the junctions times the photos when left out.", "type": "integer", "minimum": 0 },
+        "on_breach": { "description": "flag (apply, flagged), hold (not applied until fixed) or stop (the run stops).", "enum": ["flag", "hold", "stop"] }
       }
     },
     "junction": {

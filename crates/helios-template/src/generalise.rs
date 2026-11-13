@@ -1239,6 +1239,7 @@ mod tests {
                 port: "mask".into(),
             }],
             junctions: Vec::new(),
+            limits: None,
         };
         // Junctions left: written as such, the slider's fixed value its
         // default and fallback, the zone still the AI's.
