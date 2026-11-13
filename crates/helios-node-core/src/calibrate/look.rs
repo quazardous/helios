@@ -279,22 +279,24 @@ mod tests {
         helios_testkit::mosaic(&camera(), wb, Region::sized(W, H), &rgb)
     }
 
-    /// The camera's JPEG: the develop chain with a harder sigmoid, at
-    /// `size` pixels on the long edge, its white at 0.9. A sigmoid this
-    /// hard reaches display white (255) on the bright patches the raw
-    /// keeps, which the fit rightly refuses (its preview-clipped gate):
-    /// the camera here keeps headroom, as one not clipping does.
+    /// The camera's JPEG: the develop chain exposed a stop lower, with a
+    /// harder sigmoid, at `size` pixels on the long edge. Exposed as the
+    /// default render, a sigmoid this hard reaches 255 on bright patches
+    /// the raw keeps, which the fit rightly refuses (its preview-clipped
+    /// gate); a stop lower, its shoulder stays under white, as a camera
+    /// keeping its highlights does.
     fn preview(mosaic: &Image, size: u32) -> Image {
         let mut chain: Chain = defaults();
         chain.insert(
             "sigmoid".into(),
             Params::new().with("contrast", Param::Float(2.6)),
         );
-        let display = render(mosaic, &camera(), &chain, size, false)
+        if let Some(exposure) = chain.get_mut("exposure") {
+            exposure.set("exposure", Param::Float(-0.3));
+        }
+        render(mosaic, &camera(), &chain, size, false)
             .unwrap()
-            .display;
-        let data = display.data().iter().map(|v| v * 0.9).collect();
-        Image::new(display.region(), display.channels(), data)
+            .display
     }
 
     /// A vault holding one photo (a file at hand) and its id.
