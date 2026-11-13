@@ -451,9 +451,13 @@ gui-history-album-delete = Delete album “{ $name }”
 
 gui-history-album-new = New album “{ $name }”
 
+gui-history-album-new-smart = New smart album “{ $name }”
+
 gui-history-album-remove = Remove { $count } photos from “{ $name }”
 
 gui-history-album-rename = Rename album “{ $name }”
+
+gui-history-album-rules = Edit the rules of “{ $name }”
 
 gui-history-batch = { $label } ({ $count } values)
 
@@ -781,6 +785,8 @@ gui-library-album-name = name
 
 gui-library-album-new = New album…
 
+gui-library-album-new-smart = New smart album…
+
 gui-library-album-new-title = New album
 
 gui-library-album-new-verb = Create
@@ -792,6 +798,10 @@ gui-library-album-rename = Rename…
 gui-library-album-rename-title = Rename the album
 
 gui-library-album-rename-verb = Rename
+
+gui-library-album-rules = Edit the rules…
+
+gui-library-album-smart-tip = Smart album: its rules choose its photos
 
 gui-library-albums = Albums
 
@@ -1508,6 +1518,12 @@ gui-size-gib = { $size } GiB
 gui-size-kib = { $size } KiB
 
 gui-size-mib = { $size } MiB
+
+gui-smart-new-title = New smart album
+
+gui-smart-rules-title = The smart album's rules
+
+gui-smart-rules-verb = Apply
 
 gui-snapshot-failed = snapshot failed: { $error }
 
