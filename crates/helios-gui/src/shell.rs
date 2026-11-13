@@ -80,6 +80,8 @@ pub use accounts_admin::{
     RENAME as RENAME_COMMAND, SET_OAUTH_CLIENT as SET_OAUTH_CLIENT_COMMAND,
     SIGN_OUT as SIGN_OUT_COMMAND,
 };
+mod calibrate_focus;
+pub use calibrate_focus::{COMMAND as CALIBRATE_COMMAND, WINDOW as CALIBRATE_WINDOW};
 mod health;
 mod import;
 mod import_accounts;
@@ -202,6 +204,8 @@ enum Action {
     ImportSource(Value, Origin),
     /// Open the import window (`library.importWindow`'s arguments).
     ImportWindow(Value),
+    /// Open the Calibration focus (`calibrate.open`'s arguments).
+    Calibrate(Value),
     /// `import.addSource` or `import.reconnect`, with its arguments.
     Account(&'static str, Value),
     /// Open the Health page (`help.health`).
@@ -608,6 +612,8 @@ pub struct Shell {
     focus: focus::Focus,
     /// The import focus, in an OS window of its own.
     import: import_window::ImportFocus,
+    /// The Calibration focus, in an OS window of its own.
+    calibration: calibrate_focus::CalibrationFocus,
     /// The application's life, apart from its windows'.
     lifetime: lifetime::Lifetime,
     /// What the shell has to say: command results, layout repairs.
@@ -982,6 +988,7 @@ impl Shell {
             core,
             focus,
             import: import_window::ImportFocus::new(),
+            calibration: calibrate_focus::CalibrationFocus::default(),
             lifetime: lifetime::Lifetime::default(),
             notes: Vec::new(),
         };
@@ -3099,6 +3106,14 @@ impl Shell {
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::ImportWindow(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                calibrate_focus::COMMAND,
+                "Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)",
+                "Calibration",
+            ),
+            Box::new(|a, _| Ok(Action::Calibrate(a.clone()))),
         );
         for (id, about) in [
             (
@@ -5746,6 +5761,10 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
+            Action::Calibrate(args) => {
+                self.open_calibration(&args);
+                return Ok(Value::Null);
+            }
             Action::Account(id, args) => return self.account_command(id, &args),
             Action::Health => return self.open_health(),
             Action::HealthFix(args) => return self.health_fix(&args),
@@ -6220,6 +6239,7 @@ impl Shell {
         }
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
+        self.calibration_frame(&ctx);
         let refused = std::mem::take(&mut self.focus.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

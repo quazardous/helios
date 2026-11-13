@@ -261,6 +261,70 @@ gui-caches-total = Caches hold { $size }
 
 gui-caches-use = In use
 
+gui-calibrate-after = Delta E after: mean { $mean }, max { $max }
+
+gui-calibrate-as-default = Use as the default for this camera
+
+gui-calibrate-before = Delta E before: mean { $mean }, max { $max }
+
+gui-calibrate-clipped = Clipped, left out: { $patches }
+
+gui-calibrate-corner = Chart corner { $n }
+
+gui-calibrate-corner-tip = Drag onto the centre of the corner patch
+
+gui-calibrate-corners-undo = Put the corner back
+
+gui-calibrate-default-set = Default set for the camera
+
+gui-calibrate-deleted = Profile deleted
+
+gui-calibrate-export-folder = Export to folder
+
+gui-calibrate-exported = Exported to { $path }
+
+gui-calibrate-import = Import the profile
+
+gui-calibrate-import-file = Profile file to import
+
+gui-calibrate-imported = Profile imported
+
+gui-calibrate-is-default = The camera's default
+
+gui-calibrate-light = Light: { $kelvin } K
+
+gui-calibrate-name = Profile name
+
+gui-calibrate-no-shot = Open a shot of a ColorChecker chart to make a profile
+
+gui-calibrate-open-shot = Open
+
+gui-calibrate-orientation = Chart seen turned by { $turns } quarter turns
+
+gui-calibrate-patches = Patches
+
+gui-calibrate-profiles = Profiles
+
+gui-calibrate-profiles-none = No calibration profile yet
+
+gui-calibrate-quality = Quality: { $quality }
+
+gui-calibrate-report = Report
+
+gui-calibrate-report-none = Place the four corners on the centres of the corner patches
+
+gui-calibrate-save = Save the profile
+
+gui-calibrate-save-heading = Make a profile
+
+gui-calibrate-saved = Profile “{ $name }” saved
+
+gui-calibrate-shot = Chart shot
+
+gui-calibrate-title = Calibrate camera colour
+
+gui-calibrate-worst = Worst patches: { $patches }
+
 gui-calibration-default-applied = Calibration profile “{ $name }” applied: the default of { $camera }
 
 gui-calibration-default-none = No calibration profile applied: { $reason }
@@ -272,6 +336,8 @@ gui-calibration-header-choose = Calibration profile
 gui-calibration-header-empty = No calibration profile for this camera yet
 
 gui-calibration-header-gone = Profile { $id } (not in the library)
+
+gui-calibration-header-make = Make a profile…
 
 gui-calibration-header-none = No profile
 

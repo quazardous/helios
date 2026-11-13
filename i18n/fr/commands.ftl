@@ -192,6 +192,8 @@ command-library-export =
 command-library-openFolder =
     .title = Ouvrir un dossier dans le gestionnaire de fichiers (`path`)
 
+command-calibrate-open =
+    .title = Calibrer les couleurs du boîtier… (`path` : une photo de mire ; `corners` : les centres de ses quatre pastilles des coins ; `camera` : les profils listés)
 command-library-importWindow =
     .title = Importer des photos… (`source` : la carte ou le dossier sur lequel la fenêtre d’import s’ouvre)
 
