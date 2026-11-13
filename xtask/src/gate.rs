@@ -168,13 +168,41 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     })
 }
 
+/// Uploads `file` as the box's Benchfile for `branch`.
+fn upload_benchfile(root: &Path, branch: &str, file: &Path) -> Result<(), String> {
+    let bench = crate::remote::Bench::configure(root)?;
+    let input = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let status = bench
+        .ssh(10, &["config", "benchfile", branch])
+        .stdin(input)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the box refused the Benchfile for {branch} ({status})"
+        ))
+    }
+}
+
+/// Drops the Benchfile uploaded for `branch`.
+fn forget_benchfile(root: &Path, branch: &str) -> Result<(), String> {
+    let bench = crate::remote::Bench::configure(root)?;
+    bench
+        .ssh(10, &["config", "benchfile", "rm", branch])
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Runs the gate from the checkout `root`; the report either way.
 fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     let benchfile = std::fs::read_to_string(root.join("tools/bench/Benchfile")).unwrap_or_default();
     let temp = temp_branch(numbers);
     // A worktree of its own, so the caller's checkout is left alone.
     let work = root.join("target/gate");
-    git(root, &["fetch", "-q", "origin", "next"])?;
+    git(root, &["fetch", "-q", "origin", "next", "main"])?;
     if !work.exists() {
         git(
             root,
@@ -231,8 +259,22 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
             &format!("HEAD:refs/heads/{temp}"),
         ],
     )?;
+    // The box reads the default Benchfile (main's) for a branch it has none
+    // for: a job only next declares would be refused. Upload the tested
+    // Benchfile under the temporary branch when it differs from main's.
+    let tested_benchfile = git(&work, &["show", "HEAD:tools/bench/Benchfile"]).unwrap_or_default();
+    let main_benchfile =
+        git(&work, &["show", "origin/main:tools/bench/Benchfile"]).unwrap_or_default();
+    let own_benchfile = tested_benchfile != main_benchfile;
+    if own_benchfile {
+        let path = work.join("tools/bench/Benchfile");
+        upload_benchfile(root, &temp, &path)?;
+    }
     let drop_temp = || {
         let _ = git(root, &["push", "-q", "origin", "--delete", &temp]);
+        if own_benchfile {
+            let _ = forget_benchfile(root, &temp);
+        }
     };
 
     // Run the jobs side by side: spawned together, then waited on.
@@ -240,7 +282,13 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     let children: Vec<_> = plan
         .runs
         .iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
+            // Spaced out: a burst of ssh connections is refused by the box's
+            // sshd (MaxStartups), and the refused job is never submitted.
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
             Command::new(&exe)
                 .arg("bench-remote")
                 .args(&r.args)
@@ -263,7 +311,9 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
                     .lines()
                     .rev()
                     .find(|l| l.contains(&r.ext_job_id))
-                    .unwrap_or("")
+                    // No line names the job: it was never submitted; say why.
+                    .or_else(|| text.lines().rev().find(|l| !l.trim().is_empty()))
+                    .unwrap_or("no output")
                     .to_string();
                 (o.status.success() && !line.contains(" exit "), line)
             }
