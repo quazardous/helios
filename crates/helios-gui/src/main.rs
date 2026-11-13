@@ -2324,6 +2324,23 @@ fn main() -> Result<(), String> {
             if !shell.has_command(helios_gui::shell::IMPORT_COMMAND) {
                 shell.set_no_library(no_library.clone());
             }
+            // Workshop runs (experimental) over the library's photos, on
+            // the viewport's engine, each one library step.
+            if let Some(p) = &persist {
+                let runner = Arc::new(helios_gui::workshop_run::Runner::new(
+                    p.vault().clone(),
+                    shell.viewport().engine().clone(),
+                    shell.jobs(),
+                    shell.library_history(),
+                ));
+                shell.set_workshop_runner(Arc::new(move |ask, dry| {
+                    if dry {
+                        runner.plan(&ask)
+                    } else {
+                        runner.start(ask)
+                    }
+                }));
+            }
             // The node runs the exports (its jobs): they go on when the
             // window that started them closes.
             let exporter = persist.as_ref().zip(node_link.as_ref()).map(|(p, link)| {

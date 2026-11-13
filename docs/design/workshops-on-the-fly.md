@@ -571,6 +571,53 @@ of the run's photos, after, with before on hover):
 - **teach it**: a fixed photo can be added to the workshop's test cases,
   which re-opens generalisation with three photos instead of two.
 
+### Built (slice 9)
+
+Built (2026-11-13). `workshop.run {node, set, images, on_breach,
+dry_run}` runs the workshop applied in the workspace (its node, the
+selected one by default) on `images` (ids), else the Library's selection
+(`set: selection`) or the photos in view (`set: view`). Only the user
+starts a run; a dry run, anyone's, answers the photos, `J`, `A`, how
+many photos the decision book already answers (the cache's share in
+`A`) and the calls the run would make.
+
+- **The run** (`helios_gui::workshop_run::Runner`, held by the host with
+  the library): a job of the jobs API (kind `workshop-run`, its node the
+  workshop node, cancelled before its next photo) on a thread of its
+  own; one run of a workshop version at a time.
+- **Per photo** (`helios_template::run::photo`): its file through the
+  workspace's network with its head version's edit; a proxy of what
+  enters the workshop node; the zones drawn; the junctions answered
+  first, from the book or by the AI while the run's `Budget` lasts, a
+  value junction's value (or fallback) set before aiming; the targets
+  aimed; `limits::check`.
+- **The book**: `workshops/books` in the vault, one document per
+  workshop version, each answer by junction and the content key of what
+  entered the workshop, and the runs counted. A low-confidence answer is
+  recorded too: a second run replays it and flags the same fallback.
+- **Writing**: an applied photo gets a version continuing its head,
+  labelled "workshop <name> (run <n>)", the workshop node's parameters
+  set; its metadata (`workshop_run`) holds the run, each value's
+  provenance (`aimed` with measure, goal, measured, probes; `ai` with
+  its confidence; `fallback`; `fixed`) and the flags. A photo whose edit
+  would not change gets no version, so a second run of a set writes
+  nothing and asks nothing. Held photos are not written and are listed
+  with their flags; `stop` ends the run at its photo, unwritten.
+- **Undo**: the run is one library step ("Workshop “<name>” on <n>
+  photos") holding each written photo's rows before and after; undo
+  takes the run's versions out, so each photo's head is its edit before
+  the run again, and a version a later edit continues stays: a photo
+  edited after the run keeps its edit.
+
+Not built yet: the run as items of the workflow level (journal rows,
+leases, retries) and adopted by the node so it outlives the window;
+`query` and `series` sets beyond the photos in view; a junction left
+pending for the user's agent over MCP (the desktop asks no model yet,
+so junctions take their fallback, flagged); a zone junction's mask
+asked again per photo (its answer is recorded, the mask is the
+workshop's own); a user-wide default for `on_breach` as a declared
+setting (the file's value, or the run's `on_breach`).
+
 ## 5. Series consistency: same look or same targets
 
 Two meanings of "the same" across a series, chosen **per slider** on its
@@ -743,7 +790,7 @@ included.
 8. **Limits** (S, built 2026-11-13; shown and edited on the rows later). The `limits` block, its defaults from the test cases,
    the pure checker (clamp, flag, hold, stop). Test: each flag raised
    by a crafted input.
-9. **The run** (L). `workshop.run` on the workflow level over a selection,
+9. **The run** (L, built 2026-11-13 for a selection, the photos in view or given ids; the workflow level, series and pending junctions later). `workshop.run` on the workflow level over a selection,
    a query and a series; zones, aiming, limits, writing with provenance;
    pending junctions; one library-scope step. Test: a synthetic set of
    24 images of varying backlight with a fake agent at one junction: the

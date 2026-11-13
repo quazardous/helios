@@ -81,6 +81,7 @@ pub mod tips;
 pub mod viewport;
 mod windows;
 mod workbench;
+pub mod workshop_run;
 pub mod workshops;
 
 pub use shell::{Shell, headless, name_rect};

@@ -291,6 +291,7 @@ command-workshop-context.title 608e659ad197f7a6
 command-workshop-describe.title 81e28c5e0f43f797
 command-workshop-design.title 9aa93a4b7659928b
 command-workshop-propose.title ec5cd5e566cdfe0a
+command-workshop-run.title c8310527995ec061
 command-workshop-save.title 65d5af81aeae4310
 command-workshop-send-proxy.title 18f403b94722beca
 command-workshop-session.title 70d9735f9e6631e1
@@ -579,6 +580,7 @@ gui-history-quick-save d55f15e5e5aec98e
 gui-history-set-new 438a574de74bd810
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-undo cc7022a2d9050a57
+gui-history-workshop-run deb043ee2096a079
 gui-image-not-reopened 422cb049e7d6fe52
 gui-image-opened 8cddc04842c75210
 gui-image-opening 0a3761ae857369a4
@@ -1269,6 +1271,7 @@ gui-wizard-no-folder 84f367f87175aada
 gui-wizard-no-library 5b1526a7cb139c51
 gui-wizard-sign-in 6f8ad2084116c666
 gui-wizard-title 756d6fb914845bbe
+gui-workshop-run-job 65e53f6e39359316
 gui-workshops-ai-left ed60a8398b7ee934
 gui-workshops-ai-none 38d14681e004558e
 gui-workshops-aim caaedec277d28d20

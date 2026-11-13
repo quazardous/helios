@@ -208,7 +208,8 @@ impl Range {
         self.step().unwrap_or((self.max - self.min) / 1000.0) / 2.0
     }
 
-    fn value(&self, v: f64) -> Value {
+    /// `v` as the parameter's value (a whole number for an `int`).
+    pub fn value(&self, v: f64) -> Value {
         if self.integer {
             Value::Int(v.round() as i64)
         } else {

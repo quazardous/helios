@@ -424,6 +424,7 @@ gui-history-calibration-off = Désactiver le profil de calibration
 gui-history-calibration-save = Enregistrer le profil de calibration « { $name } »
 gui-history-calibration-import = Importer le profil de calibration « { $name } »
 gui-history-import = Importer { $count } photos
+gui-history-workshop-run = Atelier « { $name } » sur { $count } photos
 gui-history-album-new = Nouvel album « { $name } »
 gui-history-album-rename = Renommer l’album « { $name } »
 gui-history-album-delete = Supprimer l’album « { $name } »
@@ -1856,6 +1857,7 @@ gui-workshops-row-ai = Garder l’IA
 gui-workshops-zone-parametric = Masque paramétrique
 gui-workshops-ai-none = IA par photo : aucune
 gui-workshops-ai-left = IA par photo : { $junctions } jonctions, { $calls } appels
+gui-workshop-run-job = Atelier « { $name } »
 gui-workshops-confirm = Confirmer
 gui-workshops-confirm-hint = Écrire la version suivante de l’atelier avec ces choix, en une seule étape d’annulation ; une ligne gardée en IA est demandée à chaque photo
 
