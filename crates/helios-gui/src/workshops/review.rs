@@ -54,7 +54,7 @@ fn number(v: &Value) -> String {
     v.as_f64().map_or_else(
         || "-".to_string(),
         |f| {
-            format!("{:.3}", f)
+            format!("{f:.3}")
                 .trim_end_matches('0')
                 .trim_end_matches('.')
                 .to_string()
@@ -143,6 +143,11 @@ impl Panel {
             return;
         }
         let pending = review["pending"].as_array().cloned().unwrap_or_default();
+        let scroll = egui::ScrollArea::vertical()
+            .id_salt("workshop-review")
+            .max_height(480.0)
+            .auto_shrink([false, true]);
+        scroll.show(ui, |ui| {
         for p in review["photos"].as_array().into_iter().flatten() {
             let state = p["state"].as_str().unwrap_or_default();
             let flags = p["flags"].as_array().cloned().unwrap_or_default();
@@ -253,5 +258,6 @@ impl Panel {
                 });
             });
         }
+        });
     }
 }
