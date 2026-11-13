@@ -243,6 +243,16 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("workspace.saveAsTemplate", "save"),
 ];
 
+/// The icons of the commands Helios declares for every panel
+/// (`<panel>.moveTo`, `.detach`, `.float`, `.dock`), by verb: the same
+/// glyph for a verb whatever the panel, as menus show them side by side.
+pub const PANEL_COMMAND_ICONS: &[(&str, &str)] = &[
+    ("moveTo", "phosphor:layout"),
+    ("detach", "phosphor:app-window"),
+    ("float", "phosphor:picture-in-picture"),
+    ("dock", "phosphor:arrow-square-in"),
+];
+
 /// A command's id, checked.
 pub fn command_id(id: &str) -> Result<CommandId, PluginError> {
     CommandId::new(id).map_err(|e| PluginError::Failed(e.to_string()))
@@ -652,6 +662,12 @@ mod tests {
             assert!(
                 egui_pop::core::icon::registry::is_known(icon),
                 "{id}: `{icon}` is not in egui-pop's icon registry"
+            );
+        }
+        for (verb, icon) in super::PANEL_COMMAND_ICONS {
+            assert!(
+                egui_pop::core::icon::registry::is_known(icon),
+                "<panel>.{verb}: `{icon}` is not in egui-pop's icon registry"
             );
         }
         // The Phosphor names are checked, not only the built-in ones.

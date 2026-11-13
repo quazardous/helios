@@ -3291,6 +3291,12 @@ impl Shell {
                 .iter()
                 .map(|(id, icon)| ((*id).to_string(), (*icon).to_string())),
         );
+        for p in panels {
+            for (verb, icon) in crate::plugins::PANEL_COMMAND_ICONS {
+                d.icons
+                    .insert(format!("{}.{verb}", p.id), (*icon).to_string());
+            }
+        }
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
