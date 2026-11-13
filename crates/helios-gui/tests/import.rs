@@ -2277,7 +2277,7 @@ fn closing_the_main_window_keeps_the_import_window_and_window_main_brings_it_bac
         [("import".to_owned(), true)],
         "it took the main window's place"
     );
-    // Drawn in the main window now, with its short menu bar.
+    // Drawn in the main window now, with the main menus.
     assert!(h.query_by_label("Choose a folder…").is_some());
     h.get_by_label("Window").click();
     h.run_steps(2);
@@ -3208,5 +3208,204 @@ fn a_folder_offers_three_browsers_the_grid_follows_the_choice_and_it_comes_back_
     );
     drop(h);
     node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A deferred window's pass with input events, as eframe runs it: the
+/// accessible nodes it drew, each a name, a rectangle (in points) and
+/// whether it is disabled.
+fn window_nodes(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Rect, bool)> {
+    use egui::{Pos2, RawInput, Rect, ViewportId, ViewportInfo};
+    let cb = h.output().viewport_output[&window]
+        .viewport_ui_cb
+        .clone()
+        .expect("the window is declared by the main window's last pass");
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+    let info = ViewportInfo {
+        inner_rect: Some(rect),
+        focused: Some(true),
+        ..Default::default()
+    };
+    // The window's own clock, a frame on per pass (the context's input is
+    // the main window's between passes): a tooltip's delay goes by.
+    thread_local!(static CLOCK: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) });
+    let time = CLOCK.with(|c| {
+        let t = c.get().max(h.ctx.input(|i| i.time)) + 1.0 / 60.0;
+        c.set(t);
+        t
+    });
+    let mut input = RawInput {
+        viewport_id: window,
+        screen_rect: Some(rect),
+        time: Some(time),
+        focused: true,
+        events,
+        ..Default::default()
+    };
+    input.viewports.insert(window, info);
+    input.viewports.insert(
+        ViewportId::ROOT,
+        ViewportInfo {
+            focused: Some(false),
+            ..Default::default()
+        },
+    );
+    let mut out = h.ctx.run_ui(input, |ui| cb(ui));
+    out.textures_delta.clear();
+    let ppp = h.ctx.pixels_per_point();
+    let Some(update) = out.platform_output.accesskit_update else {
+        return Vec::new();
+    };
+    update
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            let name = n.label().or_else(|| n.value())?.to_string();
+            let b = n.bounds()?;
+            let rect = Rect::from_min_max(
+                Pos2::new(b.x0 as f32 / ppp, b.y0 as f32 / ppp),
+                Pos2::new(b.x1 as f32 / ppp, b.y1 as f32 / ppp),
+            );
+            Some((name, rect, n.is_disabled()))
+        })
+        .collect()
+}
+
+/// Clicks the node `name` (or `name` and its key) a window's last pass drew: the pointer pressed
+/// in one pass, released in the next; the nodes of the pass after.
+fn click_in_window(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    nodes: &[(String, egui::Rect, bool)],
+    name: &str,
+) -> Vec<(String, egui::Rect, bool)> {
+    let names: Vec<&String> = nodes.iter().map(|(n, _, _)| n).collect();
+    let at = nodes
+        .iter()
+        // A menu entry's name ends with its key ("Close window Ctrl+W").
+        .find(|(n, _, _)| n == name || n.starts_with(&format!("{name} ")))
+        .unwrap_or_else(|| panic!("no `{name}` in {names:?}"))
+        .1
+        .center();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    window_nodes(h, window, vec![egui::Event::PointerMoved(at), button(true)]);
+    window_nodes(h, window, vec![button(false)]);
+    window_nodes(h, window, Vec::new())
+}
+
+/// The menus a bar of `app.main` showed last, in the bar or in "…".
+fn top_menus(app: &egui_pop::api::app::AppHandle) -> Vec<String> {
+    let layout = egui_pop::api::menus::bar_layout(app, &egui_pop::api::app::MENU_MAIN)
+        .expect("the main menu is drawn as a bar");
+    layout
+        .bar
+        .iter()
+        .chain(&layout.overflow)
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Every Helios window has the main window's title bar and menus
+/// (docs/design/windows.md, section 7), as VS Code's windows do: the
+/// import window's bar has the menu button, the logo and the name, and
+/// the same menus as the main window, evaluated in the import window. A
+/// command of the main window (Export…) is greyed there and says where
+/// it runs; a command run from the import window's menu acts on it:
+/// File > Close window closes the import window, not the main one.
+#[test]
+fn the_import_window_has_the_main_windows_title_bar_and_menus() {
+    let (mut h, window, dir) = import_in_its_own_window_framed("chrome", true);
+    let app = h.state().app().handle().clone();
+    h.run();
+    let main_menus = top_menus(&app);
+    assert!(main_menus.len() >= 4, "{main_menus:?}");
+    let nodes = window_nodes(&mut h, window, Vec::new());
+    let names: Vec<&String> = nodes.iter().map(|(n, _, _)| n).collect();
+    // The title bar's start: the menu button, the logo, the name.
+    for name in ["Window menu", "Helios"] {
+        assert!(names.iter().any(|n| *n == name), "{name} in {names:?}");
+    }
+    let named = h.ctx.data(|d| {
+        d.get_temp::<std::collections::BTreeMap<String, (egui::Rect, egui::ViewportId)>>(
+            egui::Id::unique("helios.named"),
+        )
+    });
+    assert_eq!(
+        named
+            .unwrap_or_default()
+            .get("helios.logo")
+            .map(|(_, v)| *v),
+        Some(window),
+        "the logo is drawn in the import window's title bar"
+    );
+    // The same menus as the main window.
+    assert_eq!(top_menus(&app), main_menus);
+    for name in ["File", "Edit", "View", "Window"] {
+        assert!(names.iter().any(|n| *n == name), "{name} in {names:?}");
+    }
+    // File > Export…: the main window's, greyed here, saying where it runs.
+    let nodes = click_in_window(&mut h, window, &nodes, "File");
+    let (export, _, disabled) = nodes
+        .iter()
+        .find(|(n, _, _)| n.starts_with("Export"))
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "Export in {:?}",
+                nodes.iter().map(|n| &n.0).collect::<Vec<_>>()
+            )
+        });
+    assert!(disabled, "{export} is greyed in the import window");
+    let at = nodes
+        .iter()
+        .find(|(n, _, _)| *n == export)
+        .unwrap()
+        .1
+        .center();
+    let mut said = None;
+    let mut events = vec![egui::Event::PointerMoved(at)];
+    for _ in 0..120 {
+        let nodes = window_nodes(&mut h, window, std::mem::take(&mut events));
+        said = nodes
+            .into_iter()
+            .map(|(n, _, _)| n)
+            .find(|n| n.starts_with("Only in the "));
+        if said.is_some() {
+            break;
+        }
+    }
+    let said = said.expect("the greyed entry says where it runs");
+    assert!(said.ends_with(" window"), "{said}");
+    // File > Close window, run from the import window: it closes.
+    let nodes = window_nodes(
+        &mut h,
+        window,
+        vec![egui::Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+    );
+    let nodes = click_in_window(&mut h, window, &nodes, "File");
+    click_in_window(&mut h, window, &nodes, "Close window");
+    h.run_steps(3);
+    assert!(!h.state().import_window_open(), "the import window closed");
+    let open: Vec<String> = app
+        .windows()
+        .into_iter()
+        .map(|w| w.id.to_string())
+        .collect();
+    assert_eq!(open, ["main"], "the main window stays");
     let _ = std::fs::remove_dir_all(&dir);
 }

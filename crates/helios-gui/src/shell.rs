@@ -119,6 +119,11 @@ pub const IMPORT_COMMAND: &str = "library.import";
 /// Opens a failure's details as an error dialog, from its toast.
 pub const NOTICE_DETAILS: &str = "notice.details";
 
+/// The `when` of a command of the main window (the library's selection,
+/// the image shown): greyed in another window's menus, which say where
+/// it runs (docs/design/windows.md, section 7).
+pub const IN_MAIN_WINDOW: &str = "appWindow == 'main'";
+
 /// The screen's own scale (physical pixels per point, the interface zoom
 /// left out) from which it is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
@@ -3026,12 +3031,15 @@ impl Shell {
             ),
             Box::new(|a, origin| Ok(Action::ImportWith(a.clone(), origin.clone()))),
         );
+        // The main window's commands, greyed in the other windows' menus
+        // (docs/design/windows.md, section 7).
         add(
             CommandSpec::new(
                 "library.export",
                 "Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)",
                 "Library",
-            ),
+            )
+            .when(IN_MAIN_WINDOW),
             Box::new(|a, origin| Ok(Action::Export(a.clone(), origin.clone()))),
         );
         add(
@@ -3057,7 +3065,8 @@ impl Shell {
                 "library.copyFiles",
                 "Copy files: the selected images' files, for a file manager or another application",
                 "Library",
-            ),
+            )
+            .when(IN_MAIN_WINDOW),
             Box::new(|_, origin| Ok(Action::CopyFiles(origin.clone()))),
         );
         add(
@@ -3076,7 +3085,8 @@ impl Shell {
                 "viewport.copyImage",
                 "Copy the image: the edited image rendered whole, for another application (as PNG)",
                 "View",
-            ),
+            )
+            .when(IN_MAIN_WINDOW),
             Box::new(|_, origin| Ok(Action::CopyImage(origin.clone()))),
         );
         // A parameter copied: the item is the parameter with its type,
@@ -3630,9 +3640,9 @@ impl Shell {
             // The same commands in the menu bar.
             // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
             command(MENU_FILE, "1_import", 0, import_window::COMMAND),
-            // The import window's File menu.
-            command(import_window::MENU, "1_window", 0, "window.close"),
-            command(import_window::MENU, "9_quit", 0, "workbench.quit"),
+            // File > Close window (Ctrl+W), in every window: the import
+            // window's own File entry once, now beside Quit everywhere.
+            command(MENU_FILE, "9_close", 0, "window.close"),
             // Window: Helios's windows, open or not, to bring one forward.
             command(MENU_WINDOW, "1_open", 0, lifetime::MAIN_WINDOW),
             command(MENU_WINDOW, "1_open", 1, import_window::COMMAND),

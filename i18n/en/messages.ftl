@@ -661,10 +661,6 @@ gui-import-window-layout-year = By year
 
 gui-import-window-library-folder = The Library folder
 
-gui-import-window-menu-file = File
-
-gui-import-window-menu-window = Window
-
 gui-import-window-more = More
 
 gui-import-window-more-note = Metadata templates and time offsets come later.

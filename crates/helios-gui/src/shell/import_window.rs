@@ -116,10 +116,6 @@ pub const FORGET_VOLUME: &str = "library.forgetVolume";
 /// agents).
 pub const WINDOW: &str = "import";
 
-/// The import window's File menu: Close window, Quit.
-pub(super) const MENU: egui_pop::model::ids::MenuId =
-    egui_pop::model::ids::MenuId::from_static("helios.menu.importFile");
-
 /// The id of the window of the main one the import window is drawn in
 /// where the backend has no windows of its own (kittest, the web).
 const EMBEDDED_ID: &str = "helios.import.embedded";
@@ -614,9 +610,6 @@ struct GridWords {
 /// The window's words, in the shell's language.
 struct Words {
     title: String,
-    /// The window's short menu bar: File and Window.
-    menu_file: String,
-    menu_window: String,
     sources: String,
     cards: String,
     no_cards: String,
@@ -1026,9 +1019,12 @@ impl Shell {
                     .texts
                     .as_ref()
                     .map_or_else(|| "Import photos".to_owned(), |t| t(window_title()));
+                // The main window's title bar start and menus, as every
+                // Helios window has (docs/design/windows.md, section 7).
                 let spec = WindowSpec::new(WINDOW, title)
                     .size(default_size(ctx.content_rect().size()))
-                    .min_size(MIN_SIZE);
+                    .min_size(MIN_SIZE)
+                    .shell_bars(true);
                 w.shown = Some(id.clone());
                 drop(w);
                 let state = self.import.state.clone();
@@ -1320,8 +1316,6 @@ impl ImportWindow {
         let counts = self.contents.counts();
         Some(Words {
             title: t(window_title()),
-            menu_file: t(Message::new("gui-import-window-menu-file", "File")),
-            menu_window: t(Message::new("gui-import-window-menu-window", "Window")),
             sources: t(Message::new("gui-import-window-sources", "Sources")),
             cards: t(Message::new("gui-import-window-cards", "Cards and cameras")),
             no_cards: t(Message::new(
@@ -1491,10 +1485,10 @@ impl ImportWindow {
         };
         window.title = Some(words.title.clone());
         let app = window.app.clone();
+        // Its title bar and menus are egui-pop's (`WindowSpec::shell_bars`).
         let mut event = if window.embedded {
             self.window_ui(ui, &words, &app)
         } else {
-            menu_bar_ui(ui, &words, &app);
             egui::CentralPanel::default()
                 .show(ui, |ui| self.window_ui(ui, &words, &app))
                 .inner
@@ -1797,23 +1791,6 @@ impl ImportWindow {
         });
         event
     }
-}
-
-/// The window's short menu bar (docs/design/windows.md, section 7): File
-/// (Close window, Quit) and Window, which lists Helios's windows to bring
-/// one forward, the main one included. Drawn in its own OS window only:
-/// embedded, the main window's menus are above it.
-fn menu_bar_ui(ui: &mut egui::Ui, words: &Words, app: &egui_pop::api::app::AppHandle) {
-    use egui_pop::api::menus;
-    use egui_pop::api::windows::MENU_WINDOW;
-    egui::Panel::top("helios.import.menu")
-        .resizable(false)
-        .show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button(&words.menu_file, |ui| menus::show(ui, app, &MENU));
-                ui.menu_button(&words.menu_window, |ui| menus::show(ui, app, &MENU_WINDOW));
-            });
-        });
 }
 
 /// The window's status bar: "Reading <path>" while the sources are read,

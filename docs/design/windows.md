@@ -1003,7 +1003,9 @@ Default: as above.
 - The alternative: a reduced bar in the Import window (File with Close
   and Quit, Edit, Window), as Firefox's Library window has.
 
-Decided (2026-11-12): **the reduced bar**. Every window has a menu bar
+Decided (2026-11-12): **the reduced bar**, then (2026-11-13, the owner)
+**the full bar in every window**, as VS Code's windows have: see "Built:
+the same bars in every window" below. Every window has a menu bar
 with at least a Window menu, so any window can be opened or brought
 forward from any other. The Import window's bar has File (Close window,
 Quit) and Window: Close window, Helios's windows (Main window, Import
@@ -1096,6 +1098,47 @@ Default: as above, after a macOS build exists; nothing to do before.
   other keys shown in the native menus, and a run on a Mac beyond CI's
   build: the release's macOS job builds and smoke-tests the bundle
   headless, it does not click menus.
+
+### Built: the same bars in every window (2026-11-13)
+
+The owner, 2026-11-13: the import window's bar showed only "File
+Window", with no logo, no menu button and none of the other menus.
+Every Helios window now draws the main window's bars.
+
+- **egui-pop** (`WindowSpec::shell_bars`): an application window opened
+  with it draws the start of the main title bar (the `CAPTION_START`
+  zone: Helios's menu button, logo and name) and the main menu
+  (`app.main`) under it, evaluated and run in that window's context
+  (`appWindow`). A menu opened as a popup from the window (the menu
+  button's system menu) is drawn in it. The bars follow the window into
+  the main window when the main window closes. The title bar's end
+  (Helios's jobs and decisions items, the layout controls) and the top
+  bar's zone (the workspace tabs) stay the main window's.
+- **Greyed, not removed.** A command whose `when` holds only in another
+  open window is greyed, its tooltip naming that window ("Only in the
+  Helios window"). Helios marks its main-window commands with
+  `appWindow == 'main'` (`shell::IN_MAIN_WINDOW`): Export…, Copy files
+  and Copy the image, which act on the library's selection or the image
+  shown. Their keys (Ctrl+Shift+E) do nothing in the import window
+  either, as D6 wants for the main window's commands.
+- **Routed to the main window.** The layout commands of View (the side
+  bars, the panel, arrangements, Zen mode) act on the main window's
+  layout, the only one there is, from any window. The app-wide commands
+  (Settings, Import…, Storage…, Health check, the palette, About, Quit,
+  the Window menu, themes, zoom) run from any window, what they open
+  opening in the window they ran in.
+- **The window's own entries.** File > Close window (`window.close`,
+  Ctrl+W), the import window's File entry before, is in every window's
+  File menu, closing the window it is chosen in. Import photos… (File)
+  brings the import window forward; the import window's own commands
+  stay its buttons.
+- **macOS:** the in-window bar is not drawn, as for the main window; the
+  native bar following the window in front is still to do (D7).
+- **Test** (`tests/import.rs`, real viewports): the import window's bar
+  has the menu button, the logo and the name, and the same top-level
+  menus as the main window; Export… is greyed there with "Only in the …
+  window"; File > Close window chosen there closes the import window and
+  leaves the main one.
 
 **Not built yet: reopening the main window.** egui-pop 0.9 moves a
 window into the main one but has no way back: once the main window is
