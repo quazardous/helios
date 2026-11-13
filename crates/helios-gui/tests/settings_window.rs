@@ -459,11 +459,20 @@ fn settings_opened_from_the_main_window_edit_its_library_and_workspace_named_in_
     h.run_steps(3);
     assert_eq!(admin.edited_focus().as_deref(), Some("main"));
     let foci = admin.foci(&app);
-    assert_eq!(
-        foci[0].label,
-        "Main window: workspace Wedding, library photos"
+    // Named by the workspace and the library (Fluent may isolate the
+    // names it places).
+    let main = &foci[0].label;
+    assert!(main.starts_with("Main window"), "{main}");
+    assert!(
+        main.contains("Wedding") && main.contains("photos"),
+        "{main}"
     );
-    assert_eq!(foci[1].label, "Import window: library photos");
+    let import_label = &foci[1].label;
+    assert!(import_label.starts_with("Import window"), "{import_label}");
+    assert!(
+        import_label.contains("photos") && !import_label.contains("Wedding"),
+        "{import_label}"
+    );
     let offered: Vec<_> = admin.offered().iter().map(|s| s.name()).collect();
     assert!(
         offered.contains(&"library") && offered.contains(&"workspace"),
