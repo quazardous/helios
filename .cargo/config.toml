@@ -6,6 +6,6 @@ xtask = "run --quiet --package xtask --"
 # holding the bench box until the job's timeout.
 survival = "nextest run -p helios-gui -p helios-node --test survival"
 # The stability scenarios (kill -9 in the middle of the headless node's
-# own jobs): not in CI, run by the bench box's `stability` job, on demand
-# and before a release (docs/bench.md).
-stability = "nextest run -p helios-node --features stability --test stability"
+# own jobs) and the many-clients stress run: not in CI, run by the bench
+# box's `stability` job, on demand and before a release (docs/bench.md).
+stability = "nextest run -p helios-node --features stability --test stability --test many_clients"
