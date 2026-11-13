@@ -8,7 +8,8 @@
 //!    per checkout so parallel worktrees never overwrite each other, and the
 //!    job runs on it (`src=helios-local-<id>`) instead of the pushed branch.
 //! 3. `run <job> [key=value...]`, its log followed; `branch=` defaults to
-//!    the current branch, `ext_job_id=` to `<project>-<branch>-<job>` (see
+//!    the current branch, `ext_job_id=` to `<project>-<branch>-<job>`, with
+//!    a hash of the job's own parameters when it has some (see
 //!    `default_ext_job_id`: a resubmission replaces the stale job), and
 //!    `priority=` to `high` for egui-pop's jobs (`--priority` sets it). On a
 //!    dropped connection, `wait <id>` reattaches.
@@ -85,12 +86,32 @@ const EGUI_POP_JOB: &str = "egui-pop-";
 /// The longest `ext_job_id` the box accepts.
 const EXT_ID_MAX: usize = 64;
 
+/// The parameters that say where a job runs or how it is queued, not what
+/// it runs, left out of the hash that tells a job's runs apart; with
+/// `base=` and `crates=`, whose selection changes with each push of a
+/// branch: its `test-affected` stays one run that a new push replaces.
+const ROUTING_PARAMS: &[&str] = &[
+    "base",
+    "crates",
+    "branch",
+    "egui_pop",
+    "src",
+    "priority",
+    "ext_job_id",
+    "after",
+    "after_ok",
+];
+
 /// The name a job is submitted under when none is given (`ext_job_id=`):
 /// `<project>-<branch>-<job>`, egui-pop's jobs named after their
 /// `egui_pop=` branch (`main` by default, as in the Benchfile) and without
-/// their `egui-pop-` prefix. Resubmitting under the same name replaces the
-/// job while it is queued or running, so a run made stale by a rebase does
-/// not pile up behind the new one.
+/// their `egui-pop-` prefix. When the job has parameters of its own
+/// (`crate=`, `test=`, `filter=`...), a short hash of them follows the job
+/// (`helios-<branch>-test-crate-<hash>`), so two different runs on one
+/// branch (two crates, two filters) keep apart. Resubmitting the same job
+/// with the same parameters gives the same name, which replaces it while it
+/// is queued or running: a run made stale by a rebase does not pile up
+/// behind the new one.
 pub fn default_ext_job_id(job: &str, params: &[(String, String)]) -> String {
     let param = |key: &str| {
         params
@@ -102,7 +123,45 @@ pub fn default_ext_job_id(job: &str, params: &[(String, String)]) -> String {
         Some(step) => ("egui-pop", param("egui_pop").unwrap_or("main"), step),
         None => ("helios", param("branch").unwrap_or("main"), job),
     };
-    ext_job_id(project, branch, step)
+    let mut own: Vec<String> = params
+        .iter()
+        .filter(|(k, _)| !ROUTING_PARAMS.contains(&k.as_str()))
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    if own.is_empty() {
+        return ext_job_id(project, branch, step);
+    }
+    own.sort();
+    let step = format!("{step}-{:08x}", fnv1a(&own.join(" ")));
+    ext_job_id(project, branch, &step)
+}
+
+/// An `ext_job_id=` given by hand, made acceptable to the box: other
+/// characters become `-`, a name too long is cut and a hash of the whole
+/// added, a name that does not start with a letter or digit gets an `x`.
+pub fn clean_ext_job_id(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+    let mut out: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if !out.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        out.insert(0, 'x');
+    }
+    if out.len() > EXT_ID_MAX {
+        let hash = format!("-{:08x}", fnv1a(name));
+        out.truncate(EXT_ID_MAX - hash.len());
+        out.push_str(&hash);
+    }
+    out
 }
 
 /// `<project>-<branch>-<step>` as the box accepts an `ext_job_id`: letters,
@@ -202,6 +261,17 @@ fn valid_value(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "._/@+-".contains(c))
 }
 
+/// `filter=` as the box can carry it: its values are limited to
+/// `[A-Za-z0-9._/@+-]`, so a test path's `::` travels as `@` and a space
+/// (several name filters) as `+`; the Benchfile's test jobs turn them back
+/// (`f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"`). Test names hold
+/// neither `@` nor `+`. `None` when another character is in the way.
+pub fn encode_filter(filter: &str) -> Option<String> {
+    let encoded = filter.trim().replace("::", "@");
+    let encoded = encoded.split_whitespace().collect::<Vec<_>>().join("+");
+    valid_value(&encoded).then_some(encoded)
+}
+
 /// A parameter's value: `after=` and `after_ok=` take job ids or
 /// `x:<ext_job_id>`, separated by commas; `priority=` is `high` or `normal`.
 fn valid_param(key: &str, value: &str) -> bool {
@@ -253,6 +323,22 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
             }
             params.push(("priority".into(), (*v).to_string()));
         } else if let Some((k, v)) = a.split_once('=') {
+            // a test path (`a::b`) or several filters (`a b`), encoded for the box
+            let filter;
+            let v = if k == "filter" {
+                filter = encode_filter(v)?;
+                filter.as_str()
+            } else {
+                v
+            };
+            // a name of one's own, made acceptable to the box
+            let id;
+            let v = if k == "ext_job_id" {
+                id = clean_ext_job_id(v);
+                id.as_str()
+            } else {
+                v
+            };
             if !valid_name(k) || !valid_param(k, v) || params.iter().any(|(p, _)| p == k) {
                 return None;
             }
@@ -2006,8 +2092,8 @@ fn failures(all_of_them: bool) -> u8 {
     u8::from(!all_of_them && !shown.is_empty())
 }
 
-/// The parameters a job's command needs with no default (`${name}` with
-/// no `:-` or `:+`), read from the Benchfile; `branch` and the box's own
+/// The parameters a job's command needs with no default (`${name}`, not
+/// `${name:-…}`, `${name:+…}` or a shell form), read from the Benchfile; `branch` and the box's own
 /// (`src`) are left out.
 pub fn required_params(benchfile: &str, job: &str) -> Vec<String> {
     let head = format!("[jobs.{job}]");
@@ -2029,9 +2115,9 @@ pub fn required_params(benchfile: &str, job: &str) -> Vec<String> {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
             .collect();
-        let after = &s[name.len()..];
-        let defaulted =
-            after.starts_with(":-") || after.starts_with(":+") || after.starts_with('-');
+        // only `${name}` is required: `${name:-…}` and `${name:+…}` have a
+        // default, and any other form (`${f//@/::}`) is the shell's own
+        let defaulted = !s[name.len()..].starts_with('}');
         // a name in capitals is the shell's own (`${PIPESTATUS[0]}`), not a
         // parameter: the box leaves those to the shell
         let shell = name.chars().any(|c| c.is_ascii_uppercase());
@@ -2383,6 +2469,96 @@ mod tests {
             "egui-pop-main-snapshots"
         );
         assert_eq!(default_ext_job_id("lint", &[]), "helios-main-lint");
+    }
+
+    #[test]
+    fn different_runs_of_one_job_on_one_branch_get_different_names() {
+        let id = |p: &[(&str, &str)]| default_ext_job_id("test-crate", &owned(p));
+        let gui = id(&[("branch", "fix/x"), ("crate", "helios-gui")]);
+        let connect = id(&[("branch", "fix/x"), ("crate", "helios-connect")]);
+        assert_ne!(gui, connect, "two crates keep apart");
+        assert!(gui.starts_with("helios-fix-x-test-crate-"), "{gui}");
+        assert_ne!(
+            gui,
+            id(&[
+                ("branch", "fix/x"),
+                ("crate", "helios-gui"),
+                ("test", "lib")
+            ]),
+            "a test target keeps apart"
+        );
+        assert_ne!(
+            id(&[("crate", "a"), ("filter", "x")]),
+            id(&[("crate", "a"), ("filter", "y")]),
+            "a filter keeps apart"
+        );
+        // the same run, whatever the order and the queueing, replaces itself
+        assert_eq!(
+            id(&[("branch", "fix/x"), ("crate", "a"), ("test", "t")]),
+            id(&[
+                ("test", "t"),
+                ("priority", "high"),
+                ("crate", "a"),
+                ("branch", "fix/x"),
+                ("src", "helios-local-1"),
+            ])
+        );
+        let long = id(&[("branch", &"feature/".repeat(12)), ("crate", "helios-gui")]);
+        assert!(box_accepts(&long), "{long}");
+        let egui = default_ext_job_id(
+            "egui-pop-test",
+            &owned(&[("egui_pop", "feat/dock"), ("crate", "egui-pop")]),
+        );
+        assert!(egui.starts_with("egui-pop-feat-dock-test-"), "{egui}");
+    }
+
+    #[test]
+    fn a_name_given_by_hand_is_kept_and_made_acceptable() {
+        let r = parse_args(&["test-crate", "crate=a", "ext_job_id=mine-1"]).unwrap();
+        assert_eq!(r.param("ext_job_id"), Some("mine-1"));
+        let r = parse_args(&["test-crate", "crate=a", "ext_job_id=fix/a@b"]).unwrap();
+        assert_eq!(r.param("ext_job_id"), Some("fix-a-b"));
+        assert!(box_accepts(&clean_ext_job_id(&"/x".repeat(50))));
+        assert!(parse_args(&["test-crate", "crate=a", "ext_job_id="]).is_none());
+        assert!(parse_args(&["--chain", "helios", "ext_job_id=x"]).is_none());
+    }
+
+    #[test]
+    fn a_filter_may_name_a_test_path_or_several_names() {
+        assert_eq!(
+            encode_filter("tests::undo::redo").as_deref(),
+            Some("tests@undo@redo")
+        );
+        assert_eq!(encode_filter(" a::b  c ").as_deref(), Some("a@b+c"));
+        assert_eq!(encode_filter("plain_name").as_deref(), Some("plain_name"));
+        assert_eq!(encode_filter("a:b"), None, "a lone colon is no test path");
+        assert_eq!(encode_filter(""), None);
+        let r = parse_args(&["test-crate", "crate=a", "filter=m::t other"]).unwrap();
+        assert_eq!(r.param("filter"), Some("m@t+other"));
+        assert!(parse_args(&["test-crate", "filter=a;b"]).is_none());
+    }
+
+    #[test]
+    fn the_test_jobs_turn_the_filter_back_and_run_lib_tests() {
+        let bf = include_str!("../../tools/bench/Benchfile");
+        for job in ["test-crate", "egui-pop-test", "egui-pop-test-1p"] {
+            let head = format!("[jobs.{job}]");
+            let start = bf.find(&head).unwrap() + head.len();
+            let section = &bf[start..];
+            let section = &section[..section.find("\n[").unwrap_or(section.len())];
+            assert!(
+                section.contains(r#"f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }""#),
+                "{job} decodes filter="
+            );
+            assert!(
+                section.contains("lib) sel=\"--lib\""),
+                "{job} runs test=lib"
+            );
+            assert!(
+                !required_params(bf, job).contains(&"f".to_string()),
+                "{job}: the decoded filter is the shell's"
+            );
+        }
     }
 
     /// What the box accepts as an `ext_job_id`.
