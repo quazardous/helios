@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use helios_connect::ConnectorProvider as _;
 use helios_connect::account::{
     AccountBook, AccountState, MemoryAccounts, MemorySecrets, Secrets as _,
@@ -42,7 +42,12 @@ fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, 
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("never got there: {what}");
+    // What was shown instead, for the log.
+    let labels: Vec<String> = h
+        .query_all_by_label_contains("")
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    panic!("never got there: {what}; shown: {labels:?}");
 }
 
 /// Whether a node with this label is shown, once or more.
@@ -501,7 +506,9 @@ fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source
     until(&mut h, "its choices shown", |h| {
         shown(h, &format!("{name}: its own choices"))
     });
-    assert!(shown(&h, "Saved sources") && shown(&h, &name));
+    // Listed once, under Services by its name, never under Saved sources.
+    assert!(shown(&h, "Services") && shown(&h, &name));
+    assert!(!shown(&h, "Saved sources"));
 }
 
 /// Cancel in the wizard leaves no source, wherever it is pressed; an
@@ -1259,8 +1266,10 @@ fn a_picking_source_shows_its_account_once_and_one_primary_action() {
 /// column, never a dialog, with Cancel back to the primary action.
 #[test]
 fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
-    let (mut h, opened, _folder, imported, _) =
+    let (mut h, opened, folder, imported, _) =
         picking_world_with(None, End::Wait, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     until(&mut h, "the status line", |h| {
@@ -1294,8 +1303,10 @@ fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
 /// Left without Done: said plainly, and the primary action again.
 #[test]
 fn nothing_chosen_says_so_and_offers_to_choose_again() {
-    let (mut h, opened, _folder, imported, _) =
+    let (mut h, opened, folder, imported, _) =
         picking_world_with(None, End::Nothing, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     until(&mut h, "nothing said", |h| {
@@ -1309,8 +1320,10 @@ fn nothing_chosen_says_so_and_offers_to_choose_again() {
 /// The service unreachable: why, and "Try again", which opens a new page.
 #[test]
 fn an_unreachable_service_says_why_and_offers_to_try_again() {
-    let (mut h, opened, _folder, _imported, _) =
+    let (mut h, opened, folder, _imported, _) =
         picking_world_with(None, End::Down, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     until(&mut h, "the reason said", |h| {
@@ -1327,8 +1340,10 @@ fn an_unreachable_service_says_why_and_offers_to_try_again() {
 /// "needs reconnecting", and the one action is its reconnection.
 #[test]
 fn a_refused_account_says_so_and_offers_its_reconnection() {
-    let (mut h, _opened, _folder, _imported, _) =
+    let (mut h, _opened, folder, _imported, _) =
         picking_world_with(None, End::Refused, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     let refused = "▲ Test server no longer lets Helios read this account.";
