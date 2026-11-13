@@ -475,6 +475,18 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-auto = Import automatically
+
+gui-import-auto-failed = Automatic import from { $source }: { $error }
+
+gui-import-auto-new-files = When new files appear
+
+gui-import-auto-off = Off
+
+gui-import-auto-plugged = When plugged in
+
+gui-import-auto-started = Automatic import from { $source }: { $files } files
+
 gui-import-backup-copies = { $copies } copies: { $disks }
 
 gui-import-backup-days = { $disk } (not seen for { $days } days)

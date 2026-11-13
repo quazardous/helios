@@ -55,6 +55,7 @@ pub use health::{
     FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, PAGE as HEALTH_PAGE,
     findings_answer as health_findings_answer,
 };
+pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;
 pub use import_sources::{
     DOCUMENT as IMPORT_SOURCES, Honours, ReadSources, SavedSource, WriteSources,
@@ -82,6 +83,7 @@ mod import;
 mod import_accounts;
 mod import_browsers;
 pub use import_accounts::LibraryFolder;
+mod import_auto;
 mod import_choices;
 mod import_sources;
 mod import_window;

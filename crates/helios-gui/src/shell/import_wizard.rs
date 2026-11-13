@@ -10,7 +10,8 @@
 //!    connection dialog (a plugin's consent asked first when it lacks
 //!    capabilities). A card needs nothing: cards are listed on their own.
 //! 3. **Choices**: the Choices column's, started from the window's and
-//!    without those the connector cannot honour ([`Honours::of`]).
+//!    without those the connector cannot honour ([`Honours::of`]); for a
+//!    folder or a card, "Import automatically" ([`super::import_auto`]).
 //! 4. **Name**: the folder's, or the account's, to start with.
 //!
 //! The source is then saved ([`super::import_sources::Sources::add`]) and
@@ -38,6 +39,7 @@ use helios_core::config::{Contract, KeyType};
 use serde_json::{Map, Value};
 
 use super::import_accounts::{Asked, state_text, translated};
+use super::import_auto::{self, Trigger};
 use super::import_choices::{self, Choices};
 use super::import_sources::{Honours, SavedSource, SourceKey};
 use super::import_window::ImportWindow;
@@ -102,6 +104,8 @@ pub(crate) struct Wizard {
     /// choices' keys, and their values.
     contract: Contract,
     params: Map<String, Value>,
+    /// When the source imports on its own.
+    auto: Option<Trigger>,
 }
 
 impl Wizard {
@@ -121,6 +125,7 @@ impl Wizard {
             editing: None,
             contract: Contract::new(),
             params: Map::new(),
+            auto: None,
         }
     }
 
@@ -244,6 +249,7 @@ impl ImportWindow {
             SourceKey::Folder(p) => wz.folder = p.display().to_string(),
             SourceKey::Account(id) => wz.account = Some(id.clone()),
         }
+        wz.auto = saved.as_ref().and_then(|s| s.auto);
         wz.name = saved.and_then(|s| s.name).unwrap_or_default();
         wz.focus = true;
         wz.editing = Some(key);
@@ -479,6 +485,7 @@ impl ImportWindow {
             choices: Some(choices),
             params: wz.params.into_iter().collect(),
             browser,
+            auto: wz.auto,
         };
         if let Some(old) = &wz.editing {
             self.replace_source(old, source);
@@ -736,6 +743,26 @@ impl ImportWindow {
             let request = FileRequest::folder(&words.change).purpose("helios.import.into");
             self.choose_into(f.choose(app, request));
         }
+        self.wizard_auto_ui(ui, t);
+    }
+
+    /// "Import automatically", for a folder or a card: off, or the
+    /// trigger of its kind.
+    fn wizard_auto_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
+        let Some(wz) = self.wizard.as_mut() else {
+            return;
+        };
+        let offered = match wz.connector.as_ref().map(|(_, s)| *s) {
+            Some(Setup::Folder) => Trigger::offered(false),
+            Some(Setup::Card) => Trigger::offered(true),
+            _ => return,
+        };
+        ui.add_space(8.0);
+        ui.strong(t(import_auto::title_message()));
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut wz.auto, None, t(import_auto::off_message()));
+            ui.radio_value(&mut wz.auto, Some(offered), t(offered.message()));
+        });
     }
 
     /// The connector's own parameters, from its source contract: each

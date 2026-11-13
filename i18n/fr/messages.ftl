@@ -300,6 +300,18 @@ gui-import-window-forget-source = Oublier cette source
 
 gui-import-window-forget-source-hint = La retire de cette colonne, avec son nom et ses choix ; les photos et la bibliothèque ne sont pas touchées
 
+gui-import-auto = Importer automatiquement
+
+gui-import-auto-off = Non
+
+gui-import-auto-plugged = À l’insertion
+
+gui-import-auto-new-files = Quand de nouveaux fichiers apparaissent
+
+gui-import-auto-started = Import automatique depuis { $source } : { $files } fichiers
+
+gui-import-auto-failed = Import automatique depuis { $source } : { $error }
+
 gui-job-backup-done = Sauvegarde terminée
 
 gui-job-backup-failed = Échec de la sauvegarde
