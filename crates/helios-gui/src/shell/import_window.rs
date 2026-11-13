@@ -484,10 +484,13 @@ impl ImportWindow {
         let Some(events) = &self.volume_events else {
             return;
         };
+        let mut mounted = self.sources.mounted.clone();
         for change in events.try_iter().filter_map(|e| Change::of(&e)) {
             let Some(card) = change.card() else { continue };
             self.cards.retain(|c| c.root != card.root);
+            mounted.retain(|m| m.root != card.root);
             if let Change::Mounted(m) = &change {
+                mounted.push(mounted_card(&change, card));
                 self.cards.push(card.clone());
                 self.auto.plugged.push(card.clone());
                 if !m.at_start {
@@ -496,6 +499,10 @@ impl ImportWindow {
             } else {
                 self.inserted.retain(|c| c.root != card.root);
             }
+        }
+        // The sources saved on a card follow it by its volume.
+        if mounted != self.sources.mounted {
+            self.sources.see_cards(mounted);
         }
         self.connectors.set_cards(&self.cards);
         let cards = &self.cards;
@@ -509,6 +516,15 @@ impl ImportWindow {
         {
             self.ticked = vec![first.root.clone()];
         }
+    }
+}
+
+/// The card of a volume event, by its volume.
+fn mounted_card(change: &Change, card: &Card) -> super::import_sources::MountedCard {
+    super::import_sources::MountedCard {
+        root: card.root.clone(),
+        id: change.id().0.clone(),
+        label: card.label.clone(),
     }
 }
 
@@ -677,6 +693,19 @@ impl Shell {
         // once (by its root).
         w.volume_events = Some(watch.subscribe());
         w.cards = watch.cards();
+        let mounted = watch
+            .mounted()
+            .iter()
+            .filter_map(|v| {
+                let card = Card::of(v)?;
+                Some(super::import_sources::MountedCard {
+                    root: card.root,
+                    id: v.id.0.clone(),
+                    label: card.label,
+                })
+            })
+            .collect();
+        w.sources.see_cards(mounted);
         watch.on_change(move |_| {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                 // The main window's toasts, and the import window's list.
@@ -1863,10 +1892,19 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             }
             for (source, _) in &detected {
                 let Some(root) = &source.root else { continue };
-                let label = match source.capacity {
+                let mut label = match source.capacity {
                     Some(b) => format!("{} · {}", source.label, helios_storage::capacity_text(b)),
                     None => source.label.clone(),
                 };
+                // The card's volume, briefly: the same card wherever it is
+                // mounted.
+                if let Some(id) = w
+                    .sources
+                    .card_at(root)
+                    .and_then(|m| super::import_sources::brief_id(&m.id))
+                {
+                    label = format!("{label} · {id}");
+                }
                 if let Some(e) = source_row(ui, w, words, root, label, None) {
                     *event = Some(e);
                 }

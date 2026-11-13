@@ -217,7 +217,7 @@ impl Shell {
     /// in watched folders queued. The roots of the cards imported so.
     pub(super) fn run_automatic_imports(&mut self) -> Vec<PathBuf> {
         let _stall = crate::stall::section("import window: automatic imports");
-        let (plugged, ready, sources) = {
+        let (plugged, ready, sources, mounted) = {
             let mut w = self.import.get_mut();
             w.follow_kept_sources();
             let folders: Vec<PathBuf> = w
@@ -236,14 +236,17 @@ impl Shell {
                 .as_ref()
                 .map(|r| r.try_iter().collect())
                 .unwrap_or_default();
-            (plugged, ready, w.sources.list.clone())
+            (
+                plugged,
+                ready,
+                w.sources.list.clone(),
+                w.sources.mounted.clone(),
+            )
         };
+        // A card's source by the card's volume, wherever it is mounted.
         let source = |path: &PathBuf, trigger: Trigger| {
-            sources
-                .iter()
-                .find(|s| {
-                    s.auto == Some(trigger) && s.key() == Some(SourceKey::Folder(path.clone()))
-                })
+            super::import_sources::find(&sources, &mounted, &SourceKey::Folder(path.clone()))
+                .filter(|s| s.auto == Some(trigger))
                 .cloned()
         };
         let mut imported = Vec::new();
@@ -398,6 +401,7 @@ impl super::import_window::ImportWindow {
         let list = super::import_sources::parse(&text);
         if list != self.sources.list {
             self.sources.list = list;
+            self.sources.identify();
             if self.sources.showing.is_some() {
                 self.choices = self.sources.window.clone();
                 self.sources.showing = None;

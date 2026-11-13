@@ -24,6 +24,14 @@
 //!   choices), its choices, its name. A remembered source (a recent
 //!   folder, a card) is saved by it; **"Forget this source"** takes a
 //!   source off the column. Both are steps of the column's Undo.
+//! - **A card is known by its volume, not its mount point**: a source
+//!   saved on a card's mount root records the card's volume id (the
+//!   filesystem's UUID or serial, else its label and size), and that id is
+//!   its key from then on. The same card mounted elsewhere, or through
+//!   another reader, is the same source with its choices, browser and
+//!   automatic trigger; another card mounted where it was is another
+//!   source. A source saved by path before, on a card's root, takes the
+//!   card's id the first time the card is seen there ([`Sources::identify`]).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -111,6 +119,14 @@ pub struct SavedSource {
     /// when asked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto: Option<Trigger>,
+    /// A card's volume id (`uuid:…`, or `weak:<label>:<size>` when its
+    /// filesystem has none): the source's key when set, `path` then only
+    /// where it was last mounted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
+    /// The card's label, as last seen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl SavedSource {
@@ -129,6 +145,16 @@ impl SavedSource {
             params: BTreeMap::new(),
             browser: None,
             auto: None,
+            volume: None,
+            label: None,
+        }
+    }
+
+    /// What it is matched on: its card's volume, else its key.
+    fn ident(&self) -> Option<Ident> {
+        match &self.volume {
+            Some(v) => Some(Ident::Volume(v.clone())),
+            None => self.key().map(Ident::Key),
         }
     }
 
@@ -139,6 +165,60 @@ impl SavedSource {
             (None, None) => None,
         }
     }
+}
+
+/// A card mounted now: where, and the volume it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MountedCard {
+    pub(crate) root: PathBuf,
+    /// Its volume id (`uuid:…`, `weak:…`).
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
+/// What a source is matched on: a card's volume, or a folder's path or
+/// an account's id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Ident {
+    Volume(String),
+    Key(SourceKey),
+}
+
+/// What `key` names, among `list` with `mounted` cards: a folder at a
+/// card's mount root is that card's volume; one where a card source was
+/// last mounted, with no card there now, is that card's.
+fn resolve(list: &[SavedSource], mounted: &[MountedCard], key: &SourceKey) -> Ident {
+    if let SourceKey::Folder(p) = key {
+        if let Some(m) = mounted.iter().find(|m| &m.root == p) {
+            return Ident::Volume(m.id.clone());
+        }
+        if let Some(v) = list
+            .iter()
+            .find(|s| s.path.as_ref() == Some(p) && s.volume.is_some())
+            .and_then(|s| s.volume.clone())
+        {
+            return Ident::Volume(v);
+        }
+    }
+    Ident::Key(key.clone())
+}
+
+/// The source of `key` among `list`, with `mounted` cards.
+pub(crate) fn find<'a>(
+    list: &'a [SavedSource],
+    mounted: &[MountedCard],
+    key: &SourceKey,
+) -> Option<&'a SavedSource> {
+    let ident = resolve(list, mounted, key);
+    list.iter().find(|s| s.ident().as_ref() == Some(&ident))
+}
+
+/// A card's volume id, briefly, as shown beside its label: a UUID's or
+/// serial's first characters; none for a weak id (its label and size are
+/// shown already).
+pub(crate) fn brief_id(id: &str) -> Option<String> {
+    let uuid = id.strip_prefix("uuid:")?;
+    Some(uuid.chars().take(9).collect::<String>().to_uppercase())
 }
 
 /// The document, as kept.
@@ -205,7 +285,7 @@ impl Honours {
 /// A change of a source (its choices, an edit, a forget), for Undo.
 struct Step {
     /// The source as it is after the change, when there is one.
-    key: Option<SourceKey>,
+    key: Option<Ident>,
     /// The source before, and its place in the list.
     before: Option<(usize, SavedSource)>,
     /// The recent folders and favourites before, when the change took a
@@ -240,6 +320,8 @@ pub(crate) struct Sources {
     /// The window's choices while a source's are shown.
     pub(crate) window: Choices,
     pub(super) asked: Option<SourceAsked>,
+    /// The cards mounted now, by volume ([`Sources::identify`]).
+    pub(crate) mounted: Vec<MountedCard>,
 }
 
 impl Sources {
@@ -249,32 +331,106 @@ impl Sources {
     }
 
     pub(crate) fn get(&self, key: &SourceKey) -> Option<&SavedSource> {
-        self.list.iter().find(|s| s.key().as_ref() == Some(key))
+        find(&self.list, &self.mounted, key)
+    }
+
+    fn resolve(&self, key: &SourceKey) -> Ident {
+        resolve(&self.list, &self.mounted, key)
+    }
+
+    /// Where the source of `key` is in the list.
+    fn position(&self, key: &SourceKey) -> Option<usize> {
+        let ident = self.resolve(key);
+        self.list
+            .iter()
+            .position(|s| s.ident().as_ref() == Some(&ident))
+    }
+
+    /// The card mounted at `path`, if one is.
+    pub(crate) fn card_at(&self, path: &std::path::Path) -> Option<&MountedCard> {
+        self.mounted.iter().find(|m| m.root == path)
+    }
+
+    /// The cards mounted now are `mounted`: each source saved on a card
+    /// follows it. One that knows the card's volume takes where it is
+    /// mounted now and its label; one saved by path on a card's root
+    /// (before cards were known by their volume) takes its volume. Kept
+    /// when any changed.
+    pub(crate) fn see_cards(&mut self, mounted: Vec<MountedCard>) {
+        self.mounted = mounted;
+        self.identify();
+    }
+
+    /// Each source saved on a card mounted now follows it (see
+    /// [`Sources::see_cards`]).
+    pub(crate) fn identify(&mut self) {
+        let mut changed = false;
+        for m in &self.mounted {
+            let known = self
+                .list
+                .iter()
+                .position(|s| s.volume.as_ref() == Some(&m.id));
+            let at = known.or_else(|| {
+                self.list
+                    .iter()
+                    .position(|s| s.volume.is_none() && s.path.as_ref() == Some(&m.root))
+            });
+            let Some(s) = at.map(|i| &mut self.list[i]) else {
+                continue;
+            };
+            if s.volume.as_ref() != Some(&m.id) {
+                s.volume = Some(m.id.clone());
+                changed = true;
+            }
+            if s.path.as_ref() != Some(&m.root) {
+                s.path = Some(m.root.clone());
+                changed = true;
+            }
+            if s.label.as_ref() != Some(&m.label) {
+                s.label = Some(m.label.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            self.store();
+        }
+    }
+
+    /// A card's source whose last mount point another card holds now: its
+    /// row would name that other card.
+    fn shadowed(&self, s: &SavedSource) -> bool {
+        s.volume.as_ref().is_some_and(|v| {
+            s.path
+                .as_ref()
+                .and_then(|p| self.card_at(p))
+                .is_some_and(|m| &m.id != v)
+        })
     }
 
     /// The source of `key` and its place, as a step's `before`.
     fn before(&self, key: &SourceKey) -> Option<(usize, SavedSource)> {
-        self.list
-            .iter()
-            .position(|s| s.key().as_ref() == Some(key))
-            .map(|i| (i, self.list[i].clone()))
+        self.position(key).map(|i| (i, self.list[i].clone()))
     }
 
     /// Puts `source` in place of the one of `key` (at its place), or takes
     /// it away (`None`); one Undo step, its own.
     fn replace(&mut self, key: Option<&SourceKey>, source: Option<SavedSource>) {
         let before = key.and_then(|k| self.before(k));
-        let after = source.as_ref().and_then(SavedSource::key);
+        let source = source.map(|s| self.identified(s));
+        let gone = key.map(|k| self.resolve(k));
+        let new = source.as_ref().and_then(SavedSource::ident);
         let at = before.as_ref().map(|(i, _)| *i);
-        self.list
-            .retain(|s| s.key().is_none() || (s.key().as_ref() != key && s.key() != after));
+        self.list.retain(|s| {
+            let ident = s.ident();
+            ident.is_none() || (ident != gone && ident != new)
+        });
         if let Some(source) = source {
             let at = at.unwrap_or(self.list.len()).min(self.list.len());
             self.list.insert(at, source);
         }
         let now = Instant::now();
         self.undo.push(Step {
-            key: after,
+            key: new,
             before,
             memory: None,
             at: now.checked_sub(ONE_STEP).unwrap_or(now),
@@ -294,14 +450,31 @@ impl Sources {
 
     /// The saved folders, in the order saved.
     pub(crate) fn folders(&self) -> Vec<PathBuf> {
-        self.list.iter().filter_map(|s| s.path.clone()).collect()
+        self.list
+            .iter()
+            .filter(|s| !self.shadowed(s))
+            .filter_map(|s| s.path.clone())
+            .collect()
+    }
+
+    /// `source` with the volume of the card mounted at its folder, when
+    /// one is and it knows none.
+    fn identified(&self, mut source: SavedSource) -> SavedSource {
+        if source.volume.is_none()
+            && let Some(m) = source.path.as_ref().and_then(|p| self.card_at(p))
+        {
+            source.volume = Some(m.id.clone());
+            source.label = Some(m.label.clone());
+        }
+        source
     }
 
     /// Saves a source (the "Add a source…" wizard's), in place of one
-    /// of the same folder or account.
+    /// of the same folder, card or account.
     pub(crate) fn add(&mut self, source: SavedSource) {
-        let key = source.key();
-        self.list.retain(|s| key.is_none() || s.key() != key);
+        let source = self.identified(source);
+        let ident = source.ident();
+        self.list.retain(|s| ident.is_none() || s.ident() != ident);
         self.list.push(source);
         self.store();
     }
@@ -316,6 +489,7 @@ impl Sources {
     pub(crate) fn named(&self) -> Vec<(SourceKey, String)> {
         self.list
             .iter()
+            .filter(|s| !self.shadowed(s))
             .filter_map(|s| Some((s.key()?, s.name.clone()?)))
             .collect()
     }
@@ -325,13 +499,14 @@ impl Sources {
         if self.get(key).is_none() && choices.is_none() {
             return;
         }
-        if let Some(s) = self.list.iter_mut().find(|s| s.key().as_ref() == Some(key)) {
-            s.choices = choices;
+        if let Some(i) = self.position(key) {
+            self.list[i].choices = choices;
         } else {
-            self.list.push(SavedSource {
+            let source = self.identified(SavedSource {
                 choices,
                 ..SavedSource::new(connector.to_string(), key)
             });
+            self.list.push(source);
         }
         self.store();
     }
@@ -344,13 +519,14 @@ impl Sources {
         connector: &str,
         browser: helios_connect::Browser,
     ) {
-        if let Some(s) = self.list.iter_mut().find(|s| s.key().as_ref() == Some(key)) {
-            s.browser = Some(browser);
+        if let Some(i) = self.position(key) {
+            self.list[i].browser = Some(browser);
         } else {
-            self.list.push(SavedSource {
+            let source = self.identified(SavedSource {
                 browser: Some(browser),
                 ..SavedSource::new(connector.to_string(), key)
             });
+            self.list.push(source);
         }
         self.store();
     }
@@ -365,6 +541,7 @@ impl Sources {
                 Vec::new()
             }
         };
+        self.identify();
     }
 
     pub(crate) fn store(&self) {
@@ -506,14 +683,15 @@ impl ImportWindow {
             && self.choices != *before
         {
             let earlier = self.sources.before(&key);
+            let ident = self.sources.resolve(&key);
             let now = Instant::now();
             let joined = self.sources.undo.last().is_some_and(|s| {
-                s.key.as_ref() == Some(&key) && now.duration_since(s.at) < ONE_STEP
+                s.key.as_ref() == Some(&ident) && now.duration_since(s.at) < ONE_STEP
             });
             match self.sources.undo.last_mut() {
                 Some(step) if joined => step.at = now,
                 _ => self.sources.undo.push(Step {
-                    key: Some(key.clone()),
+                    key: Some(ident),
                     before: earlier,
                     memory: None,
                     at: now,
@@ -538,11 +716,11 @@ impl ImportWindow {
         };
         let list = &mut self.sources.list;
         if let Some(key) = &step.key {
-            list.retain(|s| s.key().as_ref() != Some(key));
+            list.retain(|s| s.ident().as_ref() != Some(key));
         }
-        let back = step.before.as_ref().and_then(|(_, s)| s.key());
+        let back = step.before.as_ref().and_then(|(_, s)| s.ident());
         if let Some((at, source)) = step.before {
-            list.retain(|s| s.key().is_none() || s.key() != back);
+            list.retain(|s| s.ident().is_none() || s.ident() != back);
             list.insert(at.min(list.len()), source);
         }
         self.sources.store();
@@ -610,7 +788,7 @@ impl ImportWindow {
         // Its own step: a change right after it is not joined to it.
         let now = Instant::now();
         self.sources.undo.push(Step {
-            key: Some(key.clone()),
+            key: Some(self.sources.resolve(&key)),
             before: self.sources.before(&key),
             memory: None,
             at: now.checked_sub(ONE_STEP).unwrap_or(now),
@@ -704,6 +882,8 @@ mod tests {
                     params: BTreeMap::new(),
                     browser: Some(helios_connect::Browser::Timeline),
                     auto: Some(Trigger::NewFiles),
+                    volume: None,
+                    label: None,
                 },
                 SavedSource {
                     connector: "google-photos".into(),
@@ -714,6 +894,8 @@ mod tests {
                     params: [("album".to_owned(), serde_json::json!("Holidays"))].into(),
                     browser: None,
                     auto: None,
+                    volume: None,
+                    label: None,
                 },
             ],
         };
