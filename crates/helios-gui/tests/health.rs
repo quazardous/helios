@@ -24,6 +24,7 @@ use helios_core::Message;
 use helios_gui::shell::HEALTH_BADGE;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_health::backup::{Backup, CardShort};
+use helios_health::checks::Database;
 use helios_health::gpu::{Adapter, AdapterCheck, AdapterKind, Gpu, Kernel, Kernels};
 use helios_health::plugins::{Plugin, Plugins, Status};
 use helios_health::runner::{Runner, Schedule};
@@ -264,8 +265,17 @@ impl Library {
             library: Some(self.dir.clone()),
             vault: Some(self.file.clone()),
             backup: Some(Backup::read(&self.vault, &mounted, now).unwrap()),
+            database: Some(database(&self.file)),
             ..Context::default()
         }
+    }
+}
+
+/// What the node reads of the database `file`, as its health inputs do.
+fn database(file: &Path) -> Database {
+    Database {
+        opens: helios_vault_sqlite::health::opens(file),
+        problems: helios_vault_sqlite::health::quick_check(file),
     }
 }
 
@@ -501,6 +511,7 @@ fn the_library_opens_and_its_disk_needs_room() {
     let mut ctx = lib.context(&[&lib.studio], FIRST);
     let bad = lib.dir.join("broken.db");
     std::fs::write(&bad, vec![0x5a; 8192]).unwrap();
+    ctx.database = Some(database(&bad));
     ctx.vault = Some(bad);
     let h = checked(ctx);
     let f = finding(&h, "library.default").unwrap();
