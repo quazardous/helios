@@ -31,6 +31,8 @@ use serde_json::json;
 use crate::dialogs::{Request, request};
 use crate::params::Params;
 
+mod review;
+
 /// The switch.
 pub const SETTING: &str = "interface.experimental.workshops";
 
@@ -250,6 +252,14 @@ pub struct Panel {
     /// "Make it automatic"'s rows, waiting for the user's Confirm; the
     /// choices are edited here.
     pub generalised: Option<crate::shell::Generalised>,
+    /// The workshop run last started or reviewed here, by its id.
+    pub last_run: Option<String>,
+    /// The review shown (`workshop.review`'s answer).
+    pub review: Option<serde_json::Value>,
+    /// The review shows only the photos to review.
+    review_flagged_only: bool,
+    /// The values typed in the review, by photo and slider.
+    review_edits: BTreeMap<(String, String), f64>,
 }
 
 impl Default for Panel {
@@ -267,6 +277,10 @@ impl Default for Panel {
             session_writes: Vec::new(),
             image: None,
             generalised: None,
+            last_run: None,
+            review: None,
+            review_flagged_only: false,
+            review_edits: BTreeMap::new(),
         }
     }
 }
@@ -338,6 +352,7 @@ impl Panel {
         let mut select: Option<String> = None;
         self.describe_ui(ui, &mut run);
         self.session_ui(ui, &mut run);
+        self.review_ui(ui, &mut run);
         ui.separator();
         let find = ui
             .horizontal(|ui| {

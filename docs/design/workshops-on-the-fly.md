@@ -618,6 +618,45 @@ asked again per photo (its answer is recorded, the mask is the
 workshop's own); a user-wide default for `on_breach` as a declared
 setting (the file's value, or the run's `on_breach`).
 
+### Built (slice 10)
+
+Built (2026-11-13). Each run keeps its record in the vault
+(`workshops/runs`, by the run's id): per photo its state (applied, held,
+stopped, unchanged, failed; then accepted, reverted, fixed), flags,
+provenance, the workshop's values before and after, its version, and
+the content key of what entered the workshop. The record is part of the
+run's library step.
+
+- **`workshop.review {run, flag, action, image, …}`** (and
+  `helios_workshop_review` on the node's MCP server): the counts (photos,
+  to review, held, AI calls, per flag), the photos to review first, a
+  filter per flag; `pending`, the junctions left to their fallback;
+  `rerun`, the photos a re-run takes.
+- **Actions**, each one library step (the photo's rows, the record, the
+  book): `accept` a held or stopped photo (written with the run's
+  values, flags kept); `revert` a written one (its run version taken
+  out, refused when a later edit continues it); `fix` values by hand (a
+  version with provenance `user` and its author, their flags cleared,
+  refused out of range); `decide` a pending value junction (the answer
+  in the decision book with its author, `user` or `agent:<session>`, so
+  a re-run takes it at no call); `rerun` the held, stopped and decided
+  photos (a new run). Accept, revert and rerun are the user's alone; an
+  agent fixes and decides.
+- **The panel's review** (Workshops panel, "Review the last run"): the
+  counts, Only photos to review, Re-run held and decided; per photo its
+  state, flag badges (the flag's note on hover), each value before and
+  after with its source, a value field with Set (a fix) or Decide (a
+  pending junction), Accept or Revert.
+
+Not built yet: before and after as pictures (the review shows the
+values; a contact sheet of thumbnails comes with the Library's
+previews); opening the photo with the workshop's sliders for a fix (the
+review sets values in place); a zone junction decided (its mask);
+"teach it" (a fixed photo added to the test cases); an event announcing
+a pending junction (`workshop.junction_pending`: an agent reads
+`pending` after a run); the review's actions as window commands with
+their enabled state.
+
 ## 5. Series consistency: same look or same targets
 
 Two meanings of "the same" across a series, chosen **per slider** on its
@@ -799,7 +838,7 @@ included.
    share in `A`: a dry run over the set says how many photos the book
    already answers), undo restores
    every edit and leaves a photo edited after the run alone.
-10. **The review** (M). `workshop.review`, the contact sheet, fix one,
+10. **The review** (M, built 2026-11-13 but teach it, pictures and zone junctions). `workshop.review`, the contact sheet, fix one,
     decide a junction, teach it. Test: headless, the flagged photos
     first, a fix clears its flag and records provenance `user`.
 11. **From an import** (S, after the import hooks are built). A saved

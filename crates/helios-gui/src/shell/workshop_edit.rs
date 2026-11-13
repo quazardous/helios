@@ -70,6 +70,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "Experimental: run the applied workshop on a set of photos, a job: each photo aimed, its junctions answered, checked against the limits, written or held; one undo step (`node`, the selected one by default; `set`: selection or view; `images`: ids instead; `on_breach`: flag, hold or stop; `dry_run`: the photos, J, A and what the decision book already answers)",
     ),
     (
+        "workshop.review",
+        "Experimental: review a workshop run, flagged photos first, with their flags, provenance and values before and after; or act on one photo (`run`, the last one by default; `flag`: only photos raising it; `action`: accept or revert (yours alone), fix (`values`), decide a junction left to its fallback (`junction`, `value`, recorded in the decision book), rerun the held and decided photos (yours alone); `image`)",
+    ),
+    (
         "workshop.send_proxy",
         "Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only",
     ),
@@ -115,6 +119,7 @@ impl Shell {
             "workshop.answer" => self.answer_proposal(args, origin),
             "workshop.generalise" => self.generalise_session(args, origin),
             "workshop.run" => self.run_workshop(args, origin),
+            "workshop.review" => self.review_workshop(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }

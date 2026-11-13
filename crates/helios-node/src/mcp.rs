@@ -256,6 +256,14 @@ fn optional_integer() -> Value {
     json!({ "type": ["integer", "null"], "minimum": 0 })
 }
 
+fn optional_number() -> Value {
+    json!({ "type": ["number", "null"] })
+}
+
+fn review_action() -> Value {
+    json!({ "type": ["string", "null"], "enum": ["list", "accept", "revert", "fix", "decide", "rerun", null] })
+}
+
 fn optional_strings() -> Value {
     json!({ "type": ["array", "null"], "items": { "type": "string" } })
 }
@@ -927,6 +935,39 @@ pub const TOOLS: &[Tool] = &[
                 "The session it is for; the one going on when null",
             ),
             DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workshop_review",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.review",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): the review of a workshop run the user started on the desktop. Lists the run's photos, those to review first (flagged, held, stopped, failed), each with its `state` (applied, held, stopped, unchanged, failed, accepted, reverted, fixed), its `flags`, each value's `provenance` (aimed, ai, fallback, fixed, user) and its values `before` and `after`; `counts` (photos, flagged, held, AI calls, per flag); `pending`, the junctions left to their fallback; `rerun`, the photos a re-run takes. Actions on one photo (`image`), each one undo step: `decide` answers a pending junction (`junction`, `value`), recorded in the workshop's decision book with you as its author, so a re-run takes it; `fix` sets the workshop's values by hand (`values`), a new version with provenance user, their flags cleared. `accept` (a held photo), `revert` (a written one) and `rerun` are the user's alone. No event announces a pending junction yet: read `pending` after a run. Refused on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            optional(
+                "run",
+                optional_string,
+                "The run's id (workshop.run's answer); the last one started on the desktop when null",
+            ),
+            optional(
+                "action",
+                review_action,
+                "list (the default), decide, fix; accept, revert and rerun are the user's",
+            ),
+            optional("image", optional_string, "The photo's id, for an action"),
+            optional(
+                "flag",
+                optional_string,
+                "Only the photos raising this flag (low_confidence, fallback, target_missed…)",
+            ),
+            optional("junction", optional_string, "decide: the junction's name"),
+            optional("value", optional_number, "decide: the junction's value"),
+            optional(
+                "values",
+                optional_object,
+                "fix: the workshop's values by slider name: {\"lift\": 0.02}",
+            ),
             CONFIG,
         ],
     },
@@ -3628,6 +3669,7 @@ mod tests {
             ("helios_workshop_session", "workshop.session"),
             ("helios_workshop_propose", "workshop.propose"),
             ("helios_workshop_generalise", "workshop.generalise"),
+            ("helios_workshop_review", "workshop.review"),
         ] {
             let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
             assert_eq!(tool.cmd, cmd);

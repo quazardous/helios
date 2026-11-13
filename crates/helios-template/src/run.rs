@@ -40,13 +40,23 @@ pub struct Recorded {
 pub struct Book {
     #[serde(default)]
     pub answers: BTreeMap<String, Recorded>,
+    /// The answers a person or their agent decided in a review, by key:
+    /// who (`user`, `agent:<session>`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub decided: BTreeMap<String, String>,
 }
 
 impl Book {
     /// The key of `junction`'s answer for the workshop `workshop`
     /// (id@version) on what enters it, `input`.
     pub fn key(workshop: &str, junction: &str, input: &Image) -> String {
-        format!("{workshop}|{junction}|{}", input.content_hash())
+        Self::key_of(workshop, junction, &input.content_hash().to_string())
+    }
+
+    /// The same key from the input's content hash, as a run's record
+    /// keeps it.
+    pub fn key_of(workshop: &str, junction: &str, input: &str) -> String {
+        format!("{workshop}|{junction}|{input}")
     }
 }
 

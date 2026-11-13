@@ -88,6 +88,8 @@ pub(super) struct Core {
     /// Where `workshop.run` hands a run: the host's runner, which holds
     /// the library (none without one).
     pub(super) workshop_runner: Option<super::workshop_run::RunFn>,
+    /// Where `workshop.review` reads and changes runs (the host's runner).
+    pub(super) workshop_reviewer: Option<super::workshop_run::ReviewFn>,
     /// What the exports the host runs say (`export_sink`).
     pub(super) export_lines: (
         std::sync::mpsc::Sender<helios_export::batch::Line>,
