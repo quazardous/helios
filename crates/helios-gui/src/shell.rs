@@ -618,6 +618,8 @@ pub struct Shell {
     calibration: calibrate_focus::CalibrationFocus,
     /// The application's life, apart from its windows'.
     lifetime: lifetime::Lifetime,
+    /// What the node's endpoint asks of the windows' commands.
+    window_asks: Option<crate::window_commands::Asks>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
 }
@@ -993,6 +995,7 @@ impl Shell {
             import: import_window::ImportFocus::new(),
             calibration: calibrate_focus::CalibrationFocus::default(),
             lifetime: lifetime::Lifetime::default(),
+            window_asks: None,
             notes: Vec::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
@@ -2329,6 +2332,12 @@ impl Shell {
             self.notify_failure(Level::Warning, e.clone(), report);
         }
         result
+    }
+
+    /// Answers the node endpoint's requests for the windows' commands at
+    /// each frame (`window_commands::Bridge::attach`).
+    pub fn serve_window_commands(&mut self, asks: crate::window_commands::Asks) {
+        self.window_asks = Some(asks);
     }
 
     /// Runs a command as `origin` in a given context: what a window's
@@ -6312,6 +6321,11 @@ impl Shell {
         );
         // The History panel's snapshots: a toast for each restore.
         self.follow_snapshots();
+        // The node's endpoint lists and runs the windows' commands.
+        if let Some(asks) = self.window_asks.take() {
+            crate::window_commands::answer(self, &asks, &ctx);
+            self.window_asks = Some(asks);
+        }
         self.apply_queue(&ctx);
         // The workspace's files changed outside, and agents' requests.
         self.follow_workspace(&ctx);

@@ -79,6 +79,7 @@ pub mod thumb_textures;
 pub mod thumbnails;
 pub mod tips;
 pub mod viewport;
+pub mod window_commands;
 mod windows;
 mod workbench;
 pub mod workshop_run;
