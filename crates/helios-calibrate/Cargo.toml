@@ -12,6 +12,9 @@ helios-colour.workspace = true
 # Colour calibration's own CAT16, so the solve and the render agree.
 helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
 serde.workspace = true
+# Profiles: their canonical JSON and its hash, the profile id.
+serde_json.workspace = true
+blake3.workspace = true
 # The raw measurement graph: the raw front without `colorin`.
 helios-core.workspace = true
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
@@ -20,7 +23,6 @@ helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
 
 [dev-dependencies]
-serde_json.workspace = true
 helios-testkit.workspace = true
 
 [lints]

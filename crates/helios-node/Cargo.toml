@@ -28,7 +28,6 @@ helios-storage.workspace = true
 helios-display.workspace = true
 helios-template.workspace = true
 helios-journal.workspace = true
-helios-calibrate.workspace = true
 blake3.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
@@ -61,6 +60,7 @@ name = "stability"
 required-features = ["stability"]
 
 [dev-dependencies]
+helios-calibrate.workspace = true
 helios-colour.workspace = true
 egui-pop-model.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

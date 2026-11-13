@@ -13,9 +13,11 @@
 //! camera RGB, the values `colorin` would receive; `rawprepare`'s output on
 //! the same region is where clipping is read, at the level `highlights`
 //! cuts ([`RAW_CLIP_LEVEL`]). The standard matrix `M_s` is `colorin`'s, from
-//! the camera's matrix ([`camera_to_working`]). The modules keep their
-//! defaults, white balance in camera reference (D65) mode as Helios's
-//! develop network has it: a raw from a file has no edit yet.
+//! the camera's matrix ([`camera_to_working`]). The modules take the
+//! parameters of the image's edit when the caller gives them
+//! ([`RawFront`], [`calibrate_raw_with`]), so the profile matches what the
+//! edit's `colorin` receives; otherwise their defaults, white balance in
+//! camera reference (D65) mode as Helios's develop network has it.
 //!
 //! The rendered region is cut from the image, so the handles are shifted
 //! into it for the measurement and the answer's corners shifted back: the
@@ -23,6 +25,7 @@
 //! geometry). Same inputs, same answer: the modules run on the CPU, each
 //! pixel computed alone.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, NodeId, Params, Region, Value};
@@ -92,29 +95,57 @@ pub fn measured_region(
         .then(|| Region::new(left, top, (right - left) as u32, (bottom - top) as u32))
 }
 
+/// The raw front's modules, in order, by module id.
+pub const RAW_FRONT: [&str; 4] = ["rawprepare", "whitebalance", "highlights", "demosaic"];
+
+/// Parameters for the raw front's modules, by module id ([`RAW_FRONT`]):
+/// an edit's. A module not named keeps its defaults.
+pub type RawFront = BTreeMap<String, Params>;
+
 fn module_error(e: impl std::fmt::Display) -> ChartError {
     ChartError::RawGraph(e.to_string())
 }
 
 /// The measurement graph on `mosaic`: its source, `rawprepare` (the clip
 /// source) and `demosaic` (the measured values).
-fn graph(mosaic: Image, camera: &CameraInfo) -> Result<(Graph, NodeId, NodeId), ChartError> {
+fn graph(
+    mosaic: Image,
+    camera: &CameraInfo,
+    front: &RawFront,
+) -> Result<(Graph, NodeId, NodeId), ChartError> {
     let mut graph = Graph::new();
     let source = graph.add_source("raw", mosaic);
     let none = Params::new();
     let balance = Params::new().with("mode", Value::Choice(CAMERA_REFERENCE.into()));
+    let given = |name: &str, default: &Params| front.get(name).unwrap_or(default).clone();
     let steps = [
-        ("rawprepare", ModuleRef::new(RawPrepare), &none),
-        ("whitebalance", ModuleRef::new(WhiteBalance), &balance),
-        ("highlights", ModuleRef::new(Highlights), &none),
-        ("demosaic", ModuleRef::new(Demosaic), &none),
+        (
+            "rawprepare",
+            ModuleRef::new(RawPrepare),
+            given("rawprepare", &none),
+        ),
+        (
+            "whitebalance",
+            ModuleRef::new(WhiteBalance),
+            given("whitebalance", &balance),
+        ),
+        (
+            "highlights",
+            ModuleRef::new(Highlights),
+            given("highlights", &none),
+        ),
+        (
+            "demosaic",
+            ModuleRef::new(Demosaic),
+            given("demosaic", &none),
+        ),
     ];
     let context = camera.to_context();
     let mut ids = Vec::with_capacity(steps.len());
     let (mut from, mut port) = (source, "image");
     for (name, module, params) in steps {
         let id = graph
-            .add_module(name, module, params)
+            .add_module(name, module, &params)
             .map_err(module_error)?;
         graph
             .connect(from, port, id, "input")
@@ -129,18 +160,20 @@ fn graph(mosaic: Image, camera: &CameraInfo) -> Result<(Graph, NodeId, NodeId), 
 }
 
 /// Renders the measurement graph of `mosaic` (a raw's sensor data in
-/// counts, one channel, the loader's region) over `region`.
+/// counts, one channel, the loader's region) over `region`, its modules
+/// with `front`'s parameters.
 ///
 /// # Errors
 /// A camera without a usable matrix, or a module refusing the camera's
-/// description.
+/// description or the parameters.
 pub fn measure_raw(
     mosaic: Image,
     camera: &CameraInfo,
     region: Region,
+    front: &RawFront,
 ) -> Result<Measured, ChartError> {
     let standard = camera_to_working(&camera.xyz_to_camera).ok_or(ChartError::NoCameraMatrix)?;
-    let (graph, prepared, demosaiced) = graph(mosaic, camera)?;
+    let (graph, prepared, demosaiced) = graph(mosaic, camera, front)?;
     let engine = Engine::new(Arc::new(Bus::new()));
     let image = engine
         .render(&graph, demosaiced, "output", region)
@@ -177,6 +210,20 @@ pub fn calibrate_raw(
     mosaic: Image,
     camera: &CameraInfo,
 ) -> Result<ChartAnswer, ChartError> {
+    calibrate_raw_with(args, mosaic, camera, &RawFront::new())
+}
+
+/// [`calibrate_raw`] with the raw front's modules set to `front`'s
+/// parameters (the image's edit), the others at their defaults.
+///
+/// # Errors
+/// As [`calibrate_raw`].
+pub fn calibrate_raw_with(
+    args: &ChartArgs,
+    mosaic: Image,
+    camera: &CameraInfo,
+    front: &RawFront,
+) -> Result<ChartAnswer, ChartError> {
     if !args.dry_run {
         return Err(ChartError::NotDryRun);
     }
@@ -191,7 +238,7 @@ pub fn calibrate_raw(
     }
     let region =
         measured_region(chart, args.corners, mosaic.region()).ok_or(ChartError::OutsideImage)?;
-    let measured = measure_raw(mosaic, camera, region)?;
+    let measured = measure_raw(mosaic, camera, region, front)?;
     let (dx, dy) = (region.x as f64, region.y as f64);
     let mut shifted = args.clone();
     shifted.corners = args.corners.map(|[x, y]| [x - dx, y - dy]);

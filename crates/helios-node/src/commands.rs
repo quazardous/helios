@@ -281,30 +281,7 @@ fn verbs() -> Vec<CommandSpec> {
             or_null(string()),
             false,
         )])),
-        CommandSpec::new(
-            "calibrate.chart",
-            "Measure a colour chart shot",
-            "Calibration",
-        )
-        .params(object(&[
-            ("path", absolute(), true),
-            (
-                "corners",
-                json!({ "type": "array", "minItems": 4, "maxItems": 4,
-                            "items": { "type": "array", "minItems": 2, "maxItems": 2,
-                                       "items": { "type": "number" } },
-                            "description": "the four corner patches' centres, [x, y] in pixels" }),
-                true,
-            ),
-            ("chart", or_null(string()), false),
-            ("exclude", strings(), false),
-            (
-                "dry_run",
-                json!({ "type": "boolean", "enum": [true] }),
-                false,
-            ),
-        ]))
-        .read_only(),
+        crate::calibrate::chart_spec(),
     ]
 }
 
@@ -314,7 +291,11 @@ pub fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
     REGISTRY.get_or_init(|| {
         let mut registry = Registry::new();
-        for spec in verbs().into_iter().chain(crate::library::specs()) {
+        for spec in verbs()
+            .into_iter()
+            .chain(crate::library::specs())
+            .chain(crate::calibrate::profile_specs())
+        {
             registry.register(spec).expect("each verb is declared once");
         }
         registry
@@ -421,8 +402,10 @@ mod tests {
             ("cache.clear", json!({ "kind": null })),
             (
                 "calibrate.chart",
-                json!({ "path": "/chart.png", "corners": [[0, 0], [1, 0], [1, 1], [0, 1]],
-                        "chart": null, "exclude": ["B3"], "dry_run": true }),
+                json!({ "path": "/chart.png", "image": null,
+                        "corners": [[0, 0], [1, 0], [1, 1], [0, 1]],
+                        "chart": null, "exclude": ["B3"], "dry_run": true,
+                        "save": true, "name": "Flash" }),
             ),
         ]
     }
@@ -435,7 +418,9 @@ mod tests {
         let ids: Vec<&str> = registry()
             .specs()
             .map(|s| s.id.as_str())
-            .filter(|id| !crate::library::handles(id))
+            .filter(|id| {
+                !crate::library::handles(id) && !crate::calibrate::PROFILE_IDS.contains(id)
+            })
             .collect();
         let mut named: Vec<&str> = examples.iter().map(|(id, _)| *id).collect();
         named.sort_unstable();

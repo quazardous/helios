@@ -33,25 +33,41 @@ batch-vault-attached = --vault with a running node only keeps sidecars: it needs
 
 calibrate-bad-image = the chart shot has no pixel or fewer than three channels
 
-calibrate-dry-run-only = only the dry run is answered so far: saving a profile is not built yet
+calibrate-bad-params = calibrate.chart: { $error }
+
+calibrate-image-not-at-hand = no file of image { $image } is at hand
 
 calibrate-load-failed = cannot read the chart shot: { $error }
+
+calibrate-needs-vault = the node keeps no vault: saving and reading profiles need one (start it with --vault)
 
 calibrate-no-camera-matrix = the camera has no usable colour matrix to measure the raw against
 
 calibrate-no-neutral = the chart could not be solved at these corners: no neutral patch is kept
 
+calibrate-no-profile = no calibration profile `{ $id }`
+
+calibrate-no-shot = calibrate.chart needs `path` or `image`, the chart shot
+
 calibrate-outside-image = the chart's patches fall outside the image
 
 calibrate-raw-graph = the raw could not be developed for measuring: { $error }
+
+calibrate-save-needed = a run that writes needs `save`: the profile is what it writes
 
 calibrate-too-few-patches = the chart could not be solved at these corners: too few patches are kept
 
 calibrate-unknown-chart = no chart `{ $chart }`
 
+calibrate-unknown-command = no command `{ $id }`
+
+calibrate-unknown-image = `{ $image }` is neither an image id nor a file the vault knows
+
 calibrate-unknown-patch = the chart has no patch `{ $patch }`
 
 calibrate-unsolved = the chart could not be measured and solved at these corners
+
+calibrate-vault-error = the vault: { $error }
 
 engine-failure-compile = compile
 
@@ -491,6 +507,8 @@ gui-history-album-rules = Edit the rules of “{ $name }”
 
 gui-history-batch = { $label } ({ $count } values)
 
+gui-history-calibration-delete = Delete the calibration profile “{ $name }”
+gui-history-calibration-save = Save the calibration profile “{ $name }”
 gui-history-import = Import { $count } photos
 
 gui-history-preview-applied = applied

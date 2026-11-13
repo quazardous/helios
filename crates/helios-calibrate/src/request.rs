@@ -4,8 +4,8 @@
 //!
 //! A raw is measured on its sensor data by [`crate::raw::calibrate_raw`].
 //!
-//! Only the dry run is answered so far: the report, nothing written.
-//! Saving the profile comes with the profile store.
+//! The library measures only (a dry run, nothing written): a node saves
+//! the answer as a profile ([`crate::profile`]) when asked to.
 //!
 //! The measured image is the caller's. For a decoded picture
 //! ([`calibrate_picture`]) it is the picture's linear working RGB, as
@@ -39,7 +39,8 @@ pub struct ChartArgs {
     /// Patch names the solver leaves out (`B3`).
     #[serde(default)]
     pub exclude: Vec<String>,
-    /// Report only, write nothing: the only mode answered so far.
+    /// Report only, write nothing (the library's only mode: a node saves
+    /// the profile when `save` is asked).
     #[serde(default = "yes")]
     pub dry_run: bool,
 }
@@ -68,7 +69,8 @@ impl ChartArgs {
 /// Why `calibrate.chart` gives no answer.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChartError {
-    /// `dry_run` false: saving a profile is not built yet.
+    /// `dry_run` false here: the library writes nothing, the node saves
+    /// (`save`).
     NotDryRun,
     UnknownChart(String),
     UnknownPatch(String),
@@ -87,9 +89,9 @@ pub enum ChartError {
 impl fmt::Display for ChartError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ChartError::NotDryRun => f.write_str(
-                "only the dry run is answered so far: saving a profile is not built yet",
-            ),
+            ChartError::NotDryRun => {
+                f.write_str("a run that writes needs `save`: the profile is what it writes")
+            }
             ChartError::UnknownChart(id) => write!(f, "no chart `{id}`"),
             ChartError::UnknownPatch(name) => write!(f, "the chart has no patch `{name}`"),
             ChartError::BadImage => {
@@ -196,7 +198,7 @@ pub enum ChartWarning {
 /// `calibrate.chart`'s answer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChartAnswer {
-    /// Always true so far: nothing was written.
+    /// True when nothing was written (a profile saved: false).
     pub dry_run: bool,
     pub chart: String,
     pub orientation: OrientationAnswer,

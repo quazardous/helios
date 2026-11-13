@@ -37,6 +37,7 @@ pub mod homography;
 pub mod lab;
 pub mod layout;
 pub mod look;
+pub mod profile;
 pub mod raw;
 pub mod request;
 pub mod run;
@@ -46,7 +47,10 @@ pub mod solver;
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
 pub use layout::{ImageView, Layout, Point};
-pub use raw::{Measured, calibrate_raw, measure_raw, measured_region};
+pub use profile::{PROFILE_FORMAT, Profile, ProfileSource, camera_key};
+pub use raw::{
+    Measured, RAW_FRONT, RawFront, calibrate_raw, calibrate_raw_with, measure_raw, measured_region,
+};
 pub use request::{ChartAnswer, ChartArgs, ChartError, calibrate_picture, calibrate_shot};
 pub use run::{Illuminant, Report, Request, RunError, Shot, calibrate, working_to_xyz};
 pub use sampler::{

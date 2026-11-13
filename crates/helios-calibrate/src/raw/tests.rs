@@ -91,7 +91,7 @@ fn the_graph_gives_each_patch_its_camera_rgb_back() {
     let scene = scene();
     let mosaic = mosaic_of(&scene.camera_rgb);
     let region = measured_region(CHART, CORNERS, mosaic.region()).unwrap();
-    let measured = measure_raw(mosaic, &camera(), region).unwrap();
+    let measured = measure_raw(mosaic, &camera(), region, &RawFront::new()).unwrap();
     assert_eq!(measured.image.region(), region);
     assert_eq!(measured.clip.channels(), 1);
     assert_eq!(measured.standard, camera_to_working(&CAMERA).unwrap());
@@ -218,4 +218,38 @@ fn the_same_raw_gives_the_same_answer() {
         serde_json::to_string(&answer).unwrap()
     };
     assert_eq!(run(), run());
+}
+
+#[test]
+fn the_raw_front_takes_the_edit_s_parameters() {
+    let scene = scene();
+    let run = |front: &RawFront| {
+        let answer = calibrate_raw_with(
+            &ChartArgs::new(CORNERS),
+            mosaic_of(&scene.camera_rgb),
+            &camera(),
+            front,
+        )
+        .unwrap();
+        serde_json::to_string(&answer).unwrap()
+    };
+    let defaults = run(&RawFront::new());
+    // The edit's white balance said as the default is: the same answer.
+    let reference: RawFront = [(
+        "whitebalance".to_string(),
+        Params::new().with("mode", Value::Choice(CAMERA_REFERENCE.into())),
+    )]
+    .into();
+    assert_eq!(run(&reference), defaults);
+    // The edit's own white balance is the one measured through.
+    let user: RawFront = [(
+        "whitebalance".to_string(),
+        Params::new()
+            .with("mode", Value::Choice("user".into()))
+            .with("red", Value::Float(2.0))
+            .with("green", Value::Float(1.0))
+            .with("blue", Value::Float(1.0)),
+    )]
+    .into();
+    assert_ne!(run(&user), defaults);
 }

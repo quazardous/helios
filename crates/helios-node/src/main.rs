@@ -830,6 +830,7 @@ mod control {
             self == Self::Debug
                 || BATCH_VERBS.contains(&verb)
                 || helios_node::library::handles(verb)
+                || helios_node::calibrate::handles(verb)
         }
     }
 
@@ -918,6 +919,21 @@ mod control {
         }
         if let Some(reason) = disabled(node, scope, spec) {
             return refused(None, &reason);
+        }
+        if helios_node::calibrate::PROFILE_IDS.contains(&id) {
+            node.bus.publish(SOURCE, None, &CommandRan { id, origin });
+            let vault = node.importer.as_ref().map(|i| i.vault().as_ref());
+            let mut answer = match helios_node::calibrate::run(vault, id, params, now()) {
+                Ok(done) => {
+                    let mut answer = done.answer;
+                    answer["ok"] = json!(true);
+                    answer
+                }
+                Err(e) => refused(None, &e),
+            };
+            answer["command"] = json!(id);
+            answer["origin"] = json!(origin);
+            return answer;
         }
         if helios_node::library::handles(id) {
             node.bus.publish(SOURCE, None, &CommandRan { id, origin });
@@ -1237,23 +1253,12 @@ mod control {
                 Ok(json!({}))
             }
             ControlRequest::CacheStats => Ok(helios_cache::Service::global().snapshot()),
-            ControlRequest::CalibrateChart {
-                path,
-                corners,
-                chart,
-                exclude,
-                dry_run,
-            } => helios_node::calibrate::chart(
-                path,
-                &helios_calibrate::ChartArgs {
-                    corners: *corners,
-                    chart: chart
-                        .clone()
-                        .unwrap_or_else(|| helios_calibrate::request::DEFAULT_CHART.into()),
-                    exclude: exclude.clone(),
-                    dry_run: *dry_run,
-                },
-            ),
+            ControlRequest::CalibrateChart { .. } => {
+                let params = serde_json::to_value(&request).unwrap_or_default();
+                let vault = node.importer.as_ref().map(|i| i.vault().as_ref());
+                helios_node::calibrate::run(vault, helios_node::calibrate::CHART, &params, now())
+                    .map(|done| done.answer)
+            }
             ControlRequest::CacheClear { kind } => Ok(json!({
                 "freed": helios_cache::Service::global().clear(kind.as_deref()),
             })),
