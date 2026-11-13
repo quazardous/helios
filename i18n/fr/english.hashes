@@ -935,12 +935,12 @@ gui-settings-for-workspace-about 74fc5dad0d4c8b3b
 gui-settings-health 7633e8a1583e45e7
 gui-settings-health-check c1e913ce62823067
 gui-settings-plugin-granted 2c8c84258a75df83
-gui-settings-plugin-name f272a9b884fbf0d8
+gui-settings-plugin-no-capability f2a2f96d1902f843
 gui-settings-plugin-reason b548901a66fbd4b1
+gui-settings-plugin-refused 79efaad4cbe227a7
+gui-settings-plugin-settings 3b5b172596a8843e
 gui-settings-plugins f4791889f7d7e08b
-gui-settings-plugins-about a0bae695137a1523
 gui-settings-plugins-capabilities 83dd6669158d29a3
-gui-settings-plugins-none 56632202a58d9500
 gui-size-bytes f7153bf939a9449c
 gui-size-gib 05df2d85b96c6970
 gui-size-kib 053b6d255ce6ae14

@@ -1457,17 +1457,17 @@ gui-settings-library = Library
 
 gui-settings-plugin-granted = Allowed
 
-gui-settings-plugin-name = Plugin
+gui-settings-plugin-no-capability = It asks for no permission.
 
 gui-settings-plugin-reason = Why
 
+gui-settings-plugin-refused = This plugin's settings are not shown: { $problems }
+
+gui-settings-plugin-settings = Settings
+
 gui-settings-plugins = Plugins
 
-gui-settings-plugins-about = What each plugin may do. A plugin asks the first time it needs a permission; Helios remembers your answer.
-
 gui-settings-plugins-capabilities = Permissions
-
-gui-settings-plugins-none = No plugin asks for a permission.
 
 gui-settings-snapshots = Snapshots
 
