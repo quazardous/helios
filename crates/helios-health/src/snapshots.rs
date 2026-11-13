@@ -4,11 +4,20 @@
 //! one line; snapshots, once taken, only fill a [`Snapshots`].
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use helios_core::Message;
 use serde_json::json;
 
-use crate::{Check, Context, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Finding, Fix, Level};
+
+/// The owner of the snapshots' check: the catalogue.
+pub const OWNER: &str = "catalogue";
+
+/// The catalogue's checks: its last verified snapshot.
+pub fn checks() -> Vec<Arc<dyn Check>> {
+    vec![Arc::new(SnapshotsCheck)]
+}
 
 pub const SNAPSHOTS: &str = "catalogue.snapshots";
 
@@ -59,6 +68,12 @@ impl Check for SnapshotsCheck {
 
     fn title(&self) -> Message {
         Message::new("health-snapshots", "Catalogue snapshots")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("The catalogue's last verified snapshot: present, restorable and recent")
+            .levels(&[Level::Ok, Level::Warning, Level::Problem])
+            .fixes(&["library.openFolder"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {

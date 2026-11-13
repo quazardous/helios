@@ -440,6 +440,8 @@ gui-history-quick-clear = Vider la collection rapide
 gui-history-quick-save = Enregistrer la collection rapide sous « { $name } »
 gui-history-album-rules = Modifier les règles de « { $name } »
 
+gui-history-camera-look-fit = Ajuster le rendu boîtier au JPEG de l’appareil
+
 gui-history-preview-applied = appliqué
 
 gui-history-preview-bypassed = contourné
@@ -545,6 +547,22 @@ gui-library-badge-backup-unverified = non vérifiée
 gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
+
+gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
+
+gui-look-header-fit = Ajuster au JPEG de l’appareil
+
+gui-look-header-fit-about = Ajuste une matrice, une table teinte et saturation et des courbes de tons au JPEG intégré de l’appareil, vérifiés sur des pixels qui n’ont pas servi à l’ajustement
+
+gui-look-header-fitted = Ajusté au JPEG de l’appareil : Delta E { $held } (par défaut { $baseline })
+
+gui-look-header-none = Pas encore ajusté : le rendu part du JPEG de l’appareil lui-même
+
+gui-look-header-refit = Réajuster
+
+gui-look-header-refused = Non ajusté : { $reason }
+
+gui-look-header-switch = Rendu boîtier
 
 gui-mask-display = Afficher le masque
 
@@ -2156,6 +2174,10 @@ health-vault-damaged-detail = { $file } : { $first } ({ $count } erreurs). Resta
 health-vault-unreadable = Le catalogue ne peut pas être vérifié
 
 health-vault-unreadable-detail = { $file } : { $error }
+
+look-load-failed = impossible de lire la photo : { $error }
+
+look-render-failed = impossible de développer le raw : { $error }
 
 gui-library-offline-on = Sur { $volume }, vu pour la dernière fois le { $date } sur { $node }
 

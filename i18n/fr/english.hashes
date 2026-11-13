@@ -571,6 +571,7 @@ gui-history-calibration-delete 94da8120961af40e
 gui-history-calibration-import 4931f637c83e8b50
 gui-history-calibration-off dcaad546e81ba1b9
 gui-history-calibration-save 40e060e250f7ee04
+gui-history-camera-look-fit 632c8f5dace2095e
 gui-history-import 54b5fc5f7ff45a8e
 gui-history-preview-applied e4ec2cb3e00f5ea8
 gui-history-preview-bypassed 02942dd0aa53a222
@@ -848,6 +849,14 @@ gui-library-tags d8aadaa7f12dec16
 gui-library-volume-offline 5f2b93239dade10c
 gui-log-clear 238f7a82e564b550
 gui-log-empty 204c4ef685556125
+gui-look-header-chart 1a3e64ad95dd7ed6
+gui-look-header-fit abdf56943d9b004b
+gui-look-header-fit-about 4a67652cacc37dd8
+gui-look-header-fitted 3ea09dd786644131
+gui-look-header-none c3605523df2773b1
+gui-look-header-refit 44ee1821930d2c47
+gui-look-header-refused d1a4beeb3927ea68
+gui-look-header-switch ca79fd41d3155331
 gui-macro-fold-detail d63939bfb0cb05f6
 gui-macro-fold-discard b8d533c186819cc9
 gui-macro-fold-discard-hint f6c2cea0052fa938
@@ -1509,6 +1518,8 @@ health-vault-ok 459a72792fe7153e
 health-vault-ok-detail 361b930170208c98
 health-vault-unreadable f3d10565cbc6623e
 health-vault-unreadable-detail 61f97265649bdc9f
+look-load-failed fb5b6895ff118a7d
+look-render-failed 1464794c5194db67
 menu-helios-file-importFrom.label 2605aaed9c91a322
 menu-helios-masks-row-add.label ea5be6af4dfc4a82
 menu-helios-system-profiles.label 493fa9da88311dbf

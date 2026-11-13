@@ -23,6 +23,10 @@ helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
+# A camera look's proxies: the raw rendered through the develop chain.
+helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-exposure = { path = "../../modules/exposure" }
+helios-module-sigmoid = { path = "../../modules/sigmoid" }
 
 [dev-dependencies]
 # A profile with its residual table rendered as the module renders it.

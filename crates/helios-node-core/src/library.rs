@@ -512,6 +512,7 @@ mod tests {
             json!({ "image": "0a" }),
             json!({ "image": "0a", "edit": {}, "label": "macro.make" }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
+            json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
             json!({}),
             json!({ "images": ["/p/a.raf", "0a"], "top": null }),
             json!({ "stack": "s" }),
@@ -521,7 +522,10 @@ mod tests {
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
             json!({}),
+            json!({ "limit": 10 }),
+            json!({ "id": "1700000000000-42-0" }),
         ];
+        assert_eq!(examples.len(), IDS.len(), "one example per command");
         for (spec, example) in specs().iter().zip(examples) {
             validate(&spec.params, &example).unwrap_or_else(|e| panic!("{}: {e}", spec.id));
         }

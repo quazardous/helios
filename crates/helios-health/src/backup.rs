@@ -3,13 +3,29 @@
 //! still inserted are safe to format. They read a [`Backup`], gathered
 //! from the vault once per run ([`Backup::read`]).
 
+use std::sync::Arc;
+
 use helios_core::Message;
 use helios_storage::strategy::{self, BackupStatus, Scope, Strategy};
 use helios_storage::{Volume, registry};
 use helios_vault::{Store, Vault};
 use serde_json::json;
 
-use crate::{Check, Context, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Finding, Fix, Level};
+
+/// The owner of the backup checks ([`checks`]).
+pub const OWNER: &str = "backup";
+
+/// The backup module's checks, in the order they run.
+pub fn checks() -> Vec<Arc<dyn Check>> {
+    vec![
+        Arc::new(StrategySet),
+        Arc::new(StrategyMet),
+        Arc::new(DestinationsSeen),
+        Arc::new(Unverified),
+        Arc::new(Cards),
+    ]
+}
 
 /// Days a backup destination may stay away before a warning, by default.
 pub const DESTINATION_DAYS: u64 = 14;
@@ -112,6 +128,12 @@ impl Check for StrategySet {
         Message::new("health-strategy", "Backup strategy")
     }
 
+    fn declaration(&self) -> Declaration {
+        Declaration::new("A backup strategy is set for the library")
+            .levels(&[Level::Ok, Level::Warning])
+            .fixes(&["admin.open"])
+    }
+
     fn run(&self, ctx: &Context) -> Vec<Finding> {
         let Some(backup) = &ctx.backup else {
             return Vec::new();
@@ -163,6 +185,12 @@ impl Check for StrategyMet {
 
     fn title(&self) -> Message {
         Message::new("health-met", "Photos backed up")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Every photo has the verified copies its strategy asks for")
+            .levels(&[Level::Ok, Level::Warning])
+            .fixes(&["library.backupNow", "library.storage"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -223,6 +251,12 @@ impl Check for DestinationsSeen {
 
     fn title(&self) -> Message {
         Message::new("health-seen", "Backup disks seen lately")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("The strategy's backup disks were plugged in lately")
+            .levels(&[Level::Ok, Level::Warning])
+            .fixes(&["library.storage"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -303,6 +337,12 @@ impl Check for Unverified {
         Message::new("health-unverified", "Verified copies")
     }
 
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Backup copies not yet read back and matched to their hash")
+            .levels(&[Level::Warning])
+            .fixes(&["library.backupNow"])
+    }
+
     fn run(&self, ctx: &Context) -> Vec<Finding> {
         let Some((backup, _)) = strategy_of(ctx) else {
             return Vec::new();
@@ -347,6 +387,12 @@ impl Check for Cards {
 
     fn title(&self) -> Message {
         Message::new("health-cards", "Cards safe to format")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("The cards still inserted whose photos are short of their backups")
+            .levels(&[Level::Warning])
+            .fixes(&["library.backupNow"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {

@@ -1120,9 +1120,23 @@ Backup › Strategy.
 The checks run as one background job (kind `health`, in the jobs
 centre): 30 seconds after start, then daily, and when a volume is
 mounted or goes (the storage watch). A check is a `helios_health::Check`
-(`id`, `title`, `run(&Context) -> Vec<Finding>`), kept in a `Registry`
-that plugins will extend; a check that panics becomes a problem of its
-own. Helios's own:
+(`id`, `title`, `declaration`, `run(&Context) -> Vec<Finding>`), kept in
+a `Registry` by owner: the module that declares it (`storage`,
+`library`, `backup`, `gpu`, `plugins`, `catalogue`), or the plugin
+(its id) for the checks a plugin declares in its manifest and answers
+through its process (`helios_plugin::health`, docs/extensions.md, "Health
+checks"); a plugin that crashes or does not answer within 20 s gives
+that check's "failed" problem.
+
+Health checks are a contract (`helios_health::contract`): each check
+declares what it watches, the levels its findings may have and the fix
+commands they may offer. `Registry::add` refuses an owner or a
+declaration that is unsound (an id that is not lowercase, no level, a
+fix that is not a command id), with its reasons; a finding outside its
+check's declaration (another level, another fix) turns that check's run
+into a problem of its own, like a check that panics. Each module lists
+its checks (`helios_health::backup::checks()` and so on), and
+`Registry::builtin` gathers them. Helios's own:
 
 - **Free space** on the library's volume (the one holding the vault's
   folder) and on every volume with a library, archive, backup or

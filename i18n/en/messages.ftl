@@ -653,6 +653,8 @@ gui-history-calibration-off = Turn the calibration profile off
 
 gui-history-calibration-save = Save the calibration profile “{ $name }”
 
+gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
+
 gui-history-import = Import { $count } photos
 
 gui-history-preview-applied = applied
@@ -1224,6 +1226,22 @@ gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date 
 gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet
+
+gui-look-header-chart = Colour half off: the chart profile rules the colours
+
+gui-look-header-fit = Fit to the camera's JPEG
+
+gui-look-header-fit-about = Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit
+
+gui-look-header-fitted = Fitted to the camera's JPEG: Delta E { $held } (default { $baseline })
+
+gui-look-header-none = Not fitted yet: the look starts from the camera's own JPEG
+
+gui-look-header-refit = Refit
+
+gui-look-header-refused = Not fitted: { $reason }
+
+gui-look-header-switch = Camera look
 
 gui-macro-fold-detail = Changed: { $changes }
 
@@ -2642,6 +2660,10 @@ health-vault-ok-detail = { $file } passed SQLite's quick check
 health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
+
+look-load-failed = cannot read the photo: { $error }
+
+look-render-failed = cannot render the raw: { $error }
 
 node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import, settings.layer.*, commands.list and command.run
 
