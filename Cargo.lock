@@ -2747,6 +2747,7 @@ dependencies = [
  "helios-calibrate",
  "helios-colour",
  "helios-config",
+ "helios-connect",
  "helios-core",
  "helios-decision",
  "helios-display",
@@ -2784,6 +2785,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]

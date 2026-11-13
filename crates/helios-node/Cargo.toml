@@ -46,6 +46,9 @@ helios-module-vkdt = { path = "../../modules/vkdt" }
 helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
+# The saved import sources' document (`user/import-sources`).
+toml = "1"
+helios-connect.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 # MIT OR Apache-2.0: a safe flag set on Ctrl-C, for `helios batch` and

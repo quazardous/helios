@@ -2,7 +2,8 @@
 //! volume watch, the backups, the health check) and closes the vault
 //! cleanly when it stops, in process or on SIGTERM; an import through
 //! the node starts the strategy's after-import backup; its settings
-//! layers are read and written through its control endpoint.
+//! layers are read and written through its control endpoint; the saved
+//! sources' automatic imports run with no window.
 
 mod common;
 
@@ -206,6 +207,150 @@ fn an_import_through_the_node_is_backed_up_then_the_health_check_runs_and_the_no
         usize::from(PHOTOS),
         "the copies are recorded in the vault"
     );
+}
+
+/// Volumes plugged in and out by the test.
+#[derive(Default)]
+struct Plugged(std::sync::Mutex<Vec<Volume>>);
+
+impl Volumes for Plugged {
+    fn volumes(&self) -> Vec<Volume> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// Distinct photo bytes: each its own content.
+fn photo(path: &Path, seed: u8) {
+    let bytes: Vec<u8> = (0..20_000u32)
+        .map(|i| (i as u8).wrapping_mul(seed) ^ seed)
+        .collect();
+    std::fs::write(path, bytes).unwrap();
+}
+
+/// The headless node runs the saved sources' automatic imports: a card
+/// plugged in is copied with its own choices, a file settled in a watched
+/// folder is added where it is, both recorded as `auto:<source>` in the
+/// import history; a source whose first run was never confirmed is held
+/// and said on the bus, not imported.
+#[test]
+fn the_node_runs_the_saved_sources_automatic_imports_with_their_own_origin() {
+    use helios_library::auto_import::Timing;
+    use helios_storage::VolumeKind;
+
+    let p = Place::new("auto");
+    let file = p.0.join("vault.db");
+    let (card, hot, fresh, into) = (
+        p.0.join("EOS_DIGITAL"),
+        p.0.join("hot"),
+        p.0.join("fresh"),
+        p.0.join("photos"),
+    );
+    let dcim = card.join("DCIM/100CANON");
+    for dir in [&dcim, &hot, &fresh] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    photo(&dcim.join("IMG_0001.RAF"), 1);
+    photo(&dcim.join("IMG_0002.RAF"), 2);
+    let vault = Vault::new(SqliteStore::open(&file).unwrap());
+    let doc = format!(
+        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = \"/media/elsewhere\"\n\
+         volume = \"uuid:card\"\nauto = \"plugged\"\nconfirmed = \"2026-11-13\"\n\n\
+         [source.choices]\ninto = {into:?}\nlayout = \"flat\"\n\n\
+         [[source]]\nconnector = \"folder\"\nname = \"Hot\"\npath = {hot:?}\n\
+         auto = \"new-files\"\nconfirmed = \"2026-11-13\"\n\n\
+         [[source]]\nconnector = \"folder\"\nname = \"Fresh\"\npath = {fresh:?}\nauto = \"new-files\"\n"
+    );
+    vault
+        .set_config_layer("user/import-sources", Some(&doc))
+        .unwrap();
+    let bus = Arc::new(Bus::new());
+    let jobs = Jobs::new(bus.clone());
+    let plugged = Arc::new(Plugged::default());
+    let volumes: Arc<dyn Volumes> = plugged.clone();
+    let mut node = VaultNode::start(
+        vault,
+        &file,
+        bus.clone(),
+        &jobs,
+        Options {
+            volumes,
+            schedule: Schedule::new(
+                Instant::now(),
+                Duration::from_hours(1),
+                Duration::from_hours(1),
+            ),
+            clock: Duration::from_secs(1),
+        },
+    );
+    node.run_automatic_imports(Timing {
+        poll: Duration::from_millis(50),
+        settle: Duration::from_millis(200),
+    });
+    let link = node.link();
+
+    // The card plugged in, mounted elsewhere than it was saved at: known
+    // by its volume, its photos copied into its own folder.
+    let mut volume = disk("uuid:card", &card, &[]);
+    (volume.kind, volume.has_dcim) = (VolumeKind::Removable, true);
+    plugged.0.lock().unwrap().push(volume);
+    assert!(
+        until(Duration::from_secs(30), || node
+            .vault()
+            .images()
+            .unwrap()
+            .len()
+            == 2),
+        "the card imported in 30 s"
+    );
+    assert!(
+        into.join("IMG_0001.RAF").is_file(),
+        "copied into its folder"
+    );
+
+    // A file settled in the watched folder: added where it is.
+    photo(&hot.join("a.raf"), 3);
+    // One in the folder never confirmed: held, not imported.
+    photo(&fresh.join("b.raf"), 4);
+    assert!(
+        until(Duration::from_secs(30), || node
+            .vault()
+            .images()
+            .unwrap()
+            .len()
+            == 3),
+        "the hot folder's file imported in 30 s"
+    );
+    assert!(
+        until(Duration::from_secs(30), || bus.since(0).iter().any(|e| {
+            e.kind == "import.automatic.held"
+                && e.payload["source"] == "Fresh"
+                && e.payload["verdict"] == "confirm"
+        })),
+        "the unconfirmed source held and said in 30 s"
+    );
+    assert!(
+        until(Duration::from_secs(30), || link.running_jobs().is_empty()),
+        "the imports ended in 30 s"
+    );
+    assert_eq!(
+        node.vault().images().unwrap().len(),
+        3,
+        "Fresh not imported"
+    );
+    let mut origins: Vec<String> = helios_library::import_history::list(node.vault(), None)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.origin)
+        .collect();
+    origins.sort();
+    assert_eq!(origins, ["auto:Camera", "auto:Hot"]);
+
+    let stopping = std::thread::spawn(move || node.stop());
+    assert!(
+        link.wait_stopped(Duration::from_secs(30)),
+        "the node stopped in 30 s"
+    );
+    stopping.join().unwrap();
 }
 
 /// The binary: SIGTERM stops the node, which closes the vault cleanly

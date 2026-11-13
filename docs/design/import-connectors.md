@@ -627,15 +627,17 @@ later, so a studio machine ingests a hot folder with no window (C7).
 Built (2026-11-13): `helios_library::import_history`. The record is
 written by the library's import itself, so the desktop, the headless
 node, the CLI and an importer plugin all leave one: when, who asked (the
-origin: `user`, `cli`, `agent:NAME`), the sources, the choices as
+origin: `user`, `cli`, `agent:NAME`, `auto:SOURCE`), the sources, the choices as
 `library.import` takes them, the counts, or the error of an import that
 could not start. Its key is the time with the process and a number (a job
 id is unique only in its process); the last 200 are kept. The commands
 `import.history.list` and `import.history.again` are served by the node
 and the desktop; the import window lists the last ten under its sources,
-each with Import again. Not yet: the machine, the saved import it came
-from, the cards' safety and bytes, Save as…, a Window menu entry, remote
-(connector) imports and an automatic import's own origin.
+each with Import again. An automatic import is recorded as `auto:<source>`
+(the saved source's name), on the desktop and the headless node alike.
+Not yet: the machine, the saved import it came
+from, the cards' safety and bytes, Save as…, a Window menu entry and remote
+(connector) imports.
 
 ### 3.5 Where they live
 
@@ -837,6 +839,25 @@ lines and report in the Log panel and its end said. Its start is a
 notice and a Log line ("Automatic import from Camera: 12 files"); a card
 imported so is not toasted "inserted".
 
+**The headless node runs them too** (built 2026-11-13): `helios-node
+--vault`, unless started for a client (`--idle-exit`), reads the same
+`user/import-sources` and the person's settings at each pass
+(`helios_node::auto_import`): a card mounted (one there at start
+included) whose source says `plugged`, matched by its volume id, else
+the path it was saved at, is copied; a watched folder is looked at every
+2 seconds, a file taken once it held still for 3, as the desktop's
+(`helios_library::auto_import::Settling`, shared). The import is the
+node's own job, followed by the strategy's after-import backup. With no
+window to ask in, a batch the safeguards hold (paused, a first run not
+confirmed, above the limits) is left alone, said on the node's error
+output and on its bus (`import.automatic.held`: source, root, verdict,
+files, bytes); a first run is confirmed in a desktop's import window on
+the same vault. A source without choices of its own takes the local
+sources' defaults on the node (the window's last choices live on the
+desktop). The desktop and a node never run them on one vault together:
+the desktop's own node holds the vault, and clients reach it through its
+rendezvous.
+
 **Only what is new.** An automatic import always skips duplicates,
 whatever the source's choices say (it never keeps nor asks about one):
 a photo the Library holds is skipped by its content hash, and a file
@@ -889,11 +910,7 @@ Not yet, from sections 3.2 and 3.3:
 - remote sources (a schedule, "every N hours", or a change feed);
 - an "Import" button on the question's toast (a toast offers one
   command: Open) and a status bar item while paused; pausing on battery
-  and during a render;
-- the headless node running them (C7, later);
-- an import history record (`import/history`) beyond the Library's undo
-  step and the Log panel;
-- a card matched by its volume identity rather than its mount root.
+  and during a render (on the headless node too).
 
 ## 4. The connectors surveyed
 
@@ -1600,7 +1617,8 @@ Decided (2026-11-11): **A**.
 - B. The node from the start, as a background service.
 
 Decided (2026-11-11): **A**: the node's service mode is not built yet, and an
-import the person cannot see is the surprise C6 avoids.
+import the person cannot see is the surprise C6 avoids. Built (2026-11-13): the
+headless node runs them too, with the same safeguards (section 3.10).
 
 **C8. What "filter profile" means.**
 - A. A saved filter over the source's items, applied before fetching
