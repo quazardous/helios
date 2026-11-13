@@ -550,6 +550,31 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "20m"
 
+# the soak: a moderate mix of clients (`clients=`, 8 by default) on one
+# headless node for `minutes=` (60 by default, `seed=`), the node sampled
+# every `every=` seconds (30): memory, threads, descriptors, open vault
+# files and write-ahead log, caches, bus subscribers and their lag. No
+# measure may grow, no call may pass its deadline, the vault must hold
+# exactly what was acknowledged and the node stop cleanly. On demand and
+# before a release, never in CI (`cargo soak`). The series and its trends
+# in /out/soak.json, JUnit and a summary in /out
+[jobs.soak]
+about = "a moderate mix of clients on one headless node for an hour, sampled: nothing may grow; not run by CI"
+first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 4
+memory = "4g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+HELIOS_SOAK_CLIENTS="${clients:-8}" HELIOS_SOAK_MINUTES="${minutes:-60}" HELIOS_SOAK_EVERY="${every:-30}" HELIOS_SOAK_SEED="${seed:-5005}" HELIOS_SOAK_REPORT=/out/soak.json \
+cargo soak --locked; rc=$?; \
+cp target/nextest/default/junit.xml /out/ \
+ && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
+exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "3h"
+
 # a release prepared from main's fragments (`cargo xtask release`: the
 # survival scenarios first, then the CHANGELOG section, the version bump
 # and the fragments removed), Cargo.lock refreshed and every test run on
