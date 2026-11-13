@@ -24,6 +24,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.87.0] - 2026-11-13
+
+### Added
+
+- Every desktop command now has an icon, shown in menus and the command palette: the ones that had none (collections, macros, masks, the network, workshops, scopes, zoom, labels and flags) take a Phosphor icon. The status bar's items (images, zoom, history, picks and rejects) show an icon before their text.
+- An import now measures, for each photo, how sharp it is and where its sharpest area lies, how much of it is blown to white or crushed to black in each channel, and its brightness (mean, median and spread). Photos imported before are measured by a background job in the jobs centre, which can be paused or cancelled and resumes where it stopped. These measures will help pick the best frame of a burst.
+- Dialogs can be copied for a bug report. A failure's toast offers "Details": an error dialog whose Copy button copies the message with Helios's version and commit, the system and display server, the command that failed and its error, in a collapsed "Details" section too. Questions copy their text with the same details, hidden. No secret is ever copied (client ids, tokens) and the home folder is written `~`.
+- Saved import sources can import on their own: "Import automatically" in a source's menu, or in the wizard's choices step, sets a card to import when it is plugged in and a folder to import new files as they appear (once a file holds still). The import runs without the import window, with the source's own choices; photos already in the Library are skipped. A change made to the sources by another Helios window is followed.
+- The import window's Contents column shows the selected source in one of the ways its connector offers, with a switch between them: "All photos" (one flat grid), "Folder tree" (a folder and its subfolders at a time) and "By date" for folders, "All photos" and "By date" for cards, "Pick in the service" alone for Google Photos. The way chosen is remembered for each source.
+- "Edit source…" in the menu of a source in the import window's Sources column opens the add-a-source steps on it: its folder or account and its connector's own parameters, its import choices (copy or add where they are only when the source allows both), and its name. A recent folder or a card is saved that way. "Forget this source" takes a source off the column. Both can be undone.
+- "Add a source…" in the import window is now a wizard: choose the kind of source (a folder, cards and cameras, or a service such as Google Photos, each with a line saying what it does), set it up (pick the folder, or sign in to an account), set its import choices (those the source cannot honour are left out) and give it a name. The source is then listed under "Saved sources" with its own choices, selected and ready to import from. Cancel at any step adds nothing.
+- macOS: the menus are in the system's menu bar, with the application menu (About Helios, Settings… Cmd+,, Services, Hide, Quit Cmd+Q) and the Window menu's Minimize and Zoom. Closing the last window keeps Helios running, as macOS applications do: the Dock icon or File > New Window brings the window back, Cmd+Q quits. Linux and Windows are unchanged.
+- The node's inspect, control and batch endpoints speak JSON-RPC 2.0: the method is a command's id, errors carry standard and Helios codes, one connection carries several calls and the event notifications of `events.subscribe`, `node.hello` gives the protocol version and the client's permissions, and `$/cancel` stops a wait still running. The older `{"cmd": …}` requests are still answered. See docs/protocol.md.
+
+### Changed
+
+- Stack suggestions now propose the best frame of a burst on top using the culling measures: the sharpest frame that is not blown to white, with the reason given ("sharpest, not clipped"). Photos not measured yet keep the previous choice and are never preferred over a measured one.
+- `helios import`, `import-darktable` and `stacks` no longer open the vault: they run on the node holding it, found beside the vault (`.helios/NAME.node.json`) or named by `--node` / `HELIOS_NODE`. With none running, the command starts `helios-node --idle-exit`, shared by commands run at once, which exits when idle.
+- In Settings, a setting can be set for one library or workspace only where that makes sense: the library defaults (decision nodes, finished batches kept) may differ per library; every other setting is app-wide and no longer shows a "Set for" choice. Where the choice remains it is labelled, and its tooltip says what "This library" and "This workspace" mean and which wins. A value saved for a library or workspace on a setting that is now app-wide moves to the app's value, so none is lost.
+
+### Fixed
+
+- A raw shot with the camera set to Adobe RGB now shows its embedded preview in the right colours: the preview is read in the colour space the raw's Exif names, no longer always as sRGB, which made it look dull.
+- Connecting or reconnecting an account (Google Photos) and "Pick photos…" open the browser at once: the page is opened as soon as it is ready, through the system's own opener (the desktop portal inside the Flatpak), instead of waiting for the import window's next frame. The dialog shows the page's address, to copy, with "Open again". Every "Pick photos…" starts a new picking session; the dialog says which account the browser must be signed in to, and a session that expires is reported ("The picking session expired, start again") with "Start again", instead of being waited out.
+- The Flatpak release build now includes the built-in Google Photos sign-in client, like the other packages.
+- Closing the Import window no longer waits on work it left: a connection in progress is given up, and a source's choices are saved to the library off the interface's thread, so a busy library cannot hold a frame. If the interface is ever held more than 2 seconds, Helios now logs what it was doing and leaves a `stall-*.txt` note in its crash folder.
+- The Import window no longer freezes while the library is busy or a plugin is slow to stop: its accounts are read in the background, and allowing a plugin's permissions stops and restarts it off the interface's thread. Finishing or cancelling an import in a window that took the main window's place (the main window closed first) now brings the library back instead of quitting Helios.
+- "Pick photos…" copies the picked photos into the account's own Into folder, else the import window's, else the library folder; when no library folder is known yet, it is asked for (and remembered) before the picking page opens, instead of the import failing afterwards. Signing in to Google Photos now asks for offline access, so the account stays connected beyond an hour instead of needing a reconnection.
+
 ## [0.86.0] - 2026-11-12
 
 ### Changed
