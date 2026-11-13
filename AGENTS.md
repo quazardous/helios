@@ -30,8 +30,7 @@ merges). It applies to every agent and every repository of the project
   lists **only your own part** (`test-crate` / `egui-pop-test` on what you
   touched, one test name per filter, never `test-affected` or the whole
   suite), stop. Authors never merge and never wait for the box or CI; the
-  tester does both. (Until `cargo xtask gate` lands, authors still merge
-  into `next` after their narrow jobs pass.)
+  tester does both.
 - The bench box is shared by several agents: follow "Rules for agents" in
   `docs/bench.md` (narrowest job first, deadlines in tests, one blocking
   wait per job, never `pgrep`/`pkill` waiters).

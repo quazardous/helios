@@ -3,9 +3,8 @@
 How every change reaches Helios, for people and agents alike. The same
 protocol holds in egui-pop, egui_stack, egui_fit and egui_hud.
 
-> **In effect from the day `cargo xtask gate` lands.** Until then, authors
-> still merge their own pull requests into `next` after their narrow box
-> jobs pass (the protocol below, minus the tester).
+> **In effect since 2026-11-13** (`cargo xtask gate` and the tester's
+> brief, [tester.md](tester.md)).
 
 Three branches, three roles:
 
