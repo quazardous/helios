@@ -1013,7 +1013,7 @@ fn rule_sql(rule: &Rule, args: &mut Vec<Sql>) -> String {
 fn condition_sql(c: &Condition, args: &mut Vec<Sql>) -> String {
     let field = c.field.field;
     let positive = match c.field.kind {
-        RuleKind::Number => {
+        RuleKind::Number | RuleKind::Date => {
             let test = if c.op == "between" {
                 let (low, high) = c.bounds();
                 args.push(Sql::Real(low));

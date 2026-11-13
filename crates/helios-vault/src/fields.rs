@@ -518,6 +518,9 @@ pub struct Query {
     /// Passing a smart album's rule tree ([`crate::rules`]): each store
     /// compiles it into its own query, no photo is tested apart.
     pub rules: Option<crate::rules::Rule>,
+    /// The clock relative dates in `rules` resolve against (seconds, the
+    /// camera's clock read as UTC); none: [`crate::rules::now`].
+    pub now: Option<i64>,
     /// Present, offline or missing as one of these ([`Presence::of`]).
     pub presence: Vec<Presence>,
     /// Backed up in one of these states against a strategy.
