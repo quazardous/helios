@@ -232,9 +232,9 @@ fn a_card_set_to_import_when_plugged_in_imports_its_new_photos_with_its_choices(
             "layout": "month",
             "rename": "{stem}",
             "duplicates": "skip",
-            // Who asked, for the import history: the automatic import is
-            // recorded as the user's until it gets an origin of its own.
-            "origin": "user",
+            // Who asked, for the import history: the automatic import
+            // of the source named Camera.
+            "origin": "auto:Camera",
         })
     );
     run_imports(&mut h, imports, &done);
@@ -315,6 +315,7 @@ fn a_folder_set_to_import_new_files_imports_a_file_dropped_in_once_settled_and_o
     assert_eq!(imports[0]["paths"], json!([dropped]));
     assert_ne!(imports[0]["copy"], json!(true), "added where it is");
     assert_eq!(imports[0]["duplicates"], json!("skip"));
+    assert_eq!(imports[0]["origin"], json!("auto:Hot folder"));
     // Once: the next scans leave it alone.
     assert!(imports_during(&mut h, Duration::from_millis(800)).is_empty());
     // A second file: only it.
