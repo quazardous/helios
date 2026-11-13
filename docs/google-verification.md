@@ -27,8 +27,13 @@ Both are published by `.github/workflows/pages.yml` from `main`.
    logo (`docs/brand/logo.svg` exported to a 120×120 PNG), the support
    e-mail, the home page and privacy policy links above, the authorized
    domain `quazardous.github.io`.
-3. **Data access:** the only scope is
-   `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`.
+3. **Data access:** the scopes are, and are only (a test checks this list
+   against the plugin's manifest):
+   - `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`
+     (sensitive): read the photos the user picks;
+   - `openid` and `email` (non-sensitive): the address of the Google
+     account signed in, shown beside "Google Photos" so the user sees
+     which account is connected and several accounts stay apart.
 4. **Audience:** Publish app (from "Testing" to "In production").
 5. **Verification Center:** submit with the justification and the video
    below, then answer Google's e-mails.
@@ -41,8 +46,10 @@ Both are published by `.github/workflows/pages.yml` from `main`.
 > the user picks photos in Google's own picking page, and Helios downloads
 > exactly those photos to the user's computer, into the library folder they
 > chose. The `photospicker.mediaitems.readonly` scope is the narrowest scope
-> that allows this; Helios never reads the rest of the library, albums or
-> account data. Nothing is sent to the developers or to third parties; the
+> that allows this; Helios never reads the rest of the library or albums.
+> The `openid` and `email` scopes give the address of the signed-in account,
+> shown in Helios beside "Google Photos" so the user knows which account is
+> connected; no other account data is read. Nothing is sent to the developers or to third parties; the
 > OAuth tokens are kept in the operating system's keyring on the user's
 > computer.
 

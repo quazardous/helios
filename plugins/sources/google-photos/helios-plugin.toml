@@ -32,7 +32,9 @@ kind = "oauth"
 authorize = "https://accounts.google.com/o/oauth2/v2/auth"
 token = "https://oauth2.googleapis.com/token"
 revoke = "https://oauth2.googleapis.com/revoke"
-scopes = ["https://www.googleapis.com/auth/photospicker.mediaitems.readonly"]
+# The picked items, and who the account is (its address, shown beside
+# "Google Photos" so several accounts stay apart): docs/google-verification.md.
+scopes = ["https://www.googleapis.com/auth/photospicker.mediaitems.readonly", "openid", "email"]
 
 [[connect]]
 id = "probe"

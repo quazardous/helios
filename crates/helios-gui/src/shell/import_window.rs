@@ -1731,6 +1731,8 @@ impl ImportWindow {
                 }
                 Shown::Picker(account) => {
                     ui.separator();
+                    // The source's header: which account it picks from.
+                    ui.strong(w.account_label(&account));
                     ui.label(&browse.pick_about);
                     if ui.button(&browse.pick).clicked() {
                         event = Some(Event::Account(super::import_accounts::Asked::Pick(account)));
@@ -1924,8 +1926,13 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                             .selectable_label(selected, &name)
                             .on_hover_text(w.account_label(&id));
                         let key = SourceKey::Account(id.clone());
-                        if let Some(asked) = source_menu(&row, w, words) {
-                            w.source_menu_asked(asked, key);
+                        if let Some(asked) = source_menu(&row, w, words, Some(&id)) {
+                            if let MenuAsked::Pick = asked {
+                                *event =
+                                    Some(Event::Account(super::import_accounts::Asked::Pick(id)));
+                            } else {
+                                w.source_menu_asked(asked, key);
+                            }
                         } else if row.clicked() {
                             w.select_account(id);
                         }
@@ -2056,6 +2063,8 @@ fn source_row(
 /// What a source's menu asked.
 pub(super) enum MenuAsked {
     Edit,
+    /// "Pick photos…" on an account's source that picks.
+    Pick,
     Forget,
     /// "Import automatically": off, or this trigger.
     Auto(Option<Trigger>),
@@ -2100,13 +2109,31 @@ fn menu_items(
     asked
 }
 
-/// A saved account's row's menu, while the sources are kept.
-fn source_menu(row: &egui::Response, w: &ImportWindow, words: &Words) -> Option<MenuAsked> {
-    if !w.sources.kept() {
+/// A saved account's row's menu: "Pick photos…" first when its account
+/// picks (any time, a new picking each time), then the source's items
+/// while the sources are kept.
+fn source_menu(
+    row: &egui::Response,
+    w: &ImportWindow,
+    words: &Words,
+    account: Option<&str>,
+) -> Option<MenuAsked> {
+    let picks = account.is_some_and(|id| w.account_picks(id));
+    if !w.sources.kept() && !picks {
         return None;
     }
     let mut asked = None;
-    row.context_menu(|ui| asked = menu_items(ui, words, None));
+    row.context_menu(|ui| {
+        if picks && ui.button(&words.grid.browse.pick).clicked() {
+            asked = Some(MenuAsked::Pick);
+            ui.close();
+        }
+        if w.sources.kept()
+            && let Some(a) = menu_items(ui, words, None)
+        {
+            asked = Some(a);
+        }
+    });
     asked
 }
 
@@ -2115,6 +2142,7 @@ impl ImportWindow {
     fn source_menu_asked(&mut self, asked: MenuAsked, key: SourceKey) {
         match asked {
             MenuAsked::Edit => self.open_editor(key),
+            MenuAsked::Pick => {}
             MenuAsked::Forget => self.forget_source(&key),
             MenuAsked::Auto(auto) => self.set_auto(&key, auto),
         }

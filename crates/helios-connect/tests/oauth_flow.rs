@@ -4,7 +4,8 @@
 //! token is kept), a token renewed with the refresh token when it expired
 //! without a new sign-in, a renewal refused leaving the account needing
 //! attention, and signing out revoking the
-//! token and forgetting it. The "browser" is a plain HTTP client that
+//! token and forgetting it, and the identity read from the id token
+//! when the `email` scope is asked. The "browser" is a plain HTTP client that
 //! follows the consent page's redirect to Helios's loopback; no real
 //! browser is opened.
 
@@ -42,6 +43,21 @@ struct Seen {
     live_refresh: Option<String>,
     revoked: Vec<String>,
     refreshes: usize,
+    /// The address an id token names, given with the tokens when set.
+    email: Option<String>,
+}
+
+/// An unsigned id token naming `email` (the flow reads its claims only).
+fn id_token(email: &str) -> String {
+    use base64::Engine;
+    let part = |v: serde_json::Value| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string())
+    };
+    format!(
+        "{}.{}.signature",
+        part(serde_json::json!({"alg": "RS256", "typ": "JWT"})),
+        part(serde_json::json!({"iss": "fake", "sub": "42", "email": email}))
+    )
 }
 
 struct Server {
@@ -156,12 +172,14 @@ impl Server {
                         };
                         if ok && grant == Some("authorization_code") {
                             seen.live_refresh = Some("refresh-1".into());
-                            reply(
-                                &mut stream,
-                                "200 OK",
-                                "",
-                                r#"{"access_token":"access-1","expires_in":3600,"refresh_token":"refresh-1","token_type":"Bearer"}"#,
-                            );
+                            let mut answer = serde_json::json!({
+                                "access_token": "access-1", "expires_in": 3600,
+                                "refresh_token": "refresh-1", "token_type": "Bearer",
+                            });
+                            if let Some(email) = &seen.email {
+                                answer["id_token"] = id_token(email).into();
+                            }
+                            reply(&mut stream, "200 OK", "", &answer.to_string());
                         } else if ok {
                             reply(
                                 &mut stream,
@@ -441,4 +459,70 @@ fn the_person_s_own_client_signs_in_over_the_environment_s() {
         Some("own-client")
     );
     assert_eq!(w.account.facts[oauth::CLIENT_ID], "own-client");
+}
+
+#[test]
+fn the_email_scope_reads_the_identity_from_the_id_token_and_an_old_account_consents_again() {
+    let server = Server::start(Consent::Grant);
+    server.seen.lock().unwrap().email = Some("ann@example.com".into());
+    let mut w = world();
+    let StepKind::Oauth {
+        authorize,
+        token,
+        revoke,
+        client_id,
+        ..
+    } = server.step()
+    else {
+        unreachable!()
+    };
+    let step = StepKind::Oauth {
+        authorize,
+        token,
+        scopes: vec!["photos.read".into(), "openid".into(), "email".into()],
+        revoke,
+        client_id,
+    };
+    // An account signed in before the scope was asked: a refresh token
+    // kept, no address known.
+    let id = w.account.id.clone();
+    w.secrets.set(&id, oauth::REFRESH_TOKEN, "old").unwrap();
+    w.account
+        .facts
+        .insert(oauth::CLIENT_ID.into(), CLIENT.into());
+    assert!(w.account.identity_missing(true));
+    let opened = Mutex::new(None);
+    let done = flow().sign_in(
+        &mut w.account,
+        &step,
+        &w.secrets,
+        &browser(&opened),
+        &Cancel::new(),
+    );
+    assert_eq!(done, Ok(()));
+    let url = opened.lock().unwrap().clone().unwrap();
+    let q = pairs(url.split_once('?').unwrap().1);
+    assert_eq!(q["scope"], "photos.read openid email");
+    // One consent, to the new scopes.
+    assert_eq!(q["prompt"], "consent select_account");
+    assert_eq!(w.account.email(), Some("ann@example.com"));
+    assert_eq!(w.account.shown(), "Fake Photos — ann@example.com");
+    assert!(!w.account.identity_missing(true));
+    // The document keeps the address, never the id token.
+    let doc = w.account.to_document().to_string();
+    assert!(doc.contains("ann@example.com"));
+    assert!(!doc.contains("signature") && !doc.contains("access-1"));
+    // Known, a sign-in again asks no new consent.
+    let opened = Mutex::new(None);
+    flow()
+        .sign_in(
+            &mut w.account,
+            &step,
+            &w.secrets,
+            &browser(&opened),
+            &Cancel::new(),
+        )
+        .unwrap();
+    let url = opened.lock().unwrap().clone().unwrap();
+    assert!(!url.contains("prompt="), "{url}");
 }

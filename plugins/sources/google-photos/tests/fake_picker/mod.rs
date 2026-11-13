@@ -3,6 +3,9 @@
 //! `polls` times before the picking is done, its items listed two a page,
 //! their originals served at `<baseUrl>=d` (`=dv` for a video), every
 //! call checked for the bearer token `good`. It records each request.
+//! The items picked can change between two pickings ([`FakePicker::pick`]),
+//! and the next downloads can be answered as expired
+//! ([`FakePicker::expire_downloads`]), as a base URL past its hour is.
 
 #![allow(dead_code)]
 
@@ -18,6 +21,8 @@ pub const TOKEN: &str = "good";
 pub struct FakePicker {
     pub base: String,
     pub requests: Arc<Mutex<Vec<String>>>,
+    items: Arc<Mutex<Vec<Picked>>>,
+    stale: Arc<AtomicU32>,
 }
 
 /// One picked item: id, file name, video or not, bytes.
@@ -37,6 +42,9 @@ impl FakePicker {
         let host = base.clone();
         let polled = Arc::new(AtomicU32::new(0));
         let created = Arc::new(AtomicU32::new(0));
+        let items = Arc::new(Mutex::new(items));
+        let stale = Arc::new(AtomicU32::new(0));
+        let (picked, expired) = (items.clone(), stale.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
@@ -65,6 +73,7 @@ impl FakePicker {
                 let _ = reader.read_exact(&mut body);
                 log.lock().unwrap().push(format!("{method} {target}"));
                 let (status, kind, payload) = if auth == format!("Bearer {TOKEN}") {
+                    let items = picked.lock().unwrap().clone();
                     let fake = Fake {
                         host: &host,
                         polls,
@@ -73,7 +82,16 @@ impl FakePicker {
                         expires,
                         items: &items,
                     };
-                    route(&method, &target, &fake)
+                    let download = method == "GET" && target.starts_with("/media/");
+                    if download
+                        && expired
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                            .is_ok()
+                    {
+                        (403, "text/plain", b"expired".to_vec())
+                    } else {
+                        route(&method, &target, &fake)
+                    }
                 } else {
                     (
                         401,
@@ -95,7 +113,19 @@ impl FakePicker {
         Self {
             base: format!("{base}/v1"),
             requests,
+            items,
+            stale,
         }
+    }
+
+    /// What the next pickings list.
+    pub fn pick(&self, items: Vec<Picked>) {
+        *self.items.lock().unwrap() = items;
+    }
+
+    /// The next `n` downloads answered as an expired base URL.
+    pub fn expire_downloads(&self, n: u32) {
+        self.stale.store(n, Ordering::SeqCst);
     }
 
     pub fn requests(&self) -> Vec<String> {

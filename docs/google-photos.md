@@ -54,7 +54,9 @@ It is free, and done once, in your own Google account.
    - user type **External**, an app name, your e-mail address as the
      support and developer contact;
    - under **Data access** (scopes), add
-     `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`;
+     `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`,
+     `openid` and `email` (the last two show which account is
+     connected);
    - under **Audience**, leave the app in **Testing** and add your own
      Google account as a **test user**.
 4. In **APIs & Services > Credentials**, **Create credentials > OAuth
@@ -99,12 +101,16 @@ before compiling.
 
 In the import window, **Add a source… > Google Photos**. Helios opens
 your browser on Google's sign-in page; choose your account and allow
-"See photos you select". Google may warn that the app is not verified:
+"See photos you select" and your e-mail address. Google may warn that the app is not verified:
 it is your own app, in testing, so continue. The browser then says to
 go back to Helios.
 
 Helios keeps the sign-in in your system keyring, never in the Library.
-**Settings > Accounts** shows the account; **Sign out** there revokes
+The account is shown with its address, "Google Photos — name@example.com",
+in the import window, the source editor and **Settings > Accounts**, so
+several accounts stay apart. An account connected before Helios asked
+for the address says **Reconnect to see the account**: one reconnection
+(one consent) shows it. **Settings > Accounts** shows the account; **Sign out** there revokes
 Helios's access at Google and forgets it. When Google refuses the access
 later (you revoked it in your Google account, or a testing app's
 sign-in aged out: Google ends them after seven days), the account shows
@@ -120,6 +126,14 @@ your Library folder, then closes the session at Google. **Cancel** stops waiting
 waits 30 minutes at most. A photo you
 already imported from Google Photos is recognised by its Google id and
 not downloaded again.
+
+Pick again whenever you want: **Pick photos…** stays on the account, in
+its source's menu and in the Contents column, and a finished picking
+offers **Pick more photos…**. Each is a new picking session; its photos
+are added to the same source, and those already in the Library are said
+so and left as they are. Google's download addresses last an hour: one
+that expired during an import is renewed by listing the picking again,
+never shown as an error.
 
 ## For developers
 

@@ -584,7 +584,11 @@ fn library_commands(
             }
             done.store(true, Ordering::Relaxed);
             ctx.request_repaint();
-            Ok(report.added)
+            // Picked before: known by its item id, never fetched again.
+            Ok(helios_gui::shell::PickImported {
+                added: report.added,
+                known: report.unfetched,
+            })
         }));
     }
     shell.set_import_library_folder(Arc::new(LibraryFolder(vault.clone())));

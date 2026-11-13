@@ -4,8 +4,10 @@
 //! fill a form the person allows, never a secret on its own.
 //!
 //! - `import.accounts` (read-only): every account, as rows (`/accounts`):
-//!   `id`, `label`, `connector`, `connectorText`, `state`, `stateText`,
-//!   `why`, `tone`.
+//!   `id`, `label` (with the account's address once known: "Google
+//!   Photos — name@example.com"), `email`, `connector`, `connectorText`,
+//!   `state`, `stateText`, `why` (also "Reconnect to see the account" for
+//!   one signed in before its connector asked who it is), `tone`.
 //! - `import.addSource`: opens the import window and connects a new
 //!   account of `connector`.
 //! - `import.reconnect`: opens the import window and connects `account`
@@ -76,7 +78,7 @@ impl Shell {
     /// secrets in `secrets` (the system keyring), and declares the
     /// commands that read and change them.
     pub fn set_import_accounts(&mut self, book: Arc<dyn AccountBook>, secrets: Arc<dyn Secrets>) {
-        let (current, labels, web) = {
+        let (current, labels, web, identity) = {
             let mut w = self.import.get_mut();
             w.accounts.book = Some(book.clone());
             w.accounts.secrets = secrets.clone();
@@ -93,9 +95,14 @@ impl Shell {
                     web.access_token(book.as_ref(), secrets.as_ref(), id)
                 }));
             }
-            (w.accounts.current.clone(), labels, w.accounts.web.clone())
+            (
+                w.accounts.current.clone(),
+                labels,
+                w.accounts.web.clone(),
+                w.accounts.identity.clone(),
+            )
         };
-        self.register_account_commands(&book, &secrets, web.clone(), &current, &labels);
+        self.register_account_commands(&book, &secrets, web.clone(), &current, &labels, &identity);
         let oauth = self.import.get_mut().accounts.oauth.clone();
         self.register_client_commands(&secrets, web, &oauth, &labels);
     }
@@ -135,6 +142,13 @@ impl Shell {
     pub fn add_import_connector(&mut self, provider: ProviderRef) {
         let manifest = provider.manifest();
         let mut w = self.import.get_mut();
+        if helios_connect::oauth::asks_email(&manifest.connect) {
+            w.accounts
+                .identity
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(manifest.id.clone());
+        }
         for step in &manifest.connect {
             if let helios_connect::StepKind::Oauth { client_id, .. } = &step.kind {
                 w.accounts
@@ -179,11 +193,13 @@ impl Shell {
         web: Option<Arc<dyn WebSteps>>,
         current: &Current,
         labels: &Labels,
+        identity: &super::import_accounts::IdentityConnectors,
     ) {
         if self.has_command(ACCOUNTS) {
             return;
         }
         let (b, l, i18n) = (book.clone(), labels.clone(), self.core.i18n.clone());
+        let asking = identity.clone();
         let listed = self.register(
             CommandSpec::new(
                 ACCOUNTS,
@@ -199,7 +215,13 @@ impl Shell {
                         .get(id)
                         .map_or_else(|| id.to_owned(), |l| t(Message::new(&l.key, &l.en)))
                 };
-                Ok(account_rows(&t, &b.accounts()?, &label))
+                let asks = |id: &str| {
+                    asking
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .contains(id)
+                };
+                Ok(account_rows(&t, &b.accounts()?, &label, &asks))
             },
         );
         let (b, s) = (book.clone(), secrets.clone());
@@ -380,22 +402,30 @@ fn account_rows(
     t: &dyn Fn(Message) -> String,
     accounts: &[Account],
     connector: &dyn Fn(&str) -> String,
+    asks_email: &dyn Fn(&str) -> bool,
 ) -> Value {
     let rows: Vec<Value> = accounts
         .iter()
         .map(|a| {
+            let unknown = a.identity_missing(asks_email(&a.connector));
             let why = match &a.state {
                 AccountState::NeedsAttention { why, .. } => why.clone(),
+                _ if unknown => t(Message::new(
+                    "gui-account-identity-missing",
+                    "Reconnect to see the account",
+                )),
                 _ => String::new(),
             };
             let tone = match a.state {
+                AccountState::Connected if unknown => json!("warning"),
                 AccountState::Connected => json!("success"),
                 AccountState::NeedsAttention { .. } => json!("warning"),
                 _ => Value::Null,
             };
             json!({
                 "id": a.id,
-                "label": a.label,
+                "label": a.shown(),
+                "email": a.email(),
                 "connector": a.connector,
                 "connectorText": connector(&a.connector),
                 "state": a.state.name(),

@@ -242,7 +242,35 @@ fn the_manifest_declares_the_google_sign_in_then_a_test() {
         revoke.as_deref(),
         Some("https://oauth2.googleapis.com/revoke")
     );
-    assert_eq!(scopes, &[helios_plugin_google_photos::SCOPE]);
+    assert_eq!(scopes, &helios_plugin_google_photos::SCOPES);
+    assert!(
+        helios_connect::oauth::asks_email(&steps),
+        "the account shown"
+    );
     assert_eq!(client_id, &None, "never built in");
     assert_eq!(steps[1].kind, helios_connect::StepKind::Test);
+}
+
+/// The scopes Google's verification and the privacy page list are the
+/// ones the sign-in asks, no more, no fewer.
+#[test]
+fn the_scopes_documented_are_the_ones_the_code_asks() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap();
+    let doc = read("docs/google-verification.md");
+    let privacy = read("site/privacy.html");
+    let section = doc
+        .split("**Data access:**")
+        .nth(1)
+        .and_then(|s| s.split("4. **Audience").next())
+        .expect("the data access step");
+    let listed: Vec<&str> = section.split('`').skip(1).step_by(2).collect();
+    assert_eq!(listed, helios_plugin_google_photos::SCOPES, "{section}");
+    for scope in helios_plugin_google_photos::SCOPES {
+        let short = scope.rsplit('/').next().unwrap();
+        assert!(
+            privacy.contains(&format!("<code>{short}</code>")),
+            "the privacy page names {short}"
+        );
+    }
 }

@@ -16,6 +16,13 @@
 //! account needing attention at its `oauth` step. [`OAuth::sign_out`]
 //! revokes the token where the service can, then forgets it.
 //!
+//! **The identity.** A step asking the `openid email` scopes gets an id
+//! token beside the access token (`OpenID` Connect): its `email` claim is
+//! kept as the account's [`crate::account::EMAIL`] fact, shown beside the
+//! connector's name. The id token comes straight from the token endpoint
+//! over TLS, so its signature is not checked (`OpenID` Connect Core,
+//! 3.1.3.7); nothing else of it is kept, and no token is ever logged.
+//!
 //! **The client.** A desktop application's OAuth client (its id, and
 //! the secret Google issues to desktop clients without treating it as
 //! confidential: PKCE and the loopback redirect protect the flow) comes
@@ -358,8 +365,11 @@ impl OAuth {
             ("access_type", "offline"),
         ];
         // Google hands the refresh token only on a consent: asked for when
-        // none is kept (a first sign-in, or one the service refused).
-        if secrets.get(&account.id, REFRESH_TOKEN)?.is_none() {
+        // none is kept (a first sign-in, or one the service refused), or
+        // when the identity is asked and not known yet (an account signed
+        // in before the scopes asked it: one consent to the new ones).
+        let identity = scopes.iter().any(|s| is_email_scope(s)) && account.email().is_none();
+        if identity || secrets.get(&account.id, REFRESH_TOKEN)?.is_none() {
             query.push(("prompt", "consent select_account"));
         }
         let url = with_query(authorize, &query);
@@ -579,9 +589,43 @@ impl ServiceError {
     }
 }
 
-/// Keeps the tokens of a token answer.
+/// Whether `scope` asks for the person's address.
+fn is_email_scope(scope: &str) -> bool {
+    scope == "email" || scope.ends_with("/auth/userinfo.email")
+}
+
+/// Whether one of `steps` signs in asking for the person's address
+/// (the `email` scope): its accounts are shown with it.
+pub fn asks_email(steps: &[crate::ConnectStep]) -> bool {
+    steps.iter().any(|s| match &s.kind {
+        StepKind::Oauth { scopes, .. } => scopes.iter().any(|s| is_email_scope(s)),
+        _ => false,
+    })
+}
+
+/// The `email` claim of an `OpenID` Connect id token (a JWT: its payload,
+/// base64url between the two dots), when it has one.
+pub fn email_of_id_token(id_token: &str) -> Option<String> {
+    let payload = id_token.split('.').nth(1)?;
+    let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    let claims: Value = serde_json::from_slice(&bytes).ok()?;
+    claims
+        .get("email")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(str::to_owned)
+}
+
+/// Keeps the tokens of a token answer, and the identity its id token
+/// names.
 fn keep(account: &mut Account, secrets: &dyn Secrets, tokens: &Value) -> Result<(), String> {
     let text = |k: &str| tokens.get(k).and_then(Value::as_str);
+    if let Some(email) = text("id_token").and_then(email_of_id_token) {
+        account
+            .facts
+            .insert(crate::account::EMAIL.into(), email.into());
+    }
     let access = text("access_token").ok_or("the service gave no access token")?;
     let lasts = tokens
         .get("expires_in")
@@ -817,6 +861,23 @@ fn request_target(stream: &mut TcpStream) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_id_token_s_email_claim_is_read() {
+        let part = |v: &Value| URL_SAFE_NO_PAD.encode(v.to_string());
+        let token = format!(
+            "{}.{}.sig",
+            part(&serde_json::json!({"alg": "RS256"})),
+            part(&serde_json::json!({"sub": "1", "email": "ann@example.com"}))
+        );
+        assert_eq!(
+            email_of_id_token(&token).as_deref(),
+            Some("ann@example.com")
+        );
+        assert_eq!(email_of_id_token("not a token"), None);
+        let none = format!("x.{}.y", part(&serde_json::json!({"sub": "1"})));
+        assert_eq!(email_of_id_token(&none), None);
+    }
 
     #[test]
     fn the_challenge_is_rfc_7636s_and_queries_round_trip() {

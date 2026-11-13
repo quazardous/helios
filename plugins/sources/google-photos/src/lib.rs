@@ -51,8 +51,13 @@ pub const ID: &str = "google-photos";
 /// Where the Picker API answers.
 pub const API: &str = "https://photospicker.googleapis.com/v1";
 
-/// The only scope the plugin asks for: read the items the person picks.
+/// The scope reading the items the person picks.
 pub const SCOPE: &str = "https://www.googleapis.com/auth/photospicker.mediaitems.readonly";
+
+/// Every scope the sign-in asks (the manifest's `oauth` step): the
+/// picked items, and who the account is (`openid email`: its address,
+/// read from the id token, shown beside the connector's name).
+pub const SCOPES: [&str; 3] = [SCOPE, "openid", "email"];
 
 /// The most items a list page holds (the API coerces larger sizes).
 pub const PAGE_MAX: usize = 100;
@@ -430,8 +435,9 @@ impl Picker {
         .map(|_| ())
     }
 
-    /// Writes an item's original into `sink`. An expired base URL is
-    /// [`ConnectorError::Expired`]: listing again gives fresh ones.
+    /// Writes an item's original into `sink`. An expired base URL (403,
+    /// 404 or 410 from the content server) is [`ConnectorError::Expired`]:
+    /// listing again gives fresh ones.
     pub fn download(
         &self,
         download: &Download,
@@ -445,6 +451,12 @@ impl Picker {
             .call()
             .map_err(|_| ConnectorError::Offline)?;
         let status = response.status().as_u16();
+        // A base URL past its hour is refused by the content server, not
+        // the API: expired, listed again for a fresh one (a token the
+        // service refuses fails that listing, as sign-in needed).
+        if status == 403 {
+            return Err(ConnectorError::Expired);
+        }
         if !(200..300).contains(&status) {
             let retry = response
                 .headers()

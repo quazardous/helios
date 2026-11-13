@@ -82,6 +82,7 @@ mod health;
 mod import;
 mod import_accounts;
 mod import_browsers;
+pub use import_accounts::Imported as PickImported;
 pub use import_accounts::LibraryFolder;
 mod import_auto;
 mod import_choices;

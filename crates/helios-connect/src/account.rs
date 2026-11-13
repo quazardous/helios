@@ -18,6 +18,11 @@ use serde_json::Value;
 
 use crate::AccountRef;
 
+/// The account fact holding the address of the identity it signed in
+/// as (an OAuth account asking the `email` scope reads it from the id
+/// token): public, shown beside the connector's name.
+pub const EMAIL: &str = "email";
+
 /// Where an account stands.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
@@ -92,6 +97,34 @@ impl Account {
             facts: BTreeMap::new(),
             secrets: Vec::new(),
         }
+    }
+
+    /// The address of the identity it signed in as, once known.
+    pub fn email(&self) -> Option<&str> {
+        self.facts
+            .get(EMAIL)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+    }
+
+    /// Its name as shown: "Google Photos — name@example.com" once the
+    /// identity is known, so several accounts of one connector stay
+    /// apart; its label alone otherwise (or when the label already says
+    /// the address).
+    pub fn shown(&self) -> String {
+        match self.email() {
+            Some(email) if !self.label.contains(email) => format!("{} — {email}", self.label),
+            _ => self.label.clone(),
+        }
+    }
+
+    /// Whether it signed in before its connector asked who it is
+    /// (`asks_email`: the connector's `oauth` step asks the `email`
+    /// scope, [`crate::oauth::asks_email`]): no address known, one
+    /// reconnection (one consent) shows it.
+    pub fn identity_missing(&self, asks_email: bool) -> bool {
+        asks_email && self.email().is_none() && self.facts.contains_key(crate::oauth::CLIENT_ID)
     }
 
     pub fn account_ref(&self) -> AccountRef {
@@ -296,6 +329,22 @@ mod tests {
         assert_eq!(book.accounts().unwrap().len(), 1);
         remove(&book, &secrets, "nas-1").unwrap();
         assert!(book.accounts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_account_is_shown_with_its_address_and_an_old_one_asks_a_reconnection() {
+        let mut a = Account::new("google-photos", "Google Photos", &[]);
+        assert_eq!(a.shown(), "Google Photos");
+        assert!(!a.identity_missing(true), "never signed in");
+        a.facts
+            .insert(crate::oauth::CLIENT_ID.into(), "client".into());
+        assert!(a.identity_missing(true));
+        assert!(!a.identity_missing(false));
+        a.facts.insert(EMAIL.into(), "ann@example.com".into());
+        assert_eq!(a.shown(), "Google Photos — ann@example.com");
+        assert!(!a.identity_missing(true));
+        a.label = "ann@example.com".into();
+        assert_eq!(a.shown(), "ann@example.com");
     }
 
     #[test]
