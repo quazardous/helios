@@ -11,12 +11,19 @@
 //! import from it ([`Record::params`]): a card's new photos come in, the
 //! ones the library has are skipped as duplicates.
 //!
+//! An import from a connector's source (a Google Photos pick, any source
+//! whose items are fetched, [`crate::fetch`]) is recorded too, by
+//! [`record_remote`]: its source is the connector's ([`Remote`]), not a
+//! path. It is run again from the import window, where the source is
+//! listed or picked anew.
+//!
 //! The newest [`KEPT`] records are kept; older ones are dropped as new
 //! ones are written.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use helios_connect::SourceRef;
 use helios_vault::{Store, Vault};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -64,6 +71,28 @@ impl From<&Report> for Counts {
     }
 }
 
+/// The connector's source an import fetched its items from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Remote {
+    /// The connector's id (`google-photos`…).
+    pub connector: String,
+    /// The source's id within the connector (an account).
+    pub id: String,
+    /// Its name as shown.
+    pub label: String,
+}
+
+impl From<&SourceRef> for Remote {
+    fn from(s: &SourceRef) -> Self {
+        Remote {
+            connector: s.connector.clone(),
+            id: s.id.clone(),
+            label: s.label.clone(),
+        }
+    }
+}
+
 /// One import.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -83,6 +112,10 @@ pub struct Record {
     /// The importer plugin that listed the files, if one did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub importer: Option<String>,
+    /// The connector's source whose items were fetched, for an import
+    /// from one; its `sources` are then empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote: Option<Remote>,
     /// The choices, as `library.import` takes them: `copy`, `into`,
     /// `rename`, `layout`, `duplicates`, `signals`, `darktable`.
     pub choices: Value,
@@ -95,11 +128,18 @@ pub struct Record {
 impl Record {
     /// The params of `library.import` that run this import again, or why
     /// it cannot be: an importer plugin's import is run again from the
-    /// import window, its plugin listing the files anew.
+    /// import window, its plugin listing the files anew, and so is an
+    /// import from a connector's source, listed or picked anew there.
     ///
     /// # Errors
-    /// An importer's import, or a record with no source.
+    /// An importer's import, a connector's, or a record with no source.
     pub fn params(&self) -> Result<Value, String> {
+        if let Some(remote) = &self.remote {
+            return Err(format!(
+                "this import came from `{}` through the connector `{}`: run it again from the import window",
+                remote.label, remote.connector
+            ));
+        }
         if let Some(importer) = &self.importer {
             return Err(format!(
                 "this import came through the importer `{importer}`: run it again from the import window"
@@ -125,6 +165,9 @@ impl Record {
                 |n| n.to_string_lossy().into_owned(),
             )
         };
+        if let Some(remote) = &self.remote {
+            return remote.label.clone();
+        }
         match (self.sources.first(), &self.importer) {
             (_, Some(importer)) => importer.clone(),
             (None, None) => String::new(),
@@ -166,10 +209,9 @@ pub fn record<S: Store>(
     now: u64,
     outcome: Result<&Report, &str>,
 ) -> Result<Record, String> {
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let importer = options.listed.as_ref().map(|l| l.by.clone());
     let record = Record {
-        id: format!("{now:011}-{:07}-{n:09}", std::process::id()),
+        id: key(now),
         when: now,
         origin: options.origin.clone().unwrap_or_default(),
         // An importer's files are its scan's: not kept, as many as they
@@ -180,10 +222,53 @@ pub fn record<S: Store>(
             sources.to_vec()
         },
         importer,
+        remote: None,
         choices: choices(options),
         counts: outcome.map(Counts::from).unwrap_or_default(),
         error: outcome.err().map(String::from),
     };
+    write(vault, record)
+}
+
+/// Records an import from a connector's `source` that ended (`outcome`:
+/// its report, or the error it could not start for), then drops the
+/// records past [`KEPT`].
+///
+/// # Errors
+/// The vault's.
+pub fn record_remote<S: Store>(
+    vault: &Vault<S>,
+    source: &SourceRef,
+    options: &Options,
+    now: u64,
+    outcome: Result<&Report, &str>,
+) -> Result<Record, String> {
+    let mut c = choices(options);
+    // A fetched item is always a copy in the library folder: the record
+    // says what was done, whatever was asked.
+    c["copy"] = json!(true);
+    let record = Record {
+        id: key(now),
+        when: now,
+        origin: options.origin.clone().unwrap_or_default(),
+        remote: Some(Remote::from(source)),
+        choices: c,
+        counts: outcome.map(Counts::from).unwrap_or_default(),
+        error: outcome.err().map(String::from),
+        ..Record::default()
+    };
+    write(vault, record)
+}
+
+/// A new record's key: the time, the process and a number, so keys sort
+/// by time and two imports ending in the same second keep a record each.
+fn key(now: u64) -> String {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    format!("{now:011}-{:07}-{n:09}", std::process::id())
+}
+
+/// Writes `record`, then drops the records past [`KEPT`].
+fn write<S: Store>(vault: &Vault<S>, record: Record) -> Result<Record, String> {
     let doc = serde_json::to_value(&record).map_err(|e| e.to_string())?;
     vault.set_library_document(NS, &record.id, Some(&doc))?;
     let mut keys: Vec<String> = vault
@@ -296,6 +381,43 @@ mod tests {
         // The params make the same choices again.
         let rename = Pattern::parse(params["rename"].as_str().unwrap()).unwrap();
         assert_eq!(Some(rename), options.rename);
+    }
+
+    #[test]
+    fn an_import_from_a_connector_is_recorded_with_its_source_and_runs_again_from_the_window() {
+        let vault = Vault::new(MemoryStore::default());
+        let options = Options {
+            // Asked to reference: a fetched item is a copy all the same.
+            placement: Placement::Reference,
+            origin: Some("user".into()),
+            ..Options::default()
+        };
+        let source = SourceRef {
+            connector: "google-photos".into(),
+            id: "me@example.org".into(),
+            label: "Google Photos (me)".into(),
+            root: None,
+            capacity: None,
+        };
+        let r = record_remote(&vault, &source, &options, 1000, Ok(&report(2))).unwrap();
+        assert_eq!(list(&vault, None).unwrap(), std::slice::from_ref(&r));
+        assert_eq!(
+            r.remote,
+            Some(Remote {
+                connector: "google-photos".into(),
+                id: "me@example.org".into(),
+                label: "Google Photos (me)".into(),
+            })
+        );
+        assert!(r.sources.is_empty());
+        assert_eq!((r.origin.as_str(), r.counts.added), ("user", 2));
+        assert_eq!(r.choices["copy"], true);
+        assert_eq!(r.source_label(), "Google Photos (me)");
+        let refused = again(&vault, &r.id).unwrap_err();
+        assert!(refused.contains("import window"), "{refused}");
+        // One that could not start says why.
+        let failed = record_remote(&vault, &source, &options, 1001, Err("offline")).unwrap();
+        assert_eq!(failed.error.as_deref(), Some("offline"));
     }
 
     #[test]
