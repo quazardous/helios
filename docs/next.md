@@ -1,7 +1,8 @@
 # The `devel` → `next` protocol
 
-How every change reaches Helios, for people and agents alike. The same
-protocol holds in egui-pop, egui_stack, egui_fit and egui_hud.
+How every change reaches Helios, for people and agents alike. egui-pop,
+egui_stack, egui_fit and egui_hud have no `devel` branch or gate yet: there,
+a change still goes into `next` after its own narrow box jobs pass.
 
 > **In effect since 2026-11-13** (`cargo xtask gate` and the tester's
 > brief, [tester.md](tester.md)).
@@ -58,7 +59,9 @@ One agent, with a standing brief ([tester.md](tester.md)), takes the pull reques
 `devel` in order (first in, first out):
 
 1. Picks a batch of one to three that do not touch the same files, and
-   merges them into `devel` (rebasing a branch that falls behind).
+   merges them into `devel`. The gate first brings `devel` up to `next`
+   (the promotion bot commits releases on `next`), so `next` can always
+   fast-forward to what was tested.
 2. Runs the union of their manifests on the bench box: one build, the jobs
    side by side (`cargo xtask gate`). The box runs `check` and clippy first.
 3. **Green:** fast-forwards `next` to `devel`, deletes the merged branches,

@@ -7,7 +7,8 @@ moves only when a release is made, and every release is published.
 
 ## Releases: asked for by a fragment
 
-Every change is merged into `next`. When CI passes on a commit of `next`,
+Every change reaches `next` through `devel` and the tester's gate
+(docs/next.md). When CI passes on a commit of `next`,
 the promotion workflow (`.github/workflows/promote.yml`, running
 `cargo xtask promote`) moves `main` forward:
 

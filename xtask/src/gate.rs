@@ -5,7 +5,8 @@
 //!
 //! 1. Each pull request must target `devel` and carry a valid manifest
 //!    (`manifest.rs`); one that does not is left out with its reason.
-//! 2. `devel` is fetched and each branch merged into it (`--no-ff`, the
+//! 2. `devel` is fetched, brought up to `next` if the promotion bot moved
+//!    `next` (a merge, pushed), and each branch merged into it (`--no-ff`, the
 //!    pull request's title as the message). A branch that does not merge
 //!    cleanly is left out; the others go on.
 //! 3. `devel` is pushed: GitHub marks the pull requests merged.
@@ -208,6 +209,29 @@ fn gate(root: &Path, numbers: &[u64], retest: bool) -> Result<String, String> {
     }
     git(&work, &["checkout", "-q", "--detach", "origin/devel"])?;
     let mut report = String::new();
+    // The promotion bot commits releases on next: bring devel up to it, so
+    // next can always fast-forward to what is tested.
+    if git(
+        &work,
+        &["merge-base", "--is-ancestor", "origin/next", "HEAD"],
+    )
+    .is_err()
+    {
+        git(
+            &work,
+            &[
+                "merge",
+                "-q",
+                "--no-edit",
+                "-m",
+                "Merge next into devel",
+                "origin/next",
+            ],
+        )
+        .map_err(|e| format!("devel does not take next's commits: {e}"))?;
+        git(&work, &["push", "-q", "origin", "HEAD:refs/heads/devel"])?;
+        let _ = writeln!(report, "devel brought up to next");
+    }
 
     let prs: Vec<Pr> = if retest {
         let log = git(&work, &["log", "--format=%s", "origin/next..HEAD"])?;

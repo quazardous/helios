@@ -532,9 +532,10 @@ Several agents share one box, one queue and one disk quota. A job that hangs
 or hoards blocks everyone for the length of its timeout. These rules come
 from incidents on the box; every agent prompt points here.
 
-**The next branch**: how a change reaches `next`, what to test before
-merging (only your own part) and what happens after, is in
-[next.md](next.md). Every agent follows it.
+**The devel and next branches**: how a change reaches `devel` and then
+`next` (a pull request with its test manifest; the tester runs the jobs and
+merges) is in [next.md](next.md), and the tester's own brief in
+[tester.md](tester.md). Every agent follows them.
 
 **The work cycle**
 - Code the whole change with local checks only: `cargo fmt --check`, then
@@ -546,17 +547,16 @@ merging (only your own part) and what happens after, is in
   and snapshots (for egui-pop and egui_stack, CI on `next` runs the rest). The box confirms; it is not where errors are first
   looked for (a failing gate costs about seven minutes for what a local
   clippy shows in seconds).
-- Full runs (gate, snapshots, release, the daily full suite) are queued by
-  one agent dedicated to the box, at fixed points: a branch is ready, before
-  a merge, after a Helios merge (release), once a day. It does the waiting,
-  so the agents writing code never wait on the box, and its jobs run one at
-  a time.
+- Box runs are queued by the tester alone (`cargo xtask gate`: a batch of
+  pull requests' manifests on `devel`), plus the wide runs (snapshots,
+  release, the daily full suite) at fixed points. The tester does the
+  waiting, so the agents writing code never wait on the box.
 
 **Before queuing**
 - Run the narrowest job first. A Helios change is tested with `test-crate
   crate=<crate> test=<target> filter=<name>` on the crates and targets it
-  touched, and nothing wider: no `test-affected` and no `--affected`
-  before a merge (rule 3 of [next.md](next.md)). On Helios they reach
+  touched, and nothing wider: no `test-affected` and no `--affected` in a
+  manifest ([next.md](next.md)). On Helios they reach
   nearly the whole suite (2026-11-08: 1,370 to 1,440 of 1,440 tests),
   which `next`'s CI already runs. `test-affected` and `test` are for the
   daily run and releases.
