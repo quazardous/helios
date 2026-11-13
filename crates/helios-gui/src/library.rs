@@ -1398,17 +1398,12 @@ fn drop_target(
                     .with("count", photos.0.len()),
             ),
         };
-        if let Some(at) = ctx.pointer_latest_pos() {
-            egui::Area::new(egui::Id::unique("helios.library.drop.hint"))
-                .order(egui::Order::Tooltip)
-                .fixed_pos(at + egui::vec2(16.0, 36.0))
-                .interactable(false)
-                .show(ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.label(text);
-                    });
-                });
-        }
+        // The row's own tooltip, at the pointer: egui hides hover tooltips
+        // while something is dragged, so it is shown here, not through
+        // `on_hover_text`; it is no window, popup or menu of the panel's.
+        egui::Tooltip::for_widget(row).at_pointer().show(|ui| {
+            ui.label(text);
+        });
     }
     let Some(photos) = row.dnd_release_payload::<DraggedPhotos>() else {
         return;

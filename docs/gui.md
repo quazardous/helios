@@ -1122,7 +1122,11 @@ centre): 30 seconds after start, then daily, and when a volume is
 mounted or goes (the storage watch). A check is a `helios_health::Check`
 (`id`, `title`, `declaration`, `run(&Context) -> Vec<Finding>`), kept in
 a `Registry` by owner: the module that declares it (`storage`,
-`library`, `backup`, `gpu`, `plugins`, `catalogue`), later the plugin.
+`library`, `backup`, `gpu`, `plugins`, `catalogue`), or the plugin
+(its id) for the checks a plugin declares in its manifest and answers
+through its process (`helios_plugin::health`, docs/extensions.md, "Health
+checks"); a plugin that crashes or does not answer within 20 s gives
+that check's "failed" problem.
 
 Health checks are a contract (`helios_health::contract`): each check
 declares what it watches, the levels its findings may have and the fix

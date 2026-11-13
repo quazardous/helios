@@ -311,6 +311,8 @@ impl Shell {
         if args["camera_look"] == false {
             target["camera_look"] = json!(false);
         }
+        // Run later as the user: who asked is said, for the history.
+        target["origin"] = json!(crate::persist::who(origin));
         Ok(self.queue_import(target, copy, args))
     }
 

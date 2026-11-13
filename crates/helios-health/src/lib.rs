@@ -12,11 +12,12 @@
 //! - Each check declares what it watches, the levels it may raise and
 //!   the fixes it may offer ([`contract::Declaration`]); its findings are
 //!   held to it.
-//! - The [`Registry`] holds the checks by owner (the module, later the
-//!   plugin, that declares them): Helios's own, each module listing its
+//! - The [`Registry`] holds the checks by owner (the module or the
+//!   plugin that declares them): Helios's own, each module listing its
 //!   checks ([`checks`], [`backup`], [`gpu`], [`plugins`],
-//!   [`snapshots`]), and later those plugins bring (the seam is
-//!   [`Registry::add`], which refuses an unsound declaration).
+//!   [`snapshots`]), and those plugins declare in their manifest, run
+//!   through their process (`helios_plugin::health`); the seam is
+//!   [`Registry::add`], which refuses an unsound declaration.
 //! - [`Findings`] keeps the last findings in memory beside the
 //!   [`Ignored`] list, saved in a small JSON file and undoable.
 //! - [`runner`] runs every check as one background job, at start (after a
@@ -145,9 +146,10 @@ pub trait Check: Send + Sync {
 }
 
 /// The checks the runner runs, in order, each with its owner: the module
-/// (later the plugin) that declares it. Helios's own are
-/// [`Registry::builtin`]; a plugin's will be added through
-/// [`Registry::add`] once the plugin protocol carries them.
+/// or the plugin that declares it. Helios's own are
+/// [`Registry::builtin`]; a plugin's are added through [`Registry::add`]
+/// by the plugin host (`helios_plugin::health`), its owner the plugin's
+/// id.
 #[derive(Clone, Default)]
 pub struct Registry {
     checks: Vec<Arc<dyn Check>>,
@@ -253,7 +255,10 @@ pub fn run_one(check: &Arc<dyn Check>, ctx: &Context) -> Vec<Finding> {
     let declaration = check.declaration();
     match found {
         Ok(found) => {
-            let breach = found.iter().find_map(|f| declaration.breach(check.id(), f));
+            let breach = found
+                .iter()
+                .filter(|f| !(is_failure(f) && f.check == check.id()))
+                .find_map(|f| declaration.breach(check.id(), f));
             match breach {
                 None => found,
                 Some(why) => {
@@ -268,17 +273,32 @@ pub fn run_one(check: &Arc<dyn Check>, ctx: &Context) -> Vec<Finding> {
 
 /// The problem a check that failed gives in place of its findings.
 fn crashed(check: &Arc<dyn Check>) -> Finding {
+    failed(check.id(), check.title())
+}
+
+/// The key of the problem a check that failed gives.
+pub const FAILED: &str = "health-check-crashed";
+
+/// The problem the check `id`, named `title`, gives when it failed (it
+/// panicked, its plugin crashed or did not answer in time) in place of
+/// its findings. A check may always give it, whatever it declares.
+pub fn failed(id: &str, title: Message) -> Finding {
     Finding::new(
-        check.id(),
+        id,
         "",
         Level::Problem,
-        Message::new("health-check-crashed", "The check { $check } failed")
-            .with("check", check.title()),
+        Message::new("health-check-crashed", "The check { $check } failed").with("check", title),
         Message::new(
             "health-check-crashed-detail",
             "It stopped before it could say anything.",
         ),
     )
+}
+
+/// Whether `finding` is the problem of its check having failed
+/// ([`failed`]).
+fn is_failure(finding: &Finding) -> bool {
+    finding.level == Level::Problem && finding.message.key == FAILED && finding.id == finding.check
 }
 
 /// The findings the user chose to ignore, by id, kept in a small JSON
@@ -613,6 +633,39 @@ mod tests {
             ])
         );
         assert!(r.checks().is_empty());
+    }
+
+    /// A check that says itself it failed (its plugin did not answer).
+    struct Fails;
+    impl Check for Fails {
+        fn id(&self) -> &'static str {
+            "fails"
+        }
+        fn title(&self) -> Message {
+            Message::plain("Fails")
+        }
+        fn declaration(&self) -> Declaration {
+            Declaration::new("Nothing").levels(&[Level::Ok])
+        }
+        fn run(&self, _: &Context) -> Vec<Finding> {
+            vec![failed(self.id(), self.title())]
+        }
+    }
+
+    #[test]
+    fn a_check_may_say_it_failed_whatever_it_declares() {
+        let mut r = Registry::default();
+        r.add("test", Arc::new(Fails)).unwrap();
+        let found = r.run(&Context::default());
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (
+                found[0].id.as_str(),
+                found[0].level,
+                found[0].message.key.as_str()
+            ),
+            ("fails", Level::Problem, FAILED)
+        );
     }
 
     #[test]

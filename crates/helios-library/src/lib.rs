@@ -5,6 +5,8 @@
 //!   copied into the library folder, renamed by a [`rename::Pattern`],
 //!   their sidecars kept, exact duplicates found by content and handled
 //!   by a policy, run as a job announced on the bus;
+//! - [`import_history`]: a record of each import (sources, choices,
+//!   counts, when, who) kept in the vault, and its params to run it again;
 //! - [`fetch`]: import from a connector whose items are fetched (a remote
 //!   source): bytes landed in part files with resume, hashed in BLAKE3 and
 //!   the claimed algorithm, always a verified copy in the library folder,
@@ -39,6 +41,7 @@ pub mod darktable;
 pub mod export;
 pub mod fetch;
 pub mod import;
+pub mod import_history;
 pub mod map;
 pub mod map_job;
 pub mod rename;

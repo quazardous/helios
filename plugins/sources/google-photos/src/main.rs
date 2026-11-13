@@ -15,9 +15,16 @@
 //! | `source.fetch` | `auth`, `items` (`id`, `path`, `download`), `staging` | `{fetched: [{id, file, bytes, mime}], failed: [{id, code, message}]}` |
 //! | `source.thumbnail` | `auth`, `item` (`id`, `download`), `maxSide`, `staging` | `{file, bytes}`: the item's preview, written into `staging` |
 //! | `source.close` | `auth`, `session` | `{}`: the session deleted |
+//! | `health.check` | `check`, `accounts` (`id`, `label`, `state`, `auth`) | `{findings}`: its `accounts` check |
 //!
 //! A token Google refuses answers -32010 ("sign-in needed"): Helios
 //! offers to reconnect the account and nothing is retried.
+//!
+//! Its health check `accounts` (declared in its manifest) tries each
+//! account Helios hands it, signed out ones aside: one whose token Google
+//! takes is fine, one with no token or a refused one needs reconnecting
+//! (the fix `import.reconnect`), one it could not try (offline) is said
+//! as a warning without a fix.
 
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -58,6 +65,86 @@ fn send(msg: &Json) {
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{msg}");
     let _ = out.flush();
+}
+
+/// A message for people: its key in the plugin's catalogue, its English
+/// and its arguments.
+fn message(key: &str, english: &str, account: &str) -> Json {
+    json!({
+        "key": key,
+        "english": english.replace("{ $account }", account),
+        "args": { "account": account },
+    })
+}
+
+/// The `accounts` check: one finding per account Helios hands, signed
+/// out ones aside.
+fn accounts_check(api: &str, params: &Json) -> Json {
+    let accounts = params["accounts"].as_array().cloned().unwrap_or_default();
+    let findings: Vec<Json> = accounts
+        .iter()
+        .filter(|a| a["state"] != "not-connected")
+        .map(|a| {
+            let id = a["id"].as_str().unwrap_or_default();
+            let label = a["label"].as_str().unwrap_or(id);
+            let tried = match a["auth"].as_str().filter(|t| !t.is_empty()) {
+                None => Err(ConnectorError::AuthNeeded),
+                Some(token) => {
+                    let picker = Picker::new(api, token);
+                    picker.create(Some(1)).map(|session| {
+                        let _ = picker.delete(&session.id);
+                    })
+                }
+            };
+            match tried {
+                Ok(()) => json!({
+                    "about": id,
+                    "level": "ok",
+                    "message": message(
+                        "google-photos-health-account-ok",
+                        "{ $account } signs in",
+                        label,
+                    ),
+                }),
+                Err(ConnectorError::AuthNeeded) => json!({
+                    "about": id,
+                    "level": "warning",
+                    "message": message(
+                        "google-photos-health-account-reconnect",
+                        "{ $account } needs reconnecting",
+                        label,
+                    ),
+                    "detail": message(
+                        "google-photos-health-account-reconnect-detail",
+                        "Google no longer takes its sign-in (revoked or aged out): reconnect it to import from it again.",
+                        label,
+                    ),
+                    "fix": {
+                        "command": "import.reconnect",
+                        "args": { "account": id },
+                        "label": {
+                            "key": "google-photos-health-fix-reconnect",
+                            "english": "Reconnect",
+                        },
+                    },
+                }),
+                Err(e) => json!({
+                    "about": id,
+                    "level": "warning",
+                    "message": message(
+                        "google-photos-health-account-untried",
+                        "{ $account } could not be checked",
+                        label,
+                    ),
+                    "detail": {
+                        "key": "",
+                        "english": format!("Google Photos: {e}"),
+                    },
+                }),
+            }
+        })
+        .collect();
+    json!({ "findings": findings })
 }
 
 /// An item as the protocol carries it.
@@ -231,6 +318,10 @@ impl Plugin {
                     .collect();
                 Ok(json!({ "items": items, "complete": next.is_none(), "next": next }))
             }
+            "health.check" => match params["check"].as_str() {
+                Some("accounts") => Ok(accounts_check(&self.api, params)),
+                other => Err((-32602, format!("no check {other:?}"))),
+            },
             "source.fetch" => self.fetch(params),
             "source.thumbnail" => self.thumbnail(params),
             "source.close" => {

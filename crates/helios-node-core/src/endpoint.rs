@@ -143,10 +143,12 @@ pub fn command<S: Store>(
     params: &Value,
     origin: &str,
 ) -> Result<(Value, Changes), String> {
-    let Some(spec) = specs()
-        .into_iter()
-        .find(|s| s.id == id && s.id != library::IMPORT && !cursor::handles(s.id.as_str()))
-    else {
+    let Some(spec) = specs().into_iter().find(|s| {
+        s.id == id
+            && s.id != library::IMPORT
+            && s.id != library::AGAIN
+            && !cursor::handles(s.id.as_str())
+    }) else {
         return Err(format!("no command `{id}` on the vault"));
     };
     let mut checked = params.clone();
@@ -321,10 +323,18 @@ impl<S: Store + Send + 'static> VaultService<S> {
     }
 
     fn run(&self, id: &str, params: &Value, call: &Call) -> Result<Value, String> {
-        if id != library::IMPORT {
+        let origin = origin_of(params).to_string();
+        // An import of the history run again is that import, as asked now.
+        let again;
+        let params = if id == library::AGAIN {
+            again = library::again_params(&self.vault, params)?;
+            &again
+        } else if id != library::IMPORT {
             return run_on(&self.vault, &self.bus, id, params, origin_of(params))
                 .map(|(answer, _)| answer);
-        }
+        } else {
+            params
+        };
         let paths: Vec<PathBuf> = params["paths"]
             .as_array()
             .into_iter()
@@ -332,7 +342,8 @@ impl<S: Store + Send + 'static> VaultService<S> {
             .filter_map(Value::as_str)
             .map(PathBuf::from)
             .collect();
-        let options = library::import_options(params, Some(call.cancel_flag()))?;
+        let mut options = library::import_options(params, Some(call.cancel_flag()))?;
+        options.origin = Some(origin);
         let mut files = Vec::new();
         let mut report = helios_library::import::import(
             &self.vault,
@@ -436,7 +447,7 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
     /// An import stops before its next file, a cursor window between
     /// chunks of rows.
     fn cancellable(&self, method: &str) -> bool {
-        method == library::IMPORT || method == "cursor.window"
+        method == library::IMPORT || method == library::AGAIN || method == "cursor.window"
     }
 }
 

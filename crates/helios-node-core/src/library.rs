@@ -3,7 +3,10 @@
 //! versions (`library.importDarktable`, one sidecar file with
 //! `library.keepSidecar`) and an image's edit read and saved
 //! (`library.edit.head`, `library.edit.save`), photos' fields set and
-//! read (`library.fields.set`, `library.fields.get`). `helios-node` lists them
+//! read (`library.fields.set`, `library.fields.get`), the import history
+//! listed (`import.history.list`) and one import run again
+//! (`import.history.again`, run as `library.import` by whoever serves
+//! it). `helios-node` lists them
 //! with its verbs; the desktop's node serves them too
 //! ([`crate::endpoint`]). They run on the vault the node owns, by whoever
 //! the call's origin names; the stacks' changes are announced on the
@@ -37,7 +40,33 @@ pub const IDS: &[&str] = &[
     "library.stacks.accept",
     "library.stacks.decline",
     "library.stacks.decisions",
+    HISTORY_LIST,
+    AGAIN,
 ];
+
+/// Lists the import history (`helios_library::import_history`).
+pub const HISTORY_LIST: &str = "import.history.list";
+
+/// Runs an import of the history again: answered as `library.import` with
+/// its record's params, by the node's importer ([`again_params`]).
+pub const AGAIN: &str = "import.history.again";
+
+/// The `library.import` params that run again the import of the history
+/// that `params` names (`id`).
+///
+/// # Errors
+/// No such import, or one an importer plugin listed.
+pub fn again_params<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, String> {
+    let id = params["id"]
+        .as_str()
+        .ok_or("`id` is missing: an import of `import.history.list`")?;
+    let mut again = helios_library::import_history::again(vault, id)?;
+    if let Some(fields) = again.as_object_mut() {
+        // The node's `library.import` takes no darktable choice.
+        fields.remove("darktable");
+    }
+    Ok(again)
+}
 
 /// Whether `id` is one of the commands run here.
 pub fn handles(id: &str) -> bool {
@@ -151,6 +180,21 @@ pub fn specs() -> Vec<CommandSpec> {
         library("library.stacks.decline", "Decline suggested stacks")
             .params(object(&[decision()])),
         library("library.stacks.decisions", "List the stack suggestions").read_only(),
+        CommandSpec::new(HISTORY_LIST, "List the import history", "Library")
+            .needs(Need::Vault)
+            .params(object(&[(
+                "limit",
+                json!({ "type": ["integer", "null"], "minimum": 1 }),
+                false,
+            )]))
+            .read_only(),
+        CommandSpec::new(AGAIN, "Import again", "Library")
+            .needs(Need::Vault)
+            .params(object(&[(
+                "id",
+                json!({ "type": "string", "description": "an import's id, from import.history.list" }),
+                true,
+            )])),
     ]
 }
 
@@ -286,6 +330,14 @@ pub fn run<S: Store>(
 ) -> Result<Value, String> {
     let bus = Some(&**bus);
     match id {
+        HISTORY_LIST => {
+            let limit = params["limit"].as_u64().map(|n| n as usize);
+            helios_library::import_history::list(vault, limit)
+                .map(|records| json!({ "imports": to_json(&records) }))
+        }
+        AGAIN => Err(format!(
+            "`{AGAIN}` runs as `{IMPORT}`, by the node's importer"
+        )),
         "library.importDarktable" => {
             let paths: Vec<PathBuf> = params["paths"]
                 .as_array()
@@ -466,6 +518,7 @@ mod tests {
             json!({ "image": "0a" }),
             json!({ "image": "0a", "edit": {}, "label": "macro.make" }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
+            json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
             json!({}),
             json!({ "images": ["/p/a.raf", "0a"], "top": null }),
             json!({ "stack": "s" }),
@@ -475,7 +528,10 @@ mod tests {
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
             json!({}),
+            json!({ "limit": 10 }),
+            json!({ "id": "1700000000000-42-0" }),
         ];
+        assert_eq!(examples.len(), IDS.len(), "one example per command");
         for (spec, example) in specs().iter().zip(examples) {
             validate(&spec.params, &example).unwrap_or_else(|e| panic!("{}: {e}", spec.id));
         }

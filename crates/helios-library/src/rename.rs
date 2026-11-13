@@ -15,6 +15,8 @@ use crate::signals::Signals;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pattern {
     parts: Vec<Part>,
+    /// As it was written: what [`Pattern::text`] gives back.
+    text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,7 +85,15 @@ impl Pattern {
         if text.contains(['/', '\\']) {
             return Err(format!("`{text}`: a name holds no path separator"));
         }
-        Ok(Pattern { parts })
+        Ok(Pattern {
+            parts,
+            text: text.to_string(),
+        })
+    }
+
+    /// The pattern as it was written, which [`Pattern::parse`] reads back.
+    pub fn text(&self) -> &str {
+        &self.text
     }
 
     /// The name for one file, without its extension.

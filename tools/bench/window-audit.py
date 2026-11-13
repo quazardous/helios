@@ -31,6 +31,7 @@ fails the job.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
@@ -144,10 +145,10 @@ def probes(args, comp, agent) -> list[dict]:
         }
     )
     shot(comp, args, "palette")
-    try:
-        agent.ui({"action": "key", "window": where if where != "nowhere" else "import", "key": "Escape"})
-    except (OSError, RuntimeError, ValueError):
-        pass
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        agent.ui(
+            {"action": "key", "window": where if where != "nowhere" else "import", "key": "Escape"}
+        )
     settle()
 
     # The picker open, the window closed by the compositor.
@@ -240,7 +241,9 @@ def main() -> int:
             f.write(json.dumps(r) + "\n")
     lines = ["| probe | ok | seen |", "|---|---|---|"]
     for r in results:
-        lines.append(f"| {r['probe']} | {'yes' if r.get('ok') else 'NO'} | {r.get('seen', r.get('error', ''))} |")
+        lines.append(
+            f"| {r['probe']} | {'yes' if r.get('ok') else 'NO'} | {r.get('seen', r.get('error', ''))} |"
+        )
     report = "\n".join(lines) + "\n"
     (args.out / "window-audit.md").write_text(report)
     print(report)
