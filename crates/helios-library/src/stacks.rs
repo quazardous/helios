@@ -7,8 +7,10 @@
 //! window, or consecutive frame numbers when there is no time) whose
 //! perceptual hashes are close are grouped, with a looser threshold
 //! between frames whose exposure differs (a bracket). Each group comes
-//! with a proposed best, the sharpest. Other resolvers (AI models) plug in
-//! under their own names.
+//! with a proposed best and why ([`best_of`]): the sharpest by the
+//! culling focus, a frame with blown highlights only when every measured
+//! frame has them. Other resolvers (AI models) plug in under their own
+//! names.
 //!
 //! Nothing is applied on its own: the suggestion is recorded as a
 //! proposal ([`Decision`], kept in the vault), and only an accept makes
@@ -20,6 +22,7 @@
 //! suggestion.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use helios_core::{Bus, Event};
@@ -54,6 +57,10 @@ pub struct Group {
     pub members: Vec<String>,
     /// The one proposed on top.
     pub best: String,
+    /// Why that one, in English (`sharpest, not clipped`); empty in
+    /// proposals made before it was recorded.
+    #[serde(default)]
+    pub best_why: String,
     /// `burst` or `bracket`.
     pub kind: String,
     /// Why the members go together, in English.
@@ -112,7 +119,12 @@ enum Link {
 }
 
 /// The version of the rules, recorded with what they propose.
-pub const RULES_VERSION: &str = "1";
+pub const RULES_VERSION: &str = "2";
+
+/// The share of pixels blown to white, on any channel, above which a
+/// frame counts as clipped and is not proposed on top while a measured
+/// frame of its group is not.
+pub const CLIPPED_WHITE: f64 = 0.02;
 
 impl RuleResolver {
     /// Whether `b`, taken after `a`, continues its group: the link and
@@ -214,25 +226,114 @@ fn group(members: &[&Candidate], links: &[(Link, bool)]) -> Group {
         .collect();
     ways.sort_unstable();
     ways.dedup();
-    let best = members
-        .iter()
-        .enumerate()
-        .max_by(|(i, a), (j, b)| {
-            let s = |c: &Candidate| c.signals.sharpness.unwrap_or(f64::NEG_INFINITY);
-            // The first of equals wins.
-            s(a).total_cmp(&s(b)).then(j.cmp(i))
-        })
-        .map(|(_, c)| c.id.clone())
-        .unwrap_or_default();
+    let (best, best_why) = best_of(members);
     Group {
         members: members.iter().map(|c| c.id.clone()).collect(),
         best,
+        best_why,
         kind: (if bracket { "bracket" } else { "burst" }).into(),
-        why: format!(
-            "{}, look alike; the sharpest proposed on top",
-            ways.join(", ")
-        ),
+        why: format!("{}, look alike; the best proposed on top", ways.join(", ")),
     }
+}
+
+/// How a frame ranks for the top of its group: only frames with a
+/// culling focus are ranked against each other (the focus is a raw
+/// energy, comparable within one burst only).
+struct Rank {
+    focus: f64,
+    /// The most of any channel blown to white.
+    white: f64,
+    /// The most of any channel crushed to black.
+    black: f64,
+}
+
+impl Rank {
+    fn of(c: &Candidate) -> Option<Rank> {
+        let cull = &c.signals.cull;
+        let max = |v: Option<[f64; 3]>| v.map_or(0.0, |v| v.into_iter().fold(0.0, f64::max));
+        Some(Rank {
+            focus: cull.focus?,
+            white: max(cull.clip_white),
+            black: max(cull.clip_black),
+        })
+    }
+
+    fn clipped(&self) -> bool {
+        self.white > CLIPPED_WHITE
+    }
+}
+
+/// The member proposed on top of a group and why, deterministically:
+///
+/// - frames with culling measures are ranked: a frame not clipped
+///   (at most [`CLIPPED_WHITE`] blown white on every channel) before a
+///   clipped one, then the higher focus, then the less blown white, then
+///   the less crushed black, then the earlier in capture order;
+/// - frames without measures are never chosen over a measured one;
+/// - when no frame is measured, the highest import sharpness wins, the
+///   earlier on a tie (the rule before the culling measures).
+pub fn best_of(members: &[&Candidate]) -> (String, String) {
+    let ranked: Vec<(usize, Rank)> = members
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| Rank::of(c).map(|r| (i, r)))
+        .collect();
+    let unmeasured = members.len() - ranked.len();
+    let Some((top, rank)) = ranked.iter().min_by(|(i, a), (j, b)| {
+        a.clipped()
+            .cmp(&b.clipped())
+            .then(b.focus.total_cmp(&a.focus))
+            .then(a.white.total_cmp(&b.white))
+            .then(a.black.total_cmp(&b.black))
+            .then(i.cmp(j))
+    }) else {
+        let best = members
+            .iter()
+            .enumerate()
+            .max_by(|(i, a), (j, b)| {
+                let s = |c: &Candidate| c.signals.sharpness.unwrap_or(f64::NEG_INFINITY);
+                // The first of equals wins.
+                s(a).total_cmp(&s(b)).then(j.cmp(i))
+            })
+            .map(|(_, c)| c.id.clone())
+            .unwrap_or_default();
+        return (best, "sharpest (no culling measures)".into());
+    };
+    let percent = |share: f64| format!("{:.1}%", share * 100.0);
+    let sharper_clipped = ranked
+        .iter()
+        .filter(|(_, r)| r.clipped() && r.focus > rank.focus)
+        .map(|(_, r)| r.white)
+        .fold(None, |m: Option<f64>, w| Some(m.map_or(w, |m| m.min(w))));
+    // The others as sharp: all are at least as clipped as the top.
+    let tied: Vec<&Rank> = ranked
+        .iter()
+        .filter(|(i, r)| i != top && r.clipped() == rank.clipped() && r.focus == rank.focus)
+        .map(|(_, r)| r)
+        .collect();
+    let mut why = match (rank.clipped(), sharper_clipped) {
+        (true, _) => format!(
+            "sharpest; every measured frame is clipped ({} blown white)",
+            percent(rank.white)
+        ),
+        (false, Some(white)) => format!(
+            "sharpest not clipped (a sharper frame has {} blown white)",
+            percent(white)
+        ),
+        (false, None) => "sharpest, not clipped".to_string(),
+    };
+    if tied
+        .iter()
+        .any(|r| r.white > rank.white || r.black > rank.black)
+    {
+        why.push_str("; less clipped than one as sharp");
+    } else if !tied.is_empty() {
+        why.push_str("; the first of frames as sharp");
+    }
+    if unmeasured > 0 {
+        let _ = write!(why, "; {unmeasured} frame(s) not measured");
+    }
+    (members[*top].id.clone(), why)
 }
 
 /// Resolvers by name.
@@ -537,4 +638,144 @@ pub fn decline<S: Store>(
 /// A decision as plain JSON.
 pub fn to_json(d: &Decision) -> Value {
     serde_json::to_value(d).expect("decisions serialize")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cull::Cull;
+
+    /// A frame of one burst, `n` in capture order.
+    fn frame(n: u32, sharpness: f64, cull: Option<(f64, f64)>) -> Candidate {
+        Candidate {
+            id: format!("{n:02}"),
+            signals: Signals {
+                phash: Some("f0f0f0f00f0f0f0f".into()),
+                taken: Some(f64::from(n) * 0.2),
+                burst: Some("b1".into()),
+                sharpness: Some(sharpness),
+                cull: cull.map_or_else(Cull::default, |(focus, white)| Cull {
+                    version: Some(crate::cull::VERSION),
+                    focus: Some(focus),
+                    clip_white: Some([white / 2.0, white, 0.0]),
+                    clip_black: Some([0.001, 0.0, 0.0]),
+                    ..Cull::default()
+                }),
+                ..Signals::default()
+            },
+        }
+    }
+
+    fn one_group(candidates: &[Candidate]) -> Group {
+        let s = RuleResolver::default().suggest(candidates).unwrap();
+        assert_eq!(s.groups.len(), 1, "{:?}", s.groups);
+        s.groups.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn the_sharp_unclipped_frame_goes_on_top() {
+        // Sharp, blurred, and sharper still but 6% blown on green; the
+        // import sharpness would pick the blurred one.
+        let burst = [
+            frame(1, 1.0, Some((40.0, 0.001))),
+            frame(2, 9.0, Some((5.0, 0.0))),
+            frame(3, 2.0, Some((55.0, 0.06))),
+        ];
+        let g = one_group(&burst);
+        assert_eq!(g.best, "01");
+        assert_eq!(
+            g.best_why,
+            "sharpest not clipped (a sharper frame has 6.0% blown white)"
+        );
+        // Without the clipped one: plainly the sharpest.
+        let g = one_group(&burst[..2]);
+        assert_eq!(g.best, "01");
+        assert_eq!(g.best_why, "sharpest, not clipped");
+    }
+
+    #[test]
+    fn when_every_frame_is_clipped_the_sharpest_wins() {
+        let burst = [
+            frame(1, 1.0, Some((40.0, 0.05))),
+            frame(2, 1.0, Some((50.0, 0.30))),
+        ];
+        let g = one_group(&burst);
+        assert_eq!(g.best, "02");
+        assert!(
+            g.best_why
+                .starts_with("sharpest; every measured frame is clipped")
+        );
+    }
+
+    #[test]
+    fn as_sharp_frames_go_to_the_less_clipped_then_the_first() {
+        let g = one_group(&[
+            frame(1, 1.0, Some((40.0, 0.01))),
+            frame(2, 1.0, Some((40.0, 0.005))),
+        ]);
+        assert_eq!(g.best, "02");
+        assert_eq!(
+            g.best_why,
+            "sharpest, not clipped; less clipped than one as sharp"
+        );
+        let g = one_group(&[
+            frame(1, 1.0, Some((40.0, 0.01))),
+            frame(2, 1.0, Some((40.0, 0.01))),
+        ]);
+        assert_eq!(g.best, "01");
+        assert_eq!(
+            g.best_why,
+            "sharpest, not clipped; the first of frames as sharp"
+        );
+    }
+
+    #[test]
+    fn a_burst_without_measures_keeps_the_import_sharpness() {
+        let g = one_group(&[
+            frame(1, 1.0, None),
+            frame(2, 3.0, None),
+            frame(3, 2.0, None),
+        ]);
+        assert_eq!(g.best, "02");
+        assert_eq!(g.best_why, "sharpest (no culling measures)");
+        // Equals: the first.
+        let g = one_group(&[frame(1, 3.0, None), frame(2, 3.0, None)]);
+        assert_eq!(g.best, "01");
+    }
+
+    #[test]
+    fn an_unmeasured_frame_never_beats_a_measured_one() {
+        // The unmeasured frame has by far the highest import sharpness,
+        // and the measured one is even clipped.
+        let g = one_group(&[
+            frame(1, 99.0, None),
+            frame(2, 1.0, Some((3.0, 0.5))),
+            frame(3, 50.0, None),
+        ]);
+        assert_eq!(g.best, "02");
+        assert!(
+            g.best_why.ends_with("; 2 frame(s) not measured"),
+            "{}",
+            g.best_why
+        );
+    }
+
+    #[test]
+    fn the_same_input_gives_the_same_proposal() {
+        let burst = [
+            frame(1, 1.0, Some((40.0, 0.001))),
+            frame(2, 9.0, None),
+            frame(3, 2.0, Some((55.0, 0.06))),
+            frame(4, 2.0, Some((40.0, 0.001))),
+        ];
+        let first = RuleResolver::default().suggest(&burst).unwrap();
+        for _ in 0..5 {
+            assert_eq!(RuleResolver::default().suggest(&burst).unwrap(), first);
+        }
+        // The order the candidates come in does not matter either.
+        let mut reversed = burst.to_vec();
+        reversed.reverse();
+        assert_eq!(RuleResolver::default().suggest(&reversed).unwrap(), first);
+        assert_eq!(first.groups[0].best, "01");
+    }
 }
