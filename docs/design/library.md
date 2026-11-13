@@ -537,6 +537,13 @@ holds every entry of the Library (read in windows of 2,000), so the
 grid's paging, the badges' backup marks and the tag completion still
 read the whole Library.
 
+Built (2026-11-13): the culling measures (focus, clipping) are read-only
+fields (`focus`, `clip_white`, `clip_black`) copied from the signals
+whenever they are written, so `cull:sharp|soft|clipped|unmeasured`,
+the `cull` facet, the sharpness sort (L3, sharpest first) and smart
+album rules on those fields run in the store. The soft threshold is an
+absolute focus value, a first guess to tune on real photos.
+
 **L5. Folders.** A Folders section in the Library panel: volumes, then
 folders with counts, from the Library's locations; offline volumes
 greyed with their "last seen"; a click scopes the grid
