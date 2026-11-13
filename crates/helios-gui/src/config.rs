@@ -54,6 +54,7 @@ use helios_config::{Concern, Config, Kind, Layer, Schema, Value};
 use helios_core::Message;
 use serde_json::{Value as Json, json};
 
+pub mod focus;
 pub mod plugins;
 pub mod store;
 
@@ -336,6 +337,13 @@ struct State {
     plugins: Option<plugins::PluginSettingsStore>,
     /// The open workspace's settings file.
     workspace: Option<PathBuf>,
+    /// The open workspace's name and the library's, which the Settings
+    /// header names its focus by.
+    workspace_name: Option<String>,
+    library: Option<String>,
+    /// The Settings edit the import window's focus (the library alone),
+    /// not the main window's ([`focus`]).
+    import_edited: bool,
     /// Where the plugins' secrets are kept: the system keyring unless
     /// [`use_secrets`] says otherwise.
     secrets: Option<Arc<dyn helios_connect::account::Secrets>>,
@@ -1426,6 +1434,7 @@ impl Plugin for BridgePlugin {
             admin.declare_scope(scope);
         }
         admin.manifest(manifest(&schema, &installed, &t));
+        admin.set_foci(focus::Foci);
         ctx.service(
             &BRIDGE,
             Bridge {
@@ -1456,6 +1465,7 @@ pub fn install(
 ) -> NodeSettingsStore {
     let schema = Schema::core();
     let project = settings.project().is_some();
+    let library = settings.project().map(focus::library_name);
     let run: Vec<(&'static str, Json)> = schema
         .iter()
         .filter_map(|s| {
@@ -1488,6 +1498,7 @@ pub fn install(
             secrets,
         ));
         st.installed = Some((store.clone(), config_dir.to_path_buf()));
+        st.library = library;
     }
     attach(app, &bridge, &admin);
     store
@@ -1516,7 +1527,8 @@ fn attach(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
     let Some((node, config_dir)) = &st.installed else {
         return;
     };
-    let workspace = st.workspace.as_deref();
+    // The import window's focus has no workspace.
+    let workspace = st.workspace.as_deref().filter(|_| !st.import_edited);
     let store = store::composite(node, st.plugins.as_ref(), config_dir, workspace);
     if let Some(file) = workspace {
         let values: BTreeMap<String, Json> = std::fs::read_to_string(file)
@@ -1589,8 +1601,35 @@ pub fn open_workspace(app: &AppHandle, file: Option<PathBuf>) {
     let (Some(bridge), Some(admin)) = (app.service(&BRIDGE), app.service(&ADMIN)) else {
         return;
     };
-    admin.offer(WORKSPACE.scope, file.is_some());
-    lock(&bridge.state).workspace = file;
+    let import_edited = {
+        let mut st = lock(&bridge.state);
+        st.workspace = file;
+        st.import_edited
+    };
+    let offered = lock(&bridge.state).workspace.is_some() && !import_edited;
+    admin.offer(WORKSPACE.scope, offered);
+    attach(app, &bridge, &admin);
+}
+
+/// The open workspace's name, which the Settings header names the main
+/// window's focus by (`None`: no workspace).
+pub fn name_workspace(app: &AppHandle, name: Option<&str>) {
+    if let Some(bridge) = app.service(&BRIDGE) {
+        lock(&bridge.state).workspace_name = name.filter(|n| !n.is_empty()).map(String::from);
+    }
+}
+
+/// The Settings edit another focus: its scopes offered, its store
+/// attached ([`focus`]).
+fn reattach(app: &AppHandle) {
+    let (Some(bridge), Some(admin)) = (app.service(&BRIDGE), app.service(&ADMIN)) else {
+        return;
+    };
+    let offered = {
+        let st = lock(&bridge.state);
+        st.workspace.is_some() && !st.import_edited
+    };
+    admin.offer(WORKSPACE.scope, offered);
     attach(app, &bridge, &admin);
 }
 

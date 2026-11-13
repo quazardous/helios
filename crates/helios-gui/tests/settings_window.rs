@@ -399,3 +399,147 @@ fn quick_settings_asked_in_the_import_window_open_there() {
         nodes.iter().map(|n| n.name.as_str()).collect::<Vec<_>>()
     );
 }
+
+/// Helios with real viewports, a library open through an in-process node
+/// and a workspace's settings file, and the import window open: two foci.
+fn two_foci(name: &str) -> (Harness<'static, Shell>, ViewportId, std::path::PathBuf) {
+    use helios_gui::config::{self, Settings};
+    use helios_node_core::node::LocalNode;
+    use helios_vault_sqlite::SqliteStore;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let dir = std::env::temp_dir().join(format!("helios-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+    let node = LocalNode::open(
+        store,
+        Arc::new(helios_core::Bus::new()),
+        Duration::from_hours(1),
+    );
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.state_mut().draw_frame(true);
+    h.run();
+    let app = h.state().app().handle().clone();
+    let layers = node.settings();
+    let (sources, _) = config::read(
+        &dir,
+        &|n| layers.read(n),
+        Some("project//photos".into()),
+        &[],
+    );
+    config::install(
+        &app,
+        Settings::resolve(&sources),
+        Some(Arc::new(node.settings())),
+        &dir,
+    );
+    config::open_workspace(&app, Some(dir.join("workspace.json")));
+    h.state_mut().set_title("Wedding");
+    h.run();
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the import window's own: {windows:?}");
+    (h, windows[0], dir)
+}
+
+#[test]
+fn settings_opened_from_the_main_window_edit_its_library_and_workspace_named_in_their_header() {
+    let (mut h, import, dir) = two_foci("settings-focus-main");
+    let app = h.state().app().handle().clone();
+    let admin = app.service(&ADMIN).unwrap();
+    h.state_mut()
+        .run("admin.open", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    assert_eq!(admin.edited_focus().as_deref(), Some("main"));
+    let foci = admin.foci(&app);
+    assert_eq!(
+        foci[0].label,
+        "Main window: workspace Wedding, library photos"
+    );
+    assert_eq!(foci[1].label, "Import window: library photos");
+    let offered: Vec<_> = admin.offered().iter().map(|s| s.name()).collect();
+    assert!(
+        offered.contains(&"library") && offered.contains(&"workspace"),
+        "{offered:?}"
+    );
+    // The header, in the Settings window: the focus edited, its switch.
+    let settings = declared(&h)
+        .into_iter()
+        .find(|v| *v != import)
+        .expect("the Settings window");
+    let nodes = window_pass(&mut h, settings, Pass::default());
+    let combo = nodes
+        .iter()
+        .find(|n| n.role == Role::ComboBox && n.name == "Settings for")
+        .expect("the header's switch");
+    assert!(combo.rect.width() > 0.0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn settings_asked_in_the_import_window_edit_its_focus_and_the_switch_changes_it() {
+    let (mut h, import, dir) = two_foci("settings-focus-import");
+    let app = h.state().app().handle().clone();
+    let admin = app.service(&ADMIN).unwrap();
+    let zoom = egui_pop::model::ids::SettingId::new("interface.graph.zoom").unwrap();
+    let decisions = egui_pop::model::ids::SettingId::new("project.decisions.mode").unwrap();
+    let before = (
+        app.setting::<String>(&zoom),
+        app.setting::<String>(&decisions),
+    );
+    window_pass(&mut h, import, Pass::default());
+    window_pass(
+        &mut h,
+        import,
+        Pass {
+            events: vec![Event::Key {
+                key: egui::Key::Comma,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            }],
+            ..Pass::default()
+        },
+    );
+    main_passes_in_the_back(&mut h, 3);
+    // It lands in the Settings window, the import window left open.
+    assert!(admin_open(&h));
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 2, "import and Settings: {windows:?}");
+    assert!(
+        app.window_viewport(&WindowId::new(SETTINGS_WINDOW))
+            .is_some()
+    );
+    // The import window's focus: the library it imports into, no
+    // workspace.
+    assert_eq!(admin.edited_focus().as_deref(), Some("import"));
+    let offered: Vec<_> = admin.offered().iter().map(|s| s.name()).collect();
+    assert!(offered.contains(&"library"), "{offered:?}");
+    assert!(!offered.contains(&"workspace"), "{offered:?}");
+    // The switch: the main window's focus, its workspace offered again.
+    h.state_mut()
+        .run("admin.focus", json!({ "id": "main" }), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    assert_eq!(admin.edited_focus().as_deref(), Some("main"));
+    let offered: Vec<_> = admin.offered().iter().map(|s| s.name()).collect();
+    assert!(offered.contains(&"workspace"), "{offered:?}");
+    // A setting with no workspace level, and the library's (the same
+    // library in both foci), keep their values through the switch.
+    assert_eq!(
+        (
+            app.setting::<String>(&zoom),
+            app.setting::<String>(&decisions)
+        ),
+        before
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
