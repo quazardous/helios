@@ -225,11 +225,7 @@ mod tests {
     #[test]
     fn a_bad_file_is_refused_with_every_reason() {
         let keys = |v: &Value| -> Vec<String> {
-            read(v)
-                .unwrap_err()
-                .into_iter()
-                .map(|m| m.key.to_string())
-                .collect()
+            read(v).unwrap_err().into_iter().map(|m| m.key).collect()
         };
         assert_eq!(
             keys(&json!({ "kind": "something" })),
