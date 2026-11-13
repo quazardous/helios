@@ -26,6 +26,12 @@ both windows' accessibility trees (each OS window has its own):
   opened in it (the window quick pick, `window.pick`), the window closed by
   the compositor: the dialog is cancelled with it, none comes up over the
   main window;
+- `tooltip`: the import window opened again, the pointer left over the
+  folder's row (its tick): its tooltip, the folder's path, must show in
+  the import window's tree, not the main window's;
+- `context-menu`: the same row right-clicked: its menu ("Forget this
+  folder") must open in the import window, not the main window; Escape
+  closes it;
 - `storage`: the import window opened again, "Storage…" clicked in it,
   the Settings in their own window (Helios's default): the Settings window
   opens on the Storage page;
@@ -63,6 +69,7 @@ _spec.loader.exec_module(ic)
 CHOOSE = "Choose a folder…"
 STORAGE = "Storage…"
 PALETTE_KEY = "Ctrl+Shift+P"
+FORGET = "Forget this folder"
 
 
 def labelled(agent, window: str, label: str) -> int:
@@ -173,6 +180,38 @@ def storage_probe(args, comp, agent, title: str, name: str) -> dict:
         "seen": f"{seen}, page {admin.get('scope')!s}, activated: {', '.join(front) or 'none'}",
         "new": new,
         "activated_later": activated(comp),
+    }
+
+
+def appears(agent, window: str, label: str, more_than: int, within: float = 5.0) -> int:
+    """How many nodes of `window`'s tree are named `label`, once more
+    than `more_than` or after `within` seconds."""
+    deadline = time.monotonic() + within
+    n = labelled(agent, window, label)
+    while n <= more_than and time.monotonic() < deadline:
+        time.sleep(0.1)
+        n = labelled(agent, window, label)
+    return n
+
+
+def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str) -> dict:
+    """`action` (`hover`, `secondary_click`) on the folder's row in the
+    import window: where `label` (the popup's text) shows."""
+    row = {"window": "import", "role": "CheckBox", "label": args.folder.name, "nth": 0}
+    base = (labelled(agent, "main", label), labelled(agent, "import", label))
+    try:
+        agent.ui({"action": action, **row})
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"probe": name, "ok": False, "error": f"{action}: {exc}"}
+    imp = appears(agent, "import", label, base[1])
+    main = labelled(agent, "main", label)
+    where = "import" if imp > base[1] else "main" if main > base[0] else "nowhere"
+    shot(comp, args, name)
+    return {
+        "probe": name,
+        "ok": where == "import" and main == base[0],
+        "seen": f"{what} in the {where} window",
+        "counts": {"main": [base[0], main], "import": [base[1], imp]},
     }
 
 
@@ -306,6 +345,21 @@ def probes(args, comp, agent) -> list[dict]:
         }
     )
     shot(comp, args, "close-with-dialog")
+
+    # A tooltip and a context menu raised in the import window.
+    title = open_import(args, comp, agent)
+    if title is None:
+        out.append({"probe": "tooltip", "ok": False, "error": "no import window listed"})
+        return out
+    out.append(popup_probe(args, comp, agent, "tooltip", "hover", str(args.folder), "tooltip"))
+    out.append(
+        popup_probe(args, comp, agent, "context-menu", "secondary_click", FORGET, "context menu")
+    )
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        agent.ui({"action": "key", "window": "import", "key": "Escape"})
+    settle()
+    if labelled(agent, "import", FORGET) > 0:
+        out[-1]["seen"] += "; still open after Escape"
 
     # Storage…: the Settings in their own window (the default), then
     # popped in over the main window. Last, in an import window of their
