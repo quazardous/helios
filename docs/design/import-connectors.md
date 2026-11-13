@@ -659,6 +659,19 @@ Into, the folder pattern, Name, Duplicates, Read darktable edits).
 - **A card** stays an automatic source with the window's choices,
   unless saved through "Edit source…" (section 3.8): its own choices
   then follow it where it is mounted.
+- **A card is known by its volume, not its mount point** (as built,
+  2026-11-13). A source saved on a card's mount root records the card's
+  volume id (`volume`, beside `path` and the card's `label`): the
+  filesystem's UUID or serial (`uuid:…`, from `/dev/disk/by-uuid` on
+  Linux; on Windows the volume serial or GUID, on macOS the volume UUID,
+  once those systems list volumes), else its label and size
+  (`weak:<label>:<size>`). Its choices, browser and automatic trigger
+  follow that id: the same card in another reader or at another mount
+  point is the same source (its `path` then follows it), another card
+  mounted where it was is another source. A source saved by path before
+  takes the card's id the first time a card is seen at its path, its
+  choices kept. The card's row and the column's first line show its
+  label and its UUID's first characters.
 - **Choices a connector cannot honour are hidden.** A connector reached
   through an account (`caps.accounts`, Google Photos) is remote: its
   photos are always copied ("Add where they are" hidden) and carry no

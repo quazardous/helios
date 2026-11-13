@@ -471,12 +471,14 @@ impl ImportWindow {
         if !wz.honours.darktable {
             choices.darktable = false;
         }
-        // An edited source keeps the browser it was shown in.
-        let browser = wz
-            .editing
-            .as_ref()
-            .and_then(|k| self.sources.get(k))
-            .and_then(|s| s.browser);
+        // An edited source keeps the browser it was shown in, and the
+        // card it is on while its folder is the same.
+        let edited = wz.editing.as_ref().and_then(|k| self.sources.get(k));
+        let browser = edited.and_then(|s| s.browser);
+        let (volume, label) = edited
+            .filter(|s| s.path == path)
+            .map(|s| (s.volume.clone(), s.label.clone()))
+            .unwrap_or_default();
         let source = SavedSource {
             connector,
             name: Some(wz.name.trim().to_string()),
@@ -486,6 +488,8 @@ impl ImportWindow {
             params: wz.params.into_iter().collect(),
             browser,
             auto: wz.auto,
+            volume,
+            label,
         };
         if let Some(old) = &wz.editing {
             self.replace_source(old, source);

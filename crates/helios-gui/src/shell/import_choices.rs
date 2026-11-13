@@ -465,11 +465,23 @@ impl ImportWindow {
                 "Metadata templates and time offsets come later.",
             )),
             shown_for: w.sources.showing.as_ref().map(|key| {
-                let source = match (w.sources.name_of(key), key) {
+                let mut source = match (w.sources.name_of(key), key) {
                     (Some(name), _) => name.to_string(),
                     (None, SourceKey::Folder(p)) => folder_name(p),
                     (None, SourceKey::Account(id)) => w.account_label(id),
                 };
+                // A card's source: the card's label and volume, briefly.
+                if let Some(card) = w.sources.get(key).and_then(|s| {
+                    let label = s.label.as_deref()?;
+                    let id = s
+                        .volume
+                        .as_deref()
+                        .and_then(super::import_sources::brief_id);
+                    Some(id.map_or_else(|| label.to_owned(), |id| format!("{label} · {id}")))
+                }) && card != source
+                {
+                    source = format!("{source} ({card})");
+                }
                 if w.sources.own(key).is_some() {
                     t(Message::new(
                         "gui-import-window-choices-own",
