@@ -788,6 +788,21 @@ an immediate viewport.
 still belong to the main window's workspace (P9); it gets a header
 naming that focus once there are several. Quick settings are slice 6.
 
+### Built: slice 6, quick settings (2026-11-13)
+
+P8-A, as built. `admin.quick` (`Ctrl+Shift+Q`, File > Quick settings)
+opens a small panel over the window it is asked in, one per window as the
+palette. Before typing it lists the settings manifests mark quick
+(`Manifest::quick`; Helios marks a dozen in `config::QUICK`), then those
+the person changed in this session within the last hour, which age out;
+typing searches every setting. Each row is the Settings app's own row, so
+a change goes through the host's store (the node for Helios's settings),
+and "Set for" shows only on a setting with a library level. Each row
+links to its page in Settings. Deviations from the plan: "changed lately"
+lasts the session (not kept across runs), and the quick flag lives in
+manifests rather than in each setting's declaration, so Helios can mark
+egui-pop's own settings (theme, size, language).
+
 ## 6. Open questions
 
 ### Product choices (for the owner)
@@ -1173,6 +1188,7 @@ Audit of the import window, 2026-11-13:
 | Closing the window with the picker open | Was: the picker came up over the main window. Now the choice is cancelled | wbox `close-with-picker`; egui-pop test | Fixed |
 | System file chooser (rfd, desktop portal) | Not used: Helios builds egui-pop without `native-dialogs`. egui-pop's native path sets no parent window at all | code | Open (egui-pop) |
 | Command palette | The import window | wbox `palette` | OK |
+| Quick settings (`Ctrl+Shift+Q`) | The window it is asked in, as the palette | Helios test on real viewports (`settings_window.rs`); egui-pop test | OK |
 | egui-pop dialogs (confirmations) | The window they are opened from; each window has its own queue | egui-pop tests | OK |
 | Helios's own modals (consent, connection, picking) | Drawn in the import window's pass | code | OK |
 | Closing the window with an egui-pop dialog open | The dialog moves to the main window's queue | egui-pop docs, code | Open (to decide) |
