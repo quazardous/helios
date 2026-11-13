@@ -65,6 +65,13 @@ pub struct Plan {
     pub left_out: Vec<(u64, String)>,
 }
 
+/// The box name of a batch's desktop build. It carries the batch, so two
+/// gates running at once (two testers) do not replace each other's build:
+/// a job submitted under a name the box holds cancels the one there.
+pub fn build_ext_job_id(temp: &str) -> String {
+    crate::remote::clean_ext_job_id(&format!("gate-build-{}", temp.trim_start_matches("gate/")))
+}
+
 /// The temporary branch a batch is tested on.
 pub fn temp_branch(numbers: &[u64]) -> String {
     let ids: Vec<String> = numbers.iter().map(u64::to_string).collect();
@@ -348,7 +355,7 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
             "bench-remote",
             "build-gui",
             &format!("branch={temp}"),
-            "ext_job_id=gate-build",
+            &format!("ext_job_id={}", build_ext_job_id(&temp)),
         ])
         .current_dir(root)
         .stdin(std::process::Stdio::null())
@@ -540,5 +547,6 @@ mod tests {
     #[test]
     fn a_batch_is_tested_on_a_branch_named_after_its_pull_requests() {
         assert_eq!(temp_branch(&[187, 189]), "gate/187-189");
+        assert_eq!(build_ext_job_id("gate/187-189"), "gate-build-187-189");
     }
 }
