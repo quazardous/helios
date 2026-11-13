@@ -1,9 +1,12 @@
 # A camera look fitted to the embedded JPEG
 
-Status: **study and design** (2026-11-13). The plan (study, a headless
-fit, then a module off by default) is accepted; what this note proposes
-beyond it is **not decided** until the owner settles it, and the open
-questions are listed in section 8, each with a recommendation.
+Status: **design accepted, step 2 built** (2026-11-13). The plan (study,
+a headless fit, then a module off by default) is accepted with the
+recommended answer to each question of section 8 (two modules, a 192 px
+proxy, the chart ruling the colour, the table inline, the fitter in
+`helios-calibrate`). Step 2, the headless fit, is in
+`helios_calibrate::look` without its hue/saturation table (section 5,
+"Built"); steps 3a and 3b are to do.
 
 Related notes: [calibration.md](calibration.md) (the chart profile,
 the accurate reference this note sits next to),
@@ -466,6 +469,40 @@ A pure module, `helios_calibrate::look` (Q5), with no IO and no GUI.
 If it runs over the hour, it lands the matrix, tone curve, split, gates
 and tests 1, 3 to 7, and leaves the table and the chroma curve (test 2)
 to a follow-up of the same size.
+
+### Built (2026-11-13)
+
+`helios_calibrate::look` holds the split, the pairs, the matrix (`P = I +
+C Bᵀ`, `B` a basis orthogonal to the neutral, six unknowns solved by
+ridge least squares of the luminance-normalised render along the
+preview's chromaticity), the tone curve (quantile matching, a three-knot
+smoothing then a refusal past the steepness bound, a shoulder toward 1
+past the last knot), the chroma curve (8 nodes, kept when it lowers the
+held-out mean by 2 %), `fit`, `apply`, `estimate_quality` (IJG tables)
+and every gate of 4.5 with its words (`Gate::words`). Inputs and choices
+made while building it:
+
+- `LookInputs` also carries the preview's own clip mask (a channel at
+  255 under the proxy pixel) and a `Source` (the raw's and the preview's
+  sizes, the estimated JPEG quality, a named local effect): the caller
+  reads them from the files.
+- The colour pairs leave out preview luminances (linear) under 0.015 and
+  from 0.85, and pixels at 255 in the preview; the matrix weighs each
+  pair by the preview's luminance (a dark 8-bit pixel's chromaticity is
+  the least certain); the tone curve and the chroma curve use the
+  highlights too.
+- Gates run in this order: inputs, preview (size, aspect, quality, local
+  effect), pair counts, sensor then preview clipping, tone range,
+  Spearman, structure (a shift of up to 3 pixels searched), then the
+  attempts: all pixels then away from edges, each full then partial; the
+  first refusal is the one reported. A grey scene gives a partial look
+  without a matrix (`Gate::NotEnoughColour` in the report's notes), a
+  black-and-white preview a tone-only look scored on lightness alone.
+- Not yet: the hue/saturation table (and its test 2, "the table earns its
+  place"), the matrix's refinement on Delta E 2000, and the tone-only
+  fallback for near-black frames. They are the follow-up, the same size.
+- `helios_load` reads a raw's embedded preview in the space the raw's
+  Exif names (Adobe RGB for `ColorSpace` 2, or 0xFFFF with `R03`).
 
 ## 6. Step 3: the module and its hooks
 
