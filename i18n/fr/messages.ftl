@@ -492,6 +492,12 @@ gui-new-workspace-verb = Créer
 
 gui-no-dialogs = aucune boîte de dialogue pour montrer ceci
 
+gui-notice-details = Détails
+
+gui-notice-failed = Un problème est survenu
+
+gui-notice-no-details = Aucun échec dont montrer les détails
+
 gui-open-workspace-directory = dossier
 
 gui-open-workspace-title = Ouvrir un espace de travail

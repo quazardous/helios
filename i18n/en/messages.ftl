@@ -1173,6 +1173,12 @@ gui-new-workspace-verb = Create
 
 gui-no-dialogs = no dialogs to show this in
 
+gui-notice-details = Details
+
+gui-notice-failed = Something went wrong
+
+gui-notice-no-details = No failure to show the details of
+
 gui-oauth-client-built-in = Helios's client
 
 gui-oauth-client-environment = From the environment
