@@ -96,7 +96,15 @@ events seen on a wait's timeout, the entities known on a miss).
 | -32005 | a wait ran out of time |
 | -32006 | the call cannot be cancelled |
 | -32007 | no such cursor: closed, or its lease ran out |
+| -32008 | outcome unknown (set by the client, never sent by a node) |
 | -32800 | the call was cancelled |
+
+**Outcome unknown, never resend.** When the connection closes after a call
+was sent and before its answer came, the client answers the call -32008
+itself: the node may have run it. A client reads the state (the image's
+parameters, the command's own list or state) before sending it again, and
+never resends a change blindly. A call made on a connection already
+closed was not sent (-32603).
 
 ## Cursors
 

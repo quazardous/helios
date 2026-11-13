@@ -105,11 +105,24 @@ impl Pending {
     }
 }
 
-/// The error of a call whose connection went before it was answered.
+/// The error of a call sent whose connection went before it was
+/// answered: it may have run ([`code::OUTCOME_UNKNOWN`]).
 fn gone() -> Error {
     Error::new(
+        code::OUTCOME_UNKNOWN,
+        format!(
+            "the connection to the node closed before the call was answered: {}",
+            crate::transport::OUTCOME_UNKNOWN
+        ),
+    )
+}
+
+/// The error of a call made on a connection already closed: it was not
+/// sent.
+fn closed() -> Error {
+    Error::new(
         code::INTERNAL_ERROR,
-        "the connection to the node closed before the call was answered",
+        "the connection to the node is closed: the call was not sent",
     )
 }
 
@@ -409,7 +422,7 @@ impl Transport for Socket {
         {
             let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
             let Some(waiting) = waiting.as_mut() else {
-                let _ = answer.send(Err(gone()));
+                let _ = answer.send(Err(closed()));
                 return;
             };
             waiting.insert(id, answer);

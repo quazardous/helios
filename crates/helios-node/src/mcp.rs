@@ -68,6 +68,13 @@
 //! typed arguments and documentation for the processing node's verbs, and
 //! the server's own (sandbox, AI, workspace files).
 //!
+//! Outcome unknown, never resend: when the connection to the node closes
+//! after a request was sent and before its answer came, the tool's error
+//! starts with "outcome unknown" (`-32008` on the generic pair). The
+//! request may have been applied; the agent reads the state before
+//! sending it again, and never resends a change blindly. "cannot reach
+//! the node" means it was not sent.
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::{Path, PathBuf};
@@ -2550,8 +2557,17 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
     }
 }
 
+/// Sends `request` to the node at `address`. A request sent whose answer
+/// never came says its outcome is unknown, rather than that the node
+/// could not be reached: the agent reads the state before resending it.
 fn send(address: &Address, request: &Value) -> Result<Value, String> {
-    request_at(address, request).map_err(|e| format!("cannot reach the node at {address}: {e}"))
+    request_at(address, request).map_err(|e| {
+        if helios_inspect::unanswered(&e) {
+            format!("outcome unknown at the node at {address}: {e}")
+        } else {
+            format!("cannot reach the node at {address}: {e}")
+        }
+    })
 }
 
 fn tool_result(text: String, is_error: bool) -> Value {
@@ -2762,6 +2778,9 @@ pub fn commands_call(client: &helios_inspect::client::Client, request: &Value) -
             serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
             false,
         ),
+        Err(e) if e.code == helios_inspect::rpc::code::OUTCOME_UNKNOWN => {
+            tool_result(format!("outcome unknown: {}", e.message), true)
+        }
         Err(e) => tool_result(e.message, true),
     }
 }
@@ -4084,5 +4103,47 @@ mod tests {
                 .ends_with("params: `stack` is missing"),
             "{refused}"
         );
+    }
+
+    /// A node that reads one request, then closes without answering.
+    #[cfg(unix)]
+    fn drops_after_reading(name: &str) -> (PathBuf, std::thread::JoinHandle<()>) {
+        use std::io::BufRead;
+        let dir = std::env::temp_dir().join(format!("helios-mcp-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("node.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let node = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut line = String::new();
+            let _ = std::io::BufReader::new(stream).read_line(&mut line);
+        });
+        (path, node)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_change_sent_and_never_answered_is_outcome_unknown_not_unreachable() {
+        let (path, node) = drops_after_reading("send");
+        let request = json!({ "cmd": "set_param", "node": "exp", "param": "ev", "value": 1.0 });
+        let error = send(&Address::Unix(path.clone()), &request).unwrap_err();
+        node.join().unwrap();
+        assert!(error.starts_with("outcome unknown"), "{error}");
+        assert!(error.contains("never resend it blindly"), "{error}");
+        let gone = send(&Address::Unix(path.clone()), &request).unwrap_err();
+        assert!(gone.starts_with("cannot reach the node"), "{gone}");
+
+        let (path, node) = drops_after_reading("run");
+        let client = helios_inspect::client::Client::connect(&Address::Unix(path)).unwrap();
+        let run = json!({ "cmd": "command.run", "id": "edit.undo" });
+        let result = commands_call(&client, &run);
+        node.join().unwrap();
+        assert_eq!(result["isError"], true);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("outcome unknown"), "{text}");
     }
 }

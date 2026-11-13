@@ -127,7 +127,9 @@
 //! The inspect socket defaults to `$HELIOS_SOCKET`, the control socket to
 //! `$HELIOS_CONTROL_SOCKET`. Output is JSON. Exit codes: 0 answered, 1 the
 //! node answered with an error (a wait that timed out prints what happened
-//! instead), 2 wrong usage, 3 the node cannot be reached.
+//! instead), 2 wrong usage, 3 the node cannot be reached, 4 the request
+//! was sent and no answer came: its outcome is unknown, so read the state
+//! before running it again.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -1184,7 +1186,11 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("helios: {}", e.message);
-            ExitCode::from(1)
+            ExitCode::from(if e.code == rpc::code::OUTCOME_UNKNOWN {
+                4
+            } else {
+                1
+            })
         }
     }
 }
@@ -1312,6 +1318,13 @@ fn main() -> ExitCode {
             } else {
                 ExitCode::from(1)
             }
+        }
+        Err(e) if helios_inspect::unanswered(&e) => {
+            eprintln!(
+                "helios: outcome unknown at the node at {}: {e}",
+                call.socket
+            );
+            ExitCode::from(4)
         }
         Err(e) => {
             eprintln!("helios: cannot reach the node at {}: {e}", call.socket);
