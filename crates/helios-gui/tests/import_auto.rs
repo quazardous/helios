@@ -361,8 +361,10 @@ fn card_setup(name: &str, confirmed: bool) -> CardSetup {
     } else {
         ""
     };
+    // the path quoted as a TOML string
+    let path = card.display().to_string();
     let doc = format!(
-        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {card:?}\nauto = \"plugged\"\n{confirmed}"
+        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {path:?}\nauto = \"plugged\"\n{confirmed}"
     );
     kept.write(IMPORT_SOURCES, &doc).unwrap();
     let slot = Arc::new(Slot::default());
