@@ -132,6 +132,11 @@ pub struct ConfigKey {
     /// for a list).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub visible_when: BTreeMap<String, Json>,
+    /// Its value may differ per library: Settings offers "Set for: This
+    /// library" beside the app's value. A plugin's own keys only; never
+    /// a secret.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_library: bool,
 }
 
 #[expect(
@@ -188,6 +193,11 @@ impl ConfigKey {
 
     pub fn path(mut self, kind: PathKind) -> Self {
         self.path = Some(kind);
+        self
+    }
+
+    pub fn per_library(mut self) -> Self {
+        self.per_library = true;
         self
     }
 
@@ -289,6 +299,9 @@ impl ConfigKey {
                 }
             }
             (None, _) => {}
+        }
+        if self.per_library && self.ty == KeyType::Secret {
+            p.push("a secret is kept in the keyring, not per library".into());
         }
         for (other, values) in &self.visible_when {
             let Some(key) = all.keys.get(other) else {
@@ -495,9 +508,18 @@ impl Contracts {
                     Level::Account => "account.",
                     Level::Source => "source.",
                 };
-                self.get(level)
+                let contract = self.get(level);
+                let per_library = contract
+                    .keys
+                    .iter()
+                    .filter(move |(_, k)| level != Level::Own && k.per_library)
+                    .map(|(n, _)| {
+                        format!("setting `{n}`: `per_library` is for a plugin's own settings")
+                    });
+                contract
                     .problems()
                     .into_iter()
+                    .chain(per_library)
                     .map(move |e| format!("{at}{e}"))
             })
             .collect()
@@ -639,6 +661,10 @@ mod tests {
             (
                 r#"{ "q": { "type": "float", "min": 2, "max": 1 } }"#,
                 "setting `q`: `min` 2 is above `max` 1",
+            ),
+            (
+                r#"{ "q": { "type": "secret", "per_library": true } }"#,
+                "setting `q`: a secret is kept in the keyring, not per library",
             ),
             (
                 r#"{ "Q": { "type": "bool" } }"#,

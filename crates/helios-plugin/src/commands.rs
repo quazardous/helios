@@ -48,11 +48,11 @@ pub fn admin(broker: &Arc<Broker>) -> Vec<(CommandSpec, Handler)> {
     out.push((
         CommandSpec::new(
             CAPABILITIES,
-            "List every plugin's capabilities, each with its reason and whether it is granted",
+            "List every plugin's capabilities (or one's: `plugin`), each with its reason and whether it is granted",
             "Plugins",
         )
         .read_only(),
-        Box::new(move |_, _| Ok(capability_rows(&b))),
+        Box::new(move |args, _| Ok(capability_rows(&b, args["plugin"].as_str()))),
     ));
     for (id, title, enable) in [
         ("plugin.enable", "Enable a plugin (`plugin`)", true),
@@ -107,10 +107,13 @@ pub fn admin(broker: &Arc<Broker>) -> Vec<(CommandSpec, Handler)> {
 /// (`<plugin> <capability>`), `plugin`, `pluginText` (its title),
 /// `capability`, `reason` (its manifest's), `about` (what the capability
 /// allows), `granted`.
-fn capability_rows(broker: &Broker) -> Json {
+fn capability_rows(broker: &Broker, only: Option<&str>) -> Json {
     let list = broker.list();
     let mut rows = Vec::new();
     for p in list["plugins"].as_array().into_iter().flatten() {
+        if only.is_some_and(|id| p["id"] != id) {
+            continue;
+        }
         for c in p["capabilities"].as_array().into_iter().flatten() {
             rows.push(json!({
                 "id": format!("{} {}", p["id"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default()),
