@@ -1874,6 +1874,17 @@ fn window_pass_at(
     size: egui::Vec2,
     at: Option<egui::Pos2>,
 ) -> Vec<String> {
+    painted_text(&window_run(h, window, close, size, at).shapes)
+}
+
+/// A deferred window's pass, as eframe runs it: its whole output.
+fn window_run(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    close: bool,
+    size: egui::Vec2,
+    at: Option<egui::Pos2>,
+) -> egui::FullOutput {
     use egui::{Pos2, RawInput, Rect, ViewportEvent, ViewportId, ViewportInfo};
     let cb = h.output().viewport_output[&window]
         .viewport_ui_cb
@@ -1904,7 +1915,7 @@ fn window_pass_at(
     // No painter for it: its textures are uploaded nowhere (as egui-pop's
     // `MultiWindow` does).
     out.textures_delta.clear();
-    painted_text(&out.shapes)
+    out
 }
 
 /// The import focus in an OS window of its own (docs/design/windows.md,
@@ -2092,6 +2103,36 @@ fn a_folder_opened_again_after_a_restart_reads_its_glances_from_disk_and_nothing
     assert_eq!(again.read, 0, "opened again, files were read: {again:?}");
     assert_eq!((again.cached, again.from_disk), (N, N), "{again:?}");
     assert_eq!(h.state().import_cells().len(), N);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Closed from its own pass (its close button, Cancel), the import window
+/// hides at once, brings the main window forward, and nothing wakes it
+/// again: its OS window goes only at the main window's next pass, which a
+/// compositor holds back while the main window is hidden (behind a
+/// browser opened for a picking), and meanwhile it would stay on screen
+/// drawn empty (black).
+#[test]
+fn import_window_closed_from_its_own_pass_hides_at_once_and_is_woken_no_more() {
+    let (mut h, window, dir) = import_in_its_own_window("close-hides");
+    assert_eq!(h.state().import_window_viewport(), Some(window));
+    let out = window_run(&mut h, window, true, vec2(1000.0, 700.0), None);
+    assert!(!h.state().import_window_open());
+    let commands = &out.viewport_output[&window].commands;
+    assert!(
+        commands.contains(&egui::ViewportCommand::Visible(false)),
+        "the closing window is not hidden: {commands:?}"
+    );
+    let main = &out.viewport_output[&egui::ViewportId::ROOT].commands;
+    assert!(
+        main.contains(&egui::ViewportCommand::Focus),
+        "the main window is not brought forward: {main:?}"
+    );
+    // Before any pass of the main window: what still answers (a picking
+    // ending) asks the main window for a frame, not the window going.
+    assert_eq!(h.state().import_window_viewport(), None);
+    h.run_steps(3);
+    assert!(declared(&h).is_empty(), "its window is gone");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

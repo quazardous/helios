@@ -200,6 +200,9 @@ pub(crate) struct ImportWindow {
     /// The viewport the window is drawn in (the main one while embedded):
     /// the one a scan's progress repaints.
     drawn_in: Arc<Mutex<Option<ViewportId>>>,
+    /// Its OS window's viewport, closed but not yet dropped by egui: the
+    /// main window passes again until it is.
+    going: Option<ViewportId>,
     cards: Vec<Card>,
     pub(super) memory: Memory,
     file: Option<PathBuf>,
@@ -305,13 +308,27 @@ impl ImportWindow {
     /// again.
     fn cancel(&mut self, ctx: &Egui) {
         let _stall = crate::stall::section("import window: closing");
+        crate::start::trace_frame("import window closed");
         self.open = false;
+        self.going_away();
         self.wizard = None;
         self.clear_contents();
         // The connection running gives up on its own thread; a picking
         // goes on there, detached, and says how it ended.
         self.accounts.window_closed();
         ctx.request_repaint_of(ViewportId::ROOT);
+    }
+
+    /// Its OS window goes: what still answers (a picking ending, a
+    /// connection giving up) wakes the main window, never the window
+    /// going, and the main window passes until egui has dropped it.
+    fn going_away(&mut self) {
+        let drawn = self
+            .drawn_in
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        self.going = drawn.filter(|v| *v != ViewportId::ROOT);
     }
 
     /// Stops reading and forgets what was read.
@@ -1037,6 +1054,20 @@ impl Shell {
         let id = WindowId::new(WINDOW);
         let there = app.window_viewport(&id).is_some();
         let mut w = self.import.get_mut();
+        // A window closed is dropped by egui at a pass of the main window
+        // that no longer declares it; a pass may still hold it (its last
+        // commands), and the main window may then sit idle: it passes
+        // again, shortly, until the window is gone.
+        if w.open {
+            w.going = None;
+        }
+        if let Some(going) = w.going {
+            if ctx.input(|i| i.raw.viewports.contains_key(&going)) {
+                ctx.request_repaint_after(GONE_CHECK);
+            } else {
+                w.going = None;
+            }
+        }
         match (w.open, there) {
             (true, false) if w.shown.is_some() => {
                 w.open = false;
@@ -1082,6 +1113,7 @@ impl Shell {
                                 app.raise_window(&WindowId::main());
                             } else {
                                 window.close();
+                                hide_closing_window(ui.ctx());
                             }
                         }
                     }
@@ -1265,9 +1297,32 @@ impl Shell {
         }
         let mut w = self.import.get_mut();
         w.save();
+        crate::start::trace_frame("import window closed");
         w.open = false;
+        w.going_away();
         w.clear_contents();
     }
+}
+
+/// How soon the main window passes again while a closed window is not
+/// dropped yet.
+const GONE_CHECK: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Hides an OS window closing from its own pass, and brings the main
+/// window forward. egui drops a window's viewport at a pass of the main
+/// window, and a compositor gives a hidden window no frames (behind a
+/// browser opened for a sign-in or a picking): until the main window
+/// shows again, the closed window would stay on screen, drawn empty
+/// (black) whenever something asks it for a frame. Hidden at once, it
+/// waits out of sight; the main window, asked to the front, gets its
+/// frames back. Wayland cannot hide a window: it is minimised there.
+fn hide_closing_window(ctx: &Egui) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+    }
+    ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Focus);
+    ctx.request_repaint_of(ViewportId::ROOT);
 }
 
 /// Whether the import window's content holds the main window: moved

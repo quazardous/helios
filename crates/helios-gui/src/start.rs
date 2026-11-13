@@ -81,6 +81,29 @@ pub fn mark(step: &str) {
     }
 }
 
+/// The environment variable that sends a line per frame begun, and per
+/// event a bench waits for, to standard error:
+///
+/// ```text
+/// helios-frame <epoch µs> <what>
+/// ```
+///
+/// so a script can tell when the main window last drew after an action
+/// (the import window closed, for instance).
+pub const FRAME_TRACE_ENV: &str = "HELIOS_FRAME_TRACE";
+
+/// Writes a frame trace line when [`FRAME_TRACE_ENV`] is set (read once).
+pub fn trace_frame(what: impl std::fmt::Display) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os(FRAME_TRACE_ENV).is_some()) {
+        return;
+    }
+    let wall = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros());
+    eprintln!("helios-frame {wall} {what}");
+}
+
 /// Marks a step of the first frame (nothing in the frames after it).
 pub fn mark_in_first_frame(step: &str) {
     if !FIRST_BUILT.load(Ordering::Relaxed) {

@@ -1474,6 +1474,7 @@ impl eframe::App for App {
                     ));
             }
         }
+        start::trace_frame("main window built");
         if !self.frames.done() {
             let ctx = ui.ctx().clone();
             let saw_input = ctx.input(start::saw_input);
@@ -1481,7 +1482,12 @@ impl eframe::App for App {
         }
     }
 
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        start::trace_frame(if raw_input.viewport_id == egui::ViewportId::ROOT {
+            "main window begins"
+        } else {
+            "another window begins"
+        });
         self.frames.begin();
     }
 
