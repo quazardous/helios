@@ -1209,8 +1209,10 @@ fn a_picking_source_shows_its_account_once_and_one_primary_action() {
 /// column, never a dialog, with Cancel back to the primary action.
 #[test]
 fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
-    let (mut h, opened, _folder, imported, _) =
+    let (mut h, opened, folder, imported, _) =
         picking_world_with(None, End::Wait, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     until(&mut h, "the status line", |h| {
@@ -1244,8 +1246,10 @@ fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
 /// Left without Done: said plainly, and the primary action again.
 #[test]
 fn nothing_chosen_says_so_and_offers_to_choose_again() {
-    let (mut h, opened, _folder, imported, _) =
+    let (mut h, opened, folder, imported, _) =
         picking_world_with(None, End::Nothing, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     until(&mut h, "nothing said", |h| {
@@ -1259,8 +1263,10 @@ fn nothing_chosen_says_so_and_offers_to_choose_again() {
 /// The service unreachable: why, and "Try again", which opens a new page.
 #[test]
 fn an_unreachable_service_says_why_and_offers_to_try_again() {
-    let (mut h, opened, _folder, _imported, _) =
+    let (mut h, opened, folder, _imported, _) =
         picking_world_with(None, End::Down, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     until(&mut h, "the reason said", |h| {
@@ -1277,8 +1283,10 @@ fn an_unreachable_service_says_why_and_offers_to_try_again() {
 /// "needs reconnecting", and the one action is its reconnection.
 #[test]
 fn a_refused_account_says_so_and_offers_its_reconnection() {
-    let (mut h, _opened, _folder, _imported, _) =
+    let (mut h, _opened, folder, _imported, _) =
         picking_world_with(None, End::Refused, AccountState::Connected);
+    // A library folder, so the page opens without asking for Into.
+    *folder.0.lock().unwrap() = Some(std::env::temp_dir());
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
     h.get_by_label(CHOOSE).click();
     let refused = "▲ Test server no longer lets Helios read this account.";
