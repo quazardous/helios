@@ -675,6 +675,14 @@ gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo
 
+gui-history-workshop-accept = Workshop “{ $name }”: a photo accepted
+
+gui-history-workshop-decide = Workshop “{ $name }”: a junction decided
+
+gui-history-workshop-fix = Workshop “{ $name }”: a photo fixed
+
+gui-history-workshop-revert = Workshop “{ $name }”: a photo reverted
+
 gui-history-workshop-run = Workshop “{ $name }” on { $count } photos
 
 gui-image-not-reopened = The image left open could not be opened again: { $error }

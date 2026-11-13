@@ -608,6 +608,9 @@ command-workshop-design =
 command-workshop-propose =
     .title = Expérimental : proposer des valeurs pour l’atelier piloté, montrées comme valeurs fantômes que l’utilisateur accepte, remplace ou rejette (`values` : par nom de curseur ; `aim` : les mots auxquels elles répondent ; `session`)
 
+command-workshop-review =
+    .title = Expérimental : revoir une passe d’atelier, les photos signalées d’abord, avec leurs signalements, la provenance et les valeurs avant et après ; ou agir sur une photo (`run` : la dernière par défaut ; `flag` : seulement les photos qui le lèvent ; `action` : accept ou revert (à vous seul), fix (`values`), decide une jonction laissée à son repli (`junction`, `value`, inscrite dans le carnet de décisions), rerun les photos retenues et décidées (à vous seul) ; `image`)
+
 command-workshop-run =
     .title = Expérimental : lancer l’atelier appliqué sur un ensemble de photos, une tâche : chaque photo visée, ses jonctions répondues, vérifiée contre les limites, écrite ou retenue ; une étape d’annulation (`node` : le nœud sélectionné par défaut ; `set` : selection ou view ; `images` : des identifiants à la place ; `on_breach` : flag, hold ou stop ; `dry_run` : les photos, J, A et ce que le carnet de décisions répond déjà)
 
