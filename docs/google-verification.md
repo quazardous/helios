@@ -11,7 +11,7 @@ Cloud console; this page is the checklist and the texts to paste.
 - Privacy policy: <https://quazardous.github.io/helios/privacy.html>
   (`site/privacy.html`).
 
-Both are published by `.github/workflows/pages.yml` from `main`.
+Both are published by `.github/workflows/pages.yml` from `main`: the promotion of `next` starts it when `site/` changed.
 
 ## Checklist
 

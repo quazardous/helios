@@ -63,6 +63,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Where main stands before
+        id: before
+        run: echo "main=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
       - name: Release and promote the commit CI passed
         id: promote
         env:
@@ -81,3 +84,16 @@ jobs:
           gh workflow run release.yml -R "$GITHUB_REPOSITORY" --ref main \
             -f tag="v$VERSION" -f publish=true
           echo "tagged v$VERSION and started its release" >> "$GITHUB_STEP_SUMMARY"
+      # A push with GITHUB_TOKEN starts no workflow, so pages.yml (on a push
+      # to main touching site/) is started here when the promotion brought
+      # changes to the site.
+      - name: Publish the site when it changed
+        env:
+          BEFORE: ${{ steps.before.outputs.main }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch -q origin main
+          if ! git diff --quiet "$BEFORE" origin/main -- site .github/workflows/pages.yml; then
+            gh workflow run pages.yml -R "$GITHUB_REPOSITORY" --ref main
+            echo "the site changed: pages.yml started" >> "$GITHUB_STEP_SUMMARY"
+          fi
