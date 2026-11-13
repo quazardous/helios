@@ -184,6 +184,9 @@ impl<S: Store> Vault<S> {
             who: who.into(),
             at: now,
         };
+        // Built before the transaction: the writer is held for the checks
+        // and the write alone.
+        let doc = serde_json::to_value(&stack).expect("stacks serialize");
         self.transaction(|store| {
             for m in &unique {
                 if store.image(m)?.is_none() {
@@ -195,7 +198,6 @@ impl<S: Store> Vault<S> {
                     return Err(format!("{} is already in stack {}", m.hex(), other.id));
                 }
             }
-            let doc = serde_json::to_value(&stack).expect("stacks serialize");
             store.set_document(STACKS, &stack.id, Some(&doc))
         })?;
         self.announce(&stack, "created");
