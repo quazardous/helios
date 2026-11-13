@@ -1594,7 +1594,10 @@ pub(crate) fn choose_ui(
     };
     let mut cancel = false;
     match status {
-        None | Some(PickStatus::Cancelled) => {
+        // A refusal is the account's own state, said above while it lasts:
+        // a picking refused before the account was connected again is
+        // over, and the photos are chosen afresh.
+        None | Some(PickStatus::Cancelled | PickStatus::SignIn) => {
             if primary(ui, choose) {
                 asked = pick;
             }
@@ -1685,12 +1688,6 @@ pub(crate) fn choose_ui(
             );
             if primary(ui, choose) {
                 asked = pick;
-            }
-        }
-        Some(PickStatus::SignIn) => {
-            refused(ui);
-            if primary(ui, reconnect_who) {
-                asked = reconnect;
             }
         }
         Some(PickStatus::NoInto) => {

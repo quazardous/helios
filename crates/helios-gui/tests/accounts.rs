@@ -655,6 +655,9 @@ enum End {
     Nothing,
     /// The service refuses the account's sign-in.
     Refused,
+    /// The first page refuses the account's sign-in (its access lapsed
+    /// since an earlier run); the next ones are done at once.
+    RefusedOnce,
     /// The service cannot be reached.
     Down,
 }
@@ -771,6 +774,10 @@ impl helios_connect::Connector for PickConnector {
             End::Done => return Ok(true),
             End::Nothing => return Ok(false),
             End::Refused => return Err(helios_connect::ConnectorError::AuthNeeded),
+            End::RefusedOnce if *self.current.lock().unwrap() <= 1 => {
+                return Err(helios_connect::ConnectorError::AuthNeeded);
+            }
+            End::RefusedOnce => return Ok(true),
             End::Down => return Err(helios_connect::ConnectorError::Offline),
         }
         while Instant::now() < deadline {
@@ -1341,6 +1348,56 @@ fn a_refused_account_says_so_and_offers_its_reconnection() {
     });
     h.get_by_label("Reconnect ann@example.org").click();
     h.run_steps(3);
+}
+
+/// An account and its saved source from an earlier run, whose access
+/// lapsed since: the first page is refused, the account reconnected, and
+/// choosing photos opens a new page whose photos fill the grid, never the
+/// refusal again.
+#[test]
+fn an_existing_account_reconnected_after_a_refusal_chooses_photos_again() {
+    let (mut h, opened, _folder, _imported, _) = picking_world_with(
+        Some(OWN_INTO.into()),
+        End::RefusedOnce,
+        AccountState::Connected,
+    );
+    assert_eq!(h.state().import_sources().len(), 1, "the source read");
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    let refused = "▲ Test server no longer lets Helios read this account.";
+    until(&mut h, "refused said", |h| {
+        shown(h, refused) && shown(h, "Reconnect ann@example.org")
+    });
+    h.run_steps(2);
+    h.get_by_label("Reconnect ann@example.org").click();
+    until(&mut h, "the form", |h| connection(h)["state"] == "form");
+    run(
+        &mut h,
+        "import.connectionAnswer",
+        json!({ "values": { "host": "example.org", "user": "ann", "password": "right" } }),
+        Origin::User,
+    )
+    .unwrap();
+    until(&mut h, "connected", |h| {
+        connection(h)["state"] == "connected"
+    });
+    h.get_by_label("Close").click();
+    until(&mut h, "the dialog closed", |h| connection(h).is_null());
+    // Connected again: the primary action, not the refusal of before.
+    until(&mut h, "the primary action back", |h| {
+        shown(h, CHOOSE) && !shown(h, refused)
+    });
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the chosen photos in the grid", |h| {
+        h.state().import_cells().len() == 2
+    });
+    assert_eq!(
+        opened.urls(),
+        [
+            "https://picker.example.org/pick/s1",
+            "https://picker.example.org/pick/s2"
+        ]
+    );
 }
 
 /// The account's menu: "Manage accounts…" opens Settings > Accounts.
