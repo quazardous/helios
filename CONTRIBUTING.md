@@ -186,12 +186,12 @@ half-written file.
   `fixed`, `security`, or `internal` for a change with nothing to tell a
   user (it satisfies the check and never reaches the changelog).
 - An optional second line `release: patch`, `minor` or `major` asks for a
-  release (`release: false`, the default, asks for none). Set it on the
-  change that completes a user-visible feature (`minor`), or on a fix that
-  should reach users at once (`patch`). It cannot be lower than the kind
-  calls for (`added` with `release: patch` is refused). To ship what waits
-  on `next`, a fragment `kind: internal` with `release: patch` (or more)
-  and one line of text is enough.
+  release (`release: false`, the default, asks for none). Authors leave it
+  out: after each green batch the tester recommends whether what reached
+  `next` is worth a release, and the coordinator decides, with a one-line
+  fragment `kind: internal` and `release: patch` (or more) through the
+  same gate (docs/next.md). It cannot be lower than the kind calls for
+  (`added` with `release: patch` is refused).
 - One to three sentences, in plain language: the effect for a user, not the
   implementation. No file names, no private paths, no ticket numbers; a
   public link is fine.

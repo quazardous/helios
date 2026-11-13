@@ -4,6 +4,8 @@
 //! - `release [--date YYYY-MM-DD]`: assemble the changelog fragments into
 //!   CHANGELOG.md, bump the workspace version, remove the fragments. Stops
 //!   there: reviewing, committing and tagging stay a human's call.
+//! - `manifest check [FILE|-]`: the test manifest of a pull request into
+//!   `devel` (see `manifest.rs`).
 //! - `promote <SHA> [--remote NAME]`: what `promote.yml` runs once CI passed
 //!   on a commit of `next`: the release of its fragments committed on top
 //!   of it, then `main` (and `next`) moved to that (see `promote.rs`).
@@ -52,6 +54,7 @@ mod commits;
 mod i18n;
 mod install_dev;
 mod lint;
+mod manifest;
 mod promote;
 mod remote;
 mod test_times;
@@ -795,6 +798,10 @@ fn main() -> ExitCode {
                 fail(&problems)
             }
         }
+        ["manifest", rest @ ..] => manifest::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", manifest::USAGE);
+            ExitCode::from(2)
+        }),
         ["promote", rest @ ..] => promote::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", promote::USAGE);
             ExitCode::from(2)
