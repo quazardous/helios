@@ -2434,8 +2434,37 @@ fn the_window_switcher_is_neither_in_the_window_menu_nor_in_the_palette() {
 fn closing_the_last_window_quits() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.ctx.set_embed_viewports(false);
+    h.state_mut()
+        .set_last_window(helios_gui::shell::LastWindow::Quit);
     h.run();
     assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
+    assert!(h.state().quitting());
+}
+
+/// macOS's habit, on any platform: the last window closed is hidden and
+/// Helios goes on; Window > Main window brings it back; Quit still quits.
+#[test]
+fn the_last_window_closed_stays_open_on_macos() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.state_mut()
+        .set_last_window(helios_gui::shell::LastWindow::StayOpen);
+    h.run();
+    assert_eq!(
+        close_main_window(&mut h),
+        helios_gui::shell::Closing::Hidden
+    );
+    assert!(h.state().window_hidden());
+    assert!(!h.state().quitting());
+    h.state_mut()
+        .run("helios.window.main", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    assert!(!h.state().window_hidden(), "shown again");
+    h.state_mut()
+        .run("workbench.quit", json!(null), Origin::User)
+        .unwrap();
+    h.run();
     assert!(h.state().quitting());
 }
 

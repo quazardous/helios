@@ -106,6 +106,14 @@ open = "5"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.4"
 
+# macOS: the global menu bar (muda, Apache-2.0 OR MIT, without its GTK
+# backend) and the Dock's reopen, answered on winit's application delegate
+# (objc2, MIT).
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21", default-features = false }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+
 # Windows: the console a window program attaches to when started from a
 # terminal, its close events and the session's end (MIT OR Apache-2.0,
 # already in the tree).

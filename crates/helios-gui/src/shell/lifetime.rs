@@ -12,7 +12,11 @@
 //!   window only. Closing the main window while another is open moves that
 //!   one into it (egui-pop's rule): Helios goes on. Window > Main window
 //!   brings the main window back, that window going back to its own.
-//! - **Closing the last window** quits, as Quit does.
+//! - **Closing the last window** quits, as Quit does, on Linux and
+//!   Windows. On macOS ([`LastWindow::StayOpen`]) Helios stays running
+//!   with no window, as document applications do there: the main window
+//!   is hidden, and the Dock icon, File > New Window or Window > Main
+//!   window bring it back; Cmd+Q quits.
 //!
 //! The host (the desktop's `main.rs`) asks [`Shell::main_window_closing`]
 //! when the main window's close is requested, and quits only when told.
@@ -39,9 +43,51 @@ pub(super) const MAIN_WINDOW: &str = "helios.window.main";
 /// that came with it (egui-pop's Quit closes the main window).
 const HOLD_PASSES: u64 = 3;
 
+/// What closing the last window does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LastWindow {
+    /// Helios quits (Linux, Windows).
+    Quit,
+    /// Helios stays running with no window (macOS).
+    StayOpen,
+}
+
+impl LastWindow {
+    /// The platform's habit.
+    pub const fn platform() -> Self {
+        if cfg!(target_os = "macos") {
+            LastWindow::StayOpen
+        } else {
+            LastWindow::Quit
+        }
+    }
+}
+
+impl Default for LastWindow {
+    fn default() -> Self {
+        Self::platform()
+    }
+}
+
+/// The main window, as the last window's policy sees it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum MainWindow {
+    #[default]
+    Shown,
+    /// The last window was closed and Helios stays running: hidden until
+    /// it is asked back.
+    Hidden,
+    /// Asked back: shown at the next pass.
+    Reopening,
+}
+
 /// Where the application's life stands.
 #[derive(Debug, Default)]
 pub(super) struct Lifetime {
+    /// What closing the last window does.
+    last_window: LastWindow,
+    /// Whether the main window is hidden, Helios running with no window.
+    main: MainWindow,
     /// Quit was asked and nothing holds it: the main window's close ends
     /// the process.
     quitting: bool,
@@ -85,6 +131,10 @@ pub enum Closing {
     Moved,
     /// The close is cancelled: a question is asked first.
     Kept,
+    /// The last window closed and Helios stays running with no window
+    /// ([`LastWindow::StayOpen`]): the host hides the main window
+    /// instead of closing it.
+    Hidden,
 }
 
 impl Shell {
@@ -148,6 +198,14 @@ impl Shell {
         if self.core.app.handle().windows().len() > 1 {
             return Closing::Moved;
         }
+        // The last window on macOS: Helios stays running with no window,
+        // its jobs going on.
+        if self.lifetime.last_window == LastWindow::StayOpen {
+            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            self.lifetime.main = MainWindow::Hidden;
+            return Closing::Hidden;
+        }
         // The last window: closing it quits, as Quit does.
         let running = self.running_jobs();
         if running == 0 || self.core.assume_yes {
@@ -164,7 +222,46 @@ impl Shell {
     /// window took its place comes back: that window's content goes back
     /// to a window of its own, and the main window draws the shell again.
     pub(super) fn main_window(&mut self) {
+        if self.window_hidden() {
+            self.reopen();
+            return;
+        }
         self.core.app.handle().raise_window(&WindowId::main());
+    }
+
+    /// What closing the last window does: the platform's habit unless
+    /// set (tests set macOS's on any platform).
+    pub fn set_last_window(&mut self, last_window: LastWindow) {
+        self.lifetime.last_window = last_window;
+    }
+
+    /// Whether Helios runs with no window (the last one closed on macOS).
+    pub fn window_hidden(&self) -> bool {
+        self.lifetime.main != MainWindow::Shown
+    }
+
+    /// Brings the hidden main window back (the Dock icon, File > New
+    /// Window): shown at the next pass, by [`Shell::show_reopened`].
+    pub fn reopen(&mut self) {
+        if self.lifetime.main == MainWindow::Hidden {
+            self.lifetime.main = MainWindow::Reopening;
+        }
+    }
+
+    /// Shows the main window again when it was asked back; whether it
+    /// was. Runs in the main window's pass, which goes on while it is
+    /// hidden.
+    pub fn show_reopened(&mut self, ctx: &Context) -> bool {
+        if self.lifetime.main != MainWindow::Reopening {
+            return false;
+        }
+        self.lifetime.main = MainWindow::Shown;
+        let root = egui::ViewportId::ROOT;
+        ctx.send_viewport_cmd_to(root, ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd_to(root, ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd_to(root, ViewportCommand::Focus);
+        ctx.request_repaint();
+        true
     }
 
     /// The jobs a quit would cancel: the node's (the exports, which
