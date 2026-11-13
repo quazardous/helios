@@ -766,6 +766,9 @@ gui-library-cull-clipped 1052a836d32a2f0e
 gui-library-cull-sharp ba8a092b58423e8f
 gui-library-cull-soft 77664a4fb499c495
 gui-library-cull-unmeasured cc20513cabdb8620
+gui-library-drop-add bc4b76c3fcf7a86e
+gui-library-drop-set ec3d777987cd5744
+gui-library-drop-smart 2b52bc1534ed5dd4
 gui-library-empty d1a64591ca82b2f8
 gui-library-facet-backup 20d776af0fba6d57
 gui-library-facet-camera 2084bc593dd90bf4

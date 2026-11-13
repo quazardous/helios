@@ -1051,6 +1051,12 @@ gui-library-cull-soft = soft
 
 gui-library-cull-unmeasured = not measured
 
+gui-library-drop-add = Add { $count } photos
+
+gui-library-drop-set = Not here: drop the photos on one of the set's albums
+
+gui-library-drop-smart = Not here: a smart album's rules choose its photos
+
 gui-library-empty = No photos yet: import a card or a folder, or drop photos on the window
 
 gui-library-facet-backup = Backup
