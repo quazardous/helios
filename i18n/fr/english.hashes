@@ -290,6 +290,7 @@ frame-helios-mask-editing.title 9d40fb207fdf75d9
 frame-helios-sub-workspace.title e8980ceace620065
 frame-helios-workspace.title e7a125cdd87cf1f5
 gui-about-description 6b6356eedfe61a4e
+gui-account-identity-missing 22d8dd24e3d1c326
 gui-account-pick 59d1fb51925cc2e3
 gui-album-not-changed f8e2d0fadf57137b
 gui-backup-card-safe c563f3ba220cc628
@@ -860,7 +861,9 @@ gui-pick-done 19c95ed7feb6813d
 gui-pick-expired f9be8eee7d97989e
 gui-pick-failed 0dc585e051a2e538
 gui-pick-importing a61d47728658ad72
+gui-pick-known f20c500ee6a9c414
 gui-pick-library-folder bd3d31e24eacba72
+gui-pick-more 4cc4162fcf4ebc50
 gui-pick-nothing 692269164c42d95d
 gui-pick-sign-in 6770243a93dc36c8
 gui-pick-starting 18fd2f06bea071dd
