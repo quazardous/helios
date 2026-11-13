@@ -155,6 +155,10 @@ command-library-collection.title 8c4621c0332ae0d9
 command-library-compare.title d0cb5f40dd939879
 command-library-copyFiles.title 47994437a8a0f5ba
 command-library-export.title c2dc933564069c87
+command-library-filter-apply.title 19abeee163bd677a
+command-library-filter-pin.title 62e6f0bcdff6f1ec
+command-library-filter-recent.title 5ea26540ae874ceb
+command-library-filter-switch.title 1609e681d277603d
 command-library-folder.title 401442b888a6ce54
 command-library-importFiles.title a7190ef3f937e18a
 command-library-importSource.title b212d23cfe694c9e
@@ -998,6 +1002,11 @@ gui-quick-open-workspace 83fb01ff0702e457
 gui-quit-jobs-detail 70be8d39bb030494
 gui-quit-title 8d4beb9036a59719
 gui-quit-verb a4050ce0b3604cfc
+gui-recent-filters-none 478b93a2d42fc0d2
+gui-recent-filters-pinned 05bd6622ccf8a2e7
+gui-recent-filters-recent 34d258ba4ca0ac84
+gui-recent-filters-smart 52b24d21f2b7d415
+gui-recent-filters-title 3ad85b9fbf46be65
 gui-recording-saved a76310c7e51efad9
 gui-recording-stopped 2162a30bfb25f825
 gui-rule-add-condition e03c987ee7b176eb
