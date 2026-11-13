@@ -611,6 +611,8 @@ fn library_commands(
             };
             let options = helios_library::import::Options {
                 placement: helios_library::import::Placement::Copy { into },
+                // A pick is the person's, in the import window.
+                origin: Some("user".into()),
                 ..helios_library::import::Options::default()
             };
             let mut report = helios_library::fetch::import_remote(
