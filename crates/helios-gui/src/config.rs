@@ -979,16 +979,34 @@ fn volumes_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
     s.table(table);
 }
 
-/// Settings > Accounts: every import account with its source and state,
-/// "Reconnect" and "Sign out" on each (`import.accounts`,
-/// `import.reconnect`, `import.signOut`).
+/// Settings > Accounts: every import account with its service, the saved
+/// sources using it, when it was last used and its status (connected,
+/// needs reconnecting, access refused); its name edited in place, and
+/// "Reconnect" and "Disconnect" on each, Disconnect asking what to do
+/// with the sources using it (`import.accounts`, `import.renameAccount`,
+/// `import.reconnect`, `import.disconnect`); "Add account…" per service
+/// (`import.accountConnectors`, `import.addSource`).
 fn accounts_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
-    use crate::shell::{ACCOUNTS_COMMAND, RECONNECT_COMMAND, SIGN_OUT_COMMAND};
+    use crate::shell::{
+        ACCOUNT_CONNECTORS_COMMAND, ACCOUNTS_COMMAND, ADD_SOURCE_COMMAND, DISCONNECT_COMMAND,
+        RECONNECT_COMMAND, RENAME_COMMAND,
+    };
     s.description(&t(Message::new(
         "gui-settings-accounts-about",
         "The accounts Helios imports from. Their keys and tokens stay in this computer's keyring; the library keeps only their names.",
     )));
     let account = json!({ "account": "${row.id}" });
+    let disconnect = |sources: Option<&str>| {
+        let mut args = account.clone();
+        if let Some(s) = sources {
+            args["sources"] = json!(s);
+        }
+        Action::command(DISCONNECT_COMMAND).args(args)
+    };
+    let title = t(
+        Message::new("gui-account-disconnect-title", "Disconnect { $account }?")
+            .with("account", "${row.label}"),
+    );
     let table = Records::command("accounts", "", ACCOUNTS_COMMAND, "/accounts", "id")
         .column(
             "label",
@@ -996,45 +1014,132 @@ fn accounts_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
         )
         .column(
             "connectorText",
-            &t(Message::new("gui-settings-account-source", "Source")),
+            &t(Message::new("gui-settings-account-service", "Service")),
         )
         .column(
-            "stateText",
-            &t(Message::new("gui-settings-account-state", "State")),
+            "usedBy",
+            &t(Message::new("gui-settings-account-used-by", "Used by")),
+        )
+        .column(
+            "lastUsedText",
+            &t(Message::new("gui-settings-account-last-used", "Last used")),
+        )
+        .column(
+            "statusText",
+            &t(Message::new("gui-settings-account-status", "Status")),
         )
         .column("why", &t(Message::new("gui-settings-account-why", "Why")))
         .tone("tone")
+        .row_field(
+            RowField::text(
+                "name",
+                &t(Message::new("gui-settings-account-rename", "Name")),
+                RENAME_COMMAND,
+                json!({ "account": "${row.id}", "name": "${value}" }),
+            )
+            .help(&t(Message::new(
+                "gui-settings-account-rename-help",
+                "How this account is called in Helios; the address it signed in as stays beside it.",
+            ))),
+        )
         .row_action(
             Action::command(RECONNECT_COMMAND)
                 .title(&t(Message::new("gui-account-reconnect", "Reconnect")))
                 .args(account.clone()),
         )
         .row_action(
-            Action::command(SIGN_OUT_COMMAND)
-                .title(&t(Message::new("gui-account-sign-out", "Sign out")))
-                .args(account)
-                .when("row.connected")
-                .confirmation(Confirmation::new(
-                    &t(Message::new(
-                        "gui-account-sign-out-title",
-                        "Sign out of { $account }?",
+            disconnect(None)
+                .title(&t(Message::new("gui-account-disconnect", "Disconnect")))
+                .when("!row.used")
+                .danger()
+                .confirmation(
+                    Confirmation::new(
+                        &title,
+                        &t(Message::new(
+                            "gui-account-disconnect-explain",
+                            "Helios asks the service to revoke its access, forgets this account's keys and tokens on this computer and removes the account. What was imported stays.",
+                        )),
+                        &t(Message::new("gui-account-disconnect", "Disconnect")),
                     )
-                    .with("account", "${row.label}")),
+                    .danger(),
+                ),
+        )
+        .row_action(
+            disconnect(Some("keep"))
+                .title(&t(Message::new(
+                    "gui-account-disconnect-keep",
+                    "Disconnect, keep its sources",
+                )))
+                .when("row.used")
+                .confirmation(Confirmation::new(
+                    &title,
                     &t(Message::new(
-                        "gui-account-sign-out-explain",
-                        "Helios forgets this account's keys and tokens on this computer. What was imported stays.",
+                        "gui-account-disconnect-keep-explain",
+                        "Helios asks the service to revoke its access and forgets this account's keys and tokens on this computer. These sources stay, not connected, until you reconnect: { $sources }.",
+                    )
+                    .with("sources", "${row.usedBy}")),
+                    &t(Message::new(
+                        "gui-account-disconnect-keep",
+                        "Disconnect, keep its sources",
                     )),
-                    &t(Message::new("gui-account-sign-out", "Sign out")),
                 )),
+        )
+        .row_action(
+            disconnect(Some("forget"))
+                .title(&t(Message::new(
+                    "gui-account-disconnect-forget",
+                    "Disconnect and forget its sources",
+                )))
+                .when("row.used")
+                .danger()
+                .confirmation(
+                    Confirmation::new(
+                        &title,
+                        &t(Message::new(
+                            "gui-account-disconnect-forget-explain",
+                            "Helios asks the service to revoke its access, forgets this account's keys and tokens on this computer, removes the account and forgets these sources: { $sources }. What was imported stays.",
+                        )
+                        .with("sources", "${row.usedBy}")),
+                        &t(Message::new(
+                            "gui-account-disconnect-forget",
+                            "Disconnect and forget its sources",
+                        )),
+                    )
+                    .danger(),
+                ),
         )
         .empty(
             &t(Message::new(
                 "gui-settings-accounts-none",
-                "No account yet: add one with \"Add a source…\" in the import window.",
+                "No account yet: add one below.",
             )),
             None,
         );
     s.table(table);
+    let add = Records::command(
+        "account-services",
+        &t(Message::new("gui-settings-accounts-add", "Add an account")),
+        ACCOUNT_CONNECTORS_COMMAND,
+        "/connectors",
+        "connector",
+    )
+    .column(
+        "connectorText",
+        &t(Message::new("gui-settings-account-service", "Service")),
+    )
+    .row_action(
+        Action::command(ADD_SOURCE_COMMAND)
+            .title(&t(Message::new("gui-account-add", "Add account…")))
+            .args(json!({ "connector": "${row.connector}" })),
+    )
+    .empty(
+        &t(Message::new(
+            "gui-settings-accounts-no-service",
+            "No service with accounts is installed.",
+        )),
+        None,
+    );
+    s.table(add);
 }
 
 /// Settings > Accounts' "Use my own OAuth client": each service signing

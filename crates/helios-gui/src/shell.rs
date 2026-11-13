@@ -74,8 +74,10 @@ mod core;
 mod export;
 mod focus;
 pub use accounts_admin::{
-    ACCOUNTS as ACCOUNTS_COMMAND, OAUTH_CLIENTS as OAUTH_CLIENTS_COMMAND,
-    RECONNECT as RECONNECT_COMMAND, SET_OAUTH_CLIENT as SET_OAUTH_CLIENT_COMMAND,
+    ACCOUNT_CONNECTORS as ACCOUNT_CONNECTORS_COMMAND, ACCOUNTS as ACCOUNTS_COMMAND,
+    ADD_SOURCE as ADD_SOURCE_COMMAND, DISCONNECT as DISCONNECT_COMMAND,
+    OAUTH_CLIENTS as OAUTH_CLIENTS_COMMAND, RECONNECT as RECONNECT_COMMAND,
+    RENAME as RENAME_COMMAND, SET_OAUTH_CLIENT as SET_OAUTH_CLIENT_COMMAND,
     SIGN_OUT as SIGN_OUT_COMMAND,
 };
 mod health;
@@ -3018,6 +3020,10 @@ impl Shell {
             (
                 accounts_admin::RECONNECT,
                 "Connect an import account again, from the step that failed (`account`)",
+            ),
+            (
+                accounts_admin::DISCONNECT,
+                "Disconnect an import account (`account`): its token revoked where the service allows, its secrets forgotten; the saved sources using it are kept with it, not connected (`sources`: \"keep\") or forgotten with it (\"forget\"); an account no source uses is forgotten",
             ),
         ] {
             add(

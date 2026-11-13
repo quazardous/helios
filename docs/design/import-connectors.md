@@ -333,9 +333,12 @@ the same screens, the same states and the same tests:
   *needs attention* and the import window offers "Reconnect", which
   replays only the steps that failed.
 - **Where**: "Add a source…" in the import window runs the process for
-  a new account; Settings > Accounts lists every account with its state
-  and "Reconnect" / "Sign out". Folders and mounted cards declare no
-  process.
+  a new account; Settings > Accounts lists every account with its
+  status (OK, needs reconnecting, access refused), the saved sources
+  using it and its last use, renames it, and offers "Reconnect",
+  "Disconnect" (the token revoked and forgotten; the sources using it
+  kept with the account or forgotten with it) and "Add account…" per
+  connector. Folders and mounted cards declare no process.
 - **Agents and plugins**: the process is data, so the node exposes it
   (`import.connect` with the steps and their state); an agent may start
   it and fill a `form` the user allows, never a secret on its own, and

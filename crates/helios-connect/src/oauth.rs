@@ -420,7 +420,9 @@ impl OAuth {
         {
             return Ok(access);
         }
-        let expired = |account: &mut Account, why: &str| {
+        // `refused`: the service refused the token, not a sign-in left
+        // undone on this machine.
+        let expired = |account: &mut Account, why: &str, refused: bool| {
             account.state = AccountState::NeedsAttention {
                 step: account
                     .facts
@@ -428,12 +430,13 @@ impl OAuth {
                     .and_then(Value::as_str)
                     .map(str::to_owned),
                 why: why.to_owned(),
+                refused,
             };
             let _ = book.save(account);
             why.to_owned()
         };
         let Some(refresh) = secrets.get(id, REFRESH_TOKEN)? else {
-            return Err(expired(&mut account, "signed out: sign in again"));
+            return Err(expired(&mut account, "signed out: sign in again", false));
         };
         let fact = |k: &str| {
             account
@@ -446,6 +449,7 @@ impl OAuth {
             return Err(expired(
                 &mut account,
                 "the sign-in is incomplete: sign in again",
+                false,
             ));
         };
         let secret = self.secret_of(&account, &client, secrets);
@@ -473,6 +477,7 @@ impl OAuth {
                 Err(expired(
                     &mut account,
                     "the sign-in expired or was revoked: sign in again",
+                    true,
                 ))
             }
             Err(e) => Err(e.said()),

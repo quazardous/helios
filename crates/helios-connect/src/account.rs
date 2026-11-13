@@ -41,6 +41,10 @@ pub enum AccountState {
         #[serde(default)]
         step: Option<String>,
         why: String,
+        /// The service refused the account's token (revoked, aged out)
+        /// while it was used: shown as "access refused".
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        refused: bool,
     },
 }
 
@@ -76,6 +80,11 @@ pub struct Account {
     /// The names of the secrets kept for it in the keyring.
     #[serde(default)]
     pub secrets: Vec<String>,
+    /// When it was last used (connected, or a token handed to its
+    /// connector), in seconds since the Unix epoch; to the hour
+    /// ([`touch`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<u64>,
 }
 
 impl Account {
@@ -96,6 +105,7 @@ impl Account {
             state: AccountState::NotConnected,
             facts: BTreeMap::new(),
             secrets: Vec::new(),
+            last_used: None,
         }
     }
 
@@ -272,9 +282,10 @@ pub fn sign_out(
     Ok(account)
 }
 
-/// Marks an account "needs attention" (the source refused its sign-in
-/// during a listing or a fetch): reconnecting it replays its steps.
-/// An account already marked keeps its step and reason.
+/// Marks an account "needs attention" because the source refused its
+/// sign-in during a listing or a fetch ("access refused"): reconnecting
+/// it replays its steps. An account already marked keeps its step and
+/// reason.
 pub fn needs_attention(book: &dyn AccountBook, id: &str, why: &str) -> Result<Account, String> {
     let mut account = book
         .account(id)?
@@ -283,10 +294,54 @@ pub fn needs_attention(book: &dyn AccountBook, id: &str, why: &str) -> Result<Ac
         account.state = AccountState::NeedsAttention {
             step: None,
             why: why.to_owned(),
+            refused: true,
         };
         book.save(&account)?;
     }
     Ok(account)
+}
+
+/// Now, in seconds since the Unix epoch.
+pub fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// How stale an account's "last used" may get before [`touch`] writes it
+/// again: one write an hour at most, not one per token handed out.
+pub const TOUCH_EVERY: u64 = 3600;
+
+/// Records that the account `id` is used now, when its "last used" is
+/// older than [`TOUCH_EVERY`]; an account not kept is no error.
+pub fn touch(book: &dyn AccountBook, id: &str) -> Result<(), String> {
+    let Some(mut account) = book.account(id)? else {
+        return Ok(());
+    };
+    let now = now();
+    if account
+        .last_used
+        .is_some_and(|t| now.saturating_sub(t) < TOUCH_EVERY)
+    {
+        return Ok(());
+    }
+    account.last_used = Some(now);
+    book.save(&account)
+}
+
+/// Renames the account `id` (its name as shown, the address read at its
+/// sign-in kept beside it); its name before, for an undo.
+pub fn rename(book: &dyn AccountBook, id: &str, label: &str) -> Result<String, String> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("an account's name cannot be empty".into());
+    }
+    let mut account = book
+        .account(id)?
+        .ok_or_else(|| format!("no account {id}"))?;
+    let before = std::mem::replace(&mut account.label, label.to_owned());
+    book.save(&account)?;
+    Ok(before)
 }
 
 /// Forgets an account whole: its secrets and its document.
@@ -353,9 +408,48 @@ mod tests {
         a.state = AccountState::NeedsAttention {
             step: Some("probe".into()),
             why: "refused".into(),
+            refused: false,
         };
         let again = Account::from_document(&a.to_document()).unwrap();
         assert_eq!(again, a);
         assert_eq!(again.state.name(), "needs-attention");
+        assert!(a.to_document().get("refused").is_none());
+    }
+
+    #[test]
+    fn a_refused_token_is_kept_apart_and_an_account_is_renamed_and_touched_hourly() {
+        let book = MemoryAccounts::default();
+        let a = Account::new("nas", "NAS", &[]);
+        book.save(&a).unwrap();
+        let marked = needs_attention(&book, "nas-1", "refused").unwrap();
+        assert!(matches!(
+            marked.state,
+            AccountState::NeedsAttention { refused: true, .. }
+        ));
+        let doc = book.account("nas-1").unwrap().unwrap().to_document();
+        assert_eq!(doc["refused"], true);
+
+        assert_eq!(rename(&book, "nas-1", "  Home NAS ").unwrap(), "NAS");
+        assert_eq!(book.account("nas-1").unwrap().unwrap().label, "Home NAS");
+        assert!(rename(&book, "nas-1", " ").is_err());
+        assert!(rename(&book, "nas-9", "x").is_err());
+
+        touch(&book, "nas-1").unwrap();
+        let used = book.account("nas-1").unwrap().unwrap().last_used.unwrap();
+        assert!(used + 5 >= now());
+        // Within the hour, nothing is written again.
+        let mut old = book.account("nas-1").unwrap().unwrap();
+        old.last_used = Some(now() - 10);
+        book.save(&old).unwrap();
+        touch(&book, "nas-1").unwrap();
+        assert_eq!(
+            book.account("nas-1").unwrap().unwrap().last_used,
+            old.last_used
+        );
+        old.last_used = Some(now() - TOUCH_EVERY - 1);
+        book.save(&old).unwrap();
+        touch(&book, "nas-1").unwrap();
+        assert!(book.account("nas-1").unwrap().unwrap().last_used.unwrap() + 5 >= now());
+        touch(&book, "nas-9").unwrap();
     }
 }
