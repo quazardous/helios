@@ -612,6 +612,20 @@ pub type PlacesFn = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 /// An account's access token, by account id.
 pub type TokenFn = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
 
+/// The values the person gave an account's or a source's settings
+/// (`level`), by key, for the account or source `id`, the keys of
+/// `contract` read: secrets from the keyring as the call is made. What a
+/// plugin's connector hands its plugin with each call.
+pub type ValuesFn = Arc<
+    dyn Fn(
+            helios_core::config::Level,
+            &str,
+            &helios_core::config::Contract,
+        ) -> serde_json::Map<String, serde_json::Value>
+        + Send
+        + Sync,
+>;
+
 /// What the host gives connectors.
 #[derive(Clone, Default)]
 pub struct ConnectorServices {
@@ -625,6 +639,9 @@ pub struct ConnectorServices {
     /// expired (`oauth::OAuth::access_token`): what a connector signed in
     /// through an `oauth` step calls its service with.
     pub token: Option<TokenFn>,
+    /// The accounts' and sources' configuration values; `None`: their
+    /// contracts' defaults.
+    pub values: Option<ValuesFn>,
 }
 
 impl std::fmt::Debug for ConnectorServices {
@@ -633,6 +650,7 @@ impl std::fmt::Debug for ConnectorServices {
             .field("cards", &self.cards.is_some())
             .field("places", &self.places.is_some())
             .field("token", &self.token.is_some())
+            .field("values", &self.values.is_some())
             .finish()
     }
 }

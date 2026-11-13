@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use helios_plugin::{Broker, Notice, Policy, Probed, Scope};
+use helios_plugin::{Broker, Notice, Policy, Probed, Scope, Told};
 use helios_shell::commands::{Origin, Registry};
 use helios_shell::when::Context;
 use serde_json::{Value as Json, json};
@@ -476,4 +476,191 @@ fn revoking_a_capability_stops_the_plugin_and_is_kept() {
     );
     assert!(run("metadata.read", json!({"image": image})).is_err());
     assert_eq!(told.load(Ordering::Relaxed), 2, "granted, then revoked");
+}
+
+#[test]
+fn own_settings_reach_the_plugin_at_start_and_with_each_call_and_a_change_notifies_or_restarts() {
+    if !python() {
+        return;
+    }
+    let dir = testee_copy("settings", |m| {
+        m + r#"
+[settings.quality]
+type = "int"
+default = 90
+min = 1
+max = 100
+
+[settings.token]
+type = "secret"
+
+[settings.engine]
+type = "choice"
+choices = ["a", "b"]
+default = "a"
+restart = true
+"#
+    });
+    let mut b = Broker::new(quick());
+    b.add(&dir, Scope::User).unwrap();
+    let notices = b.subscribe();
+    // The person's values, as the desktop keeps them: the secret read
+    // from the keyring.
+    let given = Arc::new(std::sync::Mutex::new(serde_json::Map::new()));
+    let set = |k: &str, v: Json| {
+        given.lock().unwrap().insert(k.into(), v);
+    };
+    set("quality", json!(50));
+    set("token", json!("hunter2-secret"));
+    {
+        let given = given.clone();
+        b.on_values(move |id| {
+            assert_eq!(id, TESTEE);
+            given.lock().unwrap().clone()
+        });
+    }
+    let plugin = |answer: &Json| answer["params"]["config"]["plugin"].clone();
+    let echo = b.call(TESTEE, READ, "echo", json!({"n": 1})).unwrap();
+    assert_eq!(echo["params"]["n"], 1, "the call's own params are kept");
+    assert_eq!(
+        plugin(&echo),
+        json!({"quality": 50, "token": "hunter2-secret", "engine": "a"}),
+        "with each call"
+    );
+    let told = b.call(TESTEE, READ, "told", json!({})).unwrap();
+    let pid = told["pid"].clone();
+    assert_eq!(
+        told["told"][0]["settings"]["org.example.testee.quality"],
+        50
+    );
+    assert_eq!(
+        told["told"][0]["config"]["plugin"]["token"], "hunter2-secret",
+        "at start"
+    );
+
+    // A change of a key without `restart`: the running plugin is told.
+    set("quality", json!(70));
+    assert_eq!(b.settings_changed(TESTEE).unwrap(), Told::Notified);
+    let told = b.call(TESTEE, READ, "told", json!({})).unwrap();
+    assert_eq!(told["pid"], pid, "not restarted");
+    assert_eq!(told["told"][1]["config"]["plugin"]["quality"], 70);
+    assert_eq!(b.settings_changed(TESTEE).unwrap(), Told::Nothing);
+
+    // A value its contract refuses is left out: the default stands.
+    set("quality", json!(500));
+    assert_eq!(b.values(TESTEE).unwrap()["quality"], 90);
+
+    // A key that says `restart`: stopped, started again with it.
+    set("quality", json!(70));
+    set("engine", json!("b"));
+    assert_eq!(b.settings_changed(TESTEE).unwrap(), Told::Restarted);
+    assert!(!b.running(TESTEE));
+    let told = b.call(TESTEE, READ, "told", json!({})).unwrap();
+    assert_ne!(told["pid"], pid, "restarted");
+    assert_eq!(told["told"][0]["config"]["plugin"]["engine"], "b");
+
+    // The secret went to the plugin and nowhere else the broker shows.
+    b.call(TESTEE, READ, "crash", json!({})).unwrap_err();
+    let shown: Vec<String> = notices.try_iter().map(|n| format!("{n:?}")).collect();
+    assert!(!shown.is_empty());
+    for text in shown.iter().chain([&b.list().to_string()]) {
+        assert!(!text.contains("hunter2"), "the secret shows in {text}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_source_plugin_gets_its_account_and_source_values_with_each_call() {
+    use helios_connect::{AccountRef, Cancel, Connector as _};
+    use helios_core::config::Level;
+    use helios_plugin::source::SourceProvider;
+
+    if !python() {
+        return;
+    }
+    let dir = testee_copy("source-values", |m| {
+        m.replace(
+            r#"services = ["metadata.read"]
+activation = ["onService:metadata.read"]"#,
+            r#"services = ["metadata.read", "import.source"]
+activation = ["onService:metadata.read", "onService:import.source"]"#,
+        )
+        .replace(
+            r#""metadata.read" = 1 }"#,
+            r#""metadata.read" = 1, "import.source" = 1 }"#,
+        ) + r#"
+[[connect]]
+id = "who"
+kind = "form"
+schema = { fields = [{ id = "user" }] }
+
+[account.settings.region]
+type = "choice"
+choices = ["eu", "us"]
+default = "eu"
+
+[account.settings.key]
+type = "secret"
+
+[source.settings.album]
+type = "string"
+default = "all"
+
+[source.settings.limit]
+type = "int"
+min = 1
+max = 10
+"#
+    });
+    let mut b = Broker::new(quick());
+    b.add(&dir, Scope::User).unwrap();
+    let b = Arc::new(b);
+    let provider = SourceProvider::new(b.clone(), TESTEE).expect("an import.source plugin");
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let values: helios_connect::ValuesFn = {
+        let asked = asked.clone();
+        Arc::new(move |level, id: &str, contract| {
+            asked.lock().unwrap().push((level, id.to_owned()));
+            let keys: Vec<&String> = contract.keys.keys().collect();
+            match level {
+                Level::Account => {
+                    assert_eq!(keys, ["key", "region"]);
+                    json!({"region": "us", "key": "hunter2-secret"})
+                }
+                // `limit` is out of its bounds: left out.
+                _ => json!({"album": "Holidays", "limit": 99}),
+            }
+            .as_object()
+            .unwrap()
+            .clone()
+        })
+    };
+    let connector = provider.connector(Arc::new(|_: &str| Ok("token".into())), Some(values));
+    let account = AccountRef {
+        connector: "testee".into(),
+        id: "testee-1".into(),
+    };
+    connector.probe(Some(&account), &Cancel::new()).unwrap();
+    let last = b
+        .call(TESTEE, "onService:import.source", "told", json!({}))
+        .unwrap();
+    let probe = &last["last"]["source.probe"];
+    assert_eq!(probe["auth"], "token");
+    assert_eq!(
+        probe["config"],
+        json!({
+            "plugin": {},
+            "account": {"region": "us", "key": "hunter2-secret"},
+            "source": {"album": "Holidays"},
+        })
+    );
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            (Level::Account, "testee-1".to_string()),
+            (Level::Source, "testee-1".to_string())
+        ]
+    );
+    assert!(!b.list().to_string().contains("hunter2"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

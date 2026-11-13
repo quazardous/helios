@@ -13,6 +13,11 @@ def send(message):
 
 
 granted = []
+# What it was handed of its settings: at `initialize`, then each
+# `settings/changed`, newest last.
+told = []
+# Each method's params as last called.
+last = {}
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
@@ -20,10 +25,14 @@ for line in sys.stdin:
     if "id" not in message:
         if method == "exit":
             break
+        if method == "settings/changed":
+            told.append({"settings": params.get("settings"), "config": params.get("config")})
         continue
     reply = {"jsonrpc": "2.0", "id": message["id"]}
+    last[method] = params
     if method == "initialize":
         granted = params["capabilities"]["granted"]
+        told.append({"settings": params.get("settings"), "config": params.get("config")})
         reply["result"] = {"name": "testee"}
     elif method == "shutdown":
         reply["result"] = None
@@ -36,6 +45,10 @@ for line in sys.stdin:
         }
     elif method == "echo":
         reply["result"] = {"params": params, "pid": os.getpid()}
+    elif method == "told":
+        reply["result"] = {"told": told, "last": last, "pid": os.getpid()}
+    elif method == "source.probe":
+        reply["result"] = {"label": "testee"}
     elif method == "crash":
         sys.stderr.write("testee: crashing on demand\n")
         sys.stderr.flush()

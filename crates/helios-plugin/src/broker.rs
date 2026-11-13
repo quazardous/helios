@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use serde_json::{Value as Json, json};
+use serde_json::{Map, Value as Json, json};
 
 use crate::grants::Grants;
 use crate::importer::{self, Scan};
@@ -148,6 +148,9 @@ struct State {
     last_used: Instant,
     in_flight: usize,
     last_error: Option<String>,
+    /// The values of its own settings the running process was handed
+    /// (at `initialize`, then by `settings/changed`).
+    values: Option<Map<String, Json>>,
 }
 
 struct Slot {
@@ -161,6 +164,24 @@ type Listeners = Arc<Mutex<Vec<Sender<Notice>>>>;
 
 /// Who keeps the grants, told each time they change.
 type GrantsKeeper = Arc<dyn Fn(&Grants) + Send + Sync>;
+
+/// The values the person gave a plugin's own settings, by key, secrets
+/// read from the keyring: the host's, asked as the plugin starts and
+/// when [`Broker::settings_changed`] says they moved.
+pub type ValuesFn = Arc<dyn Fn(&str) -> Map<String, Json> + Send + Sync>;
+
+/// What [`Broker::settings_changed`] did with a plugin's new values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Told {
+    /// It is not running, or its values did not move: it gets them when
+    /// it next starts.
+    Nothing,
+    /// It runs and was sent `settings/changed`.
+    Notified,
+    /// A key that `restart`s moved: it was stopped, and starts again
+    /// with them on its next call.
+    Restarted,
+}
 
 /// The capabilities a plugin is granted by the act that hands it its
 /// data, never asked for ahead: `source.read` (picking the source).
@@ -184,6 +205,7 @@ pub struct Broker {
     listeners: Listeners,
     watchers: Watchers,
     keeper: Mutex<Option<GrantsKeeper>>,
+    values: Mutex<Option<ValuesFn>>,
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -198,6 +220,7 @@ impl Broker {
             listeners: Arc::default(),
             watchers: Arc::default(),
             keeper: Mutex::new(None),
+            values: Mutex::new(None),
         }
     }
 
@@ -260,6 +283,7 @@ impl Broker {
                     last_used: Instant::now(),
                     in_flight: 0,
                     last_error: None,
+                    values: None,
                 }),
             },
         );
@@ -440,6 +464,76 @@ impl Broker {
         *self.keeper.lock().expect("keeper lock") = Some(Arc::new(keeper));
     }
 
+    /// Where a plugin's own settings' values come from
+    /// ([`ValuesFn`]); without, each plugin gets its defaults.
+    pub fn on_values(&self, values: impl Fn(&str) -> Map<String, Json> + Send + Sync + 'static) {
+        *self.values.lock().expect("values lock") = Some(Arc::new(values));
+    }
+
+    /// A plugin's own settings as it is handed them: its contract's
+    /// defaults under the host's values that fit it ([`Contract::resolve`];
+    /// the others are left out, said in the log without their value).
+    ///
+    /// [`Contract::resolve`]: helios_core::config::Contract::resolve
+    pub fn values(&self, id: &str) -> Result<Map<String, Json>, String> {
+        let slot = self.slot(id)?;
+        Ok(self.values_of(id, slot))
+    }
+
+    fn values_of(&self, id: &str, slot: &Slot) -> Map<String, Json> {
+        let host = self.values.lock().expect("values lock").clone();
+        let given = host.map(|f| f(id)).unwrap_or_default();
+        let (values, refused) = slot.manifest.settings.resolve(&given);
+        for r in refused {
+            log::warn!("plugin `{id}`'s settings: {r}");
+        }
+        values
+    }
+
+    /// The person changed a plugin's settings: a running plugin is
+    /// handed its new values (`settings/changed`), or restarted when a
+    /// key that moved says `restart`.
+    pub fn settings_changed(&self, id: &str) -> Result<Told, String> {
+        let slot = self.slot(id)?;
+        let values = self.values_of(id, slot);
+        let mut st = slot.state.lock().expect("plugin lock");
+        let Some(process) = st.process.clone().filter(|p| p.alive()) else {
+            st.values = None;
+            return Ok(Told::Nothing);
+        };
+        let before = st.values.clone().unwrap_or_default();
+        let moved: Vec<&String> = slot
+            .manifest
+            .settings
+            .keys
+            .keys()
+            .filter(|k| before.get(*k) != values.get(*k))
+            .collect();
+        if moved.is_empty() {
+            return Ok(Told::Nothing);
+        }
+        let restart = moved
+            .iter()
+            .any(|k| slot.manifest.settings.get(k).is_some_and(|k| k.restart));
+        if restart {
+            self.stop_locked(id, &mut st, "settings changed");
+            st.values = None;
+            return Ok(Told::Restarted);
+        }
+        let told = process.notify(
+            "settings/changed",
+            json!({
+                "settings": prefixed(id, &values),
+                "config": {"plugin": values},
+            }),
+        );
+        if let Err(e) = told {
+            return Err(format!("plugin `{id}`: its new settings not sent: {e}"));
+        }
+        st.values = Some(values);
+        Ok(Told::Notified)
+    }
+
     fn keep_grants(&self) {
         let keeper = self.keeper.lock().expect("keeper lock").clone();
         if let Some(keeper) = keeper {
@@ -537,7 +631,7 @@ impl Broker {
             }
         }
         match self.start(id, slot, &st) {
-            Ok(p) => {
+            Ok((p, _)) => {
                 p.stop(self.policy.grace);
                 Ok((Probed::Answers, log))
             }
@@ -614,8 +708,9 @@ impl Broker {
             }
         }
         match self.start(id, slot, st) {
-            Ok(p) => {
+            Ok((p, values)) => {
                 st.process = Some(p.clone());
+                st.values = Some(values);
                 st.retry_at = None;
                 announce(&self.listeners, Notice::Started { plugin: id.into() });
                 Ok(p)
@@ -639,7 +734,14 @@ impl Broker {
         st.retry_at = Some(Instant::now() + wait);
     }
 
-    fn start(&self, id: &str, slot: &Slot, st: &State) -> Result<Arc<Process>, String> {
+    /// Starts a plugin and hands it `initialize`: its process, and the
+    /// values of its own settings it was handed.
+    fn start(
+        &self,
+        id: &str,
+        slot: &Slot,
+        st: &State,
+    ) -> Result<(Arc<Process>, Map<String, Json>), String> {
         let m = &slot.manifest;
         let first = &m.command[0];
         let local = slot.dir.join(first);
@@ -712,19 +814,20 @@ impl Broker {
         )
         .map_err(|e| format!("plugin `{id}` did not start: {e}"))?;
         let interfaces: BTreeMap<&str, &[u32]> = INTERFACES.iter().copied().collect();
-        let settings = m.default_settings();
+        let values = self.values_of(id, slot);
         let init = json!({
             "protocolVersion": 1,
             "helios": {"version": self.version.to_string()},
             "interfaces": interfaces,
             "plugin": {"id": id, "dir": slot.dir},
             "capabilities": {"granted": st.granted},
-            "settings": settings,
+            "settings": prefixed(id, &values),
+            "config": {"plugin": values},
         });
         match process.call("initialize", init, self.policy.start_timeout) {
             Ok(_) => {
                 let _ = process.notify("initialized", json!({}));
-                Ok(process)
+                Ok((process, values))
             }
             Err(e) => {
                 process.stop(self.policy.grace);
@@ -771,15 +874,16 @@ impl Broker {
     ) -> Result<Json, CallError> {
         self.stop_idle();
         let slot = self.slot(id).map_err(CallError::Stopped)?;
-        let process = {
+        let (process, values) = {
             let mut st = slot.state.lock().expect("plugin lock");
             let p = self
                 .ensure(id, slot, &mut st, event)
                 .map_err(CallError::Stopped)?;
             st.in_flight += 1;
             st.last_used = Instant::now();
-            p
+            (p, st.values.clone().unwrap_or_default())
         };
+        let params = with_values(params, values);
         let result = process.call_with(method, params, timeout, cancel);
         let mut st = slot.state.lock().expect("plugin lock");
         st.in_flight -= 1;
@@ -1112,6 +1216,31 @@ impl Broker {
         let _ = std::fs::remove_dir_all(&staging);
         result.map(|(done, refused)| json!({"files": done, "refused": refused, "progress": token}))
     }
+}
+
+/// A plugin's own values keyed `<id>.<key>`, as `initialize`'s
+/// `settings` has always given them.
+fn prefixed(id: &str, values: &Map<String, Json>) -> Map<String, Json> {
+    values
+        .iter()
+        .map(|(k, v)| (format!("{id}.{k}"), v.clone()))
+        .collect()
+}
+
+/// A call's params with the plugin's own values under `config.plugin`,
+/// beside what the caller put under `config` (a source's `account` and
+/// `source` values). Params that are not an object are left as they
+/// are.
+fn with_values(mut params: Json, values: Map<String, Json>) -> Json {
+    if let Some(p) = params.as_object_mut() {
+        let config = p
+            .entry("config")
+            .or_insert_with(|| Json::Object(Map::new()));
+        if let Some(c) = config.as_object_mut() {
+            c.insert("plugin".into(), Json::Object(values));
+        }
+    }
+    params
 }
 
 fn tail_note(tail: &[String]) -> String {

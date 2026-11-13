@@ -32,10 +32,12 @@ use std::path::{Path, PathBuf};
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::core::overlay::DialogLayout;
+use egui_pop::core::param::{self, Mode};
+use egui_pop::model::values::Value as PopValue;
 use helios_connect::ConnectorManifest;
 use helios_connect::account::AccountState;
 use helios_core::Message;
-use helios_core::config::{Contract, KeyType};
+use helios_core::config::{Contract, KeyType, Level};
 use serde_json::{Map, Value};
 
 use super::import_accounts::{Asked, state_text, translated};
@@ -131,9 +133,12 @@ impl Wizard {
 
     /// Whether the parameters set fit the connector's contract.
     fn params_fit(&self) -> bool {
-        self.contract
-            .check(&Value::Object(self.params.clone()))
-            .is_ok()
+        self.params_check().is_ok()
+    }
+
+    /// Why the parameters set do not fit the connector's contract.
+    fn params_check(&self) -> Result<(), String> {
+        self.contract.check(&Value::Object(self.params.clone()))
     }
 
     /// The folder typed, when it is one.
@@ -770,9 +775,15 @@ impl ImportWindow {
     }
 
     /// The connector's own parameters, from its source contract: each
-    /// key under its label, by its type; those hidden by another's value
-    /// left out.
+    /// key drawn by egui-pop's parameter widget from the descriptor the
+    /// Settings window draws a plugin's settings from
+    /// ([`crate::config::plugins::descriptor`]), its label and help
+    /// translated through the plugin's catalogue
+    /// (`source-setting-<plugin>-<key>`); those hidden by another's value
+    /// left out. A value the contract refuses is said with its reason, and
+    /// Next waits.
     fn params_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
+        let owner = self.params_owner();
         let Some(wz) = self.wizard.as_mut() else {
             return;
         };
@@ -786,80 +797,60 @@ impl ImportWindow {
             if !contract.visible(name, &wz.params) {
                 continue;
             }
+            let msg = helios_core::config::message(&owner, Level::Source, name);
             let label = if key.label.is_empty() {
                 name
             } else {
                 key.label.as_str()
             };
-            let value = wz.params.get(name).cloned().unwrap_or(Value::Null);
-            let changed = ui
-                .horizontal(|ui| {
-                    let mut changed = None;
-                    match key.ty {
-                        KeyType::Bool => {
-                            let mut on = value.as_bool().unwrap_or(false);
-                            if ui.checkbox(&mut on, label).changed() {
-                                changed = Some(Value::Bool(on));
-                            }
-                        }
-                        KeyType::Choice => {
-                            ui.label(label);
-                            for choice in &key.choices {
-                                let chosen = value.as_str() == Some(choice.as_str());
-                                if ui.radio(chosen, choice).clicked() && !chosen {
-                                    changed = Some(Value::String(choice.clone()));
-                                }
-                            }
-                        }
-                        KeyType::Int | KeyType::Float => {
-                            let l = ui.label(label);
-                            let mut n = value.as_f64().unwrap_or(0.0);
-                            let mut drag = egui::DragValue::new(&mut n);
-                            if let (Some(min), Some(max)) = (key.min, key.max) {
-                                drag = drag.range(min..=max);
-                            }
-                            if key.ty == KeyType::Int {
-                                drag = drag.fixed_decimals(0);
-                            }
-                            if ui.add(drag).labelled_by(l.id).changed() {
-                                changed = Some(if key.ty == KeyType::Int {
-                                    serde_json::json!(n.round() as i64)
-                                } else {
-                                    serde_json::json!(n)
-                                });
-                            }
-                        }
-                        KeyType::String | KeyType::Path | KeyType::Secret => {
-                            let l = ui.label(label);
-                            let mut text = value.as_str().unwrap_or_default().to_owned();
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut text).desired_width(240.0))
-                                .labelled_by(l.id)
-                                .changed()
-                            {
-                                changed = Some(Value::String(text));
-                            }
-                        }
-                    }
-                    changed
-                })
-                .inner;
-            if !key.help.is_empty() {
-                ui.weak(&key.help);
+            let label = t(Message::new(&format!("{msg}.label"), label));
+            let help = if key.help.is_empty() {
+                String::new()
+            } else {
+                t(Message::new(&format!("{msg}.help"), &key.help))
+            };
+            let d = crate::config::plugins::descriptor(key, &label, &help);
+            let mut value = wz
+                .params
+                .get(name)
+                .and_then(|v| PopValue::from_json(d.ty, v).ok())
+                .unwrap_or_else(|| d.default.clone());
+            let before = value.clone();
+            let response = param::param_shown(ui, &d, Mode::Plain(&mut value), &|c| c.to_owned());
+            if !help.is_empty() {
+                response.on_hover_text(&help);
+                ui.weak(&help);
             }
-            if let Some(v) = changed {
-                wz.params.insert(name.to_owned(), v);
+            if value != before {
+                wz.params.insert(name.to_owned(), value.to_json());
             }
         }
-        if !wz.params_fit() {
+        if let Err(why) = wz.params_check() {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
                 t(Message::new(
-                    "gui-editor-params-wrong",
-                    "A parameter does not fit what the connector takes",
-                )),
+                    "gui-editor-params-refused",
+                    "A parameter does not fit what the connector takes: { $why }",
+                )
+                .with("why", why)),
             );
         }
+    }
+
+    /// Whose catalogue translates the parameters: the plugin behind the
+    /// connector, else the connector.
+    fn params_owner(&self) -> String {
+        let connector = self
+            .wizard
+            .as_ref()
+            .and_then(|wz| wz.connector.as_ref())
+            .map(|(id, _)| id.clone())
+            .unwrap_or_default();
+        self.accounts
+            .plugins
+            .as_ref()
+            .and_then(|b| helios_plugin::source::plugin_of(b, &connector))
+            .unwrap_or(connector)
     }
 
     fn name_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {

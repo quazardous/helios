@@ -1474,6 +1474,19 @@ pub fn install(
     store
 }
 
+/// Hands the plugins their settings' values: `broker` reads them from
+/// the plugins' store [`install`] made as each plugin starts, and is told
+/// when they change ([`plugins::connect`]). Nothing without one.
+pub fn connect_plugins(app: &AppHandle, broker: &Arc<helios_plugin::Broker>) {
+    let Some(bridge) = app.service(&BRIDGE) else {
+        return;
+    };
+    let store = lock(&bridge.state).plugins.clone();
+    if let Some(store) = store {
+        plugins::connect(&store, broker);
+    }
+}
+
 /// Gives the Settings app the store for what is open now. A value the
 /// workspace's file holds for a setting that does not opt into the
 /// workspace scope (one made app-wide since it was saved) moves to the

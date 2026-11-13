@@ -299,6 +299,60 @@ fn list_all(
     }
 }
 
+/// Where a plugin's connector reads its accounts' and sources' values
+/// ([`helios_connect::ValuesFn`]): an account's from its document in
+/// `book` (the values its forms took) and its secrets from `secrets`
+/// (the keyring, read as the call is made); a source's from the
+/// parameters its saved source keeps (`sources`, by account id). Only the
+/// contract's keys are read.
+pub fn values_from(
+    book: Arc<dyn helios_connect::account::AccountBook>,
+    secrets: Arc<dyn helios_connect::account::Secrets>,
+    sources: Arc<
+        Mutex<std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
+    >,
+) -> helios_connect::ValuesFn {
+    use helios_core::config::{KeyType, Level};
+    Arc::new(move |level, id: &str, contract| {
+        let mut out = serde_json::Map::new();
+        match level {
+            Level::Account => {
+                match book.account(id) {
+                    Ok(Some(account)) => {
+                        for (k, v) in &account.facts {
+                            if contract.get(k).is_some_and(|key| key.ty != KeyType::Secret) {
+                                out.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => log::warn!("the account {id}: {e}"),
+                }
+                for name in contract.secrets() {
+                    match secrets.get(id, name) {
+                        Ok(Some(text)) => {
+                            out.insert(name.to_owned(), serde_json::Value::String(text));
+                        }
+                        Ok(None) => {}
+                        Err(e) => log::warn!("the account {id}: secret `{name}` not read: {e}"),
+                    }
+                }
+            }
+            Level::Source => {
+                if let Some(params) = lock(&sources).get(id) {
+                    for (k, v) in params {
+                        if contract.get(k).is_some() {
+                            out.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+            Level::Own => {}
+        }
+        out
+    })
+}
+
 /// The import connectors of the registry, created once with what the
 /// window gives them: the cards as last polled (never a poll of its own
 /// on the interface thread) and the folders it keeps.
@@ -322,6 +376,7 @@ impl Default for Connectors {
             cards: Some(Arc::new(move || lock(&c).clone())),
             places: Some(Arc::new(move || lock(&p).clone())),
             token: None,
+            values: None,
         };
         let services_kept = services.clone();
         let registry = helios_connect::registry();
@@ -386,6 +441,12 @@ impl Connectors {
     /// accounts' tokens.
     pub fn set_token(&mut self, token: helios_connect::TokenFn) {
         self.services.token = Some(token);
+    }
+
+    /// Where connectors read their accounts' and sources' configuration
+    /// values, handed to a plugin with each call.
+    pub fn set_values(&mut self, values: helios_connect::ValuesFn) {
+        self.services.values = Some(values);
     }
 
     /// What connectors are created with.
@@ -1907,6 +1968,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn an_account_s_and_its_source_s_values_are_read_for_their_contract_keys_only() {
+        use helios_connect::account::{
+            Account, AccountBook as _, MemoryAccounts, MemorySecrets, Secrets as _,
+        };
+        use helios_core::config::{ConfigKey, Contract, KeyType, Level};
+        let book = Arc::new(MemoryAccounts::default());
+        let mut account = Account::new("nas", "NAS", &[]);
+        account
+            .facts
+            .insert("region".into(), serde_json::json!("us"));
+        account.facts.insert("user".into(), serde_json::json!("me"));
+        book.save(&account).unwrap();
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets.set(&account.id, "key", "hunter2-secret").unwrap();
+        let sources: Arc<Mutex<std::collections::BTreeMap<_, _>>> = Arc::default();
+        lock(&sources).insert(
+            account.id.clone(),
+            serde_json::json!({"share": "photos", "stale": 1})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let values = values_from(book, secrets, sources);
+        let account_contract = Contract::new()
+            .key("region", ConfigKey::new(KeyType::String))
+            .key("key", ConfigKey::new(KeyType::Secret));
+        assert_eq!(
+            serde_json::Value::Object(values(Level::Account, &account.id, &account_contract)),
+            serde_json::json!({"region": "us", "key": "hunter2-secret"}),
+            "the form's other facts are not the contract's"
+        );
+        let source_contract = Contract::new().key("share", ConfigKey::new(KeyType::String));
+        assert_eq!(
+            serde_json::Value::Object(values(Level::Source, &account.id, &source_contract)),
+            serde_json::json!({"share": "photos"})
+        );
+        assert!(values(Level::Source, "nobody", &source_contract).is_empty());
     }
 
     #[test]

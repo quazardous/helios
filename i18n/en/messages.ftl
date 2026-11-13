@@ -363,7 +363,7 @@ gui-editor-card = Card or camera
 
 gui-editor-params = Parameters
 
-gui-editor-params-wrong = A parameter does not fit what the connector takes
+gui-editor-params-refused = A parameter does not fit what the connector takes: { $why }
 
 gui-editor-save = Save the source
 

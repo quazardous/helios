@@ -2018,6 +2018,9 @@ fn main() -> Result<(), String> {
             if let Some(heard) = layer_events {
                 kept.follow(heard);
             }
+            // The plugins' own settings, handed to each as it starts and
+            // again when the person changes them.
+            helios_gui::config::connect_plugins(shell.app().handle(), &plugins);
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
