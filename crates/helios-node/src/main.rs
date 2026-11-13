@@ -946,6 +946,32 @@ mod control {
             answer["origin"] = json!(origin);
             return answer;
         }
+        if id == helios_node::library::AGAIN {
+            // The import of the history run again: `library.import` with
+            // its record's params, as whoever asks now.
+            let Some(importer) = &node.importer else {
+                return refused(
+                    None,
+                    &Message::new(
+                        "node-command-needs-vault",
+                        "the node keeps no vault: start it with --vault",
+                    ),
+                );
+            };
+            let mut answer = match helios_node::library::again_params(importer.vault(), params) {
+                Ok(again) => run(
+                    node,
+                    scope,
+                    helios_node::library::IMPORT,
+                    &again,
+                    origin,
+                    cancel,
+                ),
+                Err(e) => refused(None, &Message::plain(e)),
+            };
+            answer["command"] = json!(id);
+            return answer;
+        }
         if helios_node::library::handles(id) {
             node.bus.publish(SOURCE, None, &CommandRan { id, origin });
             let Some(importer) = &node.importer else {
@@ -1447,7 +1473,8 @@ mod control {
                     *signals,
                     cancel,
                 )
-                .and_then(|options| {
+                .and_then(|mut options| {
+                    options.origin = Some(origin.to_string());
                     let mut files = Vec::new();
                     importer
                         .import(paths, &options, &mut |line| files.push(line.clone()))

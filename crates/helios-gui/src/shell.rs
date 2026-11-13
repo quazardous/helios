@@ -91,10 +91,12 @@ pub use import_accounts::LibraryFolder;
 pub use import_accounts::{KnownRemote, RemoteImport};
 mod import_auto;
 mod import_choices;
+mod import_history;
 mod import_sources;
 mod import_window;
 mod import_wizard;
 mod lifetime;
+pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use lifetime::{Closing, LastWindow};
 mod storage;
@@ -227,6 +229,11 @@ enum Action {
     /// Import through an importer plugin (`library.importWith`'s
     /// arguments).
     ImportWith(Value, Origin),
+    /// List the import history (`import.history.list`'s arguments).
+    ImportHistory(Value),
+    /// Run an import of the history again (`import.history.again`'s
+    /// arguments), as whom.
+    ImportAgain(Value, Origin),
     /// Export photos (`library.export`'s arguments), as whom.
     Export(Value, Origin),
     /// Show a folder in the file manager (`library.openFolder`'s
@@ -3168,6 +3175,23 @@ impl Shell {
             ),
             Box::new(|a, origin| Ok(Action::ImportWith(a.clone(), origin.clone()))),
         );
+        add(
+            CommandSpec::new(
+                import_history::LIST,
+                "List the import history, newest first (`limit`): each import's sources, choices, counts, when and who asked",
+                "Library",
+            )
+            .read_only(),
+            Box::new(|a, _| Ok(Action::ImportHistory(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                import_history::AGAIN,
+                "Import again (`id`: an import of `import.history.list`): the same sources with the same choices; photos the library has are skipped as duplicates",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::ImportAgain(a.clone(), origin.clone()))),
+        );
         // The main window's commands, greyed in the other windows' menus
         // (docs/design/windows.md, section 7).
         add(
@@ -5933,6 +5957,8 @@ impl Shell {
             Action::Storage(args) => return self.open_storage(&args),
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
+            Action::ImportHistory(args) => return self.import_history_list(&args),
+            Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ToggleStack => self

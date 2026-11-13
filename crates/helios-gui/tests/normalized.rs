@@ -34,6 +34,12 @@ const SHELL: &[&str] = &[
     "crates/helios-gui/src/shell/import_accounts.rs",
     // The Storage page, the shell's own (`library.storage`).
     "crates/helios-gui/src/shell/storage.rs",
+    // The Calibration focus, the shell's own (`calibrate.open`): where the
+    // backend has no OS windows, it is a window of the main one.
+    "crates/helios-gui/src/shell/calibrate_focus.rs",
+    // The rule editor's dialog, which only the shell shows (the tree does
+    // not fit the declarative forms).
+    "crates/helios-gui/src/rule_editor_ui.rs",
 ];
 
 /// Declared menus, allowed outside the shell: a view of egui-pop's given
