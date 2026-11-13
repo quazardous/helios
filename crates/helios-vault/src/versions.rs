@@ -10,6 +10,8 @@
 //! same version, so writing it twice changes nothing. Who made it, when
 //! and its label are not part of the id.
 
+use std::collections::{HashMap, HashSet};
+
 use helios_core::ContentHash;
 use serde::Serialize;
 use serde_json::Value;
@@ -100,12 +102,48 @@ impl Version {
 /// More than one head means edits diverged and wait for a merge (or not:
 /// variants are allowed to live side by side). Oldest first.
 pub fn heads(versions: &[Version]) -> Vec<&Version> {
+    // One pass over the parents, not one per version: an image's history
+    // grows with every save.
+    let continued: HashSet<&VersionId> = versions.iter().flat_map(|v| &v.parents).collect();
     let mut out: Vec<&Version> = versions
         .iter()
-        .filter(|v| !versions.iter().any(|w| w.parents.contains(&v.id)))
+        .filter(|v| !continued.contains(&v.id))
         .collect();
     out.sort_by_key(|v| (v.at, v.id));
     out
+}
+
+/// How long the line leading to each of `versions` is (what
+/// [`crate::Vault::history`] returns for it, counted): each version's
+/// first parent, back to a first edit. Worked out from the versions given,
+/// which hold every parent of an image's versions, so no store read is
+/// made per version; an error names a parent missing from them.
+pub fn depths(versions: &[Version]) -> Result<HashMap<VersionId, usize>, String> {
+    let by_id: HashMap<VersionId, &Version> = versions.iter().map(|v| (v.id, v)).collect();
+    let mut depths: HashMap<VersionId, usize> = HashMap::with_capacity(versions.len());
+    for version in versions {
+        // Down the line to a version already counted (or a first edit),
+        // then back up it, each counted once.
+        let mut line = Vec::new();
+        let mut next = Some(version.id);
+        let mut below = 0;
+        while let Some(id) = next {
+            if let Some(&depth) = depths.get(&id) {
+                below = depth;
+                break;
+            }
+            let v = by_id
+                .get(&id)
+                .ok_or_else(|| format!("no version {}", id.hex()))?;
+            line.push(id);
+            next = v.parents.first().copied();
+        }
+        for id in line.into_iter().rev() {
+            below += 1;
+            depths.insert(id, below);
+        }
+    }
+    Ok(depths)
 }
 
 /// A version was kept.

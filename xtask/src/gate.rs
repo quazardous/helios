@@ -19,6 +19,9 @@
 //!    does not move, the temporary branch is deleted, and the tester fixes
 //!    the pull request's own branch (mechanical) or sends it back, then
 //!    gates again.
+//! 5. Beside the jobs, the box builds the tested commit for the desktop
+//!    (`build-gui`); a failed build is red. After a green round its programs
+//!    are here, and `cargo xtask install-dev --from <dir>` installs them.
 //!
 //! The parts that need no network (the plan) are pure and tested; the
 //! rest drives git, gh and `cargo xtask bench-remote`.
@@ -277,8 +280,22 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
         }
     };
 
-    // Run the jobs side by side: spawned together, then waited on.
+    // Run the jobs side by side: spawned together, then waited on. The
+    // desktop build of the tested commit runs beside them, so a green round
+    // brings back the programs to install (`install-dev --from`).
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let build = Command::new(&exe)
+        .args([
+            "bench-remote",
+            "build-gui",
+            &format!("branch={temp}"),
+            "ext_job_id=gate-build",
+        ])
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
     let children: Vec<_> = plan
         .runs
         .iter()
@@ -331,6 +348,42 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
         }
     }
 
+    // The desktop build: its outputs' folder when it built, else red.
+    let desktop = match build.and_then(std::process::Child::wait_with_output) {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string()
+                + &String::from_utf8_lossy(&o.stderr);
+            text.lines()
+                .filter_map(|l| l.split("results in ").nth(1))
+                .next_back()
+                .map(|dir| Path::new(dir.trim()).join("out"))
+        }
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string()
+                + &String::from_utf8_lossy(&o.stderr);
+            let line = text
+                .lines()
+                .rev()
+                .find(|l| l.contains("gate-build"))
+                .unwrap_or("no output");
+            let _ = writeln!(report, "desktop build RED: {line}");
+            None
+        }
+        Err(e) => {
+            let _ = writeln!(report, "desktop build RED: not started: {e}");
+            None
+        }
+    };
+    if red.is_empty() && desktop.is_none() {
+        drop_temp();
+        let _ = writeln!(
+            report,
+            "red: the desktop build of the batch — next stays at {}",
+            &base[..8]
+        );
+        return Err(report);
+    }
+
     if !red.is_empty() {
         red.dedup();
         drop_temp();
@@ -366,6 +419,14 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     drop_temp();
     for p in prs.iter().filter(|p| plan.take.contains(&p.number)) {
         let _ = git(root, &["push", "-q", "origin", "--delete", &p.branch]);
+    }
+    if let Some(dir) = &desktop {
+        let _ = writeln!(
+            report,
+            "desktop build of next {}: cargo xtask install-dev --from {}",
+            &tested[..8],
+            dir.display()
+        );
     }
     Ok(report)
 }

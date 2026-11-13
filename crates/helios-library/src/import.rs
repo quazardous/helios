@@ -53,6 +53,9 @@
 //!   ends. Helios never formats a card.
 //! - **A lost source** (a card taken out, a folder moved away) pauses the
 //!   job until it is back; it can still be cancelled.
+//! - **History.** Each import, ended, cancelled or refused, leaves a
+//!   record in the vault ([`crate::import_history`]): its sources,
+//!   choices, counts, when and who asked ([`Options::origin`]).
 //! - **Cancel.** [`Jobs::cancel`] with the job's id, or the caller's
 //!   [`Options::cancel`] flag, stops the import before its next file; a
 //!   copy under way stops too and its hidden part is removed. The files
@@ -275,6 +278,9 @@ pub struct Options {
     /// Set by the caller to stop the import (an interrupt): seen before
     /// each file and during a copy, as a cancel of its job is.
     pub cancel: Option<Arc<AtomicBool>>,
+    /// Who asked for it (`user`, `cli`, `agent:NAME`…), for its record in
+    /// the import history ([`crate::import_history`]).
+    pub origin: Option<String>,
 }
 
 impl Default for Options {
@@ -288,6 +294,7 @@ impl Default for Options {
             darktable: false,
             listed: None,
             cancel: None,
+            origin: None,
         }
     }
 }
@@ -1183,6 +1190,25 @@ impl<S: Store> Run<'_, S> {
 /// Cancelled, it stops before its next file (a copy under way is
 /// dropped, its part removed) and its report says `cancelled`.
 pub fn import<S: Store>(
+    vault: &Vault<S>,
+    jobs: &Jobs,
+    sources: &[PathBuf],
+    options: &Options,
+    now: u64,
+    emit: &mut impl FnMut(&Value),
+) -> Result<Report, String> {
+    let ended = run_import(vault, jobs, sources, options, now, emit);
+    // Each import leaves its record, whoever ran it; a record that cannot
+    // be written does not undo the import, it is said.
+    let outcome = ended.as_ref().map_err(String::as_str);
+    if let Err(e) = crate::import_history::record(vault, sources, options, now, outcome) {
+        eprintln!("import history: {e}");
+    }
+    ended
+}
+
+/// [`import`], before its record.
+fn run_import<S: Store>(
     vault: &Vault<S>,
     jobs: &Jobs,
     sources: &[PathBuf],

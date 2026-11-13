@@ -771,6 +771,20 @@ gui-import-failed = The import failed: { $error }
 
 gui-import-form-title = Import photos
 
+gui-import-history = History
+
+gui-import-history-added = { $count } added
+
+gui-import-history-again = Import again
+
+gui-import-history-by = By { $origin }
+
+gui-import-history-counts = { $added } added, { $located } located, { $unchanged } unchanged, { $skipped } skipped, { $failed } failed
+
+gui-import-history-failed = failed
+
+gui-import-history-none = No import yet
+
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
 
 gui-import-no-library = No library is open: start Helios with one (--vault FILE) to import photos

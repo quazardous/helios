@@ -55,6 +55,44 @@ for line in sys.stdin:
         os._exit(3)
     elif method == "hang":
         continue  # never answers
+    elif method == "health.check":
+        check = params.get("check")
+        if check == "crash":
+            os._exit(4)
+        if check == "hang":
+            continue  # never answers
+        if check == "garbled":
+            reply["result"] = {"found": "nothing"}
+        elif check == "rogue":
+            # a level its declaration does not name
+            reply["result"] = {
+                "findings": [
+                    {
+                        "level": "problem",
+                        "message": {"key": "", "english": "rogue"},
+                    }
+                ]
+            }
+        else:
+            reply["result"] = {
+                "findings": [
+                    {
+                        "about": "disk",
+                        "level": "warning",
+                        "message": {"key": "", "english": "The testee's disk is full"},
+                        "detail": {
+                            "key": "",
+                            "english": f"accounts: {len(params.get('accounts') or [])}",
+                        },
+                        "fix": {
+                            "command": "testee.repair",
+                            "args": {"disk": 1},
+                            "label": {"key": "", "english": "Repair"},
+                        },
+                    },
+                    {"level": "ok", "message": {"key": "", "english": "The fan turns"}},
+                ]
+            }
     else:
         reply["error"] = {"code": -32601, "message": f"no method {method}"}
     send(reply)

@@ -311,11 +311,15 @@ impl EditSession {
         }
         let all = vault.versions(&image)?;
         // The newest head: the latest time, then (steps come faster than
-        // seconds) the longest history, then the greatest id.
+        // seconds) the longest history, then the greatest id. The lengths
+        // come from the versions read once, not a walk of the store per
+        // head: diverged heads pile up on a busy image, and each walk held
+        // the store, and every other call, for the length of its history.
+        let depths = versions::depths(&all)?;
         let mut head = None;
         let mut best = None;
         for v in versions::heads(&all) {
-            let key = (v.at, vault.history(&v.id)?.len(), v.id);
+            let key = (v.at, depths[&v.id], v.id);
             if best.as_ref().is_none_or(|b| key > *b) {
                 best = Some(key);
                 head = Some(v.clone());
