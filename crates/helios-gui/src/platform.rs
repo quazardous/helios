@@ -13,7 +13,8 @@
 //!   own, an agent, a node the desktop follows).
 //! - **Logs and crash reports** go to the user's state directory
 //!   ([`log_dir`], [`crash_dir`]): egui-pop's log file, rotated, at the
-//!   `developer.log_level` setting, and its crash reports, written by a
+//!   `developer.log_level` setting, set up as the process starts
+//!   ([`file_logs`]), and its crash reports, written by a
 //!   panic hook and offered on the next start, never sent. The About
 //!   dialog says where ([`about`]); so does the debug bridge's `logs`
 //!   collector.
@@ -131,6 +132,21 @@ pub fn library_file(args: &[String]) -> Result<Option<PathBuf>, String> {
 /// [`log_dir_with`] from this process's environment.
 pub fn log_dir() -> Option<PathBuf> {
     log_dir_with(|name| std::env::var(name).ok())
+}
+
+/// The process's log file (`helios.log` in [`log_dir`]), made the `log`
+/// facade's logger on the first call: `main` calls it right after the
+/// instance check, so what Helios says before the window opens reaches
+/// the file too; [`desktop`] hands the same logs to egui-pop. None when
+/// there is no log directory or another logger came first.
+pub fn file_logs() -> Option<Logs> {
+    static LOGS: std::sync::OnceLock<Option<Logs>> = std::sync::OnceLock::new();
+    LOGS.get_or_init(|| {
+        let logs = Logs::new(log_dir()?, STATE_NAME);
+        logs.install().ok()?;
+        Some(logs)
+    })
+    .clone()
 }
 
 /// [`crash_dir_with`] from this process's environment.
@@ -568,7 +584,9 @@ impl Plugin for Platform {
 pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     use egui_pop_agent::AgentSocketExt as _;
     let mut logs = LogsPlugin::new(STATE_NAME);
-    if let Some(dir) = log_dir() {
+    if let Some(file) = file_logs() {
+        logs = logs.logs(file);
+    } else if let Some(dir) = log_dir() {
         logs = logs.logs(Logs::new(dir, STATE_NAME));
     }
     let mut crashes = CrashPlugin::new("Helios", env!("HELIOS_VERSION"));

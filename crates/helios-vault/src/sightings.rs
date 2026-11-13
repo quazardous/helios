@@ -308,10 +308,7 @@ impl<S: Store> Vault<S> {
         rel_path: Option<&Path>,
         path: &Path,
     ) -> Result<Option<Sighting>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .sighting_at(volume, rel_path, path)
+        self.read(|s| s.sighting_at(volume, rel_path, path))
     }
 
     /// The sightings in a folder and below ([`Sighting::under`]).
@@ -320,10 +317,7 @@ impl<S: Store> Vault<S> {
         volume: Option<&VolumeId>,
         rel_dir: &Path,
     ) -> Result<Vec<Sighting>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .sightings_under(volume, rel_dir)
+        self.read(|s| s.sightings_under(volume, rel_dir))
     }
 
     /// What the `map` job reads next ([`ToRead`]), on `volume` only when
@@ -334,10 +328,7 @@ impl<S: Store> Vault<S> {
         volume: Option<&VolumeId>,
         limit: usize,
     ) -> Result<Vec<Sighting>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .sightings_to_read(read, volume, limit)
+        self.read(|s| s.sightings_to_read(read, volume, limit))
     }
 
     /// Forgets a volume (`rel_dir` `None`) or a folder of it: drops its
@@ -387,25 +378,23 @@ impl<S: Store> Vault<S> {
         volume: Option<&VolumeId>,
         rel_dir: &Path,
     ) -> Result<Option<Folder>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .folder(volume, rel_dir)
+        self.read(|s| s.folder(volume, rel_dir))
     }
 
     /// Whether `path` (inside `volume` at `rel_path`) lies in a folder the
     /// user forgot: a listing does not record it.
     pub fn forgotten(&self, volume: Option<&VolumeId>, rel_path: &Path) -> Result<bool, String> {
-        let store = self.store.lock().expect("store lock");
-        for dir in rel_path.ancestors().skip(1) {
-            if store
-                .folder(volume, dir)?
-                .is_some_and(|f| f.state == FolderState::Forgotten)
-            {
-                return Ok(true);
+        self.read(|store| {
+            for dir in rel_path.ancestors().skip(1) {
+                if store
+                    .folder(volume, dir)?
+                    .is_some_and(|f| f.state == FolderState::Forgotten)
+                {
+                    return Ok(true);
+                }
             }
-        }
-        Ok(false)
+            Ok(false)
+        })
     }
 
     /// The map's upkeep: drops sightings not in the Library missing since
@@ -417,7 +406,7 @@ impl<S: Store> Vault<S> {
 
     /// Every sighting of an image, in the Library or not.
     pub fn sightings(&self, id: &ImageId) -> Result<Vec<Sighting>, String> {
-        self.store.lock().expect("store lock").sightings_of(id)
+        self.read(|s| s.sightings_of(id))
     }
 
     /// The sightings of files of `size` bytes with this partial hash.
@@ -426,15 +415,12 @@ impl<S: Store> Vault<S> {
         size: u64,
         partial: &ContentHash,
     ) -> Result<Vec<Sighting>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .sightings_like(size, partial)
+        self.read(|s| s.sightings_like(size, partial))
     }
 
     /// An image's Library flag; `None` for an unknown image.
     pub fn library_flag(&self, id: &ImageId) -> Result<Option<LibraryFlag>, String> {
-        self.store.lock().expect("store lock").library_flag(id)
+        self.read(|s| s.library_flag(id))
     }
 
     /// Whether an image is in the Library.

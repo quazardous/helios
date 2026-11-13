@@ -24,8 +24,9 @@
 //! - the node's memory, threads and file descriptors stay bounded, and
 //!   the descriptors and threads come back once the clients have gone.
 //!
-//! A report (calls, calls per second, latency percentiles, errors, the
-//! node's memory and descriptors) is printed, and written to the file
+//! A report (calls, calls per second, latency percentiles overall and by
+//! method, errors, the node's memory and descriptors) is printed, and
+//! written to the file
 //! `HELIOS_STRESS_REPORT` names. The run is deterministic for a seed
 //! (what each client does, in which order), not its interleaving.
 //!
@@ -266,6 +267,8 @@ struct Tally {
     calls: u64,
     /// Each answered call's time, in microseconds.
     latencies: Vec<u64>,
+    /// The same, by method: which calls wait.
+    by_method: BTreeMap<String, Vec<u64>>,
     /// Calls not answered within the deadline.
     unanswered: u64,
     /// Answers that should not have been, by call.
@@ -344,7 +347,13 @@ fn client_run(
     let answer = |tally: &mut Tally, name: &str, pending: &Pending, at: Instant| {
         tally.calls += 1;
         if let Some(outcome) = pending.wait_timeout(DEADLINE) {
-            tally.latencies.push(at.elapsed().as_micros() as u64);
+            let took = at.elapsed().as_micros() as u64;
+            tally.latencies.push(took);
+            tally
+                .by_method
+                .entry(name.to_string())
+                .or_default()
+                .push(took);
             Some(outcome)
         } else {
             tally.unanswered += 1;
@@ -1029,6 +1038,23 @@ fn many_clients(name: &str, scale: Scale, soak: Option<Soak>) {
     // The report.
     let mut latencies: Vec<u64> = tallies.iter().flat_map(|t| t.latencies.clone()).collect();
     latencies.sort_unstable();
+    let mut by_method: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
+    for (method, took) in tallies.iter().flat_map(|t| &t.by_method) {
+        by_method.entry(method).or_default().extend(took);
+    }
+    let by_method: serde_json::Map<String, Value> = by_method
+        .into_iter()
+        .map(|(method, mut took)| {
+            took.sort_unstable();
+            let latency = json!({
+                "calls": took.len(),
+                "p50": quantile(&took, 0.50),
+                "p99": quantile(&took, 0.99),
+                "max": quantile(&took, 1.0),
+            });
+            (method.to_string(), latency)
+        })
+        .collect();
     let calls: u64 = tallies.iter().map(|t| t.calls).sum();
     let errors: Vec<String> = tallies.iter().flat_map(|t| t.errors.clone()).collect();
     let mut report = json!({
@@ -1042,6 +1068,7 @@ fn many_clients(name: &str, scale: Scale, soak: Option<Soak>) {
             "p99": quantile(&latencies, 0.99),
             "max": quantile(&latencies, 1.0),
         },
+        "latency_ms_by_method": by_method,
         "errors": errors.len(),
         "unanswered": tallies.iter().map(|t| t.unanswered).sum::<u64>(),
         "saves": total_saves,

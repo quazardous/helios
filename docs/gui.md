@@ -1120,9 +1120,23 @@ Backup › Strategy.
 The checks run as one background job (kind `health`, in the jobs
 centre): 30 seconds after start, then daily, and when a volume is
 mounted or goes (the storage watch). A check is a `helios_health::Check`
-(`id`, `title`, `run(&Context) -> Vec<Finding>`), kept in a `Registry`
-that plugins will extend; a check that panics becomes a problem of its
-own. Helios's own:
+(`id`, `title`, `declaration`, `run(&Context) -> Vec<Finding>`), kept in
+a `Registry` by owner: the module that declares it (`storage`,
+`library`, `backup`, `gpu`, `plugins`, `catalogue`), or the plugin
+(its id) for the checks a plugin declares in its manifest and answers
+through its process (`helios_plugin::health`, docs/extensions.md, "Health
+checks"); a plugin that crashes or does not answer within 20 s gives
+that check's "failed" problem.
+
+Health checks are a contract (`helios_health::contract`): each check
+declares what it watches, the levels its findings may have and the fix
+commands they may offer. `Registry::add` refuses an owner or a
+declaration that is unsound (an id that is not lowercase, no level, a
+fix that is not a command id), with its reasons; a finding outside its
+check's declaration (another level, another fix) turns that check's run
+into a problem of its own, like a check that panics. Each module lists
+its checks (`helios_health::backup::checks()` and so on), and
+`Registry::builtin` gathers them. Helios's own:
 
 - **Free space** on the library's volume (the one holding the vault's
   folder) and on every volume with a library, archive, backup or
@@ -1258,8 +1272,22 @@ decides between the desktop and a toast.
 | Windows | `%LOCALAPPDATA%\helios\logs` | `%LOCALAPPDATA%\helios\crashes` |
 
 The log file rotates at 5 MiB (three older files kept), at the
-`developer.log_level` setting (`info` by default); egui-pop and the
-window's own warnings write to it. A panic writes a crash report (the
+`developer.log_level` setting (`info` by default). It is set up as the
+process starts, right after the single-instance check, so what Helios
+says before its window opens is in it too. Each line is a time, a level
+and a target, the crate or module that wrote it:
+
+- `helios`: every notice the window shows (status bar and toast) and
+  every Log panel entry, in English;
+- `helios_gui::…`, `helios_connect::…`, `helios_library::…` and Helios's
+  other crates: what they do for the user (`info`: an import, a picking,
+  an account connected) and what failed (`warn`, `error`: a picking
+  expired or refused, a step of a connection, a mask or preview that
+  could not be drawn);
+- `egui_pop` and third-party crates: the interface's own lines.
+
+A bug report attaches `helios.log`: it holds no token or password, and
+names a source by its kind, not by its account. A panic writes a crash report (the
 version, the system, the backtrace, the last log lines and journal
 events); the next start offers it in a toast. Nothing is sent. The
 debug bridge's `logs` collector gives the file, its level and its last
@@ -1279,9 +1307,7 @@ palette) opens the folder.
   Helios command has a system-wide key yet;
 - the window's app id (`helios-gui`) differs from the desktop file's
   name, which the Wayland global shortcuts portal and some notification
-  servers match on;
-- Helios's other crates write to the terminal (`eprintln!`), not to the
-  log file.
+  servers match on.
 
 ## Agents
 

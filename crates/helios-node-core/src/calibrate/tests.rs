@@ -192,6 +192,7 @@ fn every_command_has_a_schema_its_example_fits() {
         json!({ "images": ["/a.nef"], "profile": "auto", "dry_run": false }),
         json!({ "profile": "ab", "path": "/profiles" }),
         json!({ "path": null, "file": { "kind": "helios.chartprofile" }, "dry_run": true }),
+        json!({ "images": ["/a.nef"], "dry_run": true }),
     ];
     let specs = specs();
     assert_eq!(specs.len(), examples.len());

@@ -162,3 +162,64 @@ fn a_refused_token_answers_sign_in_needed() {
     assert_eq!(error["code"], -32010, "no token at all");
     assert_eq!(fake.requests().len(), 1, "one refused call, no retry");
 }
+
+/// Its health check tries each account Helios hands it: one Google
+/// takes is fine, a refused token or none needs reconnecting, a signed
+/// out one is left alone.
+#[test]
+fn its_accounts_check_says_which_account_needs_reconnecting() {
+    let fake = FakePicker::start(1, vec![]);
+    let mut plugin = Plugin::start(&fake.base);
+    let answer = plugin
+        .call(
+            "health.check",
+            json!({
+                "check": "accounts",
+                "accounts": [
+                    {"id": "google-photos-1", "label": "Google Photos — a@example.com", "state": "connected", "auth": TOKEN},
+                    {"id": "google-photos-2", "label": "Google Photos — b@example.com", "state": "connected", "auth": "revoked"},
+                    {"id": "google-photos-3", "label": "Google Photos", "state": "needs-attention", "auth": null},
+                    {"id": "google-photos-4", "label": "Google Photos", "state": "not-connected", "auth": null},
+                ],
+            }),
+        )
+        .unwrap();
+    let findings = answer["findings"].as_array().unwrap();
+    let got: Vec<(&str, &str, &str)> = findings
+        .iter()
+        .map(|f| {
+            (
+                f["about"].as_str().unwrap(),
+                f["level"].as_str().unwrap(),
+                f["message"]["english"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (
+                "google-photos-1",
+                "ok",
+                "Google Photos — a@example.com signs in"
+            ),
+            (
+                "google-photos-2",
+                "warning",
+                "Google Photos — b@example.com needs reconnecting"
+            ),
+            (
+                "google-photos-3",
+                "warning",
+                "Google Photos needs reconnecting"
+            ),
+        ]
+    );
+    assert_eq!(findings[1]["fix"]["command"], "import.reconnect");
+    assert_eq!(findings[1]["fix"]["args"]["account"], "google-photos-2");
+    assert!(findings[0].get("fix").is_none());
+    let error = plugin
+        .call("health.check", json!({ "check": "quota" }))
+        .unwrap_err();
+    assert_eq!(error["code"], -32602);
+}

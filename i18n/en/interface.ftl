@@ -164,6 +164,18 @@ setting-health-destinationDays =
     .description = The health check warns when a disk the backup strategy copies to has not been plugged in for longer.
     .label = Warn when a backup disk is away for (days)
 
+setting-import-automatic-ask-files =
+    .description = An automatic import of more photos than this asks first, in a notice that opens the import window. 0: never asks.
+    .label = Ask before importing more photos than
+
+setting-import-automatic-ask-gb =
+    .description = An automatic import larger than this asks first, in a notice that opens the import window. 0: never asks.
+    .label = Ask before importing more than
+
+setting-import-automatic-paused =
+    .description = While on, no source imports on its own: cards plugged in and new files in watched folders wait until it is off again.
+    .label = Pause automatic imports
+
 setting-interface-experimental-workshops =
     .description = Experimental: the Workshops panel and commands, to find, apply and aim macros by what they are for. May change; what it saves stays a macro. Takes effect at the next start.
     .label = Workshops

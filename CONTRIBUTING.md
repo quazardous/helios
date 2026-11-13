@@ -86,7 +86,8 @@ GPU gone), never a test failure. See docs/bench.md.
 
 `cargo xtask install-dev` installs the box's latest `build-gui` of `next`
 (`--branch B` for another branch, `--local` for this checkout's own
-build) outside the checkout, in
+build, `--from DIR` for a folder of `build-gui` outputs, such as the one
+`cargo xtask gate` brings back after a green round) outside the checkout, in
 `${XDG_DATA_HOME:-~/.local/share}/helios-dev/<version>/` (`<version>` is
 the program's own, commit included: `0.79.1-dev.4+1a2b3c4d`), with the
 programs of the bundled plugins beside `helios-gui`. A `current` link
