@@ -11,6 +11,12 @@
 //! CLI and `helios-mcp` reach this node instead of starting another. The
 //! desktop advertises its embedded node this way while it holds the
 //! vault; `helios-node` serves the same commands on its batch endpoint.
+//!
+//! A desktop adds its windows' commands ([`WindowCommands`]): `commands.list`
+//! lists the node's (`scope: "node"`) and a window's (`scope: "window"`)
+//! in one list, each saying whether it can run there and why not, and
+//! `command.run` runs either by its id, a window's on the window's own
+//! thread, refused with its reason where it does not apply.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -55,6 +61,60 @@ pub struct Imported<'a> {
 
 impl Event for Imported<'_> {
     const KIND: &'static str = "library.imported";
+}
+
+/// A command of a desktop window, as that window lists it: its id, label
+/// and category as the menus and the palette show them, the schema of its
+/// params (an open object when it declares none: its label names its
+/// arguments), and whether it applies in the window asked about, with the
+/// reason when it does not (its menu entry's greyed tooltip).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WindowCommand {
+    pub id: String,
+    pub label: String,
+    pub category: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    pub params: Value,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
+    pub enabled: bool,
+    #[serde(rename = "disabledReason", skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+}
+
+impl WindowCommand {
+    /// Whether every word of `filter` is in its id, label or category.
+    pub fn matches(&self, filter: &str) -> bool {
+        let hay = format!("{} {} {}", self.id, self.label, self.category).to_lowercase();
+        filter
+            .split_whitespace()
+            .all(|word| hay.contains(&word.to_lowercase()))
+    }
+}
+
+/// The window a call names when it names none.
+pub const MAIN_WINDOW: &str = "main";
+
+/// A desktop's windows' commands, reached from the endpoint's threads:
+/// the desktop answers on its interface's thread.
+pub trait WindowCommands: Send + Sync {
+    /// The commands, evaluated in window `window`'s context.
+    ///
+    /// # Errors
+    /// No such window, or the interface did not answer.
+    fn list(&self, window: &str) -> Result<Vec<WindowCommand>, String>;
+
+    /// Runs command `id` in window `window` as `origin` (checked).
+    ///
+    /// # Errors
+    /// An unknown command, one that does not apply there (its reason),
+    /// no such window open, or the command's refusal.
+    fn run(&self, id: &str, params: Value, origin: &str, window: &str) -> Result<Value, String>;
 }
 
 /// The commands a [`VaultService`] runs.
@@ -134,6 +194,7 @@ pub struct VaultService<S: Store> {
     bus: Arc<Bus>,
     jobs: Jobs,
     instance: String,
+    windows: Option<Arc<dyn WindowCommands>>,
 }
 
 impl<S: Store> VaultService<S> {
@@ -146,7 +207,109 @@ impl<S: Store> VaultService<S> {
             bus,
             jobs,
             instance: instance.into(),
+            windows: None,
         }
+    }
+
+    /// Serves a desktop's windows' commands too.
+    #[must_use]
+    pub fn with_windows(mut self, windows: Arc<dyn WindowCommands>) -> Self {
+        self.windows = Some(windows);
+        self
+    }
+}
+
+impl<S: Store + Send + 'static> VaultService<S> {
+    /// `commands.list`: the node's commands, then window `window`'s
+    /// (`main` when not given), each with its scope; `filter` keeps those
+    /// whose id, label or category holds its every word, `enabled_only`
+    /// those that can run. A window that cannot answer leaves its
+    /// commands out and says why (`window_error`).
+    fn list(&self, params: &Value) -> Value {
+        let filter = params["filter"].as_str().unwrap_or("");
+        let enabled_only = params["enabled_only"].as_bool().unwrap_or(false);
+        let window = params["window"].as_str().unwrap_or(MAIN_WINDOW);
+        let mut commands: Vec<Value> = specs()
+            .iter()
+            .filter(|s| s.matches(filter))
+            .map(|s| {
+                let mut c = serde_json::to_value(s).expect("specs serialize");
+                c["enabled"] = json!(true);
+                c["scope"] = json!("node");
+                c
+            })
+            .collect();
+        let mut answer = json!({});
+        if let Some(windows) = &self.windows {
+            match windows.list(window) {
+                Ok(listed) => commands.extend(
+                    listed
+                        .iter()
+                        .filter(|c| c.matches(filter) && (c.enabled || !enabled_only))
+                        .map(|c| {
+                            let mut v = serde_json::to_value(c).expect("commands serialize");
+                            v["scope"] = json!("window");
+                            v["window"] = json!(window);
+                            v
+                        }),
+                ),
+                Err(e) => answer["window_error"] = json!(e),
+            }
+        }
+        answer["commands"] = json!(commands);
+        answer
+    }
+
+    /// `command.run`: command `id` with its `params`, as `origin` (or the
+    /// call's `_meta.origin`). A node command runs as its method would; a
+    /// window's (`scope: "window"`, or an id only a window knows) runs in
+    /// window `window` (`main` when not given), refused with the reason
+    /// it is greyed there.
+    fn run_command(&self, params: &Value, call: &Call) -> Result<Value, Error> {
+        let id = params["id"]
+            .as_str()
+            .ok_or_else(|| Error::invalid_params("`command.run` takes an `id`"))?;
+        let origin = params["origin"]
+            .as_str()
+            .unwrap_or_else(|| origin_of(params))
+            .to_string();
+        let mut args = match &params["params"] {
+            Value::Null => json!({}),
+            v => v.clone(),
+        };
+        let scope = params["scope"].as_str();
+        let node = specs().iter().any(|s| s.id == id);
+        if scope != Some("window") && node {
+            if let Some(fields) = args.as_object_mut() {
+                fields.insert("_meta".into(), json!({ "origin": origin }));
+            }
+            return self.call(id, args, call);
+        }
+        let Some(windows) = self.windows.as_ref().filter(|_| scope != Some("node")) else {
+            return Err(Error::method_not_found(id));
+        };
+        if !is_origin(&origin) {
+            return Err(refused_origin(&origin));
+        }
+        let window = params["window"].as_str().unwrap_or(MAIN_WINDOW);
+        self.bus.publish(
+            SOURCE,
+            None,
+            &CommandRan {
+                id,
+                origin: &origin,
+            },
+        );
+        let mut answer = windows
+            .run(id, args, &origin, window)
+            .map_err(|e| Error::new(rpc::code::REFUSED, e))?;
+        if !answer.is_object() {
+            answer = json!({ "result": answer });
+        }
+        answer["command"] = json!(id);
+        answer["origin"] = json!(origin);
+        answer["window"] = json!(window);
+        Ok(answer)
     }
 
     fn run(&self, id: &str, params: &Value, call: &Call) -> Result<Value, String> {
@@ -177,6 +340,14 @@ impl<S: Store> VaultService<S> {
     }
 }
 
+/// A call refused for the origin it names.
+fn refused_origin(origin: &str) -> Error {
+    Error::new(
+        rpc::code::ORIGIN_REFUSED,
+        format!("`{origin}` is not an origin: user, cli, control, agent:NAME or script:NAME"),
+    )
+}
+
 /// The origin a call's params carry (`_meta.origin`), else [`CONTROL`].
 fn origin_of(params: &Value) -> &str {
     params["_meta"]["origin"].as_str().unwrap_or(CONTROL)
@@ -186,17 +357,8 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
     fn call(&self, method: &str, params: Value, call: &Call) -> Result<Value, Error> {
         match method {
             "node.hello" => return Ok(rpc::hello(&self.instance, "batch", &["batch"])),
-            "commands.list" => {
-                let commands: Vec<Value> = specs()
-                    .iter()
-                    .map(|s| {
-                        let mut c = serde_json::to_value(s).expect("specs serialize");
-                        c["enabled"] = json!(true);
-                        c
-                    })
-                    .collect();
-                return Ok(json!({ "commands": commands }));
-            }
+            "commands.list" => return Ok(self.list(&params)),
+            "command.run" => return self.run_command(&params, call),
             _ => {}
         }
         let Some(spec) = specs().into_iter().find(|s| s.id == method) else {
@@ -204,12 +366,7 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
         };
         let origin = origin_of(&params).to_string();
         if !is_origin(&origin) {
-            return Err(Error::new(
-                rpc::code::ORIGIN_REFUSED,
-                format!(
-                    "`{origin}` is not an origin: user, cli, control, agent:NAME or script:NAME"
-                ),
-            ));
+            return Err(refused_origin(&origin));
         }
         let mut checked = params.clone();
         if let Some(fields) = checked.as_object_mut() {
@@ -405,5 +562,120 @@ mod tests {
             commands["commands"].as_array().unwrap().len(),
             1 + library::IDS.len() + calibrate::specs().len()
         );
+    }
+
+    /// A window with one command that applies and one that does not.
+    struct Windows;
+
+    impl WindowCommands for Windows {
+        fn list(&self, window: &str) -> Result<Vec<WindowCommand>, String> {
+            let command = |id: &str, reason: Option<&str>| WindowCommand {
+                id: id.into(),
+                label: id.into(),
+                category: "View".into(),
+                description: String::new(),
+                params: json!({ "type": "object" }),
+                keys: Vec::new(),
+                icon: None,
+                read_only: false,
+                enabled: reason.is_none(),
+                disabled_reason: reason.map(Into::into),
+            };
+            let export = (window != "main").then_some("Only in the Helios window");
+            Ok(vec![command("view.zoom", None), command("export", export)])
+        }
+
+        fn run(&self, id: &str, _: Value, origin: &str, window: &str) -> Result<Value, String> {
+            let listed = self.list(window)?;
+            let c = listed.iter().find(|c| c.id == id).ok_or("no command")?;
+            match &c.disabled_reason {
+                Some(reason) => Err(reason.clone()),
+                None => Ok(json!({ "ran": id, "as": origin })),
+            }
+        }
+    }
+
+    #[test]
+    fn node_and_window_commands_are_one_list_and_run_by_id() {
+        let bus = Arc::new(Bus::new());
+        let heard = bus.subscribe();
+        let service = VaultService::new(
+            Arc::new(Vault::new(helios_vault::MemoryStore::default())),
+            bus.clone(),
+            Jobs::new(bus.clone()),
+            "test",
+        )
+        .with_windows(Arc::new(Windows));
+        let client = Client::in_process(Arc::new(service)).with_origin("agent:test");
+        let listed = client.request("commands.list", json!({})).unwrap();
+        let commands = listed["commands"].as_array().unwrap();
+        let scoped = |id: &str| commands.iter().find(|c| c["id"] == id).unwrap().clone();
+        assert_eq!(scoped("library.stacks.list")["scope"], "node");
+        assert_eq!(scoped("view.zoom")["scope"], "window");
+        assert_eq!(scoped("export")["enabled"], true);
+        let import = client
+            .request(
+                "commands.list",
+                json!({ "window": "import", "filter": "export" }),
+            )
+            .unwrap();
+        let window: Vec<&Value> = import["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["scope"] == "window")
+            .collect();
+        assert_eq!(window.len(), 1, "{import}");
+        assert_eq!(window[0]["window"], "import");
+        assert_eq!(window[0]["disabledReason"], "Only in the Helios window");
+        let enabled = client
+            .request(
+                "commands.list",
+                json!({ "window": "import", "enabled_only": true }),
+            )
+            .unwrap();
+        assert!(
+            !enabled["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["id"] == "export")
+        );
+        let refused = client
+            .request(
+                "command.run",
+                json!({ "id": "export", "window": "import", "origin": "agent:test" }),
+            )
+            .unwrap_err();
+        assert_eq!(refused.code, rpc::code::REFUSED);
+        assert_eq!(refused.message, "Only in the Helios window");
+        let ran = client
+            .request(
+                "command.run",
+                json!({ "id": "view.zoom", "origin": "agent:test" }),
+            )
+            .unwrap();
+        assert_eq!(ran["as"], "agent:test");
+        assert_eq!(ran["window"], "main");
+        let events: Vec<_> = std::iter::from_fn(|| heard.try_recv().ok()).collect();
+        assert!(
+            events.iter().any(|e| e.kind == "control.command"
+                && e.payload["id"] == "view.zoom"
+                && e.payload["origin"] == "agent:test"),
+            "{events:?}"
+        );
+        // A node command runs through `command.run` as its method would.
+        let stacks = client
+            .request("command.run", json!({ "id": "library.stacks.list" }))
+            .unwrap();
+        assert_eq!(stacks["stacks"], json!([]));
+        assert_eq!(stacks["origin"], "agent:test");
+        let bad = client
+            .request(
+                "command.run",
+                json!({ "id": "view.zoom", "origin": "robot" }),
+            )
+            .unwrap_err();
+        assert_eq!(bad.code, rpc::code::ORIGIN_REFUSED);
     }
 }
