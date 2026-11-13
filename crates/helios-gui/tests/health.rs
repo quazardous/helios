@@ -851,20 +851,20 @@ fn the_page_groups_the_findings_by_their_owner() {
         h.query_by_label_contains("The flux capacitor is unplugged")
             .is_some()
     });
-    let y = |label: &str| h.get_by_label_contains(label).rect().center().y;
+    // A heading is its words alone; a finding's row holds its message.
+    let heading = |label: &str| h.get_by_label(label).rect().center().y;
+    let row = |label: &str| h.get_by_label_contains(label).rect().center().y;
     // Each finding under its owner's heading, the groups in the page's
     // order: Helios's modules, then the other checks.
     let order = [
-        y("Backups"),
-        y("The fake disk is away"),
-        y("GPU"),
-        y("The fake adapter renders"),
-        y("Other checks"),
-        y("The flux capacitor is unplugged"),
+        heading("Backups"),
+        row("The fake disk is away"),
+        heading("GPU"),
+        row("The fake adapter renders"),
+        heading("Other checks"),
+        row("The flux capacitor is unplugged"),
     ];
     assert!(order.is_sorted(), "{order:?}");
-    // A module without findings shows no group.
-    assert!(h.query_by_label("Catalogue").is_none());
     let read = h
         .state_mut()
         .run(
@@ -876,4 +876,6 @@ fn the_page_groups_the_findings_by_their_owner() {
     assert_eq!(read["owners"]["backup"][0]["id"], "backup.fake");
     assert_eq!(read["owners"]["gpu"][0]["id"], "gpu.fake");
     assert_eq!(read["others"][0]["id"], "test.broken");
+    // A module without findings has no rows, so no group.
+    assert!(read["owners"].get("catalogue").is_none());
 }
