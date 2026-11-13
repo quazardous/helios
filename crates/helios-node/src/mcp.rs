@@ -68,6 +68,12 @@
 //! typed arguments and documentation for the processing node's verbs, and
 //! the server's own (sandbox, AI, workspace files).
 //!
+//! Compact mode (`helios-mcp --tools compact`, [`ToolSet::Compact`]): the
+//! server offers only the generic pair and the sandbox pair that starts a
+//! node for it, four tools instead of the whole list, for an agent whose
+//! context is short; every command stays reachable through
+//! `helios_command_run`.
+//!
 //! Outcome unknown, never resend: when the connection to the node closes
 //! after a request was sent and before its answer came, the tool's error
 //! starts with "outcome unknown" (`-32008` on the generic pair). The
@@ -2509,6 +2515,37 @@ pub struct Sockets {
     pub ai: Option<Arc<Ai>>,
     /// The folders the agent may read and write (`crate::roots`).
     pub roots: Roots,
+    /// The tools offered: all of them, or the compact set.
+    pub tools: ToolSet,
+}
+
+/// Which tools the server offers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolSet {
+    /// Every tool.
+    #[default]
+    Full,
+    /// The generic pair over the command registry, and the sandbox pair
+    /// that starts a node for it: a short list for a short context.
+    Compact,
+}
+
+impl ToolSet {
+    /// `full` or `compact`, as `--tools` takes it.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "full" => Some(Self::Full),
+            "compact" => Some(Self::Compact),
+            _ => None,
+        }
+    }
+
+    /// Whether this set offers `tool`.
+    #[must_use]
+    pub fn offers(self, tool: &Tool) -> bool {
+        self == Self::Full || matches!(tool.endpoint, Endpoint::Commands | Endpoint::Sandbox)
+    }
 }
 
 /// The current image of `node`: its output exported as a PNG through the
@@ -2746,6 +2783,12 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
     let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
         return tool_result(format!("no tool `{name}`"), true);
     };
+    if !sockets.tools.offers(tool) {
+        return tool_result(
+            format!("no tool `{name}` in compact mode: run its command with helios_command_run"),
+            true,
+        );
+    }
     let request = match tool.request(&params["arguments"]) {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
@@ -3133,7 +3176,7 @@ pub fn handle(sockets: &mut Sockets, message: &Value) -> Option<Value> {
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({
-            "tools": TOOLS.iter().map(|t| json!({
+            "tools": TOOLS.iter().filter(|t| sockets.tools.offers(t)).map(|t| json!({
                 "name": t.name, "description": t.description, "inputSchema": t.input_schema(),
             })).collect::<Vec<_>>()
         })),
@@ -3214,6 +3257,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let (is_error, answer) = tool(
             &mut sockets,
@@ -3237,6 +3281,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let (is_error, answer) = tool(
             &mut sockets,
@@ -3344,6 +3389,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         assert!(
             handle(
@@ -3414,6 +3460,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: Some(Arc::new(ai)),
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         (sockets, runtime)
     }
@@ -3444,6 +3491,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": ws, "config": config });
@@ -3515,6 +3563,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = json!({ "workspace": root.join("shoot"), "config": root.join("config") });
         for name in [
@@ -3568,6 +3617,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": dir, "config": config });
@@ -3646,6 +3696,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let base = json!({ "workspace": root.join("work"), "config": root.join("config") });
         for (name, extra) in [
@@ -3700,6 +3751,7 @@ mod tests {
             node_bin: PathBuf::from("helios-node"),
             ai: None,
             roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": dir, "config": config });
@@ -4361,5 +4413,59 @@ mod tests {
         assert_eq!(run(), json!({ "runs": 1, "already_applied": true }));
         assert_eq!(runs.0.load(std::sync::atomic::Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_mode_offers_the_generic_pair_and_the_sandbox_only() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Compact,
+        };
+        let list = |sockets: &mut Sockets| {
+            handle(
+                sockets,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            )
+            .unwrap()["result"]["tools"]
+                .clone()
+        };
+        let compact = list(&mut sockets);
+        let names: Vec<&str> = compact
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "helios_commands_list",
+                "helios_command_run",
+                "helios_sandbox_start",
+                "helios_sandbox_stop"
+            ]
+        );
+        let other = TOOLS.iter().find(|t| !ToolSet::Compact.offers(t)).unwrap();
+        let (is_error, answer) = tool(&mut sockets, other.name, example(other));
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(format!(
+                "no tool `{}` in compact mode: run its command with helios_command_run",
+                other.name
+            ))
+        );
+        sockets.tools = ToolSet::Full;
+        let full = list(&mut sockets);
+        assert_eq!(full.as_array().unwrap().len(), TOOLS.len());
+        // The point of the mode: a list a small fraction of the full one.
+        assert!(compact.to_string().len() * 10 < full.to_string().len());
+        assert_eq!(ToolSet::parse("compact"), Some(ToolSet::Compact));
+        assert_eq!(ToolSet::parse("full"), Some(ToolSet::Full));
+        assert_eq!(ToolSet::parse("all"), None);
     }
 }
