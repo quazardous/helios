@@ -8,6 +8,7 @@
 //! schema and run by id. The desktop embeds one in its process; `helios-node --vault` runs the same
 //! node headless.
 
+pub mod calibrate;
 pub mod commands;
 pub mod endpoint;
 pub mod health;

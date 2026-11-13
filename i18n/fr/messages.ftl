@@ -32,9 +32,17 @@ batch-vault-attached = --vault avec un nœud déjà lancé ne conserve que les s
 
 calibrate-bad-image = la prise de vue de la mire n’a aucun pixel ou moins de trois canaux
 
-calibrate-dry-run-only = seul l’essai à blanc est disponible pour l’instant : l’enregistrement d’un profil n’existe pas encore
+calibrate-bad-params = calibrate.chart : { $error }
+
+calibrate-image-not-at-hand = aucun fichier de l’image { $image } n’est disponible
 
 calibrate-load-failed = impossible de lire la prise de vue de la mire : { $error }
+
+calibrate-needs-vault = le nœud n’a pas de coffre : enregistrer et lire des profils en demande un (le lancer avec --vault)
+
+calibrate-no-profile = aucun profil de calibration « { $id } »
+
+calibrate-no-shot = calibrate.chart demande `path` ou `image`, la prise de vue de la mire
 
 calibrate-outside-image = les cases de la mire tombent hors de l’image
 
@@ -42,7 +50,13 @@ calibrate-no-camera-matrix = le boîtier n’a pas de matrice de couleur utilisa
 
 calibrate-raw-graph = le raw n’a pu être développé pour la mesure : { $error }
 
+calibrate-save-needed = une exécution qui écrit demande `save` : c’est le profil qu’elle écrit
+
 calibrate-unknown-chart = aucune mire « { $chart } »
+
+calibrate-unknown-command = aucune commande « { $id } »
+
+calibrate-unknown-image = « { $image } » n’est ni un identifiant d’image ni un fichier connu du coffre
 
 calibrate-unknown-patch = la mire n’a pas de case « { $patch } »
 
@@ -51,6 +65,8 @@ calibrate-no-neutral = la mire n’a pu être résolue à ces coins : aucune cas
 calibrate-too-few-patches = la mire n’a pu être résolue à ces coins : trop peu de cases sont retenues
 
 calibrate-unsolved = la mire n’a pu être mesurée et résolue à ces coins
+
+calibrate-vault-error = le coffre : { $error }
 
 engine-failure-compile = compilation
 
@@ -271,6 +287,8 @@ gui-graph-wires-orthogonal = Orthogonales
 gui-graph-wires-straight = Droites
 
 gui-history-batch = { $label } ({ $count } valeurs)
+gui-history-calibration-delete = Supprimer le profil de calibration « { $name } »
+gui-history-calibration-save = Enregistrer le profil de calibration « { $name } »
 gui-history-import = Importer { $count } photos
 gui-history-album-new = Nouvel album « { $name } »
 gui-history-album-rename = Renommer l’album « { $name } »
@@ -1868,9 +1886,7 @@ gui-library-cannot-open = La bibliothèque ne peut pas être ouverte : { $error 
 
 gui-library-badge-missing = manquante
 
-
 gui-storage-intro = Les disques que Helios a vus. Nommez-les et dites à quoi sert chacun : Helios n’écrit que sur les disques de bibliothèque, d’archive, de sauvegarde et de travail.
-
 
 gui-storage-kind-internal = Disque interne
 
@@ -1900,11 +1916,7 @@ gui-storage-offline = hors ligne
 
 gui-storage-free = { $free } libres sur { $capacity }
 
-
-
-
 gui-storage-backup-now = Sauvegarder maintenant
-
 
 gui-storage-backup-off-site = L’une d’elles hors site
 
@@ -1918,7 +1930,6 @@ gui-storage-dest-archive = Tout disque d’archive
 
 gui-storage-dest-backup = Tout disque de sauvegarde
 
-
 gui-storage-off-site = Hors site
 
 gui-storage-off-site-hint = Gardé loin des autres disques (un autre bâtiment)
@@ -1931,15 +1942,11 @@ gui-storage-node = Dans { $node }
 
 gui-storage-last-seen = Vu pour la dernière fois le { $date } sur { $node }
 
-
 gui-storage-mark-explain = Ce disque n’est connu que par son nom de volume et sa taille : Helios pourrait le confondre avec un autre. Le marquer écrit un petit fichier, .helios/volume.json, à sa racine : rien d’autre ne change sur le disque.
 
 gui-storage-mark-confirm = Écrire le fichier d’identité
 
-
 gui-storage-mark = Marquer ce disque…
-
-
 
 gui-storage-forget-hint = Retire ce que la carte des images sait des fichiers de ce volume hors de la Bibliothèque ; le volume reste connu
 

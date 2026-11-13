@@ -42,11 +42,12 @@
 //! network.
 
 pub mod batch;
-pub mod calibrate;
 pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).
 pub use helios_library::darktable;
 pub mod connect;
+/// The calibration's commands (`helios_node_core::calibrate`).
+pub use helios_node_core::calibrate;
 pub use helios_node_core::library;
 pub mod mcp;
 pub mod sandbox;

@@ -103,7 +103,7 @@ keeps only the runs in that vault (no settings layer, no edit), as
 every `workflow-*` verb as well.
 
 `calibrate-chart PICTURE X,Y X,Y X,Y X,Y [--chart ID] [--exclude
-PATCH]...` measures a colour chart shot and solves its correction
+PATCH]... [--save [--profile-name NAME]]` measures a colour chart shot and solves its correction
 (`calibrate.chart`, the MCP tool `helios_calibrate_chart`, see
 [design/calibration.md](design/calibration.md)): the four points are the
 centres of the chart's corner patches in the picture's pixels as stored,
@@ -114,7 +114,14 @@ found, the light estimated from the neutrals, the exposure offset, the
 matrices). A decoded picture (TIFF, PNG, JPEG) is measured on its linear
 working RGB, a raw on its own sensor data (the raw front without the
 input profile, on the chart's bounding box), its points in the raw's
-pixels.
+pixels; a raw the node's vault knows is measured with the raw-front
+parameters of its newest edit. With `--save` (a node started with
+`--vault`), the result is kept as a calibration profile in the vault,
+named `--profile-name` (the camera and the light otherwise), and the
+answer's `profile` gives its id. The node's commands
+`calibrate.profiles.list`, `calibrate.profiles.get` and
+`calibrate.profiles.delete` (through `command.run`, or the vault's
+endpoint) read and remove profiles.
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job

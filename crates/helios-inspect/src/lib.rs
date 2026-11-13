@@ -919,13 +919,19 @@ pub mod control {
         },
         /// Measures a colour chart shot and solves its correction
         /// (`docs/design/calibration.md`): `path` an absolute picture
-        /// file or a raw (measured on its sensor data), `corners` the
-        /// centres of the four corner patches, `[x, y]` in its pixels as
-        /// stored, in any order. Answers the report; a dry
-        /// run only, nothing written (`dry_run` false is refused).
+        /// file or a raw (measured on its sensor data), or `image` an
+        /// image of the node's vault (its id, or a path the vault knows: a
+        /// raw then measured with its edit's raw-front parameters);
+        /// `corners` the centres of the four corner patches, `[x, y]` in
+        /// its pixels as stored, in any order. Answers the report; with
+        /// `save` (a node with a vault), the result is kept as a
+        /// calibration profile, named `name`, and its id answered.
         #[serde(rename = "calibrate.chart")]
         CalibrateChart {
-            path: PathBuf,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            path: Option<PathBuf>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            image: Option<String>,
             corners: [[f64; 2]; 4],
             /// The chart's id (`xrite.cc24.2014` when not given).
             #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -935,6 +941,13 @@ pub mod control {
             exclude: Vec<String>,
             #[serde(default = "yes")]
             dry_run: bool,
+            /// Keep the result as a profile in the vault.
+            #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+            save: bool,
+            /// The saved profile's name (the camera and the light when
+            /// not given).
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            name: Option<String>,
         },
         /// The node's commands: every verb above as a command, with its
         /// label, the JSON schema of its params, what it needs (a vault,

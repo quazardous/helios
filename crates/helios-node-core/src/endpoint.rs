@@ -1,8 +1,9 @@
 //! A node's command endpoint on its vault, and its rendezvous (see
 //! `docs/protocol.md`, "Finding a node").
 //!
-//! [`VaultService`] answers the library's commands ([`crate::library`])
-//! and `library.import` over JSON-RPC 2.0, each checked against its
+//! [`VaultService`] answers the library's commands ([`crate::library`]),
+//! the calibration's ([`crate::calibrate`]) and `library.import` over
+//! JSON-RPC 2.0, each checked against its
 //! schema, run by the origin its call names and announced on the node's
 //! bus ([`CommandRan`]). [`advertise`] serves it on a socket of its own
 //! (TCP with a session token where there are no Unix sockets) and writes
@@ -20,12 +21,12 @@ use helios_inspect::discovery::{self, Lock, Rendezvous};
 use helios_inspect::rpc::{self, Call, Error, Service};
 use helios_inspect::transport::{Connection, Listen};
 use helios_library::import::Report;
-use helios_vault::{Store, Vault};
+use helios_vault::{Changes, Store, Vault};
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, validate};
-use crate::library;
+use crate::{calibrate, library};
 
 /// Who publishes the endpoint's events on the bus.
 pub const SOURCE: &str = "node";
@@ -60,7 +61,56 @@ impl Event for Imported<'_> {
 pub fn specs() -> Vec<CommandSpec> {
     std::iter::once(library::import_spec())
         .chain(library::specs())
+        .chain(calibrate::specs())
         .collect()
+}
+
+/// Runs command `id` of [`specs`] but the import on `vault`, in the node's
+/// process: its params checked against its schema, the run announced on
+/// `bus` ([`CommandRan`]) as made by `origin`. The desktop runs its
+/// library's and calibration's commands through here, as the CLI and
+/// agents reach them over the endpoint. Answers what the vault changed
+/// too, for a history to undo.
+///
+/// # Errors
+/// An unknown command, params its schema refuses, or the command's
+/// refusal.
+pub fn command<S: Store>(
+    vault: &Vault<S>,
+    bus: &Arc<Bus>,
+    id: &str,
+    params: &Value,
+    origin: &str,
+) -> Result<(Value, Changes), String> {
+    let Some(spec) = specs()
+        .into_iter()
+        .find(|s| s.id == id && s.id != library::IMPORT)
+    else {
+        return Err(format!("no command `{id}` on the vault"));
+    };
+    let mut checked = params.clone();
+    if let Some(fields) = checked.as_object_mut() {
+        fields.remove("_meta");
+    }
+    validate(&spec.params, &checked).map_err(|e| format!("`{id}` refused its params: {e}"))?;
+    bus.publish(SOURCE, None, &CommandRan { id, origin });
+    run_on(vault, bus, id, &checked, origin)
+}
+
+/// Runs a library or calibration command whose params are checked.
+fn run_on<S: Store>(
+    vault: &Vault<S>,
+    bus: &Arc<Bus>,
+    id: &str,
+    params: &Value,
+    origin: &str,
+) -> Result<(Value, Changes), String> {
+    if calibrate::handles(id) {
+        return calibrate::run(Some(vault), id, params, now())
+            .map(|done| (done.answer, done.changes))
+            .map_err(|m| m.english);
+    }
+    library::run(vault, bus, id, params, origin).map(|answer| (answer, Changes::default()))
 }
 
 /// Whether `origin` names who runs a call: `user`, `cli`, `control`,
@@ -101,7 +151,8 @@ impl<S: Store> VaultService<S> {
 
     fn run(&self, id: &str, params: &Value, call: &Call) -> Result<Value, String> {
         if id != library::IMPORT {
-            return library::run(&self.vault, &self.bus, id, params, origin_of(params));
+            return run_on(&self.vault, &self.bus, id, params, origin_of(params))
+                .map(|(answer, _)| answer);
         }
         let paths: Vec<PathBuf> = params["paths"]
             .as_array()
@@ -352,7 +403,7 @@ mod tests {
         let commands = client.request("commands.list", json!({})).unwrap();
         assert_eq!(
             commands["commands"].as_array().unwrap().len(),
-            1 + library::IDS.len()
+            1 + library::IDS.len() + calibrate::specs().len()
         );
     }
 }

@@ -35,6 +35,7 @@ use serde_json::json;
 use storage::VolumeId;
 
 pub mod accounts;
+pub mod calibration;
 pub mod capture;
 pub mod catalog;
 pub mod changed;

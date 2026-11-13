@@ -1696,14 +1696,18 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_calibrate_chart",
         endpoint: Endpoint::Control,
         cmd: "calibrate.chart",
-        description: "Measures a colour chart shot (a decoded picture: TIFF, PNG, JPEG, or a raw measured on its sensor data) and solves its colour correction, a dry run that writes nothing: per patch the measured value, the reference and Delta E 2000 before and after, with its status; mean, max and worst patches; the orientation found, the light estimated from the neutral patches, the exposure offset and the matrices (debug control)",
+        description: "Measures a colour chart shot (a decoded picture: TIFF, PNG, JPEG, or a raw measured on its sensor data) and solves its colour correction, a dry run that writes nothing unless `save` is set: per patch the measured value, the reference and Delta E 2000 before and after, with its status; mean, max and worst patches; the orientation found, the light estimated from the neutral patches, the exposure offset and the matrices. With `save` (a node with a vault), the result is kept as a calibration profile and its id answered under `profile` (debug control)",
         params: &[
-            Param {
-                name: "path",
-                schema: string,
-                description: "Absolute path of the chart shot, on the node's machine",
-                default: None,
-            },
+            optional(
+                "path",
+                optional_string,
+                "Absolute path of the chart shot, on the node's machine (or give `image`)",
+            ),
+            optional(
+                "image",
+                optional_string,
+                "The chart shot in the node's vault: its id or a path the vault knows; a raw is then measured with its edit's raw-front parameters",
+            ),
             Param {
                 name: "corners",
                 schema: corners,
@@ -1724,9 +1728,20 @@ pub const TOOLS: &[Tool] = &[
             Param {
                 name: "dry_run",
                 schema: boolean,
-                description: "Report only, write nothing: the only mode answered so far",
+                description: "Report only, write nothing (`save` writes the profile)",
                 default: Some(yes),
             },
+            Param {
+                name: "save",
+                schema: boolean,
+                description: "Keep the result as a calibration profile in the vault",
+                default: Some(no),
+            },
+            optional(
+                "name",
+                optional_string,
+                "The saved profile's name; the camera and the light when left out",
+            ),
         ],
     },
     Tool {

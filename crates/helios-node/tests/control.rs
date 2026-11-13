@@ -419,4 +419,13 @@ fn a_chart_picture_is_calibrated_through_control() {
     );
     let (code, usage) = s.control(&["calibrate-chart", picture.to_str().unwrap(), "1,2"]);
     assert_eq!(code, 2, "{usage}");
+    // Saving a profile needs a node that keeps a vault.
+    let mut saving = args.clone();
+    saving.extend(["--save", "--profile-name", "Daylight"]);
+    let (code, refused) = s.control(&saving);
+    assert_eq!(code, 1, "{refused}");
+    assert!(
+        refused["error"].as_str().unwrap().contains("no vault"),
+        "{refused}"
+    );
 }

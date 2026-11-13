@@ -38,7 +38,6 @@ helios-gpu.workspace = true
 helios-photo.workspace = true
 helios-display.workspace = true
 helios-load.workspace = true
-helios-calibrate.workspace = true
 # The thumbnail cache, its fast read and its pool.
 helios-thumbs.workspace = true
 helios-cache.workspace = true
@@ -126,6 +125,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 winresource = "0.1"
 
 [dev-dependencies]
+helios-calibrate.workspace = true
 egui-pop-test.workspace = true
 # The import window's snapshots (tests/snapshots, thresholds in the
 # workspace's kittest.toml).

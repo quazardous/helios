@@ -620,8 +620,8 @@ usable. Slices 1 to 5 need no GUI.
    modules refuse. The node's `calibrate.chart` (and so the MCP tool and
    the command line) and the desktop command measure a raw through it;
    the answer's `image` says `raw`. The modules keep their defaults: a raw
-   from a path has no edit yet, its own parameters come with the content
-   id (slice 5). `helios_testkit::mosaic` is the inverse of `rawprepare`
+   from a path has no edit yet (slice 5 measures a raw the vault knows
+   with its edit's parameters). `helios_testkit::mosaic` is the inverse of `rawprepare`
    and `whitebalance` (a sensor mosaic in counts from white-balanced
    camera RGB, cut at the white level). Tests on a synthetic 14-bit RGGB
    mosaic of a shot under 3200 K whose true matrix is off from `colorin`'s:
@@ -637,6 +637,31 @@ usable. Slices 1 to 5 need no GUI.
    export, import, the default rule and the nearest-illuminant pick;
    `calibrate.chart` with `save`. Tested on the in-memory and SQLite
    stores.
+   **Built, first part** (2026-11-13): the profiles namespace, save,
+   list, read and delete; export, import, the defaults namespace and the
+   nearest-illuminant pick come with apply (slice 6).
+   `helios_calibrate::profile`: a `Profile` (format `PROFILE_FORMAT`, the
+   name, the camera's make, model and key, the illuminant as the answer
+   gives it, the chart, what was measured: space `camera` or `picture`,
+   the shot's content id, the edit version measured with, the corners and
+   the excluded patches; `base_matrix`, `M_c` as `matrix`, `P` as
+   `correction`, `lut` null, the report's quality, exposure and Delta E
+   before and after, `created`). Its id is BLAKE3 of its JSON without the
+   name and `created`: one measurement saved again is one profile
+   (renamed), another shot of the same camera and light a second one,
+   both kept. The vault keeps them (`Vault::calibration_profiles`,
+   `set_calibration_profile`, its `Changes` undone like an album's). The
+   commands live on the node (`helios_node_core::calibrate`):
+   `calibrate.chart` gains `image` (an image of the vault; a raw then
+   measured with the raw-front parameters of its newest edit,
+   `calibrate_raw_with`), `save` and `name`; `calibrate.profiles.list`
+   (`camera?`), `.get` and `.delete` (`profile`). `helios-node`, the
+   vault's endpoint (so the CLI and agents reach the desktop's node), the
+   MCP tool, `helios control calibrate-chart --save [--profile-name]` and
+   the desktop's commands answer through it; the desktop runs them
+   through its embedded node (`endpoint::command`, heard on the bus with
+   who ran them) and records a save or a deletion in the library's
+   history. A picture's profile has the camera key `picture`.
 6. **`core.matrix3@1` and the `chartprofile` module,** the raw front
    version 2, `calibrate.apply` and the camera default applied at open.
    Module tests and a desktop scenario (apply, undo).
