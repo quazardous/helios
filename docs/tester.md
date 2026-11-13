@@ -46,7 +46,11 @@ open pull requests into `next`; it works through them and reports.
 ## Rules
 
 - Only the tester writes `next` (through the gate). Never push to `main`.
-- One round at a time; never two gates running together.
+- One round at a time per checkout. Two mergers may gate side by side
+  (owner, 2026-11-13), each from its own checkout (the gate makes its
+  worktree inside the checkout it runs from) and on pull requests that do
+  not touch the same files. When one moves `next` first, the other's gate
+  refuses to fast-forward: gate that batch again.
 - **A red `next` CI comes first.** While `next` is red, gate only the pull
   request that fixes it, alone, before any other batch.
 - Never `test`, `test-affected` or `--affected`: the manifests are the
