@@ -262,20 +262,33 @@ mod tests {
 
     /// Patches of many colours, each a ramp from deep shadow to bright,
     /// in white-balanced camera RGB, mosaicked as the camera records it.
-    /// Saturated (channels within 1 ± 0.75 of the ramp): the look's tone
-    /// curve scales the three channels by one luminance ratio, so a
-    /// bright patch's dominant channel passes 1 where the sigmoid
-    /// "camera", compressing each channel, stays under white; the look's
-    /// gamut compression brings it back under 1, its hue kept, and the
-    /// fit is not refused for clipping highlights.
+    /// Saturation stays moderate (channels within 1 ± 0.3 of the ramp,
+    /// the ramp from 0.01 to 0.41): the range where a fitted look comes
+    /// within the `too-far` gate of the sigmoid "camera".
     fn mosaic() -> Image {
+        patches(0.1, 0.01, 0.4)
+    }
+
+    /// Saturated patches (channels within 1 ± 0.75 of the ramp, the ramp
+    /// from 0.02 to 0.72): the look's tone curve scales the three
+    /// channels by one luminance ratio, so a bright patch's dominant
+    /// channel passes 1 where the sigmoid "camera", compressing each
+    /// channel, stays under white; the look's gamut compression brings it
+    /// back under 1, its hue kept.
+    fn saturated_mosaic() -> Image {
+        patches(0.25, 0.02, 0.7)
+    }
+
+    /// Patches whose channels spread `step`, twice or three times it
+    /// around a ramp from `low` over `span`.
+    fn patches(step: f64, low: f64, span: f64) -> Image {
         let mut rgb = Vec::with_capacity((W * H * 3) as usize);
         for y in 0..H {
             for x in 0..W {
                 let k = (y / 64) * 8 + x / 64;
                 let hue = f64::from(k) * 0.618_034 % 1.0 * std::f64::consts::TAU;
-                let sat = 0.25 + 0.25 * f64::from(k % 3);
-                let ramp = 0.02 + 0.7 * f64::from(x % 64 + (y % 64) / 8) / 72.0;
+                let sat = step * f64::from(1 + k % 3);
+                let ramp = low + span * f64::from(x % 64 + (y % 64) / 8) / 72.0;
                 let c = [0.0, 2.094, 4.189]
                     .map(|o: f64| (ramp * (1.0 + sat * (hue + o).cos())).clamp(0.0, 0.9) as f32);
                 rgb.extend(c);
@@ -383,6 +396,28 @@ mod tests {
 
         vault.revert(&done.changes).unwrap();
         assert_eq!(head(&vault, id), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_saturated_scene_s_look_is_not_refused_for_clipping_highlights() {
+        let (vault, dir, id) = vault("saturated");
+        let mosaic = saturated_mosaic();
+        let shown = preview(&mosaic, W);
+        let read = |_: &Path| {
+            Ok(Some(Shot {
+                mosaic: mosaic.clone(),
+                camera: camera(),
+                preview: Some(shown.clone()),
+            }))
+        };
+        let params = json!({ "images": [id.hex()], "dry_run": true });
+        let dry = fit_with(&vault, &params, "agent:test", 10, &read).unwrap();
+        let answer = &dry.answer["images"][0];
+        // The gamut compression keeps the bright saturated patches under
+        // white, their hue kept: the look is fitted or, short of the
+        // camera's own saturation, refused further on, never for clipping.
+        assert_ne!(answer["refused"]["gate"], "clips-highlights", "{answer}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
