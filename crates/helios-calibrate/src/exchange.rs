@@ -14,7 +14,9 @@
 //! format this Helios does not read, a camera key that does not match
 //! the make and model, a matrix that is not finite or cannot be
 //! inverted, an illuminant outside the chromaticity diagram, a residual
-//! LUT (not taken yet), content that does not match its id.
+//! LUT (not taken yet), an id that is not a hash. The profile keeps the
+//! id the file names, so one shared back to its library is the same
+//! profile.
 
 use helios_core::Message;
 use serde_json::{Value, json};
@@ -149,15 +151,23 @@ pub fn read(file: &Value) -> Result<(String, Profile), Vec<Message>> {
             "the profile carries a residual LUT, which this Helios does not take yet",
         ));
     }
-    let id = profile.id();
-    if let Some(named) = file["id"].as_str()
-        && named != id
-    {
-        reasons.push(Message::new(
-            "calibrate-import-id",
-            "the profile's content does not match its id: it was changed or damaged",
-        ));
-    }
+    // The id the file names is kept, so a profile shared back to the
+    // library it came from is the same profile. Its hash cannot be checked
+    // against the content: a number read back from JSON text may differ
+    // from the one written in its last bit.
+    let id = match file["id"].as_str() {
+        None => profile.id(),
+        Some(named) if named.len() == 64 && named.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            named.to_ascii_lowercase()
+        }
+        Some(_) => {
+            reasons.push(Message::new(
+                "calibrate-import-id",
+                "the profile's id is not a 64-digit hexadecimal hash",
+            ));
+            String::new()
+        }
+    };
     if reasons.is_empty() {
         Ok((id, profile))
     } else {
@@ -241,6 +251,7 @@ mod tests {
         file["profile"]["camera"]["key"] = json!("canon eos r5");
         file["profile"]["matrix"] = json!([[1, 0, 0], [0, 1, 0], [0, 0, 0]]);
         file["profile"]["illuminant"]["xy"] = json!([0.8, 0.4]);
+        file["id"] = json!("not a hash");
         assert_eq!(
             keys(&file),
             [

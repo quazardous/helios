@@ -442,9 +442,11 @@ Profiles live in the library's vault as documents
   a camera key that is not the make and model's key (`picture` with no
   make or model); a matrix not finite or not invertible, a correction or
   camera matrix not finite; an illuminant `xy` outside the diagram; a
-  residual LUT (not taken yet); content whose id is not the `id` given
-  (changed or damaged). The name may be edited by hand: it is not part
-  of the id.
+  residual LUT (not taken yet); an `id` that is not a 64-digit hex
+  hash. The profile keeps the `id` the file names (the content's hash
+  when it names none), so a profile shared back to its library is the
+  same profile; the hash is not checked against the content, since a
+  number read back from JSON text may differ in its last bit.
 - An imported profile is added under its id; one already there is
   replaced (its name becomes the file's). The import is undone like a
   save.
