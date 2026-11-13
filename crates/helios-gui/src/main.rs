@@ -64,8 +64,8 @@ type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
 type LocalNode = helios_gui::node::LocalNode<helios_vault_sqlite::SqliteStore>;
 type Backups = helios_gui::node_jobs::Backups<helios_vault_sqlite::SqliteStore>;
 
-/// A problem worth knowing: on the terminal, and in the log file once the
-/// window's logs are set up.
+/// A problem worth knowing: on the terminal, and in the log file (set up
+/// right after the instance check).
 fn warn(text: &str) {
     eprintln!("helios-gui: {text}");
     log::warn!(target: "helios", "{text}");
@@ -1715,6 +1715,9 @@ fn main() -> Result<(), String> {
         }
     };
     start::mark("instance check");
+    // The log file from here on: what Helios says before its window
+    // opens reaches it too.
+    let _ = platform::file_logs();
     let ending = listen_for_ending();
     // A frame holding the interface's thread too long leaves a trace in
     // the log and the crash folder (`helios_gui::stall`).
@@ -1782,7 +1785,7 @@ fn main() -> Result<(), String> {
         .and_then(|p| p.canonicalize().ok())
         .ok_or("no workspace directory")?;
     if let Err(e) = helios_gui::shell::remember_workspace(&workspace) {
-        eprintln!("helios-gui: cannot remember the workspace: {e}");
+        warn(&format!("cannot remember the workspace: {e}"));
     }
     let dir = workspace_dir(&workspace);
     // The interface's settings (window place, focus mode, the user's

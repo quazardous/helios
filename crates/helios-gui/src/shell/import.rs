@@ -527,7 +527,7 @@ impl Shell {
                 .log
                 .borrow_mut()
                 .push(Level::Error, message.clone());
-            self.notify(Level::Error, message);
+            self.notify_unlogged(Level::Error, message);
             return;
         }
         let report = &line["ended"];
@@ -545,7 +545,7 @@ impl Shell {
                 .log
                 .borrow_mut()
                 .push(Level::Info, message.clone());
-            self.notify(Level::Info, message);
+            self.notify_unlogged(Level::Info, message);
             return;
         }
         if count("metadata") > 0 {
@@ -585,7 +585,7 @@ impl Shell {
         };
         self.core.log.borrow_mut().push(level, message.clone());
         if level == Level::Warning {
-            self.notify(level, message);
+            self.notify_unlogged(level, message);
             return;
         }
         // Information alone has no toast: an import's end has a short one.
