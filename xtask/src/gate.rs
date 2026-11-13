@@ -19,6 +19,8 @@
 //!    does not move, the temporary branch is deleted, and the tester fixes
 //!    the pull request's own branch (mechanical) or sends it back, then
 //!    gates again.
+//! 5. After a green round, the box builds the new `next` for the desktop
+//!    (`build-gui branch=next`); `cargo xtask install-dev` installs it.
 //!
 //! The parts that need no network (the plan) are pure and tested; the
 //! rest drives git, gh and `cargo xtask bench-remote`.
@@ -367,6 +369,31 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     for p in prs.iter().filter(|p| plan.take.contains(&p.number)) {
         let _ = git(root, &["push", "-q", "origin", "--delete", &p.branch]);
     }
+    // The desktop build of the new next, built on the box and kept there as
+    // next's latest `build-gui`: `cargo xtask install-dev` installs it.
+    let built = Command::new(&exe)
+        .args(["bench-remote", "build-gui", "branch=next"])
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .output();
+    let _ = match built {
+        Ok(o) if o.status.success() => writeln!(
+            report,
+            "desktop build of next ready: install it with `cargo xtask install-dev`"
+        ),
+        Ok(o) => writeln!(
+            report,
+            "desktop build of next failed ({}): {}",
+            o.status,
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&o.stderr).lines())
+                .filter(|l| l.contains("build-gui"))
+                .last()
+                .unwrap_or("no output")
+        ),
+        Err(e) => writeln!(report, "desktop build of next not started: {e}"),
+    };
     Ok(report)
 }
 
