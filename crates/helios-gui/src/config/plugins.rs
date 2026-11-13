@@ -935,9 +935,11 @@ mod tests {
             problems.iter().any(|p| p.contains("default")),
             "{problems:?}"
         );
-        let m = crate::config::manifest(&helios_config::Schema::core(), &[bad.clone()], &|m| {
-            m.english
-        });
+        let m = crate::config::manifest(
+            &helios_config::Schema::core(),
+            std::slice::from_ref(&bad),
+            &|m| m.english,
+        );
         let section = m
             .sections
             .iter()

@@ -4,6 +4,7 @@
 //! node), a secret masked on screen and never logged, and a library value
 //! another client of the node changes shown live.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -36,7 +37,7 @@ impl log::Log for Capture {
 
     fn log(&self, record: &log::Record<'_>) {
         let mut all = self.0.lock().unwrap();
-        all.push_str(&format!("{}\n", record.args()));
+        let _ = writeln!(all, "{}", record.args());
     }
 
     fn flush(&self) {}
