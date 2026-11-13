@@ -183,6 +183,18 @@ impl Shell {
             _ => return Err("`rows`: an object, {slider or zone: choice}".into()),
         }
         let minimum = generalise::minimum(&rows, &zones);
+        // The limits a run stays within, prefilled from the test photos
+        // for the junctions the rows leave.
+        let written = generalise::written(&block, &rows, &zones);
+        let inputs: Vec<&helios_core::Image> = cases.iter().map(|c| c.input).collect();
+        let limits = helios_template::limits::defaults(
+            &rows,
+            &helios_template::workshop::ranges(&built),
+            &inputs,
+            written
+                .as_ref()
+                .map_or(&block.junctions, |(next, _)| &next.junctions),
+        );
         let mut answer = json!({
             "session": record.session,
             "workshop": record.workshop,
@@ -192,6 +204,7 @@ impl Shell {
             "zones": zones,
             "J": minimum.junctions,
             "A": minimum.calls_per_photo,
+            "limits": limits,
             "confirmed": false,
         });
         if !confirm {
@@ -203,7 +216,8 @@ impl Shell {
             });
             return Ok(answer);
         }
-        let (next, defaults) = generalise::written(&block, &rows, &zones)?;
+        let (mut next, defaults) = written?;
+        next.limits = Some(limits);
         let node = record.node.clone();
         let label = format!("make {} automatic", file.name);
         let saved = self.macro_step(&label, args, origin, |now, values| {

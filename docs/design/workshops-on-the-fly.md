@@ -469,6 +469,20 @@ them; they are saved in the workshop block (`limits`):
 A non-monotonic measure on a photo (aiming cannot decide) keeps the
 test value and flags `not_monotonic`.
 
+Built (2026-11-13): the block is `{sliders: {<slider>: {min, max,
+value, max_deviation}}, targets: {<slider>: {tolerance}}, input_span:
+[{measure, min, max}], junctions: {<name>: {min_confidence}},
+max_ai_calls, on_breach}`; a junction's `fallback` stays on the
+junction, and `max_ai_calls` left out means `J` × photos. The input
+span covers `luma.median` and `luma.high`. `workshop.generalise` shows
+the prefilled limits and its `confirm` writes them; the catalogue
+checks them. The checker clamps (deviation first, then the range),
+applies fallbacks, and acts on `on_breach` for the breaches only
+(`at_limit`, `deviation`, `target_missed`, `unlike_test_cases`,
+`not_monotonic`): a junction's fallback (`low_confidence`, `fallback`,
+`ai_budget`) never holds a photo, as decided for low confidence.
+Editing a limit on its row waits for the panel's next step.
+
 ### Minimum AI, measured
 
 - `J`: junctions left in the workshop. Shown on the workshop's row in
@@ -726,7 +740,7 @@ included.
    the scripted session on two synthetic test images gives "Backlight
    lift: target `zones.ratio`", "Sky: parametric mask", `J = 0`; a
    variant where the parametric fit fails keeps one junction, `J = 1`.
-8. **Limits** (S). The `limits` block, its defaults from the test cases,
+8. **Limits** (S, built 2026-11-13; shown and edited on the rows later). The `limits` block, its defaults from the test cases,
    the pure checker (clamp, flag, hold, stop). Test: each flag raised
    by a crafted input.
 9. **The run** (L). `workshop.run` on the workflow level over a selection,

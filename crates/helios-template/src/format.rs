@@ -670,6 +670,101 @@ pub struct Workshop {
     /// mask could stand for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub junctions: Vec<Junction>,
+    /// The bounds a run stays within on each photo, prefilled from the
+    /// test photos when the workshop is made automatic
+    /// ([`crate::limits`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
+}
+
+/// The bounds a run of the workshop stays within (see
+/// `docs/design/workshops-on-the-fly.md`, "Limits"), and what a breach
+/// does. Checked by [`crate::limits::check`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Limits {
+    /// By exposed number parameter.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sliders: BTreeMap<String, SliderLimits>,
+    /// By the exposed parameter a target aims.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub targets: BTreeMap<String, TargetLimits>,
+    /// What a photo's input may measure: outside, it is not like the
+    /// test photos.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_span: Vec<Span>,
+    /// By junction name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub junctions: BTreeMap<String, JunctionLimits>,
+    /// The AI calls a whole run may make; none: the junctions times the
+    /// photos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_ai_calls: Option<u64>,
+    #[serde(default, skip_serializing_if = "OnBreach::is_flag")]
+    pub on_breach: OnBreach,
+}
+
+/// A slider's bounds on a photo.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SliderLimits {
+    /// The values it may take: a breach is clamped (`at_limit`).
+    pub min: f64,
+    pub max: f64,
+    /// The test photos' value (their mean), which `max_deviation` is
+    /// measured from.
+    pub value: f64,
+    /// How far from `value` it may go: a breach is clamped
+    /// (`deviation`).
+    pub max_deviation: f64,
+}
+
+/// A target's bounds on a photo.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetLimits {
+    /// How far the aimed measure may land from the goal, in the
+    /// measure's unit (`target_missed`).
+    pub tolerance: f64,
+}
+
+/// What a photo's input measures, from `min` to `max`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Span {
+    /// A measure of the whole image (`luma.median`, `luma.high`).
+    pub measure: Measure,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// A junction's bounds on a photo.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JunctionLimits {
+    /// Below it, the answer is not used: the fallback is
+    /// (`low_confidence`).
+    pub min_confidence: f64,
+}
+
+/// What a run does with a photo that breaks a limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnBreach {
+    /// Apply it, flagged for the review.
+    #[default]
+    Flag,
+    /// Do not apply it until it is fixed.
+    Hold,
+    /// Stop the run.
+    Stop,
+}
+
+impl OnBreach {
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if
+    fn is_flag(&self) -> bool {
+        *self == OnBreach::Flag
+    }
 }
 
 /// A decision the AI makes on each photo: a slider's value, or a zone it
