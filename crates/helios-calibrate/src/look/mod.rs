@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use crate::solver::{assemble, levenberg_marquardt, normalise, orthogonal_basis};
 
 pub mod edit;
+pub mod render;
 mod table;
 #[cfg(test)]
 mod tests;

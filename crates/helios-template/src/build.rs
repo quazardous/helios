@@ -267,7 +267,12 @@ pub fn build(
                 graph.set_bypass(id, true).map_err(|e| at(e.to_string()))?;
             }
             nodes.insert(n.name.clone(), id);
-            Placed::module(id, &module)
+            let mut p = Placed::module(id, &module);
+            if n.module.as_deref() == Some(DISPLAY) && !raws.is_empty() {
+                camera_tone(&mut graph, &mut nodes, &mut taken, catalogue, id, &mut p)
+                    .map_err(at)?;
+            }
+            p
         };
         placed.insert(n.name.clone(), p);
     }
@@ -352,7 +357,7 @@ const COLOUR_CALIBRATION: &str = "channelmixerrgb";
 /// The chart profile module put after the raw front, bypassed.
 const CHART_PROFILE: &str = "chartprofile";
 
-/// A camera look's colour half put after the chart profile, bypassed.
+/// A camera look's colour half put after colour calibration, bypassed.
 const CAMERA_COLOUR: &str = "cameracolour";
 
 /// The raw front's white balance node, set to the camera's D65 reference
@@ -363,10 +368,10 @@ const WHITE_BALANCE: &str = "whitebalance";
 /// nodes opened in the graph under their own names where `taken` does
 /// not hold them, the source wired to its input, then the catalogue's
 /// `chartprofile` (bypassed: on once a calibration profile is applied),
-/// `cameracolour` (bypassed: on once a camera look is applied),
 /// `channelmixerrgb` (colour calibration from the camera's illuminant,
 /// the white balance set to the camera's D65 reference: darktable's
-/// scene-referred default) and `flip` modules (the camera's orientation).
+/// scene-referred default), `cameracolour` (bypassed: on once a camera
+/// look is applied) and `flip` modules (the camera's orientation).
 /// Returns where what reads the source reads.
 ///
 /// Both are appended here rather than in `helios.raw-front@1`, which
@@ -434,16 +439,7 @@ fn raw_front(
     // A colour chart's profile, right after the camera colours: bypassed,
     // so a render is unchanged until a profile is applied to the edit.
     // Left out by a catalogue without it.
-    // Then a camera look's colour half, bypassed the same way until a
-    // look is applied.
-    for off in [CHART_PROFILE, CAMERA_COLOUR] {
-        if at.module(off, &Params::new())? {
-            let id = at.output.0;
-            at.graph
-                .set_bypass(id, true)
-                .map_err(|e| format!("`{off}`: {e}"))?;
-        }
-    }
+    at.bypassed(CHART_PROFILE)?;
     // darktable's scene-referred colour: the white balance to the
     // camera's D65 reference, then colour calibration (CAT16) from the
     // illuminant the camera's as-shot coefficients give. Left out by a
@@ -459,6 +455,10 @@ fn raw_front(
             .set_param(wb, "mode", Value::Choice("camera_reference".into()))
             .map_err(|e| format!("`{WHITE_BALANCE}`: {e}"))?;
     }
+    // Then a camera look's colour half, after colour calibration (it is
+    // fitted on what calibration gives), bypassed the same way until a
+    // look is applied.
+    at.bypassed(CAMERA_COLOUR)?;
     // The orientation step, as darktable's `flip`: the camera's EXIF
     // orientation by default. Left out by a catalogue without it.
     at.module(FLIP, &Params::new())?;
@@ -506,6 +506,51 @@ fn picture_front(
     Ok(p)
 }
 
+/// The display transform a camera look's tone half replaces.
+const DISPLAY: &str = "sigmoid";
+
+/// A camera look's tone half, put before the display transform.
+const CAMERA_TONE: &str = "cameratone";
+
+/// A network built with a raw, with a display transform (`sigmoid`, node
+/// `id`, placed as `p`) and no camera look's tone half, gets the
+/// catalogue's `cameratone` on its input, bypassed: an edit with a look turns `sigmoid` off and
+/// `cameratone` on, so no network showing that edit renders
+/// scene-linear. A render is unchanged until a look is applied. Left out
+/// by a catalogue without it, or when the name is taken (the network
+/// places its own).
+fn camera_tone(
+    graph: &mut Graph,
+    nodes: &mut BTreeMap<String, NodeId>,
+    taken: &mut std::collections::BTreeSet<String>,
+    catalogue: &Catalogue,
+    id: NodeId,
+    p: &mut Placed,
+) -> Result<(), String> {
+    if taken.contains(CAMERA_TONE) {
+        return Ok(());
+    }
+    let Some(m) = catalogue.get_module(CAMERA_TONE) else {
+        return Ok(());
+    };
+    let Some(readers) = p.inputs.get_mut("input") else {
+        return Ok(());
+    };
+    let tone = graph
+        .add_module(CAMERA_TONE, m.clone(), &Params::new())
+        .map_err(|e| format!("`{CAMERA_TONE}`: {e}"))?;
+    graph
+        .set_bypass(tone, true)
+        .map_err(|e| format!("`{CAMERA_TONE}`: {e}"))?;
+    graph
+        .connect(tone, "output", id, "input")
+        .map_err(|e| format!("`{CAMERA_TONE}`: {e}"))?;
+    *readers = vec![(tone, "input".to_string())];
+    taken.insert(CAMERA_TONE.to_string());
+    nodes.insert(CAMERA_TONE.to_string(), tone);
+    Ok(())
+}
+
 /// Modules appended after the raw front, each wired to the last output.
 struct Append<'a> {
     graph: &'a mut Graph,
@@ -517,6 +562,18 @@ struct Append<'a> {
 }
 
 impl Append<'_> {
+    /// The catalogue's `module` at its defaults, bypassed, after the last
+    /// output; nothing when the catalogue lacks it.
+    fn bypassed(&mut self, module: &str) -> Result<(), String> {
+        if self.module(module, &Params::new())? {
+            let id = self.output.0;
+            self.graph
+                .set_bypass(id, true)
+                .map_err(|e| format!("`{module}`: {e}"))?;
+        }
+        Ok(())
+    }
+
     /// The catalogue's `module` with `params`, named after it (or
     /// `<source>.<module>` where the name is taken), after the last
     /// output; false when the catalogue lacks it.

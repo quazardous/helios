@@ -1170,7 +1170,7 @@ dependencies = [
 [[package]]
 name = "egui-pop"
 version = "0.10.2"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1188,7 +1188,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-agent"
 version = "0.4.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1202,7 +1202,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-api"
 version = "0.9.4"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "eframe",
  "egui",
@@ -1222,7 +1222,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-core"
 version = "0.9.3"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1238,7 +1238,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-editors"
 version = "0.9.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1255,7 +1255,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-i18n"
 version = "0.9.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1275,7 +1275,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-imaging"
 version = "0.9.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1287,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-model"
 version = "0.7.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "idna",
  "log",
@@ -1308,7 +1308,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-platform"
 version = "0.9.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "ashpd",
  "async-io",
@@ -1330,7 +1330,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-test"
 version = "0.10.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1346,12 +1346,12 @@ dependencies = [
 [[package]]
 name = "egui-pop-test-macros"
 version = "0.1.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 
 [[package]]
 name = "egui-pop-tokens"
 version = "0.2.7"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "serde-saphyr",
  "serde_json",
@@ -1360,7 +1360,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-viewport"
 version = "0.9.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-core",
@@ -1375,7 +1375,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-views"
 version = "0.9.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1390,7 +1390,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-wayland"
 version = "0.2.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "raw-window-handle",
  "wayland-backend",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-win32"
 version = "0.2.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -2227,7 +2227,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helios-ai"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "helios-bricks"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-testkit",
@@ -2251,7 +2251,7 @@ dependencies = [
 
 [[package]]
 name = "helios-cache"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "serde_json",
@@ -2259,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "helios-calibrate"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-bricks",
@@ -2269,9 +2269,12 @@ dependencies = [
  "helios-module-cameratone",
  "helios-module-channelmixerrgb",
  "helios-module-chartprofile",
+ "helios-module-colorin",
  "helios-module-demosaic",
+ "helios-module-exposure",
  "helios-module-highlights",
  "helios-module-rawprepare",
+ "helios-module-sigmoid",
  "helios-module-whitebalance",
  "helios-photo",
  "helios-testkit",
@@ -2281,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "helios-colour"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "moxcms",
  "serde",
@@ -2290,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "helios-compute"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-gpu",
@@ -2307,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "helios-config"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "serde_json",
@@ -2316,7 +2319,7 @@ dependencies = [
 
 [[package]]
 name = "helios-connect"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2335,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "helios-controls"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "egui_fit",
  "egui_hud",
@@ -2347,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "helios-controls-gallery"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "eframe",
  "egui-pop",
@@ -2363,7 +2366,7 @@ dependencies = [
 
 [[package]]
 name = "helios-core"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-cache",
@@ -2373,7 +2376,7 @@ dependencies = [
 
 [[package]]
 name = "helios-corpus"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-load",
@@ -2385,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "helios-decision"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-config",
  "helios-core",
@@ -2395,7 +2398,7 @@ dependencies = [
 
 [[package]]
 name = "helios-declarations"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "egui-pop",
  "helios-gui",
@@ -2406,7 +2409,7 @@ dependencies = [
 
 [[package]]
 name = "helios-display"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2416,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "helios-export"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-colour",
  "helios-core",
@@ -2431,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "helios-gpu"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "bytemuck",
  "helios-core",
@@ -2448,7 +2451,7 @@ dependencies = [
 
 [[package]]
 name = "helios-gui"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2520,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "helios-health"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-storage",
@@ -2532,7 +2535,7 @@ dependencies = [
 
 [[package]]
 name = "helios-i18n"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "egui-pop-i18n",
  "helios-core",
@@ -2542,7 +2545,7 @@ dependencies = [
 
 [[package]]
 name = "helios-inspect"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2551,7 +2554,7 @@ dependencies = [
 
 [[package]]
 name = "helios-journal"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2560,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "helios-library"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "egui-pop-model",
@@ -2582,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "helios-load"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-colour",
@@ -2597,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-blur"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-testkit",
@@ -2605,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-cameracolour"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-bricks",
  "helios-core",
@@ -2614,7 +2617,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-cameratone"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-bricks",
  "helios-core",
@@ -2623,7 +2626,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-channelmixerrgb"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-colour",
  "helios-core",
@@ -2634,7 +2637,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-chartprofile"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-bricks",
  "helios-core",
@@ -2644,7 +2647,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-colorin"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2653,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-demosaic"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2662,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-exposure"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-bricks",
  "helios-controls",
@@ -2673,7 +2676,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-flip"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2682,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-highlights"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2691,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-masks"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "base64 0.22.1",
  "helios-core",
@@ -2703,7 +2706,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-rawprepare"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2712,7 +2715,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-sigmoid"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-testkit",
@@ -2720,7 +2723,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-vkdt"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2729,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-whitebalance"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2738,7 +2741,7 @@ dependencies = [
 
 [[package]]
 name = "helios-node"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "egui-pop-model",
@@ -2747,6 +2750,7 @@ dependencies = [
  "helios-calibrate",
  "helios-colour",
  "helios-config",
+ "helios-connect",
  "helios-core",
  "helios-decision",
  "helios-display",
@@ -2784,12 +2788,14 @@ dependencies = [
  "serde",
  "serde_json",
  "signal-hook",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
 name = "helios-node-core"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
+ "blake3",
  "helios-calibrate",
  "helios-core",
  "helios-export",
@@ -2797,8 +2803,10 @@ dependencies = [
  "helios-inspect",
  "helios-library",
  "helios-load",
+ "helios-module-whitebalance",
  "helios-photo",
  "helios-storage",
+ "helios-testkit",
  "helios-vault",
  "helios-vault-sqlite",
  "helios-xmp",
@@ -2809,7 +2817,7 @@ dependencies = [
 
 [[package]]
 name = "helios-parity"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-export",
@@ -2833,7 +2841,7 @@ dependencies = [
 
 [[package]]
 name = "helios-photo"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2841,10 +2849,11 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-connect",
  "helios-core",
+ "helios-health",
  "helios-shell",
  "log",
  "serde",
@@ -2854,7 +2863,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-darktable-library"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-plugin",
  "helios-plugin-darktable-library",
@@ -2865,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-google-photos"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-connect",
  "helios-core",
@@ -2879,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-gphoto2-camera"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-plugin",
  "serde_json",
@@ -2887,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-lightroom-catalog"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-plugin",
  "helios-plugin-darktable-library",
@@ -2897,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "helios-profile"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2906,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "helios-resolve"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "base64 0.22.1",
  "helios-ai",
@@ -2920,14 +2929,14 @@ dependencies = [
 
 [[package]]
 name = "helios-scopes"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
 ]
 
 [[package]]
 name = "helios-shell"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2935,7 +2944,7 @@ dependencies = [
 
 [[package]]
 name = "helios-storage"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-vault",
@@ -2947,7 +2956,7 @@ dependencies = [
 
 [[package]]
 name = "helios-template"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "egui-pop-model",
  "helios-core",
@@ -2972,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "helios-testkit"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2980,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "helios-thumbs"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-cache",
@@ -2993,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "helios-values"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-module-exposure",
@@ -3005,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vault"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-core",
@@ -3016,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vault-sqlite"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "helios-journal",
@@ -3028,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vkdt"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -3036,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "helios-xmp"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -4432,7 +4441,7 @@ dependencies = [
 [[package]]
 name = "ortho-router"
 version = "0.1.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=23c5f689#23c5f6897a11d179c6bde5cdea76963afc3be866"
+source = "git+https://github.com/quazardous/egui-pop?rev=18710702#1871070201637f3fa2a33d7046a39d7268e9c6b9"
 
 [[package]]
 name = "os_pipe"
@@ -6918,7 +6927,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.87.0"
+version = "0.88.0"
 dependencies = [
  "egui-pop-i18n",
  "helios-i18n",

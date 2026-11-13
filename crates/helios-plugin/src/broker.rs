@@ -643,6 +643,39 @@ impl Broker {
         }
     }
 
+    /// Calls `health.check` on a plugin, started on `onHealth` if need
+    /// be, waiting at most `timeout`. `Ok(None)`: it was not run, the
+    /// plugin being disabled or waiting for a capability (the plugins'
+    /// own check says so). An error: it did not start, crashed or did not
+    /// answer in time.
+    pub fn health_check(
+        &self,
+        id: &str,
+        params: Json,
+        timeout: Duration,
+    ) -> Result<Option<Json>, String> {
+        {
+            let slot = self.slot(id)?;
+            let st = slot.state.lock().expect("plugin lock");
+            let waits = slot.manifest.capabilities.iter().any(|c| {
+                capability(&c.name).map(|(e, _)| e) == Some(Enforcement::Ambient)
+                    && !st.granted.contains(&c.name)
+            });
+            if !st.enabled || waits {
+                return Ok(None);
+            }
+        }
+        self.call_with(
+            id,
+            crate::manifest::ON_HEALTH,
+            crate::health::METHOD,
+            params,
+            timeout,
+            None,
+        )
+        .map(Some)
+    }
+
     /// Starts the plugins that ask to run at startup.
     pub fn startup(&self) -> Vec<String> {
         let mut errors = Vec::new();

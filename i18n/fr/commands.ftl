@@ -700,3 +700,6 @@ command-helios-quit-confirmed =
 
 command-helios-window-main =
     .title = Fenêtre principale
+
+command-library-importAutomatic-pause =
+    .title = Suspendre les imports automatiques, ou les reprendre (`on` : true suspend, false reprend ; sans lui, bascule)

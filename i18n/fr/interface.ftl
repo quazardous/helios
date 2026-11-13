@@ -137,3 +137,15 @@ setting-catalogue-snapshotEvery =
 setting-catalogue-snapshotsKept =
     .description = Combien d'instantanés du catalogue sont gardés à côté du catalogue et sur chaque disque de sauvegarde ; les plus anciens partent d'abord.
     .label = Instantanés du catalogue gardés
+
+setting-import-automatic-ask-files =
+    .description = Un import automatique de plus de photos que cela demande d’abord, dans une notification qui ouvre la fenêtre d’import. 0 : ne demande jamais.
+    .label = Demander avant d’importer plus de photos que
+
+setting-import-automatic-ask-gb =
+    .description = Un import automatique plus gros que cela demande d’abord, dans une notification qui ouvre la fenêtre d’import. 0 : ne demande jamais.
+    .label = Demander avant d’importer plus de
+
+setting-import-automatic-paused =
+    .description = Activé, aucune source n’importe d’elle-même : les cartes branchées et les nouveaux fichiers des dossiers surveillés attendent qu’il soit désactivé.
+    .label = Suspendre les imports automatiques

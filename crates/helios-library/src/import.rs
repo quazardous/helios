@@ -1202,7 +1202,7 @@ pub fn import<S: Store>(
     // be written does not undo the import, it is said.
     let outcome = ended.as_ref().map_err(String::as_str);
     if let Err(e) = crate::import_history::record(vault, sources, options, now, outcome) {
-        eprintln!("import history: {e}");
+        log::warn!("import history: {e}");
     }
     ended
 }

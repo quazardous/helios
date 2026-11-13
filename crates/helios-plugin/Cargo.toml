@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 helios-connect.workspace = true
 helios-core.workspace = true
+helios-health.workspace = true
 helios-shell.workspace = true
 serde.workspace = true
 serde_json.workspace = true
