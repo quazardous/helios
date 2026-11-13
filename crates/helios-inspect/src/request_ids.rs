@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn a_key_is_forgotten_once_its_time_is_up() {
-        let kept = Duration::from_secs(60);
+        let kept = Duration::from_mins(1);
         let store = Remembered::new(10, kept);
         let runs = Cell::new(0);
         let start = Instant::now();
@@ -346,12 +346,12 @@ mod tests {
             store.once_at("k", "set", start, ok(&runs)),
             Once::Ran(_)
         ));
-        let before = start + kept - Duration::from_secs(1);
+        let before = (start + kept).checked_sub(Duration::from_secs(1)).unwrap();
         assert!(matches!(
             store.once_at("k", "set", before, ok(&runs)),
             Once::Applied(_)
         ));
-        let after = start + kept + Duration::from_secs(1);
+        let after = (start + kept).checked_add(Duration::from_secs(1)).unwrap();
         assert!(matches!(
             store.once_at("k", "set", after, ok(&runs)),
             Once::Ran(_)
