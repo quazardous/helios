@@ -1421,10 +1421,11 @@ fn attach(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
 
 /// Whether a known setting does not opt into a scope.
 fn stray(app: &AppHandle, admin: &Admin, scope: ValueScope, key: &str) -> bool {
-    SettingId::new(key).is_ok_and(|id| {
-        egui_pop::core::lock(&app.store()).get(&id.path()).is_some()
-            && !admin.allows(app, &id, scope)
-    })
+    let Ok(id) = SettingId::new(key) else {
+        return false;
+    };
+    let known = egui_pop::core::lock(&app.store()).get(&id.path()).is_some();
+    known && !admin.allows(app, &id, scope)
 }
 
 /// Every setting's `app` value, as the Settings app holds it.
