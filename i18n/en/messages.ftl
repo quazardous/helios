@@ -1243,6 +1243,14 @@ gui-log-empty = Nothing to report yet
 
 gui-look-header-chart = Colour half off: the chart profile rules the colours
 
+gui-look-header-compare = Compare with the camera's JPEG
+
+gui-look-header-compare-about = Shows the camera's embedded JPEG left of the split and the render right of it; drag the split to move it
+
+gui-look-header-compare-no-jpeg = No camera JPEG to compare: the raw carries none
+
+gui-look-header-compare-not-raw = No camera JPEG to compare: the photo is not a raw
+
 gui-look-header-fit = Fit to the camera's JPEG
 
 gui-look-header-fit-about = Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit

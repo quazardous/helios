@@ -24,6 +24,10 @@ param-cameracolour-preview =
     .description = l’empreinte du JPEG du boîtier sur lequel le rendu a été ajusté, pour sa provenance
     .label = aperçu
 
+param-cameratone-amount =
+    .description = la part des tons du rendu boîtier : 0 aucune, 1 toutes
+    .label = quantité
+
 param-cameratone-baseline =
     .description = le Delta E 2000 moyen du rendu par défaut au JPEG du boîtier, sur les mêmes pixels
     .label = référence

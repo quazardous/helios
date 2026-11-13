@@ -257,8 +257,26 @@ pub const LOOK_CHOOSE: &str = "look.camera.choose";
 /// Why the open photo's last fit was refused, in words (empty: none).
 pub const LOOK_REFUSAL: &str = "view/look/refusal";
 
-/// Declares [`OFFER`] and [`LOOK_REFUSAL`]: transient, never undone.
+/// The camera's embedded JPEG is the viewport's "before": the before and
+/// after split shows it left of the render (`docs/design/camera-look.md`,
+/// section 3.4). A view, not an edit: never undone, never saved.
+pub const LOOK_COMPARE: &str = "view/look/compare";
+
+/// Why the camera's JPEG could not be shown (empty: nothing to say):
+/// [`NO_JPEG`] or [`NOT_A_RAW`].
+pub const LOOK_COMPARE_MISSING: &str = "view/look/compare_missing";
+
+/// Declares [`OFFER`], [`LOOK_REFUSAL`], [`LOOK_COMPARE`] and
+/// [`LOOK_COMPARE_MISSING`]: transient, never undone.
 pub fn declare(store: &mut helios_values::Store) {
+    store.declare(
+        LOOK_COMPARE,
+        helios_values::Descriptor::bool("compare with the camera's JPEG", false).transient(),
+    );
+    store.declare(
+        LOOK_COMPARE_MISSING,
+        helios_values::Descriptor::text("camera JPEG missing", "").transient(),
+    );
     store.declare(
         OFFER,
         helios_values::Descriptor::text("calibration profiles offered", "").transient(),
@@ -388,6 +406,7 @@ pub fn on_open<S: Store>(
     graph: &helios_core::Graph,
     store: &std::sync::Mutex<helios_values::Store>,
 ) -> Option<Message> {
+    set_compare(store, false, "");
     let Some((photo, make, model)) = photo_of(graph) else {
         set_offer(store, None);
         set_refusal(store, "");
@@ -395,8 +414,18 @@ pub fn on_open<S: Store>(
     };
     let light = photo.light.map_or(Value::Null, |l| serde_json::json!(l));
     let mut offered = offer(vault, &photo.camera, &make, &model, light);
-    // The camera look's header fits this image.
+    // The camera look's header fits this image, and compares its file's
+    // embedded JPEG.
     offered["image"] = Value::String(image.hex());
+    if let Some(path) = vault
+        .locations(&image)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| l.path)
+        .find(|p| p.exists())
+    {
+        offered["path"] = Value::String(path.to_string_lossy().into_owned());
+    }
     set_offer(store, Some(&offered));
     set_refusal(store, "");
     let now = seconds() as u64;
@@ -639,6 +668,79 @@ pub fn read_refusal(store: &helios_values::Store) -> String {
     }
 }
 
+/// Turns the compare with the camera's JPEG on or off, with the viewport's
+/// before and after split; `missing` says why the JPEG is not shown
+/// (empty: nothing to say).
+pub fn set_compare(store: &std::sync::Mutex<helios_values::Store>, on: bool, missing: &str) {
+    let mut s = store.lock().expect("value store lock");
+    write_compare(&mut s, on, missing);
+}
+
+/// [`set_compare`] on a store already locked. Turning it off ends the
+/// split only when the compare had turned it on: a before and after of
+/// the user's own stays.
+pub fn write_compare(store: &mut helios_values::Store, on: bool, missing: &str) {
+    use helios_core::Value as V;
+    let split = on || is_comparing(store);
+    let mut writes = vec![
+        (LOOK_COMPARE, V::Bool(on)),
+        (LOOK_COMPARE_MISSING, V::Text(missing.to_string())),
+    ];
+    if split {
+        writes.push((crate::viewport::COMPARE, V::Bool(on)));
+    }
+    for (path, value) in writes {
+        let _ = store.set(helios_values::Set::new(
+            path,
+            helios_values::Change::To(value),
+            helios_shell::commands::Origin::User,
+        ));
+    }
+}
+
+/// Whether the camera's JPEG is asked for as the viewport's "before".
+pub fn is_comparing(store: &helios_values::Store) -> bool {
+    store
+        .get(LOOK_COMPARE)
+        .and_then(|e| e.value.as_bool())
+        .unwrap_or(false)
+}
+
+/// The file of the open photo the camera's JPEG is read from, when it is
+/// at hand.
+pub fn compared_path(store: &helios_values::Store) -> Option<std::path::PathBuf> {
+    read_offer(store)?["path"]
+        .as_str()
+        .map(std::path::PathBuf::from)
+}
+
+/// [`LOOK_COMPARE_MISSING`]: a raw without an embedded JPEG.
+pub const NO_JPEG: &str = "no-jpeg";
+
+/// [`LOOK_COMPARE_MISSING`]: a file that is no raw (or cannot be read).
+pub const NOT_A_RAW: &str = "not-a-raw";
+
+/// The camera's embedded JPEG of the raw at `path`, upright, in the
+/// working space: the viewport's "before" when comparing.
+///
+/// # Errors
+/// Why not: [`NO_JPEG`], [`NOT_A_RAW`].
+pub fn camera_jpeg(path: &std::path::Path) -> Result<helios_core::Image, &'static str> {
+    match helios_load::preview_oriented(path) {
+        Ok((Some(preview), tag)) => Ok(helios_load::upright(preview, tag)),
+        Ok((None, _)) => Err(NO_JPEG),
+        Err(_) => Err(NOT_A_RAW),
+    }
+}
+
+/// Why the camera's JPEG is not shown, as the store holds it.
+fn read_missing(store: &helios_values::Store) -> String {
+    match store.get(LOOK_COMPARE_MISSING).map(|e| &e.value) {
+        Some(helios_core::Value::Text(t)) => t.clone(),
+        _ => String::new(),
+    }
+}
+
 /// Whether `node` is bypassed in the store (a node without the switch
 /// counts as bypassed).
 fn is_bypassed(store: &helios_values::Store, node: &str) -> bool {
@@ -776,7 +878,7 @@ pub fn look_header_ui(
     node: &str,
 ) {
     use helios_values::node_path;
-    let (fitted, on, colour_off, held, baseline, refusal, image) = {
+    let (fitted, on, colour_off, held, baseline, refusal, image, compare) = {
         let s = store.lock().expect("value store lock");
         if look_node(&s).as_deref() != Some(node) {
             return;
@@ -793,6 +895,14 @@ pub fn look_header_ui(
             float("baseline"),
             read_refusal(&s),
             read_offer(&s).is_some_and(|o| o["image"].is_string()),
+            Compare {
+                file: compared_path(&s).is_some(),
+                on: is_comparing(&s)
+                    && s.get(crate::viewport::COMPARE)
+                        .and_then(|e| e.value.as_bool())
+                        .unwrap_or(false),
+                missing: read_missing(&s),
+            },
         )
     };
     let ctx = ui.ctx().clone();
@@ -858,4 +968,57 @@ pub fn look_header_ui(
             run("fit");
         }
     });
+    compare_ui(ui, store, &compare);
+}
+
+/// What the header knows of the compare with the camera's JPEG.
+struct Compare {
+    /// The open photo's file is at hand.
+    file: bool,
+    /// The camera's JPEG is the before of the split shown.
+    on: bool,
+    /// Why it could not be shown (empty: nothing to say).
+    missing: String,
+}
+
+/// The header's "Compare with the camera's JPEG" switch: the viewport's
+/// before and after split with the camera's embedded JPEG as the before,
+/// left of the split, as raw editors compare with a before (a view, not
+/// an edit step); why it could not be shown, in words.
+fn compare_ui(
+    ui: &mut egui::Ui,
+    store: &std::sync::Mutex<helios_values::Store>,
+    compare: &Compare,
+) {
+    let ctx = ui.ctx().clone();
+    let text = |m: Message| crate::i18n::text(&ctx, m);
+    let name = text(Message::new(
+        "gui-look-header-compare",
+        "Compare with the camera's JPEG",
+    ));
+    let mut checked = compare.on;
+    let r = ui.add_enabled(compare.file, egui::Checkbox::new(&mut checked, &name));
+    egui_pop::core::a11y::name(&r, egui::Role::CheckBox, &name);
+    let r = r.on_hover_text(text(Message::new(
+        "gui-look-header-compare-about",
+        "Shows the camera's embedded JPEG left of the split and the render right of it; drag the split to move it",
+    )));
+    crate::name_rect(&ctx, "helios.cameralook.compare", r.rect);
+    if r.changed() {
+        set_compare(store, checked, "");
+    }
+    let missing = match compare.missing.as_str() {
+        "" => None,
+        NO_JPEG => Some(Message::new(
+            "gui-look-header-compare-no-jpeg",
+            "No camera JPEG to compare: the raw carries none",
+        )),
+        _ => Some(Message::new(
+            "gui-look-header-compare-not-raw",
+            "No camera JPEG to compare: the photo is not a raw",
+        )),
+    };
+    if let Some(m) = missing {
+        ui.weak(text(m));
+    }
 }

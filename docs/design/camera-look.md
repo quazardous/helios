@@ -697,11 +697,34 @@ The first slice of 3b: the Camera look entry's header, on the open photo.
   slider, under its node. The tone half's is still to come (it blends
   toward the default tone map, which spans two nodes).
 
-Left for the next slices: the tone half's amount, compare with the
-camera's JPEG (the before view showing the embedded preview), the fit
-of a selection from the library's menus (the command takes `images`
-already), the per-camera default at import, and the "Camera look"
-preset in the module's preset menu.
+### Built: the tone amount and the compare (2026-11-13)
+
+- **The tone half's amount.** `cameratone` has its own `amount` (0 to
+  1, default 1), the slider under its node, one undoable step per drag
+  as every parameter slider is. It blends the curves toward the
+  identity in the module's `prepare`, not in `core.curve1d@1`: each
+  knot's display luminance `s + a (d - s)` (its scene luminance kept,
+  so the knots stay increasing) and each chroma ratio `1 + a (k - 1)`.
+  At 0 the tone half only clamps to the display range. Blending toward
+  sigmoid's curve instead (section 3.4) would span two nodes; the
+  identity keeps the amount inside one. A refit leaves the amount as
+  it is.
+- **Compare with the camera's JPEG.** A switch in the header, as raw
+  editors compare with a "before" (Lightroom's before and after split,
+  darktable's snapshot): on, the viewport's before and after split
+  (`view/viewport/compare`) shows the raw's embedded JPEG (upright, in
+  the working space, scaled to the render's size, nearest pixel) left
+  of the split and the render right of it. The JPEG is read from the
+  photo's file at hand (the offer's `path`, set when a raw opens) when
+  the switch turns on; off, the before is the edit as it was opened
+  again. A view, not an edit (`view/look/compare`, transient): never
+  undone, never saved, off when another photo opens. A file with no
+  embedded JPEG turns it off and says why, in words. The JPEG is
+  scaled as a whole: a crop or a turn of the render is not followed.
+
+Left for the next slices: the fit of a selection from the library's
+menus (the command takes `images` already), the per-camera default at
+import, and the "Camera look" preset in the module's preset menu.
 
 **3b. The user's side and the hooks.**
 
