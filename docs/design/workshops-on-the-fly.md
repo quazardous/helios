@@ -654,8 +654,9 @@ previews); opening the photo with the workshop's sliders for a fix (the
 review sets values in place); a zone junction decided (its mask);
 "teach it" (a fixed photo added to the test cases); an event announcing
 a pending junction (`workshop.junction_pending`: an agent reads
-`pending` after a run); the review's actions as window commands with
-their enabled state.
+`pending` after a run); an enabled state per action (the command is a
+window command the node's endpoint lists and runs, as every desktop
+command, but declares no `when`: a refused action says why when run).
 
 ## 5. Series consistency: same look or same targets
 
