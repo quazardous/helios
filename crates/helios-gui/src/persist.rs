@@ -62,6 +62,9 @@ use crate::Shell;
 use crate::dialogs::Level;
 use crate::library::{Change, Entry};
 
+/// A search filter's answer: the photos it takes and the facet counts.
+type Searched = (Vec<String>, helios_vault::Facets);
+
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match).
 const SHOWN: [&str; 9] = [
@@ -130,7 +133,7 @@ pub struct Persist<S: Store> {
     filled: Option<Files>,
     /// The search filter's query being run: the photos it takes and the
     /// facet counts.
-    searching: Option<Receiver<Result<(Vec<String>, helios_vault::Facets), String>>>,
+    searching: Option<Receiver<Result<Searched, String>>>,
 }
 
 /// A write of the library sent to the node.
