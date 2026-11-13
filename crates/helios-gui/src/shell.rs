@@ -5054,8 +5054,8 @@ impl Shell {
     /// marks copied.
     fn library_batch(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
         use crate::library::{
-            MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode, SELECT_INVERT_COMMAND,
-            SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
+            CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode,
+            SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
         };
         let text = |key: &str| args.get(key).and_then(Value::as_str);
         let mut lib = self.focus.library.borrow_mut();
@@ -5069,7 +5069,7 @@ impl Shell {
                 let by = Similar::parse(text("by").unwrap_or("day"))?;
                 Ok(json!({ "selected": lib.select_similar(by)? }))
             }
-            MARKS_COPY_COMMAND => lib.copy_marks(text("image")).map(|c| c.to_json()),
+            MARKS_COPY_COMMAND => lib.copy_marks(text("image")).map(CopiedMarks::to_json),
             MARKS_PASTE_COMMAND => {
                 let images = match args.get("images") {
                     None | Some(Value::Null) => None,
