@@ -692,6 +692,21 @@ command-library-quick-clear =
 command-library-quick-saveAs =
     .title = Enregistrer la collection rapide comme album (`name` ; `clear` : la vider aussi) ; sans `name`, le demande. Répond l’`id` de l’album
 
+command-library-select-none =
+    .title = Ne sélectionner aucune photo, le curseur retiré aussi
+
+command-library-select-invert =
+    .title = Inverser la sélection : les photos affichées qui n’étaient pas sélectionnées
+
+command-library-select-similar =
+    .title = Sélectionner les photos affichées semblables aux photos sélectionnées (`by` : day, prises le même jour, par défaut ; ou stack, dans la même pile)
+
+command-library-marks-copy =
+    .title = Copier les marques d’une photo : note, étiquettes de couleur, mots-clés et titre (`image` : un identifiant, sinon la photo sous le curseur). Les répond
+
+command-library-marks-paste =
+    .title = Coller les marques copiées (`images` : identifiants, sinon la sélection ; `marks` : parmi rating, labels, tags, title, toutes par défaut ; `mode` : merge, par défaut, ajoute étiquettes et mots-clés, overwrite rend chaque marque identique à la copie)
+
 command-library-scanFolder =
     .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume
 

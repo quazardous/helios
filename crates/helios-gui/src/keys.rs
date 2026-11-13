@@ -121,6 +121,18 @@ pub fn defaults() -> Vec<(String, String, String)> {
         crate::recent_filters::SWITCH_COMMAND,
         &format!("{} && !textInputFocus", behind_no_picker(&library)),
     );
+    // Select none and invert, as darktable's lighttable (Ctrl+A is the
+    // grid's own). Not while a text field is typed in.
+    for (k, command) in [
+        ("Ctrl+Shift+A", crate::library::SELECT_NONE_COMMAND),
+        ("Ctrl+I", crate::library::SELECT_INVERT_COMMAND),
+    ] {
+        bind(
+            k,
+            command,
+            &format!("{} && !textInputFocus", behind_no_picker(&library)),
+        );
+    }
     bind("Right", "compare.next", &behind_no_picker(&comparison));
     bind("Left", "compare.previous", &behind_no_picker(&comparison));
     // Next and previous image while culling; in the grid Space selects.

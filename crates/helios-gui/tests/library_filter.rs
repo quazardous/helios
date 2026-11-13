@@ -16,6 +16,9 @@
 //! Ctrl+Shift+K opens them in the window, not while a text field is typed
 //! in. Photos dragged from the grid onto an album or the quick collection
 //! go in, one step; a smart album or a set refuses them with the reason.
+//! The selection commands (L7): Ctrl+I inverts, Ctrl+Shift+A selects
+//! none, the photos of the same day selected; a photo's marks copied and
+//! pasted on others, merged or overwriting, written to the vault.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1568,6 +1571,110 @@ fn the_library_read_again_is_read_off_the_frame() {
     h.run();
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     assert_eq!(persist.take_filled().map(|f| f.len()), Some(3));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Some stored fields of photo `n`, as the vault holds them.
+fn stored(persist: &Persist<SqliteStore>, n: u8, names: &[&str]) -> Vec<Value> {
+    let row = persist
+        .vault()
+        .fields_of(&[id(n)], names)
+        .unwrap()
+        .remove(0);
+    names
+        .iter()
+        .map(|f| row.get(*f).cloned().unwrap_or(Value::Null))
+        .collect()
+}
+
+#[test]
+fn selection_commands_and_marks_pasted_merged_or_overwriting() {
+    use helios_vault::fields::{TAGS, TITLE};
+    let root = temp("batch");
+    let path = vault_file(&root);
+    {
+        // The first photo titled and tagged, the third taken a day later
+        // and tagged.
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .set_field(&id(1), TITLE, Some(&json!("Dawn")))
+            .unwrap();
+        store
+            .set_field(&id(1), TAGS, Some(&json!(["trip"])))
+            .unwrap();
+        store
+            .set_field(&id(3), CAPTURED, Some(&json!(86_400 * 2)))
+            .unwrap();
+        store
+            .set_field(&id(3), TAGS, Some(&json!(["old"])))
+            .unwrap();
+    }
+    let (mut h, mut persist) = window(&root, &path);
+    let selection = |h: &Harness<'_, Shell>| h.state().library().selection();
+
+    // In the grid: Ctrl+I inverts, Ctrl+Shift+A selects none.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::CTRL, Key::I);
+    h.run();
+    assert_eq!(selection(&h), [id(2).hex(), id(3).hex()]);
+    h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::A);
+    h.run();
+    assert!(selection(&h).is_empty());
+
+    // The same day as the first photo: the second, not the third.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    let out = answer(&mut h, "library.select.similar", json!({ "by": "day" }));
+    assert_eq!(out["selected"], 2, "{out}");
+    assert_eq!(selection(&h), [id(1).hex(), id(2).hex()]);
+
+    // The first photo's marks merged on the third: its tag stays.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    let copied = answer(&mut h, "library.marks.copy", json!({}));
+    assert_eq!(copied["title"], "Dawn", "{copied}");
+    let out = answer(
+        &mut h,
+        "library.marks.paste",
+        json!({ "images": [id(3).hex()] }),
+    );
+    assert_eq!(out["images"], 1, "{out}");
+    settle(&mut h, &mut persist, 2.0);
+    let names = [RATING, LABELS, TAGS, TITLE];
+    assert_eq!(
+        stored(&persist, 3, &names),
+        [
+            json!(3),
+            json!(["red"]),
+            json!(["old", "trip"]),
+            json!("Dawn")
+        ]
+    );
+
+    // The second photo's (one star, nothing else) overwriting the third's
+    // labels, tags and title on the selection; its stars stay.
+    answer(
+        &mut h,
+        "library.marks.copy",
+        json!({ "image": id(2).hex() }),
+    );
+    h.state_mut().library_mut().select_ids(&[id(3).hex()]);
+    answer(
+        &mut h,
+        "library.marks.paste",
+        json!({ "mode": "overwrite", "marks": ["labels", "tags", "title"] }),
+    );
+    settle(&mut h, &mut persist, 4.0);
+    let after = stored(&persist, 3, &names);
+    assert_eq!(after[0], json!(3));
+    for v in &after[1..] {
+        assert!(
+            v.is_null() || v.as_array().is_some_and(Vec::is_empty),
+            "{after:?}"
+        );
+    }
+    assert_eq!(h.state().library().entry(&id(3).hex()).unwrap().title, None);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
