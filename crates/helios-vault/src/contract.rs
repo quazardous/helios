@@ -62,6 +62,46 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     culling_fields_filter_count_sort_and_rule(make());
 }
 
+/// For a store with read handles ([`Store::reader`]): a read that is not
+/// part of a write never waits for one. With the writer held in an open
+/// transaction (a write as long as you like), reading an image, its edit
+/// head, its fields and the stacks answers within `deadline`, from what
+/// was committed before; once the write commits, the next read sees it.
+pub fn reads_do_not_wait_for_a_write<S: Store>(s: S, deadline: std::time::Duration) {
+    use crate::EditSession;
+    let v = Vault::new(with_images(s, 2));
+    assert!(v.has_readers(), "the store gives the vault read handles");
+    let (a, b) = (image(1).id, image(2).id);
+    let read = |v: &Vault<S>| {
+        assert!(v.image(&a).unwrap().is_some());
+        let (_, head) = EditSession::open(v, a).unwrap();
+        assert!(head.is_none(), "no edit committed");
+        assert!(v.stacks().unwrap().is_empty());
+        v.fields_of(&[a, b], &[RATING]).unwrap()
+    };
+    std::thread::scope(|scope| {
+        let mut writer = v.store.lock().unwrap();
+        writer.begin().unwrap();
+        writer.set_field(&a, RATING, Some(&json!(4))).unwrap();
+        writer.set_field(&b, RATING, Some(&json!(2))).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let v = &v;
+        scope.spawn(move || tx.send(read(v)).unwrap());
+        // On a timeout the panic drops the writer, so the reader ends.
+        let rows = rx
+            .recv_timeout(deadline)
+            .expect("a read waited for the write held open");
+        assert!(
+            rows.iter().all(std::collections::BTreeMap::is_empty),
+            "a read sees only what is committed: {rows:?}"
+        );
+        writer.commit().unwrap();
+    });
+    let rows = v.fields_of(&[a, b], &[RATING]).unwrap();
+    assert_eq!(rows[0][RATING], json!(4), "the committed write is read");
+    assert_eq!(rows[1][RATING], json!(2), "the committed write is read");
+}
+
 /// Capture fields are written whole by `set_captures` (a value not read
 /// is cleared), refused to commands, read back as a [`Capture`], and a
 /// capture range selects in the one query a cursor opens with; the
