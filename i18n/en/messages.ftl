@@ -541,6 +541,14 @@ gui-history-preview-bypassed = bypassed
 
 gui-history-preview-param = { $label } ({ $node })
 
+gui-history-quick-add = Add { $count } photos to the quick collection
+
+gui-history-quick-clear = Clear the quick collection
+
+gui-history-quick-remove = Remove { $count } photos from the quick collection
+
+gui-history-quick-save = Save the quick collection as “{ $name }”
+
 gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo
@@ -895,6 +903,8 @@ gui-library-badge-no-backup = no backup
 
 gui-library-badge-offline = offline
 
+gui-library-badge-quick = quick
+
 gui-library-badge-soft = soft focus
 
 gui-library-cannot-open = The library cannot be opened: { $error }
@@ -968,6 +978,22 @@ gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
 gui-library-offline-unknown = On a disk that is not plugged in
 
 gui-library-plug-in = Plug in { $volume } to open this photo (last seen { $date } on { $node })
+
+gui-library-quick = Quick collection
+
+gui-library-quick-clear = Clear the quick collection
+
+gui-library-quick-save = Save as album…
+
+gui-library-quick-save-clear = then clear the quick collection
+
+gui-library-quick-save-title = Save the quick collection as an album
+
+gui-library-quick-save-verb = Save
+
+gui-library-quick-tip = B adds the selected photos or takes them out
+
+gui-library-quick-toggle = Add or remove the selected photos
 
 gui-library-read = { $count } images in the library
 

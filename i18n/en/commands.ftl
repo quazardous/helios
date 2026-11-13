@@ -266,7 +266,7 @@ command-library-collection-delete =
     .title = Delete an album (`id`); its photos stay in the library
 
 command-library-collection-list =
-    .title = List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`
+    .title = List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`; and the quick collection's `quick` count
 
 command-library-collection-remove =
     .title = Remove photos from an album (`id`; `images`: ids, else the selection); they stay in the library
@@ -309,6 +309,15 @@ command-library-openFolder =
 
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
+
+command-library-quick-clear =
+    .title = Empty the quick collection; its photos stay in the library
+
+command-library-quick-saveAs =
+    .title = Save the quick collection as an album (`name`; `clear`: empty it too); without `name`, asks it. Answers the album's `id`
+
+command-library-quick-toggle =
+    .title = Put photos in the quick collection (`images`: ids, else the selection), or take them out when it holds them all; scope the library to it with the collection `quick`
 
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
