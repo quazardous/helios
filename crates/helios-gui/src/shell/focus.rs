@@ -75,6 +75,9 @@ pub(super) struct Focus {
     /// The smart album a rules form was opened for
     /// (`library.collection.rules` without `id` sets its rules).
     pub(super) album_ruled: Option<String>,
+    /// The rule editor open on a smart album's rules ("Edit the
+    /// rules…"), drawn over this window.
+    pub(super) rule_editor: Option<crate::rule_editor::RuleEditor>,
     /// The open image's decisions, and the Decisions panel's cards.
     pub(super) decisions: Rc<RefCell<crate::decisions::Decisions>>,
     /// Where the workspace imports from, and how (its template's).
@@ -166,6 +169,7 @@ impl Focus {
             open_in_compare: false,
             album_renamed: None,
             album_ruled: None,
+            rule_editor: None,
             decisions: Rc::default(),
             import_source: None,
             imported_ids: Vec::new(),

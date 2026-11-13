@@ -1,8 +1,8 @@
 //! The smart album form (`docs/design/library.md`, L6): the common
 //! conditions as form fields, read into a rule tree
-//! ([`helios_vault::rules`]) and back. A tree the form cannot show (a
-//! nested group, a field it has no box for) is set with
-//! `library.collection.rules` and its `rules`.
+//! ([`helios_vault::rules`]) and back, for a new smart album. Its rules
+//! are then edited, whatever their tree, in the rule editor
+//! ([`crate::rule_editor`]).
 
 use helios_vault::capture::day_start;
 use helios_vault::rules::{Condition, Match, Rule};

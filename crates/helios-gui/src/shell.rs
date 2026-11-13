@@ -636,6 +636,11 @@ impl Shell {
     /// application not built yet ([`ShellBuilder::build`], or
     /// [`ShellBuilder::run_native`] in a window).
     pub fn builder(panels: Vec<PanelSpec>, ui_settings: Option<PathBuf>) -> ShellBuilder {
+        // Relative dates in smart albums ("today") count by the local
+        // clock, as cameras set to local time write capture times.
+        helios_vault::rules::set_local_offset(i64::from(
+            chrono::Local::now().offset().local_minus_utc(),
+        ));
         let registry = Arc::new(Mutex::new(Registry::new()));
         let bus = Arc::new(Bus::new());
         // Background work reports on the shell's bus, which egui-pop
@@ -1513,6 +1518,11 @@ impl Shell {
     /// The library's state, to read.
     pub fn library(&self) -> std::cell::Ref<'_, crate::library::Library> {
         self.focus.library.borrow()
+    }
+
+    /// The rule editor open on a smart album's rules, if any.
+    pub fn rule_editor(&self) -> Option<&crate::rule_editor::RuleEditor> {
+        self.focus.rule_editor.as_ref()
     }
 
     /// The library's state, to show what it holds.
@@ -2886,7 +2896,7 @@ impl Shell {
             ),
             (
                 crate::library::COLLECTION_RULES_COMMAND,
-                "Set a smart album's rules (`id`; `rules`, a tree, or the form's keys); without them, asks them. Unknown fields and invalid rules are refused with the reason",
+                "Set a smart album's rules (`id`; `rules`, a tree, or the form's keys); without them, opens the rule editor on them. Unknown fields and invalid rules are refused with the reason",
             ),
             (
                 crate::library::COLLECTION_LIST_COMMAND,
@@ -2898,6 +2908,19 @@ impl Shell {
                 Box::new(move |a, _| Ok(Action::CollectionEdit(id, a.clone()))),
             );
         }
+        add(
+            CommandSpec::new(
+                crate::library::COLLECTION_RULES_EDIT_COMMAND,
+                "Edit the rules in the open rule editor, one undoable edit at a time: `edit` (add_condition, add_group, remove, move with `to`, match with `match`: all, any or none, field with `field`, op with `op`, value with `value`, `high` (between's second bound, or within's count) and `unit` (days, weeks or months), undo, redo, apply, cancel) at `at`, a path of indexes from the top group ([]). A capture date takes a day (YYYY-MM-DD) or, with `op: within`, today, this_year or last. Answers the draft, each condition's fault and the rules when valid",
+                "Library",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::CollectionEdit(
+                    crate::library::COLLECTION_RULES_EDIT_COMMAND,
+                    a.clone(),
+                ))
+            }),
+        );
         add(
             CommandSpec::new(
                 crate::library::SCAN_FOLDER_COMMAND,
@@ -4470,6 +4493,9 @@ impl Shell {
         };
         use crate::smart_album::SmartForm;
         use helios_vault::collections::{ALBUM, SMART};
+        if command == crate::library::COLLECTION_RULES_EDIT_COMMAND {
+            return self.rules_edit(args);
+        }
         let text = |a: &'_ Value, key: &str| a.get(key).and_then(Value::as_str).map(String::from);
         let albums: Vec<helios_vault::collections::Album> = self
             .focus
@@ -4634,14 +4660,10 @@ impl Shell {
                 };
                 let Some(rules) = rules()? else {
                     drop(lib);
-                    let form = SmartForm::of(&current).ok_or_else(|| {
-                        format!(
-                            "the rules of “{}” are more than the form shows: set them with `rules`",
-                            album.name
-                        )
-                    })?;
-                    self.smart_form(Some(id), &form);
-                    return Ok(Value::Null);
+                    let editor = crate::rule_editor::RuleEditor::new(&id, &album.name, &current);
+                    let state = editor.state();
+                    self.focus.rule_editor = Some(editor);
+                    return Ok(state);
                 };
                 AlbumEdit::Rules { id, rules }
             }
@@ -4658,6 +4680,73 @@ impl Shell {
         let answer = json!({ "id": edit.id() });
         lib.edit_album(edit);
         Ok(answer)
+    }
+
+    /// `library.collection.rules.edit`: one edit in the open rule editor,
+    /// or undo, redo, apply (refused while a condition is not valid, with
+    /// its reason), cancel. Answers the editor's state.
+    fn rules_edit(&mut self, args: &Value) -> Result<Value, String> {
+        let editor = self
+            .focus
+            .rule_editor
+            .as_mut()
+            .ok_or("no rule editor is open: run library.collection.rules with an `id`")?;
+        match args.get("edit").and_then(Value::as_str) {
+            Some("undo") => {
+                editor.undo();
+            }
+            Some("redo") => {
+                editor.redo();
+            }
+            Some("cancel") => {
+                self.focus.rule_editor = None;
+                return Ok(Value::Null);
+            }
+            Some("apply") => {
+                let rules = editor.tree.rule()?;
+                let id = editor.album.clone();
+                self.focus.rule_editor = None;
+                return self.collection_edit(
+                    crate::library::COLLECTION_RULES_COMMAND,
+                    &json!({ "id": id, "rules": rules.to_json() }),
+                );
+            }
+            _ => editor.edit(crate::rule_editor::Edit::parse(args)?)?,
+        }
+        Ok(editor.state())
+    }
+
+    /// The rule editor, when open: a modal over this window
+    /// (`rule_editor_ui`), its edits run as `library.collection.rules.edit`.
+    fn rule_editor_ui(&mut self, ctx: &Egui) {
+        let Some(editor) = &self.focus.rule_editor else {
+            return;
+        };
+        let albums: Vec<(String, String)> = self
+            .focus
+            .library
+            .borrow()
+            .albums()
+            .map(|list| {
+                list.iter()
+                    .filter(|a| a.id != editor.album)
+                    .map(|a| (a.id.clone(), a.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let t = |m: Message| self.text(m);
+        let words = crate::rule_editor_ui::Words::new(&t);
+        let (asked, rect) = crate::rule_editor_ui::show(ctx, editor, &albums, &words);
+        self.focus
+            .rects
+            .insert(crate::rule_editor_ui::RECT.into(), rect);
+        if let Some(args) = asked {
+            let _ = self.run(
+                crate::library::COLLECTION_RULES_EDIT_COMMAND,
+                args,
+                Origin::User,
+            );
+        }
     }
 
     /// Asks a smart album's conditions (`form` to start from): for a new
@@ -5875,6 +5964,7 @@ impl Shell {
         self.job_notices();
         self.follow_queue(&ctx);
         self.menus_ui(&ctx);
+        self.rule_editor_ui(&ctx);
         self.pointer_choice_ui(&ctx);
 
         let named = ctx.data(|d| {

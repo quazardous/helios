@@ -1029,8 +1029,12 @@ pub const COLLECTION_ADD_COMMAND: &str = "library.collection.add";
 /// Takes photos out of an album (`id`; `images`, else the selection).
 pub const COLLECTION_REMOVE_COMMAND: &str = "library.collection.remove";
 /// Sets a smart album's rules (`id`; `rules`, a tree, or the form's
-/// keys); without them, asks them in a form.
+/// keys); without them, opens the rule editor on them.
 pub const COLLECTION_RULES_COMMAND: &str = "library.collection.rules";
+/// Edits the rules in the open rule editor, one edit a step
+/// ([`crate::rule_editor::Edit::parse`]), or undoes, redoes, applies,
+/// cancels; answers the editor's state.
+pub const COLLECTION_RULES_EDIT_COMMAND: &str = "library.collection.rules.edit";
 /// Lists the albums, with how many photos each holds.
 pub const COLLECTION_LIST_COMMAND: &str = "library.collection.list";
 

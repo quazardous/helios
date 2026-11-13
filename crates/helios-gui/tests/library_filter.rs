@@ -692,8 +692,8 @@ fn a_smart_album_made_through_its_form_scopes_the_grid_and_its_rules_undo() {
         "Edit the rules of “Best”"
     );
 
-    // Refused with their reason: an unknown field, nested rules in the
-    // form, photos put in a smart album.
+    // Refused with their reason: an unknown field, photos put in a smart
+    // album.
     run(
         &mut h,
         "library.collection.rules",
@@ -701,7 +701,6 @@ fn a_smart_album_made_through_its_form_scopes_the_grid_and_its_rules_undo() {
             {"field": "colour", "op": "is", "value": "red"},
         ]} }),
     );
-    run(&mut h, "library.collection.rules", json!({ "id": "best" }));
     run(
         &mut h,
         "library.collection.add",
@@ -710,7 +709,6 @@ fn a_smart_album_made_through_its_form_scopes_the_grid_and_its_rules_undo() {
     settle(&mut h, &mut persist, 11.0);
     let said = warnings(&h);
     assert!(said.contains("unknown field `colour`"), "{said}");
-    assert!(said.contains("more than the form shows"), "{said}");
     assert!(said.contains("smart album"), "{said}");
     assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
 
@@ -726,6 +724,146 @@ fn a_smart_album_made_through_its_form_scopes_the_grid_and_its_rules_undo() {
     settle(&mut h, &mut persist, 14.0);
     assert_eq!(grid(&h), ["a.jpg"]);
     assert_eq!(albums(&h), [("Best".to_string(), 1)]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The open rule editor's state, as `library.collection.rules.edit`
+/// answers it (`Value::Null` when closed).
+fn editor(h: &Harness<'_, Shell>) -> Value {
+    h.state()
+        .rule_editor()
+        .map_or(Value::Null, helios_gui::rule_editor::RuleEditor::state)
+}
+
+#[test]
+fn a_nested_tree_is_built_in_the_rule_editor_each_edit_undone() {
+    let root = temp("rule-editor");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "Best", "kind": "smart", "rules": {"match": "all", "rules": [
+            {"field": "rating", "op": ">=", "value": 3},
+        ]} }),
+    );
+    settle(&mut h, &mut persist, 2.0);
+    run(&mut h, "library.collection", json!({ "id": "best" }));
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(grid(&h), ["a.jpg"]);
+
+    // "Edit the rules…" opens the editor on the tree; its own button adds
+    // a condition.
+    run(&mut h, "library.collection.rules", json!({ "id": "best" }));
+    settle(&mut h, &mut persist, 4.0);
+    assert_eq!(editor(&h)["id"], "best");
+    h.get_by_label("+ Condition").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(editor(&h)["draft"]["rules"].as_array().unwrap().len(), 2);
+    let edit = "library.collection.rules.edit";
+    run(&mut h, edit, json!({ "edit": "undo" }));
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(editor(&h)["draft"]["rules"].as_array().unwrap().len(), 1);
+    run(&mut h, edit, json!({ "edit": "redo" }));
+    settle(&mut h, &mut persist, 7.0);
+    assert_eq!(editor(&h)["draft"]["rules"].as_array().unwrap().len(), 2);
+
+    // An invalid value: its reason under it, and the rules not applied.
+    run(
+        &mut h,
+        edit,
+        json!({ "edit": "value", "at": [1], "value": "9" }),
+    );
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(editor(&h)["faults"][0]["at"], json!([1]));
+    assert!(h.query_by_label_contains("not in [0, 5]").is_some());
+    run(&mut h, edit, json!({ "edit": "apply" }));
+    settle(&mut h, &mut persist, 9.0);
+    let said = warnings(&h);
+    assert!(
+        said.contains("rules[1]") && said.contains("not in [0, 5]"),
+        "{said}"
+    );
+    assert!(!editor(&h).is_null(), "still open");
+    assert_eq!(grid(&h), ["a.jpg"]);
+
+    // A nested tree, edit by edit.
+    for args in [
+        json!({ "edit": "remove", "at": [1] }),
+        json!({ "edit": "remove", "at": [0] }),
+        json!({ "edit": "match", "at": [], "match": "any" }),
+        json!({ "edit": "add_group", "at": [] }),
+        json!({ "edit": "add_condition", "at": [0] }),
+        json!({ "edit": "field", "at": [0, 0], "field": "camera" }),
+        json!({ "edit": "value", "at": [0, 0], "value": "Z 8" }),
+        json!({ "edit": "add_condition", "at": [0] }),
+        json!({ "edit": "op", "at": [0, 1], "op": "<=" }),
+        json!({ "edit": "value", "at": [0, 1], "value": "1" }),
+        json!({ "edit": "add_condition", "at": [] }),
+        json!({ "edit": "field", "at": [1], "field": "file_type" }),
+        json!({ "edit": "value", "at": [1], "value": "nef" }),
+        json!({ "edit": "move", "at": [1], "to": 0 }),
+    ] {
+        run(&mut h, edit, args);
+        h.run();
+    }
+    settle(&mut h, &mut persist, 10.0);
+    let expected = json!({"match": "any", "rules": [
+        {"field": "file_type", "op": "is", "value": "nef"},
+        {"match": "all", "rules": [
+            {"field": "camera", "op": "is", "value": "Z 8"},
+            {"field": "rating", "op": "<=", "value": 1},
+        ]},
+    ]});
+    assert_eq!(editor(&h)["rules"], expected);
+    run(&mut h, edit, json!({ "edit": "undo" }));
+    settle(&mut h, &mut persist, 11.0);
+    assert_eq!(
+        editor(&h)["rules"]["rules"][0]["match"],
+        "all",
+        "the move undone"
+    );
+    run(&mut h, edit, json!({ "edit": "redo" }));
+    settle(&mut h, &mut persist, 12.0);
+    assert_eq!(editor(&h)["rules"], expected);
+    run(&mut h, edit, json!({ "edit": "apply" }));
+    settle(&mut h, &mut persist, 13.0);
+    settle(&mut h, &mut persist, 14.0);
+    assert!(editor(&h).is_null(), "the editor closed");
+    assert!(h.query_by_label("+ Condition").is_none());
+    assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
+    assert_eq!(albums(&h), [("Best".to_string(), 2)]);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Edit the rules of “Best”"
+    );
+
+    // The whole edit is one step of the library's history.
+    let undone = history.undo(
+        &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(
+        matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+        "{undone:?}"
+    );
+    settle(&mut h, &mut persist, 16.0);
+    assert_eq!(grid(&h), ["a.jpg"]);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
