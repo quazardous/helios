@@ -508,7 +508,9 @@ gui-history-album-rules = Edit the rules of “{ $name }”
 gui-history-batch = { $label } ({ $count } values)
 
 gui-history-calibration-delete = Delete the calibration profile “{ $name }”
+
 gui-history-calibration-save = Save the calibration profile “{ $name }”
+
 gui-history-import = Import { $count } photos
 
 gui-history-preview-applied = applied
