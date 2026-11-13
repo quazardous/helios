@@ -778,13 +778,12 @@ impl helios_connect::Connector for PickConnector {
         }
         match self.end {
             End::Wait => {}
-            End::Done => return Ok(true),
-            End::Nothing => return Ok(false),
-            End::Refused => return Err(helios_connect::ConnectorError::AuthNeeded),
             End::RefusedOnce if *self.current.lock().unwrap() <= 1 => {
                 return Err(helios_connect::ConnectorError::AuthNeeded);
             }
-            End::RefusedOnce => return Ok(true),
+            End::Done | End::RefusedOnce => return Ok(true),
+            End::Nothing => return Ok(false),
+            End::Refused => return Err(helios_connect::ConnectorError::AuthNeeded),
             End::Down => return Err(helios_connect::ConnectorError::Offline),
         }
         while Instant::now() < deadline {
