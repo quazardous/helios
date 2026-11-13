@@ -131,13 +131,20 @@ impl<S: Store> helios_journal::Store for VaultJournal<S> {
             return;
         }
         let (rows, token) = pending.into_writes();
+        // Keys and documents are built before the writer is taken.
+        let docs: Vec<(String, Option<serde_json::Value>)> = rows
+            .iter()
+            .map(|(item, node, row)| {
+                let doc = row
+                    .as_ref()
+                    .map(|r| serde_json::to_value(r).expect("rows serialize"));
+                (Self::key(item, node), doc)
+            })
+            .collect();
         self.vault
             .transaction(|store| {
-                for (item, node, row) in &rows {
-                    let doc = row
-                        .as_ref()
-                        .map(|r| serde_json::to_value(r).expect("rows serialize"));
-                    store.set_document(&self.ns, &Self::key(item, node), doc.as_ref())?;
+                for (key, doc) in &docs {
+                    store.set_document(&self.ns, key, doc.as_ref())?;
                 }
                 if let Some(t) = token {
                     store.set_document(&self.meta, TOKEN, Some(&serde_json::json!(t)))?;

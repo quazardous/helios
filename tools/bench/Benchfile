@@ -302,7 +302,7 @@ timeout = "40m"
 # from the import window, checked to land there; in /out/window-audit.md
 # and .jsonl, a screenshot per probe (tools/bench/window-audit.py)
 [jobs.window-audit]
-about = "what the import window opens lands in it: picker, Escape, palette, close with a picker open"
+about = "what the import window opens lands in it: picker, Escape, palette, Storage…, close with a picker or a dialog open"
 first = [{ job = "check", pass = ["branch", "crate", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
@@ -444,13 +444,17 @@ timeout = "1h"
 [jobs.check]
 # Clippy (which checks too) runs here, never on the developer's machine:
 # a compile error or a lint stops a branch before any of its test jobs.
-about = "clippy -D warnings on a crate or the workspace with its tests, before any test job"
+# Lints are warnings, not errors (-D warnings would fail a crate at its
+# first lint and leave every crate depending on it, and its own tests,
+# unlinted): one pass shows them all, and any warning makes the job red.
+about = "clippy on a crate or the workspace with its tests, every lint in one pass, red on any warning"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-c="${crate:-}"; cargo clippy --locked --tests --message-format short ${c:+-p $c} ${c:---workspace} -- -D warnings"""
+c="${crate:-}"; cargo clippy --locked --tests --keep-going --message-format short ${c:+-p $c} ${c:---workspace} > /tmp/clippy.log 2>&1; s=$?; cat /tmp/clippy.log; \
+n=$(grep -c ': warning:' /tmp/clippy.log); [ "$n" -gt 0 ] && echo "clippy: $n warning(s), all shown above"; [ "$s" -eq 0 ] && [ "$n" -eq 0 ]"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "20m"

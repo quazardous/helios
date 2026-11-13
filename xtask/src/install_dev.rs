@@ -1,10 +1,12 @@
-//! `cargo xtask install-dev [--branch B | --local] | --list | --uninstall`:
+//! `cargo xtask install-dev [--branch B | --local | --from DIR] | --list | --uninstall`:
 //! installs a dev build of Helios for the current user, outside the
 //! checkout, so cleaning `target/` never breaks the launcher.
 //!
 //! The build is the bench box's latest `build-gui` of a branch (`next` by
 //! default), or with `--local` this checkout's own built binaries (the
-//! newer of `target/release` and `target/debug`). It is copied into
+//! newer of `target/release` and `target/debug`), or with `--from DIR` a
+//! folder of `build-gui` outputs (what `cargo xtask gate` brings back). It
+//! is copied into
 //! `${XDG_DATA_HOME:-~/.local/share}/helios-dev/<version>/`, `<version>`
 //! being the program's own full version (`0.79.1-dev.4+1a2b3c4d`):
 //! `helios-gui`, the `helios` command line when there is one, and the
@@ -22,8 +24,7 @@ use std::time::SystemTime;
 
 use crate::remote::Bench;
 
-pub const USAGE: &str =
-    "install-dev [--branch BRANCH | --local] | install-dev --list | install-dev --uninstall";
+pub const USAGE: &str = "install-dev [--branch BRANCH | --local | --from DIR] | install-dev --list | install-dev --uninstall";
 
 /// The desktop's application id, shared with `packaging/linux/install.sh`.
 const APP_ID: &str = "io.github.quazardous.Helios";
@@ -34,6 +35,8 @@ const ICON_SIZES: [u32; 8] = [16, 24, 32, 48, 64, 128, 256, 512];
 enum Source {
     Box(String),
     Local,
+    /// A folder holding a `build-gui` job's outputs (the gate's desktop build).
+    From(PathBuf),
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
@@ -41,6 +44,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         [] => Action::Install(Source::Box("next".into())),
         ["--branch", b] => Action::Install(Source::Box((*b).to_string())),
         ["--local"] => Action::Install(Source::Local),
+        ["--from", dir] => Action::Install(Source::From(PathBuf::from(dir))),
         ["--list"] => Action::List,
         ["--uninstall"] => Action::Uninstall,
         _ => return None,
@@ -106,6 +110,7 @@ fn install(root: &Path, data: &Path, source: &Source) -> Result<(), String> {
     let got = match source {
         Source::Box(branch) => fetch_box(root, branch, &staging),
         Source::Local => copy_local(root, &staging),
+        Source::From(from) => copy_from(from, &staging),
     };
     let commit = match got {
         Ok(c) => c,
@@ -309,6 +314,28 @@ fn copy_local(root: &Path, dir: &Path) -> Result<Option<String>, String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     Ok(commit)
+}
+
+/// Copies a `build-gui` job's outputs (`helios-gui`, the plugins' programs,
+/// `commit.txt`) from `from` into `dir`; returns their commit.
+fn copy_from(from: &Path, dir: &Path) -> Result<Option<String>, String> {
+    if !from.join("helios-gui").is_file() {
+        return Err(format!("no helios-gui in {}", from.display()));
+    }
+    let entries = std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let program = name.to_string_lossy();
+        if path.is_file() && program != "commit.txt" && !program.contains('.') {
+            std::fs::copy(&path, dir.join(&name))
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+    }
+    Ok(std::fs::read_to_string(from.join("commit.txt"))
+        .ok()
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty()))
 }
 
 /// Moves `base/current` to `name`, in one rename.

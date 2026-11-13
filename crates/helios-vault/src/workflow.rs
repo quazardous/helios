@@ -29,18 +29,12 @@ pub type WorkflowWrite = (String, String, Option<Value>);
 impl<S: Store> Vault<S> {
     /// A workflow document, by namespace (under `workflow/`) and key.
     pub fn workflow_document(&self, ns: &str, key: &str) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(&namespace(ns), key)
+        self.read(|s| s.document(&namespace(ns), key))
     }
 
     /// Every document of a workflow namespace (under `workflow/`), by key.
     pub fn workflow_documents(&self, ns: &str) -> Result<Vec<(String, Value)>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .documents(&namespace(ns))
+        self.read(|s| s.documents(&namespace(ns)))
     }
 
     /// Writes workflow documents in one transaction: all of them, or none.

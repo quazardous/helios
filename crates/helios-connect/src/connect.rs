@@ -210,7 +210,21 @@ struct Shared {
 }
 
 impl Shared {
+    /// Sets the session's status; how it ended goes to the log too.
     fn set(&self, status: Status) {
+        match &status {
+            Status::Connected(account) => {
+                log::info!("connecting a {} account: connected", account.connector);
+            }
+            Status::Failed { step, why } if step.is_empty() => {
+                log::warn!("connecting an account: {why}");
+            }
+            Status::Failed { step, why } => {
+                log::warn!("connecting an account: the step `{step}` failed: {why}");
+            }
+            Status::Cancelled => log::info!("connecting an account: cancelled"),
+            Status::Working { .. } | Status::Form { .. } | Status::Browser { .. } => {}
+        }
         *self.status.lock().unwrap_or_else(PoisonError::into_inner) = status;
         (self.wake)();
     }

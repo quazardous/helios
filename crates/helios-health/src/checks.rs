@@ -4,12 +4,34 @@
 //! [`crate::backup`]).
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use helios_core::Message;
 use helios_storage::{Role, Volume, capacity_text, registry};
 use serde_json::json;
 
-use crate::{Check, Context, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Finding, Fix, Level};
+
+/// The owner of the storage checks ([`storage`]).
+pub const STORAGE_OWNER: &str = "storage";
+
+/// The owner of the library checks ([`library`]).
+pub const LIBRARY_OWNER: &str = "library";
+
+/// The storage module's checks: the free space where Helios writes.
+pub fn storage() -> Vec<Arc<dyn Check>> {
+    vec![Arc::new(FreeSpace::default())]
+}
+
+/// The library module's checks: the vault's integrity, the library
+/// opening with room, its photos changed outside Helios.
+pub fn library() -> Vec<Arc<dyn Check>> {
+    vec![
+        Arc::new(VaultIntegrity),
+        Arc::new(Library::default()),
+        Arc::new(ChangedOutside),
+    ]
+}
 
 /// Free space on the library's volume and on every volume with a role
 /// Helios writes to (library, archive, backup, scratch).
@@ -71,6 +93,12 @@ impl Check for FreeSpace {
 
     fn title(&self) -> Message {
         Message::new("health-free-space", "Free space")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Free space on the library's volume and on every volume Helios writes to")
+            .levels(&[Level::Ok, Level::Warning, Level::Problem])
+            .fixes(&["library.storage"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -155,6 +183,11 @@ impl Check for VaultIntegrity {
         Message::new("health-vault-integrity", "Catalogue integrity")
     }
 
+    fn declaration(&self) -> Declaration {
+        Declaration::new("The vault's database passes SQLite's quick check")
+            .levels(&[Level::Ok, Level::Problem])
+    }
+
     fn run(&self, ctx: &Context) -> Vec<Finding> {
         let (Some(path), Some(database)) = (&ctx.vault, &ctx.database) else {
             return Vec::new();
@@ -225,6 +258,12 @@ impl Check for Library {
 
     fn title(&self) -> Message {
         Message::new("health-library", "The library")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("The library's database opens, and its disk has room to grow")
+            .levels(&[Level::Ok, Level::Warning, Level::Problem])
+            .fixes(&["library.openFolder", "library.storage"])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -318,6 +357,12 @@ impl Check for ChangedOutside {
 
     fn title(&self) -> Message {
         Message::new("health-changed-outside", "Photos changed outside Helios")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Library photos whose file another application rewrote")
+            .levels(&[Level::Warning])
+            .fixes(&[ACKNOWLEDGE_CHANGED])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {

@@ -219,15 +219,18 @@ impl Cursors {
                     .flatten()
                     .filter_map(Value::as_str)
                     .collect();
+                // An offset near `usize::MAX` reads nothing; it must not
+                // overflow the window's end.
+                let end = offset.saturating_add(len);
                 let mut rows = Vec::with_capacity(len);
                 let mut at = offset;
-                while at < offset + len {
+                while at < end {
                     // A window of thousands of rows stops between chunks
                     // when its call is cancelled; the cursor stays open.
                     if call.is_cancelled() {
                         return Err(Error::cancelled());
                     }
-                    let n = CHUNK.min(offset + len - at);
+                    let n = CHUNK.min(end - at);
                     let read = if params["locations"] == true {
                         let chunk = vault
                             .fetch_library(handle, at, n, &names)

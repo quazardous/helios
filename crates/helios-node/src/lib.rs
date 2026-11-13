@@ -41,6 +41,7 @@
 //! `docs/ai-models.md`). Nothing is configured by default: no model, no
 //! network.
 
+pub mod auto_import;
 pub mod batch;
 pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).
@@ -51,7 +52,9 @@ pub use helios_node_core::calibrate;
 /// Reads at scale through cursors (`helios_node_core::cursor`).
 pub use helios_node_core::cursor;
 pub use helios_node_core::library;
+pub mod caps;
 pub mod mcp;
+pub mod roots;
 pub mod sandbox;
 pub mod vault_node;
 pub mod workflow;

@@ -465,6 +465,7 @@ pub const QUICK: &[&str] = &[
     "system.ai.calls",
     "notifications.jobs",
     "interface.experimental.workshops",
+    helios_library::auto_import::PAUSED,
 ];
 
 /// Where each declared setting goes: scope and section.
@@ -508,6 +509,14 @@ pub const PLACES: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// The automatic imports' safeguards, on their own section of the
+/// Library page ([`helios_library::auto_import`]).
+pub const AUTOMATIC_IMPORTS: &[&str] = &[
+    helios_library::auto_import::PAUSED,
+    helios_library::auto_import::ASK_FILES,
+    helios_library::auto_import::ASK_GB,
+];
+
 /// A scope's or a section's title, by its path, in the catalogues
 /// (`cargo xtask i18n extract` reads them here).
 pub fn title(path: &str) -> Message {
@@ -529,6 +538,9 @@ pub fn title(path: &str) -> Message {
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
         "library/decisions" => Message::new("gui-settings-decisions", "Decisions"),
         "library/history" => Message::new("gui-settings-history", "History"),
+        "library/automatic-imports" => {
+            Message::new("gui-settings-automatic-imports", "Automatic imports")
+        }
         "storage/volumes" => Message::new("gui-settings-volumes", "Volumes"),
         "storage/caches" => Message::new("gui-settings-caches", "Caches"),
         "storage/catalogue" => Message::new("gui-settings-catalogue", "Catalogue"),
@@ -582,6 +594,19 @@ pub fn manifest(
             }
         });
     }
+    // Read as they change, by whichever runs the automatic imports: no
+    // restart.
+    m = m.section(
+        "library/automatic-imports",
+        &tt("library/automatic-imports"),
+        |s| {
+            for key in AUTOMATIC_IMPORTS {
+                if let Some(setting) = schema.get(key) {
+                    s.field(Field::setting(key).scopes(scopes(setting.concern)));
+                }
+            }
+        },
+    );
     let m = m.section("storage/catalogue", &tt("storage/catalogue"), |s| {
         s.description(&t(Message::new(
             "gui-settings-catalogue-about",
