@@ -51,12 +51,17 @@ the promotion workflow (`.github/workflows/promote.yml`, running
 The promotion that makes a release tags it `vX.Y.Z` and starts the release
 workflow (`.github/workflows/release.yml`) with `publish` on: a tag pushed
 with the workflow's token starts no workflow, a dispatch does. Nobody tags
-by hand. Who decides is the coordinator, on the tester's advice: after a
-green batch reaches `next`, the tester says what a user would notice since
-the last release and recommends none, a patch or a minor one; a "yes" is a
-one-line fragment `kind: internal` with `release: patch` (or `minor`)
-through the same gate (docs/next.md). Authors put no `release:` line in
-their own fragments.
+by hand. Who decides is the coordinator, on the advice of the **release
+keeper**, a merger agent kept for the release cycle (owner, 2026-11-13):
+when `next`'s CI turns green with fragments waiting in `changelog.d/`, it
+runs the box's `release` job on `next` (`cargo xtask release`, checked
+and the whole suite tested), says what a user would notice since the last
+release and recommends none, a patch or a minor one. A "yes" is a
+one-line fragment `kind: internal` with `release: patch` (or `minor`) in
+a pull request the keeper merges once that job is green; it then follows
+the promotion to the tag and the published release. Between releases the
+keeper merges any backlog of pull requests nobody merged
+(docs/next.md). Authors put no `release:` line in their own fragments.
 
 The release workflow checks the tag against the workspace version, then:
 
