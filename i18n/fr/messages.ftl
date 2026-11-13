@@ -338,6 +338,72 @@ gui-calibration-header-gone = Profil { $id } (absent de la bibliothèque)
 
 gui-calibration-header-none = Aucun profil
 
+gui-calibrate-after = Delta E après : moyenne { $mean }, max { $max }
+
+gui-calibrate-as-default = Utiliser comme défaut pour ce boîtier
+
+gui-calibrate-before = Delta E avant : moyenne { $mean }, max { $max }
+
+gui-calibrate-clipped = Écrêtés, laissés de côté : { $patches }
+
+gui-calibrate-corner = Coin de la mire { $n }
+
+gui-calibrate-corner-tip = Glisser sur le centre de la pastille du coin
+
+gui-calibrate-corners-undo = Remettre le coin
+
+gui-calibrate-default-set = Défaut du boîtier défini
+
+gui-calibrate-deleted = Profil supprimé
+
+gui-calibrate-export-folder = Exporter dans le dossier
+
+gui-calibrate-exported = Exporté dans { $path }
+
+gui-calibrate-import = Importer le profil
+
+gui-calibrate-import-file = Fichier de profil à importer
+
+gui-calibrate-imported = Profil importé
+
+gui-calibrate-is-default = Le défaut du boîtier
+
+gui-calibrate-light = Lumière : { $kelvin } K
+
+gui-calibrate-name = Nom du profil
+
+gui-calibrate-no-shot = Ouvrir une photo d’une mire ColorChecker pour faire un profil
+
+gui-calibrate-open-shot = Ouvrir
+
+gui-calibrate-orientation = Mire vue tournée de { $turns } quarts de tour
+
+gui-calibrate-patches = Pastilles
+
+gui-calibrate-profiles = Profils
+
+gui-calibrate-profiles-none = Aucun profil de calibration pour l’instant
+
+gui-calibrate-quality = Qualité : { $quality }
+
+gui-calibrate-report = Rapport
+
+gui-calibrate-report-none = Placer les quatre coins sur les centres des pastilles des coins
+
+gui-calibrate-save = Enregistrer le profil
+
+gui-calibrate-save-heading = Faire un profil
+
+gui-calibrate-saved = Profil « { $name } » enregistré
+
+gui-calibrate-shot = Photo de la mire
+
+gui-calibrate-title = Calibrer les couleurs du boîtier
+
+gui-calibrate-worst = Pastilles les plus éloignées : { $patches }
+
+gui-calibration-header-make = Faire un profil…
+
 gui-graph-wires-orthogonal = Orthogonales
 
 gui-graph-wires-straight = Droites
