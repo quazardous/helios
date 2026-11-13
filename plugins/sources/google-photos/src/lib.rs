@@ -20,6 +20,8 @@
 //!    kept but its location) or `=dv` (a video), with the bearer token;
 //!    base URLs last 60 minutes
 //!    (<https://developers.google.com/photos/picker/guides/media-items>).
+//!    [`Picker::thumbnail`]: the same `baseUrl` with `=w<n>-h<n>`, a
+//!    preview at most `n` pixels a side, the import window's glance.
 //! 5. [`Picker::delete`]: `DELETE v1/sessions/{id}` once the items are in.
 //!
 //! The access token is Helios's (`helios_connect::oauth::OAuth::access_token`):
@@ -41,7 +43,7 @@ use std::time::{Duration, Instant};
 
 use helios_connect::{
     Access, AccountRef, Cancel, Caps, Connector, ConnectorError, ConnectorInfo, Cursor, FetchSink,
-    Fetched, Item, ItemId, ItemKind, ItemRef, Originals, Page, Probed, SourceRef, Text,
+    Fetched, Item, ItemId, ItemKind, ItemRef, Limits, Originals, Page, Probed, SourceRef, Text,
 };
 use serde_json::{Value, json};
 
@@ -50,6 +52,15 @@ pub const ID: &str = "google-photos";
 
 /// Where the Picker API answers.
 pub const API: &str = "https://photospicker.googleapis.com/v1";
+
+/// What the connector asks of Google at most, as its manifest declares
+/// it (`[limits]`): the import window's read-ahead of glances pauses
+/// there. Every install shares the OAuth client's project quota, so
+/// these stay well under it.
+pub const LIMITS: Limits = Limits {
+    per_minute: Some(120),
+    per_day: Some(10_000),
+};
 
 /// The scope reading the items the person picks.
 pub const SCOPE: &str = "https://www.googleapis.com/auth/photospicker.mediaitems.readonly";
@@ -124,6 +135,13 @@ impl Download {
     /// The original's address: `=d` for a photo, `=dv` for a video.
     pub fn url(&self) -> String {
         format!("{}={}", self.base_url, if self.video { "dv" } else { "d" })
+    }
+
+    /// A preview's address: at most `side` pixels wide and high (a
+    /// video's too: its first frame).
+    pub fn thumbnail_url(&self, side: u32) -> String {
+        let side = side.clamp(16, 2048);
+        format!("{}=w{side}-h{side}", self.base_url)
     }
 }
 
@@ -444,9 +462,32 @@ impl Picker {
         sink: &mut dyn FetchSink,
         cancel: &Cancel,
     ) -> Result<Fetched, ConnectorError> {
+        self.get(&download.url(), sink, cancel)
+    }
+
+    /// An item's preview, at most `side` pixels a side, as Google encodes
+    /// it (a JPEG). Expired as [`Picker::download`].
+    pub fn thumbnail(
+        &self,
+        download: &Download,
+        side: u32,
+        cancel: &Cancel,
+    ) -> Result<Vec<u8>, ConnectorError> {
+        let mut bytes = Vec::new();
+        self.get(&download.thumbnail_url(side), &mut bytes, cancel)?;
+        Ok(bytes)
+    }
+
+    /// The content server's answer at `url` into `sink`.
+    fn get(
+        &self,
+        url: &str,
+        sink: &mut dyn FetchSink,
+        cancel: &Cancel,
+    ) -> Result<Fetched, ConnectorError> {
         let mut response = self
             .http
-            .get(&download.url())
+            .get(url)
             .header("Authorization", &self.bearer())
             .call()
             .map_err(|_| ConnectorError::Offline)?;
@@ -569,6 +610,8 @@ impl Connector for GooglePhotos {
             caps: Caps {
                 accounts: true,
                 originals: Originals::Rendered,
+                thumbnails: true,
+                limits: LIMITS,
                 ..Caps::default()
             },
         }
@@ -643,6 +686,19 @@ impl Connector for GooglePhotos {
             .ok_or(ConnectorError::Expired)?;
         self.picker.download(&download, sink, cancel)
     }
+
+    fn thumbnail(&self, item: &ItemRef, max_side: u32) -> Result<Option<Vec<u8>>, ConnectorError> {
+        let download = self
+            .downloads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&item.id.0)
+            .cloned()
+            .ok_or(ConnectorError::Expired)?;
+        self.picker
+            .thumbnail(&download, max_side, &Cancel::new())
+            .map(Some)
+    }
 }
 
 #[cfg(test)]
@@ -656,6 +712,22 @@ mod tests {
         assert_eq!(epoch("2024-05-01T12:20:30+02:00"), Some(1_714_558_830));
         assert_eq!(duration("3.5s"), Some(Duration::from_millis(3500)));
         assert_eq!(duration("nope"), None);
+    }
+
+    #[test]
+    fn the_connector_declares_glances_and_its_limits() {
+        let photos = GooglePhotos::new(Picker::new(API, "t"), "s");
+        let caps = photos.describe().caps;
+        assert!(caps.thumbnails);
+        assert_eq!(caps.limits, LIMITS);
+        assert!(LIMITS.per_minute.is_some_and(|n| n > 0));
+        assert!(LIMITS.per_day.is_some_and(|n| n > 0));
+        let d = Download {
+            base_url: "https://lh3.example/abc".into(),
+            video: false,
+        };
+        assert_eq!(d.thumbnail_url(256), "https://lh3.example/abc=w256-h256");
+        assert_eq!(d.thumbnail_url(0), "https://lh3.example/abc=w16-h16");
     }
 
     #[test]
