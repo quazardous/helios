@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use helios_connect::ConnectorProvider as _;
 use helios_connect::account::{
     AccountBook, AccountState, MemoryAccounts, MemorySecrets, Secrets as _,
@@ -41,7 +41,12 @@ fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, 
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("never got there: {what}");
+    // What was shown instead, for the log.
+    let labels: Vec<String> = h
+        .query_all_by_label_contains("")
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    panic!("never got there: {what}; shown: {labels:?}");
 }
 
 /// Whether a node with this label is shown, once or more.
