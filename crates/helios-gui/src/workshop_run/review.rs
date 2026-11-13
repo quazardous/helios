@@ -125,8 +125,8 @@ pub fn listing(record: &Value, flag: Option<&str>) -> Value {
 }
 
 /// A review step's label: "Workshop “Backlit”: a photo accepted".
-fn step_label(key: &str, english: &str, name: &str) -> egui_pop::api::history::Label {
-    let m = Message::new(key, english).with("name", name);
+fn step_label(m: Message, name: &str) -> egui_pop::api::history::Label {
+    let m = m.with("name", name);
     egui_pop::api::history::Label {
         text: m.english.clone(),
         key: Some(m.key),
@@ -212,25 +212,33 @@ impl<S: Store + Send + 'static> Runner<S> {
                 .ok_or_else(|| format!("photo `{image}` is not in run `{run}`"))?;
             let id = ImageId::from_hex(image)?;
             let mut doc = record.clone();
-            let (key, english, mut changes) = match action {
+            let (message, mut changes) = match action {
                 "accept" => (
-                    "gui-history-workshop-accept",
-                    "Workshop “{ $name }”: a photo accepted",
+                    Message::new(
+                        "gui-history-workshop-accept",
+                        "Workshop “{ $name }”: a photo accepted",
+                    ),
                     self.accept(&ask()?, &mut doc, i, id, who)?,
                 ),
                 "revert" => (
-                    "gui-history-workshop-revert",
-                    "Workshop “{ $name }”: a photo reverted",
+                    Message::new(
+                        "gui-history-workshop-revert",
+                        "Workshop “{ $name }”: a photo reverted",
+                    ),
                     self.revert_photo(&mut doc, i, id)?,
                 ),
                 "fix" => (
-                    "gui-history-workshop-fix",
-                    "Workshop “{ $name }”: a photo fixed",
+                    Message::new(
+                        "gui-history-workshop-fix",
+                        "Workshop “{ $name }”: a photo fixed",
+                    ),
                     self.fix(&ask()?, &mut doc, i, id, who, &args["values"])?,
                 ),
                 "decide" => (
-                    "gui-history-workshop-decide",
-                    "Workshop “{ $name }”: a junction decided",
+                    Message::new(
+                        "gui-history-workshop-decide",
+                        "Workshop “{ $name }”: a junction decided",
+                    ),
                     self.decide(&mut doc, i, who, args)?,
                 ),
                 other => {
@@ -248,7 +256,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             });
             let name = doc["name"].as_str().unwrap_or_default();
             self.history
-                .record(step_label(key, english, name), changes, seconds());
+                .record(step_label(message, name), changes, seconds());
             return Ok(listing(&doc, args["flag"].as_str()));
         }
         Ok(listing(&record, args["flag"].as_str()))

@@ -622,7 +622,7 @@ fn the_panel_shows_the_review_and_accepts_a_held_photo() {
         h.query_by_label_contains("Review: Backlit, run 1")
             .is_some()
     );
-    assert!(h.query_by_label_contains("held").is_some());
+    assert!(h.query_all_by_label_contains("held").next().is_some());
     h.get_all_by_label("Accept").next().unwrap().click();
     for _ in 0..4 {
         h.run();

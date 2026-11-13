@@ -697,6 +697,9 @@ command-workshop-generalise =
 command-workshop-propose =
     .title = Experimental: propose values for the workshop being piloted, shown as ghost values the user accepts, overrides or rejects (`values`: by slider name; `aim`: the words it answers; `session`)
 
+command-workshop-review =
+    .title = Experimental: review a workshop run, flagged photos first, with their flags, provenance and values before and after; or act on one photo (`run`, the last one by default; `flag`: only photos raising it; `action`: accept or revert (yours alone), fix (`values`), decide a junction left to its fallback (`junction`, `value`, recorded in the decision book), rerun the held and decided photos (yours alone); `image`)
+
 command-workshop-run =
     .title = Experimental: run the applied workshop on a set of photos, a job: each photo aimed, its junctions answered, checked against the limits, written or held; one undo step (`node`, the selected one by default; `set`: selection or view; `images`: ids instead; `on_breach`: flag, hold or stop; `dry_run`: the photos, J, A and what the decision book already answers)
 
