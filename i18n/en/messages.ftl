@@ -47,7 +47,33 @@ calibrate-default-cameras = the profiles of a default are all of camera { $camer
 
 calibrate-default-no-camera = clearing a camera's default needs `camera`
 
+calibrate-export-failed = cannot write { $path }: { $error }
+
 calibrate-image-not-at-hand = no file of image { $image } is at hand
+
+calibrate-import-camera-key = the camera key “{ $key }” does not match the make and model “{ $make } { $model }”
+
+calibrate-import-format = the profile's format is { $found }; this Helios reads format { $expected }
+
+calibrate-import-id = the profile's id is not a 64-digit hexadecimal hash
+
+calibrate-import-illuminant = the light's chromaticity { $x }, { $y } is outside the diagram
+
+calibrate-import-lut = the profile carries a residual LUT, which this Helios does not take yet
+
+calibrate-import-matrix = the profile's matrix is not a finite matrix that can be inverted
+
+calibrate-import-not-profile = the file is not a Helios calibration profile
+
+calibrate-import-nothing = calibrate.profiles.import needs `path` or `file`
+
+calibrate-import-numbers = the profile's correction or camera matrix holds numbers that are not finite
+
+calibrate-import-refused = the profile is refused: { $reasons }
+
+calibrate-import-unreadable = the profile cannot be read: { $error }
+
+calibrate-import-unreadable-file = cannot read { $path }: { $error }
 
 calibrate-load-failed = cannot read the chart shot: { $error }
 
@@ -234,6 +260,20 @@ gui-caches-tier-vram = in video memory
 gui-caches-total = Caches hold { $size }
 
 gui-caches-use = In use
+
+gui-calibration-default-applied = Calibration profile “{ $name }” applied: the default of { $camera }
+
+gui-calibration-default-none = No calibration profile applied: { $reason }
+
+gui-calibration-header-about = { $camera }, { $light }, quality { $quality }
+
+gui-calibration-header-choose = Calibration profile
+
+gui-calibration-header-empty = No calibration profile for this camera yet
+
+gui-calibration-header-gone = Profile { $id } (not in the library)
+
+gui-calibration-header-none = No profile
 
 gui-caption-decisions = Decisions waiting
 
@@ -528,6 +568,8 @@ gui-history-calibration-apply = Apply the calibration profile “{ $name }”
 gui-history-calibration-default = Set the calibration default of { $name }
 
 gui-history-calibration-delete = Delete the calibration profile “{ $name }”
+
+gui-history-calibration-import = Import the calibration profile “{ $name }”
 
 gui-history-calibration-off = Turn the calibration profile off
 
