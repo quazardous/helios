@@ -1,6 +1,7 @@
 // core.curve1d@1 on the GPU: the same formula as the CPU form, a tone
-// curve on luminance as a ratio, then a chroma curve over luminance, the
-// colour channels clamped to [0, 1]; the fourth kept.
+// curve on luminance as a ratio, then a chroma curve over luminance, then
+// the gamut compressed toward the luminance, the colour channels clamped
+// to [0, 1]; the fourth kept.
 
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -14,6 +15,9 @@
 
 const LUMA: vec3<f32> = vec3<f32>(0.2627002, 0.6779981, 0.0593017);
 const CHROMA_NODES: u32 = 8u;
+// The CPU form's KNEE: the share of the room between a pixel's luminance
+// and 1 its brightest channel takes before the compression starts.
+const KNEE: f32 = 0.8;
 
 fn luma(p: vec3<f32>) -> f32 {
     return LUMA.x * p.x + LUMA.y * p.y + LUMA.z * p.z;
@@ -65,6 +69,23 @@ fn chroma(d: f32) -> f32 {
     return ratio(i) * (1.0 - f) + ratio(i + 1u) * f;
 }
 
+// The pixel desaturated toward its luminance until its brightest channel
+// is under 1, softly from KNEE on; unchanged within the knee or at white.
+fn compressed(p: vec3<f32>) -> vec3<f32> {
+    let d = luma(p);
+    let room = 1.0 - d;
+    if (!(room > 0.0)) {
+        return p;
+    }
+    let x = (max(max(p.x, p.y), p.z) - d) / room;
+    if (!(x - KNEE > 0.0)) {
+        return p;
+    }
+    let y = (x - KNEE) / (1.0 - KNEE);
+    let g = KNEE + (1.0 - KNEE) * y / (1.0 + y);
+    return vec3<f32>(d) + (g / x) * (p - vec3<f32>(d));
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = id.y * shape[0].w + id.x;
@@ -88,7 +109,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             let d = luma(o);
             o = vec3<f32>(d) + chroma(d) * (o - vec3<f32>(d));
         }
-        o = clamp(o, vec3<f32>(0.0), vec3<f32>(1.0));
+        o = clamp(compressed(o), vec3<f32>(0.0), vec3<f32>(1.0));
     }
     output[base] = o.x;
     output[base + 1u] = o.y;
