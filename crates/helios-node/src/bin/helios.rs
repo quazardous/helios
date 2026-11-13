@@ -46,6 +46,10 @@
 //!                   | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
 //!                   | accept DECISION [--groups N,N...] | decline DECISION | decisions
 //!
+//!     helios commands [--vault FILE|--node ADDRESS] [--window W] [--filter F] [--enabled]
+//!     helios run ID [--vault FILE|--node ADDRESS] [--param KEY=VALUE]... [--json PARAMS]
+//!                [--window W] [--scope node|window]
+//!
 //!     helios doctor display
 //!     helios doctor ai
 //!
@@ -64,6 +68,14 @@
 //! interrupted: Ctrl-C cancels the batch's images in the run and leaves no
 //! partial file, or, with `--vault` and its own node, stops it to be
 //! finished by the same batch run again. See `docs/cli.md`.
+//!
+//! `commands` lists the commands of the vault's node (or the one `--node`
+//! names), a desktop's window commands included: each with its params'
+//! schema, its scope, whether it can run in `--window` and why not.
+//! `run` runs one by its id as the CLI (origin `cli`): `--param` sets one
+//! param (its value read as JSON, else as text), `--json` gives them all.
+//! Both print the node's answer; a refusal (params against the schema, a
+//! greyed command's reason) goes to the standard error with exit code 1.
 //!
 //! `calibrate-chart` measures a colour chart shot (a decoded picture or a
 //! raw) and solves its correction, a dry run that writes nothing: the
@@ -170,6 +182,9 @@ const USAGE: &str = "usage:
                 | expand STACK | collapse STACK | top STACK IMAGE
                 | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
                 | accept DECISION [--groups N,N...] | decline DECISION | decisions
+  helios commands --vault FILE|--node ADDRESS [--window W] [--filter F] [--enabled]
+  helios run ID --vault FILE|--node ADDRESS [--param KEY=VALUE]... [--json PARAMS]
+             [--window W] [--scope node|window]
   helios doctor display
   helios doctor ai";
 
@@ -1069,6 +1084,111 @@ fn stacks(args: &[String]) -> ExitCode {
     }
 }
 
+/// The options of `helios commands` and `helios run`.
+#[derive(Default)]
+struct CommandArgs {
+    vault: Option<PathBuf>,
+    node: Option<String>,
+    window: Option<String>,
+    filter: Option<String>,
+    scope: Option<String>,
+    enabled: bool,
+    json: Option<serde_json::Value>,
+    params: serde_json::Map<String, serde_json::Value>,
+    words: Vec<String>,
+}
+
+fn command_args(args: &[String]) -> Result<CommandArgs, String> {
+    let mut parsed = CommandArgs::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let mut value = || args.next().cloned().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--vault" => parsed.vault = Some(PathBuf::from(value()?)),
+            "--node" => parsed.node = Some(value()?),
+            "--window" => parsed.window = Some(value()?),
+            "--filter" => parsed.filter = Some(value()?),
+            "--scope" => parsed.scope = Some(value()?),
+            "--enabled" => parsed.enabled = true,
+            "--json" => {
+                let params: serde_json::Value = serde_json::from_str(&value()?)
+                    .map_err(|e| format!("--json takes a JSON object: {e}"))?;
+                if !params.is_object() {
+                    return Err("--json takes a JSON object".into());
+                }
+                parsed.json = Some(params);
+            }
+            "--param" => {
+                let pair = value()?;
+                let (key, text) = pair.split_once('=').ok_or("--param takes KEY=VALUE")?;
+                // A number, a boolean, an object... else the text itself.
+                let value = serde_json::from_str(text)
+                    .unwrap_or_else(|_| serde_json::Value::String(text.to_string()));
+                parsed.params.insert(key.to_string(), value);
+            }
+            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
+            _ => parsed.words.push(arg.clone()),
+        }
+    }
+    Ok(parsed)
+}
+
+/// `helios commands` and `helios run`: the vault's node lists or runs
+/// its commands (`commands.list`, `command.run`), the answer printed.
+fn commands(verb: &str, args: &[String]) -> ExitCode {
+    use serde_json::json;
+    let parsed = match command_args(args) {
+        Ok(p) => p,
+        Err(e) => return usage(&e),
+    };
+    if parsed.vault.is_none() && helios_node::connect::explicit(parsed.node.as_deref()).is_none() {
+        return usage(&format!("{verb} needs --vault FILE or --node ADDRESS"));
+    }
+    let (method, params) = match (verb, parsed.words.as_slice()) {
+        ("commands", []) => (
+            "commands.list",
+            json!({ "window": parsed.window, "filter": parsed.filter,
+                    "enabled_only": parsed.enabled }),
+        ),
+        ("run", [id]) => {
+            let mut params = parsed.json.clone().unwrap_or_else(|| json!({}));
+            for (key, value) in &parsed.params {
+                params[key] = value.clone();
+            }
+            let mut call = json!({ "id": id, "params": params, "origin": "cli" });
+            for (key, value) in [("window", &parsed.window), ("scope", &parsed.scope)] {
+                if let Some(value) = value {
+                    call[key] = json!(value);
+                }
+            }
+            ("command.run", call)
+        }
+        ("commands", _) => return usage("commands takes no words, only options"),
+        _ => return usage("run takes one command id"),
+    };
+    let mut params = params;
+    if let Some(fields) = params.as_object_mut() {
+        fields.retain(|_, v| !v.is_null());
+    }
+    let client = match vault_client(parsed.vault.as_deref(), parsed.node.as_deref()) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    match on_node(&client, method, params, method == "command.run") {
+        Ok(answer) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&answer).expect("JSON values serialize")
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("helios: {}", e.message);
+            ExitCode::from(1)
+        }
+    }
+}
+
 /// `helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR`.
 fn sandbox(args: &[String]) -> ExitCode {
     use helios_node::sandbox;
@@ -1170,6 +1290,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "stacks") {
         return stacks(&args[1..]);
+    }
+    if let Some(verb) = args.first().filter(|a| *a == "commands" || *a == "run") {
+        return commands(verb, &args[1..]);
     }
     if args.first().is_some_and(|a| a == "doctor") {
         return doctor(&args[1..]);

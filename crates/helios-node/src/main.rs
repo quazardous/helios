@@ -869,8 +869,10 @@ mod control {
                 }
                 let mut entry = json!(spec);
                 entry["enabled"] = json!(reason.is_none());
+                entry["scope"] = json!("node");
                 if let Some(reason) = reason {
                     entry["reason"] = json!(reason.english);
+                    entry["disabledReason"] = json!(reason.english);
                     entry["message"] = json!(reason);
                 }
                 Some(entry)
@@ -1078,6 +1080,26 @@ mod control {
                     let filter = params["filter"].as_str();
                     let enabled_only = params["enabled_only"].as_bool().unwrap_or(false);
                     rpc::from_answer(list(&self.node, self.scope, filter, enabled_only))
+                }
+                // The same run by its id, as the vault endpoints take it:
+                // `{id, params, origin}`, the origin else the call's.
+                "command.run" => {
+                    let id = params["id"]
+                        .as_str()
+                        .ok_or_else(|| rpc::Error::invalid_params("`command.run` takes an `id`"))?;
+                    let origin = params["origin"].as_str().unwrap_or(origin);
+                    let args = match &params["params"] {
+                        Value::Null => json!({}),
+                        v => v.clone(),
+                    };
+                    rpc::from_answer(run(
+                        &self.node,
+                        self.scope,
+                        id,
+                        &args,
+                        origin,
+                        Some(call.cancel_flag()),
+                    ))
                 }
                 id => {
                     let answer = run(

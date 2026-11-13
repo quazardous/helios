@@ -355,9 +355,44 @@ half-written copy).
 suggestions, which are recorded as decisions and applied only once
 accepted. Its answers are JSON. See [library.md](library.md) for both.
 
+## Commands
+
+```bash
+helios commands [--vault library.db | --node ADDRESS] [--window W] [--filter F] [--enabled]
+helios run ID [--vault library.db | --node ADDRESS] [--param KEY=VALUE]... [--json '{...}']
+              [--window W] [--scope node|window]
+```
+
+`commands` lists every command of the vault's node (`commands.list`),
+generated from its registry: the node's own (`scope: "node"`) and, when a
+desktop holds the vault, its window commands (`scope: "window"`, the
+menus' and palette's). Each has its id, label, category, the JSON schema
+of its params, its keys, `enabled` and, when greyed, `disabledReason`
+("Only in the Helios window", or the clause that does not hold).
+`--window` evaluates the window commands in that window (`main` when not
+given), `--filter` keeps those whose id, label or category holds each of
+its words, `--enabled` those that can run.
+
+`run` runs one by its id (`command.run`) as the CLI (origin `cli`):
+`--json` gives its params as one object, each `--param KEY=VALUE` sets
+one (the value read as JSON, `2` or `true`, else as text). Its params are
+checked against its schema; a greyed command is refused with its reason.
+A window command runs in `--window` as its menu would. When an id is in
+both scopes (`library.import`), the node's runs unless `--scope window`.
+The answer is printed; a refusal goes to the standard error, exit code 1.
+
+```bash
+helios commands --vault library.db --filter undo
+helios run theme.select --vault library.db --param name=helios-light
+helios run library.stacks.dissolve --vault library.db --json '{"stack":"s1"}'
+```
+
+`helios-mcp` offers the same pair to agents (`helios_commands_list`,
+`helios_command_run`, origin `agent:mcp`).
+
 ## Through the vault's node
 
-`import`, `import-darktable`, `stacks` and `batch --sidecar --vault`
+`import`, `import-darktable`, `stacks`, `commands`, `run` and `batch --sidecar --vault`
 never open the vault themselves: they run on the node that holds it
 (`library.import`, `library.importDarktable`, `library.stacks.*`,
 `library.keepSidecar` for each sidecar a batch keeps), so the node's
