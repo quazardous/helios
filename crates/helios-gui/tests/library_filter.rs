@@ -1618,9 +1618,12 @@ fn selection_commands_and_marks_pasted_merged_or_overwriting() {
     run(&mut h, "helios.vault.focus", json!(null));
     h.run();
     h.key_press_modifiers(egui::Modifiers::CTRL, Key::I);
+    // The key queues the command; the next frame runs it.
+    h.run();
     h.run();
     assert_eq!(selection(&h), [id(2).hex(), id(3).hex()]);
     h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::A);
+    h.run();
     h.run();
     assert!(selection(&h).is_empty());
 
