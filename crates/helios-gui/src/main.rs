@@ -604,7 +604,14 @@ fn library_commands(
             "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
-        move |args, _| {
+        move |args, origin| {
+            // Who asked, for the import history: the window's imports say
+            // it in their arguments, being run later as the user.
+            let mut args = args.clone();
+            if args.get("origin").is_none() {
+                args["origin"] = json!(helios_gui::persist::who(origin));
+            }
+            let args = &args;
             let options = helios_gui::importers::options(args)?;
             let through = args.get("importer").is_some().then(|| plugins.clone());
             let mut sources: Vec<std::path::PathBuf> = args
@@ -2118,6 +2125,8 @@ fn main() -> Result<(), String> {
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));
+                // The imports recorded, listed in the window to run again.
+                shell.set_import_history(helios_gui::shell::import_history_of(vault.clone()));
                 // An offline folder's photos, as the image map recorded
                 // them, with the thumbnails the library's cache has.
                 shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));

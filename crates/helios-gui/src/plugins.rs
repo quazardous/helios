@@ -93,6 +93,8 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("help.health", "phosphor:first-aid"),
     ("import.addSource", "phosphor:folder-plus"),
     ("import.disconnect", "phosphor:plugs"),
+    ("import.history.again", "phosphor:arrow-clockwise"),
+    ("import.history.list", "phosphor:clock-counter-clockwise"),
     ("import.reconnect", "phosphor:plugs-connected"),
     ("keymap.package", "phosphor:package"),
     ("keymap.package.remove", "delete"),

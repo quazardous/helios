@@ -247,6 +247,12 @@ command-import-addSource =
 command-import-disconnect =
     .title = Disconnect an import account (`account`): its token revoked where the service allows, its secrets forgotten; the saved sources using it are kept with it, not connected (`sources`: "keep") or forgotten with it ("forget"); an account no source uses is forgotten
 
+command-import-history-again =
+    .title = Import again (`id`: an import of `import.history.list`): the same sources with the same choices; photos the library has are skipped as duplicates
+
+command-import-history-list =
+    .title = List the import history, newest first (`limit`): each import's sources, choices, counts, when and who asked
+
 command-import-reconnect =
     .title = Connect an import account again, from the step that failed (`account`)
 
