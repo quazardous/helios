@@ -178,6 +178,8 @@ def storage_probe(args, comp, agent, title: str, name: str) -> dict:
 
 def probes(args, comp, agent) -> list[dict]:
     out: list[dict] = []
+    if ic.wait_main(comp) is None:
+        return [{"probe": "open", "ok": False, "error": "no main window listed"}]
     title = open_import(args, comp, agent)
     if title is None:
         return [{"probe": "open", "ok": False, "error": "no import window listed"}]

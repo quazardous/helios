@@ -356,8 +356,8 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
             "demosaic",
             "colorin",
             "chartprofile",
-            "cameracolour",
             "channelmixerrgb",
+            "cameracolour",
             "flip",
             "exposure",
             "cameratone",
@@ -376,8 +376,9 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
     }
     // Version 3: a colour chart's profile after the camera colours,
     // bypassed until a profile is applied.
-    // Version 4: a camera look's colour half after it and its tone half
-    // before sigmoid, both bypassed until a look is applied.
+    // Version 4: a camera look's colour half after colour calibration
+    // and its tone half before sigmoid, both bypassed until a look is
+    // applied.
     assert_eq!(bundle.template.version, 4);
     for off in ["chartprofile", "cameracolour", "cameratone"] {
         assert!(
