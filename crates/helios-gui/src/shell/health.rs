@@ -5,16 +5,20 @@
 //! - `help.health` opens the Settings app at Health › Check.
 //! - `health.findings` (read-only): the findings of the last run, the
 //!   worst first, then the ignored ones, as rows (`/findings`) with their
-//!   tone, their fix's words and command; and a summary line with its
-//!   tone (`/summary`).
+//!   tone, their fix's words and command; the same rows by owner (the
+//!   module or plugin whose check found them: `/owners/<owner>`, those
+//!   the page has no group for in `/others`); and a summary line with its
+//!   tone (`/summary`). The page's groups show by the context keys
+//!   [`owner_key`] and [`OTHERS`], set while they have rows.
 //! - `health.fix` (`{"id"}`): runs a finding's fix, then the checks again
 //!   (so a fix done at once, an acknowledgement, clears its finding).
 //! - `health.ignore` (`{"id", "on"}`): ignores a finding, or shows it
 //!   again.
 //! - `health.checkNow`: runs the checks again.
 //!
-//! The checks run as a background job ([`helios_health::runner`]): a
-//! while after start, daily, and when a volume comes or goes (the
+//! The checks run as background jobs ([`helios_health::runner`]): all a
+//! while after start, then each as often as it declares (daily by
+//! default) and when a volume comes or goes, for those that ask (the
 //! storage watch's listener). The status bar's badge shows the worst
 //! finding needing attention and their count; it opens the page. Nothing
 //! shows while all is well, and nothing is ever modal. On the desktop the
@@ -49,6 +53,19 @@ pub const IGNORE: &str = "health.ignore";
 pub const BADGE: &str = "helios.health.badge";
 /// The Health page in the Settings app.
 pub const PAGE: &str = "health/check";
+/// The context key set while findings of an owner the page has no group
+/// for are there.
+pub const OTHERS: &str = "healthOthers";
+
+/// The context key set while the owner `owner` (a module, a plugin's id)
+/// has findings: its group on the page shows.
+pub fn owner_key(owner: &str) -> String {
+    let safe: String = owner
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("healthOwner_{safe}")
+}
 
 /// The fixes that change something not easily taken back: their button
 /// asks first.
@@ -68,6 +85,19 @@ pub(crate) struct HealthPage {
     /// `health.findings`'s answer, made again when a run starts or ends
     /// and when a finding is ignored, and read by the command at once.
     answer: Arc<Mutex<Value>>,
+    /// The plugins installed: each has a group on the page.
+    plugins: crate::config::plugins::Shared,
+    /// The context keys set on, for the groups with findings.
+    keys: Vec<String>,
+}
+
+impl HealthPage {
+    pub(crate) fn new(plugins: crate::config::plugins::Shared) -> Self {
+        Self {
+            plugins,
+            ..Self::default()
+        }
+    }
 }
 
 /// The findings as the page reads them: each finding a row with `id`,
@@ -75,9 +105,16 @@ pub(crate) struct HealthPage {
 /// message and detail), `fix` (whether it has one), `fixLabel` and
 /// `fixCommand`, `destructive` (its fix asks first), `attention` (a
 /// warning or a problem) and `ignored`; the shown ones worst first, then
-/// the ignored ones. `summary` says how it stands, with its tone; `ran`
-/// and `running` the run's state.
-pub fn findings_answer(t: &dyn Fn(Message) -> String, findings: &Findings, running: bool) -> Value {
+/// the ignored ones. `owners` holds the same rows by owner, for the
+/// owners `known` (those the page has a group for), and `others` the
+/// rows of any other owner. `summary` says how it stands, with its tone;
+/// `ran` and `running` the run's state.
+pub fn findings_answer(
+    t: &dyn Fn(Message) -> String,
+    findings: &Findings,
+    running: bool,
+    known: &[String],
+) -> Value {
     let row = |f: &Finding, ignored: bool| {
         let (level, tone) = match f.level {
             Level::Problem => ("problem", "danger"),
@@ -107,6 +144,18 @@ pub fn findings_answer(t: &dyn Fn(Message) -> String, findings: &Findings, runni
     let ignored = findings.ignored_findings();
     let mut rows: Vec<Value> = shown.iter().map(|f| row(f, false)).collect();
     rows.extend(ignored.iter().map(|f| row(f, true)));
+    let mut owners = serde_json::Map::new();
+    let mut others = Vec::new();
+    for (f, row) in shown.iter().chain(&ignored).zip(&rows) {
+        let owner = findings.owner(f).unwrap_or_default();
+        if known.iter().any(|k| k == owner) {
+            if let Value::Array(list) = owners.entry(owner).or_insert_with(|| json!([])) {
+                list.push(row.clone());
+            }
+        } else {
+            others.push(row.clone());
+        }
+    }
     let count = |l: Level| shown.iter().filter(|f| f.level == l).count();
     let (problems, warnings) = (count(Level::Problem), count(Level::Warning));
     let (text, tone) = if !findings.ran() && running {
@@ -145,6 +194,8 @@ pub fn findings_answer(t: &dyn Fn(Message) -> String, findings: &Findings, runni
     };
     json!({
         "findings": rows,
+        "owners": owners,
+        "others": others,
         "ignored": ignored.len(),
         "ran": findings.ran(),
         "running": running,
@@ -190,7 +241,24 @@ impl Shell {
             return;
         };
         let t = |m: Message| self.text(m);
-        let answer = findings_answer(&t, &runner.findings(), runner.running());
+        let known = crate::config::health_owners(&crate::config::lock(&self.core.health.plugins));
+        let answer = findings_answer(&t, &runner.findings(), runner.running(), &known);
+        // The groups with rows show; those that had and have no more hide.
+        let mut keys: Vec<String> = answer["owners"]
+            .as_object()
+            .map(|o| o.keys().map(|k| owner_key(k)).collect())
+            .unwrap_or_default();
+        if answer["others"].as_array().is_some_and(|o| !o.is_empty()) {
+            keys.push(OTHERS.to_owned());
+        }
+        let handle = self.core.app.handle();
+        for gone in self.core.health.keys.iter().filter(|k| !keys.contains(k)) {
+            handle.set_context(gone, "false");
+        }
+        for on in &keys {
+            handle.set_context(on, "true");
+        }
+        self.core.health.keys = keys;
         *self
             .core
             .health
@@ -323,6 +391,12 @@ mod tests {
     }
 
     #[test]
+    fn an_owner_key_is_a_context_key() {
+        assert_eq!(owner_key("org.example.x-y"), "healthOwner_org_example_x_y");
+        assert_eq!(owner_key("backup"), "healthOwner_backup");
+    }
+
+    #[test]
     fn findings_are_rows_worst_first_then_the_ignored_ones() {
         let plain = Message::plain;
         let fine = Finding::new("a.fine", "", Level::Ok, plain("Fine"), plain(""));
@@ -334,10 +408,13 @@ mod tests {
         });
         let dir = std::env::temp_dir().join(format!("helios-health-rows-{}", std::process::id()));
         let mut findings = Findings::with_ignored(Ignored::load(&dir.join("ignored.json")));
-        let a = findings_answer(&english, &findings, false);
+        let known = ["disks".to_owned()];
+        let a = findings_answer(&english, &findings, false, &known);
         assert_eq!(a["summary"]["tone"], "info", "not checked yet");
-        findings.replace(vec![fine, warn, bad]);
-        let a = findings_answer(&english, &findings, false);
+        findings.put("disks", "a.fine", vec![fine]);
+        findings.put("other", "a.warn", vec![warn]);
+        findings.put("disks", "a.bad", vec![bad]);
+        let a = findings_answer(&english, &findings, false, &known);
         let rows = a["findings"].as_array().unwrap();
         let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["a.bad", "a.warn", "a.fine"]);
@@ -346,8 +423,24 @@ mod tests {
         assert_eq!(rows[0]["destructive"], true);
         assert_eq!(rows[2]["attention"], false);
         assert_eq!(a["summary"]["tone"], "danger");
+        // By owner: the known one's rows worst first, the other's apart.
+        let ids = |rows: &Value| -> Vec<String> {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["id"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(ids(&a["owners"]["disks"]), ["a.bad", "a.fine"]);
+        assert_eq!(ids(&a["others"]), ["a.warn"]);
+        assert_eq!(a["owners"].as_object().unwrap().len(), 1);
         findings.ignored.set("a.bad", true).unwrap();
-        let a = findings_answer(&english, &findings, false);
+        let a = findings_answer(&english, &findings, false, &known);
+        assert_eq!(
+            ids(&a["owners"]["disks"]),
+            ["a.fine", "a.bad"],
+            "the ignored last"
+        );
         let rows = a["findings"].as_array().unwrap();
         assert_eq!(rows[2]["id"], "a.bad");
         assert_eq!(rows[2]["ignored"], true);

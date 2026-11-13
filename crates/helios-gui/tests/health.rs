@@ -795,3 +795,85 @@ fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() 
     assert_eq!(found.level, Level::Problem);
     assert_eq!(found.message.key, "health-snapshots-broken");
 }
+
+/// A fake module's check finding `message` at `level`.
+struct Said {
+    id: &'static str,
+    level: Level,
+    message: &'static str,
+}
+
+impl Check for Said {
+    fn id(&self) -> &str {
+        self.id
+    }
+
+    fn title(&self) -> Message {
+        Message::plain(self.id)
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("A fake module's state").levels(&[self.level])
+    }
+
+    fn run(&self, _: &Context) -> Vec<Finding> {
+        vec![Finding::new(
+            self.id,
+            "",
+            self.level,
+            Message::plain(self.message),
+            Message::plain(""),
+        )]
+    }
+}
+
+#[test]
+fn the_page_groups_the_findings_by_their_owner() {
+    let mut registry = Registry::default();
+    let said = |id, level, message| Arc::new(Said { id, level, message }) as Arc<dyn Check>;
+    // Owners the page has a group for (Helios's backups and GPU modules)
+    // and one it has not (a test's).
+    registry
+        .add(
+            "gpu",
+            said("gpu.fake", Level::Ok, "The fake adapter renders"),
+        )
+        .unwrap();
+    registry
+        .add(
+            "backup",
+            said("backup.fake", Level::Warning, "The fake disk is away"),
+        )
+        .unwrap();
+    registry.add("test", Arc::new(Broken)).unwrap();
+    let mut h = checked_by(registry, Context::default());
+    until(&mut h, "the findings", |h| {
+        h.query_by_label_contains("The flux capacitor is unplugged")
+            .is_some()
+    });
+    let y = |label: &str| h.get_by_label_contains(label).rect().center().y;
+    // Each finding under its owner's heading, the groups in the page's
+    // order: Helios's modules, then the other checks.
+    let order = [
+        y("Backups"),
+        y("The fake disk is away"),
+        y("GPU"),
+        y("The fake adapter renders"),
+        y("Other checks"),
+        y("The flux capacitor is unplugged"),
+    ];
+    assert!(order.is_sorted(), "{order:?}");
+    // A module without findings shows no group.
+    assert!(h.query_by_label("Catalogue").is_none());
+    let read = h
+        .state_mut()
+        .run(
+            helios_gui::shell::HEALTH_FINDINGS,
+            serde_json::Value::Null,
+            Origin::User,
+        )
+        .unwrap();
+    assert_eq!(read["owners"]["backup"][0]["id"], "backup.fake");
+    assert_eq!(read["owners"]["gpu"][0]["id"], "gpu.fake");
+    assert_eq!(read["others"][0]["id"], "test.broken");
+}

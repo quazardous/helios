@@ -2413,3 +2413,17 @@ gui-settings-for-library-about = tant que cette bibliothèque est ouverte
 gui-settings-for-workspace = Cet espace de travail
 
 gui-settings-for-workspace-about = tant que cet espace de travail est ouvert
+
+gui-health-owner-storage = Stockage
+
+gui-health-owner-library = Bibliothèque
+
+gui-health-owner-backup = Sauvegardes
+
+gui-health-owner-gpu = GPU
+
+gui-health-owner-plugins = Extensions
+
+gui-health-owner-catalogue = Catalogue
+
+gui-health-owner-other = Autres vérifications
