@@ -299,3 +299,43 @@ fn a_cursor_left_unread_expires_and_the_cache_forgets_it() {
     assert!(cache.get("cursor.window", &page).is_none(), "forgotten");
     assert!(node.service.cursors().is_empty());
 }
+
+/// `library.fields.set` puts a name in and out of a set field, keeping
+/// the others, and `library.fields.get` reads the fields back as stored.
+#[test]
+fn fields_are_set_by_op_and_read_back() {
+    let node = Node::new(with_photos(MemoryStore::default(), 2));
+    let client = node.client("user");
+    let set = |changes: Value| {
+        client
+            .request("library.fields.set", json!({ "changes": changes }))
+            .unwrap()
+    };
+    let image = id(1).hex();
+    set(json!([
+        { "image": image, "field": "labels", "op": "add", "value": "red" },
+        { "image": image, "field": "labels", "op": "add", "value": "blue" },
+        { "image": image, "field": "rating", "value": 4 },
+    ]));
+    set(json!([
+        { "image": image, "field": "labels", "op": "remove", "value": "red" },
+        { "image": image, "field": "rating", "op": "set_if_absent", "value": 1 },
+    ]));
+    let read = client
+        .request(
+            "library.fields.get",
+            json!({ "images": [image, id(2).hex()], "fields": ["labels", "rating"] }),
+        )
+        .unwrap();
+    let rows = read["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{read}");
+    assert_eq!(rows[0]["id"], image);
+    assert_eq!(rows[0]["fields"]["labels"], json!(["blue"]), "{read}");
+    assert_eq!(rows[0]["fields"]["rating"], 4, "{read}");
+    assert!(rows[1]["fields"].get("rating").is_none(), "{read}");
+    let refused = client.request(
+        "library.fields.set",
+        json!({ "changes": [{ "image": image, "field": "labels", "op": "toggle", "value": "red" }] }),
+    );
+    assert!(refused.is_err(), "an unknown op is refused");
+}

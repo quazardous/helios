@@ -82,13 +82,13 @@ fn a_label_toggled_from_a_stale_view_keeps_the_label_another_writer_added() {
     assert!(shell.library().entries[0].labels.is_empty(), "stale view");
     // The user toggles blue: one label added, red kept.
     shell.library_mut().toggle_label("blue").unwrap();
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     assert_eq!(stored(&path, LABELS), Some(json!(["blue", "red"])));
     // And the library now shows both, read back from the vault.
     assert_eq!(shell.library().entries[0].labels, ["red", "blue"]);
     // Toggling blue again takes off blue only.
     shell.library_mut().toggle_label("blue").unwrap();
-    persist.frame(&mut shell, 3.0);
+    persist.frame_settled(&mut shell, 3.0);
     assert_eq!(stored(&path, LABELS), Some(json!(["red"])));
     drop((shell, persist, other));
     let _ = std::fs::remove_dir_all(&dir);
@@ -100,13 +100,13 @@ fn taking_a_reject_back_restores_the_stars() {
     let path = vault_file(&dir);
     let (mut shell, mut persist) = open(&path, &Options::default());
     shell.library_mut().rate(4).unwrap();
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     shell.library_mut().toggle_reject().unwrap();
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     assert_eq!(stored(&path, REJECTED), Some(json!(true)));
     assert_eq!(stored(&path, RATING), Some(json!(4)), "the stars stay");
     shell.library_mut().toggle_reject().unwrap();
-    persist.frame(&mut shell, 3.0);
+    persist.frame_settled(&mut shell, 3.0);
     assert_eq!(stored(&path, REJECTED), None);
     assert_eq!(stored(&path, RATING), Some(json!(4)));
     let entry = shell.library().entries[0].clone();
@@ -129,14 +129,14 @@ fn a_failed_write_puts_the_stored_value_back_and_says_why() {
     };
     let (mut shell, mut persist) = open(&path, &options);
     shell.library_mut().rate(2).unwrap();
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     assert_eq!(stored(&path, RATING), Some(json!(2)));
     // Another process holds the write lock: the next write fails.
     let mut blocker = SqliteStore::open(&path).unwrap();
     blocker.begin().unwrap();
     shell.library_mut().rate(5).unwrap();
     assert_eq!(shell.library().entries[0].rating, 5, "shown at once");
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     let notes = shell.notices();
     let last = notes.last().expect("a notice says why");
     assert!(last.text.contains("Not saved"), "{}", last.text);
@@ -175,7 +175,7 @@ fn a_change_by_another_writer_on_the_bus_shows_in_the_library() {
             1,
         )
         .unwrap();
-    persist.frame(&mut shell, 2.0);
+    persist.frame_settled(&mut shell, 2.0);
     let entry = shell
         .library()
         .entries
@@ -262,7 +262,7 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     );
     // One write, one step.
     set(&shell, 1.0, None);
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     // A drag: saved while it goes, every FLUSH_SECONDS, then at its end.
     let drag = shell
         .values()
@@ -270,22 +270,22 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
     set(&shell, 1.2, Some(drag));
-    persist.frame(&mut shell, 10.2);
+    persist.frame_settled(&mut shell, 10.2);
     set(&shell, 1.4, Some(drag));
-    persist.frame(&mut shell, 10.5);
+    persist.frame_settled(&mut shell, 10.5);
     assert_eq!(saved(persist.bus()).len(), 1, "not yet a second");
-    persist.frame(&mut shell, 11.3);
+    persist.frame_settled(&mut shell, 11.3);
     set(&shell, 1.6, Some(drag));
     shell.values().lock().unwrap().end(drag);
-    persist.frame(&mut shell, 11.4);
+    persist.frame_settled(&mut shell, 11.4);
     // Undo and redo are steps too.
     shell.values().lock().unwrap().undo(&Origin::User).unwrap();
-    persist.frame(&mut shell, 12.0);
+    persist.frame_settled(&mut shell, 12.0);
     assert!((shown(&shell) - 1.0).abs() < 1e-9);
     shell.values().lock().unwrap().redo(&Origin::User).unwrap();
-    persist.frame(&mut shell, 13.0);
+    persist.frame_settled(&mut shell, 13.0);
     // A frame with no step saves nothing.
-    persist.frame(&mut shell, 14.0);
+    persist.frame_settled(&mut shell, 14.0);
     assert_eq!(
         saved(persist.bus()),
         [
@@ -319,7 +319,7 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     assert!((shown(&shell) - 1.6).abs() < 1e-9, "{}", shown(&shell));
     // And the next step continues it.
     set(&shell, 0.5, None);
-    persist.frame(&mut shell, 20.0);
+    persist.frame_settled(&mut shell, 20.0);
     let next = persist.vault().heads(&id(1)).unwrap();
     assert_eq!(next.len(), 1);
     assert_eq!(next[0].parents, [head.id]);
@@ -347,7 +347,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
         .begin_gesture(Origin::User, "drag exposure");
     set(&shell, start + 1.5, Some(drag));
     shell.values().lock().unwrap().end(drag);
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     let mut h = helios_gui::headless::harness(shell, egui::vec2(1280.0, 800.0));
     h.run();
     // Edit > Undo names the step it would take back.
@@ -364,11 +364,11 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run();
     assert!((shown(h.state()) - start).abs() < 1e-9, "the drag undone");
-    persist.frame(h.state_mut(), 11.0);
+    persist.frame_settled(h.state_mut(), 11.0);
     h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
     h.run();
     assert!((shown(h.state()) - (start + 1.5)).abs() < 1e-9, "redone");
-    persist.frame(h.state_mut(), 12.0);
+    persist.frame_settled(h.state_mut(), 12.0);
     assert_eq!(
         saved(persist.bus()),
         [
@@ -454,7 +454,7 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
         mask_tree::rename(&mut store, &net, "spot", "Face", &Origin::User).unwrap();
         mask_tree::set_locked(&mut store, &net, "spot", Some(true), &Origin::User).unwrap();
     }
-    persist.frame(&mut shell, 1.0);
+    persist.frame_settled(&mut shell, 1.0);
     let heads = persist.vault().heads(&id(1)).unwrap();
     assert_eq!(
         heads[0].edit["marks"],
@@ -529,9 +529,9 @@ fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
     open_exposure(&mut shell, &mut persist, 1);
     let start = shown(&shell);
     set(&shell, start + 1.0, None);
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     set(&shell, start + 2.0, None);
-    persist.frame(&mut shell, 11.0);
+    persist.frame_settled(&mut shell, 11.0);
     // The second image goes through the same network: the same paths.
     open_exposure(&mut shell, &mut persist, 2);
     assert!((shown(&shell) - start).abs() < 1e-9);
@@ -545,7 +545,7 @@ fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
         "the first image's value written into the second: {}",
         shown(&shell)
     );
-    persist.frame(&mut shell, 12.0);
+    persist.frame_settled(&mut shell, 12.0);
     assert!(persist.vault().versions(&id(2)).unwrap().is_empty());
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
@@ -575,9 +575,9 @@ fn each_version_names_who_made_its_step() {
     let start = shown(&shell);
     // An agent's write, then the user's undo of it.
     set_by(&shell, start + 1.0, Origin::Agent("retouch".into()));
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     shell.values().lock().unwrap().undo(&Origin::User).unwrap();
-    persist.frame(&mut shell, 11.0);
+    persist.frame_settled(&mut shell, 11.0);
     // A script's drag, saved while it goes and at its end.
     let drag = shell
         .values()
@@ -585,10 +585,10 @@ fn each_version_names_who_made_its_step() {
         .unwrap()
         .begin_gesture(Origin::Script("ramp".into()), "drag exposure");
     set(&shell, start + 0.5, Some(drag));
-    persist.frame(&mut shell, 12.0);
-    persist.frame(&mut shell, 13.5);
+    persist.frame_settled(&mut shell, 12.0);
+    persist.frame_settled(&mut shell, 13.5);
     shell.values().lock().unwrap().end(drag);
-    persist.frame(&mut shell, 14.0);
+    persist.frame_settled(&mut shell, 14.0);
     let vault = persist.vault().clone();
     let head = vault.heads(&id(1)).unwrap().remove(0);
     let history: Vec<(String, String)> = vault
@@ -632,7 +632,7 @@ fn a_long_drag_cancelled_saves_the_values_it_put_back() {
     open_exposure(&mut shell, &mut persist, 1);
     let start = shown(&shell);
     set(&shell, start + 0.5, None);
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     // A drag held for more than a second: saved in progress.
     let drag = shell
         .values()
@@ -640,14 +640,14 @@ fn a_long_drag_cancelled_saves_the_values_it_put_back() {
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
     set(&shell, start + 1.5, Some(drag));
-    persist.frame(&mut shell, 10.2);
-    persist.frame(&mut shell, 11.5);
+    persist.frame_settled(&mut shell, 10.2);
+    persist.frame_settled(&mut shell, 11.5);
     assert_eq!(saved(persist.bus()).len(), 2, "the drag in progress");
     // Escape: the value goes back, and that is what the vault keeps.
     shell.values().lock().unwrap().cancel(drag);
     assert!((shown(&shell) - (start + 0.5)).abs() < 1e-9);
-    persist.frame(&mut shell, 11.6);
-    persist.frame(&mut shell, 12.0);
+    persist.frame_settled(&mut shell, 11.6);
+    persist.frame_settled(&mut shell, 12.0);
     assert_eq!(
         saved(persist.bus()),
         [
@@ -682,7 +682,7 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
         .open_image(&mut shell, id(1), graph.clone(), exp, "output")
         .unwrap();
     set(&shell, 1.0, None);
-    persist.frame(&mut shell, 10.0);
+    persist.frame_settled(&mut shell, 10.0);
     // The network changed in place: `exposure` kept, `lift` added after
     // it.
     let mut next = graph.clone();
@@ -711,7 +711,7 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
         .set_source(next, lift, "output")
         .unwrap();
     persist.follow_graph(&shell);
-    persist.frame(&mut shell, 11.0);
+    persist.frame_settled(&mut shell, 11.0);
     let head = persist.vault().heads(&id(1)).unwrap().remove(0);
     let names: Vec<&str> = head.edit["modules"]
         .as_array()
@@ -734,7 +734,7 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
         .unwrap();
     persist.follow_graph(&shell);
     set(&shell, 1.5, None);
-    persist.frame(&mut shell, 12.0);
+    persist.frame_settled(&mut shell, 12.0);
     assert!(
         shell
             .values()
@@ -800,7 +800,7 @@ fn a_drag_makes_compare_render_again_once_at_its_end() {
         .begin_gesture(Origin::User, "drag exposure");
     for frame in 0..12_u32 {
         set(&shell, start + 0.1 * f64::from(frame + 1), Some(drag));
-        persist.frame(&mut shell, 10.0 + 0.5 * f64::from(frame));
+        persist.frame_settled(&mut shell, 10.0 + 0.5 * f64::from(frame));
         assert_eq!(asked(&shell), 0, "frame {frame}: rendered while dragging");
     }
     assert!(
@@ -811,10 +811,10 @@ fn a_drag_makes_compare_render_again_once_at_its_end() {
     assert!(!shell.library().head_render(&key).unwrap().2);
     // The drag ends: one render, then none until the edit changes again.
     shell.values().lock().unwrap().end(drag);
-    persist.frame(&mut shell, 20.0);
+    persist.frame_settled(&mut shell, 20.0);
     assert!(shell.library().head_render(&key).unwrap().2, "stale");
     land(&shell, "v2");
-    persist.frame(&mut shell, 21.0);
+    persist.frame_settled(&mut shell, 21.0);
     assert_eq!(asked(&shell), 0);
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);

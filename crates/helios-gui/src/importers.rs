@@ -115,6 +115,8 @@ pub fn options(args: &Value) -> Result<Options, String> {
         .get("darktable")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    // Who asked, for the import history.
+    options.origin = text("origin");
     Ok(options)
 }
 

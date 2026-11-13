@@ -215,8 +215,9 @@ fragments: `breaking` bumps the major version (the minor one before 1.0),
 `fixed` and `security` alone bump the patch version.
 
 **Only next's CI counts (decided 2026-11-12).** A pull request from a
-branch of this repository runs no CI: it is tested on the bench box, merged
-into `next`, and the run on `next` decides. A red `next` is fixed by a
+branch of this repository runs no CI: the tester's gate runs its test
+manifest on the bench box and merges it into `next` (docs/next.md), and the
+run on `next` decides. A red `next` is fixed by a
 follow-up pull request. A contributor's pull request from a fork runs the
 full CI, as before.
 
@@ -224,7 +225,8 @@ full CI, as before.
 is prepared by hand and there is no release pull request; the version moves
 only when a release is made:
 
-1. Everything is merged into `next`. When CI passes on a commit of `next`,
+1. Everything reaches `next` through the tester's gate. When CI passes on a
+   commit of `next`,
    `promote.yml` runs `cargo xtask promote` on that exact commit (never on
    whatever `next` points to by then).
 2. When a fragment in `changelog.d/` asks for a release (`release:`), or a

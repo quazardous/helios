@@ -133,9 +133,19 @@ never pulls a whole collection.
   `rating`, `edited`, `size`, `focus`, `id`). Smart-album rules and
   backup filters are not taken yet.
 
-`library.fields.set` (`changes`: `{image, field, value}`, a null value
-clearing the field) writes photos' fields, audited under the call's
-origin and announced as `vault.field_changed`.
+`library.fields.set` (`changes`: `{image, field, value, op}`) writes
+photos' fields, audited under the call's origin and announced as
+`vault.field_changed`. `op` is `set` when not given (a null value
+clears the field), `set_if_absent` (only an empty field), `add` or
+`remove` (the name `value` put in or taken out of a set field, such as
+the colour labels, the others kept). `library.fields.get` (`images`,
+`fields`) reads those fields as stored: `rows` (`id`, `fields`), in the
+order asked.
+
+The desktop's library writes its fields and its stacks' expansion this
+way, on an in-process client of its embedded node: the calls run off
+the UI thread, one write after the other in the order made, and their
+answers are picked up at the next frames.
 
 ## A client cache
 

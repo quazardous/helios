@@ -599,7 +599,14 @@ fn library_commands(
             "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
-        move |args, _| {
+        move |args, origin| {
+            // Who asked, for the import history: the window's imports say
+            // it in their arguments, being run later as the user.
+            let mut args = args.clone();
+            if args.get("origin").is_none() {
+                args["origin"] = json!(helios_gui::persist::who(origin));
+            }
+            let args = &args;
             let options = helios_gui::importers::options(args)?;
             let through = args.get("importer").is_some().then(|| plugins.clone());
             let mut sources: Vec<std::path::PathBuf> = args
@@ -1336,7 +1343,9 @@ impl App {
         quit::requested();
         if let Some(persist) = &mut self.persist {
             let _stall = helios_gui::stall::section("vault written (closing frame)");
-            persist.frame(&mut self.shell, seconds_f64());
+            // The node's answers waited for: nothing changed is left
+            // unwritten as Helios closes.
+            persist.frame_settled(&mut self.shell, seconds_f64());
             quit::mark("vault written (closing frame)");
         }
     }
@@ -1460,6 +1469,12 @@ impl eframe::App for App {
             {
                 let _stall = helios_gui::stall::section("the library's changes sent to the vault");
                 persist.frame(&mut self.shell, seconds_f64());
+            }
+            // A write still with the node: its answer is picked up at a
+            // coming frame.
+            if persist.busy() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(16));
             }
             // A scan changed where copies are (a disk plugged in or
             // out): the photos' badges and thumbnails follow.
@@ -2105,6 +2120,8 @@ fn main() -> Result<(), String> {
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));
+                // The imports recorded, listed in the window to run again.
+                shell.set_import_history(helios_gui::shell::import_history_of(vault.clone()));
                 // An offline folder's photos, as the image map recorded
                 // them, with the thumbnails the library's cache has.
                 shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));

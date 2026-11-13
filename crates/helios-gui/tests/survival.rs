@@ -167,7 +167,7 @@ fn survival_child() {
     let events = persist.bus().subscribe();
     let mut out = std::io::stdout();
     let mut frame = |shell: &mut Shell, persist: &mut Persist<SqliteStore>, now: f64| {
-        persist.frame(shell, now);
+        persist.frame_settled(shell, now);
         while let Ok(e) = events.try_recv() {
             if e.kind == "edit.saved" {
                 writeln!(
