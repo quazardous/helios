@@ -330,3 +330,52 @@ fn a_refused_token_leaves_the_account_needing_a_reconnection() {
         "needs-attention"
     );
 }
+
+#[test]
+fn glances_come_from_the_previews_within_the_declared_limits_expired_addresses_renewed() {
+    let p = Place::new("glance");
+    let a = png(4);
+    let fake = FakePicker::start(1, vec![("m1", "IMG_1.png", false, a.clone())]);
+    let broker = broker(&p.0, &fake.base);
+    let provider = SourceProvider::new(broker, PLUGIN).unwrap();
+    // The manifest declares the previews and the limits the read-ahead
+    // keeps to, the same as the connector's own.
+    let caps = provider.manifest().caps;
+    assert!(caps.thumbnails);
+    assert_eq!(caps.limits, helios_plugin_google_photos::LIMITS);
+    let photos = provider.connector(token(TOKEN));
+    assert_eq!(photos.describe().caps, caps);
+    let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
+    let (source, items) = source::pick_and_list(
+        &photos,
+        &account,
+        Instant::now() + Duration::from_secs(30),
+        &Cancel::new(),
+        &|_| {},
+    )
+    .unwrap()
+    .expect("picked");
+    let item = helios_connect::ItemRef {
+        source,
+        id: items[0].id.clone(),
+    };
+    assert_eq!(photos.thumbnail(&item, 256).unwrap(), Some(a.clone()));
+    // An address past its hour: the picking listed again, then the
+    // preview read at the fresh one.
+    fake.expire_downloads(1);
+    assert_eq!(photos.thumbnail(&item, 256).unwrap(), Some(a));
+    photos.end_pick().unwrap();
+    let requests = fake.requests();
+    let previews = requests
+        .iter()
+        .filter(|r| r.as_str() == "GET /media/m1=w256-h256")
+        .count();
+    assert_eq!(
+        previews, 3,
+        "one, then expired and asked again: {requests:?}"
+    );
+    assert!(
+        !requests.iter().any(|r| r == "GET /media/m1=d"),
+        "{requests:?}"
+    );
+}

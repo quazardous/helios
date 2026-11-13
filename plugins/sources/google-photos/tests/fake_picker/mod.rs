@@ -232,8 +232,12 @@ fn route(method: &str, target: &str, fake: &Fake<'_>) -> (u16, &'static str, Vec
         }
         ("GET", p) if p.starts_with("/media/") => {
             let rest = &p["/media/".len()..];
+            // The original, or a preview (`=w<n>-h<n>`): the same bytes.
             let found = items.iter().find(|(id, _, video, _)| {
                 rest == format!("{id}={}", if *video { "dv" } else { "d" })
+                    || rest
+                        .strip_prefix(&format!("{id}=w"))
+                        .is_some_and(|size| size.contains("-h"))
             });
             match found {
                 Some((.., bytes)) => (200, "application/octet-stream", bytes.clone()),

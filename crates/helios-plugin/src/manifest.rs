@@ -367,6 +367,14 @@ pub struct Manifest {
     /// `picker` (the `import.source` service picks).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub browsers: Vec<String>,
+    /// Its source gives a preview of an item without fetching it
+    /// (`source.thumbnail`): the import window's glances.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub thumbnails: bool,
+    /// What its service lets Helios ask (`[limits]`: `per_minute`,
+    /// `per_day`): the read-ahead of glances pauses there.
+    #[serde(default, skip_serializing_if = "no_limits")]
+    pub limits: helios_connect::Limits,
     /// The plugin's own settings, each under its id (`<id>.<key>`): the
     /// configuration contract's first level.
     #[serde(default)]
@@ -379,6 +387,10 @@ pub struct Manifest {
     pub source: InstanceDecl,
     #[serde(default)]
     pub capabilities: Vec<CapabilityDecl>,
+}
+
+fn no_limits(limits: &helios_connect::Limits) -> bool {
+    *limits == helios_connect::Limits::default()
 }
 
 fn reverse_domain(id: &str) -> bool {
@@ -521,8 +533,15 @@ impl Manifest {
         if !self.connect.is_empty() && !self.services.iter().any(|s| s == "import.source") {
             p.push("`[[connect]]` without the service `import.source`".into());
         }
-        if !self.browsers.is_empty() && !self.services.iter().any(|s| s == "import.source") {
+        let source = self.services.iter().any(|s| s == "import.source");
+        if !self.browsers.is_empty() && !source {
             p.push("`browsers` without the service `import.source`".into());
+        }
+        if (self.thumbnails || !no_limits(&self.limits)) && !source {
+            p.push("`thumbnails` or `[limits]` without the service `import.source`".into());
+        }
+        if self.limits.per_minute == Some(0) || self.limits.per_day == Some(0) {
+            p.push("a limit of 0 requests: leave it out for no limit".into());
         }
         for name in &self.browsers {
             if helios_connect::Browser::from_name(name).is_none() {
@@ -790,6 +809,16 @@ kind = "form"
             "services = [\"import.source\"]\nbrowsers = [\"picker\", \"albums\"]",
             "unknown browser `albums` (known: tree, folder, collections, timeline, picker)",
         );
+        refused(
+            "services = [\"import.source\"]",
+            "services = [\"metadata.read\"]\nthumbnails = true",
+            "`thumbnails` or `[limits]` without the service `import.source`",
+        );
+        refused(
+            "services = [\"import.source\"]",
+            "services = [\"import.source\"]\nlimits = { per_minute = 0 }",
+            "a limit of 0 requests",
+        );
     }
 
     #[test]
@@ -797,6 +826,10 @@ kind = "form"
         let text = include_str!("../../../plugins/sources/google-photos/helios-plugin.toml");
         let m = Manifest::parse(text).unwrap();
         assert_eq!(m.browsers, ["picker"]);
+        // Its glances come from Google's previews, read ahead within its
+        // declared limits.
+        assert!(m.thumbnails);
+        assert!(m.limits.per_minute.is_some() && m.limits.per_day.is_some());
         let p = problems(&SOURCE.replace(
             "services = [\"import.source\"]",
             "services = [\"import.source\"]\nbrowsers = [\"collections\", \"timeline\"]",

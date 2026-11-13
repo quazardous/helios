@@ -13,6 +13,7 @@
 //! | `source.wait` | `auth`, `session`, `timeoutSecs?` | `{ready}`: polled until the person finished picking |
 //! | `source.list` | `auth`, `session`, `cursor?`, `pageSize?` | `{items, next, complete}`, each item with its `download` |
 //! | `source.fetch` | `auth`, `items` (`id`, `path`, `download`), `staging` | `{fetched: [{id, file, bytes, mime}], failed: [{id, code, message}]}` |
+//! | `source.thumbnail` | `auth`, `item` (`id`, `download`), `maxSide`, `staging` | `{file, bytes}`: the item's preview, written into `staging` |
 //! | `source.close` | `auth`, `session` | `{}`: the session deleted |
 //!
 //! A token Google refuses answers -32010 ("sign-in needed"): Helios
@@ -157,6 +158,34 @@ impl Plugin {
         Ok(json!({ "fetched": fetched, "failed": failed }))
     }
 
+    /// An item's preview, written into the staging folder: Google's
+    /// `=w<n>-h<n>` of its `baseUrl`. An expired address answers -32012:
+    /// Helios lists the picking again and asks once more.
+    fn thumbnail(&self, params: &Json) -> Result<Json, Failure> {
+        let picker = self.picker(params)?;
+        let staging = params["staging"]
+            .as_str()
+            .map(Path::new)
+            .ok_or_else(|| (-32602, "`staging` is missing".to_string()))?;
+        let item = &params["item"];
+        let id = item["id"].as_str().unwrap_or_default();
+        let base_url = item["download"]["baseUrl"]
+            .as_str()
+            .ok_or_else(|| (-32602, "no `download`".to_string()))?;
+        let download = Download {
+            base_url: base_url.into(),
+            video: item["download"]["video"].as_bool().unwrap_or(false),
+        };
+        let side = params["maxSide"].as_u64().unwrap_or(256).min(2048) as u32;
+        let bytes = picker
+            .thumbnail(&download, side, &Cancel::new())
+            .map_err(|e| failure(&e))?;
+        let file = staging.join(format!("{}.glance", staged_name(id)));
+        std::fs::write(&file, &bytes)
+            .map_err(|e| failure(&ConnectorError::Fatal(format!("{}: {e}", file.display()))))?;
+        Ok(json!({ "file": file, "bytes": bytes.len() }))
+    }
+
     fn handle(&mut self, method: &str, params: &Json) -> Result<Json, Failure> {
         match method {
             "initialize" => {
@@ -203,6 +232,7 @@ impl Plugin {
                 Ok(json!({ "items": items, "complete": next.is_none(), "next": next }))
             }
             "source.fetch" => self.fetch(params),
+            "source.thumbnail" => self.thumbnail(params),
             "source.close" => {
                 self.picker(params)?
                     .delete(Self::session(params)?)

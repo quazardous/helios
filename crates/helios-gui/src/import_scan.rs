@@ -837,14 +837,14 @@ pub struct Glanced {
 }
 
 impl Glanced {
-    fn bytes(&self) -> u64 {
+    pub(crate) fn bytes(&self) -> u64 {
         let pixels = self.thumb.as_ref().map_or(0, |t| t.pixels.len());
         (pixels * 4 + 128) as u64
     }
 }
 
 /// A glance's key: the file's path, size and modification time.
-type GlanceKey = (PathBuf, u64, Option<i64>);
+pub(crate) type GlanceKey = (PathBuf, u64, Option<i64>);
 
 /// The RAM budget of the glances: 192 MiB, about a thousand previews.
 pub const GLANCE_BUDGET: u64 = 192 << 20;
@@ -958,7 +958,7 @@ impl GlanceCache {
     }
 
     /// Changes when it is cleared or forgotten (room came back).
-    fn generation(&self) -> u64 {
+    pub(crate) fn generation(&self) -> u64 {
         self.generation.load(Ordering::SeqCst)
     }
 
@@ -978,7 +978,7 @@ impl GlanceCache {
     /// disk tier, `on_disk`) takes `next` bytes more on top of the glances
     /// shown and the `own` the scan prefetched, without evicting a glance
     /// shown. Each is (own, next) in bytes.
-    fn room(&self, ram: (u64, u64), on_disk: Option<(u64, u64)>) -> bool {
+    pub(crate) fn room(&self, ram: (u64, u64), on_disk: Option<(u64, u64)>) -> bool {
         let shown = lock(&self.index).shown_bytes;
         let fits = |used: u64, (own, next): (u64, u64), budget: u64| {
             used.saturating_add(own).saturating_add(next) <= helios_cache::eviction_target(budget)
@@ -992,7 +992,7 @@ impl GlanceCache {
 
     /// The glance kept on disk under `on_disk`, put in RAM under `key`;
     /// read, not used: a prefetched glance stays prefetched.
-    fn disk_glance(&self, on_disk: &str, key: GlanceKey) -> Option<Arc<Glanced>> {
+    pub(crate) fn disk_glance(&self, on_disk: &str, key: GlanceKey) -> Option<Arc<Glanced>> {
         let disk = self.disk()?;
         let bytes = disk.read(on_disk.as_bytes())?;
         let Some(glanced) = decode_glance(&bytes) else {
@@ -1013,7 +1013,7 @@ impl GlanceCache {
     /// already shown stays shown); an entry already there is replaced only
     /// by a better one (a larger preview, a capture time or a camera it
     /// lacks). The bytes written.
-    fn keep_on_disk(&self, on_disk: &str, glanced: &Glanced) -> u64 {
+    pub(crate) fn keep_on_disk(&self, on_disk: &str, glanced: &Glanced) -> u64 {
         let Some(disk) = self.disk() else { return 0 };
         let key = on_disk.as_bytes();
         if let Some(old) = disk.peek(key).as_deref().and_then(glance_header) {
@@ -1095,7 +1095,12 @@ impl GlanceCache {
         }
     }
 
-    fn get(&self, key: &GlanceKey) -> Option<Arc<Glanced>> {
+    /// Whether `key` is kept in RAM: not a use, not counted.
+    pub(crate) fn holds(&self, key: &GlanceKey) -> bool {
+        lock(&self.index).entries.contains_key(key)
+    }
+
+    pub(crate) fn get(&self, key: &GlanceKey) -> Option<Arc<Glanced>> {
         let mut index = lock(&self.index);
         let now = index.tick();
         let hit = index.entries.get(key).map(|(g, _)| g.clone());
@@ -1119,7 +1124,7 @@ impl GlanceCache {
     /// Keeps `glanced` under `key`, prefetched (a glance shown before
     /// stays shown), with its key on disk; then evicts down to 90 % of the
     /// budget when over it, prefetched glances first.
-    fn put_as(
+    pub(crate) fn put_as(
         &self,
         key: GlanceKey,
         glanced: Arc<Glanced>,
