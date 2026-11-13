@@ -91,6 +91,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("helios.window.main", "phosphor:app-window"),
     ("help.health", "phosphor:first-aid"),
     ("import.addSource", "phosphor:folder-plus"),
+    ("import.disconnect", "phosphor:plugs"),
     ("import.reconnect", "phosphor:plugs-connected"),
     ("keymap.package", "phosphor:package"),
     ("keymap.package.remove", "delete"),
