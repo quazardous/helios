@@ -1389,13 +1389,20 @@ fn attach(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        let stray = stray_values(app, admin, WORKSPACE.scope, values);
+        let (stray, kept): (BTreeMap<_, _>, BTreeMap<_, _>) = values
+            .into_iter()
+            .partition(|(k, _)| stray(app, admin, WORKSPACE.scope, k));
         if !stray.is_empty() {
             let to_app = stray.iter().map(|(k, v)| (k.clone(), Some(v.clone())));
-            let gone = stray.keys().map(|k| (k.clone(), None));
+            // The file is written whole: the composite would route a
+            // Helios setting's removal to a store without this scope.
             let saved = store
                 .save(ValueScope::App, &to_app.collect())
-                .and_then(|()| store.save(WORKSPACE.scope, &gone.collect()));
+                .and_then(|()| {
+                    let text = serde_json::to_string_pretty(&kept).map_err(|e| e.to_string())?;
+                    std::fs::write(file, text + "\n")
+                        .map_err(|e| format!("{}: {e}", file.display()))
+                });
             match saved {
                 Ok(()) => {
                     for key in stray.keys() {
@@ -1412,22 +1419,12 @@ fn attach(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
     admin.attach_store(store);
 }
 
-/// The values of a scope's layer for settings that do not opt into it.
-fn stray_values(
-    app: &AppHandle,
-    admin: &Admin,
-    scope: ValueScope,
-    values: BTreeMap<String, Json>,
-) -> BTreeMap<String, Json> {
-    values
-        .into_iter()
-        .filter(|(k, _)| {
-            SettingId::new(k).is_ok_and(|id| {
-                egui_pop::core::lock(&app.store()).get(&id.path()).is_some()
-                    && !admin.allows(app, &id, scope)
-            })
-        })
-        .collect()
+/// Whether a known setting does not opt into a scope.
+fn stray(app: &AppHandle, admin: &Admin, scope: ValueScope, key: &str) -> bool {
+    SettingId::new(key).is_ok_and(|id| {
+        egui_pop::core::lock(&app.store()).get(&id.path()).is_some()
+            && !admin.allows(app, &id, scope)
+    })
 }
 
 /// Every setting's `app` value, as the Settings app holds it.
