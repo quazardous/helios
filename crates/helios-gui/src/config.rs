@@ -441,6 +441,24 @@ pub fn scopes(concern: Concern) -> &'static [ValueScope] {
     }
 }
 
+/// The settings offered in the quick settings (egui-pop's `admin.quick`),
+/// in this order: the few a person changes often, without opening
+/// Settings. Those the person changed lately follow them.
+pub const QUICK: &[&str] = &[
+    "appearance.theme_preference",
+    "appearance.interface_zoom",
+    "appearance.text_size",
+    "appearance.language",
+    "appearance.accent_color",
+    "display.wide-gamut-preview",
+    "interface.graph.zoom",
+    "interface.panels.queue_when_empty",
+    "project.decisions.mode",
+    "system.ai.calls",
+    "notifications.jobs",
+    "interface.experimental.workshops",
+];
+
 /// Where each declared setting goes: scope and section.
 pub const PLACES: &[(&str, &[&str])] = &[
     (
@@ -533,7 +551,8 @@ pub fn manifest(
         .scope_at("accounts", &tt("accounts"), "unlock", 60)
         .scope_at("plugins", &tt("plugins"), "phosphor:puzzle-piece", 65)
         .scope_at("hardware", &tt("hardware"), "command", 70)
-        .scope_at("health", &tt("health"), "success", 90);
+        .scope_at("health", &tt("health"), "success", 90)
+        .quick(QUICK);
     m = m.section("storage/volumes", &tt("storage/volumes"), |s| {
         volumes_section(s, t);
     });
