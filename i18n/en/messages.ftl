@@ -1519,11 +1519,31 @@ gui-size-kib = { $size } KiB
 
 gui-size-mib = { $size } MiB
 
+gui-smart-camera = camera (contains)
+
+gui-smart-file-type = file type
+
+gui-smart-flag = flag
+
+gui-smart-folder = folder (absolute)
+
+gui-smart-label = colour label
+
+gui-smart-match = match
+
 gui-smart-new-title = New smart album
+
+gui-smart-rating = at least (stars)
 
 gui-smart-rules-title = The smart album's rules
 
 gui-smart-rules-verb = Apply
+
+gui-smart-tag = tag
+
+gui-smart-taken-from = taken from (YYYY-MM-DD)
+
+gui-smart-taken-to = taken to (YYYY-MM-DD)
 
 gui-snapshot-failed = snapshot failed: { $error }
 
