@@ -405,7 +405,9 @@ impl std::error::Error for Unanswered {
 /// Whether `error` is a request's that was sent and never answered
 /// ([`Unanswered`]): its outcome is unknown.
 pub fn unanswered(error: &io::Error) -> bool {
-    error.get_ref().is_some_and(|e| e.is::<Unanswered>())
+    error
+        .get_ref()
+        .is_some_and(<dyn std::error::Error + Send + Sync>::is::<Unanswered>)
 }
 
 /// `error`, read after the request was sent, marked [`Unanswered`].
