@@ -577,7 +577,7 @@ fn a_held_photo_is_accepted_and_the_held_ones_rerun() {
     assert_eq!(left, o.held.len() - 1, "{a}");
     let started = review(&lib, json!({ "run": "run", "action": "rerun" }), "user").unwrap();
     let id = started["run"].as_str().unwrap().to_string();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(2);
     let record = loop {
         if let Some(r) = lib.vault.workshop_run(&id).unwrap() {
             break r;
