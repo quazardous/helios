@@ -1,12 +1,14 @@
 //! Helios's own settings (`helios-config`) in the Settings app: placed
 //! once in Helios's scopes, each with the value scopes of its concern,
 //! read from their layers (the library's as `library`, `--set` as the
-//! command line's) and written back to the layer they belong to; a
-//! layer another client of the node changes is read again. A setting is
+//! command line's) and saved through the store Helios gives the Settings
+//! app to the layer they belong to; a layer another client of the node
+//! changes is read again. A setting is
 //! app-wide unless it opts into Helios's library or workspace scope, and
 //! a value stored at a scope it no longer allows moves to the app's.
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use egui::vec2;
 use egui_kittest::kittest::Queryable;
@@ -14,12 +16,58 @@ use egui_pop::api::admin::ADMIN;
 use egui_pop::api::admin::model::ValueScope;
 use egui_pop::model::ids::SettingId;
 use helios_gui::config::LIBRARY;
-use helios_gui::config::{self, Settings, Sources};
+use helios_gui::config::{self, NodeLayers, Settings, Sources};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
 use serde_json::json;
 
-type Written = Arc<Mutex<Vec<(String, String)>>>;
+/// The node's layers in memory, every write recorded.
+#[derive(Default)]
+struct Written(Mutex<Vec<(String, String)>>);
+
+impl NodeLayers for Written {
+    fn read(&self, name: &str) -> Result<Option<String>, String> {
+        Ok(self.last(name))
+    }
+
+    fn write(&self, name: &str, text: &str) -> Result<(), String> {
+        self.0.lock().unwrap().push((name.into(), text.into()));
+        Ok(())
+    }
+}
+
+impl Written {
+    fn last(&self, name: &str) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, t)| t.clone())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.lock().unwrap().is_empty()
+    }
+}
+
+/// Runs passes until the Settings app's saves have reached the store.
+fn saved(h: &mut egui_kittest::Harness<'_, Shell>) {
+    let admin = h.state().app().handle().service(&ADMIN).unwrap();
+    let end = Instant::now() + Duration::from_secs(30);
+    h.run();
+    while admin.saving() {
+        assert!(Instant::now() < end, "not saved in 30 s");
+        std::thread::sleep(Duration::from_millis(10));
+        h.run();
+    }
+    assert!(
+        admin.store_errors().is_empty(),
+        "{:?}",
+        admin.store_errors()
+    );
+}
 
 #[test]
 fn helios_settings_are_placed_read_and_written_to_their_layer() {
@@ -28,8 +76,7 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
     h.run();
     let dir = std::env::temp_dir().join(format!("helios-settings-app-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let written: Written = Arc::default();
-    let sink = written.clone();
+    let written = Arc::new(Written::default());
     let settings = Settings::resolve(&Sources {
         global: Some("[system.ai]\ncalls = 4\n".into()),
         project: Some((
@@ -40,17 +87,10 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
         run: vec![("system.scheduler.workers".into(), "8".into())],
     });
     let app = h.state().app().handle().clone();
-    config::install(
-        &app,
-        settings,
-        Some(Box::new(move |name: &str, text: &str| {
-            sink.lock().unwrap().push((name.into(), text.into()));
-            Ok(())
-        })),
-        &dir,
-    );
+    config::install(&app, settings, Some(written.clone()), &dir);
     h.run();
     let admin = app.service(&ADMIN).unwrap();
+    assert!(admin.has_store());
 
     // Placed once, in Helios's scopes, Developer still last.
     let tree = admin.tree(&app);
@@ -112,10 +152,8 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
         ValueScope::Run
     );
     assert!(admin.offered().contains(&LIBRARY.scope));
-    assert!(
-        written.lock().unwrap().is_empty(),
-        "nothing written by reading"
-    );
+    saved(&mut h);
+    assert!(written.is_empty(), "nothing written by reading");
 
     // Edits go back to the layer of their concern.
     let mut set = |key: &str, scope: &str, value: serde_json::Value| {
@@ -126,25 +164,22 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
                 Origin::User,
             )
             .unwrap();
-        h.run();
-        h.run();
+        saved(&mut h);
     };
     set("system.ai.calls", "app", json!(6));
     let global = std::fs::read_to_string(dir.join(config::GLOBAL_FILE)).unwrap();
     assert!(global.contains("calls = 6"), "{global}");
     set("project.decisions.mode", "library", json!("full_ai"));
     set("interface.graph.zoom", "app", json!("detail"));
-    let written = written.lock().unwrap().clone();
-    let last = |name: &str| {
-        written
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, t)| t.clone())
-    };
-    assert!(last("project//photos").unwrap().contains("full_ai"));
+    assert!(written.last("project//photos").unwrap().contains("full_ai"));
     // Back to its default: the person's layer holds nothing any more.
-    assert!(!last("user").unwrap().contains("zoom"));
+    assert!(!written.last("user").unwrap().contains("zoom"));
+    // The interface's own settings go to their file in the folder given.
+    set("display.wide-gamut-preview", "app", json!(true));
+    let interface: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(config::INTERFACE_FILE)).unwrap())
+            .unwrap();
+    assert_eq!(interface["display.wide-gamut-preview"], json!(true));
     // No workspace is open: its value scope is refused.
     let refused = h.state_mut().run(
         "admin.set",
@@ -233,8 +268,6 @@ fn the_search_lands_on_a_shortcut_and_every_setting_shows_once() {
 /// the desktop writes nothing back.
 #[test]
 fn a_layer_another_client_of_the_node_changes_is_read_again() {
-    use std::time::{Duration, Instant};
-
     use helios_node_core::node::LocalNode;
     use helios_vault_sqlite::SqliteStore;
 
@@ -259,21 +292,15 @@ fn a_layer_another_client_of_the_node_changes_is_read_again() {
     let mine = node.settings();
     let (sources, problems) = config::read(&dir, &|n| mine.read(n), Some(project.into()), &[]);
     assert!(problems.is_empty(), "{problems:?}");
-    let written: Written = Arc::default();
-    let sink = written.clone();
-    let writer = node.settings();
-    config::install(
+    let kept = config::install(
         &app,
         Settings::resolve(&sources),
-        Some(Box::new(move |name: &str, text: &str| {
-            sink.lock().unwrap().push((name.into(), text.into()));
-            writer.write(name, text)
-        })),
+        Some(Arc::new(node.settings())),
         &dir,
     );
-    let reader = node.settings();
-    config::follow(&app, heard, Box::new(move |n| reader.read(n)), || {});
-    h.run();
+    kept.follow(heard);
+    saved(&mut h);
+    let user_before = mine.read("user").unwrap();
     let id = |k: &str| SettingId::new(k).unwrap();
     let zoom = |app: &egui_pop::api::AppHandle| app.setting::<String>(&id("interface.graph.zoom"));
     assert_eq!(zoom(&app).as_deref(), Some("overview"));
@@ -305,14 +332,15 @@ fn a_layer_another_client_of_the_node_changes_is_read_again() {
         admin.layers().origin("settings/project.decisions.mode"),
         LIBRARY.scope
     );
-    assert!(
-        written.lock().unwrap().is_empty(),
-        "nothing written back by reading: {:?}",
-        written.lock().unwrap()
-    );
+    saved(&mut h);
     assert!(
         mine.read("user").unwrap().unwrap().contains("detail"),
         "the other client's change stays"
+    );
+    assert_ne!(mine.read("user").unwrap(), user_before);
+    assert!(
+        !dir.join(config::GLOBAL_FILE).exists(),
+        "nothing written back by reading"
     );
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
@@ -326,8 +354,13 @@ fn only_a_setting_that_opts_into_a_scope_offers_set_for_and_a_stray_value_moves_
     let dir = std::env::temp_dir().join(format!("helios-settings-scopes-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    // A library value of an app-wide setting, left by an older program:
+    // read as the app's; the library's own defaults stay in its layer.
     let settings = Settings::resolve(&Sources {
-        project: Some(("project//photos".into(), None)),
+        project: Some((
+            "project//photos".into(),
+            Some("[system.ai]\ncalls = 5\n[project.decisions]\nmode = \"full_ai\"\n".into()),
+        )),
         ..Sources::default()
     });
     let app = h.state().app().handle().clone();
@@ -350,34 +383,24 @@ fn only_a_setting_that_opts_into_a_scope_offers_set_for_and_a_stray_value_moves_
     assert!(!admin.allows(&app, &id("system.ai.calls"), LIBRARY.scope));
 
     // The stray workspace values moved to the app's, out of the file.
-    assert!(admin.export_layer(config::WORKSPACE.scope).is_empty());
+    saved(&mut h);
     assert_eq!(app.setting::<f64>(&id("system.cache.share")), Some(12.5));
     assert_eq!(
-        app.setting::<String>(&id("project.decisions.mode"))
-            .as_deref(),
-        Some("human")
+        admin.layers().origin("settings/project.decisions.mode"),
+        LIBRARY.scope
     );
     assert_eq!(
         admin.layers().origin("settings/system.cache.share"),
         ValueScope::App
     );
-    let saved: serde_json::Value =
+    // The project setting's workspace value is now its app value, in
+    // the machine's file.
+    let global = std::fs::read_to_string(dir.join(config::GLOBAL_FILE)).unwrap();
+    assert!(global.contains("human"), "{global}");
+    let left: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!(saved, json!({}), "the workspace saved without them");
+    assert_eq!(left, json!({}), "the workspace saved without them");
 
-    // A library value of an app-wide setting moves the same way; the
-    // library's own defaults stay in its layer.
-    let moved = config::load_scope(
-        &app,
-        &admin,
-        LIBRARY.scope,
-        [
-            ("system.ai.calls".to_string(), json!(5)),
-            ("project.decisions.mode".to_string(), json!("full_ai")),
-        ]
-        .into(),
-    );
-    assert_eq!(moved, ["system.ai.calls"]);
     assert_eq!(app.setting::<i64>(&id("system.ai.calls")), Some(5));
     assert_eq!(
         admin.layers().origin("settings/system.ai.calls"),

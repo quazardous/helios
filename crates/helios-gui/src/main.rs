@@ -1781,7 +1781,7 @@ fn main() -> Result<(), String> {
     let config = helios_gui::shell::config_dir();
     let node_settings = node.as_ref().map(LocalNode::settings);
     // Heard from before they are read: a layer another client of the
-    // node changes from now on is read again (`config::follow`).
+    // node changes from now on is read again (`NodeSettingsStore::follow`).
     let layer_events = persist.as_ref().map(|p| p.bus().subscribe());
     let settings = {
         let (sources, problems) = helios_gui::config::read(
@@ -1965,26 +1965,18 @@ fn main() -> Result<(), String> {
             shell.library_mut().set_texture_budget(texture_budget);
             // The render cache's budget (`system.cache.budget` / `share`).
             helios_gui::caches::apply_settings(&shell, &settings);
-            helios_gui::config::install(
+            // Helios's settings kept through the node, followed live: a
+            // layer another client changes reaches the Settings window.
+            let kept = helios_gui::config::install(
                 shell.app().handle(),
                 settings.clone(),
-                node_settings.clone().map(|n| {
-                    Box::new(move |name: &str, text: &str| n.write(name, text))
-                        as helios_gui::config::VaultWriter
-                }),
+                node_settings
+                    .clone()
+                    .map(|n| Arc::new(n) as Arc<dyn helios_gui::config::NodeLayers>),
                 &settings_dir,
             );
-            if let Some((heard, layers)) = layer_events.zip(node_settings.clone()) {
-                helios_gui::config::follow(
-                    shell.app().handle(),
-                    heard,
-                    Box::new(move |name: &str| layers.read(name)),
-                    || {
-                        if let Some(window) = WINDOW.get() {
-                            window.request_repaint();
-                        }
-                    },
-                );
+            if let Some(heard) = layer_events {
+                kept.follow(heard);
             }
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
