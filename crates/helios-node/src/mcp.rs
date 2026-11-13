@@ -3913,9 +3913,18 @@ mod tests {
         assert_eq!(undo["scope"], "window");
         assert_eq!(undo["enabled"], false);
         assert_eq!(undo["disabledReason"], "Does not apply here (canUndo)");
+        // `enabled_only` leaves the greyed window command out.
+        let (_, matched) = tool("helios_commands_list", json!({ "filter": "edit.undo" }));
+        let ids: Vec<&Value> = matched["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| &c["id"])
+            .collect();
+        assert_eq!(ids, [&json!("edit.undo")], "{matched}");
         let (_, only) = tool(
             "helios_commands_list",
-            json!({ "filter": "edit", "enabled_only": true }),
+            json!({ "filter": "edit.undo", "enabled_only": true }),
         );
         assert_eq!(only["commands"], json!([]), "{only}");
 

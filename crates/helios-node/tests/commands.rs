@@ -106,12 +106,23 @@ fn the_list_has_every_verb_with_its_schema_and_state() {
     let list = node.batch(&["commands"]);
     assert_eq!(list["ok"], true, "{list}");
     let commands = list["commands"].as_array().unwrap();
-    // The control verbs, then the library's commands.
-    assert_eq!(
-        commands.len(),
-        32 + helios_node::library::IDS.len(),
-        "{list}"
-    );
+    // Every command of the node's registry (its control verbs, the
+    // library's and calibration's commands), once each: counted from the
+    // registry, so a module that registers commands keeps this true.
+    let listed: Vec<&str> = commands.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    let registered: Vec<&str> = helios_node::commands::registry()
+        .specs()
+        .map(|s| s.id.as_str())
+        .collect();
+    assert_eq!(listed.len(), registered.len(), "{list}");
+    for id in registered
+        .iter()
+        .copied()
+        .chain(helios_node::library::IDS.iter().copied())
+        .chain(helios_node::calibrate::PROFILE_IDS.iter().copied())
+    {
+        assert!(listed.contains(&id), "{id} missing from {list}");
+    }
     for c in commands {
         assert_eq!(c["params"]["type"], "object", "{c}");
         assert!(c["label"].as_str().is_some_and(|l| !l.is_empty()), "{c}");
