@@ -10,12 +10,15 @@
 //!    of that release into `next` whose first parent is the validated
 //!    commit. Without such a merge, nothing is promoted: the next green run
 //!    on `next` does it.
-//! 2. With user-facing fragments in the base, the release is written as
-//!    `cargo xtask release` writes it, Cargo.lock is refreshed
+//! 2. When a fragment in the base asks for a release (`release: patch`,
+//!    `minor` or `major`), or a user-facing fragment has waited
+//!    [`FALLBACK_DAYS`] without one, the release of every pending fragment
+//!    is written as `cargo xtask release` writes it, Cargo.lock is refreshed
 //!    (`cargo update --workspace`) and the result is committed as
-//!    "Release X.Y.Z", the base its parent. The survival scenarios are not
-//!    run again: CI ran them on the validated commit, and the release
-//!    changes no code.
+//!    "Release X.Y.Z", the base its parent. Otherwise the commit alone is
+//!    promoted and the fragments wait. The survival scenarios are not run
+//!    again: CI ran them on the validated commit, and the release changes
+//!    no code. The workflow then tags `vX.Y.Z` and publishes it.
 //! 3. The commit to promote must differ from the validated one by a version
 //!    bump only ([`bump_problems`]): Cargo.toml's workspace version, the
 //!    in-tree plugins' Helios range, CHANGELOG.md, the `AppStream`
@@ -36,6 +39,10 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 
 pub const USAGE: &str = "promote <SHA> [--remote NAME]";
+
+/// How long a user-facing fragment waits for a release asked for: past
+/// that, the next promotion releases whatever is pending.
+pub const FALLBACK_DAYS: i64 = 7;
 
 /// What a promotion did.
 #[derive(Debug, PartialEq, Eq)]
@@ -81,8 +88,11 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             next,
         }) => {
             let mut text = format!("main is now {main}");
-            if let Some(v) = release {
+            if let Some(v) = &release {
                 let _ = write!(text, ", \"Release {v}\" on top of {sha}");
+                // promote.yml tags and publishes it
+                output("release", v);
+                output("commit", &main);
             }
             match next {
                 Next::Untouched => text.push_str("; next already held it"),
@@ -103,6 +113,16 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         Err(e) => (e, false),
     };
     Some(report(&text, ok))
+}
+
+/// A step output of the workflow (`GITHUB_OUTPUT`), when there is one.
+fn output(key: &str, value: &str) {
+    if let Some(path) = std::env::var_os("GITHUB_OUTPUT") {
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(path) {
+            let _ = writeln!(f, "{key}={value}");
+        }
+    }
 }
 
 fn report(text: &str, ok: bool) -> ExitCode {
@@ -218,8 +238,14 @@ pub fn promote(
     };
     git(dir, &["checkout", "-q", "--detach", &base])?;
 
-    // The release of the base's fragments.
-    let release = match crate::plan(dir, date) {
+    // The release of the base's fragments: when one asks for it, or when
+    // one has waited too long.
+    let gate = if waited_too_long(dir, &base)? {
+        crate::Gate::Always
+    } else {
+        crate::Gate::Asked
+    };
+    let release = match crate::plan(dir, date, gate) {
         Err(problems) => return Err(problems.join("; ")),
         Ok(None) => None,
         Ok(Some(plan)) => {
@@ -317,6 +343,33 @@ pub fn promote(
         release,
         next: next_followed,
     })
+}
+
+/// Whether a user-facing fragment of `base` was added [`FALLBACK_DAYS`] or
+/// more before `base` itself was committed (commit times, so the answer is
+/// the same whenever the promotion runs).
+fn waited_too_long(dir: &Path, base: &str) -> Result<bool, String> {
+    let time = |args: &[&str]| -> Result<Option<i64>, String> {
+        Ok(git(dir, args)?
+            .lines()
+            .last()
+            .and_then(|l| l.trim().parse().ok()))
+    };
+    let Some(now) = time(&["log", "-1", "--format=%ct", base])? else {
+        return Ok(false);
+    };
+    let Ok(fragments) = crate::read_fragments(&dir.join("changelog.d")) else {
+        return Ok(false);
+    };
+    for f in fragments.iter().filter(|f| f.kind != crate::Kind::Internal) {
+        let path = format!("changelog.d/{}", f.name);
+        // the oldest commit that added it, on the base's history
+        let added = time(&["log", "--diff-filter=A", "--format=%ct", base, "--", &path])?;
+        if added.is_some_and(|t| now - t >= FALLBACK_DAYS * 86_400) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// [`bump_problems`] on the commits `from` and `to` of the checkout `dir`.
@@ -534,6 +587,28 @@ mod tests {
             sh(&self.work, &["rev-parse", "HEAD"])
         }
 
+        /// [`Repo::land`], committed at `date` (`git`'s date format).
+        fn land_at(&self, path: &str, text: &str, date: &str) -> String {
+            sh(&self.work, &["fetch", "-q", "origin"]);
+            sh(&self.work, &["checkout", "-q", "--detach", "origin/next"]);
+            write(&self.work, path, text);
+            sh(&self.work, &["add", "-A"]);
+            let ok = Command::new("git")
+                .args(["commit", "-q", "-m", &format!("add {path}")])
+                .env("GIT_COMMITTER_DATE", date)
+                .env("GIT_AUTHOR_DATE", date)
+                .current_dir(&self.work)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok);
+            sh(
+                &self.work,
+                &["push", "-q", "origin", "HEAD:refs/heads/next"],
+            );
+            sh(&self.work, &["rev-parse", "HEAD"])
+        }
+
         /// The runner's checkout of a validated commit.
         fn checkout(&self, sha: &str) -> PathBuf {
             let dir = self.top.join(format!("ci-{}", &sha[..8]));
@@ -583,8 +658,8 @@ mod tests {
         std::fs::write(p, text).unwrap();
     }
 
-    const ADDED: &str = "kind: added\n\nA new panel.\n";
-    const FIXED: &str = "kind: fixed\n\nExports no longer stop.\n";
+    const ADDED: &str = "kind: added\nrelease: minor\n\nA new panel.\n";
+    const FIXED: &str = "kind: fixed\nrelease: patch\n\nExports no longer stop.\n";
 
     #[test]
     fn fragments_make_a_release_commit_on_the_validated_commit() {
@@ -669,6 +744,77 @@ mod tests {
         assert!(
             repo.show("main", "Cargo.toml")
                 .contains("version = \"0.1.0\"")
+        );
+    }
+
+    #[test]
+    fn fragments_that_ask_for_no_release_wait_and_the_commit_alone_moves() {
+        let repo = Repo::new("wait");
+        let v = repo.land("changelog.d/panel.md", "kind: added\n\nA new panel.\n");
+        let dir = repo.checkout(&v);
+        let out = promote(&dir, "origin", &v, "2026-11-13", &ok_refresh).unwrap();
+        assert_eq!(
+            out,
+            Outcome::Promoted {
+                main: v.clone(),
+                release: None,
+                next: Next::Untouched,
+            }
+        );
+        assert!(
+            repo.show("main", "Cargo.toml")
+                .contains("version = \"0.1.0\"")
+        );
+        // A later fragment asking for a patch releases both, at the level
+        // the stronger change calls for.
+        let n = repo.land("changelog.d/export.md", FIXED);
+        let dir = repo.checkout(&n);
+        let out = promote(&dir, "origin", &n, "2026-11-13", &ok_refresh).unwrap();
+        let Outcome::Promoted {
+            release: Some(r), ..
+        } = out
+        else {
+            panic!("{out:?}")
+        };
+        assert_eq!(r, "0.2.0");
+        let log = repo.show("main", "CHANGELOG.md");
+        assert!(log.contains("- A new panel.") && log.contains("- Exports no longer stop."));
+    }
+
+    #[test]
+    fn a_fragment_waiting_a_week_is_released_anyway() {
+        let repo = Repo::new("fallback");
+        repo.land_at(
+            "changelog.d/panel.md",
+            "kind: fixed\n\nA fix.\n",
+            "2026-11-01T12:00:00Z",
+        );
+        let v = repo.land_at("src.txt", "later\n", "2026-11-09T12:00:00Z");
+        let dir = repo.checkout(&v);
+        let out = promote(&dir, "origin", &v, "2026-11-09", &ok_refresh).unwrap();
+        let Outcome::Promoted {
+            release: Some(r), ..
+        } = out
+        else {
+            panic!("{out:?}")
+        };
+        assert_eq!(r, "0.1.1");
+    }
+
+    #[test]
+    fn a_fragment_waiting_less_than_a_week_still_waits() {
+        let repo = Repo::new("fresh");
+        repo.land_at(
+            "changelog.d/panel.md",
+            "kind: fixed\n\nA fix.\n",
+            "2026-11-05T12:00:00Z",
+        );
+        let v = repo.land_at("src.txt", "later\n", "2026-11-09T12:00:00Z");
+        let dir = repo.checkout(&v);
+        let out = promote(&dir, "origin", &v, "2026-11-09", &ok_refresh).unwrap();
+        assert!(
+            matches!(out, Outcome::Promoted { release: None, .. }),
+            "{out:?}"
         );
     }
 
