@@ -68,7 +68,8 @@ pub fn defaults() -> Vec<(String, String, String)> {
     let (library, culling, image, viewport) = (library(), culling(), image(), viewport());
     // Culling, in the library and while culling: digits rate (top row
     // and keypad alike), R toggles the reject (darktable), P, X and U
-    // flag (Lightroom), F2 to F5 and 6 to 9 label. F1 stays the palette's
+    // flag (Lightroom), F2 to F5 and 6 to 9 label, B puts the selection
+    // in or out of the quick collection (Lightroom). F1 stays the palette's
     // (egui-pop's): its red is 6, or F1 with the darktable package.
     let mut culling_keys: Vec<(String, String)> = (0..=5)
         .map(|n| (n.to_string(), format!("vault.rate.{n}")))
@@ -89,6 +90,8 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Right", "vault.next"),
         ("Left", "vault.previous"),
         ("S", "vault.stack.toggle"),
+        // The quick collection, as Lightroom's B.
+        ("B", crate::library::QUICK_TOGGLE_COMMAND),
     ] {
         culling_keys.push((k.into(), command.into()));
     }

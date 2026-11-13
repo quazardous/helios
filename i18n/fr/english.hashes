@@ -133,7 +133,7 @@ command-keymap-package.title dafef66dd3b9bf88
 command-library-collection-add.title bc2b88d961d3487b
 command-library-collection-create.title 4e9991f0a7f08f9d
 command-library-collection-delete.title c37879e580c9448a
-command-library-collection-list.title 25ecdd9ad1c732a9
+command-library-collection-list.title 8c46cea022ccd74d
 command-library-collection-remove.title 7045a731045beddc
 command-library-collection-rename.title 7c0e951da68a2f8f
 command-library-collection-rules-edit.title d274b6e5ffb58cd9
@@ -149,6 +149,9 @@ command-library-importWindow.title 5cf073c01aa7d73f
 command-library-importWith.title 8da42d005844e0c1
 command-library-openFolder.title 79525ab3a42262e5
 command-library-pasteFiles.title 409587651f782f9a
+command-library-quick-clear.title 1c4b266b7b1ccc5c
+command-library-quick-saveAs.title 81d31076888b75b1
+command-library-quick-toggle.title 1b2258b0758413c4
 command-library-scanFolder.title 65e0df53774b720b
 command-library-sort.title ac723c2319de076f
 command-library-storage.title 72ca240c73a1c7aa
@@ -502,6 +505,10 @@ gui-history-import 54b5fc5f7ff45a8e
 gui-history-preview-applied e4ec2cb3e00f5ea8
 gui-history-preview-bypassed 02942dd0aa53a222
 gui-history-preview-param e503ef0b7a4a3ed8
+gui-history-quick-add 37804b1c3cec7307
+gui-history-quick-clear 9b52b03e469d7bac
+gui-history-quick-remove 334339e3707ea6b9
+gui-history-quick-save d55f15e5e5aec98e
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-undo cc7022a2d9050a57
 gui-image-not-reopened 422cb049e7d6fe52
@@ -677,6 +684,7 @@ gui-library-badge-crushed 1152f6fb562980fa
 gui-library-badge-missing 5821c2953f0639df
 gui-library-badge-no-backup 2b3f93f60c5b31be
 gui-library-badge-offline 01064de9e41d67ce
+gui-library-badge-quick d3602fbd519917ca
 gui-library-badge-soft a3be16c56c2993f9
 gui-library-cannot-open 2702ccb4eb8511ba
 gui-library-compare 0b2cb0ac030421c2
@@ -714,6 +722,14 @@ gui-library-not-saved 48d930d6f5a75dc9
 gui-library-offline-on 98daffdf1242288a
 gui-library-offline-unknown c646373072f8d849
 gui-library-plug-in 58e5adccf754ef76
+gui-library-quick 7d8a2d33871d5c6e
+gui-library-quick-clear 9b52b03e469d7bac
+gui-library-quick-save 0b0b5c0a2115e659
+gui-library-quick-save-clear ad2a9740b38db899
+gui-library-quick-save-title 962cd32219ab2a8e
+gui-library-quick-save-verb 835b5f8f6d37f13e
+gui-library-quick-tip 121d5529fa55b98f
+gui-library-quick-toggle 58f2469f03174d34
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
 gui-library-search fddceff6dbd31d81

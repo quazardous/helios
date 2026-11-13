@@ -2900,7 +2900,19 @@ impl Shell {
             ),
             (
                 crate::library::COLLECTION_LIST_COMMAND,
-                "List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`",
+                "List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`; and the quick collection's `quick` count",
+            ),
+            (
+                crate::library::QUICK_TOGGLE_COMMAND,
+                "Put photos in the quick collection (`images`: ids, else the selection), or take them out when it holds them all; scope the library to it with the collection `quick`",
+            ),
+            (
+                crate::library::QUICK_CLEAR_COMMAND,
+                "Empty the quick collection; its photos stay in the library",
+            ),
+            (
+                crate::library::QUICK_SAVE_COMMAND,
+                "Save the quick collection as an album (`name`; `clear`: empty it too); without `name`, asks it. Answers the album's `id`",
             ),
         ] {
             add(
@@ -4450,7 +4462,8 @@ impl Shell {
                         .library
                         .borrow()
                         .albums()
-                        .is_none_or(|a| a.iter().any(|a| a.id == *id));
+                        .is_none_or(|a| a.iter().any(|a| a.id == *id))
+                        || id == helios_vault::collections::QUICK;
                     if !known {
                         return Err(format!("`id`: no album `{id}`"));
                     }
@@ -4521,12 +4534,24 @@ impl Shell {
                     item
                 })
                 .collect();
-            return Ok(json!({ "albums": list, "shown": lib.collection() }));
+            return Ok(json!({
+                "albums": list,
+                "quick": lib.quick_count(),
+                "shown": lib.collection(),
+            }));
         }
         let name = text(args, "name")
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty());
         let name = name.as_deref();
+        if matches!(
+            command,
+            crate::library::QUICK_TOGGLE_COMMAND
+                | crate::library::QUICK_CLEAR_COMMAND
+                | crate::library::QUICK_SAVE_COMMAND
+        ) {
+            return self.quick_edit(command, args, name, &albums);
+        }
         let taken = |name: &str, id: &str| {
             let folded = helios_vault::fields::fold_case(name);
             albums
@@ -4680,6 +4705,102 @@ impl Shell {
         let answer = json!({ "id": edit.id() });
         lib.edit_album(edit);
         Ok(answer)
+    }
+
+    /// The quick collection's commands (`library.quick.*`), queued for the
+    /// host as the albums' are: one step of the library's history each.
+    fn quick_edit(
+        &mut self,
+        command: &'static str,
+        args: &Value,
+        name: Option<&str>,
+        albums: &[helios_vault::collections::Album],
+    ) -> Result<Value, String> {
+        use crate::library::{AlbumEdit, QUICK_CLEAR_COMMAND, QUICK_TOGGLE_COMMAND};
+        let mut lib = self.focus.library.borrow_mut();
+        if command == QUICK_TOGGLE_COMMAND {
+            let images: Vec<String> = match args.get("images") {
+                Some(Value::Array(list)) => list
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect(),
+                Some(other) => return Err(format!("`images`: {other} is not a list of ids")),
+                None => lib.targets()?,
+            };
+            if images.is_empty() {
+                return Err("no image selected".into());
+            }
+            // As the vault decides: all in, out; else in.
+            let added = !images.iter().all(|i| lib.quick().contains(i));
+            let count = images.len();
+            lib.edit_album(AlbumEdit::QuickToggle { images });
+            return Ok(json!({ "added": added, "images": count }));
+        }
+        if command == QUICK_CLEAR_COMMAND {
+            lib.edit_album(AlbumEdit::QuickClear);
+            return Ok(Value::Null);
+        }
+        if lib.quick_count() == 0 {
+            return Err("the quick collection is empty".into());
+        }
+        let Some(name) = name else {
+            drop(lib);
+            self.quick_save_form();
+            return Ok(Value::Null);
+        };
+        let folded = helios_vault::fields::fold_case(name);
+        if albums
+            .iter()
+            .any(|a| helios_vault::fields::fold_case(&a.name) == folded)
+        {
+            return Err(format!("an album is already named “{name}”"));
+        }
+        let clear = match args.get("clear") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(other) => return Err(format!("`clear`: {other} is not true or false")),
+        };
+        let id = helios_vault::collections::album_key(name, |k| albums.iter().any(|a| a.id == k));
+        let count = lib.quick().len();
+        lib.edit_album(AlbumEdit::QuickSave {
+            id: id.clone(),
+            name: name.to_string(),
+            clear,
+        });
+        Ok(json!({ "id": id, "name": name, "images": count, "clear": clear }))
+    }
+
+    /// Asks the name of the album the quick collection is saved as, and
+    /// whether to empty it, then runs `library.quick.saveAs`.
+    fn quick_save_form(&mut self) {
+        use crate::dialogs::Field;
+        use helios_values::Descriptor as D;
+        let name = self.text(Message::new("gui-library-album-name", "name"));
+        let clear = self.text(Message::new(
+            "gui-library-quick-save-clear",
+            "then clear the quick collection",
+        ));
+        self.form(crate::dialogs::Form {
+            title: self.text(Message::new(
+                "gui-library-quick-save-title",
+                "Save the quick collection as an album",
+            )),
+            fields: vec![
+                Field {
+                    key: "name".into(),
+                    descriptor: D::text(&name, ""),
+                    value: helios_core::Value::Text(String::new()),
+                },
+                Field {
+                    key: "clear".into(),
+                    descriptor: D::bool(&clear, false),
+                    value: helios_core::Value::Bool(false),
+                },
+            ],
+            verb: self.text(Message::new("gui-library-quick-save-verb", "Save")),
+            command: crate::library::QUICK_SAVE_COMMAND.into(),
+        });
     }
 
     /// `library.collection.rules.edit`: one edit in the open rule editor,
