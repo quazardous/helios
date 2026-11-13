@@ -115,7 +115,7 @@ fn a_picking_through_the_broker_imports_the_two_photos_picked() {
     let steps: Vec<&str> = manifest.connect.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(steps, ["google", "probe"]);
 
-    let photos = provider.connector(token(TOKEN));
+    let photos = provider.connector(token(TOKEN), None);
     let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
     photos.probe(Some(&account), &Cancel::new()).unwrap();
     let opened = Mutex::new(Vec::new());
@@ -166,7 +166,7 @@ fn two_pickings_add_to_one_source_without_duplicates_and_expired_addresses_are_r
     let broker = broker(&p.0, &fake.base);
     let photos = SourceProvider::new(broker, PLUGIN)
         .unwrap()
-        .connector(token(TOKEN));
+        .connector(token(TOKEN), None);
     let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
     let vault = Vault::new(MemoryStore::default());
     let jobs = Jobs::new(Arc::default());
@@ -241,7 +241,7 @@ fn a_cancelled_wait_ends_the_picking() {
     let broker = broker(&p.0, &fake.base);
     let photos = SourceProvider::new(broker, PLUGIN)
         .unwrap()
-        .connector(token(TOKEN));
+        .connector(token(TOKEN), None);
     let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
     let cancel = Cancel::new();
     {
@@ -284,7 +284,7 @@ fn an_expired_picking_session_is_said_expired_through_the_broker() {
     let broker = broker(&p.0, &fake.base);
     let photos = SourceProvider::new(broker, PLUGIN)
         .unwrap()
-        .connector(token(TOKEN));
+        .connector(token(TOKEN), None);
     let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
     let started = Instant::now();
     let picked = source::pick_and_list(
@@ -312,7 +312,7 @@ fn a_refused_token_leaves_the_account_needing_a_reconnection() {
     book.save(&account).unwrap();
     let photos = SourceProvider::new(broker, PLUGIN)
         .unwrap()
-        .connector(token("revoked"));
+        .connector(token("revoked"), None);
     let picked = source::pick_and_list(
         &photos,
         &account.account_ref(),
@@ -343,7 +343,7 @@ fn glances_come_from_the_previews_within_the_declared_limits_expired_addresses_r
     let caps = provider.manifest().caps;
     assert!(caps.thumbnails);
     assert_eq!(caps.limits, helios_plugin_google_photos::LIMITS);
-    let photos = provider.connector(token(TOKEN));
+    let photos = provider.connector(token(TOKEN), None);
     assert_eq!(photos.describe().caps, caps);
     let account = Account::new("google-photos", "Google Photos", &[]).account_ref();
     let (source, items) = source::pick_and_list(
