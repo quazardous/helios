@@ -100,9 +100,8 @@ fn the_graph_gives_each_patch_its_camera_rgb_back() {
     let mut worst = 0.0f64;
     for (k, truth) in scene.camera_rgb.iter().enumerate() {
         let stats = layout.measure(&view(&measured.image), k).unwrap();
-        for c in 0..3 {
-            let off = (stats.mean[c] - truth[c]).abs() / truth[c].abs().max(0.01);
-            worst = worst.max(off);
+        for (mean, truth) in stats.mean.iter().zip(truth) {
+            worst = worst.max((mean - truth).abs() / truth.abs().max(0.01));
         }
     }
     eprintln!("worst relative error of a patch's mean: {worst:e}");
