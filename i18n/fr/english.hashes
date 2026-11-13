@@ -15,6 +15,9 @@ batch-several-ends 64a674c6169d3f03
 batch-several-sources 9e966f5d4cf4a738
 batch-stopped bf8c5265f0d7c6ae
 batch-vault-attached 96665044590f1b33
+calibrate-auto-no-light 44d267b3bab7f34b
+calibrate-auto-no-profile 14a1163d4fca0c5f
+calibrate-auto-too-far 1e2a66055276523e
 calibrate-bad-image f103f3ad11e12ef2
 calibrate-bad-params 8d2ef685a704a562
 calibrate-bad-profile ee10bf231eece476
@@ -1313,6 +1316,10 @@ panel-helios-viewport.title 4b07fc2a14723e58
 panel-helios-workshops.title 9745a6d842d9d02d
 param-blur-radius.description 54673d21b55e03e7
 param-blur-radius.label ef601b7d7553ac03
+param-chartprofile-matrix.description 0b23e5e5b646a82d
+param-chartprofile-matrix.label 77bd1893bb4fc0da
+param-chartprofile-profile.description 78e8ab50eddc3946
+param-chartprofile-profile.label 96d3f8614647fc44
 param-decide-exposure-exposure.description 6c04f1bcac526085
 param-decide-exposure-exposure.label f30ba140f0818436
 param-demosaic-method-choice-auto 382c2a029fe4147c
