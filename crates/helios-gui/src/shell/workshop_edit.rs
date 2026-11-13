@@ -66,6 +66,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "Experimental: make the workshop piloted automatic: one row per slider (a target a measure explains, else a fixed value, or kept as AI) and per AI zone (a fitted parametric mask, or kept as AI), with evidence, and J, A (the AI left, calls per photo) (`rows`: choices by name; `confirm`: write the next version, yours alone; `session`; `dry_run`)",
     ),
     (
+        "workshop.run",
+        "Experimental: run the applied workshop on a set of photos, a job: each photo aimed, its junctions answered, checked against the limits, written or held; one undo step (`node`, the selected one by default; `set`: selection or view; `images`: ids instead; `on_breach`: flag, hold or stop; `dry_run`: the photos, J, A and what the decision book already answers)",
+    ),
+    (
         "workshop.send_proxy",
         "Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only",
     ),
@@ -110,6 +114,7 @@ impl Shell {
             "workshop.propose" => self.propose_values(args, origin),
             "workshop.answer" => self.answer_proposal(args, origin),
             "workshop.generalise" => self.generalise_session(args, origin),
+            "workshop.run" => self.run_workshop(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }
@@ -242,7 +247,7 @@ impl Shell {
 
     /// The applied workshop `node` (a node of the network whose composite
     /// has a workshop block): its pinned file.
-    fn applied_workshop(
+    pub(super) fn applied_workshop(
         &self,
         state: &State,
         node: &str,

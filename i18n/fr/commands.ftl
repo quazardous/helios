@@ -608,6 +608,9 @@ command-workshop-design =
 command-workshop-propose =
     .title = Expérimental : proposer des valeurs pour l’atelier piloté, montrées comme valeurs fantômes que l’utilisateur accepte, remplace ou rejette (`values` : par nom de curseur ; `aim` : les mots auxquels elles répondent ; `session`)
 
+command-workshop-run =
+    .title = Expérimental : lancer l’atelier appliqué sur un ensemble de photos, une tâche : chaque photo visée, ses jonctions répondues, vérifiée contre les limites, écrite ou retenue ; une étape d’annulation (`node` : le nœud sélectionné par défaut ; `set` : selection ou view ; `images` : des identifiants à la place ; `on_breach` : flag, hold ou stop ; `dry_run` : les photos, J, A et ce que le carnet de décisions répond déjà)
+
 command-workshop-save =
     .title = Expérimental : enregistrer une macro comme atelier, sa version suivante avec une intention, des mots-clés et des cibles (`node` : le nœud sélectionné par défaut ; `intent`, `keywords`, `targets` ; `dry_run`) ; sans `intent`, un formulaire les demande
 

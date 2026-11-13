@@ -85,6 +85,9 @@ pub(super) struct Core {
     pub(super) import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
     /// Exports asked for, for the host.
     pub(super) exports: Vec<ExportAsk>,
+    /// Where `workshop.run` hands a run: the host's runner, which holds
+    /// the library (none without one).
+    pub(super) workshop_runner: Option<super::workshop_run::RunFn>,
     /// What the exports the host runs say (`export_sink`).
     pub(super) export_lines: (
         std::sync::mpsc::Sender<helios_export::batch::Line>,

@@ -2256,6 +2256,11 @@ impl Library {
         self.index.get(id).and_then(|&i| self.entries.get(i))
     }
 
+    /// The ids of the images in view, in order.
+    pub fn ids(&self) -> Vec<String> {
+        self.entries.iter().map(|e| e.id.clone()).collect()
+    }
+
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
         let selected = self
             .selected

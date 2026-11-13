@@ -675,6 +675,8 @@ gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo
 
+gui-history-workshop-run = Workshop “{ $name }” on { $count } photos
+
 gui-image-not-reopened = The image left open could not be opened again: { $error }
 
 gui-image-opened = { $name } is open
@@ -2146,6 +2148,8 @@ gui-wizard-no-library = Open a library first: accounts are kept in it
 gui-wizard-sign-in = Sign in to an account…
 
 gui-wizard-title = Add a source
+
+gui-workshop-run-job = Workshop “{ $name }”
 
 gui-workshops-ai-left = AI per photo: { $junctions } junctions, { $calls } calls
 

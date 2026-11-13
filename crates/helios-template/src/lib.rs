@@ -46,6 +46,7 @@ pub mod library;
 pub mod limits;
 pub mod macros;
 pub mod network;
+pub mod run;
 pub mod schema;
 pub mod session;
 pub mod shipped;

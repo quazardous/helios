@@ -239,6 +239,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("workshop.design", "phosphor:pencil-ruler"),
     ("workshop.generalise", "phosphor:tree-structure"),
     ("workshop.propose", "phosphor:lightbulb"),
+    ("workshop.run", "phosphor:play"),
     ("workshop.save", "save"),
     ("workshop.send_proxy", "phosphor:paper-plane-tilt"),
     ("workshop.session", "phosphor:flask"),
