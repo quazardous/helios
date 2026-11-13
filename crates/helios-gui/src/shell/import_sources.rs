@@ -328,7 +328,15 @@ pub(crate) struct Sources {
     pub(super) asked: Option<SourceAsked>,
     /// The cards mounted now, by volume ([`Sources::identify`]).
     pub(crate) mounted: Vec<MountedCard>,
+    /// The account sources' own parameters, by account id, as last kept
+    /// or read: what a plugin's connector hands its plugin with each call,
+    /// read from its threads ([`Sources::params`]).
+    params: SourceParams,
 }
+
+/// The account sources' parameters, shared with the connectors' threads.
+pub(crate) type SourceParams =
+    std::sync::Arc<std::sync::Mutex<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>>;
 
 impl Sources {
     /// Whether the sources are kept: the choices then follow them.
@@ -537,6 +545,28 @@ impl Sources {
         self.store();
     }
 
+    /// The account sources' parameters, kept up to date as the sources
+    /// are read and kept.
+    pub(crate) fn params(&self) -> SourceParams {
+        self.params.clone()
+    }
+
+    /// Shares the account sources' parameters ([`Sources::params`]).
+    fn share_params(&self) {
+        let by_account = self
+            .list
+            .iter()
+            .filter_map(|s| {
+                let account = s.account.clone()?;
+                Some((account, s.params.clone().into_iter().collect()))
+            })
+            .collect();
+        *self
+            .params
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = by_account;
+    }
+
     fn read_kept(&mut self) {
         let Some(read) = &self.read else { return };
         self.list = match read() {
@@ -551,12 +581,14 @@ impl Sources {
         self.identify();
     }
 
-    /// Hands the list to the commands that read it off the window.
+    /// Hands the list to the commands that read it off the window, and
+    /// the account sources' parameters to the connectors.
     fn share(&self) {
         self.shared
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone_from(&self.list);
+        self.share_params();
     }
 
     pub(crate) fn store(&self) {

@@ -39,6 +39,14 @@ impl ConnectorProvider for FakeProvider {
                     .label("Share")
                     .help("The share the photos are read from"),
             ),
+            account: Contract::new()
+                .key(
+                    "region",
+                    ConfigKey::new(KeyType::String)
+                        .default_value(serde_json::json!("eu"))
+                        .label("Region"),
+                )
+                .key("api-key", ConfigKey::new(KeyType::Secret).label("API key")),
             ..Contracts::default()
         }
     }

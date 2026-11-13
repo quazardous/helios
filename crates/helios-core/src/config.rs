@@ -137,6 +137,11 @@ pub struct ConfigKey {
     /// a secret.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub per_library: bool,
+    /// A change of its value restarts the plugin, which reads it only as
+    /// it starts; without, the running plugin is told the new values
+    /// (`settings/changed`). A plugin's own keys only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restart: bool,
 }
 
 #[expect(
@@ -198,6 +203,11 @@ impl ConfigKey {
 
     pub fn per_library(mut self) -> Self {
         self.per_library = true;
+        self
+    }
+
+    pub fn restart(mut self) -> Self {
+        self.restart = true;
         self
     }
 
@@ -425,6 +435,31 @@ impl Contract {
             .collect()
     }
 
+    /// The values a plugin is handed: the defaults, under the values
+    /// `given` (secrets among them) that fit their key. A value of a key
+    /// the contract does not declare, or one that does not fit its key,
+    /// is left out, with its reason in the list returned; a reason never
+    /// holds the value.
+    pub fn resolve(&self, given: &Map<String, Json>) -> (Map<String, Json>, Vec<String>) {
+        let mut out = self.defaults();
+        let mut refused = Vec::new();
+        for (name, v) in given {
+            match self.keys.get(name) {
+                None => refused.push(format!("`{name}`: not declared; left out")),
+                Some(key) => match key.check(v) {
+                    Ok(()) => {
+                        out.insert(name.clone(), v.clone());
+                    }
+                    Err(_) if key.ty == KeyType::Secret => {
+                        refused.push(format!("`{name}`: a secret is a text; left out"));
+                    }
+                    Err(e) => refused.push(format!("`{name}`: {e}; left out")),
+                },
+            }
+        }
+        (out, refused)
+    }
+
     /// The keys that are secrets.
     pub fn secrets(&self) -> impl Iterator<Item = &str> {
         self.keys
@@ -512,9 +547,14 @@ impl Contracts {
                 let per_library = contract
                     .keys
                     .iter()
-                    .filter(move |(_, k)| level != Level::Own && k.per_library)
-                    .map(|(n, _)| {
-                        format!("setting `{n}`: `per_library` is for a plugin's own settings")
+                    .filter(move |(_, k)| level != Level::Own && (k.per_library || k.restart))
+                    .map(|(n, k)| {
+                        let what = if k.per_library {
+                            "per_library"
+                        } else {
+                            "restart"
+                        };
+                        format!("setting `{n}`: `{what}` is for a plugin's own settings")
                     });
                 contract
                     .problems()
@@ -575,6 +615,39 @@ mod tests {
                 "fast",
                 ConfigKey::new(KeyType::Bool).default_value(json!(true)),
             )
+    }
+
+    #[test]
+    fn values_resolve_over_defaults_and_the_ones_refused_say_why_without_the_value() {
+        let c = sample();
+        let given = json!({
+            "quality": 500,
+            "mode": "custom",
+            "token": "hunter2-secret",
+            "speed": 3,
+        });
+        let (values, refused) = c.resolve(given.as_object().unwrap());
+        assert_eq!(values["quality"], 90, "refused: the default stays");
+        assert_eq!(values["mode"], "custom");
+        assert_eq!(values["token"], "hunter2-secret");
+        assert_eq!(values["fast"], true);
+        assert_eq!(
+            refused,
+            vec![
+                "`quality`: 500 is above 100; left out".to_string(),
+                "`speed`: not declared; left out".to_string(),
+            ]
+        );
+        let (_, refused) = c.resolve(json!({ "token": 7 }).as_object().unwrap());
+        assert_eq!(refused, vec!["`token`: a secret is a text; left out"]);
+        let contracts = Contracts {
+            account: Contract::new().key("x", ConfigKey::new(KeyType::Bool).restart()),
+            ..Contracts::default()
+        };
+        assert_eq!(
+            contracts.problems(),
+            vec!["account.setting `x`: `restart` is for a plugin's own settings"]
+        );
     }
 
     #[test]

@@ -103,6 +103,7 @@ help = "The JPEG quality of the previews it asks for"
 group = "Previews"      # the heading it is shown under
 order = 0               # its place in its group, then by name
 per_library = true      # may differ per library (own settings only)
+restart = true          # a change restarts the plugin (own settings only)
 
 [settings.mode]
 type = "choice"
@@ -147,6 +148,34 @@ file, a log or a settings export. A value read that the contract refuses
 (unknown key, wrong type, out of bounds) is left out, and the Settings
 window says why; a library value another client changes shows at once.
 
+**To the plugin.** A plugin is handed its values as it starts and with
+each call: `initialize` carries its own settings as `settings`
+(`<id>.<key>`) and as `config.plugin` (by key), and every call's params
+carry `config.plugin` too. A source plugin's calls (`source.*`) also carry
+`config.account` and `config.source`: the account's values (the facts its
+`[[connect]]` forms kept, its secrets from the keyring, under the
+account's id) and its source's (the parameters the import window's "Add
+a source…" and "Edit source…" keep with the source). Each level is its
+contract's defaults under the person's values that fit it; a value the
+contract refuses is left out and the log says why, never with the value.
+Secrets are read from the keyring as the plugin starts (its own) or as
+the call is made (an account's), and go to the plugin alone: never to a
+file, a log or a notice. When the person changes a plugin's own settings,
+a running plugin gets the notification `settings/changed`
+(`{settings, config: {plugin}}`), or, when a key that moved says
+`restart = true`, it is stopped and starts again with them on its next
+call.
+
+The import window draws a source's parameters (its connector's
+`[source.settings.*]`, choices and secrets aside) with egui-pop's
+parameter widgets, from the same descriptors as Settings, their texts
+from the plugin's catalogue (`source-setting-…`); a value its contract
+refuses is said with the reason, and Next waits. When the source is an
+account's, the same step shows the account's own settings
+(`[account.settings.*]`, under "Account settings"), kept on the account
+when the wizard ends: the values on its document, its secrets in the
+keyring under the account's id (a secret set shows as a mask).
+
 ## Packaging and trust
 
 - A signed archive: the manifest, the plugin's code, its modules.
@@ -180,7 +209,8 @@ The broker starts a plugin on its first activation event
 (`onStartup`, `onService:<service>`, `onCommand:<id>`) and sends
 `initialize` with the Helios version, the interface versions it speaks,
 the capabilities granted and the plugin's settings (`<id>.<key>`, typed
-by the manifest); the plugin answers, then gets `initialized`. Calls wait
+by the manifest, the person's values over the defaults; see "The
+configuration contract"); the plugin answers, then gets `initialized`. Calls wait
 at most a timeout, after which the plugin gets `$/cancelRequest`. The
 plugin may send `$/progress` and `$/log` notifications; a request from the
 plugin is answered "method not found", since Helios offers plugins nothing

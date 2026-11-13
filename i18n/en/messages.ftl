@@ -363,7 +363,7 @@ gui-editor-card = Card or camera
 
 gui-editor-params = Parameters
 
-gui-editor-params-wrong = A parameter does not fit what the connector takes
+gui-editor-params-refused = A parameter does not fit what the connector takes: { $why }
 
 gui-editor-save = Save the source
 
@@ -1736,6 +1736,8 @@ gui-vault-unreadable = Cannot read the library: { $error }
 gui-window-frame-error = window frame: { $error }
 
 gui-wizard-account = Account
+
+gui-wizard-account-settings = Account settings
 
 gui-wizard-add = Add the source
 

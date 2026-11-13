@@ -32,10 +32,12 @@ use std::path::{Path, PathBuf};
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::core::overlay::DialogLayout;
+use egui_pop::core::param::{self, Mode};
+use egui_pop::model::values::Value as PopValue;
 use helios_connect::ConnectorManifest;
 use helios_connect::account::AccountState;
 use helios_core::Message;
-use helios_core::config::{Contract, KeyType};
+use helios_core::config::{Contract, KeyType, Level};
 use serde_json::{Map, Value};
 
 use super::import_accounts::{Asked, state_text, translated};
@@ -43,6 +45,7 @@ use super::import_auto::{self, Trigger};
 use super::import_choices::{self, Choices};
 use super::import_sources::{Honours, SavedSource, SourceKey};
 use super::import_window::ImportWindow;
+use crate::config::plugins::SECRET_SET;
 
 /// The wizard's steps, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -104,6 +107,12 @@ pub(crate) struct Wizard {
     /// choices' keys, and their values.
     contract: Contract,
     params: Map<String, Value>,
+    /// The account's settings (its connector's account contract) and
+    /// their values, for the account they were read for; a secret set
+    /// shows as a mask.
+    account_contract: Contract,
+    account_values: Map<String, Value>,
+    account_read: Option<String>,
     /// When the source imports on its own.
     auto: Option<Trigger>,
 }
@@ -125,15 +134,23 @@ impl Wizard {
             editing: None,
             contract: Contract::new(),
             params: Map::new(),
+            account_contract: Contract::new(),
+            account_values: Map::new(),
+            account_read: None,
             auto: None,
         }
     }
 
     /// Whether the parameters set fit the connector's contract.
     fn params_fit(&self) -> bool {
-        self.contract
-            .check(&Value::Object(self.params.clone()))
-            .is_ok()
+        self.params_check().is_ok()
+    }
+
+    /// Why the parameters set do not fit the connector's contract.
+    fn params_check(&self) -> Result<(), String> {
+        self.contract.check(&Value::Object(self.params.clone()))?;
+        self.account_contract
+            .check(&Value::Object(self.account_values.clone()))
     }
 
     /// The folder typed, when it is one.
@@ -296,6 +313,7 @@ impl ImportWindow {
                 Step::Kind => self.kind_ui(ui, &t),
                 Step::Setup => {
                     self.setup_ui(ui, &t, app);
+                    self.account_settings_ui(ui, &t);
                     self.params_ui(ui, &t);
                 }
                 Step::Choices => self.wizard_choices_ui(ui, &t, app),
@@ -454,6 +472,13 @@ impl ImportWindow {
         let Some((connector, _)) = wz.connector.clone() else {
             return;
         };
+        if let Some(id) = wz
+            .account_read
+            .as_ref()
+            .filter(|id| wz.account.as_ref() == Some(id))
+        {
+            self.keep_account_settings(id, &wz.account_contract, &wz.account_values);
+        }
         let path = wz.folder();
         let account = if path.is_some() { None } else { wz.account };
         let key = match (&path, &account) {
@@ -770,9 +795,15 @@ impl ImportWindow {
     }
 
     /// The connector's own parameters, from its source contract: each
-    /// key under its label, by its type; those hidden by another's value
-    /// left out.
+    /// key drawn by egui-pop's parameter widget from the descriptor the
+    /// Settings window draws a plugin's settings from
+    /// ([`crate::config::plugins::descriptor`]), its label and help
+    /// translated through the plugin's catalogue
+    /// (`source-setting-<plugin>-<key>`); those hidden by another's value
+    /// left out. A value the contract refuses is said with its reason, and
+    /// Next waits.
     fn params_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
+        let owner = self.params_owner();
         let Some(wz) = self.wizard.as_mut() else {
             return;
         };
@@ -782,84 +813,147 @@ impl ImportWindow {
         ui.add_space(8.0);
         ui.strong(t(Message::new("gui-editor-params", "Parameters")));
         let contract = wz.contract.clone();
-        for (name, key) in contract.ordered() {
-            if !contract.visible(name, &wz.params) {
+        let fit = contract_ui(ui, t, &owner, Level::Source, &contract, &mut wz.params);
+        refused_ui(ui, t, fit);
+    }
+
+    /// The account chosen's own settings (its connector's
+    /// `[account.settings.*]`), read from its document and the keyring
+    /// when it is chosen, drawn as the source's parameters are; kept on
+    /// the account when the wizard ends ([`ImportWindow::keep_account_settings`]).
+    fn account_settings_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
+        self.read_account_settings();
+        let owner = self.params_owner();
+        let Some(wz) = self.wizard.as_mut() else {
+            return;
+        };
+        if wz.account_contract.is_empty() || wz.account.is_none() {
+            return;
+        }
+        ui.add_space(8.0);
+        ui.strong(t(Message::new(
+            "gui-wizard-account-settings",
+            "Account settings",
+        )));
+        let contract = wz.account_contract.clone();
+        let fit = contract_ui(
+            ui,
+            t,
+            &owner,
+            Level::Account,
+            &contract,
+            &mut wz.account_values,
+        );
+        refused_ui(ui, t, fit);
+    }
+
+    /// Reads the account chosen's settings, once per account chosen.
+    fn read_account_settings(&mut self) {
+        let Some(wz) = self.wizard.as_ref() else {
+            return;
+        };
+        let Some(((connector, Setup::Account), Some(id))) =
+            wz.connector.as_ref().map(|c| (c, wz.account.as_ref()))
+        else {
+            return;
+        };
+        if wz.account_read.as_ref() == Some(id) {
+            return;
+        }
+        let (connector, id) = (connector.clone(), id.clone());
+        let contract = self
+            .connectors
+            .provider(&connector)
+            .map(|p| p.config().account)
+            .unwrap_or_default();
+        let mut values = contract.defaults();
+        if let Some(book) = &self.accounts.book
+            && let Ok(Some(account)) = book.account(&id)
+        {
+            for (k, v) in &account.facts {
+                if contract.get(k).is_some_and(|key| key.ty != KeyType::Secret) {
+                    values.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        for name in contract.secrets() {
+            if let Ok(Some(_)) = self.accounts.secrets.get(&id, name) {
+                values.insert(name.to_owned(), Value::String(SECRET_SET.into()));
+            }
+        }
+        if let Some(wz) = self.wizard.as_mut() {
+            wz.account_contract = contract;
+            wz.account_values = values;
+            wz.account_read = Some(id);
+        }
+    }
+
+    /// Keeps the account's settings the wizard shows: the others on its
+    /// document, its secrets in the keyring (a mask left as it is keeps
+    /// the secret, an empty one forgets it). Their values are never in a
+    /// message.
+    fn keep_account_settings(&self, id: &str, contract: &Contract, values: &Map<String, Value>) {
+        if contract.is_empty() {
+            return;
+        }
+        let Some(book) = self.accounts.book.clone() else {
+            return;
+        };
+        let secrets = self.accounts.secrets.clone();
+        let mut account = match book.account(id) {
+            Ok(Some(a)) => a,
+            Ok(None) => return,
+            Err(e) => {
+                log::warn!("the account {id}'s settings not kept: {e}");
+                return;
+            }
+        };
+        for (name, key) in &contract.keys {
+            let value = values.get(name);
+            if key.ty != KeyType::Secret {
+                match value {
+                    Some(v) => account.facts.insert(name.clone(), v.clone()),
+                    None => account.facts.remove(name),
+                };
                 continue;
             }
-            let label = if key.label.is_empty() {
-                name
+            let text = value.and_then(Value::as_str).unwrap_or_default();
+            if text == SECRET_SET {
+                continue;
+            }
+            let text = text.strip_prefix(SECRET_SET).unwrap_or(text);
+            let kept = if text.is_empty() {
+                account.secrets.retain(|s| s != name);
+                secrets.delete(id, name)
             } else {
-                key.label.as_str()
+                if !account.secrets.contains(name) {
+                    account.secrets.push(name.clone());
+                }
+                secrets.set(id, name, text)
             };
-            let value = wz.params.get(name).cloned().unwrap_or(Value::Null);
-            let changed = ui
-                .horizontal(|ui| {
-                    let mut changed = None;
-                    match key.ty {
-                        KeyType::Bool => {
-                            let mut on = value.as_bool().unwrap_or(false);
-                            if ui.checkbox(&mut on, label).changed() {
-                                changed = Some(Value::Bool(on));
-                            }
-                        }
-                        KeyType::Choice => {
-                            ui.label(label);
-                            for choice in &key.choices {
-                                let chosen = value.as_str() == Some(choice.as_str());
-                                if ui.radio(chosen, choice).clicked() && !chosen {
-                                    changed = Some(Value::String(choice.clone()));
-                                }
-                            }
-                        }
-                        KeyType::Int | KeyType::Float => {
-                            let l = ui.label(label);
-                            let mut n = value.as_f64().unwrap_or(0.0);
-                            let mut drag = egui::DragValue::new(&mut n);
-                            if let (Some(min), Some(max)) = (key.min, key.max) {
-                                drag = drag.range(min..=max);
-                            }
-                            if key.ty == KeyType::Int {
-                                drag = drag.fixed_decimals(0);
-                            }
-                            if ui.add(drag).labelled_by(l.id).changed() {
-                                changed = Some(if key.ty == KeyType::Int {
-                                    serde_json::json!(n.round() as i64)
-                                } else {
-                                    serde_json::json!(n)
-                                });
-                            }
-                        }
-                        KeyType::String | KeyType::Path | KeyType::Secret => {
-                            let l = ui.label(label);
-                            let mut text = value.as_str().unwrap_or_default().to_owned();
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut text).desired_width(240.0))
-                                .labelled_by(l.id)
-                                .changed()
-                            {
-                                changed = Some(Value::String(text));
-                            }
-                        }
-                    }
-                    changed
-                })
-                .inner;
-            if !key.help.is_empty() {
-                ui.weak(&key.help);
-            }
-            if let Some(v) = changed {
-                wz.params.insert(name.to_owned(), v);
+            if let Err(e) = kept {
+                log::warn!("the account {id}'s secret `{name}` not kept: {e}");
             }
         }
-        if !wz.params_fit() {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                t(Message::new(
-                    "gui-editor-params-wrong",
-                    "A parameter does not fit what the connector takes",
-                )),
-            );
+        if let Err(e) = book.save(&account) {
+            log::warn!("the account {id}'s settings not kept: {e}");
         }
+    }
+
+    /// Whose catalogue translates the parameters: the plugin behind the
+    /// connector, else the connector.
+    fn params_owner(&self) -> String {
+        let connector = self
+            .wizard
+            .as_ref()
+            .and_then(|wz| wz.connector.as_ref())
+            .map(|(id, _)| id.clone())
+            .unwrap_or_default();
+        self.accounts
+            .plugins
+            .as_ref()
+            .and_then(|b| helios_plugin::source::plugin_of(b, &connector))
+            .unwrap_or(connector)
     }
 
     fn name_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
@@ -879,6 +973,67 @@ impl ImportWindow {
             "gui-wizard-name-help",
             "How the source is listed in the Sources column",
         )));
+    }
+}
+
+/// Draws a contract's keys with egui-pop's parameter widgets, each
+/// from the descriptor Settings draws a plugin's settings from
+/// ([`crate::config::plugins::descriptor`]), its label and help through
+/// the owner's catalogue; those hidden by another's value left out.
+/// Whether the values fit the contract, else why not.
+fn contract_ui(
+    ui: &mut egui::Ui,
+    t: &dyn Fn(Message) -> String,
+    owner: &str,
+    level: Level,
+    contract: &Contract,
+    values: &mut Map<String, Value>,
+) -> Result<(), String> {
+    for (name, key) in contract.ordered() {
+        if !contract.visible(name, values) {
+            continue;
+        }
+        let msg = helios_core::config::message(owner, level, name);
+        let label = if key.label.is_empty() {
+            name
+        } else {
+            key.label.as_str()
+        };
+        let label = t(Message::new(&format!("{msg}.label"), label));
+        let help = if key.help.is_empty() {
+            String::new()
+        } else {
+            t(Message::new(&format!("{msg}.help"), &key.help))
+        };
+        let d = crate::config::plugins::descriptor(key, &label, &help);
+        let mut value = values
+            .get(name)
+            .and_then(|v| PopValue::from_json(d.ty, v).ok())
+            .unwrap_or_else(|| d.default.clone());
+        let before = value.clone();
+        let response = param::param_shown(ui, &d, Mode::Plain(&mut value), &|c| c.to_owned());
+        if !help.is_empty() {
+            response.on_hover_text(&help);
+            ui.weak(&help);
+        }
+        if value != before {
+            values.insert(name.to_owned(), value.to_json());
+        }
+    }
+    contract.check(&Value::Object(values.clone()))
+}
+
+/// Says why values do not fit their contract.
+fn refused_ui(ui: &mut egui::Ui, t: &dyn Fn(Message) -> String, fit: Result<(), String>) {
+    if let Err(why) = fit {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            t(Message::new(
+                "gui-editor-params-refused",
+                "A parameter does not fit what the connector takes: { $why }",
+            )
+            .with("why", why)),
+        );
     }
 }
 

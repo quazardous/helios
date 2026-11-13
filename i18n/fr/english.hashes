@@ -412,7 +412,7 @@ gui-edit-does-not-fit b270477011039ced
 gui-edit-not-saved 988fbabe3acbb2ab
 gui-editor-card 7990bbcb51e1fe73
 gui-editor-params fff7588f4a1a3651
-gui-editor-params-wrong 9fac9b9663ae50d2
+gui-editor-params-refused 17e99425fe05031e
 gui-editor-save bf722ac13bbc1962
 gui-editor-title bbab0761ce200edc
 gui-export-bits 445ead6584b2ae46
@@ -1053,6 +1053,7 @@ gui-theme-unknown 440ee9790a2a4952
 gui-vault-unreadable f60fd7de770903dc
 gui-window-frame-error 72035247381882d2
 gui-wizard-account 4103a27ff07b58ca
+gui-wizard-account-settings 4e8adab3079a2601
 gui-wizard-add 8c5fb21c9d35ce76
 gui-wizard-back 5f409e65a5b970e0
 gui-wizard-card 7983e280acf668b2

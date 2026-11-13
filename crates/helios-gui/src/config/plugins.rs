@@ -32,6 +32,13 @@
 //! of range) is left out with its reason, shown in the Settings window.
 //! A library value another client of the node changes is read again and
 //! shown live.
+//!
+//! **To the plugin.** [`PluginSettingsStore::values`] gives a plugin's
+//! values as it is handed them (the library's over the app's, secrets
+//! read from the keyring), and each save, or a library change from
+//! another client, tells [`PluginSettingsStore::on_changed`] which
+//! plugins moved: the desktop hands both to the broker
+//! ([`connect`]), which tells the running plugin or restarts it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -416,7 +423,12 @@ struct Inner {
     refused: Mutex<BTreeMap<ValueScope, Vec<String>>>,
     /// One write at a time.
     writing: Mutex<()>,
+    /// Told the plugins whose values a save or another client changed.
+    changed: Mutex<Option<Changed>>,
 }
+
+/// Told a plugin's id when its values change.
+pub type Changed = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl std::fmt::Debug for PluginSettingsStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -466,6 +478,7 @@ impl PluginSettingsStore {
                 library: Mutex::new(Values::new()),
                 refused: Mutex::new(BTreeMap::new()),
                 writing: Mutex::new(()),
+                changed: Mutex::new(None),
             }),
         };
         let me = store.clone();
@@ -474,6 +487,59 @@ impl PluginSettingsStore {
             *lock(&store.inner.library) = values;
         }
         store
+    }
+
+    /// A plugin's values as it is handed them, by key: the app's, the
+    /// open library's over them, its secrets read from the keyring (never
+    /// logged). Values the contract refuses are left out
+    /// ([`SettingsStore::problems`]).
+    pub fn values(&self, plugin: &str) -> Map<String, Json> {
+        let Some(p) = self.inner.plugins.iter().find(|p| p.id == plugin) else {
+            return Map::new();
+        };
+        let prefix = format!("{plugin}.");
+        let mut app = match self.read_file() {
+            Ok(file) => self.checked(&file, ValueScope::App),
+            Err(e) => {
+                log::warn!("plugin `{plugin}`'s settings: {e}");
+                Values::new()
+            }
+        };
+        app.extend(lock(&self.inner.library).clone());
+        let mut out: Map<String, Json> = app
+            .into_iter()
+            .filter_map(|(id, v)| Some((id.strip_prefix(&prefix)?.to_string(), v)))
+            .collect();
+        for name in p.contract.secrets() {
+            match self.inner.secrets.get(&p.account(), name) {
+                Ok(Some(text)) => {
+                    out.insert(name.to_string(), Json::String(text));
+                }
+                Ok(None) => {}
+                Err(e) => log::warn!("plugin `{plugin}`: secret `{name}` not read: {e}"),
+            }
+        }
+        out
+    }
+
+    /// Who is told which plugins' values changed (the broker, through
+    /// [`connect`]).
+    pub fn on_changed(&self, changed: Changed) {
+        *lock(&self.inner.changed) = Some(changed);
+    }
+
+    /// Tells the plugins `ids` (setting ids) belong to that they moved.
+    fn tell<'a>(&self, ids: impl Iterator<Item = &'a String>) {
+        let Some(changed) = lock(&self.inner.changed).clone() else {
+            return;
+        };
+        let plugins: std::collections::BTreeSet<&str> = ids
+            .filter_map(|id| self.inner.keys.get(id))
+            .map(|(i, _)| self.inner.plugins[*i].id.as_str())
+            .collect();
+        for p in plugins {
+            changed(p);
+        }
     }
 
     fn key(&self, id: &str) -> Option<(&PluginSettings, &str, &ConfigKey)> {
@@ -732,11 +798,29 @@ impl PluginSettingsStore {
         if changes.is_empty() {
             return;
         }
+        self.tell(changes.keys());
         let watcher = lock(&self.inner.watchers).get(&LIBRARY.scope).cloned();
         if let Some(w) = watcher {
             w(LIBRARY.scope, changes);
         }
     }
+}
+
+/// Hands `broker` the plugins' values from `store` as each plugin starts,
+/// and tells it when they change, so it hands the running plugin its new
+/// values or restarts it (`helios_plugin::Broker::settings_changed`).
+pub fn connect(store: &PluginSettingsStore, broker: &Arc<helios_plugin::Broker>) {
+    let values = store.clone();
+    broker.on_values(move |id| values.values(id));
+    // The broker holds the store: the store holds it back weakly.
+    let weak = Arc::downgrade(broker);
+    store.on_changed(Arc::new(move |id: &str| {
+        let Some(broker) = weak.upgrade() else { return };
+        match broker.settings_changed(id) {
+            Ok(told) => log::debug!("plugin `{id}`'s settings changed: {told:?}"),
+            Err(e) => log::warn!("{e}"),
+        }
+    }));
 }
 
 impl SettingsStore for PluginSettingsStore {
@@ -766,14 +850,19 @@ impl SettingsStore for PluginSettingsStore {
     }
 
     fn save(&self, scope: ValueScope, changes: &Changes) -> Result<(), String> {
-        let _one = lock(&self.inner.writing);
-        if scope == ValueScope::App {
-            self.save_app(changes)
-        } else if scope == LIBRARY.scope {
-            self.save_library(changes)
-        } else {
-            Err(format!("plugins keep no {} settings", scope.name()))
-        }
+        let saved = {
+            let _one = lock(&self.inner.writing);
+            if scope == ValueScope::App {
+                self.save_app(changes)
+            } else if scope == LIBRARY.scope {
+                self.save_library(changes)
+            } else {
+                return Err(format!("plugins keep no {} settings", scope.name()));
+            }
+        };
+        // What was kept of a partly refused save moved too.
+        self.tell(changes.keys());
+        saved
     }
 
     fn watch(&self, scope: ValueScope, on_change: OnChange) -> Result<(), String> {
@@ -1036,6 +1125,48 @@ mod tests {
         );
         assert!(problems.contains("`org.example.fake-one.nope`: no plugin installed declares it"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plugin_s_values_are_the_library_s_over_the_app_s_with_its_secret_and_each_save_is_told() {
+        let dir = temp("values");
+        let layers = Arc::new(Layers::default());
+        let secrets = Arc::new(MemorySecrets::default());
+        let (_node, s) = store(&dir, &layers, &secrets);
+        let told: Arc<Mutex<Vec<String>>> = Arc::default();
+        {
+            let told = told.clone();
+            s.on_changed(Arc::new(move |id: &str| lock(&told).push(id.to_string())));
+        }
+        let set = |pairs: &[(&str, Json)]| -> Changes {
+            pairs
+                .iter()
+                .map(|(k, v)| (format!("{ID}.{k}"), Some(v.clone())))
+                .collect()
+        };
+        s.save(
+            ValueScope::App,
+            &set(&[
+                ("quality", json!(50)),
+                ("mode", json!("best")),
+                ("token", json!("hunter2-secret")),
+            ]),
+        )
+        .unwrap();
+        s.save(LIBRARY.scope, &set(&[("quality", json!(80))]))
+            .unwrap();
+        assert_eq!(*lock(&told), [ID, ID], "each save is told");
+        assert_eq!(
+            Json::Object(s.values(ID)),
+            json!({"quality": 80, "mode": "best", "token": "hunter2-secret"})
+        );
+        // Refused with its reason, and nothing moved but what was kept.
+        let e = s
+            .save(ValueScope::App, &set(&[("quality", json!(500))]))
+            .unwrap_err();
+        assert!(e.contains("500 is above 100"), "{e}");
+        assert_eq!(s.values(ID)["quality"], 80);
+        assert!(s.values("org.example.none").is_empty());
     }
 
     #[test]

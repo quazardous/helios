@@ -34,7 +34,7 @@ pub mod manifest;
 pub mod rpc;
 pub mod source;
 
-pub use broker::{Broker, Notice, Policy, Probed, Scope, default_dirs};
+pub use broker::{Broker, Notice, Policy, Probed, Scope, Told, ValuesFn, default_dirs};
 pub use commands::register;
 pub use manifest::{MANIFEST, Manifest};
 pub use rpc::Cancel;

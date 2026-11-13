@@ -6,6 +6,12 @@
 //!
 //! The plugin keeps no token: every call carries `auth`, the account's
 //! access token as the host renews it ([`ConnectorServices::token`]).
+//! Every call also carries `config`: the plugin's own settings
+//! (`plugin`, put by the broker), the account's (`account`) and the
+//! source's (`source`), each its contract's defaults under the values
+//! the person gave ([`ConnectorServices::values`], secrets read from the
+//! keyring as the call is made); a value its contract refuses is left
+//! out, said in the log without the value.
 //! Its error -32010 is "sign-in needed" ([`ConnectorError::AuthNeeded`]):
 //! the account needs a reconnection, nothing is retried.
 //!
@@ -30,9 +36,9 @@ use helios_connect::{
     Access, AccountRef, Cancel, Caps, ConnectStep, Connector, ConnectorError, ConnectorInfo,
     ConnectorManifest, ConnectorProvider, ConnectorServices, Cursor, FetchSink, Fetched, Item,
     ItemId, ItemKind, ItemRef, Needs, Originals, Page, Pick, Probed, Settings, SourceRef, Text,
-    TokenFn,
+    TokenFn, ValuesFn,
 };
-use helios_core::config::Contracts;
+use helios_core::config::{Contracts, Level};
 use serde_json::{Value as Json, json};
 
 use crate::Broker;
@@ -151,9 +157,13 @@ impl SourceProvider {
         &self.plugin
     }
 
-    /// Its connector, calling the plugin with the tokens `token` gives.
-    pub fn connector(&self, token: TokenFn) -> PluginSource {
+    /// Its connector, calling the plugin with the tokens `token` gives
+    /// and the account's and source's values `values` gives (their
+    /// defaults without).
+    pub fn connector(&self, token: TokenFn, values: Option<ValuesFn>) -> PluginSource {
         PluginSource {
+            config: self.config.clone(),
+            values,
             broker: self.broker.clone(),
             plugin: self.plugin.clone(),
             id: self.manifest.id.clone(),
@@ -188,7 +198,7 @@ impl ConnectorProvider for SourceProvider {
         let token = services.token.clone().unwrap_or_else(|| {
             Arc::new(|id: &str| Err(format!("no sign-in for the account {id}")))
         });
-        Ok(Box::new(self.connector(token)))
+        Ok(Box::new(self.connector(token, services.values.clone())))
     }
 }
 
@@ -203,6 +213,10 @@ pub struct PluginSource {
     /// Its manifest's: what it does, its limits.
     caps: Caps,
     token: TokenFn,
+    /// Its plugin's contracts: what the account's and source's values
+    /// are checked against.
+    config: Contracts,
+    values: Option<ValuesFn>,
     /// The picking going: its account and session.
     session: Mutex<Option<(String, String)>>,
     /// Each item listed, as the plugin gave it (its `download` beside).
@@ -259,6 +273,10 @@ impl PluginSource {
             ConnectorError::AuthNeeded
         })?;
         params["auth"] = json!(token);
+        params["config"] = json!({
+            "account": self.values_of(Level::Account, account),
+            "source": self.values_of(Level::Source, account),
+        });
         // The broker's cancel follows the connector's, polled while the
         // call runs.
         let stop = rpc::Cancel::new();
@@ -281,6 +299,32 @@ impl PluginSource {
         done.store(true, Ordering::Relaxed);
         let _ = watcher.join();
         answer.map_err(error_of)
+    }
+
+    /// The values of the account or source `id` at `level`, as the plugin
+    /// is handed them: the contract's defaults under the person's values
+    /// that fit. A plugin source's source is its account: both are named
+    /// by the account's id.
+    fn values_of(&self, level: Level, id: &str) -> serde_json::Map<String, Json> {
+        let contract = self.config.get(level);
+        if contract.is_empty() {
+            return serde_json::Map::new();
+        }
+        let given = self
+            .values
+            .as_ref()
+            .map(|f| f(level, id, contract))
+            .unwrap_or_default();
+        let (values, refused) = contract.resolve(&given);
+        let at = if level == Level::Account {
+            "account"
+        } else {
+            "source"
+        };
+        for r in refused {
+            log::warn!("{}: the {at} {id}'s settings: {r}", self.id);
+        }
+        values
     }
 
     /// The plugin's download of one item listed into the staging folder:

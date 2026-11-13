@@ -234,7 +234,7 @@ gui-editor-card = Carte ou appareil photo
 
 gui-editor-params = Paramètres
 
-gui-editor-params-wrong = Un paramètre ne correspond pas à ce que le connecteur accepte
+gui-editor-params-refused = Un paramètre ne correspond pas à ce que le connecteur accepte : { $why }
 
 gui-editor-save = Enregistrer la source
 
@@ -762,6 +762,7 @@ gui-size-kib = { $size } Kio
 gui-size-mib = { $size } Mio
 
 gui-wizard-account = Compte
+gui-wizard-account-settings = Réglages du compte
 
 gui-wizard-add = Ajouter la source
 

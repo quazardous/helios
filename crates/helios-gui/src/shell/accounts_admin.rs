@@ -112,6 +112,14 @@ impl Shell {
                     .unwrap_or_else(PoisonError::into_inner)
                     .insert(id, label);
             }
+            // An account's and its source's settings, handed to a
+            // plugin's connector with each call.
+            let params = w.sources.params();
+            w.connectors.set_values(crate::import_scan::values_from(
+                book.clone(),
+                secrets.clone(),
+                params,
+            ));
             if let Some(web) = w.accounts.web.clone() {
                 let (book, secrets) = (book.clone(), secrets.clone());
                 w.connectors.set_token(Arc::new(move |id: &str| {
