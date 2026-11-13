@@ -290,8 +290,8 @@ fn gate(root: &Path, numbers: &[u64], retest: bool) -> Result<String, String> {
                     + &String::from_utf8_lossy(&o.stderr);
                 let line = text
                     .lines()
-                    .filter(|l| l.contains(&r.ext_job_id))
-                    .last()
+                    .rev()
+                    .find(|l| l.contains(&r.ext_job_id))
                     .unwrap_or("")
                     .to_string();
                 (o.status.success() && !line.contains(" exit "), line)

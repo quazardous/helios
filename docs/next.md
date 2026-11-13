@@ -55,7 +55,7 @@ Sizing: one author, one pull request, one small slice, under an hour.
 
 ## The tester
 
-One agent, with a standing brief, takes the pull requests waiting on
+One agent, with a standing brief ([tester.md](tester.md)), takes the pull requests waiting on
 `devel` in order (first in, first out):
 
 1. Picks a batch of one to three that do not touch the same files, and
