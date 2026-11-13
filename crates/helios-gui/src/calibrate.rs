@@ -1268,7 +1268,9 @@ fn default_ui(
             ),
         );
     };
-    ui.horizontal(|ui| {
+    // Wrapped: in a narrow panel "Clear the default" goes to the next
+    // line instead of past the panel's edge, where it cannot be clicked.
+    ui.horizontal_wrapped(|ui| {
         let save = text(Message::new(
             "gui-look-header-default-save",
             "Save as the camera's default",
