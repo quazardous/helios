@@ -2333,17 +2333,13 @@ impl Library {
     pub fn record_filter(&mut self) {
         self.typed = None;
         let filter = self.filter.clone();
-        match &mut self.filter_history {
-            Some(h) => {
-                if h.record(&filter) {
-                    self.filter_history_write = Wanted::Yes;
-                }
+        if let Some(h) = &mut self.filter_history {
+            if h.record(&filter) {
+                self.filter_history_write = Wanted::Yes;
             }
-            None if !filter.is_empty() => {
-                self.used_early.retain(|f| *f != filter);
-                self.used_early.push(filter);
-            }
-            None => {}
+        } else if !filter.is_empty() {
+            self.used_early.retain(|f| *f != filter);
+            self.used_early.push(filter);
         }
     }
 
