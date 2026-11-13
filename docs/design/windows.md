@@ -1203,6 +1203,10 @@ Every Helios window now draws the main window's bars.
   menus as the main window; Export… is greyed there with "Only in the …
   window"; File > Close window chosen there closes the import window and
   leaves the main one.
+- **The Settings window** (2026-11-13): egui-pop's Settings app opens
+  its window with the same bars. Test (`tests/settings_window.rs`, real
+  viewports): its bar has the menu button, the logo and the name, the
+  main window's menus, and Export… greyed there.
 
 **Not built yet: reopening the main window.** egui-pop 0.9 moves a
 window into the main one but has no way back: once the main window is
@@ -1249,6 +1253,7 @@ Audit of the import window, 2026-11-13:
 | Background task when the window closes (folder read) | Closes at once, the main window draws on | `import-close` job | OK |
 | Size and position | Kept per window across runs | egui-pop test | OK |
 | Agent socket and test steps | Address each window (`window`) | egui-pop-agent tests | OK |
+| Menu bar | The window's own: the main window's title bar start and menus, evaluated in it, the main window's commands greyed (the import and Settings windows) | Helios tests on real viewports (`import.rs`, `settings_window.rs`); egui-pop tests | OK |
 
 For a new window: add it to `window-audit.py`'s probes (or a probe of its
 own) so the job checks the same things for it.

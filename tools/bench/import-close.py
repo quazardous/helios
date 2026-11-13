@@ -42,6 +42,7 @@ close after which the main window takes longer to draw fails the job.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -352,7 +353,7 @@ def one_close(
     result["main_thread_waits"] = waits
     # The longest gap between two main window frames after the close.
     roots = [at for at, w in marks if w == MAIN_BEGINS]
-    gaps = [b - a for a, b in zip(roots, roots[1:])]
+    gaps = [b - a for a, b in zip(roots, roots[1:], strict=False)]
     result["longest_main_gap_ms"] = round(max(gaps) * 1e3, 1) if gaps else None
     if built is None:
         result["error"] = f"the main window drew nothing within {args.timeout:.0f} s of the close"
@@ -362,10 +363,8 @@ def one_close(
     # A way that did not close it (Escape where it does not): closed by
     # Cancel, so the next way opens it afresh.
     if present(comp, title):
-        try:
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
             close(comp, agent, "cancel", title)
-        except (OSError, RuntimeError, ValueError):
-            pass
         until = time.monotonic() + 10
         while time.monotonic() < until and present(comp, title):
             time.sleep(0.1)
