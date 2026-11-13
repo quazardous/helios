@@ -550,6 +550,14 @@ gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été 
 
 gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
 
+gui-look-header-compare = Comparer au JPEG de l’appareil
+
+gui-look-header-compare-about = Affiche le JPEG intégré de l’appareil à gauche de la séparation et le rendu à sa droite ; faites glisser la séparation pour la déplacer
+
+gui-look-header-compare-no-jpeg = Aucun JPEG de l’appareil à comparer : le raw n’en contient pas
+
+gui-look-header-compare-not-raw = Aucun JPEG de l’appareil à comparer : la photo n’est pas un raw
+
 gui-look-header-fit = Ajuster au JPEG de l’appareil
 
 gui-look-header-fit-about = Ajuste une matrice, une table teinte et saturation et des courbes de tons au JPEG intégré de l’appareil, vérifiés sur des pixels qui n’ont pas servi à l’ajustement

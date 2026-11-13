@@ -232,6 +232,38 @@ pub fn write_view(store: &mut Store, view: &View, gesture: Option<GestureId>) {
     }
 }
 
+/// The source node holding the camera's JPEG, the "before" of a compare
+/// with it.
+pub const CAMERA_JPEG: &str = "camera-jpeg";
+
+/// `image` (four channels) scaled to `extent`, nearest pixel: the camera's
+/// JPEG laid over the render it is compared with. Another channel count
+/// is padded with opaque alpha.
+fn scaled_to(image: &Image, extent: Region) -> Image {
+    let from = image.region();
+    let channels = image.channels();
+    if from.width == 0 || from.height == 0 || extent.width == 0 || extent.height == 0 {
+        return Image::from_fn(extent, 4, |_, _, c| if c == 3 { 1.0 } else { 0.0 });
+    }
+    let (sx, sy) = (
+        f64::from(from.width) / f64::from(extent.width),
+        f64::from(from.height) / f64::from(extent.height),
+    );
+    Image::from_fn(extent, 4, |x, y, c| {
+        let px = ((x - extent.x) as f64 + 0.5) * sx;
+        let py = ((y - extent.y) as f64 + 0.5) * sy;
+        let px = from.x + (px as i64).min(i64::from(from.width) - 1);
+        let py = from.y + (py as i64).min(i64::from(from.height) - 1);
+        let pixel = image.pixel(px, py);
+        match pixel.get(c as usize) {
+            Some(v) if c < channels.min(4) => *v,
+            _ if c == 3 => 1.0,
+            // A grey picture: its one channel in each colour.
+            _ => pixel[0],
+        }
+    })
+}
+
 /// The image's id as egui-pop's canvas in use (`egui_pop::core::canvas`).
 pub const CANVAS: &str = "helios.viewport.canvas";
 
@@ -263,6 +295,12 @@ pub struct Viewport {
     state: ViewportState,
     after: EngineSource,
     before: EngineSource,
+    /// What "before" shows when it is not the camera's JPEG: the edit as
+    /// it was opened.
+    opened: Option<Shown>,
+    /// The file whose embedded JPEG "before" shows, when comparing with
+    /// the camera's JPEG ([`crate::calibrate::LOOK_COMPARE`]).
+    camera_jpeg: Option<std::path::PathBuf>,
     edited: Option<Edited>,
     /// The drag under way, a gesture of the store.
     gesture: Option<GestureId>,
@@ -344,6 +382,8 @@ impl Viewport {
             state,
             after,
             before,
+            opened: None,
+            camera_jpeg: None,
             edited: None,
             gesture: None,
             readout: None,
@@ -365,7 +405,9 @@ impl Viewport {
         // Another image: its mask is found again at the next frame.
         self.layer = None;
         self.after.show(Some(shown.clone()));
-        self.before.show(Some(shown));
+        self.before.show(Some(shown.clone()));
+        self.opened = Some(shown);
+        self.camera_jpeg = None;
         if let Some(s) = &mut self.stand_in {
             s.sourced = true;
         }
@@ -807,6 +849,63 @@ impl Viewport {
             Ok(_) => self.reshow(),
             Err(e) => eprintln!("helios-gui: viewport: {e}"),
         }
+        self.follow_camera_jpeg(store);
+    }
+
+    /// Follows the compare with the camera's JPEG: asked for, "before"
+    /// shows the open photo's embedded JPEG; no longer, the edit as it was
+    /// opened again. A file without one turns the compare off and says why
+    /// ([`crate::calibrate::LOOK_COMPARE_MISSING`]).
+    fn follow_camera_jpeg(&mut self, store: &mut Store) {
+        use crate::calibrate;
+        let wanted = if calibrate::is_comparing(store) {
+            calibrate::compared_path(store)
+        } else {
+            None
+        };
+        if wanted == self.camera_jpeg {
+            return;
+        }
+        self.camera_jpeg = None;
+        let Some(path) = wanted else {
+            self.before.show(self.opened.clone());
+            return;
+        };
+        match calibrate::camera_jpeg(&path) {
+            Ok(image) => match self.show_camera_jpeg(&image) {
+                Ok(()) => self.camera_jpeg = Some(path),
+                Err(e) => {
+                    eprintln!("helios-gui: viewport: the camera's JPEG: {e}");
+                    calibrate::write_compare(store, false, "");
+                }
+            },
+            Err(why) => calibrate::write_compare(store, false, why),
+        }
+    }
+
+    /// Shows `jpeg` (the camera's embedded JPEG, in the working space) as
+    /// "before", scaled to the image shown so the split lines them up.
+    ///
+    /// # Errors
+    /// No image is shown.
+    pub fn show_camera_jpeg(&mut self, jpeg: &Image) -> Result<(), String> {
+        let extent = self
+            .opened
+            .as_ref()
+            .map(|s| s.extent)
+            .ok_or("no image is shown")?;
+        let mut graph = Graph::new();
+        let node = graph.add_source(CAMERA_JPEG, scaled_to(jpeg, extent));
+        let shown = Shown::new(Arc::new(graph), node, helios_core::graph::SOURCE_PORT)?
+            .ok_or("the camera's JPEG has no pixels")?;
+        self.before.show(Some(shown));
+        Ok(())
+    }
+
+    /// What "before" shows: the edit as it was opened, or the camera's
+    /// JPEG ([`CAMERA_JPEG`]) when comparing with it.
+    pub fn before_shown(&self) -> Option<Shown> {
+        self.before.shown()
     }
 
     /// Computes on `gpu`, the process's device the window draws with:
