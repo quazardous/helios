@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
+pub mod cache;
 pub mod client;
 pub mod discovery;
 pub mod jobs;

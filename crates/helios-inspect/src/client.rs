@@ -14,7 +14,9 @@
 //! ([`Pending::poll`]) from a thread that must not wait (an interface's),
 //! or waited on ([`Pending::wait`]) from one that may (a command line's).
 //! Several calls run at once on one client; each answer reaches its own
-//! [`Pending`].
+//! [`Pending`]. The notifications the node sends on the client's
+//! connection (a subscription's `events.event`) reach
+//! [`Client::notifications`].
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -111,6 +113,50 @@ fn gone() -> Error {
     )
 }
 
+/// Where the notifications a client receives go, once someone listens.
+type Notify = Arc<Mutex<Option<Sender<Value>>>>;
+
+/// Hands a notification to whoever listens; false once the listener
+/// went (no listener yet is not a failure: the notification is dropped).
+fn forward(notify: &Notify, value: Value) -> bool {
+    let mut to = notify.lock().unwrap_or_else(PoisonError::into_inner);
+    if to.as_ref().is_some_and(|s| s.send(value).is_err()) {
+        *to = None;
+        return false;
+    }
+    true
+}
+
+/// The lines a call of this process writes as notifications, each handed
+/// to the client's listener.
+struct Lines {
+    line: Vec<u8>,
+    notify: Notify,
+}
+
+impl Write for Lines {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        for &b in bytes {
+            if b == b'\n' {
+                let line = std::mem::take(&mut self.line);
+                if let Ok(value) = serde_json::from_slice::<Value>(&line)
+                    && !forward(&self.notify, value)
+                {
+                    // A stream sending to nobody stops.
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+            } else {
+                self.line.push(b);
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 /// What carries a [`Client`]'s calls.
 trait Transport: Send + Sync {
     /// Sends call `id`; its answer goes to `answer`.
@@ -124,31 +170,52 @@ pub struct Client {
     transport: Arc<dyn Transport>,
     next: AtomicI64,
     meta: CallMeta,
+    notify: Notify,
 }
 
 impl Client {
     /// A client of the endpoint `service` answers in this process: each
     /// call runs on a thread of its own, as a socket's do.
     pub fn in_process(service: Arc<dyn Service>) -> Self {
-        Self::over(Arc::new(InProcess {
-            service,
-            running: Arc::default(),
-            closers: Closers::default(),
-        }))
+        let notify = Notify::default();
+        Self::over(
+            Arc::new(InProcess {
+                service,
+                running: Arc::default(),
+                closers: Closers::default(),
+                notify: notify.clone(),
+            }),
+            notify,
+        )
     }
 
     /// A client of the endpoint at `address`, its connection kept open
     /// until the client is dropped.
     pub fn connect(address: &Address) -> io::Result<Self> {
-        Ok(Self::over(Arc::new(Socket::connect(address)?)))
+        let notify = Notify::default();
+        Ok(Self::over(
+            Arc::new(Socket::connect(address, notify.clone())?),
+            notify,
+        ))
     }
 
-    fn over(transport: Arc<dyn Transport>) -> Self {
+    fn over(transport: Arc<dyn Transport>, notify: Notify) -> Self {
         Self {
             transport,
             next: AtomicI64::new(1),
             meta: CallMeta::default(),
+            notify,
         }
+    }
+
+    /// The notifications the node sends this client from now on (each a
+    /// JSON-RPC notification: `method` and `params`), such as a
+    /// subscription's events. One listener at a time: a second call
+    /// takes them over.
+    pub fn notifications(&self) -> Receiver<Value> {
+        let (send, receive) = mpsc::channel();
+        *self.notify.lock().unwrap_or_else(PoisonError::into_inner) = Some(send);
+        receive
     }
 
     /// Its calls made by `origin` (`_meta.origin`), unless a call names
@@ -197,6 +264,7 @@ struct InProcess {
     running: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     /// What calls asked to run when their client goes.
     closers: Closers,
+    notify: Notify,
 }
 
 impl Transport for InProcess {
@@ -206,11 +274,15 @@ impl Transport for InProcess {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id, cancelled.clone());
-        // Notifications sent on the call's connection have nowhere to go.
+        // Notifications sent on the call's connection reach the client's
+        // listener, as a socket's do.
         let call = Call::detached(
             Some(Id::Number(id)),
             cancelled,
-            Sink::new(io::sink()),
+            Sink::new(Lines {
+                line: Vec::new(),
+                notify: self.notify.clone(),
+            }),
             self.closers.clone(),
         );
         let (service, method, running) = (
@@ -267,13 +339,13 @@ struct Socket {
 }
 
 impl Socket {
-    fn connect(address: &Address) -> io::Result<Self> {
+    fn connect(address: &Address, notify: Notify) -> io::Result<Self> {
         let (reader, writer, closer) = Connection::connect(address)?.split()?;
         let waiting: Waiting = Arc::new(Mutex::new(Some(HashMap::new())));
         let read = waiting.clone();
         std::thread::Builder::new()
             .name("helios-client".into())
-            .spawn(move || read_answers(reader, &read))?;
+            .spawn(move || read_answers(reader, &read, &notify))?;
         Ok(Self {
             writer: Mutex::new(writer),
             waiting,
@@ -288,9 +360,10 @@ impl Socket {
     }
 }
 
-/// Hands each answer read to its call; once the connection closes, every
-/// call still waiting is told.
-fn read_answers(mut reader: Box<dyn BufRead + Send>, waiting: &Waiting) {
+/// Hands each answer read to its call, and each notification to the
+/// client's listener; once the connection closes, every call still
+/// waiting is told.
+fn read_answers(mut reader: Box<dyn BufRead + Send>, waiting: &Waiting, notify: &Notify) {
     let mut line = String::new();
     loop {
         line.clear();
@@ -298,8 +371,15 @@ fn read_answers(mut reader: Box<dyn BufRead + Send>, waiting: &Waiting) {
             Ok(0) | Err(_) => break,
             Ok(_) => {}
         }
-        // Notifications (no id) and lines of another form are not answers.
-        let Ok(response) = serde_json::from_str::<Response>(&line) else {
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if value.get("id").is_none() && value.get("method").is_some() {
+            let _ = forward(notify, value);
+            continue;
+        }
+        // Lines of another form are not answers.
+        let Ok(response) = serde_json::from_value::<Response>(value) else {
             continue;
         };
         let Id::Number(id) = response.id else {

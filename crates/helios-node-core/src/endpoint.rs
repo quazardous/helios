@@ -32,7 +32,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, validate};
-use crate::{calibrate, library};
+use crate::{calibrate, cursor, library};
 
 /// Who publishes the endpoint's events on the bus.
 pub const SOURCE: &str = "node";
@@ -121,6 +121,7 @@ pub trait WindowCommands: Send + Sync {
 pub fn specs() -> Vec<CommandSpec> {
     std::iter::once(library::import_spec())
         .chain(library::specs())
+        .chain(cursor::specs())
         .chain(calibrate::specs())
         .collect()
 }
@@ -144,7 +145,7 @@ pub fn command<S: Store>(
 ) -> Result<(Value, Changes), String> {
     let Some(spec) = specs()
         .into_iter()
-        .find(|s| s.id == id && s.id != library::IMPORT)
+        .find(|s| s.id == id && s.id != library::IMPORT && !cursor::handles(s.id.as_str()))
     else {
         return Err(format!("no command `{id}` on the vault"));
     };
@@ -195,6 +196,7 @@ pub struct VaultService<S: Store> {
     jobs: Jobs,
     instance: String,
     windows: Option<Arc<dyn WindowCommands>>,
+    cursors: cursor::Cursors,
 }
 
 impl<S: Store> VaultService<S> {
@@ -208,6 +210,7 @@ impl<S: Store> VaultService<S> {
             jobs,
             instance: instance.into(),
             windows: None,
+            cursors: cursor::Cursors::default(),
         }
     }
 
@@ -216,6 +219,11 @@ impl<S: Store> VaultService<S> {
     pub fn with_windows(mut self, windows: Arc<dyn WindowCommands>) -> Self {
         self.windows = Some(windows);
         self
+    }
+
+    /// The cursors its clients hold open.
+    pub fn cursors(&self) -> &cursor::Cursors {
+        &self.cursors
     }
 }
 
@@ -374,6 +382,19 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
         }
         validate(&spec.params, &checked)
             .map_err(|e| Error::invalid_params(format!("`{method}` refused its params: {e}")))?;
+        if cursor::handles(method) {
+            // Reads, announced on no bus: a page turned is not a change.
+            let mut answer = self.cursors.run(
+                &self.vault,
+                method,
+                &checked,
+                call,
+                std::time::Instant::now(),
+            )?;
+            answer["command"] = json!(method);
+            answer["seq"] = json!(self.bus.last_seq());
+            return Ok(answer);
+        }
         self.bus.publish(
             SOURCE,
             None,
@@ -386,6 +407,10 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
             Ok(mut answer) => {
                 answer["command"] = json!(method);
                 answer["origin"] = json!(origin);
+                // The bus's sequence once it ran: every event of a write
+                // is at or below it, so a client whose cache has seen it
+                // shows the write (docs/protocol.md, "A client cache").
+                answer["seq"] = json!(self.bus.last_seq());
                 Ok(answer)
             }
             Err(e) if call.is_cancelled() => {
@@ -395,9 +420,10 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
         }
     }
 
-    /// An import stops before its next file.
+    /// An import stops before its next file, a cursor window between
+    /// chunks of rows.
     fn cancellable(&self, method: &str) -> bool {
-        method == library::IMPORT
+        method == library::IMPORT || method == "cursor.window"
     }
 }
 
@@ -560,7 +586,7 @@ mod tests {
         let commands = client.request("commands.list", json!({})).unwrap();
         assert_eq!(
             commands["commands"].as_array().unwrap().len(),
-            1 + library::IDS.len() + calibrate::specs().len()
+            1 + library::IDS.len() + cursor::IDS.len() + calibrate::specs().len()
         );
     }
 

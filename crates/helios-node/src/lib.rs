@@ -48,6 +48,8 @@ pub use helios_library::darktable;
 pub mod connect;
 /// The calibration's commands (`helios_node_core::calibrate`).
 pub use helios_node_core::calibrate;
+/// Reads at scale through cursors (`helios_node_core::cursor`).
+pub use helios_node_core::cursor;
 pub use helios_node_core::library;
 pub mod mcp;
 pub mod sandbox;

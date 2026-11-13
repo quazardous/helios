@@ -95,7 +95,73 @@ events seen on a wait's timeout, the entities known on a miss).
 | -32004 | the origin is not one |
 | -32005 | a wait ran out of time |
 | -32006 | the call cannot be cancelled |
+| -32007 | no such cursor: closed, or its lease ran out |
 | -32800 | the call was cancelled |
+
+## Cursors
+
+The library's photos are read through cursors on the vault's endpoint
+(`VaultService`: the desktop's node, in-process clients), so a client
+never pulls a whole collection.
+
+| Method | Params | Answers |
+|---|---|---|
+| `cursor.open` | `query`, `lease` (seconds, 60 by default, at most 3600) | `cursor`, `count`, `version`, `lease` |
+| `cursor.window` | `cursor`, `offset`, `len` (at most 10,000), `fields` | `rows` (`id`, `fields`), `count`, `version`, `current`, `stale` |
+| `cursor.rank` | `cursor`, `image` | `rank` (null when not in it) |
+| `cursor.refresh` | `cursor` | `changed`, `count`, `version`, `inserted`, `removed`, `replaced` |
+| `cursor.close` | `cursor` | `closed` |
+
+- **A snapshot.** `cursor.open` runs its query once and keeps the
+  ordered ids on the node. Windows page that snapshot: a write made
+  during the paging never shifts the pages, and each photo is read once.
+  The fields of a window are read when it is read.
+- **Stale, not wrong.** A window says the version its snapshot was taken
+  at and the catalog's (`current`); `stale` when they differ. The client
+  then calls `cursor.refresh` (the photos inserted and removed, and those
+  whose copies moved) or reopens the cursor.
+- **A lease.** A cursor not read for its lease is closed by the node;
+  reading it then answers -32007, and the client reopens it from its
+  query. `cursor.window` is cancellable (`$/cancel`): it stops between
+  chunks of rows and the cursor stays open.
+- **The query**, every term optional (none: the whole Library by id):
+  `min_rating`, `label`, `labels`, `flags` (`pick`, `reject`, `none`),
+  `tags`, `captured_from`, `captured_before`, `words`, `cameras`,
+  `lenses`, `file_types`, `folder`, `album`, `presence` (`present`,
+  `offline`, `missing`), `cull`, and `order` (`{"by": "captured",
+  "descending": true}`; `by` one of `captured`, `imported`, `name`,
+  `rating`, `edited`, `size`, `focus`, `id`). Smart-album rules and
+  backup filters are not taken yet.
+
+`library.fields.set` (`changes`: `{image, field, value}`, a null value
+clearing the field) writes photos' fields, audited under the call's
+origin and announced as `vault.field_changed`.
+
+## A client cache
+
+Every answer of the vault's endpoint carries `seq`: the bus's sequence
+once the call ran. Every event of a write is at or below it.
+`helios_inspect::cache::ReadCache` keeps the answers of the reads it
+knows (`cursor.window`, `cursor.rank`, `library.edit.head`,
+`library.stacks.list`, `library.stacks.decisions`, the settings layers'
+reads), keyed by method and params, and follows the node's events
+(`events.subscribe` on its inspect endpoint) to drop what they name:
+
+| Event | Drops |
+|---|---|
+| `vault.field_changed`, `vault.version_added`, `edit.saved` | the reads naming its `image` |
+| `vault.stack_changed`, `library.decision` | the stacks' reads |
+| `settings.layerChanged` | the settings' reads |
+| `library.imported`, `vault.locations_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
+
+- An answer read at a sequence older than an event already heard is
+  checked against that event before it is kept.
+- A `gap`, a subscription that ends, or a node of another `instance`
+  (restarted) empties the cache.
+- **Read your writes**: a writer waits until the cache has seen its
+  answer's `seq` (`wait_seen`); from then on, the cache shows the write.
+- A cached window keeps the `stale` it was read with: `cursor.refresh`
+  is never cached, and is how a client learns its snapshot moved.
 
 ## Finding a node
 
