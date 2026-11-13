@@ -103,6 +103,10 @@ param-channelmixerrgb-y =
     .description = the illuminant's CIE y (custom illuminant)
     .label = y
 
+param-chartprofile-lut =
+    .description = the profile's residual table: its neutral, then each node's hue shift (degrees) and saturation scale, 72 hues x 5 saturations x 5 values; empty for none
+    .label = lut
+
 param-chartprofile-matrix =
     .description = the profile's matrix, camera RGB to the working space, row by row; all zero for none
     .label = matrix

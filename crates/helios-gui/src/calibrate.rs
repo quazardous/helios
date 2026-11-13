@@ -415,6 +415,12 @@ fn choose<S: Store>(
                     helios_core::Value::List(profile.matrix.iter().flatten().copied().collect()),
                 ),
                 (
+                    node_path(&target, "lut"),
+                    helios_core::Value::List(helios_calibrate::apply::lut_param(
+                        profile.lut.as_ref(),
+                    )),
+                ),
+                (
                     node_path(&target, "profile"),
                     helios_core::Value::Text(asked.to_string()),
                 ),

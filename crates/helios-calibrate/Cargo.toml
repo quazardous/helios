@@ -17,12 +17,16 @@ serde_json.workspace = true
 blake3.workspace = true
 # The raw measurement graph: the raw front without `colorin`.
 helios-core.workspace = true
+# The residual table's layout, shared with the brick that renders it.
+helios-bricks.workspace = true
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
 
 [dev-dependencies]
+# A profile with its residual table rendered as the module renders it.
+helios-module-chartprofile = { path = "../../modules/chartprofile" }
 helios-testkit.workspace = true
 
 [lints]

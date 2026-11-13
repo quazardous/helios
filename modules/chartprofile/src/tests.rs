@@ -130,3 +130,59 @@ fn an_unusable_camera_matrix_is_named() {
 fn it_keeps_the_module_contract() {
     helios_testkit::assert_contract_in(ChartProfile, &raw_context());
 }
+
+/// A residual table turning every coloured hue by `shift` degrees.
+fn turning_table(shift: f64) -> Vec<f64> {
+    let mut flat = vec![1.0, 1.0, 1.0];
+    for _ in 0..huesat::VALUES * huesat::HUES {
+        flat.extend([0.0, 1.0]);
+        for _ in 1..huesat::SATURATIONS {
+            flat.extend([shift, 1.0]);
+        }
+    }
+    flat
+}
+
+#[test]
+fn a_profile_without_a_table_is_the_matrix_step_bit_for_bit() {
+    // A profile saved before residual tables (no `lut`) renders as the
+    // matrix step did.
+    let context = raw_context();
+    let m_s = standard(&context).unwrap();
+    let m_c = profile_matrix(&m_s);
+    let out = run(&with_matrix(&m_c), &context);
+    let p = correction(&m_c, &m_s).unwrap();
+    let mut want = pixels().concat();
+    matrix3::apply(&matrix3::plan(&flat(&p)).unwrap(), &mut want);
+    let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&out.concat()), bits(&want));
+    let empty = with_matrix(&m_c).with("lut", Value::List(Vec::new()));
+    assert_eq!(bits(&run(&empty, &context).concat()), bits(&want));
+}
+
+#[test]
+fn the_residual_table_turns_the_hues_after_the_matrix() {
+    let m: Mat3 = [[1.1, -0.1, 0.0], [0.0, 0.9, 0.1], [0.05, 0.0, 0.95]];
+    let plain = run(&with_matrix(&m), &Context::new());
+    let params = with_matrix(&m).with("lut", Value::List(turning_table(8.0)));
+    let turned = run(&params, &Context::new());
+    // The grey keeps its value, the colours turn and keep their
+    // luminance, the fourth channel is kept.
+    for c in 0..3 {
+        assert!((turned[0][c] - plain[0][c]).abs() < 1e-6, "{turned:?}");
+    }
+    let luma =
+        |p: &[f32; 4]| huesat::LUMA[0] * p[0] + huesat::LUMA[1] * p[1] + huesat::LUMA[2] * p[2];
+    for (t, p) in turned.iter().zip(&plain).skip(1).take(3) {
+        assert!((luma(t) - luma(p)).abs() < 1e-5, "{t:?} {p:?}");
+        assert!((t[0] - p[0]).abs() + (t[1] - p[1]).abs() + (t[2] - p[2]).abs() > 1e-3);
+        assert_eq!(t[3], p[3]);
+    }
+    // A table of the wrong size is refused, by its name.
+    let bad = ChartProfile
+        .manifest()
+        .resolve(&with_matrix(&m).with("lut", Value::List(vec![1.0; 7])))
+        .unwrap();
+    let e = ChartProfile.prepare(&bad, &Context::new()).unwrap_err();
+    assert!(e.contains("`lut`"), "{e}");
+}

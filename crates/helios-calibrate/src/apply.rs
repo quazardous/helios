@@ -3,8 +3,9 @@
 //! photo gets when none is named.
 //!
 //! - [`with_profile`] sets the `chartprofile` node of an edit to a
-//!   profile: its matrix `M_c` and its id copied into the parameters (a
-//!   module does no IO), the node turned on. [`without_profile`] turns it
+//!   profile: its matrix `M_c`, its residual table when it has one and its
+//!   id copied into the parameters (a module does no IO), the node turned
+//!   on. [`without_profile`] turns it
 //!   off, its parameters kept.
 //! - [`pick`] chooses among a camera's profiles the one whose illuminant
 //!   is nearest the photo's as-shot light, within [`MAX_UV_DISTANCE`] in
@@ -16,6 +17,8 @@ use helios_core::{Params, Value as Param};
 use helios_photo::color::Mat3;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use crate::look::HueSatTable;
 
 /// The module, and the node it runs in.
 pub const MODULE: &str = "chartprofile";
@@ -112,24 +115,33 @@ pub fn pick(candidates: &[Candidate], xy: [f64; 2]) -> Result<Picked, PickError>
     }
 }
 
-/// The `chartprofile` node's parameters for a profile, as an edit holds
-/// them.
-pub fn params(id: &str, matrix: &Mat3) -> Value {
-    let params = Params::new()
-        .with(
-            "matrix",
-            Param::List(matrix.iter().flatten().copied().collect()),
-        )
-        .with("profile", Param::Text(id.into()));
+/// The `chartprofile` node's parameters for a profile (matrix `matrix`,
+/// residual table `lut`), as an edit holds them. A profile without a
+/// table writes no `lut`: its parameters are the ones written before
+/// residual tables.
+pub fn params(id: &str, matrix: &Mat3, lut: Option<&HueSatTable>) -> Value {
+    let mut params = Params::new().with(
+        "matrix",
+        Param::List(matrix.iter().flatten().copied().collect()),
+    );
+    if let Some(table) = lut {
+        params = params.with("lut", Param::List(table.to_param()));
+    }
+    let params = params.with("profile", Param::Text(id.into()));
     serde_json::to_value(&params).expect("parameters serialise")
 }
 
+/// The `lut` parameter's value for a profile: its table, or empty (none).
+pub fn lut_param(lut: Option<&HueSatTable>) -> Vec<f64> {
+    lut.map(HueSatTable::to_param).unwrap_or_default()
+}
+
 /// `edit` (an image's edit, `null` for none yet) with its `chartprofile`
-/// node set to the profile `id` (matrix `matrix`) and turned on; the other
-/// nodes kept as they are.
-pub fn with_profile(edit: &Value, id: &str, matrix: &Mat3) -> Value {
+/// node set to the profile `id` (matrix `matrix`, residual table `lut`)
+/// and turned on; the other nodes kept as they are.
+pub fn with_profile(edit: &Value, id: &str, matrix: &Mat3, lut: Option<&HueSatTable>) -> Value {
     let mut edit = base(edit);
-    let entry = json!({ "name": MODULE, "module": MODULE, "params": params(id, matrix) });
+    let entry = json!({ "name": MODULE, "module": MODULE, "params": params(id, matrix, lut) });
     let modules = edit["modules"].as_array_mut().expect("an array");
     match modules.iter_mut().find(|m| m["name"] == MODULE) {
         Some(m) => *m = entry,
@@ -230,24 +242,31 @@ mod tests {
             { "name": "exposure", "module": "exposure", "params": { "exposure": { "float": 1.0 } } }
         ] });
         let m: Mat3 = [[1.1, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.9]];
-        let on = with_profile(&edit, "p1", &m);
+        let on = with_profile(&edit, "p1", &m, None);
         assert_eq!(applied(&on).as_deref(), Some("p1"));
         assert_eq!(on["modules"][0], edit["modules"][0]);
         let entry = &on["modules"][1];
         assert_eq!(entry["module"], MODULE);
         assert_eq!(entry["params"]["matrix"]["list"][0], 1.1);
         // Another profile replaces it; none turns it off, values kept.
-        let other = with_profile(&on, "p2", &m);
+        let other = with_profile(&on, "p2", &m, None);
         assert_eq!(other["modules"].as_array().unwrap().len(), 2);
         assert_eq!(applied(&other).as_deref(), Some("p2"));
         let off = without_profile(&other);
         assert_eq!(applied(&off), None);
         assert_eq!(off["modules"][1]["params"]["profile"]["text"], "p2");
         // A photo never edited.
-        let first = with_profile(&Value::Null, "p1", &m);
+        let first = with_profile(&Value::Null, "p1", &m, None);
         assert_eq!(first["modules"].as_array().unwrap().len(), 1);
         // The parameters are the module's.
         let params: Params = serde_json::from_value(entry["params"].clone()).unwrap();
         assert_eq!(params.get("profile"), Some(&Param::Text("p1".into())));
+        assert_eq!(params.get("lut"), None);
+        // A profile with a residual table carries it in `lut`.
+        let table = HueSatTable::identity([0.5, 0.6, 0.6]);
+        let with = with_profile(&edit, "p3", &m, Some(&table));
+        let params: Params = serde_json::from_value(with["modules"][1]["params"].clone()).unwrap();
+        assert_eq!(params.get("lut"), Some(&Param::List(table.to_param())));
+        assert_eq!(table.to_param().len(), helios_bricks::huesat::TABLE_LEN);
     }
 }

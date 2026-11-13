@@ -357,15 +357,39 @@ smooth except at hue wrap-around and zero chroma; the neutral patches
 have near-zero chroma, which is why their error is held by the
 constraint and their weight in `F` can stay ordinary.
 
-### Optional residual LUT (off by default)
+### Residual table (built 2026-11-13)
 
-A 9×9×9 3D LUT `T` applied after `P` in the working space, solved as
-`min Σ_k w_k ‖Lab(A T(P x_k)) − L_k‖² + μ ‖∇²T‖²`, the smoothness term
-dominant (`μ` chosen so the LUT moves no patch by more than its own
-residual), identity at the grid's neutral axis and decaying to identity
-away from the chart's gamut. With 24 patches the LUT is mostly the
-regulariser's: it is offered with a strength slider and the report shows
-both results. Solved by conjugate gradients on the sparse system.
+Planned as a regularised 9×9×9 3D LUT, off by default, with a strength
+slider. Built instead as Q7's option B, the camera look's machinery
+(camera-look.md, 4.2; `helios_calibrate::look::table`), with the two
+concepts kept apart (camera-look.md Q3 A):
+
+- **Model:** a hue/saturation table `T` in DNG's `ProfileHueSatMap`
+  layout (72 hues × 5 saturations × 5 values; a hue shift and a
+  saturation scale per node), applied after `P` in the working space,
+  read in hexcone HSV of the pixel divided by the neutral `n` that `P`
+  keeps (so `T n = n`), the luminance restored after it.
+- **Fit:** the look's kernel regression (`fit_table_with`) of each kept
+  patch's `P x_k` toward its reference `t_k`, with wide kernels for 24
+  patches (hue 20°, saturation 0.35, shrinkage 0.1) and no value axis:
+  every value row is the same, so `T` does not depend on exposure.
+- **Kept only when it earns its place:** each kept patch is left out in
+  turn, the matrix solved again without it and the table fitted on the
+  others; the table is kept when the held-out mean Delta E 2000 through
+  matrix and table is at most 98 % of the matrix alone's (the look's
+  2 % margin) and at least 0.1 lower. No switch and no slider: the
+  held-out check replaces "off by default".
+- **Stored:** in the profile's `lut` (format 2; format 1 profiles have
+  none and still read and render as before), the check in
+  `report.residual`. `chartprofile` takes it as its `lut` parameter
+  (empty for none), applied by the brick `core.huesat@1` (matrix, then
+  table; CPU and WGSL); without a table its CPU step is
+  `core.matrix3@1`'s, bit for bit. The report shows "Residual table:
+  kept/dropped" and the held-out Delta E without and with it.
+- **Why not the 3D LUT:** a hue/saturation table behaves better away
+  from the chart's gamut (it moves hues and saturations, never
+  lightness, and is the identity on greys), shares the look's tested
+  fit, and is the form a DCP export (Q2) writes.
 
 ### Tests (headless, `helios-calibrate`)
 
@@ -408,7 +432,7 @@ Profiles live in the library's vault as documents
 
 ```jsonc
 {
-  "format": 1,
+  "format": 2,
   "name": "Studio flash, Classic 2025",
   "camera": { "make": "Nikon", "model": "Z 6", "key": "nikon z 6", "serial": null },
   "illuminant": { "label": "Studio flash", "xy": [0.3271, 0.3402], "cct": 5620, "kind": "daylight" },
@@ -416,7 +440,7 @@ Profiles live in the library's vault as documents
   "measured": { "space": "camera", "exact": true, "image": "<content id>", "corners": [[812.5, 640.0], [3301.0, 655.5], [3290.0, 2310.0], [820.0, 2296.5]], "excluded": [] },
   "base_matrix": [ /* the XYZ_TO_CAMERA it was measured with, 9 numbers */ ],
   "matrix": [ /* M_c, camera RGB to working space, 9 numbers */ ],
-  "lut": null,
+  "lut": null,  // or the residual table: { "neutral": [3], "nodes": [[hue shift, saturation scale, 1], …] }
   "solver": { "version": 1, "stage": "de2000", "exposure_ev": 0.12 },
   "report": { "mean": 0.84, "max": 2.11, "worst": ["D1", "B4", "A2"], "patches": [ /* per patch before, after, status */ ] },
   "created": "2026-11-11T10:00:00Z"
@@ -447,11 +471,13 @@ Profiles live in the library's vault as documents
   `.helios-chartprofile.json`. Written as pretty JSON, UTF-8.
 - Import refuses the file, with every reason found, each keyed for
   translation: not `helios.chartprofile`; a `profile.format` other than
-  the one this Helios reads; a document that does not read as a profile;
+  the ones this Helios reads (1 and 2); a document that does not read as a profile;
   a camera key that is not the make and model's key (`picture` with no
   make or model); a matrix not finite or not invertible, a correction or
   camera matrix not finite; an illuminant `xy` outside the diagram; a
-  residual LUT (not taken yet); an `id` that is not a 64-digit hex
+  residual table this Helios cannot apply (wrong size, not finite, out
+  of the fit's bounds, greys moved, or in a format 1 file); an `id` that
+  is not a 64-digit hex
   hash. The profile keeps the `id` the file names (the content's hash
   when it names none), so a profile shared back to its library is the
   same profile; the hash is not checked against the content, since a
@@ -476,8 +502,9 @@ renders the same after profiles change (section 7).
   `colorin`, before `channelmixerrgb`; bypassed by default, so renders
   without a profile are unchanged and darktable parity holds.
 - **Parameters:** `matrix` (9 numbers, `M_c`), `profile` (the id, for
-  provenance and the header's name; never read at render), `lut` (off,
-  or a reference to a LUT data input, a later slice). Modules do no IO
+  provenance and the header's name; never read at render), `lut` (the
+  residual table inline, its neutral then a hue shift and a saturation
+  scale per node; empty for none: section 5). Modules do no IO
   (design rule 2): applying a profile copies its values into the
   parameters.
 - **Context:** `XYZ_TO_CAMERA`, to compute `M_s`.
@@ -790,8 +817,13 @@ usable. Slices 1 to 5 need no GUI.
    click, renaming, the chart type's choice, a library context menu
    entry, the File > New Focus entry, a live solve during the drag, the
    shot read off the interface's thread, and panel snapshots.
-8. **Residual LUT** (off by default): the regularised fit, a LUT data
-   input for the module, the strength slider.
+8. **Residual table** (built 2026-11-13, section 5): a hue/saturation
+   table in DNG's layout after the matrix, kept when it lowers the
+   held-out Delta E 2000; in the profile's `lut` (format 2), applied by
+   `chartprofile` through `core.huesat@1`, shown in the report, carried
+   by export and import. Not built: a strength slider (the held-out
+   check decides instead), a table outside the chart's gamut fitted from
+   more than one chart.
 9. **Later:** automatic chart detection (corners proposed, the handles
    kept for correction), the SpyderCheckr charts, two-illuminant
    interpolation (DCP-style), DCP export.
@@ -872,6 +904,10 @@ Recommendation: **B**.
 
 Recommendation: **A** as accepted, revisited when the DCP export (Q2)
 is built, where B would be the natural form.
+
+Built (2026-11-13): **B**, reusing the camera look's table and fit, with
+a held-out check instead of "off by default" (section 5, "Residual
+table").
 
 ### Q8. Did "focus calibration" mean autofocus fine-tuning?
 

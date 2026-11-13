@@ -14,14 +14,15 @@
 //! format this Helios does not read, a camera key that does not match
 //! the make and model, a matrix that is not finite or cannot be
 //! inverted, an illuminant outside the chromaticity diagram, a residual
-//! LUT (not taken yet), an id that is not a hash. The profile keeps the
+//! table this Helios cannot render, an id that is not a hash. Formats 1
+//! (no residual table) and 2 are read. The profile keeps the
 //! id the file names, so one shared back to its library is the same
 //! profile.
 
 use helios_core::Message;
 use serde_json::{Value, json};
 
-use crate::profile::{PROFILE_FORMAT, Profile, camera_key};
+use crate::profile::{Profile, READ_FORMATS, camera_key};
 
 /// What the file says it is.
 pub const KIND: &str = "helios.chartprofile";
@@ -74,18 +75,18 @@ pub fn read(file: &Value) -> Result<(String, Profile), Vec<Message>> {
     }
     let doc = &file["profile"];
     match doc["format"].as_u64() {
-        Some(f) if f == u64::from(PROFILE_FORMAT) => {}
+        Some(f) if READ_FORMATS.iter().any(|&r| u64::from(r) == f) => {}
         found => {
             return Err(vec![
                 Message::new(
                     "calibrate-import-format",
-                    "the profile's format is { $found }; this Helios reads format { $expected }",
+                    "the profile's format is { $found }; this Helios reads formats { $expected }",
                 )
                 .with(
                     "found",
                     found.map_or_else(|| "missing".to_string(), |f| f.to_string()),
                 )
-                .with("expected", PROFILE_FORMAT.to_string()),
+                .with("expected", READ_FORMATS.map(|f| f.to_string()).join(", ")),
             ]);
         }
     }
@@ -145,10 +146,14 @@ pub fn read(file: &Value) -> Result<(String, Profile), Vec<Message>> {
             .with("y", y.to_string()),
         );
     }
-    if profile.lut.as_ref().is_some_and(|l| !l.is_null()) {
+    if profile
+        .lut
+        .as_ref()
+        .is_some_and(|t| profile.format < 2 || !t.is_valid())
+    {
         reasons.push(Message::new(
-            "calibrate-import-lut",
-            "the profile carries a residual LUT, which this Helios does not take yet",
+            "calibrate-import-table",
+            "the profile's residual table is not one this Helios can apply",
         ));
     }
     // The id the file names is kept, so a profile shared back to the
@@ -178,7 +183,8 @@ pub fn read(file: &Value) -> Result<(String, Profile), Vec<Message>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile::{ProfileCamera, ProfileMeasured, ProfileReport};
+    use crate::look::{HUES, HueSatTable, SATURATIONS, VALUES};
+    use crate::profile::{PROFILE_FORMAT, ProfileCamera, ProfileMeasured, ProfileReport};
     use crate::request::{IlluminantAnswer, SummaryAnswer};
 
     fn profile() -> Profile {
@@ -217,6 +223,7 @@ mod tests {
                 exposure_ev: 0.1,
                 before: summary.clone(),
                 after: summary,
+                residual: None,
             },
             created: 1_700_000_000,
         }
@@ -261,12 +268,67 @@ mod tests {
                 "calibrate-import-id",
             ]
         );
-        let mut file = write(&profile());
-        file["profile"]["lut"] = json!({ "size": 9 });
-        assert!(keys(&file).contains(&"calibrate-import-lut".to_string()));
+        let mut file = write(&with_table());
+        file["profile"]["lut"]["nodes"][0] = json!([0.0, 9.0, 1.0]);
+        assert_eq!(keys(&file), ["calibrate-import-table"]);
+        let mut file = write(&with_table());
+        file["profile"]["format"] = json!(1);
+        assert_eq!(keys(&file), ["calibrate-import-table"]);
         // Renamed by hand: the name is not part of the id.
         let mut file = write(&profile());
         file["profile"]["name"] = json!("Renamed");
         assert_eq!(read(&file).unwrap().1.name, "Renamed");
+    }
+
+    /// The profile with a residual table: a gentle hue turn on coloured
+    /// nodes, varying with hue.
+    fn with_table() -> Profile {
+        let mut table = HueSatTable::identity([0.55, 0.6, 0.58]);
+        for v in 0..VALUES {
+            for h in 0..HUES {
+                for s in 1..SATURATIONS {
+                    let i = (v * HUES + h) * SATURATIONS + s;
+                    table.nodes[i] = [
+                        3.0 * (h as f64 / 7.0).sin() + 0.1,
+                        1.0 + 0.013 * s as f64,
+                        1.0,
+                    ];
+                }
+            }
+        }
+        Profile {
+            lut: Some(table),
+            ..profile()
+        }
+    }
+
+    #[test]
+    fn a_profile_with_its_table_round_trips_through_its_file() {
+        let p = with_table();
+        let text = serde_json::to_string_pretty(&write(&p)).unwrap();
+        let (id, back) = read(&serde_json::from_str(&text).unwrap()).unwrap();
+        assert_eq!(id, p.id());
+        let (a, b) = (p.lut.as_ref().unwrap(), back.lut.as_ref().unwrap());
+        assert_eq!(a.nodes.len(), b.nodes.len());
+        for (x, y) in a.to_param().iter().zip(b.to_param()) {
+            assert!((x - y).abs() <= 1e-15 * x.abs().max(1.0), "{x} {y}");
+        }
+        assert_eq!(Profile { lut: None, ..back }, Profile { lut: None, ..p });
+    }
+
+    #[test]
+    fn a_format_1_profile_still_reads() {
+        // A profile shared before residual tables: format 1, `lut` null,
+        // no residual check in its report.
+        let mut file = write(&profile());
+        file["profile"]["format"] = json!(1);
+        file["profile"]["report"]
+            .as_object_mut()
+            .unwrap()
+            .remove("residual");
+        let (_, back) = read(&file).unwrap();
+        assert_eq!(back.format, 1);
+        assert_eq!(back.lut, None);
+        assert_eq!(back.report.residual, None);
     }
 }

@@ -53,13 +53,11 @@ calibrate-image-not-at-hand = no file of image { $image } is at hand
 
 calibrate-import-camera-key = the camera key “{ $key }” does not match the make and model “{ $make } { $model }”
 
-calibrate-import-format = the profile's format is { $found }; this Helios reads format { $expected }
+calibrate-import-format = the profile's format is { $found }; this Helios reads formats { $expected }
 
 calibrate-import-id = the profile's id is not a 64-digit hexadecimal hash
 
 calibrate-import-illuminant = the light's chromaticity { $x }, { $y } is outside the diagram
-
-calibrate-import-lut = the profile carries a residual LUT, which this Helios does not take yet
 
 calibrate-import-matrix = the profile's matrix is not a finite matrix that can be inverted
 
@@ -70,6 +68,8 @@ calibrate-import-nothing = calibrate.profiles.import needs `path` or `file`
 calibrate-import-numbers = the profile's correction or camera matrix holds numbers that are not finite
 
 calibrate-import-refused = the profile is refused: { $reasons }
+
+calibrate-import-table = the profile's residual table is not one this Helios can apply
 
 calibrate-import-unreadable = the profile cannot be read: { $error }
 
@@ -312,6 +312,14 @@ gui-calibrate-quality = Quality: { $quality }
 gui-calibrate-report = Report
 
 gui-calibrate-report-none = Place the four corners on the centres of the corner patches
+
+gui-calibrate-residual-after = Delta E with the table: mean { $mean }, max { $max }
+
+gui-calibrate-residual-dropped = Residual table: dropped
+
+gui-calibrate-residual-held-out = Held-out Delta E: { $without } without the table, { $with } with it
+
+gui-calibrate-residual-kept = Residual table: kept
 
 gui-calibrate-save = Save the profile
 

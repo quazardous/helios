@@ -14,25 +14,39 @@
 use super::{at_least, luma, positive};
 use serde::{Deserialize, Serialize};
 
-/// Hue divisions, every 5 degrees.
-pub const HUES: usize = 72;
-/// Saturation divisions, from 0 to 1.
-pub const SATURATIONS: usize = 5;
-/// Value divisions, from 0 to 1 in [`value_coordinate`].
-pub const VALUES: usize = 5;
+/// The layout: hues (every 5 degrees), saturations and values (0 to 1),
+/// the brick's that renders the table (`core.huesat@1`).
+pub use helios_bricks::huesat::{HUES, SATURATIONS, VALUES};
 
-/// The kernels' widths: hue in degrees, saturation, value coordinate.
-const SIGMA_HUE: f64 = 2.5;
-const SIGMA_SAT: f64 = 0.15;
-const SIGMA_VALUE: f64 = 0.12;
 /// Pairs under this saturation say nothing about hue.
 const MIN_SATURATION: f64 = 0.02;
-/// The shrinkage toward the identity, in kernel weight: a node with
-/// fewer samples near it stays near the identity.
-const SHRINK: f64 = 1.0;
 /// The bounds of a node.
-const MAX_HUE_SHIFT: f64 = 45.0;
-const MAX_SAT_SCALE: f64 = 3.0;
+pub const MAX_HUE_SHIFT: f64 = 45.0;
+pub const MAX_SAT_SCALE: f64 = 3.0;
+
+/// How a table is fitted: its kernels' widths and its shrinkage.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Kernels {
+    /// The hue kernel's width, in degrees.
+    pub hue: f64,
+    /// The saturation kernel's width.
+    pub saturation: f64,
+    /// The value kernel's width on the value coordinate; `None` reads no
+    /// value, every value row the same: the table then depends on hue and
+    /// saturation only, and so not on exposure.
+    pub value: Option<f64>,
+    /// The shrinkage toward the identity, in kernel weight: a node with
+    /// fewer samples near it stays near the identity.
+    pub shrink: f64,
+}
+
+/// The camera look's kernels: narrow, for thousands of pixel pairs.
+pub const LOOK_KERNELS: Kernels = Kernels {
+    hue: 2.5,
+    saturation: 0.15,
+    value: Some(0.12),
+    shrink: 1.0,
+};
 
 /// A hue/saturation table in the DNG layout, with the neutral it is read
 /// against.
@@ -175,6 +189,23 @@ pub fn fit_table(
     preview: &[[f64; 3]],
     neutral: [f64; 3],
 ) -> Option<HueSatTable> {
+    fit_table_with(scene, preview, neutral, &LOOK_KERNELS)
+}
+
+/// [`fit_table`] with other kernels: a chart's residual table, fitted on
+/// a few patches, reads them wide.
+pub fn fit_table_with(
+    scene: &[[f64; 3]],
+    preview: &[[f64; 3]],
+    neutral: [f64; 3],
+    kernels: &Kernels,
+) -> Option<HueSatTable> {
+    let Kernels {
+        hue: sigma_hue,
+        saturation: sigma_sat,
+        value: sigma_value,
+        shrink,
+    } = *kernels;
     if !neutral.iter().all(|&c| positive(c) && c.is_finite()) {
         return None;
     }
@@ -183,7 +214,7 @@ pub fn fit_table(
     let mut sums = vec![[0.0; 4]; size];
     let mut used = 0usize;
     let step = 360.0 / HUES as f64;
-    let reach_h = (3.0 * SIGMA_HUE / step).ceil() as i64;
+    let reach_h = ((3.0 * sigma_hue / step).ceil() as i64).min(HUES as i64 / 2);
     for (&x, &y) in scene.iter().zip(preview) {
         let q = [x[0] / neutral[0], x[1] / neutral[1], x[2] / neutral[2]];
         let r = [y[0] / neutral[0], y[1] / neutral[1], y[2] / neutral[2]];
@@ -200,23 +231,28 @@ pub fn fit_table(
         let vc = value_coordinate(v);
         let centre = (h / step).round() as i64;
         for vi in 0..VALUES {
-            let dv = vc - vi as f64 / (VALUES - 1) as f64;
-            if dv.abs() > 3.0 * SIGMA_VALUE {
-                continue;
-            }
+            // Without a value kernel every row reads every pair alike.
+            let dv_term = match sigma_value {
+                Some(sigma) => {
+                    let dv = vc - vi as f64 / (VALUES - 1) as f64;
+                    if dv.abs() > 3.0 * sigma {
+                        continue;
+                    }
+                    (dv / sigma).powi(2)
+                }
+                None => 0.0,
+            };
             for si in 1..SATURATIONS {
                 let ds = s.min(1.0) - si as f64 / (SATURATIONS - 1) as f64;
-                if ds.abs() > 3.0 * SIGMA_SAT {
+                if ds.abs() > 3.0 * sigma_sat {
                     continue;
                 }
                 for k in centre - reach_h..=centre + reach_h {
                     let hi = k.rem_euclid(HUES as i64) as usize;
                     let dhn = hue_difference(h, hi as f64 * step);
                     let g = (-0.5
-                        * ((dhn / SIGMA_HUE).powi(2)
-                            + (ds / SIGMA_SAT).powi(2)
-                            + (dv / SIGMA_VALUE).powi(2)))
-                    .exp();
+                        * ((dhn / sigma_hue).powi(2) + (ds / sigma_sat).powi(2) + dv_term))
+                        .exp();
                     let w = g * s;
                     let e = &mut sums[index(vi, hi, si)];
                     e[0] += w;
@@ -236,8 +272,8 @@ pub fn fit_table(
             for si in 1..SATURATIONS {
                 let e = sums[index(vi, hi, si)];
                 let sn = si as f64 / (SATURATIONS - 1) as f64;
-                let prior = SHRINK * sn * sn;
-                let shift = (e[1] / (e[0] + SHRINK)).clamp(-MAX_HUE_SHIFT, MAX_HUE_SHIFT);
+                let prior = shrink * sn * sn;
+                let shift = (e[1] / (e[0] + shrink)).clamp(-MAX_HUE_SHIFT, MAX_HUE_SHIFT);
                 let scale = ((e[2] + prior) / (e[3] + prior)).clamp(0.0, MAX_SAT_SCALE);
                 table.nodes[index(vi, hi, si)] = [shift, scale, 1.0];
             }
@@ -245,6 +281,40 @@ pub fn fit_table(
     }
     let finite = table.nodes.iter().flatten().all(|v| v.is_finite());
     finite.then_some(table)
+}
+
+impl HueSatTable {
+    /// The table as `core.huesat@1`'s `table` parameter (and the
+    /// `chartprofile` module's `lut`): the neutral, then each node's hue
+    /// shift and saturation scale (the value scale, always 1, left out).
+    pub fn to_param(&self) -> Vec<f64> {
+        let mut flat = Vec::with_capacity(3 + 2 * self.nodes.len());
+        flat.extend(self.neutral);
+        for n in &self.nodes {
+            flat.extend([n[0], n[1]]);
+        }
+        flat
+    }
+
+    /// Whether the table is one this Helios renders: the layout's node
+    /// count, a neutral above 0, every node finite and within the fit's
+    /// bounds, the zero-saturation row the identity, every value scale 1.
+    pub fn is_valid(&self) -> bool {
+        let neutral = self.neutral.iter().all(|&c| c.is_finite() && c > 0.0);
+        let nodes = self.nodes.len() == HUES * SATURATIONS * VALUES
+            && self
+                .nodes
+                .iter()
+                .enumerate()
+                .all(|(i, &[dh, scale, value])| {
+                    let bounded = dh.abs() <= MAX_HUE_SHIFT
+                        && (0.0..=MAX_SAT_SCALE).contains(&scale)
+                        && value == 1.0;
+                    let grey = i % SATURATIONS != 0 || (dh == 0.0 && scale == 1.0);
+                    bounded && grey
+                });
+        neutral && nodes
+    }
 }
 
 /// The table's numbers, for the non-finite gate.

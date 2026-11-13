@@ -31,6 +31,8 @@
 //!   without `colorin`, rendered on the chart's bounding box;
 //! - [`apply`]: a profile written into an edit's `chartprofile` node, the
 //!   nearest-illuminant pick and a camera's default rule;
+//! - [`residual`]: the residual hue/saturation table after the matrix,
+//!   kept only when it lowers the held-out Delta E 2000;
 //! - [`look`]: a camera look fitted to a raw's embedded JPEG (matrix,
 //!   hue/saturation table, tone and chroma curves), with its gates; it
 //!   shares the solver's Levenberg-Marquardt.
@@ -45,6 +47,7 @@ pub mod look;
 pub mod profile;
 pub mod raw;
 pub mod request;
+pub mod residual;
 pub mod run;
 pub mod sampler;
 pub mod solver;
@@ -52,11 +55,12 @@ pub mod solver;
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
 pub use layout::{ImageView, Layout, Point};
-pub use profile::{PROFILE_FORMAT, Profile, ProfileSource, camera_key};
+pub use profile::{PROFILE_FORMAT, Profile, ProfileSource, READ_FORMATS, camera_key};
 pub use raw::{
     Measured, RAW_FRONT, RawFront, calibrate_raw, calibrate_raw_with, measure_raw, measured_region,
 };
 pub use request::{ChartAnswer, ChartArgs, ChartError, calibrate_picture, calibrate_shot};
+pub use residual::Residual;
 pub use run::{Illuminant, Report, Request, RunError, Shot, calibrate, working_to_xyz};
 pub use sampler::{
     ChartCheck, ClipSource, PatchCheck, PatchStats, THRESHOLDS, Thresholds, Warning, check_chart,

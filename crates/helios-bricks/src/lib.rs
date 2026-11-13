@@ -1,8 +1,8 @@
 //! Process bricks: the registered, described functions modules are made of
 //! (`docs/design/process-bricks.md`).
 //!
-//! Image bricks: `core.affine@1` ([`Affine`]) and `core.matrix3@1`
-//! ([`Matrix3`]).
+//! Image bricks: `core.affine@1` ([`Affine`]), `core.matrix3@1`
+//! ([`Matrix3`]) and `core.huesat@1` ([`HueSat`]).
 //!
 //! - An **image brick** is a module offering the brick contract
 //!   ([`helios_core::Module::brick`]): a namespaced id with a major version,
@@ -20,12 +20,14 @@
 
 pub mod affine;
 pub mod assembly;
+pub mod huesat;
 pub mod matrix3;
 pub mod registry;
 pub mod values;
 
 pub use affine::Affine;
 pub use assembly::{Assembled, Assembly, ControlDecl};
+pub use huesat::HueSat;
 pub use matrix3::Matrix3;
 pub use registry::{Brick, BrickRegistry};
 pub use values::ValueBrick;

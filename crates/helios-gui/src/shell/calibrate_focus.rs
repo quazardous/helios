@@ -433,6 +433,9 @@ impl Calibration {
                 .with("max", num(&r["after"]["max"])),
             ),
         );
+        if r["residual"].is_object() {
+            self.residual_ui(ui, &r["residual"]);
+        }
         let worst: Vec<&str> = r["after"]["worst"]
             .as_array()
             .into_iter()
@@ -506,6 +509,40 @@ impl Calibration {
                         }
                     });
             });
+    }
+
+    /// The residual table's line: kept or dropped, and Delta E without and
+    /// with it.
+    fn residual_ui(&self, ui: &mut egui::Ui, residual: &Value) {
+        let num = |v: &Value| v.as_f64().map_or_else(|| "-".into(), |x| format!("{x:.2}"));
+        let status = if residual["status"] == "kept" {
+            Message::new("gui-calibrate-residual-kept", "Residual table: kept")
+        } else {
+            Message::new("gui-calibrate-residual-dropped", "Residual table: dropped")
+        };
+        ui.label(self.text(status));
+        ui.label(
+            self.text(
+                Message::new(
+                    "gui-calibrate-residual-held-out",
+                    "Held-out Delta E: { $without } without the table, { $with } with it",
+                )
+                .with("without", num(&residual["held_out_without"]))
+                .with("with", num(&residual["held_out_with"])),
+            ),
+        );
+        if residual["status"] == "kept" {
+            ui.label(
+                self.text(
+                    Message::new(
+                        "gui-calibrate-residual-after",
+                        "Delta E with the table: mean { $mean }, max { $max }",
+                    )
+                    .with("mean", num(&residual["after"]["mean"]))
+                    .with("max", num(&residual["after"]["max"])),
+                ),
+            );
+        }
     }
 
     /// The profile's name, "Use as the default", Save.

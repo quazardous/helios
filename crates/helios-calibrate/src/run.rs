@@ -31,6 +31,7 @@ use helios_photo::color::{Mat3, apply};
 use crate::chart::Chart;
 use crate::lab::lab_to_xyz;
 use crate::layout::{ImageView, Layout, Point};
+use crate::residual::Residual;
 use crate::sampler::{ChartCheck, ClipSource, THRESHOLDS, Thresholds, check_chart};
 use crate::solver::{Orientation, Problem, Solution, SolveError, Stage, solve};
 
@@ -106,6 +107,8 @@ pub struct Report {
     /// `M_c = P M_s`: camera RGB to the working space, what a profile
     /// stores.
     pub camera_matrix: Mat3,
+    /// The residual table after `P`, and whether it earned its place.
+    pub residual: Option<Residual>,
 }
 
 /// Why a shot gives no report.
@@ -186,7 +189,7 @@ pub fn calibrate(shot: &Shot<'_>, request: &Request<'_>) -> Result<Report, RunEr
         .collect::<Result<_, _>>()?;
     let to_xyz = working_to_xyz();
 
-    let mut best: Option<Report> = None;
+    let mut best: Option<(Report, Vec<[f64; 3]>, Vec<f64>)> = None;
     let mut last_error = None;
     for orientation in Orientation::ALL {
         let Some(layout) = Layout::new(chart, orientation.corners(request.handles)) else {
@@ -224,10 +227,10 @@ pub fn calibrate(shot: &Shot<'_>, request: &Request<'_>) -> Result<Report, RunEr
         };
         if best
             .as_ref()
-            .is_none_or(|b| solution.after.mean < b.solution.after.mean)
+            .is_none_or(|(b, ..)| solution.after.mean < b.solution.after.mean)
         {
             let camera_matrix = helios_photo::color::mul(&solution.matrix, &shot.standard);
-            best = Some(Report {
+            let report = Report {
                 orientation,
                 layout,
                 check,
@@ -236,10 +239,24 @@ pub fn calibrate(shot: &Shot<'_>, request: &Request<'_>) -> Result<Report, RunEr
                 to_xyz,
                 solution,
                 camera_matrix,
-            });
+                residual: None,
+            };
+            best = Some((report, measured, weights));
         }
     }
-    best.ok_or(RunError::Unsolved(last_error))
+    let (mut report, measured, weights) = best.ok_or(RunError::Unsolved(last_error))?;
+    // The residual table, for the orientation kept only.
+    let problem = Problem {
+        chart,
+        measured: &measured,
+        weights: &weights,
+        adaptation: report.adaptation,
+        to_xyz,
+        keep_neutral: request.keep_neutral,
+        stage: request.stage,
+    };
+    report.residual = crate::residual::fit(&problem, &report.solution);
+    Ok(report)
 }
 
 #[cfg(test)]

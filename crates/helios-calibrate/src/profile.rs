@@ -16,10 +16,18 @@ use helios_photo::CameraInfo;
 use helios_photo::color::Mat3;
 use serde::{Deserialize, Serialize};
 
-use crate::request::{ChartAnswer, IlluminantAnswer, SummaryAnswer};
+use crate::look::HueSatTable;
+use crate::request::{ChartAnswer, IlluminantAnswer, ResidualAnswer, SummaryAnswer};
 
-/// The profile document's format.
-pub const PROFILE_FORMAT: u32 = 1;
+/// The profile document's format, the one written.
+///
+/// 2: the residual table (`lut`, a hue/saturation table) and its check
+/// in the report (`report.residual`).
+pub const PROFILE_FORMAT: u32 = 2;
+
+/// The formats this Helios reads: format 1 is format 2 without a residual
+/// table, and reads and applies as it did.
+pub const READ_FORMATS: [u32; 2] = [1, PROFILE_FORMAT];
 
 /// The camera a profile belongs to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,8 +65,12 @@ pub struct ProfileReport {
     pub exposure_ev: f64,
     /// Delta E 2000 through the standard matrix.
     pub before: SummaryAnswer,
-    /// Delta E 2000 through the profile.
+    /// Delta E 2000 through the profile's matrix.
     pub after: SummaryAnswer,
+    /// The residual table's check (format 2): kept or dropped, the
+    /// held-out means without and with it; the table itself is `lut`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual: Option<ResidualAnswer>,
 }
 
 /// A calibration profile, as the vault keeps it.
@@ -78,8 +90,10 @@ pub struct Profile {
     pub matrix: Mat3,
     /// `P`: the correction after the standard matrix.
     pub correction: Mat3,
-    /// The residual LUT: none until it is built.
-    pub lut: Option<serde_json::Value>,
+    /// The residual table after the matrix, when the fit kept it: a
+    /// hue/saturation table in DNG's layout ([`HueSatTable`]); `None` for
+    /// a matrix-only profile (and every format 1 profile).
+    pub lut: Option<HueSatTable>,
     pub report: ProfileReport,
     /// Seconds since the epoch.
     pub created: u64,
@@ -154,12 +168,16 @@ impl Profile {
             base_matrix: source.camera.map(|c| c.xyz_to_camera),
             matrix: answer.camera_matrix,
             correction: answer.matrix,
-            lut: None,
+            lut: answer.residual.as_ref().and_then(|r| r.table.clone()),
             report: ProfileReport {
                 quality: answer.quality.clone(),
                 exposure_ev: answer.exposure_ev,
                 before: answer.before.clone(),
                 after: answer.after.clone(),
+                residual: answer.residual.as_ref().map(|r| ResidualAnswer {
+                    table: None,
+                    ..r.clone()
+                }),
             },
             created,
         }
