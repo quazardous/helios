@@ -2121,7 +2121,7 @@ fn source_row(
             w.source_menu_asked(asked, SourceKey::Folder(path.to_path_buf()));
         }
         if let Some((text, add)) = favourite {
-            let icon = if add { "☆" } else { "✕" };
+            let icon = if add { "☆" } else { "×" };
             if ui.small_button(icon).on_hover_text(text).clicked() {
                 event = Some(Event::Favourite(path.to_path_buf(), add));
             }
