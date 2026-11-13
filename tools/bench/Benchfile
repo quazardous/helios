@@ -425,7 +425,8 @@ timeout = "20m"
 
 # a fix loop's run: one crate's tests, one test target (`test=`; `test=lib`
 # for the crate's unit tests; none for all its targets), a name
-# filter (`filter=`), stopped at the first failure; seconds of tests, in
+# filter (`filter=`; bench-remote sends a test path's `::` as `@` and a
+# space as `+`, turned back here), stopped at the first failure; seconds of tests, in
 # the branch's target that test-affected reuses before the merge
 [jobs.test-crate]
 about = "one crate's tests, one test target, a name filter (a fix loop's run)"
@@ -435,7 +436,7 @@ cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; cargo nextest run --locked --fail-fast -p ${crate} $sel ${filter:-}"""
+t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; cargo nextest run --locked --fail-fast -p ${crate} $sel $f"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
@@ -671,8 +672,9 @@ mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/r
 timeout = "75m"
 
 # egui-pop's narrowest test run, for a fix loop: one crate (`crate=`), one
-# test target (`test=`, else the crate's lib and every test target), and a
-# name filter (`filter=`). Under nextest as on CI (each test in a process of
+# test target (`test=`; `test=lib` for the crate's unit tests; else the
+# crate's lib and every test target), and a name filter (`filter=`: a
+# test path's `::` comes as `@` and a space as `+`, turned back here). Under nextest as on CI (each test in a process of
 # its own), stopped at the first failure. Minutes, not the gate's twenty.
 [jobs.egui-pop-test]
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
@@ -682,7 +684,7 @@ cores = 4
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-t="${test:-}"; cargo nextest run --locked --fail-fast -p ${crate} ${t:+--test $t} ${filter:-}"""
+t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; cargo nextest run --locked --fail-fast -p ${crate} $sel $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
@@ -699,7 +701,7 @@ cores = 4
 memory = "5g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-cargo test --locked -p ${crate} --test ${test} -- ${filter:-}"""
+t="${test}"; case "$t" in lib) sel="--lib";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; cargo test --locked -p ${crate} $sel -- $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"

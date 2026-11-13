@@ -27,7 +27,7 @@ Jobs of the Benchfile:
 | `build` | `cargo build --workspace --all-targets` | 8 cores, 6 GB |
 | `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
-| `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target) and `filter=` (a name filter), stopped at the first failure, in the branch's target | 4 cores, 4 GB |
+| `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target, `test=lib` for the crate's unit tests) and `filter=` (a name filter, a test path such as `filter=undo::tests::redo`, or several names separated by spaces), stopped at the first failure, in the branch's target | 4 cores, 4 GB |
 | `test-affected` | the tests a change touches since `base=` (`origin/main` by default), or the `crates=` given (as `--push` does), and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `stability` | `cargo stability`: the headless node (`helios-node --vault`) killed with `kill -9` in the middle of its own jobs (a backup copying, an import, a health run, a settings layer write), then started again on the same vault; JUnit and a summary in `out/`, where each kill landed in the log. Not run by CI, which is for compatibility breaks: run it on demand and before a release (the tests sit behind the `helios-node` feature `stability`, which no CI run enables) | 4 cores, 4 GB |
@@ -205,16 +205,30 @@ ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> config benc
 ### Job names, priority and dependencies
 
 Each job goes to the box under a name of its own, its `ext_job_id`:
-`helios-<branch>-<job>`, such as `helios-wip-undo-test-affected`, or
+`helios-<branch>-<job>`, such as `helios-wip-undo-lint`, or
 `egui-pop-<egui_pop branch>-<job>` for egui-pop's jobs
 (`egui-pop-feat-dock-gate` for `egui-pop-gate egui_pop=feat/dock`).
-Characters the box refuses become `-`; a branch too long for the box's 64
-characters is cut and a hash added. `bench-remote` prints the name it
-uses; `ext_job_id=<name>` gives another. **Submitting under a name the box
-already holds replaces that job, queued or running** (it is cancelled): the
-run made stale by a rebase or a new push goes, and the jobs waiting on the
-name follow the new one. Two runs of one job on one branch that must both
-happen need names of their own.
+A job given parameters of its own (`crate=`, `test=`, `filter=`...)
+gets a short hash of them after the job:
+`helios-wip-undo-test-crate-1a2b3c4d`. The parameters that only say where
+and how it runs (`branch=`, `egui_pop=`, `src=`, `priority=`, `after=`,
+`after_ok=`) are left out of the hash, and so are `base=` and `crates=`: a
+branch's `test-affected` stays one run, replaced by the next push's. Characters the box refuses become
+`-`; a branch too long for the box's 64 characters is cut and a hash added.
+`bench-remote` prints the name it uses; `ext_job_id=<name>` gives another
+(made acceptable to the box the same way). **Submitting under a name the
+box already holds replaces that job, queued or running** (it is
+cancelled): the same job with the same parameters, re-queued after a
+rebase or a new push, replaces its stale run, and the jobs waiting on the
+name follow the new one. Two different runs on one branch (two crates, two
+filters) have different names and run side by side; two runs of the very
+same job that must both happen need `ext_job_id=` names of their own.
+
+The box takes parameter values in `[A-Za-z0-9._/@+-]` only, so
+`bench-remote` sends a `filter=` test path's `::` as `@` and its spaces as
+`+`, and the test jobs (`test-crate`, `egui-pop-test`, `egui-pop-test-1p`)
+turn them back. Raw `ssh ... run` calls write `filter=undo@tests@redo`
+themselves.
 
 The name stands for the job wherever the box takes a job id, as
 `x:<name>`:
@@ -548,7 +562,7 @@ merging (only your own part) and what happens after, is in
   `ci` profile), is reported FLAKY and the run stays green; each flaky test
   gets a ticket and a fix, never a lasting place in the suite.
 - For egui-pop, a fix loop runs `egui-pop-test crate=<crate> test=<target>
-  filter=<name>` (minutes). A failure CI shows is reproduced with
+  filter=<name>` (minutes); `test=lib` runs the crate's unit tests. A failure CI shows is reproduced with
   `egui-pop-test`.
 - The box does not repeat what CI runs. egui-pop and egui_stack pull
   requests go to their `next` branch, whose CI runs every test; the box
