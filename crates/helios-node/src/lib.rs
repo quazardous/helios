@@ -41,6 +41,7 @@
 //! `docs/ai-models.md`). Nothing is configured by default: no model, no
 //! network.
 
+pub mod auto_import;
 pub mod batch;
 pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).

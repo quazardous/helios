@@ -1150,6 +1150,8 @@ impl Params {
                     ui.strong(node);
                     // A module's own header (the chart profile's choice).
                     crate::calibrate::header_ui(ui, store, node);
+                    // The Camera look entry's (fit, switch, scores).
+                    crate::calibrate::look_header_ui(ui, store, node);
                     let rows: Vec<(&str, Option<&str>)> = paths[start..end]
                         .iter()
                         .map(|(_, p, g)| (p.as_str(), g.as_deref()))

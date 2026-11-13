@@ -47,7 +47,7 @@
 //!                   | accept DECISION [--groups N,N...] | decline DECISION | decisions
 //!
 //!     helios commands [--vault FILE|--node ADDRESS] [--window W] [--filter F] [--enabled]
-//!     helios run ID [--vault FILE|--node ADDRESS] [--param KEY=VALUE]... [--json PARAMS]
+//!     helios run ID [--vault FILE|--node ADDRESS] [--param KEY=VALUE]... [--json PARAMS] [--request-id KEY]
 //!                [--window W] [--scope node|window]
 //!
 //!     helios doctor display
@@ -129,7 +129,11 @@
 //! node answered with an error (a wait that timed out prints what happened
 //! instead), 2 wrong usage, 3 the node cannot be reached, 4 the request
 //! was sent and no answer came: its outcome is unknown, so read the state
-//! before running it again.
+//! before running it again, or run it again with the key it was sent with.
+//!
+//! Every `control` request and every `run` carries a key (`--request-id
+//! KEY`, else a new one, named after an exit code 4): sent again with the
+//! same key, the node applies it once and answers `already_applied`.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -313,6 +317,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     let mut sets: BTreeMap<String, Params> = BTreeMap::new();
     let (mut chart, mut exclude) = (None, Vec::new());
     let (mut save, mut profile_name) = (false, None);
+    let mut request_id = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--socket" => {
@@ -366,6 +371,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
             "--profile-name" => {
                 profile_name = Some(args.next().ok_or("--profile-name needs a name")?);
             }
+            "--request-id" => request_id = Some(args.next().ok_or("--request-id needs a key")?),
             _ => words.push(arg),
         }
     }
@@ -591,10 +597,16 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
         };
         serde_json::to_value(request)
     };
-    Ok(Call {
-        socket,
-        body: body.expect("requests always serialize"),
-    })
+    let mut body = body.expect("requests always serialize");
+    // A control request carries a key: sent again with it after an
+    // unknown outcome, the node applies it once.
+    if what == "control" {
+        let key = request_id.unwrap_or_else(helios_inspect::request_ids::new_request_id);
+        body["_meta"] = serde_json::json!({ "request_id": key });
+    } else if request_id.is_some() {
+        return Err("--request-id is for control requests".into());
+    }
+    Ok(Call { socket, body })
 }
 
 /// The `helios-node` executable next to this one.
@@ -741,7 +753,22 @@ fn on_node(
     params: serde_json::Value,
     interrupt: bool,
 ) -> Result<serde_json::Value, rpc::Error> {
-    let pending = client.call(method, params);
+    on_node_keyed(client, method, params, interrupt, None)
+}
+
+/// As [`on_node`], the call keyed `request_id` when given: sent again
+/// with it, the node applies it once.
+fn on_node_keyed(
+    client: &Client,
+    method: &str,
+    params: serde_json::Value,
+    interrupt: bool,
+    request_id: Option<&str>,
+) -> Result<serde_json::Value, rpc::Error> {
+    let pending = match request_id {
+        Some(key) => client.call_keyed(method, params, key),
+        None => client.call(method, params),
+    };
     if !interrupt {
         return pending.wait();
     }
@@ -1098,6 +1125,7 @@ struct CommandArgs {
     json: Option<serde_json::Value>,
     params: serde_json::Map<String, serde_json::Value>,
     words: Vec<String>,
+    request_id: Option<String>,
 }
 
 fn command_args(args: &[String]) -> Result<CommandArgs, String> {
@@ -1111,6 +1139,7 @@ fn command_args(args: &[String]) -> Result<CommandArgs, String> {
             "--window" => parsed.window = Some(value()?),
             "--filter" => parsed.filter = Some(value()?),
             "--scope" => parsed.scope = Some(value()?),
+            "--request-id" => parsed.request_id = Some(value()?),
             "--enabled" => parsed.enabled = true,
             "--json" => {
                 let params: serde_json::Value = serde_json::from_str(&value()?)
@@ -1176,7 +1205,15 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    match on_node(&client, method, params, method == "command.run") {
+    // A run carries a key: sent again with it after an unknown outcome,
+    // the node applies it once.
+    let key = (method == "command.run").then(|| {
+        parsed
+            .request_id
+            .clone()
+            .unwrap_or_else(helios_inspect::request_ids::new_request_id)
+    });
+    match on_node_keyed(&client, method, params, key.is_some(), key.as_deref()) {
         Ok(answer) => {
             println!(
                 "{}",
@@ -1184,13 +1221,14 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        Err(e) if e.code == rpc::code::OUTCOME_UNKNOWN => {
+            eprintln!("helios: {}", e.message);
+            resend_hint(key.as_deref());
+            ExitCode::from(4)
+        }
         Err(e) => {
             eprintln!("helios: {}", e.message);
-            ExitCode::from(if e.code == rpc::code::OUTCOME_UNKNOWN {
-                4
-            } else {
-                1
-            })
+            ExitCode::from(1)
         }
     }
 }
@@ -1274,6 +1312,16 @@ fn doctor(args: &[String]) -> ExitCode {
     }
 }
 
+/// After an unknown outcome, says how to send the request again safely:
+/// with its key, which the node applies once.
+fn resend_hint(request_id: Option<&str>) {
+    if let Some(key) = request_id {
+        eprintln!(
+            "helios: or send it again with --request-id {key}: the node applies it once and answers \"already_applied\" if it ran"
+        );
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [flag] = args.as_slice()
@@ -1324,6 +1372,7 @@ fn main() -> ExitCode {
                 "helios: outcome unknown at the node at {}: {e}",
                 call.socket
             );
+            resend_hint(call.body["_meta"]["request_id"].as_str());
             ExitCode::from(4)
         }
         Err(e) => {

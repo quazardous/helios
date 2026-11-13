@@ -247,6 +247,12 @@ command-import-addSource =
 command-import-disconnect =
     .title = Disconnect an import account (`account`): its token revoked where the service allows, its secrets forgotten; the saved sources using it are kept with it, not connected (`sources`: "keep") or forgotten with it ("forget"); an account no source uses is forgotten
 
+command-import-history-again =
+    .title = Import again (`id`: an import of `import.history.list`): the same sources with the same choices; photos the library has are skipped as duplicates
+
+command-import-history-list =
+    .title = List the import history, newest first (`limit`): each import's sources, choices, counts, when and who asked
+
 command-import-reconnect =
     .title = Connect an import account again, from the step that failed (`account`)
 
@@ -309,6 +315,9 @@ command-library-filter-switch =
 
 command-library-folder =
     .title = Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder
+
+command-library-importAutomatic-pause =
+    .title = Pause automatic imports, or resume them (`on`: true pauses, false resumes; without it, toggles)
 
 command-library-importFiles =
     .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`)

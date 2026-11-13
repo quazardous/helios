@@ -397,10 +397,7 @@ fn mask_on_device(
         .ok()?;
     crate::mask_display::composite_on_device(gpu, image, &mask, m.mode, &m.style)
         .inspect_err(|e| {
-            eprintln!(
-                "helios-gui: mask display of {} on the GPU: {e}",
-                m.target.name
-            );
+            log::warn!("mask display of {} on the GPU: {e}", m.target.name);
         })
         .ok()
 }
@@ -517,7 +514,7 @@ fn render(
                         engine
                             .render_at(&s.graph, m.target.node, &m.target.port, union, scale.get())
                             .inspect_err(|e| {
-                                eprintln!("helios-gui: mask display of {}: {e}", m.target.name);
+                                log::warn!("mask display of {}: {e}", m.target.name);
                             })
                             .ok()
                             .map(|image| (m, image))

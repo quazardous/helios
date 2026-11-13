@@ -197,6 +197,9 @@ pub(crate) struct ImportWindow {
     pub(super) ctx: Arc<Mutex<Option<Egui>>>,
     /// The automatic imports ([`super::import_auto`]).
     pub(super) auto: super::import_auto::AutoImports,
+    /// The library's import history, listed under the sources
+    /// ([`super::import_history`]).
+    pub(super) history: super::import_history::History,
     /// The viewport the window is drawn in (the main one while embedded):
     /// the one a scan's progress repaints.
     drawn_in: Arc<Mutex<Option<ViewportId>>>,
@@ -615,6 +618,8 @@ enum Event {
     /// An account asked of the Sources column: added, reconnected or
     /// signed out.
     Account(super::import_accounts::Asked),
+    /// "Import again" on an import of the history (its id).
+    Again(String),
 }
 
 /// The Contents column's and the status bar's words.
@@ -987,8 +992,8 @@ impl Shell {
 
     /// Each frame of the main window: the cards polled, a toast for each
     /// card inserted while the window is closed, what the window asked of
-    /// the shell, and its OS window opened or closed as the import focus
-    /// is.
+    /// the shell (its toasts shown in the window), and its OS window
+    /// opened or closed as the import focus is.
     pub(super) fn import_window_frame(&mut self, ctx: &Egui) {
         let _stall = crate::stall::section("import window: the main window's part");
         {
@@ -1034,8 +1039,19 @@ impl Shell {
             w.shell_words = words;
         }
         let events = std::mem::take(&mut self.import.get_mut().events);
-        for event in events {
-            self.import_event(event);
+        if !events.is_empty() {
+            // Asked in the import window, answered in the main window's
+            // pass: what they say (a toast) shows in the import window
+            // while it is open (the main window's once it closes).
+            let app = self.core.app.handle();
+            let group = app
+                .window_viewport(&WindowId::new(WINDOW))
+                .map(|v| app.window_group(v));
+            let before = std::mem::replace(&mut self.toasts_in, group);
+            for event in events {
+                self.import_event(event);
+            }
+            self.toasts_in = before;
         }
         self.follow_import_focus(ctx);
     }
@@ -1217,6 +1233,11 @@ impl Shell {
                 }
             }
             Event::Import => self.import_ticked_sources(),
+            Event::Again(id) => {
+                if let Err(e) = self.import_again(&json!({ "id": id }), &Origin::User) {
+                    self.warn(e);
+                }
+            }
             Event::Dropped(paths) => self.open_import_window(&json!({ "paths": paths })),
             Event::Storage => {
                 if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
@@ -1286,6 +1307,18 @@ impl Shell {
             };
             if let Err(e) = self.import_files(&args, &Origin::User) {
                 self.warn(e);
+            } else if self
+                .import
+                .get_mut()
+                .sources
+                .confirm(&SourceKey::Folder(path.clone()))
+            {
+                // Import pressed on a source set to import on its own:
+                // its automatic import is confirmed.
+                self.note(Message::new(
+                    "gui-import-auto-confirmed",
+                    "Automatic import confirmed: from now on it runs on its own",
+                ));
             }
             let mut w = self.import.get_mut();
             if !card {
@@ -1556,6 +1589,7 @@ impl ImportWindow {
         }
         self.follow_cards();
         self.follow_scans();
+        self.history.follow();
         // The Choices column shows the selected source's; a change made
         // in this pass is saved on it at its end.
         self.follow_selection();
@@ -1629,7 +1663,13 @@ impl ImportWindow {
             Some(Event::SavePreset(name)) => self.save_preset(&name),
             Some(Event::DeletePreset(name)) => self.delete_preset(&name),
             // The shell's, at the main window's next pass.
-            Some(e @ (Event::Import | Event::Forget(_) | Event::Storage | Event::Dropped(_))) => {
+            Some(
+                e @ (Event::Import
+                | Event::Forget(_)
+                | Event::Storage
+                | Event::Dropped(_)
+                | Event::Again(_)),
+            ) => {
                 self.events.push(e);
                 ctx.request_repaint_of(ViewportId::ROOT);
             }
@@ -2066,6 +2106,13 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                     Some(super::import_accounts::Asked::Select(id)) => w.select_account(id),
                     Some(asked) => *event = Some(Event::Account(asked)),
                     None => {}
+                }
+                // The imports done, each to run again.
+                let words = super::import_history::Words::new(&|m| texts(m));
+                if let Some(id) =
+                    super::import_history::history_ui(ui, &w.history, &words, &|m| texts(m))
+                {
+                    *event = Some(Event::Again(id));
                 }
             }
         });

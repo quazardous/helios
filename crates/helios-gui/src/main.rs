@@ -64,8 +64,8 @@ type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
 type LocalNode = helios_gui::node::LocalNode<helios_vault_sqlite::SqliteStore>;
 type Backups = helios_gui::node_jobs::Backups<helios_vault_sqlite::SqliteStore>;
 
-/// A problem worth knowing: on the terminal, and in the log file once the
-/// window's logs are set up.
+/// A problem worth knowing: on the terminal, and in the log file (set up
+/// right after the instance check).
 fn warn(text: &str) {
     eprintln!("helios-gui: {text}");
     log::warn!(target: "helios", "{text}");
@@ -145,13 +145,15 @@ fn seconds_f64() -> f64 {
 /// `health.destinationDays` setting read from `settings`, the GPU in use
 /// and its kernels, the plugins installed, each probed, and the
 /// catalogue's snapshots; the ignored findings kept beside Helios's
-/// settings.
+/// settings. The plugins' own checks join them, owned by each plugin, a
+/// connector's handed its accounts by `accounts`.
 fn health_runner(
     vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
     file: Option<PathBuf>,
     cards: Arc<std::sync::Mutex<Vec<helios_library::import::Card>>>,
     settings: egui_pop::core::binding::SharedStore,
     plugins: Arc<helios_plugin::Broker>,
+    accounts: Option<&helios_plugin::health::AccountsFn>,
 ) -> helios_health::runner::Runner {
     use helios_health::backup::CardShort;
     use helios_health::{Findings, Ignored, Registry, runner};
@@ -171,12 +173,21 @@ fn health_runner(
                     .collect()
             })
             .with_gpu(health_gpu)
-            .with_plugins(move || health_plugins(&plugins))
+            .with_plugins({
+                let plugins = plugins.clone();
+                move || health_plugins(&plugins)
+            })
             .with_snapshots(helios_gui::catalogue::health)
             .into_context();
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
     let mut registry = Registry::builtin();
-    registry.add(Arc::new(helios_health::gpu::Kernels::new(health_kernels())));
+    if let Err(problems) = registry.add(
+        helios_health::gpu::OWNER,
+        Arc::new(helios_health::gpu::Kernels::new(health_kernels())),
+    ) {
+        log::error!("health: {}", problems.join("; "));
+    }
+    helios_plugin::health::register(&mut registry, &plugins, accounts);
     runner::Runner::new(
         registry,
         context,
@@ -241,6 +252,43 @@ fn health_kernels() -> impl Fn() -> Vec<helios_health::gpu::Kernel> + Send + Syn
             })
             .collect()
     }
+}
+
+/// A connector's accounts as its plugin's health check is handed them:
+/// each with its id, its name as shown, its state and an access token
+/// (renewed if need be; null when there is none to give, the account
+/// then needing a reconnection).
+fn health_accounts_of(
+    book: Arc<dyn helios_connect::account::AccountBook>,
+    secrets: Arc<dyn helios_connect::account::Secrets>,
+    web: Arc<dyn helios_connect::connect::WebSteps>,
+) -> helios_plugin::health::AccountsFn {
+    use helios_connect::account::AccountState;
+    Arc::new(move |connector: &str| {
+        let accounts = book.accounts().unwrap_or_else(|e| {
+            log::warn!("health: accounts: {e}");
+            Vec::new()
+        });
+        accounts
+            .into_iter()
+            .filter(|a| a.connector == connector)
+            .map(|a| {
+                let auth = match a.state {
+                    AccountState::Connected => web
+                        .access_token(book.as_ref(), secrets.as_ref(), &a.id)
+                        .inspect_err(|e| log::warn!("health: account {}: {e}", a.id))
+                        .ok(),
+                    _ => None,
+                };
+                serde_json::json!({
+                    "id": a.id,
+                    "label": a.shown(),
+                    "state": a.state.name(),
+                    "auth": auth,
+                })
+            })
+            .collect()
+    })
 }
 
 /// Every plugin installed, probed (started and its handshake answered,
@@ -599,7 +647,14 @@ fn library_commands(
             "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
-        move |args, _| {
+        move |args, origin| {
+            // Who asked, for the import history: the window's imports say
+            // it in their arguments, being run later as the user.
+            let mut args = args.clone();
+            if args.get("origin").is_none() {
+                args["origin"] = json!(helios_gui::persist::who(origin));
+            }
+            let args = &args;
             let options = helios_gui::importers::options(args)?;
             let through = args.get("importer").is_some().then(|| plugins.clone());
             let mut sources: Vec<std::path::PathBuf> = args
@@ -1660,6 +1715,9 @@ fn main() -> Result<(), String> {
         }
     };
     start::mark("instance check");
+    // The log file from here on: what Helios says before its window
+    // opens reaches it too.
+    let _ = platform::file_logs();
     let ending = listen_for_ending();
     // A frame holding the interface's thread too long leaves a trace in
     // the log and the crash folder (`helios_gui::stall`).
@@ -1727,7 +1785,7 @@ fn main() -> Result<(), String> {
         .and_then(|p| p.canonicalize().ok())
         .ok_or("no workspace directory")?;
     if let Err(e) = helios_gui::shell::remember_workspace(&workspace) {
-        eprintln!("helios-gui: cannot remember the workspace: {e}");
+        warn(&format!("cannot remember the workspace: {e}"));
     }
     let dir = workspace_dir(&workspace);
     // The interface's settings (window place, focus mode, the user's
@@ -2091,6 +2149,7 @@ fn main() -> Result<(), String> {
                 )));
             }
             // The import accounts, kept in the vault (public facts only).
+            let mut health_accounts = None;
             if let Some(vault) = known_vault.clone() {
                 // Secrets and tokens in the system keyring (Windows has no
                 // keyring support yet: kept for the session only); `oauth`
@@ -2102,17 +2161,21 @@ fn main() -> Result<(), String> {
                 };
                 // The person's own OAuth clients (Settings > Accounts) are
                 // kept in the same keyring.
-                shell.set_import_sign_in(Arc::new(
+                let web: Arc<dyn helios_connect::connect::WebSteps> = Arc::new(
                     helios_connect::oauth::OAuth::system().with_own_in(secrets.clone()),
-                ));
-                shell.set_import_accounts(
-                    Arc::new(helios_connect::account::VaultAccounts(vault)),
-                    secrets,
                 );
+                shell.set_import_sign_in(web.clone());
+                let book: Arc<dyn helios_connect::account::AccountBook> =
+                    Arc::new(helios_connect::account::VaultAccounts(vault));
+                // A plugin's health check tries its connector's accounts.
+                health_accounts = Some(health_accounts_of(book.clone(), secrets.clone(), web));
+                shell.set_import_accounts(book, secrets);
             }
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));
+                // The imports recorded, listed in the window to run again.
+                shell.set_import_history(helios_gui::shell::import_history_of(vault.clone()));
                 // An offline folder's photos, as the image map recorded
                 // them, with the thumbnails the library's cache has.
                 shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
@@ -2212,6 +2275,7 @@ fn main() -> Result<(), String> {
                 cards,
                 settings,
                 plugins.clone(),
+                health_accounts.as_ref(),
             );
             runner.report_to(shell.jobs());
             if let Some(link) = &node_link {

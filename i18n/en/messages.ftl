@@ -653,6 +653,8 @@ gui-history-calibration-off = Turn the calibration profile off
 
 gui-history-calibration-save = Save the calibration profile “{ $name }”
 
+gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
+
 gui-history-import = Import { $count } photos
 
 gui-history-preview-applied = applied
@@ -693,13 +695,29 @@ gui-image-opening = Opening { $name }…
 
 gui-import-auto = Import automatically
 
+gui-import-auto-ask = { $files } new photos ({ $size }) on { $source }: more than an automatic import takes without asking
+
+gui-import-auto-confirm = First automatic import from { $source }: check the photos, then Import confirms it
+
+gui-import-auto-confirmed = Automatic import confirmed: from now on it runs on its own
+
 gui-import-auto-failed = Automatic import from { $source }: { $error }
+
+gui-import-auto-held = Automatic imports are paused: { $source } not imported
 
 gui-import-auto-new-files = When new files appear
 
 gui-import-auto-off = Off
 
+gui-import-auto-open = Open
+
+gui-import-auto-paused = Automatic imports paused
+
 gui-import-auto-plugged = When plugged in
+
+gui-import-auto-resume = Resume
+
+gui-import-auto-resumed = Automatic imports resumed
 
 gui-import-auto-started = Automatic import from { $source }: { $files } files
 
@@ -768,6 +786,20 @@ gui-import-ended-reported = { $photos } photos imported, { $edits } darktable ed
 gui-import-failed = The import failed: { $error }
 
 gui-import-form-title = Import photos
+
+gui-import-history = History
+
+gui-import-history-added = { $count } added
+
+gui-import-history-again = Import again
+
+gui-import-history-by = By { $origin }
+
+gui-import-history-counts = { $added } added, { $located } located, { $unchanged } unchanged, { $skipped } skipped, { $failed } failed
+
+gui-import-history-failed = failed
+
+gui-import-history-none = No import yet
 
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
 
@@ -1194,6 +1226,22 @@ gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date 
 gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet
+
+gui-look-header-chart = Colour half off: the chart profile rules the colours
+
+gui-look-header-fit = Fit to the camera's JPEG
+
+gui-look-header-fit-about = Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit
+
+gui-look-header-fitted = Fitted to the camera's JPEG: Delta E { $held } (default { $baseline })
+
+gui-look-header-none = Not fitted yet: the look starts from the camera's own JPEG
+
+gui-look-header-refit = Refit
+
+gui-look-header-refused = Not fitted: { $reason }
+
+gui-look-header-switch = Camera look
 
 gui-macro-fold-detail = Changed: { $changes }
 
@@ -1828,6 +1876,8 @@ gui-settings-accounts-list = Import accounts
 gui-settings-accounts-no-service = No service with accounts is installed.
 
 gui-settings-accounts-none = No account yet: add one below.
+
+gui-settings-automatic-imports = Automatic imports
 
 gui-settings-backup = Backup
 
@@ -2610,6 +2660,10 @@ health-vault-ok-detail = { $file } passed SQLite's quick check
 health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
+
+look-load-failed = cannot read the photo: { $error }
+
+look-render-failed = cannot render the raw: { $error }
 
 node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import, settings.layer.*, commands.list and command.run
 

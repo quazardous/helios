@@ -7,10 +7,15 @@
 //!   accepted, and every connection must first present the session token
 //!   (`{"auth": "<token>"}`), which the server writes to a file readable by
 //!   its user only.
+//!
+//! An endpoint serves at most [`MAX_CONNECTIONS`] connections at once; one
+//! more is answered with a "too many connections" error line and closed.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, PoisonError};
 use std::thread;
 use std::time::Duration;
@@ -19,6 +24,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::request_ids::{Keyed, Once, Remembered, applied, request_id, reused};
 use crate::rpc::{self, Closers, Running, Service, Sink, dispatch};
 
 /// Where a server listens.
@@ -191,6 +197,15 @@ where
     H: Fn(R, &mut Connection<'_>) -> Option<Value> + Send + Sync + 'static,
 {
     let handler = Arc::new(handler);
+    // The keys of calls sent again (`crate::request_ids`), one store for
+    // the endpoint, both forms.
+    let remembered = Arc::new(Remembered::default());
+    let service = service.map(|service| {
+        Arc::new(Keyed {
+            service,
+            remembered: remembered.clone(),
+        }) as Arc<dyn Service>
+    });
     match listen {
         #[cfg(unix)]
         Listen::Unix(path) => {
@@ -199,12 +214,25 @@ where
                 std::fs::remove_file(path)?;
             }
             let listener = UnixListener::bind(path)?;
+            let count = Arc::new(AtomicUsize::new(0));
             thread::spawn(move || {
-                for stream in listener.incoming().flatten() {
+                for mut stream in listener.incoming().flatten() {
+                    let Some(slot) = Slot::take(&count) else {
+                        let _ = stream.set_write_timeout(Some(REFUSE_WRITE));
+                        refuse(&mut stream);
+                        continue;
+                    };
                     let (handler, service) = (handler.clone(), service.clone());
+                    let remembered = remembered.clone();
                     thread::spawn(move || {
+                        let _slot = slot;
                         if let Ok(reader) = stream.try_clone() {
-                            converse(reader, stream, None, &*handler, service);
+                            let serve = Serve {
+                                handler: &*handler,
+                                service,
+                                remembered: &remembered,
+                            };
+                            converse(reader, stream, None, &serve);
                         }
                     });
                 }
@@ -229,13 +257,25 @@ where
                 .to_string();
             let listener = TcpListener::bind(addr)?;
             let bound = listener.local_addr()?;
+            let count = Arc::new(AtomicUsize::new(0));
             thread::spawn(move || {
-                for stream in listener.incoming().flatten() {
+                for mut stream in listener.incoming().flatten() {
+                    let Some(slot) = Slot::take(&count) else {
+                        let _ = stream.set_write_timeout(Some(REFUSE_WRITE));
+                        refuse(&mut stream);
+                        continue;
+                    };
                     let (handler, token) = (handler.clone(), token.clone());
-                    let service = service.clone();
+                    let (service, remembered) = (service.clone(), remembered.clone());
                     thread::spawn(move || {
+                        let _slot = slot;
                         if let Ok(reader) = stream.try_clone() {
-                            converse(reader, stream, Some(&token), &*handler, service);
+                            let serve = Serve {
+                                handler: &*handler,
+                                service,
+                                remembered: &remembered,
+                            };
+                            converse(reader, stream, Some(&token), &serve);
                         }
                     });
                 }
@@ -245,6 +285,47 @@ where
             })
         }
     }
+}
+
+/// The most connections one endpoint serves at once. The desktop holds
+/// some of its node's open (events, jobs it follows), and each agent's
+/// wait holds one while it waits.
+pub const MAX_CONNECTIONS: usize = 64;
+
+/// How long a refused connection's error line may take to write.
+const REFUSE_WRITE: Duration = Duration::from_secs(1);
+
+/// One of an endpoint's [`MAX_CONNECTIONS`] places, given back on drop.
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    /// A free place among `count`'s, or `None` when all are taken.
+    fn take(count: &Arc<AtomicUsize>) -> Option<Self> {
+        count
+            .fetch_update(SeqCst, SeqCst, |n| (n < MAX_CONNECTIONS).then_some(n + 1))
+            .ok()
+            .map(|_| Slot(count.clone()))
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, SeqCst);
+    }
+}
+
+/// Answers a connection over [`MAX_CONNECTIONS`], before closing it.
+fn refuse(stream: &mut impl Write) {
+    let _ = writeln!(
+        stream,
+        "{}",
+        json!({
+            "ok": false,
+            "error": format!(
+                "too many connections: this endpoint serves at most {MAX_CONNECTIONS} at once; close one and connect again"
+            ),
+        })
+    );
 }
 
 /// The connections this process serves, open now, and when one last
@@ -291,18 +372,27 @@ impl Drop for Open {
     }
 }
 
+/// What answers an endpoint's lines: the older form's handler, the
+/// JSON-RPC service, and the keys of calls sent again.
+struct Serve<'a, H> {
+    handler: &'a H,
+    service: Option<Arc<dyn Service>>,
+    remembered: &'a Remembered,
+}
+
 /// One connection: an optional authentication line, then requests; what
 /// the handler asked to run at the end runs once the client has gone.
 fn converse<R, H>(
     reader: impl Read,
     mut writer: impl Write + Send + 'static,
     token: Option<&str>,
-    handler: &H,
-    service: Option<Arc<dyn Service>>,
+    serve: &Serve<'_, H>,
 ) where
     R: DeserializeOwned,
     H: Fn(R, &mut Connection<'_>) -> Option<Value>,
 {
+    let handler = serve.handler;
+    let service = serve.service.clone();
     let _open = Open::new();
     let mut lines = BufReader::new(reader).lines();
     if let Some(token) = token {
@@ -359,8 +449,8 @@ fn converse<R, H>(
             out: &sink,
             closers: &closers,
         };
-        let response = match parsed.and_then(serde_json::from_value::<R>) {
-            Ok(request) => handler(request, &mut connection),
+        let response = match parsed {
+            Ok(value) => older(value, handler, serve.remembered, &mut connection),
             Err(e) => Some(json!({ "ok": false, "error": format!("bad request: {e}") })),
         };
         if let Some(response) = response
@@ -372,6 +462,54 @@ fn converse<R, H>(
     let closers = std::mem::take(&mut *closers.lock().unwrap_or_else(PoisonError::into_inner));
     for close in closers {
         close();
+    }
+}
+
+/// Answers a line of the older form. With a key (`_meta.request_id`),
+/// a request answered `ok` is remembered and, sent again, answered again
+/// marked `already_applied` without running twice
+/// ([`crate::request_ids`]).
+fn older<R, H>(
+    mut value: Value,
+    handler: &H,
+    remembered: &Remembered,
+    connection: &mut Connection<'_>,
+) -> Option<Value>
+where
+    R: DeserializeOwned,
+    H: Fn(R, &mut Connection<'_>) -> Option<Value>,
+{
+    let refused = |error: String| Some(json!({ "ok": false, "error": error }));
+    let key = match request_id(&value) {
+        Ok(key) => key,
+        Err(e) => return refused(e.message),
+    };
+    if let Some(fields) = value.as_object_mut() {
+        fields.remove("_meta");
+    }
+    let Some(key) = key else {
+        return match serde_json::from_value::<R>(value) {
+            Ok(request) => handler(request, connection),
+            Err(e) => refused(format!("bad request: {e}")),
+        };
+    };
+    let fingerprint = crate::cache::key("", &value);
+    let run = || {
+        let answer = match serde_json::from_value::<R>(value) {
+            Ok(request) => handler(request, connection),
+            Err(e) => refused(format!("bad request: {e}")),
+        };
+        // Only an answer that says it ran is remembered.
+        match answer {
+            Some(answer) if answer["ok"] == true => Ok(answer),
+            other => Err(other),
+        }
+    };
+    match remembered.once(&key, &fingerprint, run) {
+        Once::Ran(Ok(answer)) => Some(answer),
+        Once::Ran(Err(answer)) => answer,
+        Once::Applied(answer) => Some(applied(answer)),
+        Once::Other => refused(reused(&key).message),
     }
 }
 

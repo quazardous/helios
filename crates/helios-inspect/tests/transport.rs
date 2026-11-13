@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use helios_core::{Bus, Event};
-use helios_inspect::{Address, Inspector, Listen, Request, new_token, request_at, serve_inspector};
+use helios_inspect::{
+    Address, Inspector, Listen, MAX_CONNECTIONS, Request, new_token, request_at, serve_inspector,
+};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -81,4 +83,43 @@ fn only_loopback_is_served_and_tcp_needs_a_token() {
         None,
     );
     assert!(no_token.is_err());
+}
+
+#[test]
+fn a_connection_over_the_cap_is_refused_and_a_freed_place_serves_again() {
+    use std::io::{BufRead, BufReader};
+    use std::time::{Duration, Instant};
+
+    let token = new_token();
+    let (_bus, address) = start(&token);
+    let addr = address.strip_prefix("tcp://").unwrap();
+    // Each holds its place, waiting to present the token.
+    let mut held: Vec<std::net::TcpStream> = (0..MAX_CONNECTIONS)
+        .map(|_| std::net::TcpStream::connect(addr).unwrap())
+        .collect();
+    let extra = std::net::TcpStream::connect(addr).unwrap();
+    extra
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(extra).read_line(&mut line).unwrap();
+    assert!(
+        line.contains("too many connections: this endpoint serves at most 64 at once"),
+        "{line}"
+    );
+    // A place given back serves the next client.
+    drop(held.pop());
+    let address = Address::parse(&address, Some(token)).unwrap();
+    let start = Instant::now();
+    loop {
+        let answer = request_at(&address, &Request::State).unwrap();
+        if answer["ok"] != false {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no place came free: {answer}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }

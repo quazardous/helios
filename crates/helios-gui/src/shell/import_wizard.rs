@@ -515,6 +515,7 @@ impl ImportWindow {
             auto: wz.auto,
             volume,
             label,
+            confirmed: edited.and_then(|s| s.confirmed.clone()),
         };
         if let Some(old) = &wz.editing {
             self.replace_source(old, source);

@@ -5,6 +5,8 @@ A Helios node (`helios-node`) serves three endpoints: **inspect**
 builds with `HELIOS_DEBUG_CONTROL` set) and **batch** (`--batch-control`,
 every build, the verbs a batch needs). Each is a Unix socket, or loopback
 TCP behind a session token (`{"auth": "<token>"}` as the first line).
+An endpoint serves at most 64 connections at once: one more gets
+`{"ok": false, "error": "too many connections: …"}` and is closed.
 
 All three speak **JSON-RPC 2.0**, one JSON object per line in each
 direction. Why JSON-RPC, and what other projects do, is in
@@ -25,7 +27,9 @@ direction. Why JSON-RPC, and what other projects do, is in
   `commands.list` describes it; checked against it before the command
   runs. `_meta.origin` names who runs a command (`user`, `cli`,
   `control`, `agent:NAME`, `script:NAME`; `control` when not given): a
-  change to the edit is saved under it.
+  change to the edit is saved under it. `_meta.request_id` is the call's
+  key: sent again with it, the call is applied once ([Request
+  ids](#request-ids)).
 - **Id**: a number or a string. Each call runs on a thread of its own, so
   one connection carries several calls at once; answers come in the order
   the calls end, matched by id. A call without an id is a notification:
@@ -84,7 +88,7 @@ events seen on a wait's timeout, the entities known on a miss).
 | Code | Meaning |
 |---|---|
 | -32700 | the line is not JSON |
-| -32600 | not a valid request (wrong `jsonrpc`, a batch, an id still running) |
+| -32600 | not a valid request (wrong `jsonrpc`, a batch, an id still running, a request id given to another call) |
 | -32601 | no such method or command |
 | -32602 | params do not match the schema |
 | -32603 | internal error |
@@ -104,7 +108,46 @@ was sent and before its answer came, the client answers the call -32008
 itself: the node may have run it. A client reads the state (the image's
 parameters, the command's own list or state) before sending it again, and
 never resends a change blindly. A call made on a connection already
-closed was not sent (-32603).
+closed was not sent (-32603). A call sent with a request id may instead be
+sent again with the same one.
+
+## Request ids
+
+A client may give a call that changes something a key of its own,
+`_meta.request_id` (a string of 1 to 128 bytes, unique to that call):
+
+```json
+{"jsonrpc": "2.0", "id": 7, "method": "command.run", "params": {"id": "theme.select", "params": {"name": "helios-light"}, "_meta": {"origin": "cli", "request_id": "3f9c0d2e8a41b7c6d5e4f3a2b1c0d9e8"}}}
+```
+
+Each endpoint remembers the keys of the calls it answered, with their
+answers. When a key comes again, on any connection, for the same call (its
+method and params, `_meta` aside), the node does not run it again: it
+answers the remembered result, with `"already_applied": true` added (a
+result that is not an object is held in `result`). So after an outcome
+unknown (-32008), the client sends the call again with the same key and
+reads from the answer whether it had already run.
+
+- A key given again with another call is refused (-32600): a key names
+  one call.
+- A call that failed (an error answer) is not remembered: it changed
+  nothing, and sent again it runs again.
+- A key that comes again while its call still runs waits for that call
+  and answers its result.
+- The store is bounded and time-limited: an endpoint keeps at most 1,000
+  keys, the oldest answered forgotten first, each for 10 minutes. A key
+  sent again after that runs the call again: resend soon, or read the
+  state.
+- The older form takes the key too, as `"_meta": {"request_id": …}` on
+  the line; an answer `"ok": true` is remembered, and given again with
+  `"already_applied": true`.
+- An in-process client (`Client::in_process`) calls the service directly:
+  there is no connection to lose, and keys are not looked at.
+
+`helios-mcp` sends a key with every tool that changes something (the
+control tools that write, `helios_command_run`), a new one unless the
+agent gives `request_id`, and names it after an outcome unknown. The `helios` CLI does
+the same with `--request-id` ([cli.md](cli.md)).
 
 ## Cursors
 

@@ -355,6 +355,18 @@ fn the_cli_and_the_mcp_pair_list_and_run_commands_on_a_running_node() {
         err.contains(r#"params.format: expected one of "jpeg", "png", "tiff""#),
         "{err}"
     );
+    // The camera look's fit, reached through the registry by name: this
+    // node keeps no vault, so it is refused with that reason.
+    let (code, _, err) = helios(&[
+        "run",
+        "look.camera.fit",
+        "--node",
+        address,
+        "--json",
+        r#"{"images":["/a.nef"],"dry_run":true}"#,
+    ]);
+    assert_eq!(code, 1);
+    assert!(err.contains("--vault"), "{err}");
 
     // The MCP pair, on the same node.
     let mut sockets = helios_node::mcp::Sockets {
@@ -391,6 +403,11 @@ fn the_cli_and_the_mcp_pair_list_and_run_commands_on_a_running_node() {
             .all(|c| c["enabled"] == true),
         "{list}"
     );
+    let (failed, all) = tool("helios_commands_list", json!({ "node": address }));
+    assert!(!failed, "{all}");
+    let fit = command(&all, "look.camera.fit");
+    assert_eq!(fit["needs"], json!(["vault"]), "{fit}");
+    assert_eq!(fit["params"]["required"], json!(["images"]), "{fit}");
     let (failed, run) = tool(
         "helios_command_run",
         json!({ "node": address, "id": "workflow.runs" }),

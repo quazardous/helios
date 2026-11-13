@@ -37,6 +37,9 @@ pub struct CallMeta {
     pub origin: Option<String>,
     /// Steps undone together carry the same group.
     pub undo_group: Option<String>,
+    /// The call's key: sent again with it, it is applied once
+    /// ([`crate::request_ids`]).
+    pub request_id: Option<String>,
 }
 
 impl CallMeta {
@@ -45,6 +48,7 @@ impl CallMeta {
         Self {
             origin: Some(origin.into()),
             undo_group: None,
+            request_id: None,
         }
     }
 
@@ -55,13 +59,18 @@ impl CallMeta {
             Value::Null => serde_json::Map::new(),
             other => return other,
         };
-        if !params.contains_key("_meta") && (self.origin.is_some() || self.undo_group.is_some()) {
+        if !params.contains_key("_meta")
+            && (self.origin.is_some() || self.undo_group.is_some() || self.request_id.is_some())
+        {
             let mut meta = serde_json::Map::new();
             if let Some(origin) = self.origin {
                 meta.insert("origin".into(), json!(origin));
             }
             if let Some(group) = self.undo_group {
                 meta.insert("undo_group".into(), json!(group));
+            }
+            if let Some(key) = self.request_id {
+                meta.insert("request_id".into(), json!(key));
             }
             params.insert("_meta".into(), Value::Object(meta));
         }
@@ -251,6 +260,15 @@ impl Client {
         self.transport
             .call(id, method, meta.into_params(params), send);
         Pending { id, answer }
+    }
+
+    /// As [`Client::call`], keyed `request_id`: a call that changes
+    /// something, which may be sent again with the same key after an
+    /// unknown outcome and is applied once ([`crate::request_ids`]).
+    pub fn call_keyed(&self, method: &str, params: Value, request_id: &str) -> Pending {
+        let mut meta = self.meta.clone();
+        meta.request_id = Some(request_id.into());
+        self.call_with(method, params, meta)
     }
 
     /// Calls `method` and waits for its answer: for a thread that may wait.

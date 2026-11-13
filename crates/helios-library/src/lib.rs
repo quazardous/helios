@@ -5,6 +5,8 @@
 //!   copied into the library folder, renamed by a [`rename::Pattern`],
 //!   their sidecars kept, exact duplicates found by content and handled
 //!   by a policy, run as a job announced on the bus;
+//! - [`import_history`]: a record of each import (sources, choices,
+//!   counts, when, who) kept in the vault, and its params to run it again;
 //! - [`fetch`]: import from a connector whose items are fetched (a remote
 //!   source): bytes landed in part files with resume, hashed in BLAKE3 and
 //!   the claimed algorithm, always a verified copy in the library folder,
@@ -15,6 +17,9 @@
 //! - [`cull`]: the culling signals (a focus score and where the focus
 //!   is, clipping per channel, the exposure's levels), at import and by a
 //!   resumable backfill job over the images imported before;
+//! - [`auto_import`]: the safeguards of automatic imports (paused,
+//!   the first run confirmed, a question above a size), for whichever
+//!   runs them, the desktop or the node;
 //! - [`backup`]: the verified backup job, copying library copies to the
 //!   backup volumes of the library's strategy, and its triggers;
 //! - [`darktable`]: darktable's sidecars kept as versions (each sidecar of
@@ -32,6 +37,7 @@
 //!   a selection through a resolver picked by name, and applies them only
 //!   when accepted.
 
+pub mod auto_import;
 pub mod backup;
 pub mod capture;
 pub mod cull;
@@ -39,6 +45,7 @@ pub mod darktable;
 pub mod export;
 pub mod fetch;
 pub mod import;
+pub mod import_history;
 pub mod map;
 pub mod map_job;
 pub mod rename;
