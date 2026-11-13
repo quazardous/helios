@@ -170,7 +170,11 @@ The import window draws a source's parameters (its connector's
 `[source.settings.*]`, choices and secrets aside) with egui-pop's
 parameter widgets, from the same descriptors as Settings, their texts
 from the plugin's catalogue (`source-setting-…`); a value its contract
-refuses is said with the reason, and Next waits.
+refuses is said with the reason, and Next waits. When the source is an
+account's, the same step shows the account's own settings
+(`[account.settings.*]`, under "Account settings"), kept on the account
+when the wizard ends: the values on its document, its secrets in the
+keyring under the account's id (a secret set shows as a mask).
 
 ## Packaging and trust
 

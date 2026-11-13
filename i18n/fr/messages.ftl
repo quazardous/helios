@@ -762,6 +762,7 @@ gui-size-kib = { $size } Kio
 gui-size-mib = { $size } Mio
 
 gui-wizard-account = Compte
+gui-wizard-account-settings = Réglages du compte
 
 gui-wizard-add = Ajouter la source
 

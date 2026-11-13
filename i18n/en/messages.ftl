@@ -1736,6 +1736,7 @@ gui-vault-unreadable = Cannot read the library: { $error }
 gui-window-frame-error = window frame: { $error }
 
 gui-wizard-account = Account
+gui-wizard-account-settings = Account settings
 
 gui-wizard-add = Add the source
 

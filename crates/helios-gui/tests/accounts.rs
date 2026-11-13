@@ -826,7 +826,7 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
 #[test]
 fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are() {
     use egui_kittest::kittest::By;
-    let (_world, mut h) = world();
+    let (world, mut h) = world();
     let kept = keep_sources(&mut h);
     wizard_signed_in(&mut h);
     // The connector's own parameter, at its default, under the account.
@@ -836,11 +836,38 @@ fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are(
             .value(value)
     };
     assert!(h.query(share("photos")).is_some(), "the share's field");
+    // The account's own settings, from its connector's contract: kept on
+    // the account, its secret in the keyring alone.
+    until(&mut h, "the account's settings", |h| {
+        shown(h, "Account settings")
+    });
+    h.get(share("eu")).focus();
+    h.run_steps(2);
+    h.get(share("eu")).type_text("-west");
+    h.run_steps(3);
+    h.get_by_label("API key").focus();
+    h.run_steps(2);
+    h.get_by_label("API key").type_text("hunter2-secret");
+    h.run_steps(3);
     click(&mut h, "Next");
     click(&mut h, "Next");
     click(&mut h, "Add the source");
     let sources = h.state().import_sources();
     assert_eq!(sources[0].params["share"], json!("photos"));
+    let account = world.book.accounts().unwrap().remove(0);
+    assert_eq!(account.facts["region"], json!("eu-west"));
+    assert_eq!(
+        world
+            .secrets
+            .get(&account.id, "api-key")
+            .unwrap()
+            .as_deref(),
+        Some("hunter2-secret")
+    );
+    assert!(
+        !account.to_document().to_string().contains("hunter2"),
+        "the secret is never in the account's document"
+    );
     let name = sources[0].name.clone().unwrap_or_default();
     // A document saying add where they are (an older Helios's, say).
     let text = kept
