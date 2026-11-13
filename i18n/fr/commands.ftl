@@ -198,6 +198,18 @@ command-library-importWindow =
 command-library-storage =
     .title = Stockage… (l’app Réglages sur Stockage › Volumes ; `volume` : le volume à marquer et à faire défiler jusqu’à lui)
 
+command-library-filter-switch =
+    .title = Afficher les filtres récents et épinglés et les albums dynamiques, pour en appliquer un à la bibliothèque
+
+command-library-filter-recent =
+    .title = Lister les filtres `pinned` (épinglés) et `recent` (récents, le plus récent d’abord) de la bibliothèque et ses albums dynamiques `smart`, chacun avec sa `query` et son `filter`
+
+command-library-filter-apply =
+    .title = Appliquer un filtre à la bibliothèque (`query`, tapée comme dans le champ de recherche, ou `filter` tel que listé) ; il devient le premier filtre récent
+
+command-library-filter-pin =
+    .title = Épingler un filtre (`query` ou `filter`, sinon le filtre en vigueur), ou le désépingler avec `pinned: false`
+
 command-library-importWith =
     .title = Importer avec un greffon d’import (`plugin`, `importer` ; `source` : le fichier ou dossier qu’il lit, demandé s’il manque ; `copy`, `darktable`)
 

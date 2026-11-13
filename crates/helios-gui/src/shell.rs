@@ -268,6 +268,9 @@ enum Action {
     Collection(Value, Origin),
     /// An album command (its id) with its arguments.
     CollectionEdit(&'static str, Value),
+    /// A recent-filters command (its id) with its arguments
+    /// (`crate::recent_filters`).
+    RecentFilters(&'static str, Value),
     /// Scans a folder for the image map (`path`).
     ScanFolder(Value),
     /// Moves the comparison's active photo by a step.
@@ -2945,6 +2948,29 @@ impl Shell {
                 Box::new(move |a, _| Ok(Action::CollectionEdit(id, a.clone()))),
             );
         }
+        for (id, title) in [
+            (
+                crate::recent_filters::SWITCH_COMMAND,
+                "Show the recent and pinned filters and the smart albums, to apply one to the library",
+            ),
+            (
+                crate::recent_filters::RECENT_COMMAND,
+                "List the library's `pinned` and `recent` filters (newest first) and its `smart` albums, each with its `query` and `filter`",
+            ),
+            (
+                crate::recent_filters::APPLY_COMMAND,
+                "Apply a filter to the library (`query`, typed as in the search field, or `filter` as listed); it becomes the first recent filter",
+            ),
+            (
+                crate::recent_filters::PIN_COMMAND,
+                "Pin a filter (`query` or `filter`, else the filter in force), or unpin it with `pinned: false`",
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, _| Ok(Action::RecentFilters(id, a.clone()))),
+            );
+        }
         add(
             CommandSpec::new(
                 crate::library::COLLECTION_RULES_EDIT_COMMAND,
@@ -4466,10 +4492,9 @@ impl Shell {
                     self.edit_workspace(&json!({ "library": library }), origin)?;
                 }
             }
-            self.focus
-                .library
-                .borrow_mut()
-                .set_folder(folder.as_deref());
+            let mut lib = self.focus.library.borrow_mut();
+            lib.set_folder(folder.as_deref());
+            lib.record_filter();
         }
         Ok(json!({ "path": self.focus.library.borrow().folder() }))
     }
@@ -4510,12 +4535,107 @@ impl Shell {
                     self.edit_workspace(&json!({ "library": library }), origin)?;
                 }
             }
-            self.focus
-                .library
-                .borrow_mut()
-                .set_collection(id.as_deref());
+            let mut lib = self.focus.library.borrow_mut();
+            lib.set_collection(id.as_deref());
+            lib.record_filter();
         }
         Ok(json!({ "id": self.focus.library.borrow().collection() }))
+    }
+
+    /// The recent-filters commands (`crate::recent_filters`): the
+    /// switcher, the list, apply, pin.
+    fn recent_filters(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
+        use crate::recent_filters::{
+            APPLY_COMMAND, Kind, PIN_COMMAND, SWITCH_COMMAND, entries, filter_arg, text,
+        };
+        let smart: Vec<(String, String)> = self
+            .focus
+            .library
+            .borrow()
+            .albums()
+            .unwrap_or_default()
+            .iter()
+            .filter(|a| a.is_smart())
+            .map(|a| (a.id.clone(), a.name.clone()))
+            .collect();
+        let history = self
+            .focus
+            .library
+            .borrow()
+            .filter_history()
+            .cloned()
+            .unwrap_or_default();
+        if command == APPLY_COMMAND {
+            let filter = filter_arg(args)?.ok_or("`query` or `filter` is missing")?;
+            let mut lib = self.focus.library.borrow_mut();
+            lib.apply_filter(filter);
+            return Ok(json!({ "query": text(lib.filter()) }));
+        }
+        if command == PIN_COMMAND {
+            let mut lib = self.focus.library.borrow_mut();
+            let filter = filter_arg(args)?.unwrap_or_else(|| lib.filter().clone());
+            if filter.is_empty() {
+                return Err("no filter to pin".into());
+            }
+            let pinned = args.get("pinned").and_then(Value::as_bool).unwrap_or(true);
+            let changed = lib.pin_filter(&filter, pinned);
+            return Ok(json!({ "query": text(&filter), "pinned": pinned, "changed": changed }));
+        }
+        let listed = entries(&history, &smart);
+        if command == SWITCH_COMMAND {
+            let options = listed
+                .iter()
+                .map(|e| {
+                    let hint = self.text(match e.kind {
+                        Kind::Pinned => Message::new("gui-recent-filters-pinned", "pinned"),
+                        Kind::Recent => Message::new("gui-recent-filters-recent", "recent"),
+                        Kind::Smart => Message::new("gui-recent-filters-smart", "smart album"),
+                    });
+                    ChooseOption::new(
+                        &e.label,
+                        serde_json::to_value(&e.filter).unwrap_or(Value::Null),
+                    )
+                    .hint(&hint)
+                })
+                .collect::<Vec<_>>();
+            if options.is_empty() {
+                self.notify(
+                    Level::Info,
+                    Message::new(
+                        "gui-recent-filters-none",
+                        "No recent filter yet: the filters used in the Library are listed here",
+                    ),
+                );
+                return Ok(json!({ "shown": 0 }));
+            }
+            let title = self.text(Message::new("gui-recent-filters-title", "Recent filters"));
+            let apply = CommandId::new(APPLY_COMMAND).map_err(|e| e.to_string())?;
+            let shown = options.len();
+            self.open_dialog(Choose::with_options(&title, options, apply).value_key("filter"));
+            return Ok(json!({ "shown": shown }));
+        }
+        let of = |kind: Kind| -> Vec<Value> {
+            listed
+                .iter()
+                .filter(|e| e.kind == kind)
+                .map(|e| {
+                    let mut item = json!({
+                        "query": text(&e.filter),
+                        "filter": serde_json::to_value(&e.filter).unwrap_or(Value::Null),
+                    });
+                    if kind == Kind::Smart {
+                        item["name"] = json!(e.label);
+                    }
+                    item
+                })
+                .collect()
+        };
+        Ok(json!({
+            "pinned": of(Kind::Pinned),
+            "recent": of(Kind::Recent),
+            "smart": of(Kind::Smart),
+            "in_force": text(self.focus.library.borrow().filter()),
+        }))
     }
 
     /// The album commands (`library.collection.*`): each change is queued
@@ -5563,6 +5683,7 @@ impl Shell {
             Action::Folder(args, origin) => return self.folder_library(&args, &origin),
             Action::Collection(args, origin) => return self.collection_library(&args, &origin),
             Action::CollectionEdit(id, args) => return self.collection_edit(id, &args),
+            Action::RecentFilters(id, args) => return self.recent_filters(id, &args),
             Action::ScanFolder(args) => {
                 let path = args
                     .get("path")

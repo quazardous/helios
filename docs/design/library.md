@@ -681,9 +681,26 @@ selection, "Save as album…", clear), and each photo in it shows a
 without `name`, a form with both) makes a plain album of it, emptied or
 not, as one step; `library.quick.clear` empties it. The import window
 shows files still to import, not Library photos, so B has nothing to
-act on there. Not built yet: Ctrl+K recent filters, album sets, drag
-and drop onto an album, keyboard undo in the rule dialog (its buttons
-only).
+act on there.
+
+Built (2026-11-13), fifth part: **the recent filters** (darktable's
+collection history). A filter used in the Library (applied by
+`library.filter.apply`, a facet clicked, a folder or an album chosen, or
+typed in the search field and left two seconds) goes first of the recent
+ones, once, ten at most; a pinned one leaves that list and stays until
+unpinned (`library.filter.pin`, the filter in force by default). Both are
+one library document (`library/filters`, key `history`: each filter as
+the search field's structure), read when the Library opens and written
+when they change, outside the library's history: they survive a restart
+and follow the library, not the workspace. Ctrl+Shift+K (rebindable, in
+the Library, not while a text field is typed in) opens the switcher in
+the window it is asked from: the pinned filters, the recent ones, then
+the smart albums (as their `collection:` term), each with what it is
+beside it, filtered by typing; Enter applies the one chosen to the grid.
+Ctrl+K, darktable's key, starts chords in Helios (Ctrl+K Z, Ctrl+K
+Ctrl+S), hence Shift; Lightroom's Ctrl+K is keywords. Agents list them
+with `library.filter.recent`. Not built yet: album sets, drag and drop
+onto an album, keyboard undo in the rule dialog (its buttons only).
 
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste

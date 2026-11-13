@@ -113,6 +113,14 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // Compare, as Lightroom's C in the library; in it, the arrows move
     // the active photo, as in Lightroom's Survey view.
     bind("C", crate::comparison::COMMAND, &behind_no_picker(&library));
+    // The recent filters (darktable's collection history, its Ctrl+K):
+    // Ctrl+K starts chords here (Ctrl+K Z, Ctrl+K Ctrl+S), so Shift is
+    // added. Not while a text field is typed in.
+    bind(
+        "Ctrl+Shift+K",
+        crate::recent_filters::SWITCH_COMMAND,
+        &format!("{} && !textInputFocus", behind_no_picker(&library)),
+    );
     bind("Right", "compare.next", &behind_no_picker(&comparison));
     bind("Left", "compare.previous", &behind_no_picker(&comparison));
     // Next and previous image while culling; in the grid Space selects.

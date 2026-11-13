@@ -28,7 +28,7 @@
     { "keys": "Ctrl+W", "what": "focus detection", "reason": "Ctrl+W closes" },
     { "keys": "Ctrl+F", "what": "filmstrip", "reason": "Ctrl+F finds; the bottom panel is Ctrl+Shift+B here, Ctrl+J by default" },
     { "keys": "Ctrl+H", "what": "header", "reason": "Ctrl+H replaces in text editors" },
-    { "keys": "Ctrl+K", "what": "collection history", "reason": "Ctrl+K starts chords (Ctrl+K Ctrl+S, Ctrl+K Z)" },
+    { "keys": "Ctrl+K", "what": "collection history", "reason": "Ctrl+K starts chords (Ctrl+K Ctrl+S, Ctrl+K Z): the recent filters are Ctrl+Shift+K" },
     { "keys": "Ctrl+B", "what": "colour assessment", "reason": "Ctrl+B folds the side bar" },
     { "keys": "Ctrl+G", "what": "gamut check, group images", "reason": "Ctrl+G is kept for one meaning everywhere (group); no such command yet" },
     { "keys": "Ctrl+Shift+T", "what": "top panel", "reason": "Helios has no top panel" },

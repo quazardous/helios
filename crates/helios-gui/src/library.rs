@@ -1325,6 +1325,18 @@ pub struct Library {
     quick: Vec<String>,
     /// The same, for the grid's badge.
     quick_set: HashSet<String>,
+    /// The pinned and recent filters (`crate::recent_filters`), as last
+    /// read from the vault; none until the host reads them.
+    filter_history: Option<crate::recent_filters::FilterHistory>,
+    /// Whether the host was asked to read the history.
+    filter_history_asked: bool,
+    /// Filters used before the history was read, oldest first.
+    used_early: Vec<Filter>,
+    /// Whether the history changed, for the host to write.
+    filter_history_changed: bool,
+    /// A filter typed in the search field and when (the input's time):
+    /// it counts as used once it rests ([`crate::recent_filters::TYPED_REST`]).
+    typed: Option<(Filter, f64)>,
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
@@ -1458,6 +1470,11 @@ impl Default for Library {
             album_edits: Vec::new(),
             quick: Vec::new(),
             quick_set: HashSet::new(),
+            filter_history: None,
+            filter_history_asked: false,
+            used_early: Vec::new(),
+            filter_history_changed: false,
+            typed: None,
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
@@ -2311,6 +2328,61 @@ impl Library {
         self.resort.take().is_some()
     }
 
+    /// The filter in force used (applied, a facet, a folder or an album
+    /// chosen): first of the recent filters.
+    pub fn record_filter(&mut self) {
+        self.typed = None;
+        let filter = self.filter.clone();
+        match &mut self.filter_history {
+            Some(h) => self.filter_history_changed |= h.record(&filter),
+            None if !filter.is_empty() => {
+                self.used_early.retain(|f| *f != filter);
+                self.used_early.push(filter);
+            }
+            None => {}
+        }
+    }
+
+    /// Filters the library with `filter`, used: recorded as recent.
+    pub fn apply_filter(&mut self, filter: Filter) {
+        self.set_filter(filter);
+        self.record_filter();
+    }
+
+    /// The pinned and recent filters, once read.
+    pub fn filter_history(&self) -> Option<&crate::recent_filters::FilterHistory> {
+        self.filter_history.as_ref()
+    }
+
+    /// Whether the host is to read the history: once, at the start.
+    pub fn take_filter_history_wanted(&mut self) -> bool {
+        !std::mem::replace(&mut self.filter_history_asked, true)
+    }
+
+    /// The history as the vault keeps it; what was used before it was
+    /// read goes on top.
+    pub fn set_filter_history(&mut self, history: crate::recent_filters::FilterHistory) {
+        let early = std::mem::take(&mut self.used_early);
+        let merged = history.clone().merged(&early);
+        self.filter_history_changed |= merged != history;
+        self.filter_history = Some(merged);
+    }
+
+    /// Pins a filter, or unpins it; whether that changed anything.
+    pub fn pin_filter(&mut self, filter: &Filter, pinned: bool) -> bool {
+        let history = self.filter_history.get_or_insert_with(Default::default);
+        let changed = history.pin(filter, pinned);
+        self.filter_history_changed |= changed;
+        changed
+    }
+
+    /// The history to write, once after it changed.
+    pub fn take_filter_history_write(&mut self) -> Option<crate::recent_filters::FilterHistory> {
+        std::mem::take(&mut self.filter_history_changed)
+            .then(|| self.filter_history.clone())
+            .flatten()
+    }
+
     /// The vault query the filter needs run, once.
     pub fn take_query(&mut self) -> Option<Query> {
         self.query.take()
@@ -3150,8 +3222,19 @@ impl Library {
                 );
             }
         });
+        let now = ctx.input(|i| i.time);
         if let Some(filter) = asked {
+            self.typed = Some((filter.clone(), now));
             self.filtered(filter);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                crate::recent_filters::TYPED_REST,
+            ));
+        }
+        // A filter typed counts as used once it rests.
+        if self.typed.as_ref().is_some_and(|(f, at)| {
+            now - at >= crate::recent_filters::TYPED_REST && *f == self.filter
+        }) {
+            self.record_filter();
         }
     }
 
@@ -3204,7 +3287,7 @@ impl Library {
         }
         if let Some(term) = add {
             let filter = self.filter.merged(&Filter::parse(&term));
-            self.set_filter(filter);
+            self.apply_filter(filter);
         }
     }
 
