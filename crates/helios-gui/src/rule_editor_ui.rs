@@ -426,7 +426,7 @@ fn moves(
     {
         *asked = Some(json!({ "edit": "move", "at": at, "to": i + 1 }));
     }
-    if ui.small_button("✕").on_hover_text(&words.remove).clicked() {
+    if ui.small_button("×").on_hover_text(&words.remove).clicked() {
         *asked = Some(json!({ "edit": "remove", "at": at }));
     }
 }
