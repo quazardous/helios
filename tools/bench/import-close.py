@@ -26,7 +26,9 @@ Each way runs twice (`--covers`): with the main window `shown` beside the
 import window, then `covered` (the import window full screen over it, as
 a browser opened for a sign-in or a picking covers it): a compositor
 sends a hidden window no frame callbacks, so its next frame waits until
-it shows again.
+it shows again. The agent socket is served by the main window's frames:
+covered, only the compositor's close runs. Each close runs in a
+compositor and a helios-gui of its own.
 
 From the close on, it times the first frame the main window begins, the
 first one it builds, and the first answer of the agent socket (served by
@@ -345,14 +347,14 @@ def one_close(
     return result
 
 
-def run(args, index: int) -> list[dict]:
+def run(args, index: int, way: str, cover: str) -> dict:
+    """One close, in a compositor and a helios-gui of its own."""
     work = args.work / f"run-{index}"
     w = world(work)
     trace = args.out / f"run-{index}.stderr"
     comp = build_compositor(config(f"helios-import-close-{index}"))
     if hasattr(comp, "set_log_dir"):
         comp.set_log_dir(args.out / "wbox-log")
-    results: list[dict] = []
     try:
         cmd = [
             "sh",
@@ -373,7 +375,7 @@ def run(args, index: int) -> list[dict]:
         }
         launched = comp.launch(cmd, env)
         if "error" in launched:
-            return [{"run": index, "error": f"launch: {launched['error']}"}]
+            return {"run": index, "close": way, "cover": cover, "error": "launch failed"}
         proc = comp.state.app_proc
 
         def alive() -> bool:
@@ -381,25 +383,16 @@ def run(args, index: int) -> list[dict]:
 
         agent = Agent(w["socket"])
         if not wait_socket(agent, alive, 90):
-            return [{"run": index, "error": "no agent socket"}]
+            return {"run": index, "close": way, "cover": cover, "error": "no agent socket"}
         pid = helios_pid(w["state"])
         listed = comp.list_windows().get("windows", [])
         main_title = next((x["title"] for x in listed if x.get("app_id") == APP_ID), "")
-        for way, cover in [(w, c) for c in args.covers for w in args.ways]:
-            if not alive():
-                results.append(
-                    {"run": index, "close": way, "cover": cover, "error": "helios-gui exited"}
-                )
-                break
-            try:
-                r = one_close(args, comp, agent, trace, pid, main_title, way, cover)
-            except Exception as exc:  # report and go on with the next way
-                r = {"close": way, "error": repr(exc)}
-            r["run"] = index
-            results.append(r)
-            print(json.dumps(r), flush=True)
-            time.sleep(1)
-        return results
+        try:
+            r = one_close(args, comp, agent, trace, pid, main_title, way, cover)
+        except Exception as exc:  # reported, the next close runs
+            r = {"close": way, "cover": cover, "error": repr(exc)}
+        r["run"] = index
+        return r
     finally:
         comp.stop()
         state = w["state"]
@@ -452,8 +445,17 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("XDG_RUNTIME_DIR", "/tmp/xdg")
     results: list[dict] = []
-    for i in range(args.runs):
-        results += run(args, i + 1)
+    # The agent socket is served by the main window's frames, which a
+    # covered main window does not get: covered, the import window is
+    # closed by the compositor alone.
+    combos = [(w, c) for c in args.covers for w in args.ways if c == "shown" or w == "compositor"]
+    index = 0
+    for _ in range(args.runs):
+        for way, cover in combos:
+            index += 1
+            r = run(args, index, way, cover)
+            results.append(r)
+            print(json.dumps(r), flush=True)
     with open(args.out / "import-close.jsonl", "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
