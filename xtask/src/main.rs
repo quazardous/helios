@@ -41,9 +41,10 @@
 //!   `install_dev.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
-//! change it describes: a first line `kind: <kind>`, then one to three
-//! sentences saying what changes for a user and why it matters. See
-//! CONTRIBUTING.md.
+//! change it describes: a first line `kind: <kind>`, an optional line
+//! `release: <false|patch|minor|major>` (does this change ship a release),
+//! then one to three sentences saying what changes for a user and why it
+//! matters. See CONTRIBUTING.md.
 
 mod affected;
 mod bench;
@@ -134,6 +135,28 @@ enum Bump {
     Major,
 }
 
+impl Bump {
+    /// The words a fragment's `release:` line takes, `false` for none.
+    fn parse_release(s: &str) -> Option<Bump> {
+        match s {
+            "false" => Some(Bump::None),
+            "patch" => Some(Bump::Patch),
+            "minor" => Some(Bump::Minor),
+            "major" => Some(Bump::Major),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Bump::None => "false",
+            Bump::Patch => "patch",
+            Bump::Minor => "minor",
+            Bump::Major => "major",
+        }
+    }
+}
+
 type Version = (u64, u64, u64);
 
 fn bumped((major, minor, patch): Version, bump: Bump) -> Version {
@@ -151,11 +174,17 @@ fn bumped((major, minor, patch): Version, bump: Bump) -> Version {
 struct Fragment {
     name: String,
     kind: Kind,
+    /// The release this change asks for: `Bump::None` (`release: false`,
+    /// the default) waits for another fragment to ask for one.
+    release: Bump,
     text: String,
 }
 
 fn parse_fragment(name: &str, content: &str) -> Result<Fragment, String> {
-    let mut lines = content.lines().skip_while(|l| l.trim().is_empty());
+    let mut lines = content
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .peekable();
     let first = lines.next().unwrap_or("");
     let kind = first
         .strip_prefix("kind:")
@@ -165,6 +194,26 @@ fn parse_fragment(name: &str, content: &str) -> Result<Fragment, String> {
         let all: Vec<_> = Kind::ALL.iter().map(|k| k.name()).collect();
         format!("{name}: unknown kind `{kind}` (one of: {})", all.join(", "))
     })?;
+    let mut release = Bump::None;
+    if let Some(word) = lines
+        .peek()
+        .and_then(|l| l.strip_prefix("release:"))
+        .map(str::trim)
+    {
+        release = Bump::parse_release(word).ok_or_else(|| {
+            format!("{name}: unknown release `{word}` (one of: false, patch, minor, major)")
+        })?;
+        lines.next();
+        // A release asked below what the change calls for would hide it.
+        if release != Bump::None && release < kind.bump() {
+            return Err(format!(
+                "{name}: `release: {}` is below what a `{}` change calls for (`{}`)",
+                release.name(),
+                kind.name(),
+                kind.bump().name()
+            ));
+        }
+    }
     let text = lines.collect::<Vec<_>>().join("\n").trim().to_string();
     if text.is_empty() {
         return Err(format!("{name}: no text after the kind line"));
@@ -172,6 +221,7 @@ fn parse_fragment(name: &str, content: &str) -> Result<Fragment, String> {
     Ok(Fragment {
         name: name.to_string(),
         kind,
+        release,
         text,
     })
 }
@@ -388,14 +438,37 @@ struct Release {
     fragments: Vec<PathBuf>,
 }
 
-/// The next release, or `None` when nothing is to tell a user.
-fn plan(root: &Path, date: &str) -> Result<Option<Release>, Vec<String>> {
+/// When the pending fragments make a release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Gate {
+    /// Only when a fragment asks for one (`release:` other than `false`):
+    /// a promotion.
+    Asked,
+    /// Whenever a fragment has something to tell a user: `cargo xtask
+    /// release` run by hand, and the promotion's fallback for fragments
+    /// left waiting too long.
+    Always,
+}
+
+/// The next release, or `None` when there is none to make. Its bump is the
+/// strongest of what the pending fragments' kinds call for and what they
+/// ask for: a release takes every pending fragment.
+fn plan(root: &Path, date: &str, gate: Gate) -> Result<Option<Release>, Vec<String>> {
     let fragments = read_fragments(&root.join("changelog.d"))?;
+    let asked = fragments
+        .iter()
+        .map(|f| f.release)
+        .max()
+        .unwrap_or(Bump::None);
+    if gate == Gate::Asked && asked == Bump::None {
+        return Ok(None);
+    }
     let bump = fragments
         .iter()
         .map(|f| f.kind.bump())
         .max()
-        .unwrap_or(Bump::None);
+        .unwrap_or(Bump::None)
+        .max(asked);
     if bump == Bump::None {
         return Ok(None);
     }
@@ -656,7 +729,7 @@ fn main() -> ExitCode {
     let root = root();
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
-        ["changelog"] => match plan(&root, &today()) {
+        ["changelog"] => match plan(&root, &today(), Gate::Always) {
             Ok(None) => {
                 println!("No fragment to release in changelog.d/.");
                 ExitCode::SUCCESS
@@ -668,6 +741,11 @@ fn main() -> ExitCode {
                     "Next release: {}.{}.{} -> {}.{}.{}\n\n{section}",
                     old.0, old.1, old.2, new.0, new.1, new.2
                 );
+                if matches!(plan(&root, &today(), Gate::Asked), Ok(None)) {
+                    println!(
+                        "No fragment asks for a release (`release:`): the next promotion makes none."
+                    );
+                }
                 ExitCode::SUCCESS
             }
             Err(p) => fail(&p),
@@ -681,7 +759,7 @@ fn main() -> ExitCode {
                     &["the survival scenarios fail (`cargo survival`): no release".into()],
                 );
             }
-            match plan(&root, &date) {
+            match plan(&root, &date, Gate::Always) {
                 Ok(None) => {
                     fail(&["nothing to release: no user-facing fragment in changelog.d/".into()])
                 }
@@ -834,6 +912,63 @@ mod tests {
     }
 
     #[test]
+    fn a_fragment_may_ask_for_a_release_no_lower_than_its_change() {
+        let f = parse_fragment("a.md", "kind: fixed\n\nA fix.\n").unwrap();
+        assert_eq!(f.release, Bump::None, "no release asked by default");
+        let f = parse_fragment("b.md", "kind: added\nrelease: minor\n\nA panel.\n").unwrap();
+        assert_eq!((f.release, f.text.as_str()), (Bump::Minor, "A panel."));
+        let f = parse_fragment("c.md", "kind: fixed\nrelease: false\n\nA fix.\n").unwrap();
+        assert_eq!(f.release, Bump::None);
+        let f = parse_fragment("d.md", "kind: internal\nrelease: patch\n\nShip.\n").unwrap();
+        assert_eq!(
+            f.release,
+            Bump::Patch,
+            "an internal line may ship what waits"
+        );
+        assert_eq!(
+            parse_fragment("e.md", "kind: added\nrelease: patch\n\nA panel.\n").unwrap_err(),
+            "e.md: `release: patch` is below what a `added` change calls for (`minor`)"
+        );
+        assert!(
+            parse_fragment("f.md", "kind: fixed\nrelease: yes\n\nA fix.\n")
+                .unwrap_err()
+                .contains("unknown release `yes`")
+        );
+    }
+
+    #[test]
+    fn a_promotion_releases_only_when_a_fragment_asks_and_takes_them_all() {
+        let dir = std::env::temp_dir().join(format!("xtask-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("changelog.d")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace.package]\nversion = \"0.3.2\"\n",
+        )
+        .unwrap();
+        let add = |name: &str, text: &str| {
+            std::fs::write(dir.join("changelog.d").join(name), text).unwrap();
+        };
+        add("a.md", "kind: added\n\nA panel.\n");
+        assert!(plan(&dir, "2026-11-13", Gate::Asked).unwrap().is_none());
+        assert_eq!(
+            plan(&dir, "2026-11-13", Gate::Always).unwrap().unwrap().new,
+            (0, 4, 0)
+        );
+        add("b.md", "kind: fixed\nrelease: patch\n\nA fix.\n");
+        let r = plan(&dir, "2026-11-13", Gate::Asked).unwrap().unwrap();
+        assert_eq!(r.new, (0, 4, 0), "the kinds still decide when stronger");
+        assert_eq!(r.fragments.len(), 2, "every pending fragment is released");
+        add("c.md", "kind: internal\nrelease: major\n\nShip it.\n");
+        assert_eq!(
+            plan(&dir, "2026-11-13", Gate::Asked).unwrap().unwrap().new,
+            (0, 4, 0),
+            "major bumps the minor before 1.0"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn hygiene_catches_what_an_outsider_cannot_follow() {
         assert!(hygiene("Ratings no longer get lost (darktable-org/darktable#22569).").is_empty());
         assert_eq!(hygiene("Fixes #42.").len(), 1);
@@ -865,16 +1000,19 @@ mod tests {
             Fragment {
                 name: "b.md".into(),
                 kind: Kind::Fixed,
+                release: Bump::None,
                 text: "A fix.".into(),
             },
             Fragment {
                 name: "a.md".into(),
                 kind: Kind::Added,
+                release: Bump::None,
                 text: "A feature,\non two lines.".into(),
             },
             Fragment {
                 name: "c.md".into(),
                 kind: Kind::Internal,
+                release: Bump::None,
                 text: "Refactor.".into(),
             },
         ];

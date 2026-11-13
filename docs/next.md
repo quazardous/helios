@@ -19,7 +19,9 @@ by the promotion of a green `next`.
    `cargo update -w --offline` (commit `Cargo.lock` if it changed).
    No local tests, no local clippy, no release build: a local hook refuses
    them. Changelog fragments: at most 600 characters, for user-visible
-   changes only.
+   changes only. The PR that completes a user-visible feature adds
+   `release: minor` under the fragment's `kind:` line, an urgent fix
+   `release: patch`: that is what makes the next release (CONTRIBUTING.md).
 3. **Test only your own part, on the bench box:**
    `cargo xtask bench-remote test-crate crate=<crate> test=<target> filter=<name>`
    for Helios, `egui-pop-test` for egui-pop, on the crates and targets the
@@ -61,10 +63,11 @@ stress runs (`stability`) never go into CI.
 
 - Every push runs the whole CI. Runs are not cancelled: the newest push
   waits behind the run going, and each green run is promoted.
-- When CI passes, `promote.yml` promotes that exact commit: with
-  user-facing fragments it commits "Release X.Y.Z" on top of it (version,
-  CHANGELOG, Cargo.lock), then fast-forwards `main`, and `next` if it has
-  not moved. Expect bot commits on `next`: rebase before merging.
+- When CI passes, `promote.yml` promotes that exact commit: when a
+  fragment asks for a release (or one has waited 7 days) it commits
+  "Release X.Y.Z" on top of it (version, CHANGELOG, Cargo.lock), tags and
+  publishes it; then it fast-forwards `main`, and `next` if it has not
+  moved. Expect bot commits on `next`: rebase before merging.
 - **One watcher** (the coordinating agent) follows CI on `next`. A red run
   gets **one fixing agent first**, before any other work: it reproduces the
   failure, adds the test that would have caught it, fixes it, and merges a

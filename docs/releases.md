@@ -1,25 +1,30 @@
 # Releases
 
-Helios's version moves with `main`; only some versions are published. A
-published release is a tag `vX.Y.Z` on `main` and a GitHub Release of the
-same name on the
-[Releases page](https://github.com/quazardous/helios/releases).
+A release is a "Release X.Y.Z" commit on `main`, its tag `vX.Y.Z` and a
+GitHub Release of the same name on the
+[Releases page](https://github.com/quazardous/helios/releases). The version
+moves only when a release is made, and every release is published.
 
-## Versions: automatic, with each promotion
+## Releases: asked for by a fragment
 
 Every change is merged into `next`. When CI passes on a commit of `next`,
 the promotion workflow (`.github/workflows/promote.yml`, running
-`cargo xtask promote`) moves `main` forward, and the version with it:
+`cargo xtask promote`) moves `main` forward:
 
 - **It works on the exact commit CI validated**, the run's `head_sha`,
   never on whatever `next` points to when the promotion runs. A commit CI
   did not test never reaches `main`.
-- With user-facing fragments in `changelog.d/`, it commits
+- When a fragment in `changelog.d/` asks for a release (a line
+  `release: patch`, `minor` or `major` under its `kind:`), it commits
   "Release X.Y.Z" on top of that commit, as the bot: the CHANGELOG.md
-  section, the version the fragments decide (CONTRIBUTING.md, "Versions
-  and releases"), the in-tree plugins' Helios range, the `AppStream`
-  metadata and Cargo.lock. With none, there is no bump: the commit alone
-  is promoted.
+  section of every pending fragment, the version (the strongest of what
+  their kinds call for and what is asked; CONTRIBUTING.md, "Versions and
+  releases"), the in-tree plugins' Helios range, the `AppStream` metadata
+  and Cargo.lock. Fragments that ask for none wait: the commit alone is
+  promoted.
+- **The fallback:** a user-facing fragment that has waited 7 days (from
+  the commit that added it to the commit promoted) is released anyway, by
+  the next promotion, so a fix never waits for a feature.
 - The release commit is refused unless it is the validated commit plus a
   version bump and nothing else; in Cargo.lock only the workspace's own
   versions may move. The survival scenarios are not run again: CI ran them
@@ -40,18 +45,17 @@ the promotion workflow (`.github/workflows/promote.yml`, running
   version than its manifest. Its message says what to write; for the lock,
   `cargo update --workspace`. The branch's own CI fails, not `next`.
 
-## Publishing: a tag, by judgment
+## Publishing: tagged by the promotion
 
-No workflow tags anything. The coordinator tags `vX.Y.Z` on the
-"Release X.Y.Z" commit on `main` when `main` holds a real feature or a
-serious bug fix (a patch version can be tagged), and pushes the tag:
+The promotion that makes a release tags it `vX.Y.Z` and starts the release
+workflow (`.github/workflows/release.yml`) with `publish` on: a tag pushed
+with the workflow's token starts no workflow, a dispatch does. Nobody tags
+by hand. Who decides is the fragment: the change completing a user-visible
+feature asks `release: minor`, a fix wanted at once `release: patch`; a
+one-line fragment `kind: internal` with `release: patch` ships what waits
+on `next`.
 
-```bash
-git fetch origin && git tag vX.Y.Z <release-commit> && git push origin vX.Y.Z
-```
-
-The tag starts the release workflow (`.github/workflows/release.yml`) on
-GitHub Actions, which checks the tag against the workspace version, then:
+The release workflow checks the tag against the workspace version, then:
 
 1. builds `helios`, `helios-node`, `helios-mcp`, `helios-gui` and the
    programs of the plugins Helios ships (`helios-darktable-library`) in
@@ -339,8 +343,8 @@ submitted to Apple's notary service and the ticket stapled to it. That
 path has not run yet (no Developer account): expect a first fix when the
 secrets arrive.
 
-Still to come: the macOS window behaviour (the global menu bar, the app
-staying open with no window).
+The window behaviour follows macOS: the global menu bar, and the app
+staying open with no window (docs/design/windows.md).
 
 ## Checking a download
 

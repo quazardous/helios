@@ -1,11 +1,11 @@
 name: release
 
 # Builds the Linux, Windows and macOS packages of a version and publishes
-# them as a GitHub Release (docs/releases.md). Versions advance on their own with each
-# promotion of `next` (promote.yml); a version is published only when the
-# coordinator tags its "Release X.Y.Z" commit on `main` as `vX.Y.Z`, by
-# judgment (a real feature or a serious fix). No workflow pushes tags.
-# Runs on a `vX.Y.Z` tag pushed, or by hand:
+# them as a GitHub Release (docs/releases.md). A release is made by the
+# promotion of `next` (promote.yml) when a changelog fragment asks for one
+# (`release: patch|minor|major`); promote.yml tags it `vX.Y.Z` and starts
+# this workflow by a dispatch with `publish`.
+# Runs on a `vX.Y.Z` tag pushed, or by a dispatch:
 # with `publish: false` (the default by hand) it only builds, tests and
 # keeps the files as the run's artefacts, without creating a Release.
 on:

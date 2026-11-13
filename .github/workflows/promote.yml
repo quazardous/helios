@@ -7,10 +7,12 @@ name: Promote next to main
 # - The promotion works on the commit CI validated, the run's `head_sha`,
 #   never on whatever `next` points to by then. A commit CI did not test
 #   never reaches `main`.
-# - With user-facing fragments in `changelog.d/`, `cargo xtask promote`
-#   commits "Release X.Y.Z" on top of that commit (the CHANGELOG section,
-#   the version the fragments decide, Cargo.lock), as the bot. No fragment,
-#   no release: the commit alone is promoted.
+# - When a fragment in `changelog.d/` asks for a release (`release: patch`,
+#   `minor` or `major`), or a user-facing one has waited 7 days,
+#   `cargo xtask promote` commits "Release X.Y.Z" on top of that commit
+#   (the CHANGELOG section of every pending fragment, the version they
+#   decide, Cargo.lock), as the bot. Otherwise the commit alone is
+#   promoted and the fragments wait.
 # - The survival scenarios are not run again: CI ran them on that commit,
 #   in its test job, and the release commit changes no code.
 # - The release commit must differ from the validated commit by a version
@@ -24,8 +26,10 @@ name: Promote next to main
 # - Pushes made with GITHUB_TOKEN start no workflow: the release commit and
 #   the merge do not rerun CI. The next push to `next` tests them, with
 #   whatever lands next.
-# - Nothing is tagged here: the coordinator tags `vX.Y.Z` on `main` when a
-#   version is worth publishing, which starts release.yml.
+# - A release made here is tagged `vX.Y.Z` here, and release.yml is started
+#   by a dispatch with `publish` (a tag pushed with GITHUB_TOKEN starts no
+#   workflow, a dispatch does): no hand step between a fragment asking for
+#   a release and the GitHub Release.
 on:
   workflow_run:
     workflows: [ci]
@@ -34,6 +38,8 @@ on:
 
 permissions:
   contents: write
+  # to start release.yml
+  actions: write
 
 concurrency:
   group: promote
@@ -58,7 +64,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Release and promote the commit CI passed
+        id: promote
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
         # --locked: a stale Cargo.lock fails here, before anything is written.
         run: cargo --locked xtask promote "$SHA"
+      - name: Tag and publish the release
+        if: steps.promote.outputs.release != ''
+        env:
+          VERSION: ${{ steps.promote.outputs.release }}
+          COMMIT: ${{ steps.promote.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag "v$VERSION" "$COMMIT"
+          git push origin "v$VERSION"
+          gh workflow run release.yml -R "$GITHUB_REPOSITORY" --ref main \
+            -f tag="v$VERSION" -f publish=true
+          echo "tagged v$VERSION and started its release" >> "$GITHUB_STEP_SUMMARY"

@@ -185,6 +185,13 @@ half-written file.
 - `kind` is one of `breaking`, `added`, `changed`, `deprecated`, `removed`,
   `fixed`, `security`, or `internal` for a change with nothing to tell a
   user (it satisfies the check and never reaches the changelog).
+- An optional second line `release: patch`, `minor` or `major` asks for a
+  release (`release: false`, the default, asks for none). Set it on the
+  change that completes a user-visible feature (`minor`), or on a fix that
+  should reach users at once (`patch`). It cannot be lower than the kind
+  calls for (`added` with `release: patch` is refused). To ship what waits
+  on `next`, a fragment `kind: internal` with `release: patch` (or more)
+  and one line of text is enough.
 - One to three sentences, in plain language: the effect for a user, not the
   implementation. No file names, no private paths, no ticket numbers; a
   public link is fine.
@@ -213,18 +220,22 @@ into `next`, and the run on `next` decides. A red `next` is fixed by a
 follow-up pull request. A contributor's pull request from a fork runs the
 full CI, as before.
 
-**Versions advance with each promotion (decided 2026-11-12).** No release
-is prepared by hand and there is no release pull request:
+**Releases are asked for by a fragment (decided 2026-11-13).** No release
+is prepared by hand and there is no release pull request; the version moves
+only when a release is made:
 
 1. Everything is merged into `next`. When CI passes on a commit of `next`,
    `promote.yml` runs `cargo xtask promote` on that exact commit (never on
    whatever `next` points to by then).
-2. With user-facing fragments in `changelog.d/`, it writes the release on
-   top of that commit: the CHANGELOG.md section, the version the fragments
-   decide, the in-tree plugins' Helios range, the `AppStream` metadata and
-   Cargo.lock, and commits "Release X.Y.Z" as the bot. Without one, there
-   is no bump: the commit alone is promoted. `internal` fragments wait for
-   the next user-facing one.
+2. When a fragment in `changelog.d/` asks for a release (`release:`), or a
+   user-facing one has waited 7 days, it writes the release of every
+   pending fragment on top of that commit: the CHANGELOG.md section, the
+   version (the strongest of what the kinds call for and what is asked;
+   before 1.0 `major` bumps the minor), the in-tree plugins' Helios range,
+   the `AppStream` metadata and Cargo.lock, and commits "Release X.Y.Z" as
+   the bot, then tags it `vX.Y.Z` and starts the release workflow, which
+   publishes it. Otherwise there is no bump: the commit alone is promoted
+   and the fragments wait.
 3. `main` fast-forwards to the release commit, and `next` with it, so both
    carry the same version. If `next` moved meanwhile, the release is merged
    into it by a merge commit (nothing pushed is rewritten).
