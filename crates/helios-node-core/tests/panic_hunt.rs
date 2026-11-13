@@ -349,7 +349,9 @@ fn run(store: &MemoryStore, case: &Case) -> Outcome {
         Some(Err(_)) => {
             let changed: Vec<&str> = std::iter::from_fn(|| heard.try_recv().ok())
                 .map(|e| e.kind)
-                .filter(|kind| *kind != "control.command")
+                // A job's own life (started, then failed) is not a change:
+                // an import refused for a missing path still ran as a job.
+                .filter(|kind| *kind != "control.command" && !kind.starts_with("job."))
                 .collect();
             if changed.is_empty() {
                 Outcome::Refused
