@@ -77,7 +77,7 @@ def config(name: str) -> dict:
 
 def world(work: Path) -> dict:
     shutil.rmtree(work, ignore_errors=True)
-    for d in ("config", "workspace", "state", "agent"):
+    for d in ("config", "workspace", "state", "agent", "cache"):
         (work / d).mkdir(parents=True)
     os.chmod(work / "agent", 0o700)
     ui = work / "config" / "helios" / "ui"
@@ -200,13 +200,23 @@ def stack(pid: int | None) -> str | None:
     return None
 
 
-def import_title(comp, before: set) -> str | None:
-    """The window listed now that was not before the import window opened."""
+def import_match(comp, before: set) -> str | None:
+    """The window listed now that was not before the import window opened,
+    as a wlrctl matcher: by its app id when no window before had it (its
+    title changes as it reads), else by its title."""
     listed = comp.list_windows()
+    ids = {a for a, _ in before}
     for w in listed.get("windows", []):
         if (w.get("app_id"), w.get("title")) not in before:
-            return w.get("title")
+            if w.get("app_id") and w["app_id"] not in ids:
+                return f"app_id:{w['app_id']}"
+            return f"title:{w.get('title')}"
     return None
+
+
+def present(comp, match: str) -> bool:
+    key, value = match.split(":", 1)
+    return any(w.get(key) == value for w in comp.list_windows().get("windows", []))
 
 
 def listed_windows(comp) -> set:
@@ -233,7 +243,7 @@ def close(comp, agent: Agent, way: str, title: str) -> None:
         agent.ui({"action": "click", "window": "import", "role": "Button", "label": label})
     else:
         subprocess.run(
-            ["wlrctl", "toplevel", "close", f"title:{title}"],
+            ["wlrctl", "toplevel", "close", title],
             env=comp._wl_env(),
             check=False,
             capture_output=True,
@@ -250,7 +260,7 @@ def one_close(
     deadline = time.monotonic() + 30
     title = None
     while time.monotonic() < deadline and title is None:
-        title = import_title(comp, before)
+        title = import_match(comp, before)
         time.sleep(0.1)
     if title is None:
         listed = comp.list_windows()
@@ -261,7 +271,7 @@ def one_close(
         # The import window over the whole screen: the main window is
         # hidden, as behind a browser opened for a sign-in or a picking.
         subprocess.run(
-            ["wlrctl", "toplevel", "fullscreen", f"title:{title}"],
+            ["wlrctl", "toplevel", "fullscreen", title],
             env=comp._wl_env(),
             check=False,
             capture_output=True,
@@ -301,7 +311,7 @@ def one_close(
                 (at for at, w in marks if w == MAIN_BEGINS and at > closed + 1e-4),
                 None,
             )
-        if gone is None and title not in {t for _, t in listed_windows(comp)}:
+        if gone is None and not present(comp, title):
             gone = time.time()
         if built is not None and gone is not None and "at" in answered:
             break
@@ -336,13 +346,13 @@ def one_close(
         shutil.copy(shot["path"], args.out / f"after-{way}-{cover}.png")
     # A way that did not close it (Escape where it does not): closed by
     # Cancel, so the next way opens it afresh.
-    if title in {t for _, t in listed_windows(comp)}:
+    if present(comp, title):
         try:
             close(comp, agent, "cancel", title)
         except (OSError, RuntimeError, ValueError):
             pass
         until = time.monotonic() + 10
-        while time.monotonic() < until and title in {t for _, t in listed_windows(comp)}:
+        while time.monotonic() < until and present(comp, title):
             time.sleep(0.1)
     return result
 
@@ -368,6 +378,7 @@ def run(args, index: int, way: str, cover: str) -> dict:
         env = {
             "XDG_CONFIG_HOME": str(work / "config"),
             "XDG_STATE_HOME": str(w["state"]),
+            "XDG_CACHE_HOME": str(work / "cache"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
             "HELIOS_AGENT_WRITE": "1",
             "HELIOS_FRAME_TRACE": "1",
