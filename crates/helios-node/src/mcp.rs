@@ -2530,7 +2530,11 @@ fn ai_call(sockets: &mut Sockets, request: &Value) -> Value {
 }
 
 fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
-    let dir = PathBuf::from(request["dir"].as_str().unwrap_or_default());
+    // Empty, it would be the server's working folder.
+    let Some(dir) = request["dir"].as_str().filter(|d| !d.is_empty()) else {
+        return tool_result(format!("{}: `dir` names no folder", tool.name), true);
+    };
+    let dir = PathBuf::from(dir);
     let result = match tool.cmd {
         "start" => {
             let created = if dir.join("sandbox.json").exists() {
@@ -2659,7 +2663,15 @@ fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
             }
             _ => continue,
         };
-        match value.as_str().filter(|s| !s.is_empty()) {
+        match value.as_str() {
+            // Empty, a path names the server's own working folder, which
+            // no root holds.
+            Some("") if param.name != "source" => {
+                return Err(format!(
+                    "`{}` is empty: give an absolute path under the roots",
+                    param.name
+                ));
+            }
             Some(text) if param.name == "source" && !path_like(text) => {}
             Some(text) => check(text, access)?,
             None => {}
@@ -3056,6 +3068,12 @@ fn edit_values(
 
 /// Answers one JSON-RPC message; `None` for notifications.
 pub fn handle(sockets: &mut Sockets, message: &Value) -> Option<Value> {
+    if !message.is_object() {
+        return Some(json!({
+            "jsonrpc": "2.0", "id": null,
+            "error": { "code": -32600, "message": "invalid request: a message is one JSON object (batches are not taken)" },
+        }));
+    }
     let id = message.get("id").cloned()?;
     let result = match message["method"].as_str().unwrap_or_default() {
         "initialize" => Ok(json!({

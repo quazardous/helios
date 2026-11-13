@@ -337,6 +337,20 @@ fn paths_outside_the_roots_are_refused() {
         "for writing",
     );
 
+    // An empty path would be the server's working folder.
+    refused(
+        &mut client,
+        "helios_export",
+        export(String::new()),
+        "is empty",
+    );
+    refused(
+        &mut client,
+        "helios_sandbox_start",
+        json!({ "dir": "" }),
+        "is empty",
+    );
+
     // Inside the roots, the call goes on: here, to the missing node.
     refused(
         &mut client,
