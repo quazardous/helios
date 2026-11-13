@@ -1244,7 +1244,7 @@ fn a_picking_source_shows_its_account_once_and_one_primary_action() {
     assert!(shown(&h, "Services"));
     assert!(!shown(&h, "Accounts"));
     assert_eq!(h.query_all_by_label("ann@example.org").count(), 2);
-    assert!(shown(&h, "⋯"));
+    assert!(shown(&h, "Account"));
     // One button only says "Choose photos", and none says "pick".
     assert_eq!(h.query_all_by_label(CHOOSE).count(), 1);
     for word in ["Pick photos", "Pick more", "picking"] {
@@ -1404,7 +1404,7 @@ fn an_existing_account_reconnected_after_a_refusal_chooses_photos_again() {
 #[test]
 fn the_account_menu_opens_settings_accounts() {
     let (mut h, ..) = picking_world(None);
-    click(&mut h, "⋯");
+    click(&mut h, "Account");
     for label in ["Reconnect", "Use another account…", "Manage accounts…"] {
         assert!(shown(&h, label), "{label}");
     }
@@ -1539,7 +1539,7 @@ fn the_chosen_photos_fill_the_grid_with_the_library_s_marked() {
     // `p1` is in the Library: marked, and not taken while New only is on.
     assert_eq!(cells.iter().map(|c| c.2).collect::<Vec<_>>(), [true, false]);
     assert_eq!(h.state().import_counts().selected, 1);
-    for label in ["New only", "Select:", "Choose more…", "⋯", "Import 1"] {
+    for label in ["New only", "Select:", "Choose more…", "Account", "Import 1"] {
         assert!(shown(&h, label), "{label}");
     }
     assert!(!shown(&h, CHOOSE), "the grid replaces the primary action");
