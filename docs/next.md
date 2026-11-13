@@ -1,21 +1,23 @@
 # The `next` protocol
 
-How every change reaches Helios, for people and agents alike. egui-pop,
-egui_stack, egui_fit and egui_hud have no gate yet: there, an author still
+How every change reaches Helios, for people and agents alike. In every
+repository (Helios, egui-pop, egui_stack, egui_fit, egui_hud) the author
 merges into `next` after its own narrow box jobs pass.
 
-> **In effect since 2026-11-13** (`cargo xtask gate` and the tester's
-> brief, [tester.md](tester.md)).
+> **Since 2026-11-13, evening:** authors test and merge their own pull
+> requests again (owner: it worked better than one gate for every pull
+> request). `cargo xtask gate` and a merger's brief ([tester.md](tester.md))
+> stay for a backlog nobody merged.
 
 Two branches, two writers:
 
 | Branch | Who writes it | What it holds |
 |---|---|---|
-| `next` | the **tester** (`cargo xtask gate`, fast-forward) and the promotion bot | what passed the box tests; CI runs on each push |
+| `next` | each **author** (its own pull request, after its box jobs), a merger for a backlog (`cargo xtask gate`), and the promotion bot | what passed the box tests; CI runs on each push |
 | `main` | the promotion bot only | what passed `next`'s CI, with its releases |
 
-A pull request waits open until the tester's gate takes it; it is merged
-only when its tests passed, so "merged" always means "on `next`".
+A pull request is merged only when its tests passed on the box, so
+"merged" always means "on `next`".
 
 ## For a change (an author's whole job)
 
@@ -42,29 +44,45 @@ only when its tests passed, so "merged" always means "on `next`".
    ```
 
    - One job per line, as `cargo xtask bench-remote <job> …` takes it,
-     without `branch=` (the tester gives it).
+     without `branch=` (add it when you run them).
    - `filter=` names **one** test: two names select none, and the job
      passes empty.
    - Never `test`, `test-affected` or `--affected`: the whole suite is
      `next`'s CI.
    - A change with nothing to run says `Tests: none — <why>`.
    - `cargo xtask manifest check <file>` (or the body on stdin) checks it.
-4. **Stop.** Post the step on the ticket and end. **Never merge, never run
-   or wait for box jobs**: the tester does. Delete the worktree and its
-   `target/`; the branch stays until the tester merges or returns it.
+4. **Prove it on the box yourself** (owner, 2026-11-13: the author who
+   wrote the change runs its narrowest tests; it beat batching every pull
+   request through one gate). First the branch's `check`:
+   `cargo xtask bench-remote check branch=<branch>` (clippy, every lint
+   at once). Then each manifest job with `branch=<branch>`. Wait in the
+   foreground with `jbx wait <id>`: a subagent's turn stays alive. Fix
+   what is red on the branch and run that job again.
+5. **Merge it yourself** when every job is green: merge the pull request
+   into `next` (`gh pr merge <n> --merge --delete-branch`). If `next`
+   moved meanwhile, merge `origin/next` into the branch, check it again
+   locally, and merge. Post the step on the ticket. Delete the worktree
+   and its `target/`.
+6. `next`'s full CI runs after the merge. A red run there gets a fixer at
+   once, ahead of everything (below). `cargo xtask gate` stays for a
+   backlog of pull requests nobody merged, run by a merger.
 
 Sizing: one author, one pull request, one small slice, under an hour.
 
-## The tester
+## A merger (for a backlog)
 
-One agent, with a standing brief ([tester.md](tester.md)), takes the open
-pull requests into `next` in order (first in, first out):
+When pull requests pile up unmerged, a merger agent, with a standing
+brief ([tester.md](tester.md)), takes them into `next` in order (first
+in, first out):
 
 1. Picks a batch of one to three that do not touch the same files.
-2. Runs `cargo xtask gate <n>…`: the batch is merged on a temporary branch
-   `gate/<n>-…` made from `next`, and the union of their manifests runs on
-   the bench box on that branch (one build, the jobs side by side; the box
-   runs `check` and clippy first).
+2. Runs `cargo xtask gate <n>…`. First each pull request's own `check`
+   (clippy, every lint at once) runs on its own branch, side by side; one
+   that fails is left out of the batch with its lints, so it cannot turn
+   the batch red. The others are merged on a temporary branch `gate/<n>-…`
+   made from `next`, and the union of their manifests runs on the bench
+   box on that branch (one build, the jobs side by side; the box runs
+   `check` and clippy first).
 3. **Green:** `next` fast-forwards to the tested commit, GitHub marks the
    pull requests merged, their branches and the temporary one are deleted;
    the tester posts the result on each ticket. Beside the tests the box
@@ -109,10 +127,19 @@ stress runs (`stability`) never go into CI.
   "Release X.Y.Z" on top of it (version, CHANGELOG, Cargo.lock), tags and
   publishes it; then it fast-forwards `main`, and `next` if it has not
   moved.
-- **One watcher** (the coordinating agent) follows CI on `next`. A red run
-  gets **one fixing agent first**, before any other work: it reproduces the
-  failure, adds the test that would have caught it, fixes it, and opens its
-  pull request into `next` like any change. A bug the owner reports is
+- **One watcher** (the coordinating agent) follows CI on `next`: a
+  standing watch wakes it on every finished run, so a red run is seen
+  within minutes, never hours. **A red `next` comes before everything**
+  (owner, 2026-11-13). The merger (the release keeper, docs/releases.md)
+  debugs it, as the one who knows what just reached `next` (owner, same
+  day); a separate fixing agent starts only if the merger is already on
+  another red. Whoever takes it drops everything else; it reproduces the
+  failure, adds the test that would have caught
+  it, fixes it, runs its box jobs with `--priority high` (one at a time:
+  the box keeps one high-priority job waiting per project), and opens its
+  pull request into `next` like any change. That pull request is gated
+  **alone and first**; no other batch is gated while `next` is red, unless
+  it carries the fix. A green `next` is what releases. A bug the owner reports is
   handled the same way: agents reproduce and validate it themselves and
   never ask the owner to test.
 - External contributors' pull requests (from forks) target `next` and run
