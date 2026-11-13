@@ -505,7 +505,11 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
     // Nothing fitted: the switch waits for a fit.
     assert!(
         h.state_mut()
-            .run(calibrate::LOOK_CHOOSE, json!({ "look": "on" }), Origin::User)
+            .run(
+                calibrate::LOOK_CHOOSE,
+                json!({ "look": "on" }),
+                Origin::User
+            )
             .is_err()
     );
 
@@ -515,9 +519,7 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
         .click();
     h.run();
     h.run();
-    h.get_by_label(
-        "Not fitted: the photo is not a raw: it has no sensor data to fit",
-    );
+    h.get_by_label("Not fitted: the photo is not a raw: it has no sensor data to fit");
     assert!(history.line().undo.is_empty());
 
     let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
@@ -539,7 +541,10 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
         let values = h.state().values().clone();
         let mut s = values.lock().unwrap();
         for (path, value) in [
-            ("node/cameratone/tone", Value::List(vec![0.0, 0.0, 1.0, 1.0])),
+            (
+                "node/cameratone/tone",
+                Value::List(vec![0.0, 0.0, 1.0, 1.0]),
+            ),
             ("node/cameratone/held_out", Value::Float(2.4)),
             ("node/cameratone/baseline", Value::Float(9.8)),
         ] {
@@ -584,14 +589,22 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
         ))
         .unwrap();
     h.state_mut()
-        .run(calibrate::LOOK_CHOOSE, json!({ "look": "on" }), Origin::User)
+        .run(
+            calibrate::LOOK_CHOOSE,
+            json!({ "look": "on" }),
+            Origin::User,
+        )
         .unwrap();
     h.run();
     assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(false));
     assert_eq!(read(&h, "bypass/cameracolour"), Value::Bool(true));
     h.get_by_label("Colour half off: the chart profile rules the colours");
     h.state_mut()
-        .run(calibrate::LOOK_CHOOSE, json!({ "look": "off" }), Origin::User)
+        .run(
+            calibrate::LOOK_CHOOSE,
+            json!({ "look": "off" }),
+            Origin::User,
+        )
         .unwrap();
     assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(false));
     let _ = std::fs::remove_dir_all(&dir);
