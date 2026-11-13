@@ -432,7 +432,7 @@ mod tests {
             "its period"
         );
         assert_eq!(
-            due(&mut sch, 30 + 86_400, Some(1)),
+            due(&mut sch, 40 + 86_400, Some(1)),
             ["clock.tick", "disks.seen", "plain.daily"],
             "daily for the others"
         );
