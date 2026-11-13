@@ -883,13 +883,19 @@ gui-library-badge-backup-short = backup short
 
 gui-library-badge-backup-unverified = unverified
 
+gui-library-badge-blown = blown highlights
+
 gui-library-badge-changed-outside = changed outside
+
+gui-library-badge-crushed = crushed shadows
 
 gui-library-badge-missing = missing
 
 gui-library-badge-no-backup = no backup
 
 gui-library-badge-offline = offline
+
+gui-library-badge-soft = soft focus
 
 gui-library-cannot-open = The library cannot be opened: { $error }
 
@@ -901,11 +907,21 @@ gui-library-compare-tip = The selected photos side by side (C)
 
 gui-library-count = { $shown } of { $total }
 
+gui-library-cull-clipped = clipped
+
+gui-library-cull-sharp = sharp
+
+gui-library-cull-soft = soft
+
+gui-library-cull-unmeasured = not measured
+
 gui-library-empty = No photos yet: import a card or a folder, or drop photos on the window
 
 gui-library-facet-backup = Backup
 
 gui-library-facet-camera = Camera
+
+gui-library-facet-cull = Culling
 
 gui-library-facet-flag = Flag
 
@@ -966,6 +982,8 @@ gui-library-sort-captured = Capture time
 gui-library-sort-descending = Descending: newest, largest or Z first
 
 gui-library-sort-edited = Last edit
+
+gui-library-sort-focus = Sharpness
 
 gui-library-sort-id = Content
 
@@ -1790,6 +1808,8 @@ gui-stacks-suggest = Suggest stacks
 gui-stacks-suggest-hint = Over the images selected (two or more), else over every image
 
 gui-stacks-top = Proposed on top: the sharpest
+
+gui-stacks-top-why = Proposed on top: { $why }
 
 gui-status-culled = { $picked } picked, { $rejected } rejected
 
