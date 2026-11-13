@@ -655,7 +655,10 @@ command-library-collection-remove =
     .title = Retirer des photos d’un album (`id` ; `images` : identifiants, sinon la sélection) ; elles restent dans la bibliothèque
 
 command-library-collection-rules =
-    .title = Fixer les règles d’un album dynamique (`id` ; `rules`, un arbre, ou les clés du formulaire) ; sans elles, les demande. Les champs inconnus et les règles invalides sont refusés avec la raison
+    .title = Fixer les règles d’un album dynamique (`id` ; `rules`, un arbre, ou les clés du formulaire) ; sans elles, ouvre l’éditeur de règles sur elles. Les champs inconnus et les règles invalides sont refusés avec la raison
+
+command-library-collection-rules-edit =
+    .title = Modifier les règles dans l’éditeur ouvert, une modification annulable à la fois : `edit` (add_condition, add_group, remove, move avec `to`, match avec `match` : all, any ou none, field avec `field`, op avec `op`, value avec `value`, `high` (la seconde borne de between, ou le nombre de within) et `unit` (days, weeks ou months), undo, redo, apply, cancel) à `at`, un chemin d’indices depuis le groupe du haut ([]). Une date de prise de vue prend un jour (AAAA-MM-JJ) ou, avec `op: within`, today, this_year ou last. Répond le brouillon, le défaut de chaque condition et les règles quand elles sont valides
 
 command-library-collection-list =
     .title = Lister les albums : `id`, `name`, `kind` (album ou dynamique), combien de photos chacun contient, les `rules` d’un album dynamique
