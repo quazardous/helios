@@ -1,9 +1,8 @@
 # Helios: rules for agents
 
 **Before any change, read and follow [docs/next.md](docs/next.md)**: how a
-change reaches `devel`, then `next` (branch from `devel`, local checks, a
-pull request with its test manifest, stop; the tester runs the box jobs and
-merges). It applies to every agent and every repository of the project
+change reaches `next` (branch from `next`, local checks, a pull request
+with its test manifest, stop; the tester runs the box jobs and merges). It applies to every agent and every repository of the project
 (Helios, egui-pop, egui_stack, egui_fit, egui_hud).
 
 - Public project: everything written to files (code, comments, docs, commit
@@ -25,8 +24,8 @@ merges). It applies to every agent and every repository of the project
   AI-assisted project. Keep one purpose per commit, every commit building
   and passing its tests, with a changelog fragment for user-visible changes.
   The darktable fork keeps its own rules (see its `AGENTS.md`).
-- Every change follows `docs/next.md`: branch from `origin/devel`, local
-  fmt/check only, open a pull request into `devel` whose `Tests:` manifest
+- Every change follows `docs/next.md`: branch from `origin/next`, local
+  fmt/check only, open a pull request into `next` whose `Tests:` manifest
   lists **only your own part** (`test-crate` / `egui-pop-test` on what you
   touched, one test name per filter, never `test-affected` or the whole
   suite), stop. Authors never merge and never wait for the box or CI; the
