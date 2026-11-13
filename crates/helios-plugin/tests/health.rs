@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use helios_health::{Check, Context, FAILED, Level, Registry, run_one};
-use helios_plugin::health::{self, PluginCheck};
+use helios_plugin::health;
 use helios_plugin::{Broker, Policy, Scope};
 
 const TESTEE: &str = "org.example.testee";
