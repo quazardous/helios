@@ -59,7 +59,8 @@ and the whole suite tested), says what a user would notice since the last
 release and recommends none, a patch or a minor one. A "yes" is a
 one-line fragment `kind: internal` with `release: patch` (or `minor`) in
 a pull request the keeper merges once that job is green; it then follows
-the promotion to the tag and the published release. Between releases the
+the promotion to the tag and the published release. It also debugs a red CI on
+`next` first, before anything else (docs/next.md). Between releases the
 keeper merges any backlog of pull requests nobody merged
 (docs/next.md). Authors put no `release:` line in their own fragments.
 

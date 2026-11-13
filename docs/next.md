@@ -130,8 +130,11 @@ stress runs (`stability`) never go into CI.
 - **One watcher** (the coordinating agent) follows CI on `next`: a
   standing watch wakes it on every finished run, so a red run is seen
   within minutes, never hours. **A red `next` comes before everything**
-  (owner, 2026-11-13): a fixing agent starts at once, whatever else is
-  running; it reproduces the failure, adds the test that would have caught
+  (owner, 2026-11-13). The merger (the release keeper, docs/releases.md)
+  debugs it, as the one who knows what just reached `next` (owner, same
+  day); a separate fixing agent starts only if the merger is already on
+  another red. Whoever takes it drops everything else; it reproduces the
+  failure, adds the test that would have caught
   it, fixes it, runs its box jobs with `--priority high` (one at a time:
   the box keeps one high-priority job waiting per project), and opens its
   pull request into `next` like any change. That pull request is gated
