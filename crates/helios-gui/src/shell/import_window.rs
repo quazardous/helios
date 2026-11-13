@@ -1410,7 +1410,7 @@ impl ImportWindow {
                 if !wizard.is_some_and(|wz| wz.take_into(p.clone())) {
                     self.choices.into = Some(p);
                     // Asked for by an account's Contents: settled.
-                    self.accounts.into_chosen();
+                    self.accounts.on_into_chosen();
                 }
             }
         }

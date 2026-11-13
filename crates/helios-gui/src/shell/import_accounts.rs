@@ -1587,7 +1587,7 @@ fn finish(asked: Option<Asked>) -> Option<ChooseAsked> {
 impl Accounts {
     /// Into was chosen while it was asked for: back to the account's
     /// primary action, the photos chosen with it.
-    pub(crate) fn into_chosen(&mut self) {
+    pub(crate) fn on_into_chosen(&mut self) {
         if self
             .picking
             .as_ref()
