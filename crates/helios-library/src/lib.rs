@@ -12,6 +12,9 @@
 //! - [`capture`]: capture metadata (time, camera, lens, settings, size)
 //!   kept as the vault's read-only fields, at import and by a resumable
 //!   backfill job over the images imported before;
+//! - [`cull`]: the culling signals (a focus score and where the focus
+//!   is, clipping per channel, the exposure's levels), at import and by a
+//!   resumable backfill job over the images imported before;
 //! - [`backup`]: the verified backup job, copying library copies to the
 //!   backup volumes of the library's strategy, and its triggers;
 //! - [`darktable`]: darktable's sidecars kept as versions (each sidecar of
@@ -31,6 +34,7 @@
 
 pub mod backup;
 pub mod capture;
+pub mod cull;
 pub mod darktable;
 pub mod export;
 pub mod fetch;

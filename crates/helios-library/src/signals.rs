@@ -12,7 +12,9 @@
 //!   aperture, ISO, bias) and the camera's **frame number** (EXIF, else the
 //!   digits a file name ends with);
 //! - a **sharpness**: the variance of the Laplacian of a grey thumbnail at
-//!   most [`SHARP_SIDE`] pixels a side, to propose the best of a group.
+//!   most [`SHARP_SIDE`] pixels a side, to propose the best of a group;
+//! - the **culling signals** of [`crate::cull`]: a focus score and where
+//!   the focus is, clipping per channel, the exposure's levels.
 
 use std::path::Path;
 
@@ -65,6 +67,10 @@ pub struct Signals {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharpness: Option<f64>,
+    /// The culling measures (focus, clipping, exposure), kept with the
+    /// others under their own keys.
+    #[serde(flatten)]
+    pub cull: crate::cull::Cull,
 }
 
 impl Signals {
@@ -290,6 +296,7 @@ pub fn measure(path: &Path) -> Result<Signals, String> {
         phash: dhash(w, h, &values).map(|v| format!("{v:016x}")),
         hashed: Some(hashed.into()),
         sharpness: Some(sharpness(w, h, &values)),
+        cull: crate::cull::measure(&image, w, h, &values),
         ..Signals::default()
     };
     if let Some(shot) = look.shot {
