@@ -2473,6 +2473,7 @@ dependencies = [
  "helios-library",
  "helios-load",
  "helios-module-channelmixerrgb",
+ "helios-module-chartprofile",
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
@@ -2608,6 +2609,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-chartprofile"
+version = "0.87.0"
+dependencies = [
+ "helios-bricks",
+ "helios-core",
+ "helios-photo",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-colorin"
 version = "0.87.0"
 dependencies = [
@@ -2723,6 +2734,7 @@ dependencies = [
  "helios-load",
  "helios-module-blur",
  "helios-module-channelmixerrgb",
+ "helios-module-chartprofile",
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
@@ -2914,6 +2926,7 @@ dependencies = [
  "egui-pop-model",
  "helios-core",
  "helios-module-channelmixerrgb",
+ "helios-module-chartprofile",
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",

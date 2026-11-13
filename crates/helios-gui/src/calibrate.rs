@@ -5,17 +5,20 @@
 //! - `calibrate.chart`: a colour chart shot measured and its correction
 //!   solved; with `save`, kept as a profile in the vault.
 //! - `calibrate.profiles.list`, `.get`, `.delete`: the saved profiles.
+//! - `calibrate.profiles.setDefault`: a camera's default profiles.
+//! - `calibrate.apply`: a profile (or `auto`, or `none`) put on photos'
+//!   edits, the `chartprofile` node.
 //!
 //! Each run is announced on the node's bus with who ran it
-//! (`control.command`). A save or a deletion is one step of the library's
-//! history, so Ctrl+Z takes it back. Without a library, the chart's dry
+//! (`control.command`). A save, a deletion, a default set or an apply is
+//! one step of the library's history, so Ctrl+Z takes it back. Without a library, the chart's dry
 //! run is still answered; the profile commands say they need one.
 
 use std::sync::Arc;
 
 use egui_pop::api::history::Label;
 use helios_core::{Bus, Message};
-use helios_node_core::calibrate::{self as node, CHART, DELETE, GET, LIST};
+use helios_node_core::calibrate::{self as node, APPLY, CHART, DELETE, GET, LIST, SET_DEFAULT};
 use helios_shell::commands::CommandSpec;
 use helios_vault::{Changes, Store, Vault};
 use serde_json::Value;
@@ -38,12 +41,28 @@ fn seconds() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// The history step of a save or a deletion of the profile `name`.
+/// The history step of command `id` on the profile `name` (an apply
+/// with none: the profile turned off; a default: of camera `name`).
 pub fn label(id: &str, name: &str) -> Label {
     let m = if id == DELETE {
         Message::new(
             "gui-history-calibration-delete",
             "Delete the calibration profile “{ $name }”",
+        )
+    } else if id == APPLY && name.is_empty() {
+        Message::new(
+            "gui-history-calibration-off",
+            "Turn the calibration profile off",
+        )
+    } else if id == APPLY {
+        Message::new(
+            "gui-history-calibration-apply",
+            "Apply the calibration profile “{ $name }”",
+        )
+    } else if id == SET_DEFAULT {
+        Message::new(
+            "gui-history-calibration-default",
+            "Set the calibration default of { $name }",
         )
     } else {
         Message::new(
@@ -59,8 +78,18 @@ pub fn label(id: &str, name: &str) -> Label {
     }
 }
 
-/// The profile's name in an answer of `id`.
+/// The profile's name in an answer of `id` (an apply turning it off:
+/// none; a default: its camera).
 fn named(id: &str, answer: &Value) -> String {
+    if id == APPLY {
+        return answer["images"][0]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+    }
+    if id == SET_DEFAULT {
+        return answer["camera"].as_str().unwrap_or_default().to_string();
+    }
     let profile = if id == DELETE {
         &answer["deleted"]
     } else {
@@ -112,6 +141,16 @@ pub fn register<S: Store + Send + 'static>(
         (
             DELETE,
             "Deletes a calibration profile (`profile`: its id)",
+            false,
+        ),
+        (
+            SET_DEFAULT,
+            "Sets a camera's default calibration profiles (`profiles`: their ids, empty with `camera` to clear)",
+            false,
+        ),
+        (
+            APPLY,
+            "Applies a calibration profile to photos (`images`; `profile`: an id, `auto` for the camera's nearest light, or `none`)",
             false,
         ),
     ];

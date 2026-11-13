@@ -665,6 +665,40 @@ usable. Slices 1 to 5 need no GUI.
 6. **`core.matrix3@1` and the `chartprofile` module,** the raw front
    version 2, `calibrate.apply` and the camera default applied at open.
    Module tests and a desktop scenario (apply, undo).
+   **Built, first part** (2026-11-13): the brick `core.matrix3@1`
+   (`helios_bricks::matrix3`, CPU and WGSL, in the core registry); the
+   `chartprofile` module (`modules/chartprofile`: parameters `matrix`,
+   `M_c`, all zero for none, and `profile`, the id; context
+   `XYZ_TO_CAMERA`; plan `P = M_c M_s⁻¹` run by the brick's step, `M_s`
+   the identity for a picture). It is a sealed module calling the
+   brick's code, not yet an assembly. The raw front is not versioned:
+   the network builder appends `chartprofile`, bypassed, after the raw
+   front and before `channelmixerrgb`, as it already appends colour
+   calibration and `flip` (a catalogue without it leaves it out), so
+   every image-source network has it; the "Develop one image" template,
+   whose raw chain is written out, does not yet.
+   `calibrate.apply {images, profile | auto | none, dry_run}` saves each
+   photo's edit with the node on and the profile's values copied in (or
+   bypassed for `none`), by its caller, as one undoable step (the
+   images' rows before and after); every photo is resolved before
+   anything is written. `auto` takes the camera's default rule's
+   profiles (else all of its camera key) and picks the one nearest the
+   shot's as-shot light (`channelmixerrgb`'s "as shot in camera") within
+   0.02 in CIE 1960 `uv` (`helios_calibrate::apply::pick`, ties to the
+   smaller id); otherwise it refuses with the reason (no light, no
+   profile for the camera, the nearest too far). A named profile of
+   another camera is refused. The namespace `calibration/defaults` and
+   `calibrate.profiles.setDefault {profiles, camera?, dry_run}` keep a
+   camera's rule (`{profiles, pick: "nearest"}`), undone as a profile.
+   The desktop's commands run through its node; an apply is one step of
+   the library's history. Not built yet: the camera default applied at
+   open, the module in "Develop one image" (a template version 3), the
+   module's header (profile name, quality, "Make a profile…"), export
+   and import.
+   With the camera look (camera-look.md): its modules are not in the chain
+   yet; when they come, the chart rules the colour half and the look's
+   tone half may stay on top (camera-look.md, Q3, answer A), and the
+   look's colour module reuses `core.matrix3@1`.
 7. **The Calibration focus:** as a place in the main window first; the
    corner gizmo, the grid overlay, the Chart, Report, Save and Profiles
    panels. A kittest scenario drives the corners through accesskit and

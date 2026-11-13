@@ -31,9 +31,21 @@ batch-stopped = stopped before it was written: the same batch run again finishes
 
 batch-vault-attached = --vault with a running node only keeps sidecars: it needs --sidecar (the node keeps its runs in its own vault)
 
+calibrate-auto-no-light = image { $image } has no as-shot light to pick a profile by (camera { $camera })
+
+calibrate-auto-no-profile = no calibration profile for camera { $camera } (image { $image })
+
+calibrate-auto-too-far = no profile of camera { $camera } fits the light of image { $image }: the nearest, { $profile }, is { $distance } away in uv (at most 0.02)
+
 calibrate-bad-image = the chart shot has no pixel or fewer than three channels
 
 calibrate-bad-params = calibrate.chart: { $error }
+
+calibrate-bad-profile = the calibration profile `{ $id }` cannot be read: { $error }
+
+calibrate-default-cameras = the profiles of a default are all of camera { $camera }; `{ $id }` is of { $other }
+
+calibrate-default-no-camera = clearing a camera's default needs `camera`
 
 calibrate-image-not-at-hand = no file of image { $image } is at hand
 
@@ -49,7 +61,11 @@ calibrate-no-profile = no calibration profile `{ $id }`
 
 calibrate-no-shot = calibrate.chart needs `path` or `image`, the chart shot
 
+calibrate-other-camera = the profile is for camera { $profile }, image { $image } is from { $camera }
+
 calibrate-outside-image = the chart's patches fall outside the image
+
+calibrate-photo-load-failed = cannot read the photo: { $error }
 
 calibrate-raw-graph = the raw could not be developed for measuring: { $error }
 
@@ -507,7 +523,13 @@ gui-history-album-rules = Edit the rules of “{ $name }”
 
 gui-history-batch = { $label } ({ $count } values)
 
+gui-history-calibration-apply = Apply the calibration profile “{ $name }”
+
+gui-history-calibration-default = Set the calibration default of { $name }
+
 gui-history-calibration-delete = Delete the calibration profile “{ $name }”
+
+gui-history-calibration-off = Turn the calibration profile off
 
 gui-history-calibration-save = Save the calibration profile “{ $name }”
 

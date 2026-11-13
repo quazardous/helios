@@ -374,7 +374,25 @@ fn a_raw_gets_darktables_colour_calibration_in_every_template_taking_a_raw() {
         );
         let calibrated = graph.find("channelmixerrgb").unwrap();
         let colorin = graph.find("colorin").unwrap();
-        assert_eq!(graph.input_nodes(calibrated).unwrap(), [Some(colorin)]);
+        // After colorin, or after the chart profile (bypassed until a
+        // profile is applied) where the raw front is built for an image
+        // source.
+        match graph.find("chartprofile") {
+            Some(profile) => {
+                assert_eq!(graph.input_nodes(profile).unwrap(), [Some(colorin)], "{id}");
+                assert!(graph.is_bypassed(profile).unwrap(), "{id}");
+                assert_eq!(
+                    graph.input_nodes(calibrated).unwrap(),
+                    [Some(profile)],
+                    "{id}"
+                );
+            }
+            None => assert_eq!(
+                graph.input_nodes(calibrated).unwrap(),
+                [Some(colorin)],
+                "{id}"
+            ),
+        }
         // The as-shot coefficients give an illuminant: the colours move.
         let (before, after) = (render(&graph, colorin), render(&graph, calibrated));
         assert!(after.iter().all(|v| v.is_finite()), "{id}");

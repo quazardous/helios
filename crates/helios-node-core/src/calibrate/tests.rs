@@ -188,6 +188,8 @@ fn every_command_has_a_schema_its_example_fits() {
         json!({ "camera": "nikon z 6" }),
         json!({ "profile": "ab" }),
         json!({ "profile": "ab" }),
+        json!({ "profiles": ["ab"], "camera": null, "dry_run": true }),
+        json!({ "images": ["/a.nef"], "profile": "auto", "dry_run": false }),
     ];
     let specs = specs();
     assert_eq!(specs.len(), examples.len());
@@ -195,4 +197,213 @@ fn every_command_has_a_schema_its_example_fits() {
         assert!(handles(&spec.id));
         validate(&spec.params, &example).unwrap_or_else(|e| panic!("{}: {e}", spec.id));
     }
+}
+
+/// A vault holding the chart picture as an image, and its saved profile.
+fn applied_vault(name: &str) -> (Vault<MemoryStore>, PathBuf, ImageId, String) {
+    let path = picture(name);
+    let vault = vault();
+    let image = vault.import_file(&path, 1).unwrap();
+    let saved = save(&vault, &path, json!({ "name": "Flash" }), 10);
+    let id = saved.answer["profile"]["id"].as_str().unwrap().to_string();
+    (vault, path, image, id)
+}
+
+fn head(vault: &Vault<MemoryStore>, image: ImageId) -> Option<Value> {
+    helios_vault::EditSession::open(vault, image)
+        .unwrap()
+        .1
+        .map(|v| v.edit)
+}
+
+#[test]
+fn applying_a_profile_turns_on_the_chart_profile_and_undo_takes_it_back() {
+    let (vault, path, image, id) = applied_vault("apply");
+    let params = json!({ "images": [image.hex()], "profile": id });
+    let dry = run(
+        Some(&vault),
+        APPLY,
+        &json!({ "images": [path], "profile": id, "dry_run": true }),
+        20,
+    )
+    .unwrap();
+    assert!(dry.changes.is_empty());
+    assert_eq!(head(&vault, image), None, "a dry run writes nothing");
+    assert_eq!(
+        dry.answer["images"][0]["params"]["profile"]["text"],
+        id.as_str()
+    );
+
+    let done = run_as(Some(&vault), APPLY, &params, "agent:test", 20).unwrap();
+    assert_eq!(done.changes.images.len(), 1, "one step");
+    let edit = head(&vault, image).unwrap();
+    assert_eq!(apply::applied(&edit).as_deref(), Some(id.as_str()));
+    // The profile's matrix, copied into the parameters.
+    let profile: Profile =
+        serde_json::from_value(vault.calibration_profile(&id).unwrap().unwrap()).unwrap();
+    let entry = &edit["modules"][0];
+    assert_eq!(entry["module"], apply::MODULE);
+    let matrix: Vec<f64> = entry["params"]["matrix"]["list"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert_eq!(
+        matrix,
+        profile.matrix.iter().flatten().copied().collect::<Vec<_>>()
+    );
+    let versions = vault.versions(&image).unwrap();
+    assert_eq!(versions[0].origin, "agent:test");
+
+    // Undo: the version and so the module are gone; redo brings them back.
+    vault.revert(&done.changes).unwrap();
+    assert_eq!(head(&vault, image), None);
+    vault.replay(&done.changes).unwrap();
+    assert_eq!(
+        apply::applied(&head(&vault, image).unwrap()).as_deref(),
+        Some(id.as_str())
+    );
+
+    // `none` turns it off, its values kept.
+    let off = run(
+        Some(&vault),
+        APPLY,
+        &json!({ "images": [image.hex()], "profile": "none" }),
+        30,
+    )
+    .unwrap();
+    assert_eq!(off.changes.images.len(), 1);
+    let edit = head(&vault, image).unwrap();
+    assert_eq!(apply::applied(&edit), None);
+    assert_eq!(edit["modules"][0]["params"]["profile"]["text"], id.as_str());
+    vault.revert(&off.changes).unwrap();
+    assert!(apply::applied(&head(&vault, image).unwrap()).is_some());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The saved profile, as one of camera `camera` under light `xy`.
+fn as_camera(vault: &Vault<MemoryStore>, from: &str, id: &str, camera: &str, xy: [f64; 2]) {
+    let mut doc = vault.calibration_profile(from).unwrap().unwrap();
+    doc["camera"]["key"] = json!(camera);
+    doc["illuminant"]["xy"] = json!(xy);
+    vault.set_calibration_profile(id, Some(&doc)).unwrap();
+}
+
+const D65: [f64; 2] = [0.3127, 0.3290];
+const D50: [f64; 2] = [0.3457, 0.3585];
+const TUNGSTEN: [f64; 2] = [0.4234, 0.3990];
+const FOUR_K: [f64; 2] = [0.3805, 0.3768];
+
+#[test]
+fn auto_picks_the_camera_s_profile_nearest_the_shot_s_light() {
+    let (vault, path, image, id) = applied_vault("auto");
+    as_camera(&vault, &id, "daylight", "nikon z 6", D65);
+    as_camera(&vault, &id, "studio", "nikon z 6", D50);
+    as_camera(&vault, &id, "tungsten", "nikon z 6", TUNGSTEN);
+    as_camera(&vault, &id, "other-body", "canon eos r5", [0.35, 0.36]);
+    let shot = |light: Option<[f64; 2]>, camera: &'static str| {
+        move |_: &Path| {
+            Ok(Photo {
+                camera: camera.into(),
+                light,
+            })
+        }
+    };
+    let params = json!({ "images": [image.hex()], "profile": "auto" });
+    let picked = |light, camera| {
+        apply_with(&vault, &params, "user", 40, &shot(light, camera)).map(|d| {
+            d.answer["images"][0]["profile"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+    };
+    // A shot a little warmer than D50: the studio profile, not the other
+    // camera's nearer one.
+    assert_eq!(picked(Some([0.350, 0.360]), "nikon z 6").unwrap(), "studio");
+    assert_eq!(picked(Some([0.42, 0.40]), "nikon z 6").unwrap(), "tungsten");
+    assert_eq!(
+        apply::applied(&head(&vault, image).unwrap()).as_deref(),
+        Some("tungsten")
+    );
+
+    // The camera's default narrows the choice.
+    let set = run(
+        Some(&vault),
+        SET_DEFAULT,
+        &json!({ "profiles": ["daylight", "tungsten"] }),
+        0,
+    )
+    .unwrap();
+    assert_eq!(set.answer["camera"], "nikon z 6");
+    assert_eq!(set.answer["after"]["pick"], "nearest");
+    assert_eq!(set.changes.documents.len(), 1);
+    // A 4000 K shot: 0.019 from the studio profile in uv, beyond 0.02 from
+    // the two the default keeps.
+    let refused = picked(Some(FOUR_K), "nikon z 6").unwrap_err();
+    assert_eq!(refused.key, "calibrate-auto-too-far", "{}", refused.english);
+    assert_eq!(picked(Some(D65), "nikon z 6").unwrap(), "daylight");
+    // Cleared (undone), every profile of the camera is a candidate again.
+    vault.revert(&set.changes).unwrap();
+    assert_eq!(picked(Some(FOUR_K), "nikon z 6").unwrap(), "studio");
+    let mixed = run(
+        Some(&vault),
+        SET_DEFAULT,
+        &json!({ "profiles": ["daylight", "other-body"] }),
+        0,
+    )
+    .unwrap_err();
+    assert_eq!(mixed.key, "calibrate-default-cameras");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn auto_refuses_with_its_reason_and_writes_nothing() {
+    let (vault, path, image, id) = applied_vault("refuse");
+    as_camera(&vault, &id, "daylight", "nikon z 6", D65);
+    let params = json!({ "images": [image.hex()], "profile": "auto" });
+    let refused = |light: Option<[f64; 2]>, camera: &'static str| {
+        apply_with(&vault, &params, "user", 40, &move |_: &Path| {
+            Ok(Photo {
+                camera: camera.into(),
+                light,
+            })
+        })
+        .unwrap_err()
+    };
+    let none = refused(Some(D65), "fujifilm x-t5");
+    assert_eq!(none.key, "calibrate-auto-no-profile");
+    assert!(none.english.contains("fujifilm x-t5"), "{}", none.english);
+    let far = refused(Some(TUNGSTEN), "nikon z 6");
+    assert_eq!(far.key, "calibrate-auto-too-far");
+    assert_eq!(refused(None, "nikon z 6").key, "calibrate-auto-no-light");
+    assert_eq!(head(&vault, image), None, "nothing written");
+    // A profile of another camera is refused too.
+    let other = run(
+        Some(&vault),
+        APPLY,
+        &json!({ "images": [image.hex()], "profile": "daylight" }),
+        0,
+    )
+    .unwrap_err();
+    assert_eq!(other.key, "calibrate-other-camera");
+    // Read from its file, a picture has no as-shot light to pick by; its
+    // own profile, named, fits it.
+    let picture = run(
+        Some(&vault),
+        APPLY,
+        &json!({ "images": [image.hex()], "profile": "auto" }),
+        0,
+    )
+    .unwrap_err();
+    assert_eq!(picture.key, "calibrate-auto-no-light");
+    run(
+        Some(&vault),
+        APPLY,
+        &json!({ "images": [image.hex()], "profile": id }),
+        0,
+    )
+    .unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

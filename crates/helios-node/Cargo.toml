@@ -36,6 +36,7 @@ helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
 helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-chartprofile = { path = "../../modules/chartprofile" }
 helios-module-flip = { path = "../../modules/flip" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
 helios-module-blur = { path = "../../modules/blur" }

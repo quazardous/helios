@@ -269,6 +269,10 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
         ),
         ("demosaic", ModuleRef::new(helios_module_demosaic::Demosaic)),
         ("colorin", ModuleRef::new(helios_module_colorin::ColorIn)),
+        (
+            "chartprofile",
+            ModuleRef::new(helios_module_chartprofile::ChartProfile),
+        ),
         ("flip", ModuleRef::new(helios_module_flip::Flip)),
         (
             "channelmixerrgb",

@@ -1,7 +1,8 @@
 //! The desktop's calibration commands on a chart picture, reached through
 //! the shell and run by the desktop's node: the dry run, a profile saved,
-//! listed, deleted and brought back by the library's undo, each command
-//! heard on the node's bus with who ran it.
+//! listed, deleted and brought back by the library's undo, then applied
+//! to the picture and taken back by the undo, each command heard on the
+//! node's bus with who ran it.
 
 use egui::vec2;
 use helios_calibrate::lab::lab_to_xyz;
@@ -148,5 +149,48 @@ fn the_shell_answers_a_chart_dry_run() {
         panic!("undone");
     };
     assert!(vault.calibration_profile(&id).unwrap().is_some());
+
+    // Applied to the chart picture by the person at the desktop: through
+    // the node, heard on its bus, the edit's `chartprofile` node on; one
+    // step of the library's history that Ctrl+Z takes back.
+    let image = vault.import_file(&picture, 1).unwrap();
+    let head = || {
+        helios_vault::EditSession::open(&vault, image)
+            .unwrap()
+            .1
+            .map(|v| v.edit)
+    };
+    let applied = shell
+        .run(
+            "calibrate.apply",
+            json!({ "images": [image.hex()], "profile": id }),
+            Origin::User,
+        )
+        .unwrap();
+    assert_eq!(applied["images"][0]["profile"], id.as_str(), "{applied}");
+    assert_eq!(
+        heard
+            .try_iter()
+            .filter(|e| e.kind == "control.command")
+            .map(|e| (e.payload["id"].clone(), e.payload["origin"].clone()))
+            .last(),
+        Some((json!("calibrate.apply"), json!("user")))
+    );
+    let edit = head().unwrap();
+    assert_eq!(
+        helios_calibrate::apply::applied(&edit).as_deref(),
+        Some(id.as_str())
+    );
+    let steps = history.line().undo.len();
+    assert_eq!(
+        history.line().undo[steps - 1].label.text,
+        "Apply the calibration profile “Daylight”"
+    );
+    let egui_pop::api::history::Answer::Done(Ok(_)) =
+        history.undo(&request, &egui_pop::model::commands::Origin::User)
+    else {
+        panic!("undone");
+    };
+    assert_eq!(head(), None, "the apply undone: no chart profile");
     let _ = std::fs::remove_dir_all(&dir);
 }
