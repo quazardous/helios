@@ -66,6 +66,9 @@ use crate::Shell;
 use crate::dialogs::Level;
 use crate::library::{Change, Entry};
 
+/// A search filter's answer: the photos it takes and the facet counts.
+type Searched = (Vec<String>, helios_vault::Facets);
+
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match).
 const SHOWN: [&str; 9] = [
@@ -134,7 +137,7 @@ pub struct Persist<S: Store> {
     filled: Option<Files>,
     /// The search filter's query being run: the photos it takes and the
     /// facet counts.
-    searching: Option<Receiver<Result<(Vec<String>, helios_vault::Facets), String>>>,
+    searching: Option<Receiver<Result<Searched, String>>>,
     /// The stacks and the proposals waiting being read again
     /// ([`Persist::ask_stacks`]).
     stacking: Option<Receiver<Result<Stacked, String>>>,
@@ -1031,7 +1034,9 @@ impl<S: Store + 'static> Persist<S> {
     fn apply(&self, shell: &mut Shell, fetched: Fetched) -> Result<Files, String> {
         match fetched {
             Fetched::Whole(rows) => self.show_library(shell, rows),
-            Fetched::Delta(shown, moved, stacked) => self.show_moved(shell, shown, moved, stacked),
+            Fetched::Delta(shown, moved, stacked) => {
+                Ok(self.show_moved(shell, shown, moved, stacked))
+            }
         }
     }
 
@@ -1071,7 +1076,7 @@ impl<S: Store + 'static> Persist<S> {
         shown: Shown,
         moved: Option<Moved>,
         stacked: Stacked,
-    ) -> Result<Vec<(String, PathBuf)>, String> {
+    ) -> Vec<(String, PathBuf)> {
         if let Some(moved) = moved {
             // The entries shown, their fields kept up to date by the
             // vault's events.
@@ -1112,7 +1117,7 @@ impl<S: Store + 'static> Persist<S> {
             self.reader.close(old.cursor);
         }
         show_stacked(shell, stacked);
-        Ok(files)
+        files
     }
 
     /// Reads the stacks and the proposals waiting again through the node,
