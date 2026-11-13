@@ -13,6 +13,8 @@ helios-health.workspace = true
 helios-inspect.workspace = true
 helios-library.workspace = true
 helios-load.workspace = true
+helios-photo.workspace = true
+blake3.workspace = true
 helios-storage.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
@@ -23,7 +25,8 @@ serde_json.workspace = true
 
 [dev-dependencies]
 helios-export.workspace = true
-helios-photo.workspace = true
+helios-testkit.workspace = true
+helios-module-whitebalance = { path = "../../modules/whitebalance" }
 
 [lints]
 workspace = true

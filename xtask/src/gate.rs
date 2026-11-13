@@ -19,6 +19,9 @@
 //!    does not move, the temporary branch is deleted, and the tester fixes
 //!    the pull request's own branch (mechanical) or sends it back, then
 //!    gates again.
+//! 5. Beside the jobs, the box builds the tested commit for the desktop
+//!    (`build-gui`); a failed build is red. After a green round its programs
+//!    are here, and `cargo xtask install-dev --from <dir>` installs them.
 //!
 //! The parts that need no network (the plan) are pure and tested; the
 //! rest drives git, gh and `cargo xtask bench-remote`.
@@ -168,13 +171,41 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     })
 }
 
+/// Uploads `file` as the box's Benchfile for `branch`.
+fn upload_benchfile(root: &Path, branch: &str, file: &Path) -> Result<(), String> {
+    let bench = crate::remote::Bench::configure(root)?;
+    let input = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let status = bench
+        .ssh(10, &["config", "benchfile", branch])
+        .stdin(input)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the box refused the Benchfile for {branch} ({status})"
+        ))
+    }
+}
+
+/// Drops the Benchfile uploaded for `branch`.
+fn forget_benchfile(root: &Path, branch: &str) -> Result<(), String> {
+    let bench = crate::remote::Bench::configure(root)?;
+    bench
+        .ssh(10, &["config", "benchfile", "rm", branch])
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Runs the gate from the checkout `root`; the report either way.
 fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     let benchfile = std::fs::read_to_string(root.join("tools/bench/Benchfile")).unwrap_or_default();
     let temp = temp_branch(numbers);
     // A worktree of its own, so the caller's checkout is left alone.
     let work = root.join("target/gate");
-    git(root, &["fetch", "-q", "origin", "next"])?;
+    git(root, &["fetch", "-q", "origin", "next", "main"])?;
     if !work.exists() {
         git(
             root,
@@ -231,16 +262,50 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
             &format!("HEAD:refs/heads/{temp}"),
         ],
     )?;
+    // The box reads the default Benchfile (main's) for a branch it has none
+    // for: a job only next declares would be refused. Upload the tested
+    // Benchfile under the temporary branch when it differs from main's.
+    let tested_benchfile = git(&work, &["show", "HEAD:tools/bench/Benchfile"]).unwrap_or_default();
+    let main_benchfile =
+        git(&work, &["show", "origin/main:tools/bench/Benchfile"]).unwrap_or_default();
+    let own_benchfile = tested_benchfile != main_benchfile;
+    if own_benchfile {
+        let path = work.join("tools/bench/Benchfile");
+        upload_benchfile(root, &temp, &path)?;
+    }
     let drop_temp = || {
         let _ = git(root, &["push", "-q", "origin", "--delete", &temp]);
+        if own_benchfile {
+            let _ = forget_benchfile(root, &temp);
+        }
     };
 
-    // Run the jobs side by side: spawned together, then waited on.
+    // Run the jobs side by side: spawned together, then waited on. The
+    // desktop build of the tested commit runs beside them, so a green round
+    // brings back the programs to install (`install-dev --from`).
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let build = Command::new(&exe)
+        .args([
+            "bench-remote",
+            "build-gui",
+            &format!("branch={temp}"),
+            "ext_job_id=gate-build",
+        ])
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
     let children: Vec<_> = plan
         .runs
         .iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
+            // Spaced out: a burst of ssh connections is refused by the box's
+            // sshd (MaxStartups), and the refused job is never submitted.
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
             Command::new(&exe)
                 .arg("bench-remote")
                 .args(&r.args)
@@ -263,7 +328,9 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
                     .lines()
                     .rev()
                     .find(|l| l.contains(&r.ext_job_id))
-                    .unwrap_or("")
+                    // No line names the job: it was never submitted; say why.
+                    .or_else(|| text.lines().rev().find(|l| !l.trim().is_empty()))
+                    .unwrap_or("no output")
                     .to_string();
                 (o.status.success() && !line.contains(" exit "), line)
             }
@@ -279,6 +346,42 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
         if !ok {
             red.push(r.pr);
         }
+    }
+
+    // The desktop build: its outputs' folder when it built, else red.
+    let desktop = match build.and_then(std::process::Child::wait_with_output) {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string()
+                + &String::from_utf8_lossy(&o.stderr);
+            text.lines()
+                .filter_map(|l| l.split("results in ").nth(1))
+                .next_back()
+                .map(|dir| Path::new(dir.trim()).join("out"))
+        }
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string()
+                + &String::from_utf8_lossy(&o.stderr);
+            let line = text
+                .lines()
+                .rev()
+                .find(|l| l.contains("gate-build"))
+                .unwrap_or("no output");
+            let _ = writeln!(report, "desktop build RED: {line}");
+            None
+        }
+        Err(e) => {
+            let _ = writeln!(report, "desktop build RED: not started: {e}");
+            None
+        }
+    };
+    if red.is_empty() && desktop.is_none() {
+        drop_temp();
+        let _ = writeln!(
+            report,
+            "red: the desktop build of the batch — next stays at {}",
+            &base[..8]
+        );
+        return Err(report);
     }
 
     if !red.is_empty() {
@@ -316,6 +419,14 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     drop_temp();
     for p in prs.iter().filter(|p| plan.take.contains(&p.number)) {
         let _ = git(root, &["push", "-q", "origin", "--delete", &p.branch]);
+    }
+    if let Some(dir) = &desktop {
+        let _ = writeln!(
+            report,
+            "desktop build of next {}: cargo xtask install-dev --from {}",
+            &tested[..8],
+            dir.display()
+        );
     }
     Ok(report)
 }

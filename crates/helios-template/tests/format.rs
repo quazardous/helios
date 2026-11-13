@@ -934,7 +934,7 @@ fn a_workshop_target_is_on_one_exposed_number() {
 }
 
 #[test]
-fn the_raw_front_has_a_bypassed_camera_look_colour_half_after_the_chart_profile() {
+fn the_raw_front_has_a_bypassed_camera_look_colour_half_after_colour_calibration() {
     use helios_core::Image;
     use helios_module_cameracolour::CameraColour;
     use helios_module_chartprofile::ChartProfile;
@@ -977,26 +977,117 @@ fn the_raw_front_has_a_bypassed_camera_look_colour_half_after_the_chart_profile(
         )
         .unwrap()
     };
-    let render = |graph: &helios_core::Graph| {
-        let cat = graph.find("channelmixerrgb").unwrap();
+    let render = |graph: &helios_core::Graph, node: &str| {
+        let at = graph.find(node).unwrap();
         Engine::new(Arc::new(Bus::new()))
-            .render(graph, cat, "output", Region::sized(16, 16))
+            .render(graph, at, "output", Region::sized(16, 16))
             .unwrap()
     };
     let plain = build(&without);
     assert!(plain.graph.find("cameracolour").is_none());
     let built = build(&with);
     let g = &built.graph;
-    let (profile, look) = (
+    let (profile, calibration, look) = (
         g.find("chartprofile").unwrap(),
+        g.find("channelmixerrgb").unwrap(),
         g.find("cameracolour").unwrap(),
     );
-    assert_eq!(g.input_nodes(look).unwrap(), [Some(profile)]);
+    // The chart profile after the camera colours, colour calibration,
+    // then the look's colour half: it is fitted on what calibration
+    // gives.
+    assert_eq!(g.input_nodes(calibration).unwrap(), [Some(profile)]);
+    assert_eq!(g.input_nodes(look).unwrap(), [Some(calibration)]);
+    assert_eq!(g.input_nodes(g.find("exp").unwrap()).unwrap(), [Some(look)]);
+    assert!(g.is_bypassed(look).unwrap());
+    // Bypassed, the render is the one without it, bit for bit.
     assert_eq!(
-        g.input_nodes(g.find("channelmixerrgb").unwrap()).unwrap(),
+        render(g, "cameracolour").data(),
+        render(&plain.graph, "channelmixerrgb").data()
+    );
+}
+
+#[test]
+fn a_raw_shown_through_sigmoid_gets_a_bypassed_camera_look_tone_half_before_it() {
+    use helios_core::Image;
+    use helios_module_cameratone::CameraTone;
+    // A template with a display transform and no `cameratone`: built
+    // with a raw, the tone half goes on sigmoid's input, so an edit with
+    // a look (sigmoid off, cameratone on) never renders scene-linear.
+    let t = json!({
+        "format": 1,
+        "id": "test.shown",
+        "version": 1,
+        "meta": { "name": "Shown", "scenario": "A raw, shown." },
+        "network": {
+            "sources": ["source"],
+            "image_sources": ["source"],
+            "nodes": [
+                { "name": "exp", "module": "exposure" },
+                { "name": "tone", "module": "sigmoid" }
+            ],
+            "connections": [
+                { "from": "source", "port": "image", "to": "exp", "input": "input" },
+                { "from": "exp", "port": "output", "to": "tone", "input": "input" }
+            ],
+            "view": { "node": "tone", "port": "output" }
+        }
+    });
+    let b = bundle(&t);
+    let without = image_catalogue().module(ModuleRef::new(helios_module_sigmoid::Sigmoid));
+    let with = without.clone().module(ModuleRef::new(CameraTone));
+    let camera = helios_photo::CameraInfo {
+        maker: "Nikon".into(),
+        model: "D750".into(),
+        iso: 100.0,
+        exposure_bias: 0.0,
+        exposure_time: 0.01,
+        aperture: 4.0,
+        focal_length: 50.0,
+        black: [0.0; 4],
+        white: 1.0,
+        white_balance: [2.0, 1.0, 1.5, 1.0],
+        xyz_to_camera: [
+            0.9020, -0.2890, -0.0715, -0.4535, 1.2436, 0.2348, -0.0934, 0.1919, 0.7086,
+        ],
+        cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+        orientation: 1,
+    }
+    .to_context();
+    let mosaic = Image::from_fn(Region::sized(16, 16), 1, |x, y, _| {
+        0.05 + 0.01 * (x as f32) + 0.02 * ((x + y) % 3) as f32
+    });
+    let raw = |catalogue: &Catalogue| {
+        b.build_with(
+            catalogue,
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .unwrap()
+    };
+    let render = |graph: &helios_core::Graph| {
+        let at = graph.find("tone").unwrap();
+        Engine::new(Arc::new(Bus::new()))
+            .render(graph, at, "output", Region::sized(16, 16))
+            .unwrap()
+    };
+    let plain = raw(&without);
+    assert!(plain.graph.find("cameratone").is_none());
+    let built = raw(&with);
+    let g = &built.graph;
+    let look = g.find("cameratone").unwrap();
+    assert_eq!(g.input_nodes(look).unwrap(), [g.find("exp")]);
+    assert_eq!(
+        g.input_nodes(g.find("tone").unwrap()).unwrap(),
         [Some(look)]
     );
     assert!(g.is_bypassed(look).unwrap());
+    assert!(built.nodes.contains_key("cameratone"));
     // Bypassed, the render is the one without it, bit for bit.
     assert_eq!(render(g).data(), render(&plain.graph).data());
+    // Built without a raw (no look can be fitted), the network is as
+    // written.
+    assert!(b.build(&with).unwrap().graph.find("cameratone").is_none());
 }
