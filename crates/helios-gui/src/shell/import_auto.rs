@@ -324,6 +324,7 @@ impl Shell {
             key: message.key,
             action: None,
             at: self.core.now,
+            report: None,
         });
     }
 
