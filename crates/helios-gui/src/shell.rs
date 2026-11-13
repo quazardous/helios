@@ -2846,7 +2846,7 @@ impl Shell {
         for (id, title) in [
             (
                 crate::library::COLLECTION_CREATE_COMMAND,
-                "New album (`name`; `images`: ids, else the selection); without `name`, asks it. Answers its `id`",
+                "New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys); without `name`, asks it. Answers its `id`",
             ),
             (
                 crate::library::COLLECTION_RENAME_COMMAND,
@@ -2865,8 +2865,12 @@ impl Shell {
                 "Remove photos from an album (`id`; `images`: ids, else the selection); they stay in the library",
             ),
             (
+                crate::library::COLLECTION_RULES_COMMAND,
+                "Set a smart album's rules (`id`; `rules`, a tree, or the form's keys); without them, asks them. Unknown fields and invalid rules are refused with the reason",
+            ),
+            (
                 crate::library::COLLECTION_LIST_COMMAND,
-                "List the albums: `id`, `name` and how many photos each holds",
+                "List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`",
             ),
         ] {
             add(
@@ -4433,7 +4437,10 @@ impl Shell {
             AlbumEdit, COLLECTION_ADD_COMMAND as ADD, COLLECTION_CREATE_COMMAND as CREATE,
             COLLECTION_DELETE_COMMAND as DELETE, COLLECTION_LIST_COMMAND as LIST,
             COLLECTION_REMOVE_COMMAND as REMOVE, COLLECTION_RENAME_COMMAND as RENAME,
+            COLLECTION_RULES_COMMAND as RULES,
         };
+        use crate::smart_album::SmartForm;
+        use helios_vault::collections::{ALBUM, SMART};
         let text = |a: &'_ Value, key: &str| a.get(key).and_then(Value::as_str).map(String::from);
         let albums: Vec<helios_vault::collections::Album> = self
             .focus
@@ -4446,7 +4453,18 @@ impl Shell {
             let lib = self.focus.library.borrow();
             let list: Vec<Value> = albums
                 .iter()
-                .map(|a| json!({ "id": a.id, "name": a.name, "count": lib.album_count(a) }))
+                .map(|a| {
+                    let mut item = json!({
+                        "id": a.id,
+                        "name": a.name,
+                        "kind": if a.is_smart() { SMART } else { ALBUM },
+                        "count": lib.album_count(a),
+                    });
+                    if let Some(rules) = &a.rules {
+                        item["rules"] = rules.to_json();
+                    }
+                    item
+                })
                 .collect();
             return Ok(json!({ "albums": list, "shown": lib.collection() }));
         }
@@ -4475,9 +4493,32 @@ impl Shell {
                 Err(e) => Err(e),
             },
         };
+        // A smart album's rules: `rules` (a tree), else the form's keys,
+        // else none given.
+        let rules = || -> Result<Option<helios_vault::rules::Rule>, String> {
+            if let Some(tree) = args.get("rules") {
+                return helios_vault::rules::Rule::parse(tree).map(Some);
+            }
+            if SmartForm::in_args(args) {
+                return SmartForm::from_args(args)?.rules().map(Some);
+            }
+            Ok(None)
+        };
         if command == CREATE {
+            let smart = match args.get("kind").and_then(Value::as_str) {
+                None => args.get("rules").is_some() || SmartForm::in_args(args),
+                Some(SMART) => true,
+                Some(ALBUM) => false,
+                Some(other) => return Err(format!("`kind`: `{other}` is album or smart")),
+            };
+            // Checked before a form opens: a fault is said at once.
+            let tree = if smart { rules()? } else { None };
             let Some(name) = name else {
-                self.album_form(CREATE, "");
+                if smart {
+                    self.smart_form(None, &SmartForm::of_default());
+                } else {
+                    self.album_form(CREATE, "");
+                }
                 return Ok(Value::Null);
             };
             if taken(name, "") {
@@ -4485,6 +4526,22 @@ impl Shell {
             }
             let id =
                 helios_vault::collections::album_key(name, |k| albums.iter().any(|a| a.id == k));
+            if smart {
+                let rules = tree.unwrap_or_else(|| {
+                    helios_vault::rules::Rule::group(helios_vault::rules::Match::All, Vec::new())
+                });
+                self.focus
+                    .library
+                    .borrow_mut()
+                    .edit_album(AlbumEdit::CreateSmart {
+                        id: id.clone(),
+                        name: name.to_string(),
+                        rules: rules.clone(),
+                    });
+                return Ok(
+                    json!({ "id": id, "name": name, "kind": SMART, "rules": rules.to_json() }),
+                );
+            }
             let mut lib = self.focus.library.borrow_mut();
             let images = images(&lib, true)?;
             let count = images.len();
@@ -4504,11 +4561,22 @@ impl Shell {
                 .album_renamed
                 .clone()
                 .ok_or("`id`: no album named")?,
+            None if command == RULES => self
+                .focus
+                .album_ruled
+                .clone()
+                .ok_or("`id`: no album named")?,
             None => return Err("`id`: no album named".into()),
         };
         let Some(album) = albums.iter().find(|a| a.id == id) else {
             return Err(format!("`id`: no album `{id}`"));
         };
+        if album.is_smart() && (command == ADD || command == REMOVE) {
+            return Err(format!(
+                "“{}” is a smart album: its rules choose its photos",
+                album.name
+            ));
+        }
         let mut lib = self.focus.library.borrow_mut();
         let edit = match command {
             RENAME => {
@@ -4528,6 +4596,26 @@ impl Shell {
                 }
             }
             DELETE => AlbumEdit::Delete { id },
+            RULES => {
+                let Some(current) = album.rules.clone() else {
+                    return Err(format!(
+                        "“{}” is not a smart album: it holds its photos",
+                        album.name
+                    ));
+                };
+                let Some(rules) = rules()? else {
+                    drop(lib);
+                    let form = SmartForm::of(&current).ok_or_else(|| {
+                        format!(
+                            "the rules of “{}” are more than the form shows: set them with `rules`",
+                            album.name
+                        )
+                    })?;
+                    self.smart_form(Some(id), &form);
+                    return Ok(Value::Null);
+                };
+                AlbumEdit::Rules { id, rules }
+            }
             ADD => AlbumEdit::Add {
                 images: images(&lib, false)?,
                 id,
@@ -4541,6 +4629,125 @@ impl Shell {
         let answer = json!({ "id": edit.id() });
         lib.edit_album(edit);
         Ok(answer)
+    }
+
+    /// Asks a smart album's conditions (`form` to start from): for a new
+    /// one (`id` none) with its name, then runs `library.collection.create`;
+    /// else `library.collection.rules` on that album.
+    fn smart_form(&mut self, id: Option<String>, form: &crate::smart_album::SmartForm) {
+        use crate::dialogs::Field;
+        use crate::smart_album::{MATCHES, SmartForm as F};
+        use helios_values::Descriptor as D;
+        let creating = id.is_none();
+        self.focus.album_ruled = id;
+        let mut fields = Vec::new();
+        let mut field = |key: &str, descriptor: D, value: helios_core::Value| {
+            fields.push(Field {
+                key: key.into(),
+                descriptor,
+                value,
+            });
+        };
+        let label = |s: &Self, message: Message| s.text(message);
+        let text = |s: &str| helios_core::Value::Text(s.to_string());
+        let choice = |s: &str| helios_core::Value::Choice(s.to_string());
+        if creating {
+            field(
+                "name",
+                D::text(
+                    &label(self, Message::new("gui-library-album-name", "name")),
+                    "",
+                ),
+                text(""),
+            );
+        }
+        let mode = if form.any { "any" } else { "all" };
+        field(
+            "match",
+            D::choice(
+                &label(self, Message::new("gui-smart-match", "match")),
+                &MATCHES,
+                "all",
+            ),
+            choice(mode),
+        );
+        field(
+            "rating",
+            D::int(
+                &label(self, Message::new("gui-smart-rating", "at least (stars)")),
+                0,
+                5,
+                0,
+            ),
+            helios_core::Value::Int(form.rating),
+        );
+        field(
+            "label",
+            D::choice(
+                &label(self, Message::new("gui-smart-label", "colour label")),
+                &F::labels(),
+                crate::smart_album::ANY,
+            ),
+            choice(&form.label),
+        );
+        field(
+            "flag",
+            D::choice(
+                &label(self, Message::new("gui-smart-flag", "flag")),
+                &F::flags(),
+                crate::smart_album::ANY,
+            ),
+            choice(&form.flag),
+        );
+        for (key, message, value) in [
+            ("tag", Message::new("gui-smart-tag", "tag"), &form.tag),
+            (
+                "camera",
+                Message::new("gui-smart-camera", "camera (contains)"),
+                &form.camera,
+            ),
+            (
+                "file_type",
+                Message::new("gui-smart-file-type", "file type"),
+                &form.file_type,
+            ),
+            (
+                "folder",
+                Message::new("gui-smart-folder", "folder (absolute)"),
+                &form.folder,
+            ),
+            (
+                "taken_from",
+                Message::new("gui-smart-taken-from", "taken from (YYYY-MM-DD)"),
+                &form.taken_from,
+            ),
+            (
+                "taken_to",
+                Message::new("gui-smart-taken-to", "taken to (YYYY-MM-DD)"),
+                &form.taken_to,
+            ),
+        ] {
+            field(key, D::text(&label(self, message), ""), text(value));
+        }
+        let (title, verb, command) = if creating {
+            (
+                Message::new("gui-smart-new-title", "New smart album"),
+                Message::new("gui-library-album-new-verb", "Create"),
+                crate::library::COLLECTION_CREATE_COMMAND,
+            )
+        } else {
+            (
+                Message::new("gui-smart-rules-title", "The smart album's rules"),
+                Message::new("gui-smart-rules-verb", "Apply"),
+                crate::library::COLLECTION_RULES_COMMAND,
+            )
+        };
+        self.form(crate::dialogs::Form {
+            title: self.text(title),
+            fields,
+            verb: self.text(verb),
+            command: command.into(),
+        });
     }
 
     /// Asks an album's name (`current` to start from), then runs `command`

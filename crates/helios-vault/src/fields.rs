@@ -515,6 +515,9 @@ pub struct Query {
     /// In this album (its id in [`crate::collections::COLLECTIONS`]); an
     /// album that is not there holds no photo.
     pub album: Option<String>,
+    /// Passing a smart album's rule tree ([`crate::rules`]): each store
+    /// compiles it into its own query, no photo is tested apart.
+    pub rules: Option<crate::rules::Rule>,
     /// Present, offline or missing as one of these ([`Presence::of`]).
     pub presence: Vec<Presence>,
     /// Backed up in one of these states against a strategy.

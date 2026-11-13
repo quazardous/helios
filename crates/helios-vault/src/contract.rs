@@ -54,6 +54,8 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     folders_count_their_photos_and_those_below_in_one_query(make());
     albums_are_made_filled_renamed_and_forgotten(make());
     an_album_s_changes_are_undone_and_redone(make());
+    smart_album_rules_select_in_one_query(make());
+    smart_albums_scope_count_and_undo(make());
 }
 
 /// Capture fields are written whole by `set_captures` (a value not read
@@ -2285,4 +2287,184 @@ fn an_album_s_changes_are_undone_and_redone<S: Store>(s: S) {
     let kept = v.revert(&made).unwrap();
     assert_eq!(kept.kept, 1);
     assert_eq!(in_album(&v, "trip").len(), 3);
+}
+
+/// A smart album's rule tree (`docs/design/library.md`, L6) compiles into
+/// the one query a cursor opens with, whatever its nesting: each kind of
+/// field and operator, `all`, `any` and `none` groups, an empty group.
+fn smart_album_rules_select_in_one_query<S: Store>(s: S) {
+    use crate::rules::Rule;
+    let (v, ids, _) = library_fixture(s);
+    v.create_album(Some("trip"), "Trip", &[ids[2], ids[4]])
+        .unwrap();
+    let pick = |n: &[usize]| n.iter().map(|&i| ids[i]).collect::<Vec<_>>();
+    let run = |tree: serde_json::Value| {
+        let rules = Rule::parse(&tree).unwrap();
+        let q0 = v.reads().queries;
+        let cursor = v
+            .open_cursor(Query {
+                rules: Some(rules),
+                ..Query::default()
+            })
+            .unwrap();
+        assert_eq!(v.reads().queries - q0, 1, "{tree}: one query");
+        let got = v.cursor_ids(cursor.id, 0, 99).unwrap();
+        v.close_cursor(cursor.id);
+        got
+    };
+    let one = |field: &str, op: &str, value: serde_json::Value| {
+        run(json!({"match": "all", "rules": [{"field": field, "op": op, "value": value}]}))
+    };
+    let shots = Path::new(std::path::MAIN_SEPARATOR_STR)
+        .join("p")
+        .join("shots")
+        .display()
+        .to_string();
+    assert_eq!(one("rating", ">=", json!(3)), pick(&[0, 1]));
+    assert_eq!(
+        one("rating", "=", json!(0)),
+        pick(&[2, 3, 4]),
+        "unrated is 0"
+    );
+    assert_eq!(one("rating", "between", json!([1, 3])), pick(&[0, 1]));
+    assert_eq!(one("rating", "!=", json!(3)), pick(&[2, 3, 4]));
+    assert_eq!(one("label", "has", json!("red")), pick(&[0, 2]));
+    assert_eq!(one("label", "lacks", json!("red")), pick(&[1, 3, 4]));
+    assert_eq!(one("tag", "has", json!("Été")), pick(&[0]));
+    assert_eq!(one("flag", "is", json!("pick")), pick(&[1]));
+    assert_eq!(one("flag", "is_not", json!("none")), pick(&[1]));
+    assert_eq!(one("camera", "is", json!("Z 8")), pick(&[0, 1]));
+    assert_eq!(
+        one("camera", "contains", json!("z")),
+        pick(&[0, 1]),
+        "any case"
+    );
+    assert_eq!(one("camera", "is_not", json!("Z 8")), pick(&[2, 3, 4]));
+    assert_eq!(one("lens", "is", json!("L2")), pick(&[2]));
+    assert_eq!(one("file_type", "is", json!("nef")), pick(&[2]));
+    assert_eq!(one("iso", ">", json!(0)), pick(&[]), "no ISO: no match");
+    assert_eq!(one("folder", "in", json!(shots)), pick(&[0, 1, 3]));
+    assert_eq!(one("folder", "not_in", json!(shots)), pick(&[2, 4]));
+    assert_eq!(one("album", "in", json!("trip")), pick(&[2, 4]));
+    assert_eq!(one("album", "not_in", json!("trip")), pick(&[0, 1, 3]));
+    // Groups, nested.
+    assert_eq!(
+        run(json!({"match": "all", "rules": []})),
+        pick(&[0, 1, 2, 3, 4])
+    );
+    assert_eq!(run(json!({"match": "any", "rules": []})), pick(&[]));
+    assert_eq!(
+        run(json!({"match": "any", "rules": [
+            {"match": "all", "rules": [
+                {"field": "camera", "op": "is", "value": "Z 8"},
+                {"field": "flag", "op": "is", "value": "pick"},
+            ]},
+            {"field": "label", "op": "has", "value": "blue"},
+        ]})),
+        pick(&[1, 2])
+    );
+    assert_eq!(
+        run(json!({"match": "all", "rules": [
+            {"field": "folder", "op": "in", "value": shots},
+            {"match": "none", "rules": [
+                {"field": "rating", "op": ">=", "value": 3},
+                {"match": "any", "rules": [
+                    {"field": "file_type", "op": "is", "value": "jpg"},
+                ]},
+            ]},
+        ]})),
+        pick(&[3])
+    );
+}
+
+/// A smart album is a collection of its own kind: a query naming it runs
+/// its rules (one query, with the other terms), its count follows the
+/// photos, its rules are set as one step undone and redone; photos are
+/// never put in it, and rules that do not parse are refused.
+fn smart_albums_scope_count_and_undo<S: Store>(s: S) {
+    use crate::rules::{Match, Rule};
+    let (v, ids, _) = library_fixture(s);
+    let tree = |json: serde_json::Value| Rule::parse(&json).unwrap();
+    let rated =
+        tree(json!({"match": "all", "rules": [{"field": "rating", "op": ">=", "value": 3}]}));
+    let (a, made) = v.create_smart_album(None, "Best", rated.clone()).unwrap();
+    assert_eq!((a.id.as_str(), a.is_smart()), ("best", true));
+    assert!(
+        v.create_smart_album(None, "best", rated.clone()).is_err(),
+        "names are unique"
+    );
+    assert_eq!(in_album(&v, "best"), vec![ids[0], ids[1]]);
+    let q0 = v.reads().queries;
+    let c = v
+        .open_cursor(Query {
+            album: Some("best".into()),
+            cameras: vec!["Z 8".into()],
+            flags: vec!["pick".into()],
+            ..Query::default()
+        })
+        .unwrap();
+    assert_eq!(v.reads().queries - q0, 1, "one query");
+    assert_eq!(v.cursor_ids(c.id, 0, 9).unwrap(), vec![ids[1]]);
+    v.close_cursor(c.id);
+    let facets = v
+        .facets(
+            &Query {
+                album: Some("best".into()),
+                ..Query::default()
+            },
+            None,
+        )
+        .unwrap();
+    assert_eq!(facets.count("rating", "3"), 2, "{facets:?}");
+    let best = |v: &Vault<S>| {
+        v.albums()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == "best")
+            .unwrap()
+    };
+    assert_eq!(best(&v).count, Some(2));
+    // The count follows the photos.
+    v.apply(&[Command::set(ids[4], RATING, json!(5))], "user", None, 1)
+        .unwrap();
+    assert_eq!(best(&v).count, Some(3));
+    // Rules set as one step, undone and redone.
+    let red =
+        tree(json!({"match": "any", "rules": [{"field": "label", "op": "has", "value": "red"}]}));
+    let set = v.set_album_rules("best", red.clone()).unwrap();
+    assert_eq!(set.documents.len(), 1);
+    assert!(v.set_album_rules("best", red.clone()).unwrap().is_empty());
+    assert_eq!(in_album(&v, "best"), vec![ids[0], ids[2]]);
+    v.revert(&set).unwrap();
+    assert_eq!(best(&v).rules, Some(rated.clone()));
+    assert_eq!(in_album(&v, "best"), vec![ids[0], ids[1], ids[4]]);
+    v.replay(&set).unwrap();
+    assert_eq!(best(&v).rules, Some(red));
+    // Photos are never put in a smart album; a plain album takes no rules.
+    assert!(
+        v.add_to_album("best", &[ids[3]])
+            .unwrap_err()
+            .contains("smart")
+    );
+    assert!(v.remove_from_album("best", &[ids[0]]).is_err());
+    v.create_album(Some("trip"), "Trip", &[]).unwrap();
+    let empty = Rule::group(Match::All, Vec::new());
+    assert!(v.set_album_rules("trip", empty.clone()).is_err());
+    assert!(v.set_album_rules("nope", empty).is_err());
+    // Rules a hand wrote wrong: refused when run, with the reason.
+    let store_doc = json!({"kind": "smart", "name": "Bad", "rules":
+        {"match": "all", "rules": [{"field": "colour", "op": "is", "value": "red"}]}});
+    v.transaction(|s| s.set_document(crate::collections::COLLECTIONS, "bad", Some(&store_doc)))
+        .unwrap();
+    let e = v
+        .open_cursor(Query {
+            album: Some("bad".into()),
+            ..Query::default()
+        })
+        .unwrap_err();
+    assert!(e.contains("unknown field `colour`"), "{e}");
+    // Undoing back to the album's making forgets it.
+    v.revert(&set).unwrap();
+    v.revert(&made).unwrap();
+    assert!(v.album("best").unwrap().is_none());
 }

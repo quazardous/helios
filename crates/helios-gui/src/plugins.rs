@@ -101,6 +101,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.collection.list", "phosphor:list"),
     ("library.collection.remove", "minus"),
     ("library.collection.rename", "phosphor:pencil-simple"),
+    ("library.collection.rules", "phosphor:funnel"),
     ("library.compare", "phosphor:square-split-horizontal"),
     ("library.copyFiles", "copy"),
     ("library.export", "phosphor:export"),

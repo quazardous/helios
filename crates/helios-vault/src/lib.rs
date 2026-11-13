@@ -44,6 +44,7 @@ pub mod contract;
 pub mod edit;
 pub mod fields;
 pub mod journal;
+pub mod rules;
 pub mod settings;
 pub mod sightings;
 pub mod snapshots;
@@ -551,6 +552,10 @@ impl MemoryStore {
         query.min_rating.is_none_or(|min| rating >= min)
             && album_ok
             && query
+                .rules
+                .as_ref()
+                .is_none_or(|r| r.holds(&mut |c| self.condition_holds(id, c)))
+            && query
                 .label
                 .as_ref()
                 .is_none_or(|l| labels.contains(&l.as_str()))
@@ -569,6 +574,83 @@ impl MemoryStore {
                 .backup
                 .as_ref()
                 .is_none_or(|b| b.states.contains(&self.backup_state(id, &b.rule)))
+    }
+}
+
+impl MemoryStore {
+    /// Whether a photo passes one condition of a rule tree, as the SQL
+    /// driver compiles it.
+    fn condition_holds(&self, id: &ImageId, c: &rules::Condition) -> bool {
+        use rules::RuleKind;
+        let field = |name: &str| self.fields.get(&(*id, name.to_string()));
+        let yes = |name: &str| {
+            field(name)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        let positive = match c.field.kind {
+            RuleKind::Number => {
+                let n = field(c.field.field).and_then(serde_json::Value::as_f64);
+                let n = if c.field.field == fields::RATING {
+                    Some(n.unwrap_or(0.0))
+                } else {
+                    n
+                };
+                let Some(n) = n else {
+                    return false;
+                };
+                let v = c.number();
+                return match c.op {
+                    "=" => n == v,
+                    "!=" => n != v,
+                    "<" => n < v,
+                    "<=" => n <= v,
+                    ">" => n > v,
+                    ">=" => n >= v,
+                    _ => {
+                        let (low, high) = c.bounds();
+                        (low..=high).contains(&n)
+                    }
+                };
+            }
+            RuleKind::Set => self.items_of(id, c.field.field).contains(&c.text()),
+            RuleKind::Text => {
+                let v = self.text_of(id, c.field.field);
+                if c.op == "contains" {
+                    return v.is_some_and(|v| {
+                        fields::fold_case(v).contains(&fields::fold_case(c.text()))
+                    });
+                }
+                v == Some(c.text())
+            }
+            RuleKind::Flag => {
+                Query::flag_of(yes(fields::PICKED), yes(fields::REJECTED)) == c.text()
+            }
+            RuleKind::Folder => {
+                let prefix = folder_prefix(c.text());
+                self.sightings.iter().any(|s| {
+                    s.image.as_ref() == Some(id) && s.path.to_string_lossy().starts_with(&prefix)
+                })
+            }
+            RuleKind::Album => self
+                .documents
+                .get(&(collections::COLLECTIONS.to_string(), c.text().to_string()))
+                .and_then(|d| d.get("images"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|a| a.iter().any(|i| i.as_str() == Some(id.hex().as_str()))),
+        };
+        // `lacks`, `is_not`, `not_in`: the photo without the value too.
+        positive == matches!(c.op, "has" | "is" | "in" | "contains")
+    }
+
+    /// A query as this store runs it ([`rules::resolve`]).
+    fn resolved<'a>(&self, query: &'a Query) -> Result<std::borrow::Cow<'a, Query>, String> {
+        rules::resolve(query, |id| {
+            Ok(self
+                .documents
+                .get(&(collections::COLLECTIONS.to_string(), id.to_string()))
+                .cloned())
+        })
     }
 }
 
@@ -981,6 +1063,7 @@ impl Store for MemoryStore {
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
+        let query = &*self.resolved(query)?;
         query.check()?;
         let mut ids: Vec<ImageId> = self
             .images
@@ -993,6 +1076,7 @@ impl Store for MemoryStore {
     }
 
     fn facets(&self, query: &Query, backups: Option<&Backups>) -> Result<Facets, String> {
+        let query = &*self.resolved(query)?;
         query.check()?;
         let mut facets = Facets::default();
         for id in self
@@ -1034,6 +1118,7 @@ impl Store for MemoryStore {
 
     fn folders(&self, query: &Query) -> Result<VolumeFolders, String> {
         type Ids = BTreeMap<String, BTreeSet<ImageId>>;
+        let query = &*self.resolved(query)?;
         query.check()?;
         let mut images: BTreeMap<Option<VolumeId>, Ids> = BTreeMap::new();
         for s in &self.sightings {

@@ -257,19 +257,22 @@ command-library-collection-add =
     .title = Add photos to an album (`id`; `images`: ids, else the selection)
 
 command-library-collection-create =
-    .title = New album (`name`; `images`: ids, else the selection); without `name`, asks it. Answers its `id`
+    .title = New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys); without `name`, asks it. Answers its `id`
 
 command-library-collection-delete =
     .title = Delete an album (`id`); its photos stay in the library
 
 command-library-collection-list =
-    .title = List the albums: `id`, `name` and how many photos each holds
+    .title = List the albums: `id`, `name`, `kind` (album or smart), how many photos each holds, a smart album's `rules`
 
 command-library-collection-remove =
     .title = Remove photos from an album (`id`; `images`: ids, else the selection); they stay in the library
 
 command-library-collection-rename =
     .title = Rename an album (`id`, `name`); without `name`, asks it
+
+command-library-collection-rules =
+    .title = Set a smart album's rules (`id`; `rules`, a tree, or the form's keys); without them, asks them. Unknown fields and invalid rules are refused with the reason
 
 command-library-compare =
     .title = Compare photos side by side (`images`: ids, else the selection; two to four)

@@ -7,6 +7,12 @@
 //! so every window and every node sees the same; which one a window shows
 //! is that window's (a [`crate::Query::album`]).
 //!
+//! A **smart album** holds a rule tree instead of photos,
+//! `{ "kind": "smart", "name": "…", "rules": {"match": "all", …} }`
+//! ([`crate::rules`]): its photos are those the rules select, now, which
+//! each store reads in the same query when [`crate::Query::album`] names
+//! it.
+//!
 //! Each change answers what it changed as [`Changes`] holding the
 //! document before and after it, so the Library's undo takes it back
 //! ([`crate::Vault::revert`]) and puts it again ([`crate::Vault::replay`]).
@@ -14,31 +20,59 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::rules::Rule;
 use crate::undo::DocumentChange;
-use crate::{Changes, ImageId, Store, Vault};
+use crate::{Changes, ImageId, Query, Store, Vault};
 
 /// The collections' namespace.
 pub const COLLECTIONS: &str = "library/collections";
+/// A plain album's `kind`.
+pub const ALBUM: &str = "album";
+/// A smart album's `kind`.
+pub const SMART: &str = "smart";
 
-/// An album: a name and the photos put in it.
+/// An album: a name and the photos put in it, or for a smart album the
+/// rules choosing them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Album {
     /// Its key in [`COLLECTIONS`]: made from its first name
     /// ([`album_key`]), kept when it is renamed.
     pub id: String,
     pub name: String,
-    /// Its photos, by id, in the order they were added.
+    /// Its photos, by id, in the order they were added (none for a smart
+    /// album).
     pub images: Vec<String>,
+    /// A smart album's rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Rule>,
+    /// How many photos of the Library a smart album selects, when
+    /// [`Vault::albums`] read it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<usize>,
 }
 
 impl Album {
+    /// Whether it is a smart album.
+    pub fn is_smart(&self) -> bool {
+        self.rules.is_some()
+    }
+
     fn of(id: &str, doc: &Value) -> Option<Album> {
-        if doc.get("kind").and_then(Value::as_str) != Some("album") {
-            return None;
-        }
+        let rules = match doc.get("kind").and_then(Value::as_str) {
+            Some(ALBUM) => None,
+            // A tree that does not parse (written by hand) is shown as
+            // an empty `all` group; the store refuses to run it.
+            Some(SMART) => Some(
+                Rule::parse(doc.get("rules").unwrap_or(&Value::Null))
+                    .unwrap_or_else(|_| Rule::group(crate::rules::Match::All, Vec::new())),
+            ),
+            _ => return None,
+        };
         Some(Album {
             id: id.to_string(),
             name: doc.get("name").and_then(Value::as_str)?.to_string(),
+            rules,
+            count: None,
             images: doc
                 .get("images")
                 .and_then(Value::as_array)
@@ -53,7 +87,10 @@ impl Album {
     }
 
     fn doc(&self) -> Value {
-        json!({ "kind": "album", "name": self.name, "images": self.images })
+        match &self.rules {
+            Some(rules) => json!({ "kind": SMART, "name": self.name, "rules": rules.to_json() }),
+            None => json!({ "kind": ALBUM, "name": self.name, "images": self.images }),
+        }
     }
 }
 
@@ -121,9 +158,19 @@ fn check_free<S: Store + ?Sized>(store: &S, name: &str, id: &str) -> Result<(), 
 }
 
 impl<S: Store> Vault<S> {
-    /// Every album, by name.
+    /// Every album, by name; a smart album with how many photos of the
+    /// Library its rules select now (one store query each).
     pub fn albums(&self) -> Result<Vec<Album>, String> {
-        albums_of(&*self.store.lock().expect("store lock"))
+        let store = self.store.lock().expect("store lock");
+        let mut albums = albums_of(&*store)?;
+        for album in albums.iter_mut().filter(|a| a.is_smart()) {
+            let query = Query {
+                album: Some(album.id.clone()),
+                ..Query::default()
+            };
+            album.count = store.select(&query).ok().map(|ids| ids.len());
+        }
+        Ok(albums)
     }
 
     /// An album by id.
@@ -143,6 +190,45 @@ impl<S: Store> Vault<S> {
         id: Option<&str>,
         name: &str,
         images: &[ImageId],
+    ) -> Result<(Album, Changes), String> {
+        self.create_collection(id, name, images, None)
+    }
+
+    /// Makes a smart album named `name` choosing its photos by `rules`
+    /// (a group, [`crate::rules`]), under `id` or a key made from the
+    /// name, as [`Vault::create_album`].
+    pub fn create_smart_album(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        rules: Rule,
+    ) -> Result<(Album, Changes), String> {
+        if !matches!(rules, Rule::Group { .. }) {
+            return Err("a smart album's rules are a group".into());
+        }
+        self.create_collection(id, name, &[], Some(rules))
+    }
+
+    /// Sets a smart album's rules; the same again changes nothing.
+    pub fn set_album_rules(&self, id: &str, rules: Rule) -> Result<Changes, String> {
+        if !matches!(rules, Rule::Group { .. }) {
+            return Err("a smart album's rules are a group".into());
+        }
+        self.change_album(id, |_, album| {
+            if !album.is_smart() {
+                return Err(format!("`{id}` is not a smart album: it holds its photos"));
+            }
+            album.rules = Some(rules);
+            Ok(())
+        })
+    }
+
+    fn create_collection(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        images: &[ImageId],
+        rules: Option<Rule>,
     ) -> Result<(Album, Changes), String> {
         let name = album_name(name)?;
         self.transaction(|store| {
@@ -168,6 +254,8 @@ impl<S: Store> Vault<S> {
                 id,
                 name,
                 images: Vec::new(),
+                rules,
+                count: None,
             };
             for i in images {
                 let hex = i.hex();
@@ -205,6 +293,7 @@ impl<S: Store> Vault<S> {
     /// already stays where it is.
     pub fn add_to_album(&self, id: &str, images: &[ImageId]) -> Result<Changes, String> {
         self.change_album(id, |_, album| {
+            refuse_smart(album)?;
             for i in images {
                 let hex = i.hex();
                 if !album.images.contains(&hex) {
@@ -219,6 +308,7 @@ impl<S: Store> Vault<S> {
     pub fn remove_from_album(&self, id: &str, images: &[ImageId]) -> Result<Changes, String> {
         let gone: Vec<String> = images.iter().map(ImageId::hex).collect();
         self.change_album(id, |_, album| {
+            refuse_smart(album)?;
             album.images.retain(|i| !gone.contains(i));
             Ok(())
         })
@@ -239,6 +329,17 @@ impl<S: Store> Vault<S> {
             put(store, id, before, Some(album.doc()))
         })
     }
+}
+
+/// Refuses to put photos in or take them out of a smart album.
+fn refuse_smart(album: &Album) -> Result<(), String> {
+    if album.is_smart() {
+        return Err(format!(
+            "“{}” is a smart album: its rules choose its photos",
+            album.name
+        ));
+    }
+    Ok(())
 }
 
 /// Writes a collection's document, answering the change (none when it

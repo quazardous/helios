@@ -41,6 +41,7 @@ use helios_vault::capture::{CAMERA_MODEL, FILE_TYPE, LENS};
 use helios_vault::fields::{
     AuditEntry, Backups, Facets, LABELS, Order, PICKED, Query, RATING, REJECTED, Sort, TAGS,
 };
+use helios_vault::rules::{Condition, Match, Rule, RuleKind};
 use helios_vault::storage::VERIFIED;
 use helios_vault::storage::VolumeId;
 use helios_vault::{
@@ -963,6 +964,12 @@ fn matched_sql(
         );
         args.push(Sql::Text(album.clone()));
     }
+    // A smart album's rule tree: one boolean expression in the same
+    // statement.
+    if let Some(rule) = &query.rules {
+        sql.push_str(" AND ");
+        sql.push_str(&rule_sql(rule, &mut args));
+    }
     if !query.presence.is_empty() {
         let _ = write!(sql, " AND {PRESENCE} IN ({})", marks(query.presence.len()));
         args.extend(query.presence.iter().map(|p| Sql::Text(p.as_str().into())));
@@ -981,6 +988,115 @@ fn matched_sql(
         }
     }
     Ok((ctes.join(",\n"), sql, args))
+}
+
+/// A rule tree as one SQL expression on `i`, never NULL (each condition
+/// answers 0 or 1, so `none` negates what the memory store negates); its
+/// arguments pushed to `args` in the order of the text.
+fn rule_sql(rule: &Rule, args: &mut Vec<Sql>) -> String {
+    match rule {
+        Rule::Group { mode, rules } => {
+            if rules.is_empty() {
+                return if *mode == Match::Any { "0" } else { "1" }.into();
+            }
+            let parts: Vec<String> = rules.iter().map(|r| rule_sql(r, args)).collect();
+            match mode {
+                Match::All => format!("({})", parts.join(" AND ")),
+                Match::Any => format!("({})", parts.join(" OR ")),
+                Match::None => format!("NOT ({})", parts.join(" OR ")),
+            }
+        }
+        Rule::Condition(c) => condition_sql(c, args),
+    }
+}
+
+fn condition_sql(c: &Condition, args: &mut Vec<Sql>) -> String {
+    let field = c.field.field;
+    let positive = match c.field.kind {
+        RuleKind::Number => {
+            let test = if c.op == "between" {
+                let (low, high) = c.bounds();
+                args.push(Sql::Real(low));
+                args.push(Sql::Real(high));
+                "BETWEEN ? AND ?".to_string()
+            } else {
+                args.push(Sql::Real(c.number()));
+                let op = if c.op == "=" { "==" } else { c.op };
+                format!("{op} ?")
+            };
+            // An unrated photo counts as 0; any other field missing never
+            // matches.
+            return if field == RATING {
+                format!(
+                    "(COALESCE((SELECT f.number FROM fields f WHERE f.image = i.id AND f.name = '{field}'), 0) {test})"
+                )
+            } else {
+                format!(
+                    "EXISTS (SELECT 1 FROM fields f WHERE f.image = i.id AND f.name = '{field}' AND f.number {test})"
+                )
+            };
+        }
+        RuleKind::Set => {
+            args.push(Sql::Text(c.text().to_string()));
+            format!(
+                "EXISTS (SELECT 1 FROM fields f, json_each(f.value) j
+                         WHERE f.image = i.id AND f.name = '{field}' AND j.value = ?)"
+            )
+        }
+        RuleKind::Text if c.op == "contains" => {
+            args.push(Sql::Text(helios_vault::fields::fold_case(c.text())));
+            return format!(
+                "EXISTS (SELECT 1 FROM fields f WHERE f.image = i.id AND f.name = '{field}'
+                         AND f.number IS NULL AND instr({FOLD}(json_extract(f.value, '$')), ?) > 0)"
+            );
+        }
+        RuleKind::Text => {
+            args.push(Sql::Text(Value::from(c.text()).to_string()));
+            format!(
+                "EXISTS (SELECT 1 FROM fields f WHERE f.image = i.id AND f.name = '{field}'
+                         AND f.number IS NULL AND f.value = ?)"
+            )
+        }
+        RuleKind::Flag => {
+            let yes = |name: &str| {
+                format!(
+                    "EXISTS (SELECT 1 FROM fields f WHERE f.image = i.id AND f.name = '{name}' AND f.value = 'true')"
+                )
+            };
+            let (picked, rejected) = (yes(PICKED), yes(REJECTED));
+            match c.text() {
+                "pick" => format!("({picked} AND NOT {rejected})"),
+                "reject" => rejected,
+                _ => format!("(NOT {picked} AND NOT {rejected})"),
+            }
+        }
+        RuleKind::Folder => {
+            let prefix = helios_vault::folder_prefix(c.text());
+            let mut end = prefix.clone();
+            let last = end
+                .pop()
+                .map_or('\0', |ch| char::from_u32(ch as u32 + 1).unwrap_or(ch));
+            end.push(last);
+            args.push(Sql::Text(prefix));
+            args.push(Sql::Text(end));
+            "EXISTS (SELECT 1 FROM sightings s WHERE s.image = i.id AND s.path >= ? AND s.path < ?)"
+                .to_string()
+        }
+        RuleKind::Album => {
+            args.push(Sql::Text(c.text().to_string()));
+            format!(
+                "EXISTS (SELECT 1 FROM documents d, json_each(d.value, '$.images') j
+                         WHERE d.ns = '{}' AND d.key = ? AND j.value = i.id)",
+                helios_vault::collections::COLLECTIONS
+            )
+        }
+    };
+    // `lacks`, `is_not`, `not_in`: the photo without the value too.
+    if matches!(c.op, "has" | "is" | "in") {
+        positive
+    } else {
+        format!("NOT {positive}")
+    }
 }
 
 /// The statement a query selects with, and its arguments.
@@ -1072,9 +1188,18 @@ fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
 }
 
 impl SqliteStore {
+    /// A query as this store runs it: a smart album's rules in place of
+    /// its id ([`helios_vault::rules::resolve`]).
+    fn resolved<'a>(&self, query: &'a Query) -> Result<std::borrow::Cow<'a, Query>, String> {
+        helios_vault::rules::resolve(query, |id| {
+            helios_vault::Store::document(self, helios_vault::collections::COLLECTIONS, id)
+        })
+    }
+
     /// The plan SQLite chooses for a query's select, one step a line:
     /// what a test reads to check an index serves it.
     pub fn explain_select(&self, query: &Query) -> Result<String, String> {
+        let query = &*self.resolved(query)?;
         let (sql, args) = select_sql(query)?;
         let mut statement = self
             .db
@@ -1633,6 +1758,7 @@ impl Store for SqliteStore {
     }
 
     fn facets(&self, query: &Query, backups: Option<&Backups>) -> Result<Facets, String> {
+        let query = &*self.resolved(query)?;
         let (sql, args) = facets_sql(query, backups)?;
         let mut statement = self.db.prepare(&sql).map_err(err)?;
         let rows = statement
@@ -1656,6 +1782,7 @@ impl Store for SqliteStore {
     }
 
     fn folders(&self, query: &Query) -> Result<helios_vault::VolumeFolders, String> {
+        let query = &*self.resolved(query)?;
         let (sql, args) = folders_sql(query)?;
         let mut statement = self.db.prepare(&sql).map_err(err)?;
         let rows = statement
@@ -1680,6 +1807,7 @@ impl Store for SqliteStore {
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
+        let query = &*self.resolved(query)?;
         let (sql, args) = select_sql(query)?;
         let mut statement = self.db.prepare(&sql).map_err(err)?;
         let ids = statement
