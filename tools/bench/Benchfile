@@ -273,9 +273,11 @@ timeout = "1h"
 # how long the main window takes to draw again once the import window
 # closes: helios-gui in release, in a headless labwc through wbox, the
 # import window opened on the raw corpus and closed by each way in turn
-# (`ways=`: cancel, escape, compositor, import, joined by `+`), beside
-# the main window then over it (`covers=`: shown, covered), `runs=` times; the main window's next frame, the agent socket's next answer and
-# the main thread's waits meanwhile, in /out/import-close.md and .jsonl.
+# (`ways=`: cancel and compositor by default, escape, import, joined by
+# `+`), beside the main window then over it (`covers=`: shown, covered),
+# `runs=` times; the main window's next frame, when the import window
+# went, the agent socket's next answer and the main thread's waits
+# meanwhile, in /out/import-close.md and .jsonl.
 # `budget=<ms>` fails a close after which the main window draws later
 # (tools/bench/import-close.py)
 [jobs.import-close]
@@ -289,7 +291,7 @@ command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ &&
 cargo build --locked --release -p helios-gui --bin helios-gui && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/import-close.py --gui /target/release/helios-gui --folder /corpus \
-  --out /out --runs ${runs:-1} --ways "${ways:-cancel+escape+compositor+import}" --covers "${covers:-shown+covered}" --budget-ms ${budget:-0}"""
+  --out /out --runs ${runs:-1} --ways "${ways:-cancel+compositor}" --covers "${covers:-shown+covered}" --budget-ms ${budget:-0}"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "40m"

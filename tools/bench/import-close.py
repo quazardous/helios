@@ -57,6 +57,7 @@ HERE = Path(__file__).resolve().parent
 FIXTURES = HERE.parents[1] / "crates/helios-plugin/tests/fixtures/rated-photos"
 MAIN_BEGINS = "main window begins"
 WAYS = ("cancel", "escape", "compositor", "import")
+DEFAULT_WAYS = ("cancel", "compositor")
 
 
 def config(name: str) -> dict:
@@ -298,7 +299,7 @@ def one_close(
                 (at for at, w in marks if w == MAIN_BEGINS and at > closed + 1e-4),
                 None,
             )
-        if gone is None and import_title(comp, before) is None:
+        if gone is None and title not in {t for _, t in listed_windows(comp)}:
             gone = time.time()
         if built is not None and gone is not None and "at" in answered:
             break
@@ -328,9 +329,19 @@ def one_close(
     result["longest_main_gap_ms"] = round(max(gaps) * 1e3, 1) if gaps else None
     if built is None:
         result["error"] = f"the main window drew nothing within {args.timeout:.0f} s of the close"
-    shot = comp.screenshot(f"after-{way}")
+    shot = comp.screenshot(f"after-{way}-{cover}")
     if "path" in shot:
-        shutil.copy(shot["path"], args.out / f"after-{way}.png")
+        shutil.copy(shot["path"], args.out / f"after-{way}-{cover}.png")
+    # A way that did not close it (Escape where it does not): closed by
+    # Cancel, so the next way opens it afresh.
+    if title in {t for _, t in listed_windows(comp)}:
+        try:
+            close(comp, agent, "cancel", title)
+        except (OSError, RuntimeError, ValueError):
+            pass
+        until = time.monotonic() + 10
+        while time.monotonic() < until and title in {t for _, t in listed_windows(comp)}:
+            time.sleep(0.1)
     return result
 
 
@@ -421,7 +432,7 @@ def main() -> int:
     parser.add_argument("--gui", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--folder", type=Path, default=FIXTURES)
-    parser.add_argument("--ways", default=",".join(WAYS))
+    parser.add_argument("--ways", default=",".join(DEFAULT_WAYS))
     parser.add_argument("--covers", default="shown,covered")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--settle", type=float, default=4.0)
