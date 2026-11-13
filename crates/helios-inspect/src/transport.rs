@@ -7,10 +7,15 @@
 //!   accepted, and every connection must first present the session token
 //!   (`{"auth": "<token>"}`), which the server writes to a file readable by
 //!   its user only.
+//!
+//! An endpoint serves at most [`MAX_CONNECTIONS`] connections at once; one
+//! more is answered with a "too many connections" error line and closed.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, PoisonError};
 use std::thread;
 use std::time::Duration;
@@ -209,11 +214,18 @@ where
                 std::fs::remove_file(path)?;
             }
             let listener = UnixListener::bind(path)?;
+            let count = Arc::new(AtomicUsize::new(0));
             thread::spawn(move || {
-                for stream in listener.incoming().flatten() {
+                for mut stream in listener.incoming().flatten() {
+                    let Some(slot) = Slot::take(&count) else {
+                        let _ = stream.set_write_timeout(Some(REFUSE_WRITE));
+                        refuse(&mut stream);
+                        continue;
+                    };
                     let (handler, service) = (handler.clone(), service.clone());
                     let remembered = remembered.clone();
                     thread::spawn(move || {
+                        let _slot = slot;
                         if let Ok(reader) = stream.try_clone() {
                             let serve = Serve {
                                 handler: &*handler,
@@ -245,11 +257,18 @@ where
                 .to_string();
             let listener = TcpListener::bind(addr)?;
             let bound = listener.local_addr()?;
+            let count = Arc::new(AtomicUsize::new(0));
             thread::spawn(move || {
-                for stream in listener.incoming().flatten() {
+                for mut stream in listener.incoming().flatten() {
+                    let Some(slot) = Slot::take(&count) else {
+                        let _ = stream.set_write_timeout(Some(REFUSE_WRITE));
+                        refuse(&mut stream);
+                        continue;
+                    };
                     let (handler, token) = (handler.clone(), token.clone());
                     let (service, remembered) = (service.clone(), remembered.clone());
                     thread::spawn(move || {
+                        let _slot = slot;
                         if let Ok(reader) = stream.try_clone() {
                             let serve = Serve {
                                 handler: &*handler,
@@ -266,6 +285,47 @@ where
             })
         }
     }
+}
+
+/// The most connections one endpoint serves at once. The desktop holds
+/// some of its node's open (events, jobs it follows), and each agent's
+/// wait holds one while it waits.
+pub const MAX_CONNECTIONS: usize = 64;
+
+/// How long a refused connection's error line may take to write.
+const REFUSE_WRITE: Duration = Duration::from_secs(1);
+
+/// One of an endpoint's [`MAX_CONNECTIONS`] places, given back on drop.
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    /// A free place among `count`'s, or `None` when all are taken.
+    fn take(count: &Arc<AtomicUsize>) -> Option<Self> {
+        count
+            .fetch_update(SeqCst, SeqCst, |n| (n < MAX_CONNECTIONS).then_some(n + 1))
+            .ok()
+            .map(|_| Slot(count.clone()))
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, SeqCst);
+    }
+}
+
+/// Answers a connection over [`MAX_CONNECTIONS`], before closing it.
+fn refuse(stream: &mut impl Write) {
+    let _ = writeln!(
+        stream,
+        "{}",
+        json!({
+            "ok": false,
+            "error": format!(
+                "too many connections: this endpoint serves at most {MAX_CONNECTIONS} at once; close one and connect again"
+            ),
+        })
+    );
 }
 
 /// The connections this process serves, open now, and when one last

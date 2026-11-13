@@ -457,6 +457,19 @@ helios-mcp --read-root ~/Pictures --write-root ~/helios-agent
   (`-32600`, "request too large") without being parsed.
 - A `limit` (a tool's, or `params.limit` of `helios_command_run`) is at
   most 1,000 items; more is refused, page with `offset`.
+- A wait's `timeout_ms` (`helios_wait_event`, `helios_wait_idle`,
+  `helios_ai_jobs_wait`, or `params.timeout_ms` of `helios_command_run`)
+  is at most 600,000 ms (10 minutes); more is refused, wait again.
+- A batch holds at most 256 steps (`items` of `helios_workflow_submit`, or
+  `params.items`); more is refused, send the rest in another call (the
+  same network and settings extend the same run).
+- An image in an answer (`{mime, width, height, base64}`, a workshop's
+  proxy) is at most 2048 px on its long edge and 5 MiB. A larger one keeps
+  its size but its `base64` is null, and a note says "Image left out" with
+  why.
+- Every endpoint of a node (and of the desktop) serves at most 64
+  connections at once; one more is answered "too many connections" and
+  closed.
 - In an answer, a list holds at most 1,000 items and the text at most
   8 MiB. Past either it is cut, never silently: a note after the JSON says
   "Truncated, N more items" and which list, or the text ends with

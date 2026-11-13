@@ -76,10 +76,12 @@
 //! the node" means it was not sent.
 //!
 //! Caps and untrusted text (`crate::caps`): a request is at most 1 MiB,
-//! a `limit` at most 1,000 items; an answer's lists and text are cut to
-//! their caps with a "truncated, N more" note after the JSON, and text
-//! from photos' metadata or files (titles, tags, camera strings, paths)
-//! is named in a note as data, never instructions.
+//! a `limit` at most 1,000 items, a wait's `timeout_ms` at most 10
+//! minutes, a batch at most 256 `items`; an answer's lists and text are
+//! cut to their caps with a "truncated, N more" note after the JSON, an
+//! image over 2048 px on its long edge or 5 MiB is left out with a note
+//! saying why, and text from photos' metadata or files (titles, tags,
+//! camera strings, paths) is named in a note as data, never instructions.
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
@@ -2748,7 +2750,7 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
     };
-    if let Err(e) = caps::check_limit(&request) {
+    if let Err(e) = caps::check_request(&request) {
         return tool_result(format!("{}: {e}", tool.name), true);
     }
     if let Err(e) = confine(&sockets.roots, tool, &request) {
@@ -3223,6 +3225,42 @@ mod tests {
             answer,
             json!(
                 "helios_workflow_items: `limit` 5000 is over the cap of 1000 items: page with `offset`"
+            )
+        );
+    }
+
+    #[test]
+    fn a_wait_or_a_batch_over_the_cap_is_refused_before_the_node() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+        };
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_wait_idle",
+            json!({ "timeout_ms": 86_400_000 }),
+        );
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(
+                "helios_wait_idle: `timeout_ms` 86400000 is over the cap of 600000 ms (10 minutes): wait again rather than longer"
+            )
+        );
+        let items = vec![json!("/photos/a.raf"); 300];
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_workflow_submit",
+            json!({ "items": items, "out": "/photos/out", "format": "jpeg" }),
+        );
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(
+                "helios_workflow_submit: `items` holds 300 steps, over the cap of 256 per batch: send the rest in another call"
             )
         );
     }
