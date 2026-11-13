@@ -13,7 +13,7 @@ const NS: &str = "config";
 impl<S: Store> Vault<S> {
     /// A configuration layer's TOML text, if the vault keeps one.
     pub fn config_layer(&self, name: &str) -> Result<Option<String>, String> {
-        let doc = self.store.lock().expect("store lock").document(NS, name)?;
+        let doc = self.read(|s| s.document(NS, name))?;
         doc.map(|d| {
             d.get("toml")
                 .and_then(|t| t.as_str())

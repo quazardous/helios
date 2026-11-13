@@ -78,7 +78,7 @@ impl<S: Store> Vault<S> {
     /// # Errors
     /// The store cannot be read.
     pub fn content(&self, id: &ImageId) -> Result<Option<Content>, String> {
-        read(&*self.store.lock().expect("store lock"), id)
+        self.read(|store| read(store, id))
     }
 
     /// The content an image's file holds now: its id, unless a change
@@ -149,21 +149,22 @@ impl<S: Store> Vault<S> {
     /// # Errors
     /// The store cannot be read.
     pub fn changed_outside_images(&self) -> Result<Vec<(ImageId, u64)>, String> {
-        let store = self.store.lock().expect("store lock");
-        let mut out = Vec::new();
-        for (key, doc) in store.documents(CONTENT)? {
-            let content: Content =
-                serde_json::from_value(doc).map_err(|e| format!("content of {key}: {e}"))?;
-            let Some(at) = content.changed_outside else {
-                continue;
-            };
-            let id = ImageId::from_hex(&key)?;
-            if store.library_flag(&id)?.is_some_and(|f| f.in_library) {
-                out.push((id, at));
+        self.read(|store| {
+            let mut out = Vec::new();
+            for (key, doc) in store.documents(CONTENT)? {
+                let content: Content =
+                    serde_json::from_value(doc).map_err(|e| format!("content of {key}: {e}"))?;
+                let Some(at) = content.changed_outside else {
+                    continue;
+                };
+                let id = ImageId::from_hex(&key)?;
+                if store.library_flag(&id)?.is_some_and(|f| f.in_library) {
+                    out.push((id, at));
+                }
             }
-        }
-        out.sort_by_key(|(id, at)| (*at, *id));
-        Ok(out)
+            out.sort_by_key(|(id, at)| (*at, *id));
+            Ok(out)
+        })
     }
 
     /// Clears the mark "changed outside Helios" of `ids`, or of every

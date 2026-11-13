@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 use helios_core::{ContentHash, Describe};
 use serde::Serialize;
@@ -380,6 +380,27 @@ pub trait Store: Send {
     /// refused. Reads go on. Closing twice does nothing more.
     fn shut_down(&mut self) -> Result<(), String> {
         Ok(())
+    }
+
+    /// Another handle on the same rows, for reads only, whose reads do not
+    /// wait for this store's writes (a second connection to a database
+    /// with a write-ahead log). `None`, the default, when the store cannot
+    /// have one (rows in memory): the vault then reads through this store.
+    fn reader(&self) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    /// Runs `f` on one committed state of the store: every read it makes
+    /// sees the same rows, whatever another handle commits meanwhile. A
+    /// store whose handle is the only writer has nothing to do.
+    fn view<T>(&self, f: impl FnOnce(&Self) -> Result<T, String>) -> Result<T, String>
+    where
+        Self: Sized,
+    {
+        f(self)
     }
 }
 
@@ -1341,8 +1362,67 @@ fn partial_read(path: &Path, size: u64) -> Result<(ContentHash, u64), String> {
     Ok((ContentHash(*hasher.finalize().as_bytes()), read))
 }
 
+/// How many read handles a vault keeps beside its writer, when its store
+/// can have them ([`Store::reader`]).
+pub const READERS: usize = 4;
+
+/// The vault's read handles: a read takes an idle one, or waits for one.
+struct Readers<S> {
+    idle: Mutex<Vec<S>>,
+    freed: Condvar,
+}
+
+/// A read handle taken from [`Readers`], given back when dropped (even
+/// when the read panics).
+struct Lent<'a, S> {
+    readers: &'a Readers<S>,
+    store: Option<S>,
+}
+
+impl<S> std::ops::Deref for Lent<'_, S> {
+    type Target = S;
+
+    fn deref(&self) -> &S {
+        self.store.as_ref().expect("a lent reader")
+    }
+}
+
+impl<S> Drop for Lent<'_, S> {
+    fn drop(&mut self) {
+        if let Some(store) = self.store.take() {
+            self.readers.idle.lock().expect("readers lock").push(store);
+            self.readers.freed.notify_one();
+        }
+    }
+}
+
+impl<S> Readers<S> {
+    fn take(&self) -> Lent<'_, S> {
+        let mut idle = self.idle.lock().expect("readers lock");
+        loop {
+            if let Some(store) = idle.pop() {
+                return Lent {
+                    readers: self,
+                    store: Some(store),
+                };
+            }
+            idle = self.freed.wait(idle).expect("readers lock");
+        }
+    }
+}
+
+/// The vault: rows in a [`Store`], behind one writer.
+///
+/// Every write goes through the one store handle, in turn. A store that
+/// can have read handles ([`Store::reader`], a database with a
+/// write-ahead log) gets [`READERS`] of them: a read that is not part of
+/// a write runs on one, on one committed state ([`Store::view`]), and
+/// waits for no write, however long. Without them, reads take their turn
+/// on the writer, as writes do.
 pub struct Vault<S: Store> {
     store: Mutex<S>,
+    /// The read handles; none when the store has none.
+    readers: Option<Readers<S>>,
     reads: Mutex<Reads>,
     catalog: Mutex<catalog::State>,
     bus: Option<std::sync::Arc<helios_core::Bus>>,
@@ -1350,11 +1430,38 @@ pub struct Vault<S: Store> {
 
 impl<S: Store> Vault<S> {
     pub fn new(store: S) -> Self {
+        let handles: Vec<S> = std::iter::from_fn(|| store.reader())
+            .take(READERS)
+            .collect();
+        let readers = if handles.is_empty() {
+            None
+        } else {
+            Some(Readers {
+                idle: Mutex::new(handles),
+                freed: Condvar::new(),
+            })
+        };
         Self {
             store: Mutex::new(store),
+            readers,
             reads: Mutex::new(Reads::default()),
             catalog: Mutex::new(catalog::State::default()),
             bus: None,
+        }
+    }
+
+    /// Whether reads run on read handles of their own, beside the writer.
+    pub fn has_readers(&self) -> bool {
+        self.readers.is_some()
+    }
+
+    /// Runs `f`, a read that is not part of a write, on a read handle (on
+    /// one committed state), else on the writer: it sees every write
+    /// committed before it starts.
+    pub(crate) fn read<T>(&self, f: impl FnOnce(&S) -> Result<T, String>) -> Result<T, String> {
+        match &self.readers {
+            Some(readers) => readers.take().view(f),
+            None => f(&self.store.lock().expect("store lock")),
         }
     }
 
@@ -1402,16 +1509,16 @@ impl<S: Store> Vault<S> {
     }
 
     pub fn image(&self, id: &ImageId) -> Result<Option<Image>, String> {
-        self.store.lock().expect("store lock").image(id)
+        self.read(|s| s.image(id))
     }
 
     pub fn images(&self) -> Result<Vec<Image>, String> {
-        self.store.lock().expect("store lock").images()
+        self.read(Store::images)
     }
 
     /// An image's locations: one store query, counted in [`Vault::reads`].
     pub fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String> {
-        let locations = self.store.lock().expect("store lock").locations(id)?;
+        let locations = self.read(|s| s.locations(id))?;
         self.reads.lock().expect("reads lock").queries += 1;
         Ok(locations)
     }
@@ -1440,7 +1547,7 @@ impl<S: Store> Vault<S> {
         let mut report = ImportReport::default();
         for path in image_files(root)? {
             let (size, modified) = stat(&path)?;
-            let known = self.store.lock().expect("store lock").at_path(&path)?;
+            let known = self.read(|s| s.at_path(&path))?;
             if let Some((id, location)) = &known
                 && location.size == size
                 && location.modified == modified
@@ -1492,7 +1599,7 @@ impl<S: Store> Vault<S> {
     pub fn import_file(&self, path: &Path, now: u64) -> Result<ImageId, String> {
         let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let (size, modified) = stat(&path)?;
-        let known = self.store.lock().expect("store lock").at_path(&path)?;
+        let known = self.read(|s| s.at_path(&path))?;
         if let Some((id, location)) = known
             && location.size == size
             && location.modified == modified
@@ -1522,7 +1629,7 @@ impl<S: Store> Vault<S> {
 
     /// The image a path is known as, with what was seen there.
     pub fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String> {
-        self.store.lock().expect("store lock").at_path(path)
+        self.read(|s| s.at_path(path))
     }
 
     /// Records a file whose content hash the caller has just computed
@@ -1574,7 +1681,7 @@ impl<S: Store> Vault<S> {
 
     /// Every location, with its image.
     pub fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
-        self.store.lock().expect("store lock").all_locations()
+        self.read(Store::all_locations)
     }
 
     /// Writes locations a scan changed (their volume, path inside it,
@@ -1617,7 +1724,7 @@ impl<S: Store> Vault<S> {
         let mut report = RepairReport::default();
         // The images whose copies this pass changed.
         let mut placed = Vec::new();
-        let locations = self.store.lock().expect("store lock").all_locations()?;
+        let locations = self.read(Store::all_locations)?;
         for (id, location) in &locations {
             if !location.present() {
                 continue;
@@ -1637,8 +1744,7 @@ impl<S: Store> Vault<S> {
                 report.lost += 1;
             }
         }
-        let mut missing: Vec<Image> = {
-            let store = self.store.lock().expect("store lock");
+        let mut missing: Vec<Image> = self.read(|store| {
             let mut missing = Vec::new();
             for image in store.images()? {
                 if store
@@ -1649,14 +1755,14 @@ impl<S: Store> Vault<S> {
                     missing.push(image);
                 }
             }
-            missing
-        };
+            Ok(missing)
+        })?;
         for root in roots {
             for path in image_files(root)? {
                 if missing.is_empty() {
                     break;
                 }
-                let known = self.store.lock().expect("store lock").at_path(&path)?;
+                let known = self.read(|s| s.at_path(&path))?;
                 if known.is_some_and(|(_, l)| l.presence != Presence::Missing) {
                     continue;
                 }
@@ -1694,9 +1800,14 @@ impl<S: Store> Vault<S> {
 
 impl<S: Store> Describe for Vault<S> {
     fn describe(&self) -> serde_json::Value {
-        let store = self.store.lock().expect("store lock");
-        let images = store.images().map_or(0, |i| i.len());
-        let locations = store.all_locations().unwrap_or_default();
+        let (images, locations) = self
+            .read(|store| {
+                Ok((
+                    store.images().map_or(0, |i| i.len()),
+                    store.all_locations().unwrap_or_default(),
+                ))
+            })
+            .unwrap_or_default();
         let count = |p: Presence| locations.iter().filter(|(_, l)| l.presence == p).count();
         json!({
             "images": images,

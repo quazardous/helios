@@ -123,8 +123,7 @@ pub struct Replayed {
 impl<S: Store> Vault<S> {
     /// An image's rows, as [`Changes`] records them.
     pub fn rows(&self, id: &ImageId) -> Result<Option<ImageRows>, String> {
-        let store = self.store.lock().expect("store lock");
-        rows_of(&*store, id)
+        self.read(|store| rows_of(store, id))
     }
 
     /// Brings the images of `changes` back to their rows before it.

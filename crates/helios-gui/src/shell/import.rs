@@ -157,6 +157,23 @@ impl Shell {
         self.import_now(json!({ "paths": paths }), args, origin)
     }
 
+    /// An automatic import of `args`'s files (`paths`) from the saved
+    /// source named `source`: as `library.importFiles` without a question,
+    /// recorded in the import history as `auto:<source>`.
+    pub(super) fn import_files_automatically(
+        &mut self,
+        args: &Value,
+        source: &str,
+    ) -> Result<Value, String> {
+        self.can_import()?;
+        let paths = paths_of(&json!({ "paths": args["paths"] }));
+        if paths.is_empty() {
+            return Err("`paths` is missing".into());
+        }
+        let who = helios_library::auto_import::origin(source);
+        self.import_now_as(json!({ "paths": paths }), args, &Origin::User, who)
+    }
+
     /// `library.importWith`: an importer plugin's source (`source`)
     /// imported as the import dialog or the workspace's import source
     /// says; without a source, the dialog asks for it, a folder or a file
@@ -286,9 +303,22 @@ impl Shell {
     /// nothing is queued: the error says so.
     fn import_now(
         &mut self,
+        target: Value,
+        args: &Value,
+        origin: &Origin,
+    ) -> Result<Value, String> {
+        let who = crate::persist::who(origin);
+        self.import_now_as(target, args, origin, who)
+    }
+
+    /// [`Self::import_now`], recorded in the import history as asked by
+    /// `who`.
+    fn import_now_as(
+        &mut self,
         mut target: Value,
         args: &Value,
         origin: &Origin,
+        who: String,
     ) -> Result<Value, String> {
         self.can_import()?;
         let copy = args.get("copy").and_then(Value::as_bool);
@@ -308,7 +338,7 @@ impl Shell {
             target["darktable"] = json!(false);
         }
         // Run later as the user: who asked is said, for the history.
-        target["origin"] = json!(crate::persist::who(origin));
+        target["origin"] = json!(who);
         Ok(self.queue_import(target, copy, args))
     }
 
@@ -527,7 +557,7 @@ impl Shell {
                 .log
                 .borrow_mut()
                 .push(Level::Error, message.clone());
-            self.notify(Level::Error, message);
+            self.notify_unlogged(Level::Error, message);
             return;
         }
         let report = &line["ended"];
@@ -545,7 +575,7 @@ impl Shell {
                 .log
                 .borrow_mut()
                 .push(Level::Info, message.clone());
-            self.notify(Level::Info, message);
+            self.notify_unlogged(Level::Info, message);
             return;
         }
         if count("metadata") > 0 {
@@ -585,7 +615,7 @@ impl Shell {
         };
         self.core.log.borrow_mut().push(level, message.clone());
         if level == Level::Warning {
-            self.notify(level, message);
+            self.notify_unlogged(level, message);
             return;
         }
         // Information alone has no toast: an import's end has a short one.

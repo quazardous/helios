@@ -289,10 +289,7 @@ impl<S: Store> Vault<S> {
 
     /// How far the backfill went; `None` before its first batch.
     pub fn backfill(&self) -> Result<Option<Backfill>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(BACKFILL_NS, BACKFILL_KEY)?
+        self.read(|s| s.document(BACKFILL_NS, BACKFILL_KEY))?
             .map(|v| serde_json::from_value(v).map_err(|e| e.to_string()))
             .transpose()
     }

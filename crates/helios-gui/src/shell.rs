@@ -209,6 +209,9 @@ enum Action {
     ImportSource(Value, Origin),
     /// Open the import window (`library.importWindow`'s arguments).
     ImportWindow(Value),
+    /// Pause or resume the automatic imports
+    /// (`library.importAutomatic.pause`'s arguments).
+    PauseAutomaticImports(Value),
     /// Open the Calibration focus (`calibrate.open`'s arguments).
     Calibrate(Value),
     /// `import.addSource` or `import.reconnect`, with its arguments.
@@ -1749,8 +1752,8 @@ impl Shell {
             Some((_, gpu)) if gpu.handles().device == rs.device => {
                 self.focus.viewport.borrow().attach_gpu(gpu);
             }
-            _ => eprintln!(
-                "helios-gui: the window draws on another device than the process's GPU: \
+            _ => log::warn!(
+                "the window draws on another device than the process's GPU: \
                  the viewport computes on the CPU"
             ),
         }
@@ -3161,6 +3164,14 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                import_auto::PAUSE,
+                "Pause automatic imports, or resume them (`on`: true pauses, false resumes; without it, toggles)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::PauseAutomaticImports(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 calibrate_focus::COMMAND,
                 "Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)",
                 "Calibration",
@@ -3893,10 +3904,18 @@ impl Shell {
     }
 
     /// Shows a notice, in the shell's language: the status bar always, a
-    /// toast unless it is plain information. Kept in `notes` too.
+    /// toast unless it is plain information. Kept in `notes` too, and
+    /// written to the log file in English (target `helios`).
     /// An error offers its details (see [`Shell::notify_failure`]).
     pub fn notify(&mut self, level: Level, text: impl Into<Message>) {
         let message = text.into();
+        crate::log_panel::write(level, &message);
+        self.notify_unlogged(level, message);
+    }
+
+    /// [`Shell::notify`] for a message the Log panel has already taken,
+    /// and so written to the log file.
+    pub(crate) fn notify_unlogged(&mut self, level: Level, message: Message) {
         let report = (level == Level::Error)
             .then(|| crate::report::Context::default().cause(message.english.clone()));
         self.notify_with(level, message, report);
@@ -3910,7 +3929,9 @@ impl Shell {
         text: impl Into<Message>,
         report: crate::report::Context,
     ) {
-        self.notify_with(level, text.into(), Some(report));
+        let message = text.into();
+        crate::log_panel::write(level, &message);
+        self.notify_with(level, message, Some(report));
     }
 
     fn notify_with(
@@ -5972,6 +5993,7 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
+            Action::PauseAutomaticImports(args) => return self.pause_automatic_imports(&args),
             Action::Calibrate(args) => {
                 self.open_calibration(&args);
                 return Ok(Value::Null);

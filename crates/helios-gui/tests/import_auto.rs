@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use egui::vec2;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use helios_gui::node_volumes::VolumeWatch;
 use helios_gui::shell::{IMPORT_SOURCES, ImportTrigger};
 use helios_gui::{Shell, headless, helios_panels};
@@ -185,7 +186,7 @@ fn a_card_set_to_import_when_plugged_in_imports_its_new_photos_with_its_choices(
     let (node, bus, kept) = node_in(&dir);
     // The card saved with its own choices, set to import when plugged in.
     let doc = format!(
-        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {card:?}\nauto = \"plugged\"\n\n\
+        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {card:?}\nauto = \"plugged\"\nconfirmed = \"2026-11-13\"\n\n\
          [source.choices]\ncopy_folders = false\ninto = {into:?}\nlayout = \"month\"\n\
          rename = \"{{stem}}\"\nduplicates = \"keep\"\ndarktable = true\n"
     );
@@ -231,7 +232,9 @@ fn a_card_set_to_import_when_plugged_in_imports_its_new_photos_with_its_choices(
             "layout": "month",
             "rename": "{stem}",
             "duplicates": "skip",
-            "origin": "user",
+            // Who asked, for the import history: the automatic import
+            // of the source named Camera.
+            "origin": "auto:Camera",
         })
     );
     run_imports(&mut h, imports, &done);
@@ -286,7 +289,7 @@ fn a_folder_set_to_import_new_files_imports_a_file_dropped_in_once_settled_and_o
     // Another client saves the folder, set to import new files: the
     // shell follows it through the node.
     let doc = format!(
-        "[[source]]\nconnector = \"folder\"\nname = \"Hot folder\"\npath = {hot:?}\nauto = \"new-files\"\n"
+        "[[source]]\nconnector = \"folder\"\nname = \"Hot folder\"\npath = {hot:?}\nauto = \"new-files\"\nconfirmed = \"2026-11-13\"\n"
     );
     kept.write(IMPORT_SOURCES, &doc).unwrap();
     until(&mut h, "the source followed", |s| {
@@ -312,6 +315,7 @@ fn a_folder_set_to_import_new_files_imports_a_file_dropped_in_once_settled_and_o
     assert_eq!(imports[0]["paths"], json!([dropped]));
     assert_ne!(imports[0]["copy"], json!(true), "added where it is");
     assert_eq!(imports[0]["duplicates"], json!("skip"));
+    assert_eq!(imports[0]["origin"], json!("auto:Hot folder"));
     // Once: the next scans leave it alone.
     assert!(imports_during(&mut h, Duration::from_millis(800)).is_empty());
     // A second file: only it.
@@ -333,4 +337,205 @@ fn a_folder_set_to_import_new_files_imports_a_file_dropped_in_once_settled_and_o
     drop(h);
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A card `EOS_DIGITAL` holding two photos in `dir`, saved as a source
+/// imported when plugged in (`confirmed` or not), and a shell with a host
+/// importing into a vault, the card not plugged in yet.
+struct CardSetup {
+    dir: PathBuf,
+    card: PathBuf,
+    node: Node,
+    slot: Arc<Slot>,
+    vault: Arc<Vault<MemoryStore>>,
+    done: Arc<AtomicBool>,
+    h: Harness<'static, Shell>,
+}
+
+fn card_setup(name: &str, confirmed: bool) -> CardSetup {
+    let dir = temp(name);
+    let card = dir.join("EOS_DIGITAL");
+    let dcim = card.join("DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    std::fs::copy(jpeg("a"), dcim.join("IMG_0001.JPG")).unwrap();
+    std::fs::copy(jpeg("b"), dcim.join("IMG_0002.JPG")).unwrap();
+    let (node, bus, kept) = node_in(&dir);
+    let confirmed = if confirmed {
+        "confirmed = \"2026-11-13\"\n"
+    } else {
+        ""
+    };
+    // the path quoted as a TOML string
+    let path = card.display().to_string();
+    // Its own choices: copied into a folder of the test's.
+    let into = dir.join("photos").display().to_string();
+    let doc = format!(
+        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {path:?}\nauto = \"plugged\"\n{confirmed}\n\
+         [source.choices]\ncopy_folders = false\ninto = {into:?}\nlayout = \"month\"\n\
+         rename = \"{{stem}}\"\nduplicates = \"keep\"\ndarktable = true\n"
+    );
+    kept.write(IMPORT_SOURCES, &doc).unwrap();
+    let slot = Arc::new(Slot::default());
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let done = Arc::new(AtomicBool::new(false));
+    let h = shell_on(&kept, &bus, |shell| {
+        host_import(shell, &vault, &done);
+        shell.follow_volumes(VolumeWatch::start(
+            slot.clone(),
+            Arc::new(helios_core::Bus::new()),
+            Duration::from_millis(50),
+        ));
+    });
+    CardSetup {
+        dir,
+        card,
+        node,
+        slot,
+        vault,
+        done,
+        h,
+    }
+}
+
+impl CardSetup {
+    fn plug(&mut self) {
+        self.slot.0.lock().unwrap().push(Card {
+            label: "EOS_DIGITAL".into(),
+            root: self.card.clone(),
+            capacity: Some(64_000_000_000),
+        });
+        until(&mut self.h, "the card listed", |s| {
+            !s.import_cards().is_empty()
+        });
+    }
+
+    fn unplug(&mut self) {
+        self.slot.0.lock().unwrap().clear();
+        until(&mut self.h, "the card unplugged", |s| {
+            s.import_cards().is_empty()
+        });
+    }
+
+    fn said(&self, text: &str) -> bool {
+        self.h.state().notes.iter().any(|n| n.contains(text))
+    }
+
+    fn end(self) {
+        drop(self.h);
+        self.node.stop();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// One of the settings, an integer, as the Settings window writes it.
+fn setting_int(h: &mut Harness<'static, Shell>, id: &str, value: i64) {
+    use egui_pop::model::values::{Change, Set, Value as PopValue};
+    let store = h.state().app().handle().store();
+    store
+        .lock()
+        .unwrap()
+        .set(
+            Set::new(
+                &format!("settings/{id}"),
+                Change::To(PopValue::Int(value)),
+                egui_pop::model::commands::Origin::User,
+            )
+            .untracked(),
+        )
+        .unwrap();
+    h.step();
+}
+
+#[test]
+fn a_source_s_first_automatic_import_opens_the_import_window_where_import_confirms_it() {
+    let mut s = card_setup("first-run", false);
+    assert_eq!(s.h.state().import_sources()[0].confirmed, None);
+    // Plugged in for the first time: nothing imported, the import window
+    // opened on the card, saying why.
+    s.plug();
+    until(&mut s.h, "the import window opened", |s| {
+        s.import_window_open()
+    });
+    assert!(
+        s.said("First automatic import from Camera"),
+        "{:?}",
+        s.h.state().notes
+    );
+    until(&mut s.h, "the card read", |s| s.import_read());
+    assert!(s.h.state_mut().take_imports().is_empty());
+    // Import pressed there: imported, and confirmed.
+    s.h.get_by_label("Import 2").click();
+    let mut imports = Vec::new();
+    until(&mut s.h, "the window's import", |s| {
+        imports.extend(s.take_imports());
+        !imports.is_empty()
+    });
+    run_imports(&mut s.h, imports, &s.done);
+    assert_eq!(s.vault.images().unwrap().len(), 2);
+    until(&mut s.h, "the source confirmed", |s| {
+        s.import_sources()[0].confirmed.is_some()
+    });
+    // Plugged in again with a new photo: imported on its own, no window.
+    s.unplug();
+    std::fs::copy(jpeg("c"), s.card.join("DCIM/100CANON/IMG_0003.JPG")).unwrap();
+    s.plug();
+    let mut imports = Vec::new();
+    until(&mut s.h, "the card imported on its own", |s| {
+        imports.extend(s.take_imports());
+        !imports.is_empty()
+    });
+    assert!(!s.h.state().import_window_open());
+    assert_eq!(imports[0]["duplicates"], json!("skip"));
+    // Turned off then on again: to be confirmed again.
+    let card = s.card.clone();
+    s.h.state_mut().set_import_auto(&card, None);
+    s.h.state_mut()
+        .set_import_auto(&card, Some(ImportTrigger::Plugged));
+    s.h.step();
+    assert_eq!(s.h.state().import_sources()[0].confirmed, None);
+    s.end();
+}
+
+#[test]
+fn an_automatic_import_above_the_limit_asks_first_and_pausing_holds_them_all() {
+    let mut s = card_setup("ask", true);
+    // More photos than the limit: offered in a toast, not imported.
+    setting_int(&mut s.h, "import.automatic.ask_files", 1);
+    s.plug();
+    until(&mut s.h, "the question", |h| {
+        h.notes.iter().any(|n| n.contains("2 new photos"))
+    });
+    assert!(imports_during(&mut s.h, Duration::from_millis(300)).is_empty());
+    assert!(!s.h.state().import_window_open());
+    // Paused: nothing imported, said with Resume.
+    setting_int(&mut s.h, "import.automatic.ask_files", 0);
+    s.unplug();
+    s.h.state_mut()
+        .run(
+            "library.importAutomatic.pause",
+            json!({ "on": true }),
+            Origin::User,
+        )
+        .unwrap();
+    s.plug();
+    until(&mut s.h, "said paused", |h| {
+        h.notes
+            .iter()
+            .any(|n| n.contains("Automatic imports are paused: Camera not imported"))
+    });
+    assert!(imports_during(&mut s.h, Duration::from_millis(300)).is_empty());
+    // Resumed (the command toggles): plugged in again, imported.
+    s.unplug();
+    s.h.state_mut()
+        .run("library.importAutomatic.pause", Value::Null, Origin::User)
+        .unwrap();
+    s.plug();
+    let mut imports = Vec::new();
+    until(&mut s.h, "imported once resumed", |h| {
+        imports.extend(h.take_imports());
+        !imports.is_empty()
+    });
+    run_imports(&mut s.h, imports, &s.done);
+    assert_eq!(s.vault.images().unwrap().len(), 2);
+    s.end();
 }

@@ -15,8 +15,13 @@
 //! ([`Imported`], `library.imported`); the node hears it and starts the
 //! strategy's after-import backup, as the desktop does after its imports.
 //!
+//! The saved sources that import on their own (a card when plugged in, a
+//! folder when new files appear) are imported by the node once asked
+//! ([`VaultNode::run_automatic_imports`], [`crate::auto_import`]).
+//!
 //! [`VaultNode::stop`] is the process's end (SIGTERM, Ctrl-C): the
-//! volume watch stops, running backups are cancelled (the copy under way
+//! automatic imports stop (one under way cancelled), the volume watch
+//! stops, running backups are cancelled (the copy under way
 //! is recorded first), a health run under way ends, then the vault is
 //! flushed and marked closed cleanly.
 
@@ -31,6 +36,7 @@ use helios_core::jobs::Jobs;
 use helios_core::{Bus, Envelope, Event};
 use helios_health::runner::{Runner, Schedule};
 use helios_health::{Findings, Registry};
+use helios_library::auto_import::Timing;
 use helios_library::import::{self, Report};
 use helios_node_core::health::HealthInputs;
 use helios_node_core::jobs::{Backups, Health};
@@ -42,6 +48,8 @@ use helios_storage::strategy::Trigger;
 use helios_vault::Vault;
 use helios_vault_sqlite::SqliteStore;
 use serde_json::Value;
+
+use crate::auto_import::AutoImports;
 
 /// How often the node looks whether a health run is due (the desktop's
 /// pace).
@@ -181,6 +189,7 @@ pub struct VaultNode {
     health: Arc<Health>,
     importer: Importer,
     after_imports: AfterImports,
+    auto_imports: Option<AutoImports>,
 }
 
 impl VaultNode {
@@ -234,7 +243,24 @@ impl VaultNode {
             health,
             importer,
             after_imports,
+            auto_imports: None,
         }
+    }
+
+    /// Runs the saved sources' automatic imports from now on, with no
+    /// window: a card plugged in (one there now included), new files in a
+    /// watched folder, looked at every `timing.poll`
+    /// ([`crate::auto_import`]). Once: a second call does nothing.
+    pub fn run_automatic_imports(&mut self, timing: Timing) {
+        if self.auto_imports.is_some() {
+            return;
+        }
+        self.auto_imports = Some(AutoImports::start(
+            self.importer.clone(),
+            self.settings(),
+            &self.watch,
+            timing,
+        ));
     }
 
     /// The vault the node owns, for the process's users of it.
@@ -274,12 +300,15 @@ impl VaultNode {
         self.health.runner()
     }
 
-    /// Stops the node (the process ends): no import starts a backup any
-    /// more, the running backups cancelled
+    /// Stops the node (the process ends): the automatic imports stopped
+    /// (one under way cancelled), no import starts a backup any more, the running backups cancelled
     /// (their copy under way recorded), the health check's schedule
     /// stopped, then the vault flushed and marked closed cleanly. Waits
     /// for it.
     pub fn stop(mut self) {
+        if let Some(mut auto) = self.auto_imports.take() {
+            auto.stop();
+        }
         self.after_imports.stop();
         self.node.link().quit_cancelling_jobs();
         self.node.stop();

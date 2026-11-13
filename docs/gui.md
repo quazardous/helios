@@ -1272,8 +1272,22 @@ decides between the desktop and a toast.
 | Windows | `%LOCALAPPDATA%\helios\logs` | `%LOCALAPPDATA%\helios\crashes` |
 
 The log file rotates at 5 MiB (three older files kept), at the
-`developer.log_level` setting (`info` by default); egui-pop and the
-window's own warnings write to it. A panic writes a crash report (the
+`developer.log_level` setting (`info` by default). It is set up as the
+process starts, right after the single-instance check, so what Helios
+says before its window opens is in it too. Each line is a time, a level
+and a target, the crate or module that wrote it:
+
+- `helios`: every notice the window shows (status bar and toast) and
+  every Log panel entry, in English;
+- `helios_gui::…`, `helios_connect::…`, `helios_library::…` and Helios's
+  other crates: what they do for the user (`info`: an import, a picking,
+  an account connected) and what failed (`warn`, `error`: a picking
+  expired or refused, a step of a connection, a mask or preview that
+  could not be drawn);
+- `egui_pop` and third-party crates: the interface's own lines.
+
+A bug report attaches `helios.log`: it holds no token or password, and
+names a source by its kind, not by its account. A panic writes a crash report (the
 version, the system, the backtrace, the last log lines and journal
 events); the next start offers it in a toast. Nothing is sent. The
 debug bridge's `logs` collector gives the file, its level and its last
@@ -1293,9 +1307,7 @@ palette) opens the folder.
   Helios command has a system-wide key yet;
 - the window's app id (`helios-gui`) differs from the desktop file's
   name, which the Wayland global shortcuts portal and some notification
-  servers match on;
-- Helios's other crates write to the terminal (`eprintln!`), not to the
-  log file.
+  servers match on.
 
 ## Agents
 
