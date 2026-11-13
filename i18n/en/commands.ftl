@@ -415,6 +415,9 @@ command-network-remove =
 command-node-bypass =
     .title = Bypass a module or bring it back (`node`: the selected one by default; `on`: toggled by default)
 
+command-notice-details =
+    .title = Show a failure's details (`notice`: its index; the last failure by default)
+
 command-param-copyPath =
     .title = Copy a value's path (`path`)
 

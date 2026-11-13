@@ -288,6 +288,9 @@ command-network-remove =
 command-node-bypass =
     .title = Contourner un module ou le rétablir (`node` : le module sélectionné par défaut ; `on` : alterné par défaut)
 
+command-notice-details =
+    .title = Montrer les détails d’un échec (`notice` : son indice ; le dernier échec par défaut)
+
 command-param-copyPath =
     .title = Copier le chemin d’une valeur (`path`)
 

@@ -44,6 +44,10 @@ pub struct Notice {
     /// When it was shown, in the GUI's seconds.
     #[serde(skip)]
     pub at: f64,
+    /// What went wrong, for a failure: its "Details" action opens it as an
+    /// error dialog whose Copy button gives a bug report.
+    #[serde(skip)]
+    pub report: Option<crate::report::Context>,
 }
 
 /// A question before an action: the action is named by its verb, never
