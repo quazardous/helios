@@ -53,6 +53,7 @@ pub use helios_node_core::calibrate;
 pub use helios_node_core::cursor;
 pub use helios_node_core::library;
 pub mod mcp;
+pub mod roots;
 pub mod sandbox;
 pub mod vault_node;
 pub mod workflow;

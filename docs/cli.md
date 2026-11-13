@@ -415,6 +415,30 @@ way (`library.edit.head`, `library.edit.save`).
 
 Exit code 3 when no node can be reached or started.
 
+## The MCP server's roots
+
+`helios-mcp --read-root DIR` (repeatable) and `--write-root DIR` confine
+the paths an agent gives the tools: a file or folder is read only under a
+read root or the write root, and written only under the write root
+(exports, a run's output folder, a sandbox, a workspace edited, a vault
+opened). Anywhere else the call is refused with the path and the roots
+granted, before anything is sent to a node.
+
+- A path must be absolute and hold no `..`; links are followed before the
+  check, so a link leading out of a root is refused like its target, and
+  a link leading nowhere is refused.
+- A template's id (`source`) is not a path; a template folder is read.
+- `helios_command_run` does not say what a command does with a path: under
+  roots, every absolute path in its params must lie under the write root.
+- Left out, the configuration directory is the user's: a tool writing
+  there (`helios_workspace_save_as_template`, `helios_macro_publish`) is
+  refused unless the write root holds it; pass `config` under it.
+- Started without a root, the server is not confined.
+
+```bash
+helios-mcp --read-root ~/Pictures --write-root ~/helios-agent
+```
+
 ## Doctor
 
 ```sh

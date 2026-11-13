@@ -1,6 +1,11 @@
 //! `helios-mcp`: an MCP server (stdio) over a running node's endpoints.
 //!
 //!     helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE]
+//!                [--read-root DIR]... [--write-root DIR]
+//!
+//! With a root, the paths an agent gives a tool are confined: read under a
+//! read root or the write root, written under the write root, refused
+//! elsewhere (`helios_node::roots`). Without any, they are not confined.
 //!
 //! An address is a Unix socket path or `tcp://HOST:PORT` (with the node's
 //! session token, from `--token-file` or `HELIOS_TOKEN`).
@@ -17,17 +22,24 @@ use std::process::ExitCode;
 
 use helios_inspect::Address;
 use helios_node::mcp::{Sockets, handle};
+use helios_node::roots::Roots;
 use serde_json::{Value, json};
 
 fn main() -> ExitCode {
     let mut inspect = std::env::var("HELIOS_SOCKET").ok();
     let mut control = std::env::var("HELIOS_CONTROL_SOCKET").ok();
     let mut token = std::env::var("HELIOS_TOKEN").ok();
+    let mut read_roots = Vec::new();
+    let mut write_root: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match (arg.as_str(), args.next()) {
             ("--socket", Some(p)) => inspect = Some(p),
             ("--control", Some(p)) => control = Some(p),
+            ("--read-root", Some(d)) => read_roots.push(PathBuf::from(d)),
+            ("--write-root", Some(d)) if write_root.is_none() => {
+                write_root = Some(PathBuf::from(d));
+            }
             ("--token-file", Some(f)) => match std::fs::read_to_string(&f) {
                 Ok(t) => token = Some(t.trim().to_string()),
                 Err(e) => {
@@ -37,12 +49,19 @@ fn main() -> ExitCode {
             },
             _ => {
                 eprintln!(
-                    "usage: helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE]"
+                    "usage: helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE] [--read-root DIR]... [--write-root DIR]"
                 );
                 return ExitCode::from(2);
             }
         }
     }
+    let roots = match Roots::new(&read_roots, write_root.as_deref()) {
+        Ok(roots) => roots,
+        Err(e) => {
+            eprintln!("helios-mcp: {e}");
+            return ExitCode::from(2);
+        }
+    };
     let parse = |text: Option<String>| text.map(|t| Address::parse(&t, token.clone())).transpose();
     let (inspect, control) = match (parse(inspect), parse(control)) {
         (Ok(i), Ok(c)) => (i, c),
@@ -65,6 +84,7 @@ fn main() -> ExitCode {
         control,
         node_bin,
         ai: None,
+        roots,
     };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
