@@ -278,6 +278,8 @@ struct Node {
     first_export: Option<String>,
     /// Imports into the vault the node owns (`--vault`).
     importer: Option<helios_node::vault_node::Importer>,
+    /// The cursors its clients hold on the vault.
+    cursors: helios_node::cursor::Cursors,
     /// The settings layers the node keeps in that vault (`user`,
     /// `project/<folder>`).
     settings: Option<helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>>,
@@ -922,6 +924,12 @@ mod control {
         if let Some(reason) = disabled(node, scope, spec) {
             return refused(None, &reason);
         }
+        if helios_node::cursor::handles(id) {
+            return refused(
+                None,
+                &Message::plain(format!("`{id}` is served over JSON-RPC only, as a method")),
+            );
+        }
         if helios_node::calibrate::PROFILE_IDS.contains(&id) {
             node.bus.publish(SOURCE, None, &CommandRan { id, origin });
             let vault = node.importer.as_ref().map(|i| i.vault().as_ref());
@@ -1063,6 +1071,47 @@ mod control {
         pub instance: String,
     }
 
+    impl Rpc {
+        /// A cursor command (`helios_node::cursor`), on the node's vault.
+        fn cursor(&self, id: &str, params: &Value, call: &rpc::Call) -> Result<Value, rpc::Error> {
+            let mut params = params.clone();
+            if let Some(fields) = params.as_object_mut() {
+                fields.remove("_meta");
+            }
+            let spec = commands::registry()
+                .spec(id)
+                .ok_or_else(|| rpc::Error::method_not_found(id))?;
+            validate(&spec.params, &params).map_err(|e| {
+                rpc::Error::invalid_params(format!("`{id}` refused its params: {e}"))
+            })?;
+            let Some(importer) = &self.node.importer else {
+                return Err(rpc::Error::new(
+                    rpc::code::NEEDS_VAULT,
+                    "the node keeps no vault: start it with --vault",
+                ));
+            };
+            let mut answer = self.node.cursors.run(
+                importer.vault(),
+                id,
+                &params,
+                call,
+                std::time::Instant::now(),
+            )?;
+            answer["command"] = json!(id);
+            answer["seq"] = json!(self.node.bus.last_seq());
+            Ok(answer)
+        }
+    }
+
+    /// An answer stamped with the bus's sequence once it ran, unless it
+    /// carries one: a client's cache shows a write once it saw it.
+    fn with_seq(node: &Node, mut answer: Value) -> Value {
+        if answer.is_object() && answer.get("seq").is_none() {
+            answer["seq"] = json!(node.bus.last_seq());
+        }
+        answer
+    }
+
     impl rpc::Service for Rpc {
         fn call(&self, method: &str, params: Value, call: &rpc::Call) -> Result<Value, rpc::Error> {
             let mut params = params;
@@ -1092,15 +1141,22 @@ mod control {
                         Value::Null => json!({}),
                         v => v.clone(),
                     };
-                    rpc::from_answer(run(
+                    if helios_node::cursor::handles(id) {
+                        return self.cursor(id, &args, call);
+                    }
+                    rpc::from_answer(with_seq(
                         &self.node,
-                        self.scope,
-                        id,
-                        &args,
-                        origin,
-                        Some(call.cancel_flag()),
+                        run(
+                            &self.node,
+                            self.scope,
+                            id,
+                            &args,
+                            origin,
+                            Some(call.cancel_flag()),
+                        ),
                     ))
                 }
+                id if helios_node::cursor::handles(id) => self.cursor(id, &params, call),
                 id => {
                     let answer = run(
                         &self.node,
@@ -1118,14 +1174,15 @@ mod control {
                         let (node, batch) = (self.node.clone(), batch.to_string());
                         call.on_close(move || node.abandon_batch(&batch, "its client went away"));
                     }
-                    rpc::from_answer(answer)
+                    rpc::from_answer(with_seq(&self.node, answer))
                 }
             }
         }
 
-        /// An import stops before its next file.
+        /// An import stops before its next file, a cursor window between
+        /// chunks of rows.
         fn cancellable(&self, method: &str) -> bool {
-            method == "library.import"
+            method == "library.import" || method == "cursor.window"
         }
     }
 
@@ -2048,6 +2105,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         decisions: loaded.decisions.clone(),
         first_export: loaded.exports.first().map(|e| e.node.clone()),
         importer,
+        cursors: helios_node::cursor::Cursors::default(),
         settings,
     });
     // A batch whose client went without ending it ends on its own.

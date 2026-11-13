@@ -435,6 +435,27 @@ impl<S: Store> Vault<S> {
         Ok(delta)
     }
 
+    /// The catalog's version now: a cursor opened or refreshed at an older
+    /// one may no longer hold what its query selects.
+    pub fn catalog_version(&self) -> u64 {
+        self.catalog.lock().expect("catalog lock").version
+    }
+
+    /// A cursor's count and the version its snapshot was taken at; no
+    /// store query.
+    pub fn cursor_info(&self, cursor: CursorId) -> Result<CursorInfo, String> {
+        let catalog = self.catalog.lock().expect("catalog lock");
+        let c = catalog
+            .cursors
+            .get(&cursor.0)
+            .ok_or_else(|| format!("no cursor {}", cursor.0))?;
+        Ok(CursorInfo {
+            id: cursor,
+            count: c.ids.len(),
+            version: c.version,
+        })
+    }
+
     pub fn close_cursor(&self, cursor: CursorId) {
         self.catalog
             .lock()

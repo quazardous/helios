@@ -294,6 +294,7 @@ pub fn registry() -> &'static Registry {
         for spec in verbs()
             .into_iter()
             .chain(crate::library::specs())
+            .chain(crate::cursor::specs())
             .chain(crate::calibrate::profile_specs())
         {
             registry.register(spec).expect("each verb is declared once");

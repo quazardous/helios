@@ -10,6 +10,7 @@
 
 pub mod calibrate;
 pub mod commands;
+pub mod cursor;
 pub mod endpoint;
 pub mod health;
 pub mod jobs;
