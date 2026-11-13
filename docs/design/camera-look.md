@@ -5,7 +5,8 @@ a headless fit, then a module off by default) is accepted with the
 recommended answer to each question of section 8 (two modules, a 192 px
 proxy, the chart ruling the colour, the table inline, the fitter in
 `helios-calibrate`). Step 2, the headless fit, is in
-`helios_calibrate::look` without its hue/saturation table (section 5,
+`helios_calibrate::look`, its follow-up (the hue/saturation table, the
+Delta E 2000 refinement, near-black frames) included (section 5,
 "Built"); steps 3a and 3b are to do.
 
 Related notes: [calibration.md](calibration.md) (the chart profile,
@@ -498,9 +499,45 @@ made while building it:
   first refusal is the one reported. A grey scene gives a partial look
   without a matrix (`Gate::NotEnoughColour` in the report's notes), a
   black-and-white preview a tone-only look scored on lightness alone.
-- Not yet: the hue/saturation table (and its test 2, "the table earns its
-  place"), the matrix's refinement on Delta E 2000, and the tone-only
-  fallback for near-black frames. They are the follow-up, the same size.
+- The follow-up (fitter version 2) added the three stages left out:
+  - **Hue/saturation table** (`look::table`, `fit_table`): DNG's layout
+    and node order (72 hues × 5 saturations × 5 values; hue shift,
+    saturation scale, value scale), Gaussian kernels of 2.5°, 0.15 and
+    0.12, samples weighted by saturation, shrunk toward the identity, the
+    zero-saturation row the identity, luminance restored. Three choices
+    differ from LightCraft's: HSV is taken in the working space with each
+    channel divided by the neutral (not in linear ProPhoto), so the
+    neutral the matrix keeps has saturation 0 whatever it is; the value
+    axis reads the scene-linear value as `sqrt(v / (1 + v))`, since the
+    table sits before the tone curve where values pass 1; and every value
+    scale is 1, the luminance being restored after the table. The table
+    is fitted for full looks only, on the training pairs after the
+    matrix, and kept only when the completed look (tone and chroma
+    curves refitted) lowers the held-out mean by 2 % (test 2).
+  - **Delta E 2000 refinement** (`refine_matrix`): the linear matrix is
+    refined with the chart solver's Levenberg-Marquardt and its
+    neutral-keeping parametrisation (`solver::levenberg_marquardt`,
+    `assemble` and `orthogonal_basis`, now shared, the look's own copy
+    of the basis gone), on at most 1,024 training pairs picked evenly and
+    30 steps. Each render is scaled to the preview's luminance before
+    Delta E 2000: the lightness is the tone curve's, so the matrix stays
+    a colour stage, as the linear fit is. The refined matrix is kept when
+    its completed look has the lower held-out mean (`Report::refined`).
+  - **Near-black frames**: when the median preview luminance of the
+    training-side pairs is under 0.015, the pairs are taken down to 0.001,
+    the counts are doubled (512 pairs, 128 held out) and the look is tone
+    only, scored on lightness, with `Gate::NearBlack` in its notes.
+- The look and the calibration profile (`helios_calibrate::profile`, the
+  `chartprofile` module) stay two things. A profile is measured on a
+  chart, kept in the vault by its own format version and applied to
+  every photo it is chosen for; a look is fitted per file to the camera's
+  own rendering and copied into that file's edit with the fitter's
+  version. Both act right after `colorin` and keep the neutral; with a
+  profile on, the look's colour half (matrix and table) is off and its
+  tone half (tone and chroma curves) may run on top of the profile's
+  colours (Q3). They share the solver and Delta E 2000; the look compares
+  renders in `helios_photo::compare`'s D65 Lab, the profile the chart's
+  D50 references in `lab`.
 - `helios_load` reads a raw's embedded preview in the space the raw's
   Exif names (Adobe RGB for `ColorSpace` 2, or 0xFFFF with `R03`).
 

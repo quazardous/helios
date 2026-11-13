@@ -7,15 +7,20 @@
 //!
 //! 1. a 3×3 **matrix** keeping the neutral axis, on luminance-normalised
 //!    RGB so the tone stays out of it, ridge-regularised toward the
-//!    identity ([`fit_matrix`]);
-//! 2. a **tone curve** on luminance by quantile matching, monotone,
+//!    identity ([`fit_matrix`]), then refined on Delta E 2000 at the
+//!    preview's luminance with the chart solver's Levenberg-Marquardt
+//!    ([`refine_matrix`]), the refinement kept when it lowers the
+//!    held-out error;
+//! 2. a **hue/saturation table** in DNG's layout on what the matrix left,
+//!    kept only when it earns its place ([`fit_table`]);
+//! 3. a **tone curve** on luminance by quantile matching, monotone,
 //!    keeping black, its steepness bounded, applied as a luminance ratio
 //!    so hues are kept ([`fit_tone`]);
-//! 3. a **chroma curve**, a chroma ratio over display luminance, kept only
+//! 4. a **chroma curve**, a chroma ratio over display luminance, kept only
 //!    when it lowers the held-out error ([`fit_chroma`]).
 //!
-//! The hue/saturation table of the design (stage 2 there) comes in a
-//! follow-up; a look without it is complete.
+//! A black-and-white preview, or a near-black frame (most of the preview
+//! under [`thresholds::NEAR_BLACK`]), gets a tone curve alone.
 //!
 //! Every choice and gate is judged on held-out pixels taken in 8×8
 //! tiles ([`split`]), with Delta E 2000 against the preview, and the look
@@ -29,12 +34,20 @@ use helios_photo::color::{IDENTITY, Mat3, apply as mat_apply};
 use helios_photo::compare::{delta_e_2000, lab};
 use serde::{Deserialize, Serialize};
 
+use crate::solver::{assemble, levenberg_marquardt, normalise, orthogonal_basis};
+
+mod table;
 #[cfg(test)]
 mod tests;
 
+pub use table::{HUES, HueSatTable, SATURATIONS, VALUES, fit_table, value_coordinate};
+
 /// The fitter's version, stored in every [`Look`]: a later fitter changes
 /// no stored look.
-pub const FITTER_VERSION: u32 = 1;
+///
+/// 2: the hue/saturation table, the matrix refined on Delta E 2000, the
+/// tone-only look of near-black frames.
+pub const FITTER_VERSION: u32 = 2;
 
 /// The proxy's long edge, in pixels.
 pub const PROXY: usize = 192;
@@ -61,6 +74,12 @@ pub mod thresholds {
     pub const MIN_HELD_OUT: usize = 64;
     /// Preview luminance (linear) under which a pair is near black.
     pub const NEAR_BLACK: f64 = 0.015;
+    /// A frame is near black when the median preview luminance of its
+    /// pairs is under [`NEAR_BLACK`]: it gets a tone-only look, its pairs
+    /// taken from this lower floor.
+    pub const NEAR_BLACK_FLOOR: f64 = 0.001;
+    /// A near-black frame needs this many times the usual pair counts.
+    pub const NEAR_BLACK_COUNTS: usize = 2;
     /// Preview luminance (linear) from which a pair is a highlight, left
     /// out of the colour pairs.
     pub const HIGHLIGHT: f64 = 0.85;
@@ -172,7 +191,8 @@ pub enum Kind {
     /// Tone and chroma, the matrix at half weight (or none on a grey
     /// scene).
     Partial,
-    /// A tone curve alone: the camera's JPEG is black and white.
+    /// A tone curve alone: the camera's JPEG is black and white, or the
+    /// frame is near black.
     ToneOnly,
 }
 
@@ -208,6 +228,8 @@ pub enum Gate {
     NotEnoughColour,
     /// Tone only: the preview is black and white (a note).
     Monochrome,
+    /// Tone only: the frame is near black (a note).
+    NearBlack,
     TooSteep,
     NonFinite,
     ClipsHighlights,
@@ -233,6 +255,7 @@ impl Gate {
             Gate::Structure => "the preview is shifted or shows another frame",
             Gate::NotEnoughColour => "the picture has too little colour for a matrix",
             Gate::Monochrome => "the camera's JPEG is black and white",
+            Gate::NearBlack => "the picture is nearly black: tone only",
             Gate::TooSteep => "the camera's tone curve is too steep to follow",
             Gate::NonFinite => "the fit gave invalid numbers",
             Gate::ClipsHighlights => "the look would clip highlights the camera kept",
@@ -356,6 +379,9 @@ pub struct Report {
     pub attempt: Attempt,
     /// Gates that narrowed the look without refusing it.
     pub notes: Vec<Gate>,
+    /// The matrix is the Delta E 2000 refinement of the linear fit.
+    #[serde(default)]
+    pub refined: bool,
 }
 
 /// A fitted camera look: the numbers a render needs, with the fitter's
@@ -366,6 +392,10 @@ pub struct Look {
     pub kind: Kind,
     /// Scene-linear working RGB to working RGB, keeping the neutral.
     pub matrix: Mat3,
+    /// The hue/saturation table after the matrix, when it earned its
+    /// place.
+    #[serde(default)]
+    pub table: Option<HueSatTable>,
     pub tone: ToneCurve,
     pub chroma: Option<ChromaCurve>,
     pub report: Report,
@@ -374,16 +404,23 @@ pub struct Look {
 /// The reference render of a look: a scene-linear working RGB pixel to
 /// display-linear working RGB, in [0, 1].
 pub fn apply(look: &Look, rgb: [f64; 3]) -> [f64; 3] {
-    render(&look.matrix, &look.tone, look.chroma.as_ref(), rgb)
+    render(
+        &look.matrix,
+        look.table.as_ref(),
+        &look.tone,
+        look.chroma.as_ref(),
+        rgb,
+    )
 }
 
 fn render(
     matrix: &Mat3,
+    table: Option<&HueSatTable>,
     tone: &ToneCurve,
     chroma: Option<&ChromaCurve>,
     rgb: [f64; 3],
 ) -> [f64; 3] {
-    let o = toned(matrix, tone, rgb);
+    let o = toned(matrix, table, tone, rgb);
     let o = match chroma {
         Some(c) => chroma_applied(c, o),
         None => o,
@@ -391,9 +428,19 @@ fn render(
     o.map(|v| v.clamp(0.0, 1.0))
 }
 
-/// The matrix and the tone curve, before the chroma curve and unclamped.
-fn toned(matrix: &Mat3, tone: &ToneCurve, rgb: [f64; 3]) -> [f64; 3] {
+/// The colour stages: the matrix, then the table.
+fn coloured(matrix: &Mat3, table: Option<&HueSatTable>, rgb: [f64; 3]) -> [f64; 3] {
     let p = mat_apply(matrix, rgb);
+    match table {
+        Some(t) => t.apply(p),
+        None => p,
+    }
+}
+
+/// The colour stages and the tone curve, before the chroma curve and
+/// unclamped.
+fn toned(matrix: &Mat3, table: Option<&HueSatTable>, tone: &ToneCurve, rgb: [f64; 3]) -> [f64; 3] {
+    let p = coloured(matrix, table, rgb);
     let s = luma(p);
     if !positive(s) {
         return [0.0; 3];
@@ -460,6 +507,11 @@ impl Pairs {
 /// The pairs of `inputs`, held out by `held` ([`split`]); `keep`, when
 /// given, narrows them (the away-from-edges attempt).
 pub fn pairs(inputs: &LookInputs<'_>, held: &[bool], keep: Option<&[bool]>) -> Pairs {
+    pairs_from(inputs, held, keep, t::NEAR_BLACK)
+}
+
+/// [`pairs`], the near-black floor at `floor`.
+fn pairs_from(inputs: &LookInputs<'_>, held: &[bool], keep: Option<&[bool]>, floor: f64) -> Pairs {
     let mut out = Pairs::default();
     for i in 0..inputs.sensor.rgb.len() {
         let (x, y) = (inputs.sensor.rgb[i], inputs.preview.rgb[i]);
@@ -471,13 +523,13 @@ pub fn pairs(inputs: &LookInputs<'_>, held: &[bool], keep: Option<&[bool]>) -> P
         }
         let ly = luma(y);
         if held[i] {
-            if ly >= t::NEAR_BLACK {
+            if ly >= floor {
                 out.held.push(i);
             }
             continue;
         }
         out.tone.push(i);
-        if (t::NEAR_BLACK..t::HIGHLIGHT).contains(&ly) && !inputs.preview_clipped[i] {
+        if (floor..t::HIGHLIGHT).contains(&ly) && !inputs.preview_clipped[i] {
             out.train.push(i);
         }
     }
@@ -506,31 +558,6 @@ fn away_from_edges(sensor: &Proxy) -> Vec<bool> {
     out
 }
 
-/// An orthonormal basis of the plane orthogonal to `n`.
-fn orthogonal_basis(n: [f64; 3]) -> [[f64; 3]; 2] {
-    let norm = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-    let u = n.map(|v| v / norm);
-    // The axis least aligned with n.
-    let mut axis = 0;
-    for a in 1..3 {
-        if u[a].abs() < u[axis].abs() {
-            axis = a;
-        }
-    }
-    let mut e = [0.0; 3];
-    e[axis] = 1.0;
-    let dot = u[axis];
-    let b1 = [e[0] - dot * u[0], e[1] - dot * u[1], e[2] - dot * u[2]];
-    let len = (b1[0] * b1[0] + b1[1] * b1[1] + b1[2] * b1[2]).sqrt();
-    let b1 = b1.map(|v| v / len);
-    let b2 = [
-        u[1] * b1[2] - u[2] * b1[1],
-        u[2] * b1[0] - u[0] * b1[2],
-        u[0] * b1[1] - u[1] * b1[0],
-    ];
-    [b1, b2]
-}
-
 /// The ridge weight toward the identity, per unit of pair weight.
 const MATRIX_RIDGE: f64 = 1e-5;
 
@@ -541,7 +568,7 @@ const MATRIX_RIDGE: f64 = 1e-5;
 /// normalised by luminance), ridge-regularised toward the identity.
 /// `None` when the system is singular or a coefficient passes the bound.
 pub fn fit_matrix(sensor: &[[f64; 3]], preview: &[[f64; 3]], neutral: [f64; 3]) -> Option<Mat3> {
-    let basis = orthogonal_basis(neutral);
+    let basis = orthogonal_basis(normalise(neutral)?);
     let mut a = [[0.0; 6]; 6];
     let mut b = [0.0; 6];
     let mut weight = 0.0;
@@ -585,11 +612,68 @@ pub fn fit_matrix(sensor: &[[f64; 3]], preview: &[[f64; 3]], neutral: [f64; 3]) 
             *cell += c[i * 2] * basis[0][j] + c[i * 2 + 1] * basis[1][j];
         }
     }
-    let bounded = m
+    bounded(m)
+}
+
+fn bounded(m: Mat3) -> Option<Mat3> {
+    let ok = m
         .iter()
         .flatten()
         .all(|v| v.is_finite() && v.abs() <= t::MATRIX_BOUND);
-    bounded.then_some(m)
+    ok.then_some(m)
+}
+
+/// The pairs the Delta E 2000 refinement reads, at most: evenly picked.
+pub const REFINE_PAIRS: usize = 1024;
+
+/// The refinement's Levenberg-Marquardt steps, at most.
+pub const REFINE_ITERATIONS: usize = 30;
+
+/// The matrix `start` (keeping `neutral`) refined on Delta E 2000: the
+/// six unknowns of `P = start + U Bᵀ` (`B` orthogonal to the neutral, the
+/// chart solver's parametrisation, so the neutral stays kept) minimise
+/// `Σ ΔE00(Lab(P x scaled to the preview's luminance), Lab(y))²` by the
+/// chart solver's Levenberg-Marquardt. The lightness is the tone curve's,
+/// so the refinement weighs colour alone, as the linear fit does. `None`
+/// when no pair is usable or a coefficient leaves the bound.
+pub fn refine_matrix(
+    start: &Mat3,
+    sensor: &[[f64; 3]],
+    preview: &[[f64; 3]],
+    neutral: [f64; 3],
+) -> Option<Mat3> {
+    let basis = orthogonal_basis(normalise(neutral)?);
+    let stride = sensor.len().div_ceil(REFINE_PAIRS).max(1);
+    let picked: Vec<([f64; 3], f64, [f64; 3])> = sensor
+        .iter()
+        .zip(preview)
+        .step_by(stride)
+        .filter_map(|(&x, &y)| {
+            let (lx, ly) = (luma(x), luma(y));
+            (positive(lx) && positive(ly) && finite(x) && finite(y))
+                .then(|| (x.map(|v| v / lx), ly, lab(y)))
+        })
+        .collect();
+    if picked.is_empty() {
+        return None;
+    }
+    let residuals = |u: &[f64]| {
+        let m = assemble(start, &basis, u);
+        picked
+            .iter()
+            .map(|&(xh, ly, target)| {
+                let o = mat_apply(&m, xh);
+                let lo = luma(o);
+                if positive(lo) {
+                    delta_e_2000(lab(o.map(|v| v * ly / lo)), target)
+                } else {
+                    100.0
+                }
+            })
+            .collect()
+    };
+    let u = levenberg_marquardt(residuals, vec![0.0; 6], REFINE_ITERATIONS);
+    bounded(assemble(start, &basis, &u))
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -922,7 +1006,20 @@ pub fn fit(inputs: &LookInputs<'_>) -> Result<Look, Refusal> {
     let n = w * h;
     let held = split(w, h);
     let all = pairs(inputs, &held, None);
-    check_counts(&all)?;
+    // A near-black frame: a tone curve alone, from pairs down to a lower
+    // floor, with stricter counts.
+    let near_black = near_black(inputs, &all.tone);
+    let (floor, counts) = if near_black {
+        (t::NEAR_BLACK_FLOOR, t::NEAR_BLACK_COUNTS)
+    } else {
+        (t::NEAR_BLACK, 1)
+    };
+    let all = if near_black {
+        pairs_from(inputs, &held, None, floor)
+    } else {
+        all
+    };
+    check_counts(&all, counts)?;
     let sensor_clip = fraction(n, |i| inputs.clipped[i]);
     if sensor_clip > t::SENSOR_CLIP_MAX {
         return Err(Refusal::new(
@@ -986,22 +1083,25 @@ pub fn fit(inputs: &LookInputs<'_>) -> Result<Look, Refusal> {
             format!("correlation {corr:.2} at a shift of {shift:?} pixels"),
         ));
     }
-    let monochrome = fraction(n, |i| {
-        let p = inputs.preview.rgb[i];
-        finite(p) && {
-            let (lo, hi) = (p[0].min(p[1]).min(p[2]), p[0].max(p[1]).max(p[2]));
-            hi - lo > t::MONO_TOLERANCE
-        }
-    }) <= t::MONO_FRACTION;
-    let colour = !monochrome && enough_colour(inputs, &all.train);
+    let monochrome = !near_black
+        && fraction(n, |i| {
+            let p = inputs.preview.rgb[i];
+            finite(p) && {
+                let (lo, hi) = (p[0].min(p[1]).min(p[2]), p[0].max(p[1]).max(p[2]));
+                hi - lo > t::MONO_TOLERANCE
+            }
+        }) <= t::MONO_FRACTION;
+    let colour = !monochrome && !near_black && enough_colour(inputs, &all.train);
     let mut notes = Vec::new();
-    if monochrome {
+    if near_black {
+        notes.push(Gate::NearBlack);
+    } else if monochrome {
         notes.push(Gate::Monochrome);
     } else if !colour {
         notes.push(Gate::NotEnoughColour);
     }
     let edges = away_from_edges(inputs.sensor);
-    let kinds: &[Kind] = if monochrome {
+    let kinds: &[Kind] = if monochrome || near_black {
         &[Kind::ToneOnly]
     } else if colour {
         &[Kind::Full, Kind::Partial]
@@ -1018,9 +1118,9 @@ pub fn fit(inputs: &LookInputs<'_>) -> Result<Look, Refusal> {
     for attempt in [Attempt::AllPixels, Attempt::AwayFromEdges] {
         let p = match attempt {
             Attempt::AllPixels => all.clone(),
-            Attempt::AwayFromEdges => pairs(inputs, &held, Some(&edges)),
+            Attempt::AwayFromEdges => pairs_from(inputs, &held, Some(&edges), floor),
         };
-        if let Err(e) = check_counts(&p) {
+        if let Err(e) = check_counts(&p, counts) {
             first.get_or_insert(e);
             continue;
         }
@@ -1102,20 +1202,36 @@ fn check_preview(source: &Source) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn check_counts(p: &Pairs) -> Result<(), Refusal> {
-    if p.count() < t::MIN_PAIRS {
+/// The pair counts, at least `times` the usual minimums.
+fn check_counts(p: &Pairs, times: usize) -> Result<(), Refusal> {
+    let (pairs, held) = (t::MIN_PAIRS * times, t::MIN_HELD_OUT * times);
+    if p.count() < pairs {
         return Err(Refusal::new(
             Gate::TooFewPairs,
-            format!("{} usable pairs, under {}", p.count(), t::MIN_PAIRS),
+            format!("{} usable pairs, under {pairs}", p.count()),
         ));
     }
-    if p.held.len() < t::MIN_HELD_OUT {
+    if p.held.len() < held {
         return Err(Refusal::new(
             Gate::TooFewHeldOut,
-            format!("{} held-out pairs, under {}", p.held.len(), t::MIN_HELD_OUT),
+            format!("{} held-out pairs, under {held}", p.held.len()),
         ));
     }
     Ok(())
+}
+
+/// Whether the frame is near black: the median preview luminance of the
+/// tone pairs `idx` under [`thresholds::NEAR_BLACK`].
+fn near_black(inputs: &LookInputs<'_>, idx: &[usize]) -> bool {
+    if idx.is_empty() {
+        return false;
+    }
+    let l = sorted(
+        &idx.iter()
+            .map(|&i| luma(inputs.preview.rgb[i]))
+            .collect::<Vec<_>>(),
+    );
+    quantile(&l, 0.5) < t::NEAR_BLACK
 }
 
 /// Whether the training pairs carry colour enough for a matrix.
@@ -1171,32 +1287,42 @@ struct Context<'a> {
     colour: bool,
 }
 
+/// A look before its last gates: its stages and its held-out score.
+struct Candidate {
+    matrix: Mat3,
+    table: Option<HueSatTable>,
+    tone: ToneCurve,
+    chroma: Option<ChromaCurve>,
+    held_out: Score,
+}
+
+impl Candidate {
+    fn render(&self, rgb: [f64; 3]) -> [f64; 3] {
+        render(
+            &self.matrix,
+            self.table.as_ref(),
+            &self.tone,
+            self.chroma.as_ref(),
+            rgb,
+        )
+    }
+}
+
 impl Context<'_> {
-    fn try_look(&self, p: &Pairs, kind: Kind, attempt: Attempt) -> Result<Look, Refusal> {
+    /// The look completed after its colour stages: the tone curve, then
+    /// the chroma curve when it helps (none for a tone-only look), and
+    /// the held-out score.
+    fn complete(
+        &self,
+        p: &Pairs,
+        kind: Kind,
+        matrix: Mat3,
+        table: Option<HueSatTable>,
+    ) -> Result<Candidate, Refusal> {
         let inputs = self.inputs;
         let (sensor, preview) = (&inputs.sensor.rgb, &inputs.preview.rgb);
-        let pick = |v: &[[f64; 3]], idx: &[usize]| idx.iter().map(|&i| v[i]).collect::<Vec<_>>();
-        let matrix = match kind {
-            Kind::Full => fit_matrix(
-                &pick(sensor, &p.train),
-                &pick(preview, &p.train),
-                inputs.neutral,
-            )
-            .ok_or_else(|| Refusal::new(Gate::NotEnoughColour, "the matrix is ill-conditioned"))?,
-            Kind::Partial if self.colour => {
-                match fit_matrix(
-                    &pick(sensor, &p.train),
-                    &pick(preview, &p.train),
-                    inputs.neutral,
-                ) {
-                    Some(m) => std::array::from_fn(|r| {
-                        std::array::from_fn(|c| f64::midpoint(m[r][c], IDENTITY[r][c]))
-                    }),
-                    None => IDENTITY,
-                }
-            }
-            Kind::Partial | Kind::ToneOnly => IDENTITY,
-        };
+        let tab = table.as_ref();
+        // The table keeps the luminance: the tone curve reads the matrix's.
         let scene: Vec<f64> = p
             .tone
             .iter()
@@ -1207,7 +1333,7 @@ impl Context<'_> {
         let lightness = kind == Kind::ToneOnly;
         let held = &p.held;
         let without = score(&errors(
-            |i| render(&matrix, &tone, None, sensor[i]),
+            |i| render(&matrix, tab, &tone, None, sensor[i]),
             inputs.preview,
             held,
             lightness,
@@ -1223,11 +1349,12 @@ impl Context<'_> {
                 .collect();
             let toned_px: Vec<[f64; 3]> = fit_on
                 .iter()
-                .map(|&i| toned(&matrix, &tone, sensor[i]))
+                .map(|&i| toned(&matrix, tab, &tone, sensor[i]))
                 .collect();
-            fit_chroma(&toned_px, &pick(preview, &fit_on)).filter(|c| {
+            let targets: Vec<[f64; 3]> = fit_on.iter().map(|&i| preview[i]).collect();
+            fit_chroma(&toned_px, &targets).filter(|c| {
                 let with = score(&errors(
-                    |i| render(&matrix, &tone, Some(c), sensor[i]),
+                    |i| render(&matrix, tab, &tone, Some(c), sensor[i]),
                     inputs.preview,
                     held,
                     false,
@@ -1235,19 +1362,87 @@ impl Context<'_> {
                 with.mean < without.mean * (1.0 - t::KEEP_GAIN)
             })
         };
-        let rendered = |i: usize| render(&matrix, &tone, chroma.as_ref(), sensor[i]);
-        let held_out = score(&errors(rendered, inputs.preview, held, lightness));
+        let held_out = match &chroma {
+            Some(c) => score(&errors(
+                |i| render(&matrix, tab, &tone, Some(c), sensor[i]),
+                inputs.preview,
+                held,
+                false,
+            )),
+            None => without,
+        };
+        Ok(Candidate {
+            matrix,
+            table,
+            tone,
+            chroma,
+            held_out,
+        })
+    }
+
+    fn try_look(&self, p: &Pairs, kind: Kind, attempt: Attempt) -> Result<Look, Refusal> {
+        let inputs = self.inputs;
+        let (sensor, preview) = (&inputs.sensor.rgb, &inputs.preview.rgb);
+        let pick = |v: &[[f64; 3]], idx: &[usize]| idx.iter().map(|&i| v[i]).collect::<Vec<_>>();
+        let (train_x, train_y) = (pick(sensor, &p.train), pick(preview, &p.train));
+        let (matrix, refined) = match kind {
+            Kind::Full => {
+                let m = fit_matrix(&train_x, &train_y, inputs.neutral).ok_or_else(|| {
+                    Refusal::new(Gate::NotEnoughColour, "the matrix is ill-conditioned")
+                })?;
+                (m, refine_matrix(&m, &train_x, &train_y, inputs.neutral))
+            }
+            Kind::Partial if self.colour => {
+                let m = match fit_matrix(&train_x, &train_y, inputs.neutral) {
+                    Some(m) => std::array::from_fn(|r| {
+                        std::array::from_fn(|c| f64::midpoint(m[r][c], IDENTITY[r][c]))
+                    }),
+                    None => IDENTITY,
+                };
+                (m, None)
+            }
+            Kind::Partial | Kind::ToneOnly => (IDENTITY, None),
+        };
+        // The linear matrix, or its Delta E 2000 refinement when that
+        // lowers the held-out error.
+        let mut best = self.complete(p, kind, matrix, None)?;
+        let mut was_refined = false;
+        if let Some(m) = refined
+            && let Ok(c) = self.complete(p, kind, m, None)
+            && c.held_out.mean < best.held_out.mean
+        {
+            best = c;
+            was_refined = true;
+        }
+        // The table on what the matrix left, kept when it earns its place.
+        if kind == Kind::Full {
+            let scene: Vec<[f64; 3]> = train_x
+                .iter()
+                .map(|&x| mat_apply(&best.matrix, x))
+                .collect();
+            if let Some(table) = fit_table(&scene, &train_y, inputs.neutral)
+                && let Ok(c) = self.complete(p, kind, best.matrix, Some(table))
+                && c.held_out.mean < best.held_out.mean * (1.0 - t::KEEP_GAIN)
+            {
+                best = c;
+            }
+        }
+        let held = &p.held;
+        let lightness = kind == Kind::ToneOnly;
+        let held_out = best.held_out;
         let baseline = score(&errors(
             |i| inputs.baseline.rgb[i],
             inputs.preview,
             held,
             lightness,
         ));
-        let numbers = matrix
+        let numbers = best
+            .matrix
             .iter()
             .flatten()
-            .chain(tone.knots.iter().flatten())
-            .chain(chroma.iter().flat_map(|c| c.nodes.iter()));
+            .chain(best.table.iter().flat_map(table::numbers))
+            .chain(best.tone.knots.iter().flatten())
+            .chain(best.chroma.iter().flat_map(|c| c.nodes.iter()));
         if !held_out.mean.is_finite() || numbers.into_iter().any(|v| !v.is_finite()) {
             return Err(Refusal::new(
                 Gate::NonFinite,
@@ -1255,7 +1450,9 @@ impl Context<'_> {
             ));
         }
         let n = sensor.len();
-        let look_clip = fraction(n, |i| finite(sensor[i]) && clipped_render(rendered(i)));
+        let look_clip = fraction(n, |i| {
+            finite(sensor[i]) && clipped_render(best.render(sensor[i]))
+        });
         if clips_more(look_clip, self.sensor_clip_render, self.preview_clip) {
             return Err(Refusal::new(
                 Gate::ClipsHighlights,
@@ -1285,9 +1482,10 @@ impl Context<'_> {
         Ok(Look {
             version: FITTER_VERSION,
             kind,
-            matrix,
-            tone,
-            chroma,
+            matrix: best.matrix,
+            table: best.table,
+            tone: best.tone,
+            chroma: best.chroma,
             report: Report {
                 held_out,
                 baseline,
@@ -1295,6 +1493,7 @@ impl Context<'_> {
                 held_out_pairs: held.len(),
                 attempt,
                 notes: Vec::new(),
+                refined: was_refined,
             },
         })
     }
