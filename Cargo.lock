@@ -2851,6 +2851,7 @@ version = "0.87.0"
 dependencies = [
  "helios-connect",
  "helios-core",
+ "helios-health",
  "helios-shell",
  "log",
  "serde",
