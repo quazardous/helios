@@ -1487,6 +1487,8 @@ gui-rule-field-lens = lens
 
 gui-rule-field-make = camera make
 
+gui-rule-field-name = Field
+
 gui-rule-field-rating = rating
 
 gui-rule-field-shutter = shutter speed
@@ -1495,9 +1497,13 @@ gui-rule-field-tag = tag
 
 gui-rule-field-title = title
 
+gui-rule-high-name = Second value
+
 gui-rule-match-all = All
 
 gui-rule-match-any = Any
+
+gui-rule-match-name = Rules to match
 
 gui-rule-match-none = None
 
@@ -1527,6 +1533,8 @@ gui-rule-op-le = is at most
 
 gui-rule-op-lt = is below
 
+gui-rule-op-name = Comparison
+
 gui-rule-op-ne = is not
 
 gui-rule-op-not-in = is not in
@@ -1551,9 +1559,13 @@ gui-rule-unit-days = days
 
 gui-rule-unit-months = months
 
+gui-rule-unit-name = Unit
+
 gui-rule-unit-weeks = weeks
 
 gui-rule-up = Move up
+
+gui-rule-value-name = Value
 
 gui-scene-saved = viewport.scene saved to { $path }
 

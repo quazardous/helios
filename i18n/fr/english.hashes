@@ -973,12 +973,15 @@ gui-rule-field-iso b3ad656d0ec905f4
 gui-rule-field-label 81f370016b248557
 gui-rule-field-lens aa156bf8f144e67d
 gui-rule-field-make 18082023236d3d96
+gui-rule-field-name 469e61a809a227ff
 gui-rule-field-rating 10e47f92a6e185c6
 gui-rule-field-shutter b186fcc6d9402149
 gui-rule-field-tag 5234b8076c0fbbe3
 gui-rule-field-title 99865d5c698d8dc1
+gui-rule-high-name a0dc099f49845aaa
 gui-rule-match-all 32190eaf774f8552
 gui-rule-match-any 410bc2af7f1ac82d
+gui-rule-match-name 594cd008e784910a
 gui-rule-match-none ef460342e85aed8b
 gui-rule-of-rules ff10fd0b5c68370e
 gui-rule-op-between ca3a35a60c1ae529
@@ -993,6 +996,7 @@ gui-rule-op-is-not 54971b114b9ac206
 gui-rule-op-lacks 1934ce26394f6ff5
 gui-rule-op-le 79f655fd14f21e15
 gui-rule-op-lt b6f8f428b61745fa
+gui-rule-op-name bdb73ec26593b4f2
 gui-rule-op-ne 54971b114b9ac206
 gui-rule-op-not-in 2f30cf64b73f1fe7
 gui-rule-op-within 29b8aeb30a96d1b2
@@ -1005,8 +1009,10 @@ gui-rule-title 03cfcc86a27d6357
 gui-rule-undo cc7022a2d9050a57
 gui-rule-unit-days 86f18a2b7dfb7b88
 gui-rule-unit-months 2e24ba829e985e90
+gui-rule-unit-name f7714fa2f14a7fcf
 gui-rule-unit-weeks d73c1c8f6e6a4218
 gui-rule-up fb1761b9e307ec99
+gui-rule-value-name 2c5f8334d5a96db8
 gui-scene-saved 60fcaa10812571b8
 gui-scopes-blue 4993860c16de56cd
 gui-scopes-green e75b76ee627e2c3a

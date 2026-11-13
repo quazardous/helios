@@ -36,6 +36,13 @@ pub struct Words {
     periods: Vec<(&'static str, String)>,
     units: Vec<(Unit, String)>,
     and: String,
+    /// Screen reader names of the boxes that have no word beside them.
+    match_name: String,
+    field_name: String,
+    op_name: String,
+    value_name: String,
+    high_name: String,
+    unit_name: String,
 }
 
 impl Words {
@@ -129,7 +136,19 @@ impl Words {
                 ),
             ],
             and: t(Message::new("gui-rule-and", "and")),
+            match_name: t(Message::new("gui-rule-match-name", "Rules to match")),
+            field_name: t(Message::new("gui-rule-field-name", "Field")),
+            op_name: t(Message::new("gui-rule-op-name", "Comparison")),
+            value_name: t(Message::new("gui-rule-value-name", "Value")),
+            high_name: t(Message::new("gui-rule-high-name", "Second value")),
+            unit_name: t(Message::new("gui-rule-unit-name", "Unit")),
         }
+    }
+
+    /// Names `r` for screen readers (and tests) when no word beside it does.
+    fn name(ui: &egui::Ui, r: &egui::Response, name: &str) {
+        ui.ctx()
+            .accesskit_node_builder(r.id, |node| node.set_label(name));
     }
 
     fn of<'a, K: PartialEq>(list: &'a [(K, String)], key: &K) -> &'a str {
@@ -219,7 +238,7 @@ fn node(
         Node::Group { mode, rules } => {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt(("rule-match", path.clone()))
+                    let r = egui::ComboBox::from_id_salt(("rule-match", path.clone()))
                         .selected_text(Words::of(&words.matches, mode))
                         .show_ui(ui, |ui| {
                             for (m, w) in &words.matches {
@@ -229,7 +248,9 @@ fn node(
                                     );
                                 }
                             }
-                        });
+                        })
+                        .response;
+                    Words::name(ui, &r, &words.match_name);
                     ui.label(&words.of_rules);
                     if ui.small_button(&words.add_condition).clicked() {
                         *asked = Some(json!({ "edit": "add_condition", "at": at }));
@@ -261,7 +282,7 @@ fn node(
                     .find(|(f, _)| *f == d.field)
                     .map_or(d.field.as_str(), |(_, w)| w.as_str());
                 let field_id = id("field");
-                egui::ComboBox::from_id_salt(field_id)
+                let r = egui::ComboBox::from_id_salt(field_id)
                     .selected_text(field_word)
                     .show_ui(ui, |ui| {
                         for (f, w) in &words.fields {
@@ -269,7 +290,9 @@ fn node(
                                 *asked = Some(json!({ "edit": "field", "at": at, "field": f }));
                             }
                         }
-                    });
+                    })
+                    .response;
+                Words::name(ui, &r, &words.field_name);
                 let kind = rule_field(&d.field).ok().map(|f| f.kind);
                 if let Some(kind) = kind {
                     let op_word = words
@@ -277,7 +300,7 @@ fn node(
                         .iter()
                         .find(|(o, _)| *o == d.op)
                         .map_or(d.op.as_str(), |(_, w)| w.as_str());
-                    egui::ComboBox::from_id_salt(id("op"))
+                    let r = egui::ComboBox::from_id_salt(id("op"))
                         .selected_text(op_word)
                         .show_ui(ui, |ui| {
                             for o in kind.ops() {
@@ -290,7 +313,9 @@ fn node(
                                     *asked = Some(json!({ "edit": "op", "at": at, "op": o }));
                                 }
                             }
-                        });
+                        })
+                        .response;
+                    Words::name(ui, &r, &words.op_name);
                     value(ui, kind, d, &at, path, albums, words, asked);
                 }
                 moves(ui, path, siblings, words, asked);
@@ -322,6 +347,12 @@ fn value(
     let typed = |ui: &mut egui::Ui, text: &str, key: &str, width: f32| -> Option<Value> {
         let mut s = text.to_string();
         let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(width));
+        let name = if key == "high" {
+            &words.high_name
+        } else {
+            &words.value_name
+        };
+        Words::name(ui, &r, name);
         r.changed().then(|| {
             let mut args = json!({ "edit": "value", "at": at, "value": d.value });
             args[key] = json!(s);
@@ -334,7 +365,7 @@ fn value(
             .find(|(v, _)| *v == d.value)
             .map_or(d.value.as_str(), |(_, w)| w.as_str());
         let mut out = None;
-        egui::ComboBox::from_id_salt(salt)
+        let r = egui::ComboBox::from_id_salt(salt)
             .selected_text(shown)
             .show_ui(ui, |ui| {
                 for (v, w) in choices {
@@ -342,7 +373,9 @@ fn value(
                         out = Some(json!({ "edit": "value", "at": at, "value": v }));
                     }
                 }
-            });
+            })
+            .response;
+        Words::name(ui, &r, &words.value_name);
         out
     };
     let mut ask = |a: Option<Value>| {
@@ -360,7 +393,7 @@ fn value(
             if d.value == "last" {
                 ask(typed(ui, &d.high, "high", 48.0));
                 let unit = Unit::parse(&d.unit).unwrap_or(Unit::Days);
-                egui::ComboBox::from_id_salt(id("unit"))
+                let r = egui::ComboBox::from_id_salt(id("unit"))
                     .selected_text(Words::of(&words.units, &unit))
                     .show_ui(ui, |ui| {
                         for (u, w) in &words.units {
@@ -370,7 +403,9 @@ fn value(
                                 })));
                             }
                         }
-                    });
+                    })
+                    .response;
+                Words::name(ui, &r, &words.unit_name);
             }
         }
         (RuleKind::Number | RuleKind::Date, "between") => {
