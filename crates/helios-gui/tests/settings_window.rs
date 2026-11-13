@@ -350,3 +350,47 @@ fn closing_the_main_window_moves_the_settings_with_their_geometry_and_title_bar(
         "drawn in the main window"
     );
 }
+
+/// Quick settings asked in the import window (`Ctrl+Shift+Q`) open
+/// there, over the import window, and not in the main one.
+#[test]
+fn quick_settings_asked_in_the_import_window_open_there() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.state_mut().draw_frame(true);
+    h.run();
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the import window's own: {windows:?}");
+    let import = windows[0];
+    window_pass(&mut h, import, Pass::default());
+    window_pass(
+        &mut h,
+        import,
+        Pass {
+            events: vec![Event::Key {
+                key: egui::Key::Q,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            }],
+            ..Pass::default()
+        },
+    );
+    main_passes_in_the_back(&mut h, 2);
+    let nodes = window_pass(&mut h, import, Pass::default());
+    let admin = h.state().app().handle().service(&ADMIN).unwrap();
+    assert!(admin.quick_open_in(import), "open in the import window");
+    assert!(
+        !admin.quick_open_in(ViewportId::ROOT),
+        "not in the main window"
+    );
+    assert!(
+        nodes.iter().any(|n| n.name == "Often changed"),
+        "drawn in the import window"
+    );
+}
