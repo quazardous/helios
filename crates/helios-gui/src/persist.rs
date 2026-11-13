@@ -664,6 +664,30 @@ impl<S: Store> Persist<S> {
         self.editing.as_ref().map(|e| &e.session)
     }
 
+    /// Reads the Library's pinned and recent filters once, and writes
+    /// them back each time they change (`crate::recent_filters`): a
+    /// library document, outside the library's history.
+    fn keep_filter_history(&mut self, shell: &mut Shell) {
+        use crate::recent_filters::{FilterHistory, KEY, NS};
+        if shell.library_mut().take_filter_history_wanted() {
+            let read = self.vault.library_document(NS, KEY);
+            match read {
+                Ok(doc) => shell
+                    .library_mut()
+                    .set_filter_history(FilterHistory::of(doc.as_ref())),
+                Err(e) => shell.notify(Level::Warning, e),
+            }
+        }
+        let write = shell.library_mut().take_filter_history_write();
+        if let Some(history) = write
+            && let Err(e) = self
+                .vault
+                .set_library_document(NS, KEY, Some(&history.to_json()))
+        {
+            shell.notify(Level::Warning, e);
+        }
+    }
+
     /// Makes the album changes the library asked, each one step of the
     /// library's history; reads the albums again when that history moved
     /// (a change, an undo, a redo, an import).
@@ -737,6 +761,7 @@ impl<S: Store> Persist<S> {
                 ),
             }
         }
+        self.keep_filter_history(shell);
         let rev = history.rev();
         if rev != self.history_rev {
             self.history_rev = rev;

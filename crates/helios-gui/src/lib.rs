@@ -59,6 +59,7 @@ pub mod preview;
 pub mod queue;
 pub mod quick_open;
 pub mod quit;
+pub mod recent_filters;
 pub mod relay;
 pub mod report;
 pub mod rule_editor;

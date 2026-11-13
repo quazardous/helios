@@ -289,6 +289,18 @@ command-library-copyFiles =
 command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 
+command-library-filter-apply =
+    .title = Apply a filter to the library (`query`, typed as in the search field, or `filter` as listed); it becomes the first recent filter
+
+command-library-filter-pin =
+    .title = Pin a filter (`query` or `filter`, else the filter in force), or unpin it with `pinned: false`
+
+command-library-filter-recent =
+    .title = List the library's `pinned` and `recent` filters (newest first) and its `smart` albums, each with its `query` and `filter`
+
+command-library-filter-switch =
+    .title = Show the recent and pinned filters and the smart albums, to apply one to the library
+
 command-library-folder =
     .title = Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder
 

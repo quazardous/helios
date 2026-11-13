@@ -11,7 +11,10 @@
 //! quick collection: B toggles the selection in and out (one step a
 //! press, not while a text field is typed in), its count and the grid's
 //! badge follow, `collection:quick` scopes the grid, "Save as album"
-//! keeps its photos and empties it or not.
+//! keeps its photos and empties it or not. The recent filters: those
+//! used are listed (deduplicated), pinned, kept across a restart, and
+//! Ctrl+Shift+K opens them in the window, not while a text field is typed
+//! in.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1017,6 +1020,132 @@ fn b_toggles_the_quick_collection_which_scopes_the_grid_and_saves_as_an_album() 
     settle(&mut h, &mut persist, 24.0);
     assert_eq!(h.state().library().quick_count(), 0);
     assert_eq!(steps(&h).last().unwrap(), "Clear the quick collection");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A command's answer, run as the user (the shell's queued for its
+/// frame, then read from its history).
+fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Value {
+    let out = h.state_mut().run(id, args, Origin::User).unwrap();
+    if out != json!({ "queued": true }) {
+        return out;
+    }
+    h.run();
+    h.state()
+        .history()
+        .into_iter()
+        .rev()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("{id} never ran"))
+        .result
+        .unwrap()
+}
+
+/// The queries of a list `library.filter.recent` answers.
+fn queries(list: &Value, kind: &str) -> Vec<String> {
+    list[kind]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["query"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// The dialog open in the main window, if any.
+fn main_dialog(h: &Harness<'_, Shell>) -> Option<String> {
+    h.state()
+        .app()
+        .handle()
+        .service(&egui_pop::api::dialogs::DIALOGS)
+        .unwrap()
+        .current_in(egui::ViewportId::ROOT)
+        .map(|(_, d)| d.title().to_string())
+}
+
+#[test]
+fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
+    let root = temp("recent");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 1.0);
+
+    // Applied by an agent: each first of the recent ones, once.
+    for (at, q) in [(2.0, "camera:R5"), (3.0, "rating>=1"), (4.0, "camera:R5")] {
+        run(&mut h, "library.filter.apply", json!({ "query": q }));
+        settle(&mut h, &mut persist, at);
+    }
+    assert_eq!(grid(&h), ["c.nef"]);
+    // The search field set by code is not a filter used.
+    filter(&mut h, &mut persist, "label:red");
+    let list = answer(&mut h, "library.filter.recent", json!({}));
+    assert_eq!(queries(&list, "recent"), ["camera:R5", "rating>=1"]);
+    assert_eq!(list["in_force"], json!("label:red"));
+
+    // Pinned: out of the recent ones, listed first.
+    run(
+        &mut h,
+        "library.filter.pin",
+        json!({ "query": "rating>=1" }),
+    );
+    settle(&mut h, &mut persist, 5.0);
+    let list = answer(&mut h, "library.filter.recent", json!({}));
+    assert_eq!(queries(&list, "pinned"), ["rating>=1"]);
+    assert_eq!(queries(&list, "recent"), ["camera:R5"]);
+
+    // Ctrl+Shift+K in the grid: the switcher, in this window; the
+    // pinned filter chosen by its words applies to the grid.
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K);
+    h.run();
+    h.run();
+    assert_eq!(main_dialog(&h).as_deref(), Some("Recent filters"));
+    let current = answer(&mut h, "dialog.current", json!(null));
+    let shown = current.to_string();
+    assert!(
+        shown.contains("rating>=1") && shown.contains("camera:R5") && shown.contains("pinned"),
+        "{shown}"
+    );
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("rating".into()));
+    h.run();
+    h.key_press(Key::Enter);
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(main_dialog(&h), None);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+
+    // Typed in a text field, Ctrl+Shift+K does not open it.
+    h.get_by_label("Search images").click();
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K);
+    h.run();
+    h.run();
+    assert_eq!(main_dialog(&h), None);
+
+    // Unpinned and pinned again; kept across a restart, in the vault.
+    run(
+        &mut h,
+        "library.filter.pin",
+        json!({ "query": "camera:R5", "pinned": true }),
+    );
+    settle(&mut h, &mut persist, 7.0);
+    drop((h, persist));
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 1.0);
+    let list = answer(&mut h, "library.filter.recent", json!({}));
+    assert_eq!(queries(&list, "pinned"), ["rating>=1", "camera:R5"]);
+    assert!(queries(&list, "recent").is_empty(), "{list}");
+    run(
+        &mut h,
+        "library.filter.pin",
+        json!({ "query": "rating>=1", "pinned": false }),
+    );
+    settle(&mut h, &mut persist, 2.0);
+    let list = answer(&mut h, "library.filter.recent", json!({}));
+    assert_eq!(queries(&list, "recent"), ["rating>=1"]);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

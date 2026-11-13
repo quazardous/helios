@@ -1531,6 +1531,16 @@ gui-quit-title = Quit Helios?
 
 gui-quit-verb = Quit
 
+gui-recent-filters-none = No recent filter yet: the filters used in the Library are listed here
+
+gui-recent-filters-pinned = pinned
+
+gui-recent-filters-recent = recent
+
+gui-recent-filters-smart = smart album
+
+gui-recent-filters-title = Recent filters
+
 gui-recording-saved = recording saved to { $path }
 
 gui-recording-stopped = recording stopped: { $error }

@@ -725,6 +725,11 @@ gui-quick-open-source = source
 gui-quick-open-subworkspace = sous-espace de travail
 
 gui-quick-open-title = Aller à un module, un sous-espace de travail, une image ou un espace de travail
+gui-recent-filters-title = Filtres récents
+gui-recent-filters-pinned = épinglé
+gui-recent-filters-recent = récent
+gui-recent-filters-smart = album dynamique
+gui-recent-filters-none = Aucun filtre récent pour l’instant : les filtres utilisés dans la bibliothèque sont listés ici
 
 gui-quick-open-workspace = espace de travail { $path }
 
