@@ -1328,12 +1328,12 @@ pub struct Library {
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
-    /// Whether the host was asked to read the history.
-    filter_history_asked: bool,
+    /// Whether the host is to read the history (once, at the start).
+    filter_history_wanted: Wanted,
     /// Filters used before the history was read, oldest first.
     used_early: Vec<Filter>,
     /// Whether the history changed, for the host to write.
-    filter_history_changed: bool,
+    filter_history_write: Wanted,
     /// A filter typed in the search field and when (the input's time):
     /// it counts as used once it rests ([`crate::recent_filters::TYPED_REST`]).
     typed: Option<(Filter, f64)>,
@@ -1471,9 +1471,9 @@ impl Default for Library {
             quick: Vec::new(),
             quick_set: HashSet::new(),
             filter_history: None,
-            filter_history_asked: false,
+            filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
-            filter_history_changed: false,
+            filter_history_write: Wanted::No,
             typed: None,
             query: None,
             tags: TagInputState::default(),
@@ -2334,7 +2334,11 @@ impl Library {
         self.typed = None;
         let filter = self.filter.clone();
         match &mut self.filter_history {
-            Some(h) => self.filter_history_changed |= h.record(&filter),
+            Some(h) => {
+                if h.record(&filter) {
+                    self.filter_history_write = Wanted::Yes;
+                }
+            }
             None if !filter.is_empty() => {
                 self.used_early.retain(|f| *f != filter);
                 self.used_early.push(filter);
@@ -2356,7 +2360,7 @@ impl Library {
 
     /// Whether the host is to read the history: once, at the start.
     pub fn take_filter_history_wanted(&mut self) -> bool {
-        !std::mem::replace(&mut self.filter_history_asked, true)
+        std::mem::replace(&mut self.filter_history_wanted, Wanted::No) == Wanted::Yes
     }
 
     /// The history as the vault keeps it; what was used before it was
@@ -2364,7 +2368,9 @@ impl Library {
     pub fn set_filter_history(&mut self, history: crate::recent_filters::FilterHistory) {
         let early = std::mem::take(&mut self.used_early);
         let merged = history.clone().merged(&early);
-        self.filter_history_changed |= merged != history;
+        if merged != history {
+            self.filter_history_write = Wanted::Yes;
+        }
         self.filter_history = Some(merged);
     }
 
@@ -2372,13 +2378,15 @@ impl Library {
     pub fn pin_filter(&mut self, filter: &Filter, pinned: bool) -> bool {
         let history = self.filter_history.get_or_insert_with(Default::default);
         let changed = history.pin(filter, pinned);
-        self.filter_history_changed |= changed;
+        if changed {
+            self.filter_history_write = Wanted::Yes;
+        }
         changed
     }
 
     /// The history to write, once after it changed.
     pub fn take_filter_history_write(&mut self) -> Option<crate::recent_filters::FilterHistory> {
-        std::mem::take(&mut self.filter_history_changed)
+        (std::mem::replace(&mut self.filter_history_write, Wanted::No) == Wanted::Yes)
             .then(|| self.filter_history.clone())
             .flatten()
     }
