@@ -19,20 +19,21 @@ both windows' accessibility trees (each OS window has its own):
   import window stays;
 - `palette`: the command palette's key pressed in the import window: it
   opens there;
-- `storage`: "Storage…" clicked in the import window, the Settings in
-  their own window (Helios's default): the Settings window opens on the
-  Storage page;
-- `storage-popped-in`: the same with the Settings popped in over the main
-  window: the page opens there and Helios asks the main window to the
-  front (whether the compositor grants it is reported, not required: a
-  compositor may refuse an activation without a seat);
 - `close-with-picker`: the picker opened again, the import window closed
   by the compositor: the window goes, no picker comes up over the main
   window, and the main window still answers;
 - `close-with-dialog`: the import window opened again, an egui-pop dialog
   opened in it (the window quick pick, `window.pick`), the window closed by
   the compositor: the dialog is cancelled with it, none comes up over the
-  main window.
+  main window;
+- `storage`: the import window opened again, "Storage…" clicked in it,
+  the Settings in their own window (Helios's default): the Settings window
+  opens on the Storage page;
+- `storage-popped-in`: the same with the Settings popped in over the main
+  window: the page opens there and Helios asks the main window to the
+  front (whether the compositor grants it is reported, not required: a
+  compositor may refuse an activation without a seat). Last, as the main
+  window may then cover the import window.
 
 One JSON line per probe in `window-audit.jsonl`, a table in
 `window-audit.md`, a screenshot after each probe; a probe that fails
@@ -135,6 +136,14 @@ def activated(comp) -> list[str]:
     ]
 
 
+def windows(comp) -> list[str]:
+    """The windows listed, activated ones starred: a failure's record."""
+    return [
+        w.get("title", "") + (" *" if w.get("activated") else "")
+        for w in comp.list_windows().get("windows", [])
+    ]
+
+
 def storage_probe(args, comp, agent, title: str, name: str) -> dict:
     """Storage… clicked in the import window: where the Settings opened,
     on which page, and which window the compositor activated."""
@@ -156,11 +165,14 @@ def storage_probe(args, comp, agent, title: str, name: str) -> dict:
         ok = page and ic.present(comp, title)
         seen = "over the main window"
     shot(comp, args, name)
+    # Whether an activation the compositor grants late reached it.
+    time.sleep(2.0)
     return {
         "probe": name,
         "ok": ok,
         "seen": f"{seen}, page {admin.get('scope')!s}, activated: {', '.join(front) or 'none'}",
         "new": new,
+        "activated_later": activated(comp),
     }
 
 
@@ -230,21 +242,6 @@ def probes(args, comp, agent) -> list[dict]:
         )
     settle()
 
-    # Storage…: the Settings in their own window (the default), then
-    # popped in over the main window.
-    out.append(storage_probe(args, comp, agent, title, "storage"))
-    for cid in ("admin.close", "admin.popOut"):
-        try:
-            agent.command(cid, {})
-        except (OSError, RuntimeError, ValueError) as exc:
-            out.append({"probe": "storage-popped-in", "ok": False, "error": f"{cid}: {exc}"})
-    settle()
-    out.append(storage_probe(args, comp, agent, title, "storage-popped-in"))
-    for cid in ("admin.close", "admin.popOut"):
-        with contextlib.suppress(OSError, RuntimeError, ValueError):
-            agent.command(cid, {})
-    settle()
-
     # The picker open, the window closed by the compositor.
     try:
         agent.ui({"action": "click", "window": "import", "role": "Button", "label": CHOOSE})
@@ -267,6 +264,7 @@ def probes(args, comp, agent) -> list[dict]:
             "seen": f"window {'gone' if closed else 'still listed'}, "
             f"picker {'over the main window' if over_main else 'gone'}, "
             f"main window {'answers' if answers else 'silent'}",
+            "windows": windows(comp),
         }
     )
     shot(comp, args, "close-with-picker")
@@ -302,9 +300,31 @@ def probes(args, comp, agent) -> list[dict]:
             "seen": f"dialog shown in {', '.join(map(str, shown)) or 'no window'}, "
             f"window {'gone' if closed else 'still listed'}, "
             f"after: {'dialog in ' + ', '.join(map(str, left)) if left else 'no dialog'}",
+            "windows": windows(comp),
         }
     )
     shot(comp, args, "close-with-dialog")
+
+    # Storage…: the Settings in their own window (the default), then
+    # popped in over the main window. Last, in an import window of their
+    # own: popped in, Helios asks the main window to the front, over the
+    # import window, which then stays behind it; probes acting in the
+    # import window run before, on a window in front.
+    title = open_import(args, comp, agent)
+    if title is None:
+        out.append({"probe": "storage", "ok": False, "error": "no import window listed"})
+        return out
+    out.append(storage_probe(args, comp, agent, title, "storage"))
+    for cid in ("admin.close", "admin.popOut"):
+        try:
+            agent.command(cid, {})
+        except (OSError, RuntimeError, ValueError) as exc:
+            out.append({"probe": "storage-popped-in", "ok": False, "error": f"{cid}: {exc}"})
+    settle()
+    out.append(storage_probe(args, comp, agent, title, "storage-popped-in"))
+    for cid in ("admin.close", "admin.popOut"):
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
+            agent.command(cid, {})
     return out
 
 
