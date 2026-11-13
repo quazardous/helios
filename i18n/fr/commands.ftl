@@ -640,7 +640,7 @@ command-library-collection =
     .title = Limiter la bibliothèque à un album (`id` ; null : toute la bibliothèque) ; gardé avec l’espace de travail. Sans `id`, dit l’album
 
 command-library-collection-create =
-    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection), ou avec `kind: smart` un album dynamique (`rules` : un arbre de groupes `{match: all|any|none, rules}` et de conditions `{field, op, value}`, ou les clés du formulaire) ; sans `name`, le demande. Répond son `id`
+    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection), ou avec `kind: smart` un album dynamique (`rules` : un arbre de groupes (`match` : all, any ou none ; `rules`) et de conditions (`field`, `op`, `value`), ou les clés du formulaire) ; sans `name`, le demande. Répond son `id`
 
 command-library-collection-rename =
     .title = Renommer un album (`id`, `name`) ; sans `name`, le demande

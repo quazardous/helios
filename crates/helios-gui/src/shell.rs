@@ -2846,7 +2846,7 @@ impl Shell {
         for (id, title) in [
             (
                 crate::library::COLLECTION_CREATE_COMMAND,
-                "New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of `{match: all|any|none, rules}` groups and `{field, op, value}` conditions, or the form's keys); without `name`, asks it. Answers its `id`",
+                "New album (`name`; `images`: ids, else the selection), or with `kind: smart` a smart album (`rules`: a tree of groups (`match`: all, any or none; `rules`) and conditions (`field`, `op`, `value`), or the form's keys); without `name`, asks it. Answers its `id`",
             ),
             (
                 crate::library::COLLECTION_RENAME_COMMAND,
