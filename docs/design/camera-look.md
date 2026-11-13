@@ -1,14 +1,16 @@
 # A camera look fitted to the embedded JPEG
 
-Status: **design accepted, steps 2 and 3a built** (2026-11-13). The plan
+Status: **design accepted, steps 2 and 3a built, the command built**
+(2026-11-13). The plan
 (study, a headless fit, then a module off by default) is accepted with the
 recommended answer to each question of section 8 (two modules, a 192 px
 proxy, the chart ruling the colour, the table inline, the fitter in
 `helios-calibrate`). Step 2, the headless fit, is in
 `helios_calibrate::look`, its follow-up (the hue/saturation table, the
 Delta E 2000 refinement, near-black frames) included (section 5,
-"Built"); step 3a's bricks and modules are in (section 6, "Built"); the
-command `look.camera.fit` and step 3b are to do.
+"Built"); step 3a's bricks and modules are in (section 6, "Built"), and
+so is the command `look.camera.fit` ("Built: the command"); step 3b's
+user side is to do.
 
 Related notes: [calibration.md](calibration.md) (the chart profile,
 the accurate reference this note sits next to),
@@ -616,6 +618,58 @@ Left to the command (3a's last part, done with 3b):
   looks.
 - The tone half's `amount` (blending toward the default tone map spans
   two nodes).
+
+### Built: the command (2026-11-13)
+
+The two open points of 3a are settled, and the command is in.
+
+- **Where the sensor side is read: the module moved.** `cameracolour`
+  now sits right after `channelmixerrgb` (before `flip` and `exposure`),
+  in "Develop one image" version 4 and in the builder's raw front, and
+  the sensor proxy is colour calibration's output. Fitting at `colorin`'s
+  output instead cannot be made right: the as-shot cast is still there,
+  and CAT16 is not diagonal in working RGB, so a hue/saturation table
+  fitted after it cannot be carried before it. Exposure is a gain
+  between the two halves: the command reads it off the two renders and
+  multiplies the tone curve's scene axis by it
+  (`look::render::for_chain`), which renders exactly what the fit
+  scored. With a chart profile on, the colour half is off anyway (Q3 A),
+  so it need not sit next to `chartprofile`. Version 4 keeps its number:
+  no look could be written before the command, and both nodes are
+  bypassed, so no render changes; 3a's bit-identity tests stay as they
+  were.
+- **Templates without `cameratone`: the builder adds it.** A network
+  built with a raw that has a `sigmoid` node and no `cameratone` gets
+  the catalogue's `cameratone`, bypassed, on sigmoid's input ("Develop
+  (preview)", "Batch export", "Compare", and any template a user
+  writes). An edit with a look (sigmoid off, the tone half on) then
+  renders for display in every template; built without a raw, a network
+  is as written. `with_look` keeps turning `sigmoid` off.
+- **The command.** `look.camera.fit {images, dry_run}` (node-core's
+  calibration commands, so the node's registry, `commands.list` and
+  `command.run`, the CLI's `helios run look.camera.fit` and the MCP pair
+  `helios_commands_list` / `helios_command_run` reach it, and the
+  desktop registers it as a command run through its node). For each
+  image: the raw rendered at 192 px through the chain
+  (`look::render::prepare`: the edit's raw front and `colorin` over the
+  template's defaults, colour calibration from the camera's light,
+  exposure +0.7 EV, sigmoid for the baseline; the clip mask from the
+  raw front's levels at full resolution; the preview box-reduced to the
+  same proxy, a proxy pixel clipped where a preview pixel reaches 255 in
+  sRGB), `look::fit`, then `with_look` with the preview's hash. Every
+  image written is one library step together; a refusal is answered
+  per image with its gate, its words and its numbers, and writes
+  nothing; a picture is answered as "not a raw". The answer gives each
+  look's kind, held-out and baseline scores, notes, and whether its
+  colour half is on.
+- **Not yet read from the files:** the preview's JPEG quality (the
+  decoded preview carries no quantisation tables; the gate stays, fed
+  nothing) and maker-note styles.
+
+Left for 3b: the Camera look entry and its header (the toggle, "Fit to
+the camera's JPEG", the report's held-out Delta E against the default's,
+the refusal's words), the amount (the tone half's spans two nodes), the
+compare-with-JPEG view, Refit, the per-camera default at import.
 
 **3b. The user's side and the hooks.**
 

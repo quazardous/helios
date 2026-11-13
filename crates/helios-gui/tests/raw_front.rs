@@ -381,11 +381,15 @@ fn a_raw_gets_darktables_colour_calibration_in_every_template_taking_a_raw() {
             Some(profile) => {
                 assert_eq!(graph.input_nodes(profile).unwrap(), [Some(colorin)], "{id}");
                 assert!(graph.is_bypassed(profile).unwrap(), "{id}");
+                assert_eq!(
+                    graph.input_nodes(calibrated).unwrap(),
+                    [Some(profile)],
+                    "{id}"
+                );
                 // Then a camera look's colour half, bypassed too.
                 let look = graph.find("cameracolour").unwrap();
-                assert_eq!(graph.input_nodes(look).unwrap(), [Some(profile)], "{id}");
+                assert_eq!(graph.input_nodes(look).unwrap(), [Some(calibrated)], "{id}");
                 assert!(graph.is_bypassed(look).unwrap(), "{id}");
-                assert_eq!(graph.input_nodes(calibrated).unwrap(), [Some(look)], "{id}");
             }
             None => assert_eq!(
                 graph.input_nodes(calibrated).unwrap(),
@@ -680,13 +684,13 @@ fn develop_one_image_4_renders_version_3_s_bits_while_its_camera_look_is_off() {
     let (old, old_view) = built(&v3, &mosaic, &camera);
     let (mut new, view) = built(&v4, &mosaic, &camera);
     assert!(old.find("cameracolour").is_none() && old.find("cameratone").is_none());
-    // The colour half after the chart profile, the tone half before
+    // The colour half after colour calibration, the tone half before
     // sigmoid, both bypassed.
     let colour = new.find("cameracolour").expect("version 4 carries it");
     let tone = new.find("cameratone").expect("version 4 carries it");
     assert_eq!(
         new.input_nodes(colour).unwrap(),
-        [Some(new.find("chartprofile").unwrap())]
+        [Some(new.find("channelmixerrgb").unwrap())]
     );
     assert_eq!(
         new.input_nodes(tone).unwrap(),
@@ -731,4 +735,85 @@ fn develop_one_image_4_renders_version_3_s_bits_while_its_camera_look_is_off() {
             .iter()
             .all(|p| p[..3].iter().all(|v| (0.0..=1.0).contains(v)))
     );
+}
+
+/// A fitted look's numbers: a matrix keeping equal RGB, a tone curve
+/// with a shoulder, a chroma curve.
+fn a_look() -> helios_calibrate::look::Look {
+    use helios_calibrate::look::{
+        Attempt, ChromaCurve, FITTER_VERSION, Kind, Look, Report, Score, ToneCurve,
+    };
+    Look {
+        version: FITTER_VERSION,
+        kind: Kind::Full,
+        matrix: [
+            [1.1, -0.06, -0.04],
+            [-0.03, 1.05, -0.02],
+            [0.01, -0.08, 1.07],
+        ],
+        table: None,
+        tone: ToneCurve {
+            knots: vec![[0.0, 0.0], [0.02, 0.08], [0.18, 0.45], [1.0, 0.9]],
+        },
+        chroma: Some(ChromaCurve {
+            nodes: [1.2, 1.15, 1.1, 1.05, 1.0, 0.9, 0.7, 0.4],
+        }),
+        report: Report {
+            held_out: Score {
+                mean: 2.0,
+                p95: 4.0,
+            },
+            baseline: Score {
+                mean: 9.0,
+                p95: 15.0,
+            },
+            pairs: 1000,
+            held_out_pairs: 300,
+            attempt: Attempt::AllPixels,
+            notes: Vec::new(),
+            refined: false,
+        },
+    }
+}
+
+#[test]
+fn every_template_showing_a_raw_with_a_camera_look_renders_for_display() {
+    // `with_look` turns sigmoid off: a template without its own
+    // `cameratone` gets one from the builder, so none renders
+    // scene-linear once a look is written into the edit.
+    let mosaic = mosaic();
+    let edit =
+        helios_calibrate::look::edit::with_look(&serde_json::Value::Null, &a_look(), "preview");
+    for bundle in templates::builtin() {
+        let id = bundle.template.id.clone();
+        let Ok(b) = bundle.build_with(
+            &templates::modules(),
+            Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera(0.3),
+            },
+            None,
+        ) else {
+            continue;
+        };
+        let mut graph = b.graph;
+        let Some(sigmoid) = graph.find("sigmoid") else {
+            continue;
+        };
+        let tone = graph
+            .find("cameratone")
+            .unwrap_or_else(|| panic!("{id}: no cameratone"));
+        assert_eq!(graph.input_nodes(sigmoid).unwrap(), [Some(tone)], "{id}");
+        helios_vault::edit::apply_to_graph(&mut graph, &edit).unwrap();
+        assert!(graph.is_bypassed(sigmoid).unwrap(), "{id}");
+        assert!(!graph.is_bypassed(tone).unwrap(), "{id}");
+        let out = render(&graph, b.view.0);
+        assert!(
+            out.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[..3].iter().all(|v| (0.0..=1.0).contains(v))),
+            "{id}: renders outside the display range"
+        );
+    }
 }

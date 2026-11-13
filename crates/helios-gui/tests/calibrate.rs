@@ -364,3 +364,43 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
     assert_eq!(read(&h, "bypass/chartprofile"), Value::Bool(true));
     h.run();
 }
+
+#[test]
+fn the_shell_fits_a_camera_look_through_the_node_and_says_why_not() {
+    let dir = std::env::temp_dir().join(format!("helios-look-cmd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let image = helios_core::Image::new(helios_core::Region::sized(4, 4), 3, vec![0.5; 48]);
+    let picture = dir.join("picture.tif");
+    std::fs::write(
+        &picture,
+        helios_export::encode(&image, &helios_export::Format::Tiff).unwrap(),
+    )
+    .unwrap();
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let id = vault.import_file(&picture, 1).unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    let history = shell.library_history();
+    calibrate::register(
+        &mut shell,
+        Some(calibrate::Node {
+            vault: vault.clone(),
+            bus: Arc::new(helios_core::Bus::new()),
+        }),
+        history.clone(),
+    )
+    .unwrap();
+    // A picture has no sensor data to fit: answered per image, in words,
+    // and nothing is written.
+    let answer = shell
+        .run(
+            "look.camera.fit",
+            json!({ "images": [id.hex()] }),
+            Origin::Agent("test".into()),
+        )
+        .unwrap();
+    assert_eq!(answer["fitted"], 0, "{answer}");
+    assert_eq!(answer["images"][0]["refused"]["gate"], "not-a-raw");
+    assert!(history.line().undo.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}

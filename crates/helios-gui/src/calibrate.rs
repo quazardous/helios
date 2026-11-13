@@ -9,6 +9,8 @@
 //! - `calibrate.apply`: a profile (or `auto`, or `none`) put on photos'
 //!   edits, the `chartprofile` node.
 //! - `calibrate.profiles.export`, `.import`: a profile as a file to share.
+//! - `look.camera.fit`: a camera look fitted to photos' embedded JPEG and
+//!   written into their edits (`cameracolour`, `cameratone`).
 //! - `calibrate.choose`: the open photo's profile, chosen in the module's
 //!   header, one step of the edit's history (not of the library's).
 //!
@@ -26,7 +28,7 @@ use std::sync::Arc;
 use egui_pop::api::history::Label;
 use helios_core::{Bus, Message};
 use helios_node_core::calibrate::{
-    self as node, APPLY, CHART, DELETE, EXPORT, GET, IMPORT, LIST, SET_DEFAULT,
+    self as node, APPLY, CHART, DELETE, EXPORT, GET, IMPORT, LIST, LOOK_FIT, SET_DEFAULT,
 };
 use helios_shell::commands::CommandSpec;
 use helios_vault::{Changes, Store, Vault};
@@ -53,7 +55,12 @@ fn seconds() -> f64 {
 /// The history step of command `id` on the profile `name` (an apply
 /// with none: the profile turned off; a default: of camera `name`).
 pub fn label(id: &str, name: &str) -> Label {
-    let m = if id == DELETE {
+    let m = if id == LOOK_FIT {
+        Message::new(
+            "gui-history-camera-look-fit",
+            "Fit the camera look to the camera's JPEG",
+        )
+    } else if id == DELETE {
         Message::new(
             "gui-history-calibration-delete",
             "Delete the calibration profile “{ $name }”",
@@ -175,6 +182,11 @@ pub fn register<S: Store + Send + 'static>(
         (
             IMPORT,
             "Imports a calibration profile from a shared file (`path`), checked first",
+            false,
+        ),
+        (
+            LOOK_FIT,
+            "Fits a camera look to photos' embedded JPEG (`images`: raws) and writes it into their edits; a refusal names its reason",
             false,
         ),
     ];
