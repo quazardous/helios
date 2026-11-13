@@ -2269,9 +2269,12 @@ dependencies = [
  "helios-module-cameratone",
  "helios-module-channelmixerrgb",
  "helios-module-chartprofile",
+ "helios-module-colorin",
  "helios-module-demosaic",
+ "helios-module-exposure",
  "helios-module-highlights",
  "helios-module-rawprepare",
+ "helios-module-sigmoid",
  "helios-module-whitebalance",
  "helios-photo",
  "helios-testkit",
@@ -2790,6 +2793,7 @@ dependencies = [
 name = "helios-node-core"
 version = "0.87.0"
 dependencies = [
+ "blake3",
  "helios-calibrate",
  "helios-core",
  "helios-export",
@@ -2797,8 +2801,10 @@ dependencies = [
  "helios-inspect",
  "helios-library",
  "helios-load",
+ "helios-module-whitebalance",
  "helios-photo",
  "helios-storage",
+ "helios-testkit",
  "helios-vault",
  "helios-vault-sqlite",
  "helios-xmp",

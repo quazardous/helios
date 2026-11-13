@@ -15,8 +15,9 @@
 //!   no IO: the fit runs elsewhere and its numbers are copied here.
 //!
 //! The pixel step is `core.huesat@1`'s ([`helios_bricks::huesat`]), CPU
-//! and GPU. The templates put the module bypassed after `colorin` (and
-//! after `chartprofile`), so a render without a look is unchanged; with a
+//! and GPU. The templates put the module bypassed after colour
+//! calibration (`channelmixerrgb`, on whose output the look is fitted),
+//! so a render without a look is unchanged; with a
 //! chart profile on, the colour half stays off (the chart rules the
 //! colour), which is the edit's business, not the render's.
 
