@@ -22,6 +22,7 @@
 //! - [`importer`]: the importer protocol's checks (`importer.scan`);
 //! - [`commands`]: the broker as shell commands;
 //! - [`grants`]: the capabilities granted, as a settings layer keeps them;
+//! - [`health`]: the problem checks plugins declare, run through them;
 //! - [`source`]: the `import.source` service as an import connector;
 //! - [`bundled`]: the plugins Helios ships, built beside it.
 
@@ -29,6 +30,7 @@ pub mod broker;
 pub mod bundled;
 pub mod commands;
 pub mod grants;
+pub mod health;
 pub mod importer;
 pub mod manifest;
 pub mod rpc;

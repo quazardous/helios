@@ -1,6 +1,6 @@
 //! The health contract: what a check declares beside its id and title,
 //! so the [`Registry`](crate::Registry) can refuse an unsound one and the
-//! runner can hold each run to it. A module (or, later, a plugin) owns
+//! runner can hold each run to it. A module or a plugin owns
 //! its checks and declares, for each:
 //!
 //! - what it watches, in English, for people and tools reading the
