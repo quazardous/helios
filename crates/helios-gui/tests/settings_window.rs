@@ -50,6 +50,7 @@ struct Node {
     role: Role,
     name: String,
     rect: Rect,
+    disabled: bool,
 }
 
 /// A deferred window's own pass, as eframe runs it apart from the main
@@ -102,6 +103,7 @@ fn window_pass(h: &mut Harness<'static, Shell>, window: ViewportId, pass: Pass) 
             Some(Node {
                 role: n.role(),
                 name,
+                disabled: n.is_disabled(),
                 rect: Rect::from_min_max(
                     Pos2::new(b.x0 as f32 / ppp, b.y0 as f32 / ppp),
                     Pos2::new(b.x1 as f32 / ppp, b.y1 as f32 / ppp),
@@ -232,6 +234,61 @@ fn settings_open_in_their_own_window_with_helios_title_bar_and_work_there() {
     // Nothing of it over the main window.
     main_passes_in_the_back(&mut h, 2);
     assert!(headless::window_rect(&h, "Settings").is_none());
+}
+
+/// The menus a bar of `app.main` showed last, in the bar or in "…".
+fn top_menus(app: &egui_pop::api::app::AppHandle) -> Vec<String> {
+    let layout = egui_pop::api::menus::bar_layout(app, &egui_pop::api::app::MENU_MAIN)
+        .expect("the main menu is drawn as a bar");
+    layout
+        .bar
+        .iter()
+        .chain(&layout.overflow)
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Every Helios window has the main window's title bar and menus
+/// (docs/design/windows.md, section 7): the Settings window's bar has the
+/// menu button, the logo and the name, and the same menus as the main
+/// window, evaluated in the Settings window, where a command of the main
+/// window (Export…) is greyed.
+#[test]
+fn the_settings_window_has_the_main_windows_title_bar_and_menus() {
+    let (mut h, window) = settings_in_their_own_window();
+    let app = h.state().app().handle().clone();
+    h.run();
+    let main_menus = top_menus(&app);
+    assert!(main_menus.len() >= 4, "{main_menus:?}");
+    let nodes = window_pass(&mut h, window, Pass::default());
+    let names: Vec<&String> = nodes.iter().map(|n| &n.name).collect();
+    for name in ["Window menu", "Helios", "File", "Edit", "View", "Window"] {
+        assert!(names.iter().any(|n| *n == name), "{name} in {names:?}");
+    }
+    // The same menus as the main window, laid out in the Settings window.
+    assert_eq!(top_menus(&app), main_menus);
+    // File > Export…: the main window's, greyed here.
+    let file = nodes
+        .iter()
+        .find(|n| n.name == "File")
+        .map(|n| n.rect.center())
+        .unwrap();
+    click_in(&mut h, window, file);
+    let nodes = window_pass(&mut h, window, Pass::default());
+    let export = nodes
+        .iter()
+        .find(|n| n.name.starts_with("Export"))
+        .unwrap_or_else(|| {
+            panic!(
+                "Export in {:?}",
+                nodes.iter().map(|n| &n.name).collect::<Vec<_>>()
+            )
+        });
+    assert!(
+        export.disabled,
+        "{} is greyed in the Settings window",
+        export.name
+    );
 }
 
 #[test]
