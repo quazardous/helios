@@ -420,7 +420,9 @@ mod tests {
             .specs()
             .map(|s| s.id.as_str())
             .filter(|id| {
-                !crate::library::handles(id) && !crate::calibrate::PROFILE_IDS.contains(id)
+                !crate::library::handles(id)
+                    && !crate::cursor::handles(id)
+                    && !crate::calibrate::PROFILE_IDS.contains(id)
             })
             .collect();
         let mut named: Vec<&str> = examples.iter().map(|(id, _)| *id).collect();
