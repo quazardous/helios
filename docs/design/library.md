@@ -722,8 +722,30 @@ Commands: `library.collection.create {kind: "set", set}`,
 `library.collection.move {id, set|null}` (without `set`, the chooser),
 `library.collection.delete {id, members}`; each one step of the
 library's history. Names stay unique across all collections, as for
-albums. Not built yet: drag and drop onto an album or a set, keyboard
-undo in the rule dialog (its buttons only).
+albums. Not built yet: keyboard undo in the rule dialog (its buttons
+only).
+
+Built (2026-11-13), seventh part: **drag and drop onto an album**.
+egui-pop's thumbnail grid and filmstrip gained `drag_out`: a drag that
+starts on a cell signals `DragOut` with the selection when the cell is
+in it, else that photo alone (the selection is left as it is), and the
+rubber band starts between cells; the cursor shows a carry and a chip
+beside the pointer how many photos go. The Library sets its
+`DraggedPhotos` payload (image ids) from it, in the grid and the
+filmstrip alike. The Albums section's rows take it: an album and the
+quick collection outline in the accent while it hovers, with "Add N
+photos" beside the pointer; dropped, it runs `library.collection.add`
+or `library.quick.toggle` with `add: true` (only puts in: what is
+already in stays, and none missing changes nothing), one step of the
+library's history. A smart album and a set outline in the error colour
+with the "not allowed" cursor and the reason beside the pointer
+(a smart album's rules choose its photos; drop on one of the set's
+albums), and a drop on them is refused with that reason as a warning.
+No modifier changes a drop. The keyboard way stays each album's menu,
+"Add the selected photos". Multi-window: the payload lives in the
+window's egui context and the OS keeps the pointer in the window the
+drag started in, so a drop over another window does nothing; the
+import window has no Albums section.
 
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste

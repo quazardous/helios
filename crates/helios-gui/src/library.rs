@@ -1073,7 +1073,8 @@ pub const COLLECTION_RULES_EDIT_COMMAND: &str = "library.collection.rules.edit";
 /// Lists the albums, with how many photos each holds.
 pub const COLLECTION_LIST_COMMAND: &str = "library.collection.list";
 /// B: puts the selected photos (`images`, else the selection) in the
-/// quick collection, or takes them out when it holds them all.
+/// quick collection, or takes them out when it holds them all; with
+/// `add: true` (a drop on its row), only puts in those it lacks.
 pub const QUICK_TOGGLE_COMMAND: &str = "library.quick.toggle";
 /// Empties the quick collection.
 pub const QUICK_CLEAR_COMMAND: &str = "library.quick.clear";
@@ -1314,6 +1315,127 @@ fn quick_menu(row: &egui::Response, selection: bool, filled: bool) {
     );
 }
 
+/// Photos dragged out of the grid or the filmstrip (image ids): the
+/// payload the Albums section's rows take (`docs/design/library.md`, L6).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DraggedPhotos(pub Vec<String>);
+
+/// Sets the drag payload when a library view starts carrying photos
+/// out.
+fn carry_out(ctx: &egui::Context, signals: &[Signal<String>]) {
+    for s in signals {
+        if let Signal::DragOut { keys } = s {
+            egui::DragAndDrop::set_payload(ctx, DraggedPhotos(keys.clone()));
+        }
+    }
+}
+
+/// A row of the Albums section photos may be dropped on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DropOn {
+    /// The quick collection: they go in.
+    Quick,
+    /// An album: they go in. A smart album or a set refuses them.
+    Album(String),
+}
+
+/// Whether `album` takes photos dropped on it, else why not.
+fn drop_refusal(album: &helios_vault::collections::Album) -> Option<Message> {
+    if album.is_smart() {
+        Some(Message::new(
+            "gui-library-drop-smart",
+            "Not here: a smart album's rules choose its photos",
+        ))
+    } else if album.is_set() {
+        Some(Message::new(
+            "gui-library-drop-set",
+            "Not here: drop the photos on one of the set's albums",
+        ))
+    } else {
+        None
+    }
+}
+
+/// A row of the Albums section as a drop target for [`DraggedPhotos`]:
+/// while they hover it, its outline (the accent when it takes them, the
+/// error colour with a "not allowed" cursor and the reason beside the
+/// pointer when not); dropped, they go in (one step of the library's
+/// history, through the command an agent runs), or the reason is said.
+fn drop_target(
+    row: &egui::Response,
+    target: DropOn,
+    refusal: Option<Message>,
+    hover: &std::cell::Cell<Option<(DropOn, bool)>>,
+) {
+    let ctx = &row.ctx;
+    let allowed = refusal.is_none();
+    if let Some(photos) = row.dnd_hover_payload::<DraggedPhotos>() {
+        hover.set(Some((target.clone(), allowed)));
+        let visuals = ctx.global_style().visuals.clone();
+        let colour = if allowed {
+            visuals.selection.stroke.color
+        } else {
+            visuals.error_fg_color
+        };
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::unique("helios.library.drop"),
+        ));
+        painter.rect_stroke(
+            row.rect.expand(1.0),
+            2.0,
+            egui::Stroke::new(2.0, colour),
+            egui::StrokeKind::Inside,
+        );
+        let text = match &refusal {
+            Some(m) => {
+                ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+                crate::i18n::text(ctx, m.clone())
+            }
+            None => crate::i18n::text(
+                ctx,
+                Message::new("gui-library-drop-add", "Add { $count } photos")
+                    .with("count", photos.0.len()),
+            ),
+        };
+        if let Some(at) = ctx.pointer_latest_pos() {
+            egui::Area::new(egui::Id::unique("helios.library.drop.hint"))
+                .order(egui::Order::Tooltip)
+                .fixed_pos(at + egui::vec2(16.0, 36.0))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.label(text);
+                    });
+                });
+        }
+    }
+    let Some(photos) = row.dnd_release_payload::<DraggedPhotos>() else {
+        return;
+    };
+    if let Some(m) = refusal {
+        crate::dialogs::request(
+            ctx,
+            crate::dialogs::Request::Notify(crate::dialogs::Level::Warning, m),
+        );
+        return;
+    }
+    let (command, args) = match target {
+        DropOn::Quick => (
+            QUICK_TOGGLE_COMMAND,
+            serde_json::json!({ "images": photos.0, "add": true }),
+        ),
+        DropOn::Album(id) => (
+            COLLECTION_ADD_COMMAND,
+            serde_json::json!({ "id": id, "images": photos.0 }),
+        ),
+    };
+    crate::dialogs::request(
+        ctx,
+        crate::dialogs::Request::Run(command.into(), args, helios_shell::commands::Origin::User),
+    );
+}
+
 /// The albums as the Albums section shows them: each set's members, a
 /// collection whose set is not there at the top.
 struct AlbumTree<'a> {
@@ -1394,6 +1516,9 @@ pub struct Library {
     pub auto_advance: bool,
     /// Marks a plugin refused, to say.
     pub notes: Vec<String>,
+    /// The Albums section's row photos are dragged over this pass, and
+    /// whether it takes them.
+    drop_hover: std::cell::Cell<Option<(DropOn, bool)>>,
     /// The workspace has an import source: the Library panel's toolbar
     /// offers it.
     pub import_offered: bool,
@@ -1563,6 +1688,7 @@ impl Default for Library {
             selected: None,
             auto_advance: false,
             notes: Vec::new(),
+            drop_hover: std::cell::Cell::new(None),
             import_offered: false,
             import_asked: false,
             index: HashMap::new(),
@@ -2068,6 +2194,14 @@ impl Library {
     /// out of the Library since among them).
     pub fn quick(&self) -> &[String] {
         &self.quick
+    }
+
+    /// The Albums section's row photos were dragged over last pass, and
+    /// whether it takes them.
+    pub fn drop_hover(&self) -> Option<(DropOn, bool)> {
+        let h = self.drop_hover.take();
+        self.drop_hover.set(h.clone());
+        h
     }
 
     /// How many photos of the Library the quick collection holds.
@@ -3053,7 +3187,7 @@ impl Library {
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
-                Signal::Zoom { .. } => {}
+                Signal::Zoom { .. } | Signal::DragOut { .. } => {}
                 Signal::Vetoed { step, reason } => self.notes.push(format!("{step}: {reason}")),
             }
         }
@@ -3468,6 +3602,7 @@ impl Library {
     /// first (⚡, its count), its menu emptying it or saving it as an
     /// album.
     fn albums_section(&mut self, ui: &mut Ui) {
+        self.drop_hover.set(None);
         if self.entries.is_empty() {
             return;
         }
@@ -3510,6 +3645,7 @@ impl Library {
                         "B adds the selected photos or takes them out",
                     )));
                 quick_menu(&r, selection, count > 0);
+                drop_target(&r, DropOn::Quick, None, &self.drop_hover);
                 if r.clicked() {
                     chosen = Some(quick.to_string());
                 }
@@ -3601,6 +3737,12 @@ impl Library {
                     )));
                 }
                 album_menu(&r, album, selection, movable);
+                drop_target(
+                    &r,
+                    DropOn::Album(album.id.clone()),
+                    drop_refusal(album),
+                    &self.drop_hover,
+                );
                 if r.clicked() {
                     *chosen = Some(album.id.clone());
                 }
@@ -3632,6 +3774,12 @@ impl Library {
                         "Album set: its albums' photos together",
                     )));
                 album_menu(&r, album, selection, movable);
+                drop_target(
+                    &r,
+                    DropOn::Album(album.id.clone()),
+                    drop_refusal(album),
+                    &self.drop_hover,
+                );
                 if r.clicked() {
                     *chosen = Some(album.id.clone());
                 }
@@ -3817,7 +3965,10 @@ impl Library {
                 in_view: Some(&self.in_view),
                 changed: Some(&self.view_changed),
             };
-            let mut grid = ThumbGrid::new("grid").label(label).keymap(keymap);
+            let mut grid = ThumbGrid::new("grid")
+                .label(label)
+                .keymap(keymap)
+                .drag_out(true);
             if let Some(app) = &self.app {
                 grid = grid.app(app);
             }
@@ -3826,6 +3977,7 @@ impl Library {
         self.after_pass(ui.ctx());
         let in_view = self.in_view.borrow().clone();
         self.feed_in_view(in_view, true);
+        carry_out(ui.ctx(), &out.signals);
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell
@@ -3906,13 +4058,17 @@ impl Library {
                 in_view: None,
                 changed: None,
             };
-            let mut strip = ThumbGrid::filmstrip("strip").keymap(keymap).height(height);
+            let mut strip = ThumbGrid::filmstrip("strip")
+                .keymap(keymap)
+                .height(height)
+                .drag_out(true);
             if let Some(app) = &self.app {
                 strip = strip.app(app);
             }
             strip.show(ui, &mut self.state, &items, &thumbs)
         };
         self.after_pass(ui.ctx());
+        carry_out(ui.ctx(), &out.signals);
         crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
         self.presence_hover(ui, "strip");
         self.bind_clipboard(ui.ctx(), out.response.rect);
