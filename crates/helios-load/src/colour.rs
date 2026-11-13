@@ -441,6 +441,22 @@ pub(crate) fn exif_of(bytes: &[u8], format: Option<ImageFormat>) -> Option<Cow<'
     }
 }
 
+/// The space a raw's embedded preview is in, as the raw's own Exif names
+/// it: Adobe RGB when its `ColorSpace` is 2, or "uncalibrated" (0xFFFF)
+/// with the interoperability index R03 (as cameras set to Adobe RGB write
+/// it), else sRGB. `bytes` is the raw (read for the interoperability index
+/// when it is a TIFF-like raw), `color_space` the `ColorSpace` its
+/// metadata reader found (for raws that are not TIFF).
+pub(crate) fn preview_space(bytes: &[u8], color_space: Option<u16>) -> OutputSpace {
+    let read = exif_colour(bytes);
+    let color_space = read.map(|(c, _)| c).or(color_space);
+    let interop = read.and_then(|(_, i)| i);
+    match (color_space, interop.as_ref()) {
+        (Some(2), _) | (Some(0xFFFF), Some(b"R03")) => OutputSpace::AdobeRgb,
+        _ => OutputSpace::Srgb,
+    }
+}
+
 /// Exif `ColorSpace` (tag 0xA001) and the interoperability index (tag 1 of
 /// the interoperability directory, "R98" or "R03"), when there.
 fn exif_colour(block: &[u8]) -> Option<(u16, Option<[u8; 3]>)> {
@@ -533,6 +549,32 @@ mod tests {
         let mut prefixed = b"Exif\0\0".to_vec();
         prefixed.extend(exif_block(true, 1, None));
         assert_eq!(exif_colour(&prefixed), Some((1, None)));
+    }
+
+    #[test]
+    fn a_raw_preview_is_read_in_the_space_its_exif_names() {
+        // A TIFF-like raw: its own Exif directory says it.
+        let adobe = exif_block(true, 0xFFFF, Some(b"R03"));
+        assert_eq!(preview_space(&adobe, None), OutputSpace::AdobeRgb);
+        assert_eq!(
+            preview_space(&exif_block(false, 2, None), None),
+            OutputSpace::AdobeRgb
+        );
+        assert_eq!(
+            preview_space(&exif_block(true, 1, None), Some(2)),
+            OutputSpace::Srgb
+        );
+        // "Uncalibrated" without R03 names nothing: sRGB.
+        assert_eq!(
+            preview_space(&exif_block(true, 0xFFFF, None), None),
+            OutputSpace::Srgb
+        );
+        // Not a TIFF (a CR3, say): the metadata reader's value.
+        assert_eq!(
+            preview_space(b"....ftypcrx ", Some(2)),
+            OutputSpace::AdobeRgb
+        );
+        assert_eq!(preview_space(b"....ftypcrx ", None), OutputSpace::Srgb);
     }
 
     #[test]

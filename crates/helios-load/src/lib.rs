@@ -147,7 +147,7 @@ pub fn preview(path: &Path) -> Result<Option<Image>, String> {
 /// The file cannot be read, or its format is unknown.
 pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
     let bytes = preview_bytes(path)?;
-    let source = RawSource::new_from_shared_vec(bytes);
+    let source = RawSource::new_from_shared_vec(bytes.clone());
     let decoder = rawler::get_decoder(&source).map_err(|e| format!("{}: {e}", path.display()))?;
     let params = RawDecodeParams::default();
     let found = [
@@ -158,7 +158,9 @@ pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
     .into_iter()
     .find_map(|r| r.ok().flatten());
     let tag = raw_tag(decoder.as_ref(), &source);
-    Ok((found.map(|img| working(&img)), tag))
+    let metadata = decoder.raw_metadata(&source, &params).ok();
+    let space = raw_preview_space(&bytes, metadata.as_ref());
+    Ok((found.map(|img| preview_working(&img, space)), tag))
 }
 
 /// A raw's EXIF orientation tag, 1 to 8 (1 when it has none), from its
@@ -220,17 +222,18 @@ pub fn glance_at(path: &Path, max: Option<u32>) -> Result<Glance, String> {
     // Not hashed: a glance identifies nothing.
     if Kind::of(path) == Kind::Raw {
         let bytes = preview_bytes(path)?;
-        let source = RawSource::new_from_shared_vec(bytes);
+        let source = RawSource::new_from_shared_vec(bytes.clone());
         let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
         let params = RawDecodeParams::default();
+        let metadata = decoder.raw_metadata(&source, &params).ok();
+        let space = raw_preview_space(&bytes, metadata.as_ref());
         let preview = [
             decoder.thumbnail_image(&source, &params),
             decoder.preview_image(&source, &params),
         ]
         .into_iter()
         .find_map(|r| r.ok().flatten())
-        .map(|img| working(&fit(img)));
-        let metadata = decoder.raw_metadata(&source, &params).ok();
+        .map(|img| preview_working(&fit(img), space));
         let tag = metadata
             .as_ref()
             .and_then(|m| m.exif.orientation)
@@ -320,9 +323,11 @@ pub fn look(path: &Path) -> Result<Look, String> {
     }
     let bytes = preview_bytes(path)?;
     let named = |e: String| format!("{}: {e}", path.display());
-    let source = RawSource::new_from_shared_vec(bytes);
+    let source = RawSource::new_from_shared_vec(bytes.clone());
     let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
     let params = RawDecodeParams::default();
+    let metadata = decoder.raw_metadata(&source, &params).ok();
+    let space = raw_preview_space(&bytes, metadata.as_ref());
     let preview = [
         decoder.preview_image(&source, &params),
         decoder.thumbnail_image(&source, &params),
@@ -330,8 +335,8 @@ pub fn look(path: &Path) -> Result<Look, String> {
     ]
     .into_iter()
     .find_map(|r| r.ok().flatten())
-    .map(|img| working(&img));
-    let shot = decoder.raw_metadata(&source, &params).ok().map(|m| {
+    .map(|img| preview_working(&img, space));
+    let shot = metadata.map(|m| {
         let exif = &m.exif;
         let unsigned = |r: Option<rawler::formats::tiff::Rational>| {
             r.filter(|r| r.d != 0)
@@ -382,9 +387,21 @@ fn convert(img: &DynamicImage, space: &InputSpace) -> Result<Image, String> {
     Ok(Image::new(Region::sized(w, h), 4, data))
 }
 
-/// An image taken as sRGB (an embedded preview) to the working space.
+/// An image taken as sRGB to the working space.
 fn working(img: &DynamicImage) -> Image {
     convert(img, &InputSpace::srgb()).expect("the sRGB conversion cannot fail")
+}
+
+/// A raw's embedded preview to the working space, read in the space the
+/// raw's Exif names ([`colour::preview_space`]): a camera set to Adobe RGB
+/// writes its previews in Adobe RGB, untagged.
+fn preview_working(img: &DynamicImage, space: OutputSpace) -> Image {
+    convert(img, &InputSpace::of(space)).unwrap_or_else(|_| working(img))
+}
+
+/// The space of a raw's embedded previews, from its bytes and metadata.
+fn raw_preview_space(bytes: &[u8], metadata: Option<&RawMetadata>) -> OutputSpace {
+    colour::preview_space(bytes, metadata.and_then(|m| m.exif.color_space))
 }
 
 /// A picture in the working space, its colours and its EXIF orientation
@@ -705,4 +722,32 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
         crop_y: y0 as u32,
     };
     Ok((image, camera, sensor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pixel(image: &Image) -> [f32; 3] {
+        let d = image.data();
+        [d[0], d[1], d[2]]
+    }
+
+    #[test]
+    fn an_adobe_rgb_preview_is_not_read_as_srgb() {
+        // A camera set to Adobe RGB writes its preview's full green: in
+        // the working space it is a deeper green than sRGB's.
+        let green =
+            DynamicImage::ImageRgb8(image::RgbImage::from_pixel(1, 1, image::Rgb([0, 255, 0])));
+        let adobe = pixel(&preview_working(&green, OutputSpace::AdobeRgb));
+        let srgb = pixel(&preview_working(&green, OutputSpace::Srgb));
+        assert_eq!(srgb, pixel(&working(&green)));
+        assert!(adobe[0] < srgb[0] - 0.05, "{adobe:?} against {srgb:?}");
+        // White stays white in both.
+        let white =
+            DynamicImage::ImageRgb8(image::RgbImage::from_pixel(1, 1, image::Rgb([255; 3])));
+        for c in pixel(&preview_working(&white, OutputSpace::AdobeRgb)) {
+            assert!((c - 1.0).abs() < 1e-3, "{c}");
+        }
+    }
 }
