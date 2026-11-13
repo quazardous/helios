@@ -1155,3 +1155,34 @@ window of its own and draw the shell again in the main window.
 - The quit question (D4), with the jobs and workshop sessions it lists.
 - macOS: the bar following the window in front, and the keys shown in
   the native menus (D7); the rest of D2 and D7 is built.
+
+## 8. Multi-window checklist
+
+Every new window passes these checks, opened from that window (not the
+main one). The `window-audit` bench job (`tools/bench/window-audit.py`)
+runs the probes marked *wbox* on the import window in a headless
+compositor; the others are covered by egui-pop's tests on real viewports
+(`egui-pop-api/tests/app_windows.rs`, `windows.rs`) or read in the code.
+
+Audit of the import window, 2026-11-13:
+
+| Check | Where it lands | How checked | Status |
+|---|---|---|---|
+| Folder picker (egui-pop's in-app picker, "Choose a folder…") | Was over the main window, hidden behind the import window. Now over the import window, blocking it alone | wbox `picker`; egui-pop tests | Fixed |
+| Escape with the picker open | Was lost (the picker was in the other window). Now closes the picker, the import window stays | wbox `escape` | Fixed |
+| Closing the window with the picker open | Was: the picker came up over the main window. Now the choice is cancelled | wbox `close-with-picker`; egui-pop test | Fixed |
+| System file chooser (rfd, desktop portal) | Not used: Helios builds egui-pop without `native-dialogs`. egui-pop's native path sets no parent window at all | code | Open (egui-pop) |
+| Command palette | The import window | wbox `palette` | OK |
+| egui-pop dialogs (confirmations) | The window they are opened from; each window has its own queue | egui-pop tests | OK |
+| Helios's own modals (consent, connection, picking) | Drawn in the import window's pass | code | OK |
+| Closing the window with an egui-pop dialog open | The dialog moves to the main window's queue | egui-pop docs, code | Open (to decide) |
+| Toasts | The window they are raised from | egui-pop tests | OK |
+| Menus, context menus, tooltips | The window they open in (egui popups per viewport; egui-pop's menu popup follows its window) | egui-pop tests | OK; tooltips not probed |
+| Shortcuts and keyboard focus | The focused window, with its context (`appWindow`) | egui-pop tests; wbox `palette` | OK |
+| A main-window page asked from the window (Storage…) | Opens in the main window, which may stay behind | code | To check |
+| Background task when the window closes (folder read) | Closes at once, the main window draws on | `import-close` job | OK |
+| Size and position | Kept per window across runs | egui-pop test | OK |
+| Agent socket and test steps | Address each window (`window`) | egui-pop-agent tests | OK |
+
+For a new window: add it to `window-audit.py`'s probes (or a probe of its
+own) so the job checks the same things for it.
