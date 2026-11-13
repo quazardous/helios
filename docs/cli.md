@@ -121,7 +121,11 @@ named `--profile-name` (the camera and the light otherwise), and the
 answer's `profile` gives its id. The node's commands
 `calibrate.profiles.list`, `calibrate.profiles.get` and
 `calibrate.profiles.delete` (through `command.run`, or the vault's
-endpoint) read and remove profiles.
+endpoint) read and remove profiles; `calibrate.profiles.export`
+(`profile`, `path`: a folder or a file) writes one as a
+`.helios-chartprofile.json` file to share, and
+`calibrate.profiles.import` (`path`, `dry_run`) checks such a file and
+adds its profile, or refuses it with every reason.
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job
