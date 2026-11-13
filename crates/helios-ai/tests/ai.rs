@@ -641,3 +641,33 @@ fn the_fake_machine_records_what_it_ran() {
     assert!(system.run("id", &["-u"]).is_ok());
     assert_eq!(system.ran(), vec!["id -u".to_string()]);
 }
+
+#[test]
+fn a_prompt_that_is_not_an_object_is_refused() {
+    let s = setup("prompt-shape", FakeRuntime::new(), machine());
+    for prompt in [
+        json!("image.describe"),
+        json!(7),
+        json!([1, 2]),
+        json!(true),
+    ] {
+        let request = json!({ "cmd": "ai.prompts.set", "prompt": prompt });
+        let err = helios_ai::tools::call(&s.ai, &request, Vec::new()).unwrap_err();
+        assert!(
+            err.contains("`prompt` must be an object"),
+            "{prompt}: {err}"
+        );
+    }
+}
+
+#[test]
+fn an_absurd_pull_size_is_refused() {
+    let s = setup("pull-size", FakeRuntime::new(), machine());
+    let request = json!({ "cmd": "ai.local.pull", "model": "x:1b", "size_mib": u64::MAX });
+    let err = helios_ai::tools::call(&s.ai, &request, Vec::new()).unwrap_err();
+    assert!(err.contains("is not a model's size"), "{err}");
+    assert!(
+        s.runtime.calls().is_empty(),
+        "nothing was asked of the runtime"
+    );
+}
