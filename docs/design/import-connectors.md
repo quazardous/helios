@@ -665,7 +665,7 @@ Into, the folder pattern, Name, Duplicates, Read darktable edits).
   XMP sidecars ("Read darktable edits" hidden).
 - **Import** runs each folder ticked with its own choices.
 
-Still to come: automatic imports hung on a source.
+Automatic imports hung on a source: section 3.10.
 
 ### 3.7 Adding a source: the wizard (as built)
 
@@ -769,6 +769,63 @@ chosen is remembered on the source (`browser`, a key of `[[source]]` in
 not a step of the column's Undo, being a view, not a setting. A card not
 saved keeps its browser until Helios quits, as do sources when they are
 not kept. Editing a source keeps its browser.
+
+### 3.10 Automatic imports (as built)
+
+A saved source may import on its own: "when this source has new photos,
+import them with its choices". Its trigger is `auto` on the source (a
+key of `[[source]]` in `user/import-sources`, absent when off, so older
+documents still read):
+
+| `auto` | Offered for | Fires |
+|---|---|---|
+| `plugged` | a card | when the card is mounted (the node's volume watch, `volume.mounted`), a card already in at start included |
+| `new-files` | a folder | when files appear in it, each once its size and time held still for a few seconds |
+
+It is set in the source's menu ("Import automatically": Off, or the
+trigger of its kind), one step of the column's Undo, a remembered source
+being saved by it; and in the wizard's choices step, the editor's
+included. Accounts (remote sources) are offered none yet.
+
+**Who runs them.** The desktop while it is open (C7, A): each frame of
+the main window, whether or not the import window is open, takes the
+cards mounted and the files a watched folder settled, and queues
+`library.importFiles` as the window would, with the source's own choices
+(else the window's). A card is copied; a folder copied or added where it
+is as its choices say. The host runs it as a job, as any import: one undo
+step of the Library, the strategy's "after each import" backups, its
+lines and report in the Log panel and its end said. Its start is a
+notice and a Log line ("Automatic import from Camera: 12 files"); a card
+imported so is not toasted "inserted".
+
+**Only what is new.** An automatic import always skips duplicates,
+whatever the source's choices say (it never keeps nor asks about one):
+a photo the Library holds is skipped by its content hash, and a file
+added where it is and seen before is recognised by its path, size and
+time without being read again. So plugging the same card again brings in
+only the photos taken since, and the first scan of a folder watched
+brings in what the Library lacks.
+
+**Watching folders.** No filesystem events: the `notify` crate is not in
+the tree, and a network share raises none anyway. A thread rescans the
+watched folders every 2 seconds (`helios_connect::local::files_of`); a
+file is sent once it kept its size and modification time for 3 seconds
+(a copy in progress is left alone), and only once while the folder is
+watched. Turning the trigger off takes the folder off the watch at once.
+
+**Another client's change.** The desktop follows the node's
+`settings.layerChanged` for `user/import-sources`: the document is read
+again off the interface's thread and replaces the list when it differs,
+so a trigger set elsewhere is watched at once.
+
+Not yet, from sections 3.2 and 3.3:
+- remote sources (a schedule, "every N hours", or a change feed);
+- the first run confirmed in the window, the question above a cap or
+  for a source never seen, one switch pausing them all;
+- the headless node running them (C7, later);
+- an import history record (`import/history`) beyond the Library's undo
+  step and the Log panel;
+- a card matched by its volume identity rather than its mount root.
 
 ## 4. The connectors surveyed
 

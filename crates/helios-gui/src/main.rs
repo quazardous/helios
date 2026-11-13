@@ -2174,7 +2174,7 @@ fn main() -> Result<(), String> {
             // The import window's saved sources, with their own choices:
             // one of the person's documents the node keeps.
             if let Some(kept) = node_settings.clone() {
-                let write = kept.clone();
+                let (write, again) = (kept.clone(), kept.clone());
                 let doc = helios_gui::shell::IMPORT_SOURCES;
                 // Written off the interface's thread: a pass never waits
                 // on the node.
@@ -2184,6 +2184,11 @@ fn main() -> Result<(), String> {
                         write.write(doc, text)
                     }),
                 );
+                // Changed by another client: read again, so automatic
+                // imports follow it.
+                if let Some(p) = persist.as_ref() {
+                    shell.follow_import_sources(p.bus().subscribe(), move || again.read(doc));
+                }
             }
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));

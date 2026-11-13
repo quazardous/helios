@@ -465,6 +465,12 @@ gui-history-undo cc7022a2d9050a57
 gui-image-not-reopened 422cb049e7d6fe52
 gui-image-opened 8cddc04842c75210
 gui-image-opening 0a3761ae857369a4
+gui-import-auto 04cb4bc503badcd5
+gui-import-auto-failed 37be8b9f419b44da
+gui-import-auto-new-files 88a0cce69d7530d5
+gui-import-auto-off 9945105be618ca38
+gui-import-auto-plugged 9650053d8cfc308a
+gui-import-auto-started 8c1977b44dcb9718
 gui-import-backup-copies c5e2a9c008db2419
 gui-import-backup-days 7f3c0cfff2a6e70a
 gui-import-backup-never e9addb91d6f0d9a6

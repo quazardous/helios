@@ -75,6 +75,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::import_accounts::PickAsked;
+use super::import_auto::Trigger;
 use super::import_browsers::Shown;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
 use super::import_sources::SourceKey;
@@ -197,7 +198,9 @@ pub(crate) struct ImportWindow {
     /// Cards plugged in since the watch's first look, not toasted yet.
     inserted: Vec<Card>,
     /// The context the cards' and the scans' threads ask a frame of.
-    ctx: Arc<Mutex<Option<Egui>>>,
+    pub(super) ctx: Arc<Mutex<Option<Egui>>>,
+    /// The automatic imports ([`super::import_auto`]).
+    pub(super) auto: super::import_auto::AutoImports,
     /// The viewport the window is drawn in (the main one while embedded):
     /// the one a scan's progress repaints.
     drawn_in: Arc<Mutex<Option<ViewportId>>>,
@@ -490,6 +493,7 @@ impl ImportWindow {
             self.cards.retain(|c| c.root != card.root);
             if let Change::Mounted(m) = &change {
                 self.cards.push(card.clone());
+                self.auto.plugged.push(card.clone());
                 if !m.at_start {
                     self.inserted.push(card.clone());
                 }
@@ -631,6 +635,11 @@ struct Words {
     edit_source: String,
     forget_source: String,
     forget_source_hint: String,
+    /// "Import automatically" and its choices, in a source's menu.
+    auto: String,
+    auto_off: String,
+    auto_plugged: String,
+    auto_new_files: String,
     contents: String,
     grid: GridWords,
     choices: ChoiceWords,
@@ -963,8 +972,13 @@ impl Shell {
             let inserted = std::mem::take(&mut w.inserted);
             (w.open, inserted)
         };
+        // A card imported on its own is said by its import, not toasted.
+        let automatic = self.run_automatic_imports();
         if !open {
-            for card in inserted {
+            for card in inserted
+                .into_iter()
+                .filter(|c| !automatic.contains(&c.root))
+            {
                 self.card_toast(&card);
             }
         }
@@ -1347,6 +1361,10 @@ impl ImportWindow {
                 "gui-import-window-forget-source-hint",
                 "Takes it off this column, its name and choices with it; the photos and the library are untouched",
             )),
+            auto: t(super::import_auto::title_message()),
+            auto_off: t(super::import_auto::off_message()),
+            auto_plugged: t(Trigger::Plugged.message()),
+            auto_new_files: t(Trigger::NewFiles.message()),
             forget_hint: t(Message::new(
                 "gui-import-window-forget-hint",
                 "Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it",
@@ -2002,9 +2020,15 @@ fn source_row(
         }
         let mut asked = None;
         let kept = w.sources.kept();
+        let auto = (
+            Trigger::offered(w.is_card(path)),
+            w.sources
+                .get(&SourceKey::Folder(path.to_path_buf()))
+                .and_then(|s| s.auto),
+        );
         tick.context_menu(|ui| {
             if kept {
-                asked = menu_items(ui, words);
+                asked = menu_items(ui, words, Some(auto));
                 ui.separator();
             }
             if ui
@@ -2033,14 +2057,37 @@ fn source_row(
 pub(super) enum MenuAsked {
     Edit,
     Forget,
+    /// "Import automatically": off, or this trigger.
+    Auto(Option<Trigger>),
 }
 
-/// "Edit source…" and "Forget this source", in a source's menu.
-fn menu_items(ui: &mut egui::Ui, words: &Words) -> Option<MenuAsked> {
+/// "Edit source…", "Import automatically" (when `auto` gives the trigger
+/// offered and the one set) and "Forget this source", in a source's menu.
+fn menu_items(
+    ui: &mut egui::Ui,
+    words: &Words,
+    auto: Option<(Trigger, Option<Trigger>)>,
+) -> Option<MenuAsked> {
     let mut asked = None;
     if ui.button(&words.edit_source).clicked() {
         asked = Some(MenuAsked::Edit);
         ui.close();
+    }
+    if let Some((offered, set)) = auto {
+        ui.menu_button(&words.auto, |ui| {
+            if ui.radio(set.is_none(), &words.auto_off).clicked() {
+                asked = Some(MenuAsked::Auto(None));
+                ui.close();
+            }
+            let label = match offered {
+                Trigger::Plugged => &words.auto_plugged,
+                Trigger::NewFiles => &words.auto_new_files,
+            };
+            if ui.radio(set == Some(offered), label).clicked() {
+                asked = Some(MenuAsked::Auto(Some(offered)));
+                ui.close();
+            }
+        });
     }
     if ui
         .button(&words.forget_source)
@@ -2059,7 +2106,7 @@ fn source_menu(row: &egui::Response, w: &ImportWindow, words: &Words) -> Option<
         return None;
     }
     let mut asked = None;
-    row.context_menu(|ui| asked = menu_items(ui, words));
+    row.context_menu(|ui| asked = menu_items(ui, words, None));
     asked
 }
 
@@ -2069,6 +2116,7 @@ impl ImportWindow {
         match asked {
             MenuAsked::Edit => self.open_editor(key),
             MenuAsked::Forget => self.forget_source(&key),
+            MenuAsked::Auto(auto) => self.set_auto(&key, auto),
         }
     }
 }

@@ -33,6 +33,7 @@ use helios_connect::Caps;
 use serde::{Deserialize, Serialize};
 
 use super::Shell;
+pub use super::import_auto::Trigger;
 use super::import_choices::Choices;
 use super::import_window::ImportWindow;
 
@@ -106,9 +107,31 @@ pub struct SavedSource {
     /// ([`super::import_browsers`]); `None`: the connector's first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<helios_connect::Browser>,
+    /// When it imports on its own ([`super::import_auto`]); `None`: only
+    /// when asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto: Option<Trigger>,
 }
 
 impl SavedSource {
+    /// A source of `connector` at `key`, with nothing of its own yet.
+    pub(crate) fn new(connector: String, key: &SourceKey) -> Self {
+        let (path, account) = match key {
+            SourceKey::Folder(p) => (Some(p.clone()), None),
+            SourceKey::Account(a) => (None, Some(a.clone())),
+        };
+        Self {
+            connector,
+            name: None,
+            path,
+            account,
+            choices: None,
+            params: BTreeMap::new(),
+            browser: None,
+            auto: None,
+        }
+    }
+
     pub(crate) fn key(&self) -> Option<SourceKey> {
         match (&self.path, &self.account) {
             (Some(p), _) => Some(SourceKey::Folder(p.clone())),
@@ -123,6 +146,17 @@ impl SavedSource {
 struct Document {
     #[serde(default, rename = "source")]
     sources: Vec<SavedSource>,
+}
+
+/// The sources of the document's TOML `text`; none when it does not read.
+pub(crate) fn parse(text: &str) -> Vec<SavedSource> {
+    toml::from_str::<Document>(text).map_or_else(
+        |e| {
+            log::warn!("import sources: {DOCUMENT}: {e}");
+            Vec::new()
+        },
+        |d| d.sources,
+    )
 }
 
 /// Which of the choices a source's connector honours.
@@ -294,18 +328,9 @@ impl Sources {
         if let Some(s) = self.list.iter_mut().find(|s| s.key().as_ref() == Some(key)) {
             s.choices = choices;
         } else {
-            let (path, account) = match key {
-                SourceKey::Folder(p) => (Some(p.clone()), None),
-                SourceKey::Account(a) => (None, Some(a.clone())),
-            };
             self.list.push(SavedSource {
-                connector: connector.to_string(),
-                name: None,
-                path,
-                account,
                 choices,
-                params: BTreeMap::new(),
-                browser: None,
+                ..SavedSource::new(connector.to_string(), key)
             });
         }
         self.store();
@@ -322,18 +347,9 @@ impl Sources {
         if let Some(s) = self.list.iter_mut().find(|s| s.key().as_ref() == Some(key)) {
             s.browser = Some(browser);
         } else {
-            let (path, account) = match key {
-                SourceKey::Folder(p) => (Some(p.clone()), None),
-                SourceKey::Account(a) => (None, Some(a.clone())),
-            };
             self.list.push(SavedSource {
-                connector: connector.to_string(),
-                name: None,
-                path,
-                account,
-                choices: None,
-                params: BTreeMap::new(),
                 browser: Some(browser),
+                ..SavedSource::new(connector.to_string(), key)
             });
         }
         self.store();
@@ -341,18 +357,14 @@ impl Sources {
 
     fn read_kept(&mut self) {
         let Some(read) = &self.read else { return };
-        let doc: Document = match read() {
-            Ok(Some(text)) => toml::from_str(&text).unwrap_or_else(|e| {
-                log::warn!("import sources: {DOCUMENT}: {e}");
-                Document::default()
-            }),
-            Ok(None) => Document::default(),
+        self.list = match read() {
+            Ok(Some(text)) => parse(&text),
+            Ok(None) => Vec::new(),
             Err(e) => {
                 log::warn!("import sources: {DOCUMENT}: {e}");
-                Document::default()
+                Vec::new()
             }
         };
-        self.list = doc.sources;
     }
 
     pub(crate) fn store(&self) {
@@ -686,6 +698,7 @@ mod tests {
                     }),
                     params: BTreeMap::new(),
                     browser: Some(helios_connect::Browser::Timeline),
+                    auto: Some(Trigger::NewFiles),
                 },
                 SavedSource {
                     connector: "google-photos".into(),
@@ -695,11 +708,13 @@ mod tests {
                     choices: None,
                     params: [("album".to_owned(), serde_json::json!("Holidays"))].into(),
                     browser: None,
+                    auto: None,
                 },
             ],
         };
         let text = toml::to_string(&doc).unwrap();
         assert!(text.contains("browser = \"timeline\""), "{text}");
+        assert!(text.contains("auto = \"new-files\""), "{text}");
         let back: Document = toml::from_str(&text).unwrap();
         assert_eq!(back.sources, doc.sources, "{text}");
     }
