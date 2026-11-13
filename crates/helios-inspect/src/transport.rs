@@ -375,6 +375,46 @@ fn converse<R, H>(
     }
 }
 
+/// What a client is told of a request sent whose answer never came.
+pub const OUTCOME_UNKNOWN: &str = "its outcome is unknown, it may have been applied: \
+     read the state before sending it again, never resend it blindly";
+
+/// The error of a request sent whose answer never came: the connection
+/// closed, failed or timed out after the whole request was written, so
+/// the server may have run it. [`unanswered`] tells it apart from a
+/// request that never left (no server, refused).
+#[derive(Debug)]
+pub struct Unanswered(pub io::Error);
+
+impl std::fmt::Display for Unanswered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "no answer to the request sent ({}): {OUTCOME_UNKNOWN}",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for Unanswered {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+/// Whether `error` is a request's that was sent and never answered
+/// ([`Unanswered`]): its outcome is unknown.
+pub fn unanswered(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(<dyn std::error::Error + Send + Sync>::is::<Unanswered>)
+}
+
+/// `error`, read after the request was sent, marked [`Unanswered`].
+fn after_sending(error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), Unanswered(error))
+}
+
 /// Sends one request and reads the response.
 pub fn request_at<R: Serialize>(address: &Address, request: &R) -> io::Result<Value> {
     request_timed(address, request, None)
@@ -403,7 +443,7 @@ fn request_timed<R: Serialize>(
             stream.set_read_timeout(timeout)?;
             stream.set_write_timeout(timeout)?;
             writeln!(stream, "{line}")?;
-            read_answer(stream)
+            read_answer(stream).map_err(after_sending)
         }
         #[cfg(not(unix))]
         Address::Unix(_) => Err(io::Error::new(
@@ -428,8 +468,9 @@ fn request_timed<R: Serialize>(
             }
             writeln!(stream, "{line}")?;
             let mut answer = String::new();
-            reader.read_line(&mut answer)?;
-            serde_json::from_str(&answer).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            reader.read_line(&mut answer).map_err(after_sending)?;
+            serde_json::from_str(&answer)
+                .map_err(|e| after_sending(io::Error::new(io::ErrorKind::InvalidData, e)))
         }
     }
 }

@@ -3,7 +3,10 @@
 `helios` talks to a running node (`helios-node`): it reads its state through
 the inspect endpoint, drives it through the debug control endpoint, manages
 sandboxes, runs batches and imports darktable edits. Answers are JSON. Exit codes: 0 answered, 1 the
-node answered with an error, 2 wrong usage, 3 the node cannot be reached.
+node answered with an error, 2 wrong usage, 3 the node cannot be reached, 4 the
+request was sent and its answer never came (the connection closed): its outcome
+is unknown, it may have been applied. After a 4, read the state before running
+the request again; never resend a change blindly.
 `helios` with no argument prints the full usage.
 
 ## Inspect and control
@@ -379,7 +382,8 @@ one (the value read as JSON, `2` or `true`, else as text). Its params are
 checked against its schema; a greyed command is refused with its reason.
 A window command runs in `--window` as its menu would. When an id is in
 both scopes (`library.import`), the node's runs unless `--scope window`.
-The answer is printed; a refusal goes to the standard error, exit code 1.
+The answer is printed; a refusal goes to the standard error, exit code 1;
+a connection that closed before the answer, exit code 4 (outcome unknown).
 
 ```bash
 helios commands --vault library.db --filter undo
