@@ -1487,6 +1487,10 @@ gui-rule-field-camera = camera
 
 gui-rule-field-captured = capture date
 
+gui-rule-field-clip-black = crushed shadows (share)
+
+gui-rule-field-clip-white = blown highlights (share)
+
 gui-rule-field-description = description
 
 gui-rule-field-file-type = file type
@@ -1494,6 +1498,8 @@ gui-rule-field-file-type = file type
 gui-rule-field-flag = flag
 
 gui-rule-field-focal-length = focal length
+
+gui-rule-field-focus = sharpness (focus)
 
 gui-rule-field-folder = folder
 

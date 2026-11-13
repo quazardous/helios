@@ -973,10 +973,13 @@ gui-rule-field-album 409f8da46b9a827a
 gui-rule-field-aperture f291c41b7c3d3711
 gui-rule-field-camera fb00319d6aeaf054
 gui-rule-field-captured 73c02fc1f6a13f6f
+gui-rule-field-clip-black 0f141226ac3be250
+gui-rule-field-clip-white ddf67563b732f3fe
 gui-rule-field-description 8b5e28fcfa8e55c1
 gui-rule-field-file-type 9d1eb9e85d3462d9
 gui-rule-field-flag 92541aede106e4ef
 gui-rule-field-focal-length c35ba50bebceaa14
+gui-rule-field-focus 66eeec89c5794da3
 gui-rule-field-folder c1be81aa1156c7cd
 gui-rule-field-iso b3ad656d0ec905f4
 gui-rule-field-label 81f370016b248557
