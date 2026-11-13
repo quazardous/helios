@@ -505,7 +505,9 @@ fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source
     until(&mut h, "its choices shown", |h| {
         shown(h, &format!("{name}: its own choices"))
     });
-    assert!(shown(&h, "Saved sources") && shown(&h, &name));
+    // Listed once, under Services by its name, never under Saved sources.
+    assert!(shown(&h, "Services") && shown(&h, &name));
+    assert!(!shown(&h, "Saved sources"));
 }
 
 /// Cancel in the wizard leaves no source, wherever it is pressed; an
