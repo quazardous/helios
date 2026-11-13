@@ -36,7 +36,11 @@ calibrate-dry-run-only = seul l’essai à blanc est disponible pour l’instant
 
 calibrate-load-failed = impossible de lire la prise de vue de la mire : { $error }
 
-calibrate-raw-not-yet = une prise de vue raw de la mire n’est pas encore mesurée : donnez-en une image décodée (TIFF, PNG, JPEG)
+calibrate-outside-image = les cases de la mire tombent hors de l’image
+
+calibrate-no-camera-matrix = le boîtier n’a pas de matrice de couleur utilisable pour mesurer le raw
+
+calibrate-raw-graph = le raw n’a pu être développé pour la mesure : { $error }
 
 calibrate-unknown-chart = aucune mire « { $chart } »
 

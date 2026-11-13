@@ -919,9 +919,9 @@ pub mod control {
         },
         /// Measures a colour chart shot and solves its correction
         /// (`docs/design/calibration.md`): `path` an absolute picture
-        /// file (a raw is refused until its measurement graph lands),
-        /// `corners` the centres of the four corner patches, `[x, y]` in
-        /// its pixels as stored, in any order. Answers the report; a dry
+        /// file or a raw (measured on its sensor data), `corners` the
+        /// centres of the four corner patches, `[x, y]` in its pixels as
+        /// stored, in any order. Answers the report; a dry
         /// run only, nothing written (`dry_run` false is refused).
         #[serde(rename = "calibrate.chart")]
         CalibrateChart {

@@ -2262,8 +2262,14 @@ name = "helios-calibrate"
 version = "0.87.0"
 dependencies = [
  "helios-colour",
+ "helios-core",
  "helios-module-channelmixerrgb",
+ "helios-module-demosaic",
+ "helios-module-highlights",
+ "helios-module-rawprepare",
+ "helios-module-whitebalance",
  "helios-photo",
+ "helios-testkit",
  "serde",
  "serde_json",
 ]
@@ -2923,6 +2929,7 @@ name = "helios-testkit"
 version = "0.87.0"
 dependencies = [
  "helios-core",
+ "helios-photo",
 ]
 
 [[package]]

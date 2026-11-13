@@ -1696,7 +1696,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_calibrate_chart",
         endpoint: Endpoint::Control,
         cmd: "calibrate.chart",
-        description: "Measures a colour chart shot (a decoded picture: TIFF, PNG, JPEG) and solves its colour correction, a dry run that writes nothing: per patch the measured value, the reference and Delta E 2000 before and after, with its status; mean, max and worst patches; the orientation found, the light estimated from the neutral patches, the exposure offset and the matrices (debug control)",
+        description: "Measures a colour chart shot (a decoded picture: TIFF, PNG, JPEG, or a raw measured on its sensor data) and solves its colour correction, a dry run that writes nothing: per patch the measured value, the reference and Delta E 2000 before and after, with its status; mean, max and worst patches; the orientation found, the light estimated from the neutral patches, the exposure offset and the matrices (debug control)",
         params: &[
             Param {
                 name: "path",
@@ -1707,7 +1707,7 @@ pub const TOOLS: &[Tool] = &[
             Param {
                 name: "corners",
                 schema: corners,
-                description: "The centres of the chart's four corner patches, [x, y] in the picture's pixels as stored, in any order",
+                description: "The centres of the chart's four corner patches, [x, y] in the picture's pixels as stored (a raw's: its sensor data's), in any order",
                 default: None,
             },
             optional(

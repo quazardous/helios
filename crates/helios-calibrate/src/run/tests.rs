@@ -16,7 +16,7 @@ pub(crate) const H: usize = 440;
 pub(crate) const CORNERS: [Point; 4] = [[95.0, 88.0], [548.0, 70.0], [560.0, 352.0], [80.0, 340.0]];
 
 /// XYZ to camera RGB of a real body (dcraw's table, Canon EOS 5D Mark II).
-const CAMERA: [f64; 9] = [
+pub(crate) const CAMERA: [f64; 9] = [
     0.4716, 0.0603, -0.0830, -0.7798, 1.5474, 0.2480, -0.1496, 0.1937, 0.6651,
 ];
 
@@ -41,7 +41,7 @@ pub(crate) fn lit(a: &Mat3) -> Vec<[f64; 3]> {
 }
 
 /// A correction keeping the neutrals' direction of `targets`.
-fn correction(targets: &[[f64; 3]]) -> Mat3 {
+pub(crate) fn correction(targets: &[[f64; 3]]) -> Mat3 {
     let sum = CHART.neutrals.iter().fold([0.0; 3], |acc, &k| {
         [0, 1, 2].map(|c| acc[c] + targets[k][c])
     });

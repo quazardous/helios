@@ -3,14 +3,14 @@
 //! dry run that writes nothing, as a node's `calibrate.chart` request
 //! answers it.
 //!
-//! Arguments: `path` (a decoded picture: TIFF, PNG, JPEG; a raw is refused
-//! until its measurement graph lands), `corners` (the centres of the four
-//! corner patches, `[x, y]` in the picture's pixels as stored, any order),
+//! Arguments: `path` (a decoded picture: TIFF, PNG, JPEG, or a raw measured
+//! on its sensor data), `corners` (the centres of the four corner patches,
+//! `[x, y]` in the picture's pixels as stored or the raw's, any order),
 //! `chart`, `exclude`, `dry_run` (true only).
 
 use std::path::PathBuf;
 
-use helios_calibrate::{ChartArgs, calibrate_picture};
+use helios_calibrate::{ChartArgs, calibrate_picture, calibrate_raw};
 use helios_shell::commands::CommandSpec;
 use serde_json::{Value, json};
 
@@ -22,8 +22,8 @@ pub const CHART_COMMAND: &str = "calibrate.chart";
 /// The answer of [`CHART_COMMAND`] for `args`.
 ///
 /// # Errors
-/// Arguments that do not parse, a file that cannot be read, a raw, or a
-/// chart that cannot be solved as asked.
+/// Arguments that do not parse, a file that cannot be read, or a chart
+/// that cannot be measured and solved as asked.
 pub fn chart(args: &Value) -> Result<Value, String> {
     let path: PathBuf = args
         .get("path")
@@ -35,27 +35,26 @@ pub fn chart(args: &Value) -> Result<Value, String> {
     if !chart.dry_run {
         return Err(helios_calibrate::ChartError::NotDryRun.to_string());
     }
-    if helios_load::Kind::of(&path) == helios_load::Kind::Raw {
-        return Err(
-            "a raw chart shot is not measured yet: give a decoded picture (TIFF, PNG, JPEG) of it"
-                .into(),
-        );
-    }
     let loaded = helios_load::load(&path)?;
     let region = loaded.image.region();
-    let answer = calibrate_picture(
-        &chart,
-        loaded.image.data(),
-        region.width as usize,
-        region.height as usize,
-        loaded.image.channels() as usize,
-    )
+    let raw = loaded.camera.is_some();
+    let answer = match &loaded.camera {
+        Some(camera) => calibrate_raw(&chart, loaded.image.clone(), camera),
+        None => calibrate_picture(
+            &chart,
+            loaded.image.data(),
+            region.width as usize,
+            region.height as usize,
+            loaded.image.channels() as usize,
+        ),
+    }
     .map_err(|e| e.to_string())?;
     let mut value = json!(answer);
     value["image"] = json!({
         "hash": loaded.hash,
         "width": region.width,
         "height": region.height,
+        "raw": raw,
     });
     Ok(value)
 }

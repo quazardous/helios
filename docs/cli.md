@@ -111,8 +111,10 @@ in any order. It is a dry run, nothing is written: the answer is the
 report (per patch the measured value, the reference, Delta E 2000 before
 and after and its status; mean, max and worst patches; the orientation
 found, the light estimated from the neutrals, the exposure offset, the
-matrices). Only decoded pictures (TIFF, PNG, JPEG) are measured so far; a
-raw is refused.
+matrices). A decoded picture (TIFF, PNG, JPEG) is measured on its linear
+working RGB, a raw on its own sensor data (the raw front without the
+input profile, on the chart's bounding box), its points in the raw's
+pixels.
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job
