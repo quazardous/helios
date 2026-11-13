@@ -226,10 +226,14 @@ used while the first is open (not decided: whether to allow one device
 per adapter once the loader fix is widespread). A failing GPU falls back
 to the CPU per step, and a lost device is rebuilt once, else the session
 continues on the CPU (see docs/architecture.md, "GPU failures").
-**One window is one workspace** (2026-10-11, decided), as in VS Code:
+**One window is one focus** (2026-10-11 as "one window is one workspace",
+reworded 2026-11-13, decided by the owner): a focus is a workspace named
+by its intention (the library, an import, an edit), as in VS Code:
 opening another project opens another window, never a project tab.
 Auxiliary windows (panels detached to another screen) belong to their
-workspace's window; tabs live inside editor groups. The shell is a panel
+focus's window; tabs live inside editor groups. The Settings window edits
+the focus it was opened from, named in its header and switchable
+(2026-11-13, decided; see docs/design/windows.md). The shell is a panel
 framework from the start: fixed areas (editor groups, side and bottom
 panels, activity and status bars), panels declared rather than hard-coded,
 every action a named command reachable from menus, shortcuts, the palette,
