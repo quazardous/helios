@@ -10,6 +10,36 @@ fn the_sqlite_store_passes_the_contract() {
     contract::check(|| SqliteStore::in_memory().unwrap());
 }
 
+/// On a file, the vault reads through connections of their own beside
+/// its writer: every rule of the contract still holds.
+#[test]
+fn a_sqlite_vault_on_a_file_passes_the_contract_through_its_read_connections() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let dir =
+        std::env::temp_dir().join(format!("helios-vault-file-contract-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let next = AtomicU64::new(0);
+    contract::check(|| {
+        let n = next.fetch_add(1, Ordering::Relaxed);
+        SqliteStore::open(&dir.join(format!("vault-{n}.db"))).unwrap()
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A read on a vault file never waits for a write, however long: with the
+/// writer held in an open transaction, reads (an image, its edit head, its
+/// fields, the stacks) answer from what is committed.
+#[test]
+fn reads_do_not_wait_for_a_write_held_open() {
+    let dir = std::env::temp_dir().join(format!("helios-vault-held-write-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+    contract::reads_do_not_wait_for_a_write(store, std::time::Duration::from_secs(10));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_sqlite_vault_survives_reopening() {
     let dir = std::env::temp_dir().join(format!("helios-vault-reopen-{}", std::process::id()));
