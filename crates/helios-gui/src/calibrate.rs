@@ -13,6 +13,8 @@
 //!   written into their edits (`cameracolour`, `cameratone`).
 //! - `calibrate.choose`: the open photo's profile, chosen in the module's
 //!   header, one step of the edit's history (not of the library's).
+//! - `look.camera.choose`: the open photo's camera look fitted, turned on
+//!   or off from the Camera look header, one step of the edit's history.
 //!
 //! When a raw opens for the first time, its camera's default profile is
 //! put on it ([`on_open`]); a default that picks none says why in the
@@ -218,9 +220,19 @@ pub fn register<S: Store + Send + 'static>(
         "Sets the open photo's calibration profile (`profile`: an id of its camera's, or `none`), one step of its edit",
         "Calibration",
     );
+    let (look_node, look_values) = (node.clone(), values.clone());
     shell.register(spec, move |args, origin| match &node {
         Some(node) => choose(&node.vault, &values, args, origin),
         None => Err("no library open: calibration profiles live in one".into()),
+    })?;
+    let spec = CommandSpec::new(
+        LOOK_CHOOSE,
+        "Sets the open photo's camera look (`look`: `fit` to fit it to the camera's JPEG, `on` or `off`), one step of its edit",
+        "Calibration",
+    );
+    shell.register(spec, move |args, origin| match &look_node {
+        Some(node) => look_choose(node, &look_values, args, origin),
+        None => Err("no library open: the camera look fits a photo of it".into()),
     })?;
     Ok(())
 }
@@ -237,25 +249,48 @@ pub const CHOOSE: &str = "calibrate.choose";
 /// illuminant, quality}]}`.
 pub const OFFER: &str = "view/calibration/offer";
 
-/// Declares [`OFFER`]: transient, never undone.
+/// Sets the open photo's camera look (`look`: `fit`, `on` or `off`) on
+/// its `cameracolour` and `cameratone` nodes, as one step of the edit's
+/// history (`docs/design/camera-look.md`, section 3.4).
+pub const LOOK_CHOOSE: &str = "look.camera.choose";
+
+/// Why the open photo's last fit was refused, in words (empty: none).
+pub const LOOK_REFUSAL: &str = "view/look/refusal";
+
+/// Declares [`OFFER`] and [`LOOK_REFUSAL`]: transient, never undone.
 pub fn declare(store: &mut helios_values::Store) {
     store.declare(
         OFFER,
         helios_values::Descriptor::text("calibration profiles offered", "").transient(),
     );
+    store.declare(
+        LOOK_REFUSAL,
+        helios_values::Descriptor::text("camera look refused", "").transient(),
+    );
 }
 
-/// The `chartprofile` node of the network the store holds, by name.
-pub fn chart_node(store: &helios_values::Store) -> Option<String> {
+/// The node running `module` in the network the store holds, by name.
+fn module_node(store: &helios_values::Store, module: &str) -> Option<String> {
     store
         .list("node/")
         .into_iter()
-        .find(|(_, e)| e.descriptor.module.as_deref() == Some(helios_calibrate::apply::MODULE))
+        .find(|(_, e)| e.descriptor.module.as_deref() == Some(module))
         .and_then(|(p, _)| {
             p.strip_prefix("node/")?
                 .rsplit_once('/')
                 .map(|(n, _)| n.to_string())
         })
+}
+
+/// The `chartprofile` node of the network the store holds, by name.
+pub fn chart_node(store: &helios_values::Store) -> Option<String> {
+    module_node(store, helios_calibrate::apply::MODULE)
+}
+
+/// The `cameratone` node of the network the store holds, by name: the
+/// Camera look entry.
+pub fn look_node(store: &helios_values::Store) -> Option<String> {
+    module_node(store, helios_calibrate::look::edit::TONE)
 }
 
 /// What the photo's chart profile node knows of it: its camera's key and
@@ -331,13 +366,14 @@ fn refresh_offer<S: Store>(vault: &Vault<S>, store: &std::sync::Mutex<helios_val
         return;
     };
     let text = |k: &str| old[k].as_str().unwrap_or_default().to_string();
-    let new = offer(
+    let mut new = offer(
         vault,
         &text("camera"),
         &text("make"),
         &text("model"),
         old["light"].clone(),
     );
+    new["image"] = old["image"].clone();
     set_offer(store, Some(&new));
 }
 
@@ -354,13 +390,15 @@ pub fn on_open<S: Store>(
 ) -> Option<Message> {
     let Some((photo, make, model)) = photo_of(graph) else {
         set_offer(store, None);
+        set_refusal(store, "");
         return None;
     };
     let light = photo.light.map_or(Value::Null, |l| serde_json::json!(l));
-    set_offer(
-        store,
-        Some(&offer(vault, &photo.camera, &make, &model, light)),
-    );
+    let mut offered = offer(vault, &photo.camera, &make, &model, light);
+    // The camera look's header fits this image.
+    offered["image"] = Value::String(image.hex());
+    set_offer(store, Some(&offered));
+    set_refusal(store, "");
     let now = seconds() as u64;
     match node::default_on_open(vault, image, &photo, crate::persist::WHO, now) {
         Ok(node::OnOpen::Applied { name, .. }) => Some(
@@ -581,4 +619,243 @@ pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Stor
             ),
         );
     }
+}
+
+/// Sets why the open photo's last fit was refused (empty: none).
+pub fn set_refusal(store: &std::sync::Mutex<helios_values::Store>, words: &str) {
+    let mut s = store.lock().expect("value store lock");
+    let _ = s.set(helios_values::Set::new(
+        LOOK_REFUSAL,
+        helios_values::Change::To(helios_core::Value::Text(words.to_string())),
+        helios_shell::commands::Origin::User,
+    ));
+}
+
+/// Why the open photo's last fit was refused, as the store holds it.
+pub fn read_refusal(store: &helios_values::Store) -> String {
+    match store.get(LOOK_REFUSAL).map(|e| &e.value) {
+        Some(helios_core::Value::Text(t)) => t.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Whether `node` is bypassed in the store (a node without the switch
+/// counts as bypassed).
+fn is_bypassed(store: &helios_values::Store, node: &str) -> bool {
+    store
+        .get(&helios_values::bypass_path(node))
+        .and_then(|e| e.value.as_bool())
+        .unwrap_or(true)
+}
+
+/// Whether the store's `cameratone` node holds a fitted look: its tone
+/// curve has knots.
+fn is_fitted(store: &helios_values::Store, tone: &str) -> bool {
+    matches!(
+        store.get(&helios_values::node_path(tone, "tone")).map(|e| &e.value),
+        Some(helios_core::Value::List(k)) if !k.is_empty()
+    )
+}
+
+/// [`LOOK_CHOOSE`]: the open photo's camera look fitted through the node
+/// (`look.camera.fit`, a dry run: the numbers come back and are written
+/// here, into the edit), turned on or off; one step of the edit's
+/// history, by `origin`. A refused fit writes nothing and is kept, in
+/// words, for the header ([`LOOK_REFUSAL`]).
+fn look_choose<S: Store>(
+    node: &Node<S>,
+    store: &std::sync::Mutex<helios_values::Store>,
+    args: &Value,
+    origin: &helios_shell::commands::Origin,
+) -> Result<Value, String> {
+    use helios_calibrate::look::edit::{COLOUR, DISPLAY, TONE};
+    use helios_values::{Change, Set, bypass_path, node_path};
+    let asked = args["look"].as_str().unwrap_or_default();
+    let (tone, colour, display, charted, fitted, image) = {
+        let s = store.lock().expect("value store lock");
+        let tone = look_node(&s).ok_or("the photo shown has no camera look module")?;
+        let charted = chart_node(&s).is_some_and(|c| !is_bypassed(&s, &c));
+        let fitted = is_fitted(&s, &tone);
+        let image = read_offer(&s).and_then(|o| o["image"].as_str().map(String::from));
+        (
+            tone,
+            module_node(&s, COLOUR),
+            module_node(&s, DISPLAY),
+            charted,
+            fitted,
+            image,
+        )
+    };
+    // The switches turning the look on: the tone half in sigmoid's place,
+    // the colour half unless a chart profile rules the colours.
+    let on = |writes: &mut Vec<(String, helios_core::Value)>| {
+        writes.push((bypass_path(&tone), helios_core::Value::Bool(false)));
+        if let Some(c) = &colour {
+            writes.push((bypass_path(c), helios_core::Value::Bool(charted)));
+        }
+        if let Some(d) = &display {
+            writes.push((bypass_path(d), helios_core::Value::Bool(true)));
+        }
+    };
+    let mut writes = Vec::new();
+    let mut answer = serde_json::json!({ "node": tone, "look": asked });
+    let label = match asked {
+        "off" => {
+            writes.push((bypass_path(&tone), helios_core::Value::Bool(true)));
+            if let Some(c) = &colour {
+                writes.push((bypass_path(c), helios_core::Value::Bool(true)));
+            }
+            if let Some(d) = &display {
+                writes.push((bypass_path(d), helios_core::Value::Bool(false)));
+            }
+            "Camera look off"
+        }
+        "on" if !fitted => {
+            return Err("the camera look is not fitted yet: fit it to the camera's JPEG".into());
+        }
+        "on" => {
+            on(&mut writes);
+            "Camera look on"
+        }
+        "fit" => {
+            let image = image.ok_or("the photo shown is not one of the library's")?;
+            let who = crate::persist::who(origin);
+            let (fit, _) = helios_node_core::endpoint::command(
+                &node.vault,
+                &node.bus,
+                LOOK_FIT,
+                &serde_json::json!({ "images": [image], "dry_run": true }),
+                &who,
+            )?;
+            let done = fit["images"][0].clone();
+            answer["fit"] = done.clone();
+            if let Some(words) = done["refused"]["words"].as_str() {
+                set_refusal(store, words);
+                return Ok(answer);
+            }
+            for (module, name) in [(COLOUR, colour.as_ref()), (TONE, Some(&tone))] {
+                let Some(name) = name else { continue };
+                let params: helios_core::Params =
+                    serde_json::from_value(done["params"][module].clone())
+                        .map_err(|e| format!("the fit's {module} parameters: {e}"))?;
+                for (param, value) in params.iter() {
+                    writes.push((node_path(name, param), value.clone()));
+                }
+            }
+            on(&mut writes);
+            set_refusal(store, "");
+            "Camera look fitted to the camera's JPEG"
+        }
+        other => return Err(format!("`look` is `fit`, `on` or `off`, not `{other}`")),
+    };
+    let mut s = store.lock().expect("value store lock");
+    let group = s.begin_group(origin.clone(), label);
+    let mut failed = None;
+    for (path, value) in writes {
+        if let Err(e) = s.set(Set::new(&path, Change::To(value), origin.clone()).gesture(group)) {
+            failed = Some(e.to_string());
+        }
+    }
+    s.end(group);
+    match failed {
+        Some(e) => Err(e),
+        None => Ok(answer),
+    }
+}
+
+/// The Camera look entry's header in the Parameters panel, under the
+/// `cameratone` node's name (`docs/design/camera-look.md`, section 3.4):
+/// what the look was fitted to and how well (the held-out Delta E against
+/// the default render's), or the gate that refused it in words; a switch
+/// turning it on and off; "Fit to the camera's JPEG" (Refit once fitted).
+/// Each is [`LOOK_CHOOSE`], one undoable step of the edit. Nothing for
+/// another node.
+pub fn look_header_ui(
+    ui: &mut egui::Ui,
+    store: &std::sync::Mutex<helios_values::Store>,
+    node: &str,
+) {
+    use helios_values::node_path;
+    let (fitted, on, colour_off, held, baseline, refusal, image) = {
+        let s = store.lock().expect("value store lock");
+        if look_node(&s).as_deref() != Some(node) {
+            return;
+        }
+        let float = |p: &str| s.get(&node_path(node, p)).and_then(|e| e.value.as_f64());
+        let charted = chart_node(&s).is_some_and(|c| !is_bypassed(&s, &c));
+        let colour = module_node(&s, helios_calibrate::look::edit::COLOUR);
+        let on = !is_bypassed(&s, node);
+        (
+            is_fitted(&s, node),
+            on,
+            on && charted && colour.is_some_and(|c| is_bypassed(&s, &c)),
+            float("held_out"),
+            float("baseline"),
+            read_refusal(&s),
+            read_offer(&s).is_some_and(|o| o["image"].is_string()),
+        )
+    };
+    let ctx = ui.ctx().clone();
+    let text = |m: Message| crate::i18n::text(&ctx, m);
+    let score = |v: Option<f64>| v.map_or_else(|| "?".to_string(), |v| format!("{v:.1}"));
+    let status = if !refusal.is_empty() {
+        Message::new("gui-look-header-refused", "Not fitted: { $reason }").with("reason", refusal)
+    } else if fitted {
+        Message::new(
+            "gui-look-header-fitted",
+            "Fitted to the camera's JPEG: Delta E { $held } (default { $baseline })",
+        )
+        .with("held", score(held))
+        .with("baseline", score(baseline))
+    } else {
+        Message::new(
+            "gui-look-header-none",
+            "Not fitted yet: the look starts from the camera's own JPEG",
+        )
+    };
+    ui.weak(text(status));
+    if colour_off {
+        ui.weak(text(Message::new(
+            "gui-look-header-chart",
+            "Colour half off: the chart profile rules the colours",
+        )));
+    }
+    let run = |look: &str| {
+        crate::dialogs::request(
+            &ctx,
+            crate::dialogs::Request::Run(
+                LOOK_CHOOSE.into(),
+                serde_json::json!({ "look": look }),
+                helios_shell::commands::Origin::User,
+            ),
+        );
+    };
+    ui.horizontal(|ui| {
+        let name = text(Message::new("gui-look-header-switch", "Camera look"));
+        let mut checked = on && fitted;
+        let r = ui.add_enabled(fitted, egui::Checkbox::new(&mut checked, &name));
+        egui_pop::core::a11y::name(&r, egui::Role::CheckBox, &name);
+        crate::name_rect(&ctx, "helios.cameralook.switch", r.rect);
+        if r.changed() {
+            run(if checked { "on" } else { "off" });
+        }
+        let fit = if fitted {
+            text(Message::new("gui-look-header-refit", "Refit"))
+        } else {
+            text(Message::new(
+                "gui-look-header-fit",
+                "Fit to the camera's JPEG",
+            ))
+        };
+        let r = ui.add_enabled(image, egui::Button::new(&fit).small());
+        egui_pop::core::a11y::name(&r, egui::Role::Button, &fit);
+        let r = r.on_hover_text(text(Message::new(
+            "gui-look-header-fit-about",
+            "Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit",
+        )));
+        crate::name_rect(&ctx, "helios.cameralook.fit", r.rect);
+        if r.clicked() {
+            run("fit");
+        }
+    });
 }

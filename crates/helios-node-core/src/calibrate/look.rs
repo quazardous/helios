@@ -195,6 +195,12 @@ pub fn fit_with<S: Store>(
         answer["look"] = report(&fitted);
         answer["colour"] = json!(edit::is_on(&after, edit::COLOUR));
         answer["preview"] = json!(hash);
+        // The numbers each node takes, so a client writing the open
+        // photo's edit itself (the desktop's header) sets the same look.
+        answer["params"] = json!({
+            edit::COLOUR: edit::colour_params(&fitted, &hash),
+            edit::TONE: edit::tone_params(&fitted, &hash),
+        });
         if !dry_run {
             let rows_before = vault.rows(&id).map_err(store_error)?;
             let saved = session
@@ -329,6 +335,11 @@ mod tests {
         assert_eq!(head(&vault, id), None, "a dry run writes nothing");
         let answer = &dry.answer["images"][0];
         assert!(answer.get("look").is_some(), "{answer}");
+        assert!(
+            answer["params"]["cameratone"]["tone"]["list"].is_array(),
+            "{answer}"
+        );
+        assert!(answer["params"]["cameracolour"]["matrix"]["list"].is_array());
 
         let done = fit_with(
             &vault,

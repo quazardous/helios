@@ -671,6 +671,38 @@ the camera's JPEG", the report's held-out Delta E against the default's,
 the refusal's words), the amount (the tone half's spans two nodes), the
 compare-with-JPEG view, Refit, the per-camera default at import.
 
+### Built: the header (2026-11-13)
+
+The first slice of 3b: the Camera look entry's header, on the open photo.
+
+- **Where.** In the Parameters panel, under the `cameratone` node (the
+  entry), as the chart profile's header sits under `chartprofile`.
+- **What it says.** "Fitted to the camera's JPEG: Delta E 2.4 (default
+  9.8)" from the node's `held_out` and `baseline`; "Not fitted: <the
+  gate's words>" after a refusal (kept in the transient
+  `view/look/refusal`, cleared when another photo opens); "Not fitted
+  yet" before any fit; with a chart profile on and the look on, "Colour
+  half off: the chart profile rules the colours" (Q3 A).
+- **What it does.** A switch (on: `cameratone` on, `sigmoid` off,
+  `cameracolour` on unless a chart profile is on; off: both halves off,
+  `sigmoid` on, as `with_look` / `without_look` do) and "Fit to the
+  camera's JPEG", "Refit" once fitted. Both run the desktop command
+  `look.camera.choose {look: fit | on | off}`: the fit goes through the
+  node (`look.camera.fit` as a dry run, whose answer now carries each
+  node's parameters, `params.cameracolour` and `params.cameratone`), and
+  the numbers are written into the open edit's value store, one undoable
+  step of the edit, not of the library. The image fitted is the one the
+  chart profile's offer names (`image`, set when a raw opens).
+- **The amount.** The colour half's `amount` is `cameracolour`'s own
+  slider, under its node. The tone half's is still to come (it blends
+  toward the default tone map, which spans two nodes).
+
+Left for the next slices: the tone half's amount, compare with the
+camera's JPEG (the before view showing the embedded preview), the fit
+of a selection from the library's menus (the command takes `images`
+already), the per-camera default at import, and the "Camera look"
+preset in the module's preset menu.
+
 **3b. The user's side and the hooks.**
 
 - The Camera look entry and its header (section 3.4), the amount, the

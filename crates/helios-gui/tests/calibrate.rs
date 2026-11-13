@@ -404,3 +404,195 @@ fn the_shell_fits_a_camera_look_through_the_node_and_says_why_not() {
     assert!(history.line().undo.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
+    use egui_kittest::kittest::Queryable;
+    use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
+
+    let dir = std::env::temp_dir().join(format!("helios-look-header-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let picture = dir.join("picture.tif");
+    let small = Image::new(Region::sized(4, 4), 3, vec![0.5; 48]);
+    std::fs::write(
+        &picture,
+        helios_export::encode(&small, &helios_export::Format::Tiff).unwrap(),
+    )
+    .unwrap();
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let image = vault.import_file(&picture, 1).unwrap();
+
+    // A raw's chain in short: the chart profile (bypassed) with the
+    // camera's context, the look's two halves, then sigmoid.
+    let camera = helios_photo::CameraInfo {
+        maker: "Test".into(),
+        model: "Bayer".into(),
+        iso: 100.0,
+        exposure_bias: 0.0,
+        exposure_time: 0.01,
+        aperture: 4.0,
+        focal_length: 50.0,
+        black: [0.0; 4],
+        white: 1.0,
+        white_balance: [2.0, 1.0, 1.5, 1.0],
+        xyz_to_camera: [0.9, -0.3, -0.1, -0.4, 1.2, 0.2, -0.05, 0.15, 0.6],
+        cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+        orientation: 1,
+    };
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        Image::from_fn(Region::sized(32, 24), 4, |_, _, _| 0.2),
+    );
+    let chart = g
+        .add_module(
+            "chartprofile",
+            ModuleRef::new(helios_module_chartprofile::ChartProfile),
+            &Params::new(),
+        )
+        .unwrap();
+    g.set_context(chart, camera.to_context()).unwrap();
+    g.set_bypass(chart, true).unwrap();
+    let colour = g
+        .add_module(
+            "cameracolour",
+            ModuleRef::new(helios_module_cameracolour::CameraColour),
+            &Params::new(),
+        )
+        .unwrap();
+    g.set_bypass(colour, true).unwrap();
+    let tone = g
+        .add_module(
+            "cameratone",
+            ModuleRef::new(helios_module_cameratone::CameraTone),
+            &Params::new(),
+        )
+        .unwrap();
+    g.set_bypass(tone, true).unwrap();
+    let sigmoid = g
+        .add_module(
+            "sigmoid",
+            ModuleRef::new(helios_module_sigmoid::Sigmoid),
+            &Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", chart, "input").unwrap();
+    g.connect(chart, "output", colour, "input").unwrap();
+    g.connect(colour, "output", tone, "input").unwrap();
+    g.connect(tone, "output", sigmoid, "input").unwrap();
+
+    let mut shell = Shell::new(helios_panels(), None);
+    let history = shell.library_history();
+    calibrate::register(
+        &mut shell,
+        Some(calibrate::Node {
+            vault: vault.clone(),
+            bus: Arc::new(helios_core::Bus::new()),
+        }),
+        history.clone(),
+    )
+    .unwrap();
+    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_none());
+    shell.set_view_source(g, sigmoid, "output").unwrap();
+
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    h.get_by_label("Not fitted yet: the look starts from the camera's own JPEG");
+    // Nothing fitted: the switch waits for a fit.
+    assert!(
+        h.state_mut()
+            .run(calibrate::LOOK_CHOOSE, json!({ "look": "on" }), Origin::User)
+            .is_err()
+    );
+
+    // Fitting a picture is refused by its gate, in words, in the header;
+    // nothing is written, in the edit or the library.
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Fit to the camera's JPEG")
+        .click();
+    h.run();
+    h.run();
+    h.get_by_label(
+        "Not fitted: the photo is not a raw: it has no sensor data to fit",
+    );
+    assert!(history.line().undo.is_empty());
+
+    let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get(path)
+            .unwrap()
+            .value
+            .clone()
+    };
+    assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(true));
+
+    // A look fitted (its numbers set as a fit sets them): the header says
+    // how well, and its switch turns both halves on in sigmoid's place,
+    // one step of the edit, then off again.
+    {
+        let values = h.state().values().clone();
+        let mut s = values.lock().unwrap();
+        for (path, value) in [
+            ("node/cameratone/tone", Value::List(vec![0.0, 0.0, 1.0, 1.0])),
+            ("node/cameratone/held_out", Value::Float(2.4)),
+            ("node/cameratone/baseline", Value::Float(9.8)),
+        ] {
+            s.set(helios_values::Set::new(
+                path,
+                helios_values::Change::To(value),
+                Origin::User,
+            ))
+            .unwrap();
+        }
+    }
+    calibrate::set_refusal(h.state().values(), "");
+    h.run();
+    h.get_by_label("Fitted to the camera's JPEG: Delta E 2.4 (default 9.8)");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Refit");
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Camera look")
+        .click();
+    h.run();
+    h.run();
+    assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(false));
+    assert_eq!(read(&h, "bypass/cameracolour"), Value::Bool(false));
+    assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(true));
+    // One step: undone, the look is off and sigmoid back.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(true));
+    assert_eq!(read(&h, "bypass/cameracolour"), Value::Bool(true));
+    assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(false));
+    // With a chart profile on, the colour half stays off and says so.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .set(helios_values::Set::new(
+            "bypass/chartprofile",
+            helios_values::Change::To(Value::Bool(false)),
+            Origin::User,
+        ))
+        .unwrap();
+    h.state_mut()
+        .run(calibrate::LOOK_CHOOSE, json!({ "look": "on" }), Origin::User)
+        .unwrap();
+    h.run();
+    assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(false));
+    assert_eq!(read(&h, "bypass/cameracolour"), Value::Bool(true));
+    h.get_by_label("Colour half off: the chart profile rules the colours");
+    h.state_mut()
+        .run(calibrate::LOOK_CHOOSE, json!({ "look": "off" }), Origin::User)
+        .unwrap();
+    assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
