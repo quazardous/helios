@@ -6,32 +6,17 @@ use std::path::{Path, PathBuf};
 
 use egui_pop_model::ids::PanelId;
 use egui_pop_model::panels::Area;
-use helios_core::ModuleRef;
 use helios_template::{Bundle, Catalogue, parse_composite, schema};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates")
 }
 
+mod common;
+
 /// The modules and composites the built-in templates use.
 fn catalogue() -> Catalogue {
-    use helios_module_masks as m;
-    let mut c = Catalogue::new()
-        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
-        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
-        .module(ModuleRef::new(helios_module_highlights::Highlights))
-        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
-        .module(ModuleRef::new(helios_module_colorin::ColorIn))
-        .module(ModuleRef::new(helios_module_chartprofile::ChartProfile))
-        .module(ModuleRef::new(
-            helios_module_channelmixerrgb::ChannelMixerRgb,
-        ))
-        .module(ModuleRef::new(helios_module_flip::Flip))
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
-        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
-        .module(ModuleRef::new(m::MaskCombine))
-        .module(ModuleRef::new(m::MaskFeather))
-        .module(ModuleRef::new(m::MaskBlend));
+    let mut c = common::modules();
     for e in std::fs::read_dir(root().join("composites")).unwrap() {
         let text = std::fs::read_to_string(e.unwrap().path()).unwrap();
         c.add_composite(parse_composite(&text).unwrap());
