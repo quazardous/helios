@@ -1024,9 +1024,22 @@ fn b_toggles_the_quick_collection_which_scopes_the_grid_and_saves_as_an_album() 
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A command's answer, run as the user.
+/// A command's answer, run as the user (the shell's queued for its
+/// frame, then read from its history).
 fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Value {
-    h.state_mut().run(id, args, Origin::User).unwrap()
+    let out = h.state_mut().run(id, args, Origin::User).unwrap();
+    if out != json!({ "queued": true }) {
+        return out;
+    }
+    h.run();
+    h.state()
+        .history()
+        .into_iter()
+        .rev()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("{id} never ran"))
+        .result
+        .unwrap()
 }
 
 /// The queries of a list `library.filter.recent` answers.
@@ -1087,6 +1100,7 @@ fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
     h.run();
     h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K);
     h.run();
+    h.run();
     assert_eq!(main_dialog(&h).as_deref(), Some("Recent filters"));
     let current = answer(&mut h, "dialog.current", json!(null));
     let shown = current.to_string();
@@ -1107,6 +1121,7 @@ fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
     h.get_by_label("Search images").click();
     h.run();
     h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K);
+    h.run();
     h.run();
     assert_eq!(main_dialog(&h), None);
 
