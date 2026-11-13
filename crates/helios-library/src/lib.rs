@@ -15,6 +15,9 @@
 //! - [`cull`]: the culling signals (a focus score and where the focus
 //!   is, clipping per channel, the exposure's levels), at import and by a
 //!   resumable backfill job over the images imported before;
+//! - [`auto_import`]: the safeguards of automatic imports (paused,
+//!   the first run confirmed, a question above a size), for whichever
+//!   runs them, the desktop or the node;
 //! - [`backup`]: the verified backup job, copying library copies to the
 //!   backup volumes of the library's strategy, and its triggers;
 //! - [`darktable`]: darktable's sidecars kept as versions (each sidecar of
@@ -32,6 +35,7 @@
 //!   a selection through a resolver picked by name, and applies them only
 //!   when accepted.
 
+pub mod auto_import;
 pub mod backup;
 pub mod capture;
 pub mod cull;

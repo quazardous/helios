@@ -206,6 +206,9 @@ enum Action {
     ImportSource(Value, Origin),
     /// Open the import window (`library.importWindow`'s arguments).
     ImportWindow(Value),
+    /// Pause or resume the automatic imports
+    /// (`library.importAutomatic.pause`'s arguments).
+    PauseAutomaticImports(Value),
     /// Open the Calibration focus (`calibrate.open`'s arguments).
     Calibrate(Value),
     /// `import.addSource` or `import.reconnect`, with its arguments.
@@ -3126,6 +3129,14 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                import_auto::PAUSE,
+                "Pause automatic imports, or resume them (`on`: true pauses, false resumes; without it, toggles)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::PauseAutomaticImports(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 calibrate_focus::COMMAND,
                 "Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)",
                 "Calibration",
@@ -5917,6 +5928,7 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
+            Action::PauseAutomaticImports(args) => return self.pause_automatic_imports(&args),
             Action::Calibrate(args) => {
                 self.open_calibration(&args);
                 return Ok(Value::Null);

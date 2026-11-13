@@ -1286,6 +1286,18 @@ impl Shell {
             };
             if let Err(e) = self.import_files(&args, &Origin::User) {
                 self.warn(e);
+            } else if self
+                .import
+                .get_mut()
+                .sources
+                .confirm(&SourceKey::Folder(path.clone()))
+            {
+                // Import pressed on a source set to import on its own:
+                // its automatic import is confirmed.
+                self.note(Message::new(
+                    "gui-import-auto-confirmed",
+                    "Automatic import confirmed: from now on it runs on its own",
+                ));
             }
             let mut w = self.import.get_mut();
             if !card {
