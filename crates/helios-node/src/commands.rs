@@ -261,11 +261,23 @@ fn verbs() -> Vec<CommandSpec> {
         CommandSpec::new("workflow.pause", "Pause a run", "Workflow").params(on_run(&[])),
         CommandSpec::new("workflow.resume", "Resume a run", "Workflow").params(on_run(&[])),
         CommandSpec::new("library.import", "Import into the library", "Library")
-            .params(object(&[(
-                "paths",
-                json!({ "type": "array", "items": absolute() }),
-                true,
-            )]))
+            .params(object(&[
+                ("paths", json!({ "type": "array", "items": absolute() }), true),
+                ("copy", boolean(), false),
+                ("into", or_null(absolute()), false),
+                ("rename", or_null(text("a rename pattern")), false),
+                (
+                    "layout",
+                    json!({ "type": ["string", "null"], "enum": ["day", "month", "year", "flat", null] }),
+                    false,
+                ),
+                (
+                    "duplicates",
+                    json!({ "type": ["string", "null"], "enum": ["skip", "keep", "ask", null] }),
+                    false,
+                ),
+                ("signals", or_null(boolean()), false),
+            ]))
             .needs(Need::Vault),
         CommandSpec::new("settings.layer.get", "Read a settings layer", "Settings")
             .params(object(&[(
@@ -314,12 +326,13 @@ fn verbs() -> Vec<CommandSpec> {
     ]
 }
 
-/// The node's commands: its control verbs.
+/// The node's commands: its control verbs, and its library's commands
+/// ([`crate::library`]).
 pub fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
     REGISTRY.get_or_init(|| {
         let mut registry = Registry::new();
-        for spec in verbs() {
+        for spec in verbs().into_iter().chain(crate::library::specs()) {
             registry.register(spec).expect("each verb is declared once");
         }
         registry
@@ -411,7 +424,12 @@ mod tests {
             ),
             ("workflow.pause", json!({ "run": "r" })),
             ("workflow.resume", json!({ "run": "r" })),
-            ("library.import", json!({ "paths": ["/photos"] })),
+            (
+                "library.import",
+                json!({ "paths": ["/photos"], "copy": true, "into": "/library",
+                        "rename": "{stem}", "layout": "month", "duplicates": "keep",
+                        "signals": false }),
+            ),
             ("settings.layer.get", json!({ "layer": "user" })),
             (
                 "settings.layer.set",
@@ -432,7 +450,11 @@ mod tests {
     #[test]
     fn every_verb_is_a_command_its_schema_fits() {
         let examples = examples();
-        let ids: Vec<&str> = registry().specs().map(|s| s.id.as_str()).collect();
+        let ids: Vec<&str> = registry()
+            .specs()
+            .map(|s| s.id.as_str())
+            .filter(|id| !crate::library::handles(id))
+            .collect();
         let mut named: Vec<&str> = examples.iter().map(|(id, _)| *id).collect();
         named.sort_unstable();
         assert_eq!(ids, named, "one example per command");

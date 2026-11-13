@@ -96,6 +96,44 @@ events seen on a wait's timeout, the entities known on a miss).
 | -32006 | the call cannot be cancelled |
 | -32800 | the call was cancelled |
 
+## Finding a node
+
+One node owns a vault at a time. It holds the vault's lock
+(`.helios/NAME.node.lock` beside the vault file `NAME`, an OS file lock
+released when its process ends, even killed). A second node started on
+the same vault (one taking over the runs of a dead one) works but is not
+advertised. Once it serves, a node started with `--vault`
+and `--batch-control` writes its rendezvous file, `.helios/NAME.node.json`:
+
+```json
+{"address": "/run/…/batch.sock", "inspect": "/run/…/inspect.sock", "instance": "…", "protocol": "1.0.0", "pid": 4242, "vault": "/photos/library.db"}
+```
+
+`address` is the endpoint running the vault's commands, `inspect` the
+read-only one, `token_file` (TCP endpoints only) where the session token
+is. The node removes the file as it stops. A file left by a killed node is
+told apart by the lock: nobody holds it.
+
+A client (`helios_node::connect`):
+
+1. uses `--node ADDRESS` or `HELIOS_NODE` when given (the token of a TCP
+   endpoint in `HELIOS_TOKEN`), and the rendezvous file otherwise;
+2. with no node holding the vault, takes the start lock
+   (`.helios/NAME.start.lock`), starts `helios-node --vault FILE
+   --batch-control … --idle-exit SECONDS`, waits for its `ready` line and
+   its rendezvous file, then connects. A client racing it waits on the
+   lock and finds the node the first one started;
+3. the node started so exits once no client has been connected and no job
+   has run for `--idle-exit` seconds.
+
+In a Rust process, `helios_inspect::client::Client` is the client: over a
+socket (`Client::connect`) or in process (`Client::in_process`, the
+endpoint's own service called directly, with the same checks: schema,
+origin, the bus event of a change). `Client::call` returns at once with a
+`Pending` to poll or wait on; `_meta.origin` (and `_meta.undo_group`) go
+with every call. Windows named pipes are not served yet: there the
+endpoints are loopback TCP behind the token.
+
 ## The older form
 
 A line without `"jsonrpc"` is the older protocol, answered as before:

@@ -439,6 +439,9 @@ fn import_darktable(args: &[&str]) -> (i32, Vec<Value>, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_helios"))
         .arg("import-darktable")
         .args(args)
+        // The node the command starts on the vault exits soon after.
+        .env("HELIOS_IDLE_EXIT", "2")
+        .env_remove("HELIOS_NODE")
         .output()
         .unwrap();
     let lines = String::from_utf8_lossy(&out.stdout)

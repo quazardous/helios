@@ -14,10 +14,6 @@ reason = "reads a Lightroom catalog, a foreign database"
 
 # Until the clients go through the node.
 [[allow]]
-path = "crates/helios-node/src/bin/helios.rs"
-reason = "the CLI opens the vault for import; it moves to the node's Client"
-
-[[allow]]
 path = "crates/helios-node/src/batch.rs"
 reason = "`helios batch` opens the vault; it moves to the node's Client"
 

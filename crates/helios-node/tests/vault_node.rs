@@ -493,3 +493,232 @@ fn the_control_endpoint_reads_and_writes_the_nodes_settings_layers() {
     assert_eq!(answer["ok"], false, "{answer}");
     assert_eq!(answer["message"]["key"], "node-no-settings", "{answer}");
 }
+
+/// Runs `helios` with `args` on the vault's node: exit code, stdout,
+/// stderr.
+#[cfg(unix)]
+fn helios_cli(args: &[&str], idle: &str) -> (i32, String, String) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args(args)
+        .env("HELIOS_IDLE_EXIT", idle)
+        .env_remove("HELIOS_NODE")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+/// The journaled events of the node whose inspect endpoint is `inspect`.
+#[cfg(unix)]
+fn node_events(inspect: &str) -> Vec<serde_json::Value> {
+    let (code, out, err) = helios_cli(&["inspect", "--socket", inspect, "events"], "2");
+    assert_eq!(code, 0, "{out}{err}");
+    let answer: serde_json::Value = serde_json::from_str(&out).unwrap();
+    answer["events"].as_array().cloned().unwrap_or_default()
+}
+
+/// Whether process `pid` still runs.
+#[cfg(unix)]
+fn alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// The binary: a node on a vault, started with no network, writes its
+/// rendezvous file beside the vault; `helios import --vault` finds it and
+/// imports through it (the node's bus hears it, the command's origin
+/// `cli`); a second node on the vault is not advertised; the file goes
+/// when the node stops.
+#[cfg(unix)]
+#[test]
+fn the_cli_imports_through_the_node_holding_the_vault() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+
+    use helios_inspect::discovery::{Rendezvous, files};
+
+    let p = Place::new("cli-through-node");
+    let roll = p.0.join("roll");
+    std::fs::create_dir_all(&roll).unwrap();
+    std::fs::write(roll.join("p0.raf"), vec![7u8; 20_000]).unwrap();
+    let file = p.0.join("vault.db");
+    let inspect = p.0.join("node.sock");
+    let start = || {
+        Command::new(env!("CARGO_BIN_EXE_helios-node"))
+            .arg("--socket")
+            .arg(&inspect)
+            .arg("--batch-control")
+            .arg(p.0.join("batch.sock"))
+            .arg("--vault")
+            .arg(&file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let mut node = start();
+    let mut ready = String::new();
+    BufReader::new(node.stdout.take().unwrap())
+        .read_line(&mut ready)
+        .unwrap();
+    assert!(ready.starts_with("ready "), "{ready}");
+    let rendezvous_file = files(&file).rendezvous;
+    assert!(
+        until(Duration::from_secs(10), || rendezvous_file.exists()),
+        "the rendezvous file is written in 10 s"
+    );
+    let rendezvous = Rendezvous::read(&rendezvous_file).unwrap().unwrap();
+    assert_eq!(rendezvous.pid, node.id());
+    assert_eq!(
+        rendezvous.address,
+        p.0.join("batch.sock").display().to_string()
+    );
+    assert_eq!(rendezvous.protocol, helios_inspect::rpc::PROTOCOL);
+
+    // Another node on the same vault (one taking over runs) works, but is
+    // not advertised: the rendezvous still names the owner.
+    let mut second = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--socket")
+        .arg(p.0.join("second.sock"))
+        .arg("--batch-control")
+        .arg(p.0.join("second-batch.sock"))
+        .arg("--vault")
+        .arg(&file)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut ready = String::new();
+    BufReader::new(second.stdout.take().unwrap())
+        .read_line(&mut ready)
+        .unwrap();
+    assert!(ready.starts_with("ready "), "{ready}");
+    let _ = second.kill();
+    let second = second.wait_with_output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&second.stderr).contains("another node holds this vault"),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        Rendezvous::read(&rendezvous_file).unwrap().unwrap().pid,
+        node.id()
+    );
+
+    let (code, out, err) = helios_cli(
+        &[
+            "import",
+            "--vault",
+            file.to_str().unwrap(),
+            roll.to_str().unwrap(),
+        ],
+        "2",
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    let report: serde_json::Value = serde_json::from_str(out.lines().last().unwrap()).unwrap();
+    assert_eq!(report["report"]["added"], 1, "{out}");
+    let events = node_events(inspect.to_str().unwrap());
+    assert!(
+        events
+            .iter()
+            .any(|e| e["kind"] == "library.imported" && e["payload"]["added"] == 1),
+        "the node's bus heard the import: {events:?}"
+    );
+    assert!(
+        events.iter().any(|e| e["kind"] == "control.command"
+            && e["payload"]["id"] == "library.import"
+            && e["payload"]["origin"] == "cli"),
+        "run by the CLI: {events:?}"
+    );
+    // The CLI started no node of its own.
+    assert!(!files(&file).rendezvous.with_extension("log").exists());
+
+    let _ = Command::new("kill")
+        .args(["-TERM", &node.id().to_string()])
+        .status();
+    let end = Instant::now() + Duration::from_secs(30);
+    while node.try_wait().unwrap().is_none() {
+        if Instant::now() > end {
+            let _ = node.kill();
+            panic!("the node did not stop in 30 s after SIGTERM");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!rendezvous_file.exists(), "the rendezvous file is removed");
+}
+
+/// The binary: with no node on the vault, two `helios import` at once
+/// start one node and share it; it exits once idle, its rendezvous file
+/// removed, and `helios stacks` then starts another.
+#[cfg(unix)]
+#[test]
+fn with_no_node_the_cli_starts_one_shared_and_it_exits_when_idle() {
+    use helios_inspect::discovery::{Rendezvous, files};
+
+    let p = Place::new("cli-starts-node");
+    let file = p.0.join("vault.db");
+    let rolls: Vec<PathBuf> = (0..2u8)
+        .map(|k| {
+            let roll = p.0.join(format!("roll{k}"));
+            std::fs::create_dir_all(&roll).unwrap();
+            std::fs::write(roll.join(format!("p{k}.raf")), vec![k + 1; 20_000]).unwrap();
+            roll
+        })
+        .collect();
+    let imports: Vec<_> = rolls
+        .iter()
+        .map(|roll| {
+            let (file, roll) = (file.clone(), roll.clone());
+            std::thread::spawn(move || {
+                helios_cli(
+                    &[
+                        "import",
+                        "--vault",
+                        file.to_str().unwrap(),
+                        roll.to_str().unwrap(),
+                    ],
+                    "3",
+                )
+            })
+        })
+        .collect();
+    for import in imports {
+        let (code, out, err) = import.join().unwrap();
+        assert_eq!(code, 0, "{out}{err}");
+    }
+    let rendezvous_file = files(&file).rendezvous;
+    let rendezvous = Rendezvous::read(&rendezvous_file)
+        .unwrap()
+        .expect("the started node's rendezvous file");
+    let events = node_events(&rendezvous.inspect);
+    let imported = events
+        .iter()
+        .filter(|e| e["kind"] == "library.imported")
+        .count();
+    assert_eq!(imported, 2, "one node ran both imports: {events:?}");
+
+    assert!(
+        until(Duration::from_secs(30), || !alive(rendezvous.pid)),
+        "the node exited once idle, in 30 s"
+    );
+    assert!(!rendezvous_file.exists(), "its rendezvous file is removed");
+    let again = SqliteStore::open(&file).unwrap();
+    assert!(!again.report().unclean_shutdown, "the vault closed cleanly");
+    assert_eq!(Vault::new(again).images().unwrap().len(), 2);
+
+    let (code, out, err) = helios_cli(&["stacks", "--vault", file.to_str().unwrap(), "list"], "1");
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&out).unwrap(),
+        serde_json::json!([])
+    );
+}

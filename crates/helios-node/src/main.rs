@@ -746,6 +746,7 @@ mod control {
     //! the params its schema's object, run as `command.run` would.
 
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use helios_core::{Event, JobId, Message};
@@ -834,7 +835,9 @@ mod control {
 
     impl Scope {
         fn allows(self, verb: &str) -> bool {
-            self == Self::Debug || BATCH_VERBS.contains(&verb)
+            self == Self::Debug
+                || BATCH_VERBS.contains(&verb)
+                || helios_node::library::handles(verb)
         }
     }
 
@@ -886,7 +889,14 @@ mod control {
     /// `command.run`: the command's params checked against its schema, then
     /// the request it names answered as the endpoint would, its change to
     /// the edit saved under `origin`.
-    fn run(node: &Arc<Node>, scope: Scope, id: &str, params: &Value, origin: &str) -> Value {
+    fn run(
+        node: &Arc<Node>,
+        scope: Scope,
+        id: &str,
+        params: &Value,
+        origin: &str,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Value {
         let Some(spec) = commands::registry().spec(id) else {
             return refused(
                 None,
@@ -917,6 +927,34 @@ mod control {
         if let Some(reason) = disabled(node, scope, spec) {
             return refused(None, &reason);
         }
+        if helios_node::library::handles(id) {
+            node.bus.publish(SOURCE, None, &CommandRan { id, origin });
+            let Some(importer) = &node.importer else {
+                return refused(
+                    None,
+                    &Message::new(
+                        "node-command-needs-vault",
+                        "the node keeps no vault: start it with --vault",
+                    ),
+                );
+            };
+            let mut answer = match helios_node::library::run(
+                importer.vault(),
+                importer.bus(),
+                id,
+                params,
+                origin,
+            ) {
+                Ok(mut answer) => {
+                    answer["ok"] = json!(true);
+                    answer
+                }
+                Err(e) => refused(None, &Message::plain(e)),
+            };
+            answer["command"] = json!(id);
+            answer["origin"] = json!(origin);
+            return answer;
+        }
         let mut params = params.clone();
         // A decision taken through a command is taken by whoever ran it.
         if spec.params["properties"].get("who").is_some()
@@ -940,10 +978,43 @@ mod control {
             }
         };
         node.bus.publish(SOURCE, None, &CommandRan { id, origin });
-        let mut answer = answer_as(node, scope, request, origin);
+        let mut answer = answer_as(node, scope, request, origin, cancel);
         answer["command"] = json!(id);
         answer["origin"] = json!(origin);
         answer
+    }
+
+    /// An import's options, from `library.import`'s params.
+    fn import_options(
+        copy: bool,
+        into: Option<&std::path::PathBuf>,
+        rename: Option<&str>,
+        layout: Option<&str>,
+        duplicates: Option<&str>,
+        signals: Option<bool>,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<helios_library::import::Options, String> {
+        use helios_library::import::{Duplicates, Layout, Options, Placement};
+        let mut options = Options::default();
+        if copy || into.is_some() {
+            options.placement = Placement::Copy {
+                into: into.cloned(),
+            };
+        }
+        if let Some(pattern) = rename {
+            options.rename = Some(helios_library::rename::Pattern::parse(pattern)?);
+        }
+        if let Some(layout) = layout {
+            options.layout = Layout::parse(layout)?;
+        }
+        if let Some(duplicates) = duplicates {
+            options.duplicates = Duplicates::parse(duplicates)?;
+        }
+        if let Some(signals) = signals {
+            options.signals = signals;
+        }
+        options.cancel = cancel;
+        Ok(options)
     }
 
     /// A refusal: its English in `error`, and the message itself in
@@ -1000,7 +1071,14 @@ mod control {
                     rpc::from_answer(list(&self.node, self.scope, filter, enabled_only))
                 }
                 id => {
-                    let answer = run(&self.node, self.scope, id, &params, origin);
+                    let answer = run(
+                        &self.node,
+                        self.scope,
+                        id,
+                        &params,
+                        origin,
+                        Some(call.cancel_flag()),
+                    );
                     // A batch held by its client ends when the connection does.
                     if id == "batch_start"
                         && params["hold"] == true
@@ -1013,15 +1091,26 @@ mod control {
                 }
             }
         }
+
+        /// An import stops before its next file.
+        fn cancellable(&self, method: &str) -> bool {
+            method == "library.import"
+        }
     }
 
     pub fn answer(node: &Arc<Node>, scope: Scope, request: ControlRequest) -> Value {
-        answer_as(node, scope, request, CONTROL)
+        answer_as(node, scope, request, CONTROL, None)
     }
 
     /// Answers a request; a change to the edit is saved under `origin`
     /// unless the request names who made it.
-    fn answer_as(node: &Arc<Node>, scope: Scope, request: ControlRequest, origin: &str) -> Value {
+    fn answer_as(
+        node: &Arc<Node>,
+        scope: Scope,
+        request: ControlRequest,
+        origin: &str,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Value {
         if !scope.allows(request.verb()) {
             return refused(
                 None,
@@ -1040,7 +1129,7 @@ mod control {
                 id,
                 params,
                 origin: by,
-            } => return run(node, scope, id, params, by),
+            } => return run(node, scope, id, params, by, cancel),
             _ => {}
         }
         let seq = node
@@ -1259,19 +1348,35 @@ mod control {
                     .map(|()| json!({ "layer": layer }))
                     .map_err(Message::plain),
             },
-            ControlRequest::LibraryImport { paths } => match &node.importer {
+            ControlRequest::LibraryImport {
+                paths,
+                copy,
+                into,
+                rename,
+                layout,
+                duplicates,
+                signals,
+            } => match &node.importer {
                 None => Err(Message::new(
                     "node-no-vault",
                     "the node has no vault to import into: start it with --vault",
                 )),
-                Some(importer) => importer
-                    .import(
-                        paths,
-                        &helios_library::import::Options::default(),
-                        &mut |_| {},
-                    )
-                    .map(|report| json!({ "report": report }))
-                    .map_err(Message::plain),
+                Some(importer) => import_options(
+                    *copy,
+                    into.as_ref(),
+                    rename.as_deref(),
+                    layout.as_deref(),
+                    duplicates.as_deref(),
+                    *signals,
+                    cancel,
+                )
+                .and_then(|options| {
+                    let mut files = Vec::new();
+                    importer
+                        .import(paths, &options, &mut |line| files.push(line.clone()))
+                        .map(|report| json!({ "report": report, "files": files }))
+                })
+                .map_err(Message::plain),
             },
             ControlRequest::Decisions => {
                 let book = node.book.lock().expect("book lock");
@@ -1463,7 +1568,8 @@ fn serve_control(
 }
 
 struct Args {
-    graph: PathBuf,
+    /// The network; none: an empty one (a node serving a vault only).
+    graph: Option<PathBuf>,
     socket: Listen,
     control: Option<Listen>,
     batch_control: Option<Listen>,
@@ -1473,6 +1579,9 @@ struct Args {
     vault: Option<PathBuf>,
     /// Where runs are kept, when not in `vault`.
     runs_vault: Option<PathBuf>,
+    /// Exit once no client has been connected and no job has run for this
+    /// long.
+    idle_exit: Option<Duration>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -1485,6 +1594,7 @@ fn parse_args() -> Result<Args, String> {
     let mut sets = Vec::new();
     let mut vault = None;
     let mut runs_vault = None;
+    let mut idle_exit = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -1509,6 +1619,15 @@ fn parse_args() -> Result<Args, String> {
             "--user" => layers.push((Layer::User, PathBuf::from(value()?))),
             "--vault" => vault = Some(PathBuf::from(value()?)),
             "--runs-vault" => runs_vault = Some(PathBuf::from(value()?)),
+            "--idle-exit" => {
+                let v = value()?;
+                let seconds: u64 = v
+                    .strip_suffix('s')
+                    .unwrap_or(&v)
+                    .parse()
+                    .map_err(|_| format!("--idle-exit takes seconds, got `{v}`"))?;
+                idle_exit = Some(Duration::from_secs(seconds));
+            }
             "--set" => {
                 let v = value()?;
                 let (k, val) = v
@@ -1520,7 +1639,7 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     Ok(Args {
-        graph: graph.ok_or("missing --graph FILE")?,
+        graph,
         socket: socket.ok_or("missing --socket PATH")?,
         control,
         batch_control,
@@ -1529,6 +1648,7 @@ fn parse_args() -> Result<Args, String> {
         sets,
         vault,
         runs_vault,
+        idle_exit,
     })
 }
 
@@ -1601,9 +1721,10 @@ fn config(args: &Args, vault: Option<&Vault>) -> Result<Config, String> {
     Ok(config)
 }
 
-/// The node of `--vault`, stopped once: by a signal, or as `main` ends.
+/// The node of `--vault`, stopped once: by a signal, as `main` ends, or
+/// idle; its rendezvous file removed first.
 #[derive(Clone, Default)]
-struct Stopper(Arc<Mutex<Option<VaultNode>>>);
+struct Stopper(Arc<Mutex<Option<VaultNode>>>, Arc<Mutex<Option<PathBuf>>>);
 
 impl Stopper {
     fn hold(&self, node: VaultNode) {
@@ -1613,9 +1734,26 @@ impl Stopper {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(node);
     }
 
+    /// The rendezvous file to remove as the node stops.
+    fn rendezvous(&self, file: PathBuf) {
+        *self
+            .1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(file);
+    }
+
     /// Stops the node, if it is running: its jobs settled, the vault
     /// closed cleanly.
     fn stop(&self) {
+        // No client finds the node any more once it starts stopping.
+        let rendezvous = self
+            .1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(file) = rendezvous {
+            let _ = std::fs::remove_file(file);
+        }
         let node = self
             .0
             .lock()
@@ -1656,12 +1794,62 @@ impl Stopper {
     fn on_signals(&self) {}
 }
 
+/// Takes the lock of the vault at `file`; `None`, said on stderr, when
+/// another node holds it.
+fn owner_lock(file: &Path) -> Result<Option<helios_inspect::discovery::Lock>, String> {
+    use helios_inspect::discovery::{Lock, Rendezvous, files};
+    let files = files(file);
+    match Lock::try_take(&files.lock) {
+        Ok(Some(lock)) => Ok(Some(lock)),
+        Ok(None) => {
+            let holder = Rendezvous::read(&files.rendezvous)
+                .ok()
+                .flatten()
+                .map_or_else(String::new, |r| format!(" (process {})", r.pid));
+            eprintln!(
+                "helios-node: {}: another node holds this vault{holder}; this one is not advertised to clients",
+                file.display()
+            );
+            Ok(None)
+        }
+        Err(e) => Err(format!("{}: {e}", files.lock.display())),
+    }
+}
+
+/// Stops the node and ends the process once, for `idle`, no client has
+/// been connected to any endpoint and no job has run.
+fn exit_when_idle(idle: Duration, jobs: Jobs, stopper: Stopper) {
+    let started = Instant::now();
+    let spawned = std::thread::Builder::new()
+        .name("helios-node-idle".into())
+        .spawn(move || {
+            let mut quiet_since = started;
+            loop {
+                std::thread::sleep(Duration::from_millis(100));
+                let activity = helios_inspect::activity();
+                if activity.open > 0 || !jobs.cancellable().is_empty() {
+                    quiet_since = Instant::now();
+                    continue;
+                }
+                let last = activity.last.map_or(quiet_since, |l| l.max(quiet_since));
+                if last.elapsed() >= idle {
+                    eprintln!("helios-node: idle for {} s, stopping", idle.as_secs());
+                    stopper.stop();
+                    std::process::exit(0);
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("helios-node: no thread to watch for idleness: {e}");
+    }
+}
+
 fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--runs-vault FILE] [--set KEY=VALUE]... [--control PATH] [--batch-control PATH] [--token-file FILE]"
+                "helios-node: {e}\nusage: helios-node [--graph FILE] --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--runs-vault FILE] [--set KEY=VALUE]... [--control PATH] [--batch-control PATH] [--token-file FILE] [--idle-exit SECONDS]"
             );
             return ExitCode::from(2);
         }
@@ -1676,16 +1864,34 @@ fn main() -> ExitCode {
 
 /// Runs the node `args` describe; returns only when it cannot start.
 fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
-    let loaded = std::fs::read_to_string(&args.graph)
-        .map_err(|e| format!("cannot read {}: {e}", args.graph.display()))
-        .and_then(|text| {
-            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", args.graph.display()))
-        })
-        // Files the network names are relative to it.
-        .and_then(|desc| helios_node::load_in(desc, args.graph.parent().unwrap_or(Path::new("."))));
+    let loaded = match &args.graph {
+        None => helios_node::load_in(
+            serde_json::from_str("{}").expect("an empty network reads"),
+            Path::new("."),
+        ),
+        Some(graph) => std::fs::read_to_string(graph)
+            .map_err(|e| format!("cannot read {}: {e}", graph.display()))
+            .and_then(|text| {
+                serde_json::from_str(&text).map_err(|e| format!("{}: {e}", graph.display()))
+            })
+            // Files the network names are relative to it.
+            .and_then(|desc| helios_node::load_in(desc, graph.parent().unwrap_or(Path::new(".")))),
+    };
     let mut loaded = match loaded {
         Ok(l) => l,
         Err(e) => {
+            eprintln!("helios-node: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    // The node owning a vault holds its lock while the process lives
+    // (released by the system even if it is killed) and advertises
+    // itself; another node on the same vault (one taking over the runs of
+    // a dead one) works, but clients do not find it.
+    let owned = match args.vault.as_deref().map(owner_lock) {
+        None => None,
+        Some(Ok(lock)) => lock,
+        Some(Err(e)) => {
             eprintln!("helios-node: {e}");
             return ExitCode::from(1);
         }
@@ -1906,6 +2112,30 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         let _ = writeln!(out, "batch-control {batch}");
     }
     let _ = out.flush();
+    // Clients of the vault find the node by its rendezvous file.
+    if let (Some(file), Some(batch), Some(_)) = (&args.vault, &batch_address, &owned) {
+        let rendezvous = helios_inspect::discovery::Rendezvous {
+            address: batch.clone(),
+            inspect: address.clone(),
+            token_file: token
+                .as_ref()
+                .and(args.token_file.as_ref())
+                .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone())),
+            instance: instance.clone(),
+            protocol: helios_inspect::rpc::PROTOCOL.into(),
+            pid: std::process::id(),
+            vault: std::path::absolute(file).unwrap_or_else(|_| file.clone()),
+        };
+        let path = helios_inspect::discovery::files(file).rendezvous;
+        if let Err(e) = rendezvous.write(&path) {
+            eprintln!("helios-node: cannot write {}: {e}", path.display());
+            return ExitCode::from(1);
+        }
+        stopper.rendezvous(path);
+    }
+    if let Some(idle) = args.idle_exit {
+        exit_when_idle(idle, node.jobs.clone(), stopper.clone());
+    }
     let ready = bus.publish(
         SOURCE,
         None,

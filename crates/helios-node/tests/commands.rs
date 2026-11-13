@@ -106,7 +106,12 @@ fn the_list_has_every_verb_with_its_schema_and_state() {
     let list = node.batch(&["commands"]);
     assert_eq!(list["ok"], true, "{list}");
     let commands = list["commands"].as_array().unwrap();
-    assert_eq!(commands.len(), 32, "{list}");
+    // The control verbs, then the library's commands.
+    assert_eq!(
+        commands.len(),
+        32 + helios_node::library::IDS.len(),
+        "{list}"
+    );
     for c in commands {
         assert_eq!(c["params"]["type"], "object", "{c}");
         assert!(c["label"].as_str().is_some_and(|l| !l.is_empty()), "{c}");
