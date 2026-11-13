@@ -397,6 +397,43 @@ pub const SETTINGS: &[Setting] = &[
         },
     },
     Setting {
+        key: "import.automatic.paused",
+        concern: Concern::User,
+        label: "Pause automatic imports",
+        about: "While on, no source imports on its own: cards plugged in and new files in watched folders wait until it is off again.",
+        kind: Kind::Toggle {
+            default: false,
+            on: "paused",
+            off: "running",
+        },
+    },
+    Setting {
+        key: "import.automatic.ask_files",
+        concern: Concern::User,
+        label: "Ask before importing more photos than",
+        about: "An automatic import of more photos than this asks first, in a notice that opens the import window. 0: never asks.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 100_000.0,
+            default: 500.0,
+            unit: "photos",
+            integer: true,
+        },
+    },
+    Setting {
+        key: "import.automatic.ask_gb",
+        concern: Concern::User,
+        label: "Ask before importing more than",
+        about: "An automatic import larger than this asks first, in a notice that opens the import window. 0: never asks.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 10_000.0,
+            default: 20.0,
+            unit: "GB",
+            integer: false,
+        },
+    },
+    Setting {
         key: "interface.experimental.workshops",
         concern: Concern::User,
         label: "Workshops",

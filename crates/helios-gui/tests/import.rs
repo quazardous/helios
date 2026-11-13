@@ -108,7 +108,7 @@ fn file_import_is_in_the_file_menu_on_ctrl_shift_i_and_opens_the_import_window()
     // Referenced in place, darktable edits read (the host's default).
     assert_eq!(
         h.state_mut().take_imports(),
-        [json!({ "path": "/photos/trip" })]
+        [json!({ "path": "/photos/trip", "origin": "user" })]
     );
 }
 
@@ -263,7 +263,8 @@ fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
             "copy": true,
             "layout": "day",
             "rename": "{stem}",
-            "duplicates": "skip"
+            "duplicates": "skip",
+            "origin": "user"
         })]
     );
     assert!(!h.state().import_window_open());
@@ -332,7 +333,8 @@ fn import_passes_exactly_the_photos_ticked() {
             "copy": true,
             "layout": "day",
             "rename": "{stem}",
-            "duplicates": "skip"
+            "duplicates": "skip",
+            "origin": "user"
         })]
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -393,7 +395,8 @@ fn the_import_choices_show_live_examples_and_reach_the_import() {
             "layout": "month",
             "rename": "{date}-{seq}",
             "duplicates": "keep",
-            "darktable": false
+            "darktable": false,
+            "origin": "user"
         })]
     );
     // They are kept as the last used.
@@ -477,7 +480,8 @@ fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
         h.state_mut().take_imports(),
         [json!({
             "paths": [dcim.join("IMG_0002.JPG")],
-            "duplicates": "skip"
+            "duplicates": "skip",
+            "origin": "user"
         })]
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -547,7 +551,10 @@ fn import_files_run_with_ask_still_asks_with_the_form() {
     assert_eq!(form["command"], json!("library.importFiles"), "{form}");
     assert_eq!(field_keys(&form), ["copy", "darktable"]);
     answer(&mut h, json!({ "copy": false }));
-    assert_eq!(h.state_mut().take_imports(), [json!({ "paths": [dir] })]);
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({ "paths": [dir], "origin": "user" })]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -685,7 +692,12 @@ fn the_import_dialog_asks_where_photos_go_and_remembers_it_for_the_workspace() {
     // Copied, and now the workspace's import source.
     assert_eq!(
         h.state_mut().take_imports(),
-        [json!({ "path": "/photos/trip", "copy": true, "duplicates": "skip" })]
+        [json!({
+            "path": "/photos/trip",
+            "copy": true,
+            "duplicates": "skip",
+            "origin": "user"
+        })]
     );
     let source = h.state().import_source().cloned().unwrap();
     assert_eq!(
@@ -720,7 +732,8 @@ fn the_import_dialog_asks_where_photos_go_and_remembers_it_for_the_workspace() {
             "path": "/photos/next",
             "copy": true,
             "duplicates": "skip",
-            "darktable": false
+            "darktable": false,
+            "origin": "user"
         })]
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -1447,7 +1460,8 @@ fn the_import_contents_are_a_file_browser_that_lists_selects_and_imports() {
             "copy": true,
             "layout": "day",
             "rename": "{stem}",
-            "duplicates": "skip"
+            "duplicates": "skip",
+            "origin": "user"
         })]
     );
     let _ = std::fs::remove_dir_all(&dir);

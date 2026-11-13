@@ -2461,3 +2461,21 @@ gui-settings-for-library-about = tant que cette bibliothèque est ouverte
 gui-settings-for-workspace = Cet espace de travail
 
 gui-settings-for-workspace-about = tant que cet espace de travail est ouvert
+
+gui-import-auto-ask = { $files } nouvelles photos ({ $size }) sur { $source } : plus qu’un import automatique n’en prend sans demander
+
+gui-import-auto-confirm = Premier import automatique depuis { $source } : vérifiez les photos, puis Importer le confirme
+
+gui-import-auto-confirmed = Import automatique confirmé : il se fera désormais tout seul
+
+gui-import-auto-held = Les imports automatiques sont suspendus : { $source } n’est pas importé
+
+gui-import-auto-open = Ouvrir
+
+gui-import-auto-paused = Imports automatiques suspendus
+
+gui-import-auto-resume = Reprendre
+
+gui-import-auto-resumed = Imports automatiques repris
+
+gui-settings-automatic-imports = Imports automatiques
