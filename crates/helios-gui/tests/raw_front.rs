@@ -683,7 +683,11 @@ fn develop_one_image_4_renders_version_3_s_bits_while_its_camera_look_is_off() {
     let (mosaic, camera) = (mosaic(), camera(0.3));
     let (old, old_view) = built(&v3, &mosaic, &camera);
     let (mut new, view) = built(&v4, &mosaic, &camera);
-    assert!(old.find("cameracolour").is_none() && old.find("cameratone").is_none());
+    assert!(old.find("cameracolour").is_none());
+    // Version 3 has sigmoid and no tone half: the builder puts one before
+    // it, bypassed, as in every network showing a raw.
+    let old_tone = old.find("cameratone").expect("the builder adds it");
+    assert!(old.is_bypassed(old_tone).unwrap());
     // The colour half after colour calibration, the tone half before
     // sigmoid, both bypassed.
     let colour = new.find("cameracolour").expect("version 4 carries it");

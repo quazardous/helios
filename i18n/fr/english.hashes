@@ -570,6 +570,7 @@ gui-history-calibration-delete 94da8120961af40e
 gui-history-calibration-import 4931f637c83e8b50
 gui-history-calibration-off dcaad546e81ba1b9
 gui-history-calibration-save 40e060e250f7ee04
+gui-history-camera-look-fit 632c8f5dace2095e
 gui-history-import 54b5fc5f7ff45a8e
 gui-history-preview-applied e4ec2cb3e00f5ea8
 gui-history-preview-bypassed 02942dd0aa53a222
@@ -1499,6 +1500,8 @@ health-vault-ok 459a72792fe7153e
 health-vault-ok-detail 361b930170208c98
 health-vault-unreadable f3d10565cbc6623e
 health-vault-unreadable-detail 61f97265649bdc9f
+look-load-failed fb5b6895ff118a7d
+look-render-failed 1464794c5194db67
 menu-helios-file-importFrom.label 2605aaed9c91a322
 menu-helios-masks-row-add.label ea5be6af4dfc4a82
 menu-helios-system-profiles.label 493fa9da88311dbf

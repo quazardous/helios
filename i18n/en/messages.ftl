@@ -653,6 +653,8 @@ gui-history-calibration-off = Turn the calibration profile off
 
 gui-history-calibration-save = Save the calibration profile “{ $name }”
 
+gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
+
 gui-history-import = Import { $count } photos
 
 gui-history-preview-applied = applied
@@ -2610,6 +2612,10 @@ health-vault-ok-detail = { $file } passed SQLite's quick check
 health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
+
+look-load-failed = cannot read the photo: { $error }
+
+look-render-failed = cannot render the raw: { $error }
 
 node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import, settings.layer.*, commands.list and command.run
 

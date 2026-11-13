@@ -4,7 +4,7 @@
   "version": 4,
   "meta": {
     "name": "Develop one image",
-    "scenario": "Develop a raw file from its sensor data: its levels, white balance, highlights, demosaicing, camera colours, a colour chart profile (off until one is applied), colour calibration and a camera look's colours (off until one is fitted), then exposure, the look's tone (off) and a sigmoid tone curve, the image large, its parameters and scopes beside.",
+    "scenario": "Develop a raw file from its sensor data: its levels, white balance, highlights, demosaicing, camera colours, a colour chart profile (off until one is applied) and colour calibration, then exposure and a sigmoid tone curve, the image large, its parameters and scopes beside.",
     "tags": ["develop", "raw", "tone"]
   },
   "network": {

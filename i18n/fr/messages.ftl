@@ -440,6 +440,8 @@ gui-history-quick-clear = Vider la collection rapide
 gui-history-quick-save = Enregistrer la collection rapide sous « { $name } »
 gui-history-album-rules = Modifier les règles de « { $name } »
 
+gui-history-camera-look-fit = Ajuster le rendu boîtier au JPEG de l’appareil
+
 gui-history-preview-applied = appliqué
 
 gui-history-preview-bypassed = contourné
@@ -2156,6 +2158,10 @@ health-vault-damaged-detail = { $file } : { $first } ({ $count } erreurs). Resta
 health-vault-unreadable = Le catalogue ne peut pas être vérifié
 
 health-vault-unreadable-detail = { $file } : { $error }
+
+look-load-failed = impossible de lire la photo : { $error }
+
+look-render-failed = impossible de développer le raw : { $error }
 
 gui-library-offline-on = Sur { $volume }, vu pour la dernière fois le { $date } sur { $node }
 

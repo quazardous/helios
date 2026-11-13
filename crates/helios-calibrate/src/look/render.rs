@@ -249,9 +249,11 @@ fn cells(full: usize, proxy: usize) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// A preview pixel is at 255 when a channel of its sRGB values reaches
-/// this (linear).
-const PREVIEW_WHITE: f64 = 0.995;
+/// A preview pixel is at 255 when a channel of its sRGB values is this
+/// close to 1 (linear). An sRGB preview's 255 comes back as 1 within
+/// rounding; a colour out of sRGB's gamut (a preview in Adobe RGB, a
+/// synthetic one) goes past 1 and is not taken for a clipped one.
+const PREVIEW_WHITE: f64 = 0.005;
 
 /// The preview (working space, linear, as the raw stores it) box-reduced
 /// to `width × height`, and which proxy pixels hold a pixel at 255.
@@ -279,7 +281,9 @@ pub fn reduce_preview(preview: &Image, width: usize, height: usize) -> (Proxy, V
                     for (s, v) in sum.iter_mut().zip(v) {
                         *s += v;
                     }
-                    white |= mat_apply(&to_srgb, v).iter().any(|&s| s >= PREVIEW_WHITE);
+                    white |= mat_apply(&to_srgb, v)
+                        .iter()
+                        .any(|&s| (s - 1.0).abs() <= PREVIEW_WHITE);
                 }
             }
             let n = ((y1 - y0) * (x1 - x0)) as f64;
