@@ -14,7 +14,8 @@
 //! keeps its photos and empties it or not. The recent filters: those
 //! used are listed (deduplicated), pinned, kept across a restart, and
 //! Ctrl+Shift+K opens them in the window, not while a text field is typed
-//! in.
+//! in. Photos dragged from the grid onto an album or the quick collection
+//! go in, one step; a smart album or a set refuses them with the reason.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1322,6 +1323,171 @@ fn album_sets_nest_count_the_union_and_move_with_undo() {
             ("Trip".to_string(), 2),
         ]
     );
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A grid cell by its photo's file name.
+fn cell_at(h: &Harness<'_, Shell>, name: &str) -> egui::Pos2 {
+    h.get_by(|n| {
+        n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.contains(name))
+    })
+    .rect()
+    .center()
+}
+
+/// Drags from `from` to `to` in a few moves, as a hand does; `over`
+/// runs while the pointer is over `to`, before the drop.
+fn drag_onto(
+    h: &mut Harness<'static, Shell>,
+    from: egui::Pos2,
+    to: egui::Pos2,
+    over: impl FnOnce(&Harness<'static, Shell>),
+) {
+    h.drag_at(from);
+    h.run();
+    for i in 1..=6 {
+        h.hover_at(from + (to - from) * (i as f32 / 6.0));
+        h.run();
+    }
+    h.run();
+    over(h);
+    h.drop_at(to);
+    h.run();
+}
+
+#[test]
+fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refuses() {
+    use helios_gui::library::DropOn;
+    let root = temp("drop");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "Trip", "images": [id(3).hex()] }),
+    );
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "Best", "kind": "smart", "rules": {"match": "all", "rules": [
+            {"field": "rating", "op": ">=", "value": 3},
+        ]} }),
+    );
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "kind": "set", "name": "Travel" }),
+    );
+    settle(&mut h, &mut persist, 2.0);
+    let row = |h: &Harness<'_, Shell>, label: &str| h.get_by_label(label).rect().center();
+
+    // The two selected photos dragged onto an album: highlighted while
+    // over it, both in once dropped, one step, undone as one.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(2).hex()]);
+    settle(&mut h, &mut persist, 3.0);
+    let before = steps(&h).len();
+    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "Trip 1"));
+    drag_onto(&mut h, from, to, |h| {
+        assert_eq!(
+            h.state().library().drop_hover(),
+            Some((DropOn::Album("trip".into()), true))
+        );
+        h.get_by_label("Add 2 photos");
+    });
+    settle(&mut h, &mut persist, 4.0);
+    assert_eq!(h.state().library().drop_hover(), None);
+    h.get_by_label("Trip 3");
+    let s = steps(&h);
+    assert_eq!(s.len(), before + 1, "{s:?}");
+    assert_eq!(s.last().unwrap(), "Add 2 photos to “Trip”");
+    assert_eq!(
+        h.state().library().selection(),
+        [id(1).hex(), id(2).hex()],
+        "the selection stays"
+    );
+    let undone = history.undo(
+        &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(
+        matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+        "{undone:?}"
+    );
+    settle(&mut h, &mut persist, 5.0);
+    h.get_by_label("Trip 1");
+
+    // Onto a smart album: refused while over it, with the reason, and
+    // nothing changes once dropped.
+    let before = steps(&h).len();
+    let reason = "Not here: a smart album's rules choose its photos";
+    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "⚙ Best 1"));
+    drag_onto(&mut h, from, to, |h| {
+        assert_eq!(
+            h.state().library().drop_hover(),
+            Some((DropOn::Album("best".into()), false))
+        );
+        h.get_by_label(reason);
+    });
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(steps(&h).len(), before);
+    assert!(warnings(&h).contains(reason), "{}", warnings(&h));
+    h.get_by_label("⚙ Best 1");
+
+    // Onto a set: refused the same way.
+    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "Travel 0"));
+    drag_onto(&mut h, from, to, |h| {
+        assert_eq!(
+            h.state().library().drop_hover(),
+            Some((DropOn::Album("travel".into()), false))
+        );
+    });
+    settle(&mut h, &mut persist, 7.0);
+    assert_eq!(steps(&h).len(), before);
+
+    // A photo not selected dragged alone onto the quick collection: it
+    // goes in, the selection stays.
+    let (from, to) = (cell_at(&h, "c.nef"), row(&h, &quick_row(0)));
+    drag_onto(&mut h, from, to, |h| {
+        assert_eq!(
+            h.state().library().drop_hover(),
+            Some((DropOn::Quick, true))
+        );
+    });
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(h.state().library().quick(), [id(3).hex()]);
+    assert_eq!(
+        steps(&h).last().unwrap(),
+        "Add 1 photos to the quick collection"
+    );
+    assert_eq!(h.state().library().selection(), [id(1).hex(), id(2).hex()]);
+    // The selection onto it: added, never taken out (B's toggle is not a
+    // drop's).
+    let before = steps(&h).len();
+    let (from, to) = (cell_at(&h, "b.jpg"), row(&h, &quick_row(1)));
+    drag_onto(&mut h, from, to, |_| {});
+    settle(&mut h, &mut persist, 9.0);
+    assert_eq!(h.state().library().quick_count(), 3);
+    let (from, to) = (cell_at(&h, "b.jpg"), row(&h, &quick_row(3)));
+    drag_onto(&mut h, from, to, |_| {});
+    settle(&mut h, &mut persist, 10.0);
+    assert_eq!(h.state().library().quick_count(), 3);
+    assert_eq!(steps(&h).len(), before + 1);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

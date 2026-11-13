@@ -4958,6 +4958,19 @@ impl Shell {
             if images.is_empty() {
                 return Err("no image selected".into());
             }
+            // `add` (a drop on its row) only puts in: those already in
+            // stay, and with none missing nothing changes.
+            if args.get("add").and_then(Value::as_bool) == Some(true) {
+                let missing: Vec<String> = images
+                    .into_iter()
+                    .filter(|i| !lib.quick().contains(i))
+                    .collect();
+                let count = missing.len();
+                if count > 0 {
+                    lib.edit_album(AlbumEdit::QuickToggle { images: missing });
+                }
+                return Ok(json!({ "added": true, "images": count }));
+            }
             // As the vault decides: all in, out; else in.
             let added = !images.iter().all(|i| lib.quick().contains(i));
             let count = images.len();
