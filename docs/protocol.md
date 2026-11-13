@@ -24,7 +24,8 @@ direction. Why JSON-RPC, and what other projects do, is in
 - **Params**: an object, by name, as the command's schema in
   `commands.list` describes it; checked against it before the command
   runs. `_meta.origin` names who runs a command (`user`, `cli`,
-  `control`, `agent:NAME`, `script:NAME`; `control` when not given): a
+  `control`, `midi`, `agent:NAME`, `script:NAME`, `remote:NAME`;
+  `control` when not given): a
   change to the edit is saved under it.
 - **Id**: a number or a string. Each call runs on a thread of its own, so
   one connection carries several calls at once; answers come in the order
