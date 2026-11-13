@@ -620,6 +620,11 @@ pub struct Shell {
     lifetime: lifetime::Lifetime,
     /// What the node's endpoint asks of the windows' commands.
     window_asks: Option<crate::window_commands::Asks>,
+    /// The window group the shell's toasts go to while it answers, in
+    /// the main window's pass, what another window asked (the import
+    /// window's Import, Forget, Storage…); `None`: the window being drawn
+    /// or commanded, as egui-pop says.
+    toasts_in: Option<egui::ViewportId>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
 }
@@ -997,6 +1002,7 @@ impl Shell {
             calibration: calibrate_focus::CalibrationFocus::default(),
             lifetime: lifetime::Lifetime::default(),
             window_asks: None,
+            toasts_in: None,
             notes: Vec::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
@@ -3908,7 +3914,10 @@ impl Shell {
             (t, _) => t,
         };
         if let (Some(t), Some(toasts)) = (toast, self.core.app.handle().service(&TOASTS)) {
-            toasts.notify(t);
+            match self.toasts_in {
+                Some(group) => toasts.notify_in(group, t),
+                None => toasts.notify(t),
+            };
         }
         self.core.notices.push(Notice {
             level,

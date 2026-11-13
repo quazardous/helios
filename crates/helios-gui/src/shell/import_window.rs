@@ -987,8 +987,8 @@ impl Shell {
 
     /// Each frame of the main window: the cards polled, a toast for each
     /// card inserted while the window is closed, what the window asked of
-    /// the shell, and its OS window opened or closed as the import focus
-    /// is.
+    /// the shell (its toasts shown in the window), and its OS window
+    /// opened or closed as the import focus is.
     pub(super) fn import_window_frame(&mut self, ctx: &Egui) {
         let _stall = crate::stall::section("import window: the main window's part");
         {
@@ -1034,8 +1034,19 @@ impl Shell {
             w.shell_words = words;
         }
         let events = std::mem::take(&mut self.import.get_mut().events);
-        for event in events {
-            self.import_event(event);
+        if !events.is_empty() {
+            // Asked in the import window, answered in the main window's
+            // pass: what they say (a toast) shows in the import window
+            // while it is open (the main window's once it closes).
+            let app = self.core.app.handle();
+            let group = app
+                .window_viewport(&WindowId::new(WINDOW))
+                .map(|v| app.window_group(v));
+            let before = std::mem::replace(&mut self.toasts_in, group);
+            for event in events {
+                self.import_event(event);
+            }
+            self.toasts_in = before;
         }
         self.follow_import_focus(ctx);
     }
