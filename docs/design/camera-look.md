@@ -581,7 +581,14 @@ The look's two halves are in the chain, off; the command is not.
   `core.curve1d@1` (`helios_bricks::curve1d`, CPU and WGSL): the tone
   curve as a luminance ratio (knots from black, linear, the look's
   shoulder past the last knot), then the chroma curve (8 nodes over
-  display luminance), clamped to [0, 1]; at most 64 knots.
+  display luminance), then a gamut compression, clamped to [0, 1]; at
+  most 64 knots. The compression keeps the hue where a clamp alone
+  would clip a bright saturated pixel's dominant channel (blue first,
+  which weighs least in luminance): once the brightest channel takes
+  more than 0.8 of the room between the luminance and 1, the pixel is
+  desaturated toward its luminance, that share rolled off toward 1.
+  `look::apply` renders the same, so the fit, the preview and the
+  export agree.
 - **Modules.** `cameracolour` (`matrix`, `lut`, `amount`, `fitter`,
   `preview`) and `cameratone` (`tone`, `chroma`, `fitter`, `preview`,
   `held_out`, `baseline`). Defaults change no pixel.
