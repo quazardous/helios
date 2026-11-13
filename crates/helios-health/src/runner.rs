@@ -484,8 +484,12 @@ mod tests {
                 [("clock", "run 2"), ("disks", "run 2"), ("plain", "run 1")]
             );
         }
-        assert!(tick(86_400, Some(1)));
-        assert_eq!(counts(), [3, 3, 2], "a day later, all of them");
+        assert!(tick(120 + 86_400, Some(1)));
+        assert_eq!(
+            counts(),
+            [3, 3, 2],
+            "a day after the event check, all of them"
+        );
         assert!(runner.run_now(), "check now");
         assert!(runner.wait(Duration::from_secs(10)));
         assert_eq!(counts(), [4, 4, 3], "check now runs every check");
