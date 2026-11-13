@@ -201,6 +201,7 @@ pub struct Caps {
     pub resume: bool,               // fetch from an offset
     pub changes: bool,              // a change feed (2.3)
     pub originals: Originals,       // Exact, or Rendered (bytes may differ from the upload)
+    pub limits: Limits,             // per_minute, per_day: what its service allows (as built)
 }
 
 pub struct Page { pub items: Vec<Item>, pub next: Option<Cursor>, pub complete: bool }
@@ -449,7 +450,7 @@ JSON-RPC, completing the research note's sketch:
 | `source.detect` | `connector`, `auth?` | `[{source, label, kind}]` |
 | `source.list` | `source`, `cursor?`, `pageSize`, `auth?` | streamed `source/page` notifications `{items, next, complete}`, as `importer/page` |
 | `source.changes` | `source`, `since`, `auth?` | as `source.list` |
-| `source.thumbnail` | `items`, `maxSide`, `auth?` | a JPEG per item, written into the staging folder |
+| `source.thumbnail` | `item` (as listed), `maxSide`, `staging`, `auth?` | `{file}`: the item's preview, written into the staging folder (as built) |
 | `source.fetch` | `items` (with `offset`), `staging`, `auth?` | each file written into staging, `$/progress` per byte count; errors per item with the codes of 2.2 |
 
 The plugin writes into the brokered staging folder (`folder.write`, as
@@ -773,6 +774,15 @@ none gets `picker` when it picks (`caps.picks`), else `folder`. Built-in
 connectors declare theirs in code; a plugin in its manifest, beside
 `[[connect]]`: `browsers = ["picker"]` (an unknown name, or `browsers`
 without the `import.source` service, refuses the plugin).
+
+A source plugin that gives previews says `thumbnails = true`, and the
+requests its service allows `limits = { per_minute = 120, per_day =
+10000 }` (Google Photos' own). Remote glances (`import_remote` in
+`helios-gui`) read those previews into the glance cache, on disk under
+the connector, the account, the item's id and its revision, so a pick
+opened again reads nothing from the network; the read-ahead of items not
+shown pauses at the declared limits and at the cache's budget, never
+evicting a glance shown.
 
 The Contents column follows the source browsed: the account selected,
 else the folder or card ticked last. When its connector offers more than
