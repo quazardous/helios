@@ -280,16 +280,21 @@ mod tests {
     }
 
     /// The camera's JPEG: the develop chain with a harder sigmoid, at
-    /// `size` pixels on the long edge.
+    /// `size` pixels on the long edge, its white at 0.9. A sigmoid this
+    /// hard reaches display white (255) on the bright patches the raw
+    /// keeps, which the fit rightly refuses (its preview-clipped gate):
+    /// the camera here keeps headroom, as one not clipping does.
     fn preview(mosaic: &Image, size: u32) -> Image {
         let mut chain: Chain = defaults();
         chain.insert(
             "sigmoid".into(),
             Params::new().with("contrast", Param::Float(2.6)),
         );
-        render(mosaic, &camera(), &chain, size, false)
+        let display = render(mosaic, &camera(), &chain, size, false)
             .unwrap()
-            .display
+            .display;
+        let data = display.data().iter().map(|v| v * 0.9).collect();
+        Image::new(display.region(), display.channels(), data)
     }
 
     /// A vault holding one photo (a file at hand) and its id.
