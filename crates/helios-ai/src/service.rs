@@ -34,6 +34,9 @@ const AI_PULL: &str = "ai_pull";
 const AI_BENCH: &str = "ai_bench";
 /// Where the service's events come from on its bus.
 const SOURCE: &str = "ai";
+/// The largest model size a pull accepts: above it `size_mib` is a mistake,
+/// and the disk check would overflow.
+const MAX_MODEL_MIB: u64 = 4 * 1024 * 1024;
 
 /// What a call is for, for the log.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -1048,6 +1051,11 @@ impl Ai {
         model: &str,
         size_mib: Option<u64>,
     ) -> Result<Value, String> {
+        if let Some(size) = size_mib.filter(|&s| s > MAX_MODEL_MIB) {
+            return Err(format!(
+                "`size_mib` = {size} is not a model's size: at most {MAX_MODEL_MIB} MiB (4 TiB)"
+            ));
+        }
         let provider = self.provider(provider_id.unwrap_or(DEFAULT_PROVIDER))?;
         if provider.kind() != ProviderKind::Ollama {
             return Err(format!("`{}` cannot download models", provider.id()));
@@ -1059,7 +1067,7 @@ impl Ai {
             let dir = local::models_dir(system);
             let free = local::disk_free(system, &dir);
             // A model the catalogue does not know needs at least this much.
-            let wanted = needed.unwrap_or(4096) * 11 / 10;
+            let wanted = needed.unwrap_or(4096).saturating_mul(11) / 10;
             match free {
                 Some(f) if f < wanted => {
                     return Err(format!(
@@ -1085,7 +1093,7 @@ impl Ai {
                 let percent = if p.status == "success" {
                     100
                 } else {
-                    (p.completed * 100).checked_div(p.total).unwrap_or(0)
+                    p.completed.saturating_mul(100).checked_div(p.total).unwrap_or(0)
                 };
                 if p.status != last.0 || percent != last.1 {
                     core.progress(
