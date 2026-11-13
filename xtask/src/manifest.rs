@@ -105,8 +105,7 @@ pub fn parse(body: &str, benchfile: &str) -> Result<Manifest, Vec<String>> {
     let coverage = lines
         .iter()
         .find_map(|l| l.trim_start().strip_prefix("Coverage:"))
-        .map(str::trim)
-        .unwrap_or("");
+        .map_or("", str::trim);
     if coverage.is_empty() {
         problems.push("no `Coverage:` line: say in a sentence what the jobs prove".into());
     }
