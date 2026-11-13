@@ -1775,6 +1775,36 @@ fn main() -> Result<(), String> {
         },
         |n| n.watch_volumes(helios_storage::system()),
     );
+    // The `helios` CLI and `helios-mcp` reach this node instead of
+    // starting another: its commands served while it holds the vault,
+    // its rendezvous file written beside it, removed as Helios ends.
+    let advertised = node
+        .as_ref()
+        .zip(vault_file.as_deref())
+        .and_then(|(n, file)| {
+            let instance = format!("desktop-{}", std::process::id());
+            let service = helios_node_core::endpoint::VaultService::new(
+                n.vault().clone(),
+                bus.clone(),
+                helios_core::jobs::Jobs::new(bus.clone()),
+                &instance,
+            );
+            match helios_node_core::endpoint::advertise(
+                file,
+                std::sync::Arc::new(service),
+                &instance,
+            ) {
+                Ok(Some(advertised)) => Some(advertised),
+                Ok(None) => {
+                    warn("the library: another Helios node holds it; the CLI and agents reach that one");
+                    None
+                }
+                Err(e) => {
+                    warn(&format!("the library's command endpoint: {e}"));
+                    None
+                }
+            }
+        });
     let persist = node.as_ref().map(|n| Persist::on(n.vault().clone(), bus));
     start::mark("vault opened (and migrated)");
     // Workshop sessions a former run left unkept are dropped (C6).
@@ -2323,6 +2353,8 @@ fn main() -> Result<(), String> {
         })
         .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");
+    // No client finds the node any more once it stops.
+    drop(advertised);
     // The window is gone: the node stops (its last flush, the vault
     // closed), against its deadline, whether or not the shell asked it
     // to quit (an error ending eframe).

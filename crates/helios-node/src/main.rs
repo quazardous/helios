@@ -774,15 +774,7 @@ mod control {
 
     /// A command is run, by whom: the `control.action` of its request
     /// follows.
-    #[derive(Serialize)]
-    struct CommandRan<'a> {
-        id: &'a str,
-        origin: &'a str,
-    }
-
-    impl Event for CommandRan<'_> {
-        const KIND: &'static str = "control.command";
-    }
+    use helios_node_core::endpoint::CommandRan;
 
     fn now() -> u64 {
         std::time::SystemTime::now()

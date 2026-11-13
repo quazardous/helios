@@ -9,8 +9,10 @@
 //! node headless.
 
 pub mod commands;
+pub mod endpoint;
 pub mod health;
 pub mod jobs;
+pub mod library;
 pub mod node;
 pub mod quit;
 pub mod settings;

@@ -344,14 +344,18 @@ accepted. Its answers are JSON. See [library.md](library.md) for both.
 
 ## Through the vault's node
 
-`import`, `import-darktable` and `stacks` never open the vault themselves:
-they run on the node that holds it (`library.import`,
-`library.importDarktable`, `library.stacks.*`), so the node's caches,
-subscribers and after-import backup hear of every change.
+`import`, `import-darktable`, `stacks` and `batch --sidecar --vault`
+never open the vault themselves: they run on the node that holds it
+(`library.import`, `library.importDarktable`, `library.stacks.*`,
+`library.keepSidecar` for each sidecar a batch keeps), so the node's
+caches, subscribers and after-import backup hear of every change.
+`helios-mcp`'s macro step on an image reads and saves its edit the same
+way (`library.edit.head`, `library.edit.save`).
 
 - The node holding a vault keeps a rendezvous file beside it,
   `.helios/NAME.node.json` (see [protocol.md](protocol.md)); the CLI reads
-  it and connects.
+  it and connects. A desktop Helios with the library open is that node:
+  the CLI then works through it.
 - `--node ADDRESS` or `$HELIOS_NODE` names a node's command endpoint
   instead (a Unix socket path, or `tcp://HOST:PORT` with the session token
   in `$HELIOS_TOKEN`); `--vault` may then be left out.

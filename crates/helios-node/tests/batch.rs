@@ -58,6 +58,9 @@ fn batch(args: &[&str]) -> (i32, Vec<Value>, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_helios"))
         .arg("batch")
         .args(args)
+        // The node a `--vault` batch starts on the vault exits soon after.
+        .env("HELIOS_IDLE_EXIT", "2")
+        .env_remove("HELIOS_NODE")
         .output()
         .unwrap();
     let lines = String::from_utf8_lossy(&out.stdout)
@@ -432,6 +435,90 @@ fn darktable_duplicates_are_kept_as_versions_and_the_base_is_exported() {
     // Only the base's rating is the image's.
     assert_eq!(line["sidecar"]["vault"]["rating_set"], true);
     assert_eq!(duplicates[0]["vault"]["rating_set"], false);
+}
+
+/// With a node holding the vault, `helios batch --sidecar --vault` keeps
+/// the sidecars through it: its bus hears `library.keepSidecar` run by
+/// the CLI, and the batch starts no node on the vault.
+#[test]
+fn a_batch_keeps_its_sidecars_through_the_node_holding_the_vault() {
+    use helios_inspect::discovery::files as node_files;
+    let p = Place::new("sidecar-node");
+    std::fs::write(p.join("network.json"), NETWORK).unwrap();
+    let photo = p.join("photo.png");
+    picture(&photo, 16, 16);
+    std::fs::write(p.join("photo.png.xmp"), rated_sidecar(1.0, 4)).unwrap();
+    std::fs::write(p.join("photo_01.png.xmp"), sidecar(-1.0)).unwrap();
+    let vault = p.join("vault.db");
+    let mut node = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--socket")
+        .arg(p.join("inspect.sock"))
+        .arg("--batch-control")
+        .arg(p.join("batch.sock"))
+        .arg("--vault")
+        .arg(&vault)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut ready = String::new();
+    BufReader::new(node.stdout.take().unwrap())
+        .read_line(&mut ready)
+        .unwrap();
+    assert!(ready.starts_with("ready "), "{ready}");
+    let rendezvous = node_files(&vault).rendezvous;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !rendezvous.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the node wrote its rendezvous in 10 s"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let (code, lines, err) = batch(&[
+        "--network",
+        &p.s("network.json"),
+        "--out",
+        &p.s("out"),
+        "--format",
+        "png",
+        "--sidecar",
+        "--vault",
+        vault.to_str().unwrap(),
+        photo.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{err}\n{lines:?}");
+    let line = line_of(&lines, &photo);
+    assert_eq!(line["sidecar"]["vault"]["added"], true, "{line}");
+    assert_eq!(line["sidecar"]["vault"]["rating_set"], true, "{line}");
+    assert_eq!(
+        line["sidecar"]["duplicates"][0]["vault"]["added"], true,
+        "{line}"
+    );
+    // The node holding the vault kept them, for the CLI.
+    let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args(["inspect", "--socket", &p.s("inspect.sock"), "events"])
+        .env_remove("HELIOS_NODE")
+        .output()
+        .unwrap();
+    let events: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kept = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            e["kind"] == "control.command"
+                && e["payload"]["id"] == "library.keepSidecar"
+                && e["payload"]["origin"] == "cli"
+        })
+        .count();
+    assert_eq!(kept, 2, "the base and its duplicate: {events}");
+    // The batch started no node on the vault.
+    assert!(!rendezvous.with_extension("log").exists());
+    let _ = node.kill();
+    let _ = node.wait();
 }
 
 /// Runs `helios import-darktable`: exit code, one JSON value per line, stderr.

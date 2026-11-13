@@ -47,7 +47,7 @@ pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).
 pub use helios_library::darktable;
 pub mod connect;
-pub mod library;
+pub use helios_node_core::library;
 pub mod mcp;
 pub mod sandbox;
 pub mod vault_node;

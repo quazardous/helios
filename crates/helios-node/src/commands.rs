@@ -260,25 +260,7 @@ fn verbs() -> Vec<CommandSpec> {
         ])),
         CommandSpec::new("workflow.pause", "Pause a run", "Workflow").params(on_run(&[])),
         CommandSpec::new("workflow.resume", "Resume a run", "Workflow").params(on_run(&[])),
-        CommandSpec::new("library.import", "Import into the library", "Library")
-            .params(object(&[
-                ("paths", json!({ "type": "array", "items": absolute() }), true),
-                ("copy", boolean(), false),
-                ("into", or_null(absolute()), false),
-                ("rename", or_null(text("a rename pattern")), false),
-                (
-                    "layout",
-                    json!({ "type": ["string", "null"], "enum": ["day", "month", "year", "flat", null] }),
-                    false,
-                ),
-                (
-                    "duplicates",
-                    json!({ "type": ["string", "null"], "enum": ["skip", "keep", "ask", null] }),
-                    false,
-                ),
-                ("signals", or_null(boolean()), false),
-            ]))
-            .needs(Need::Vault),
+        helios_node_core::library::import_spec(),
         CommandSpec::new("settings.layer.get", "Read a settings layer", "Settings")
             .params(object(&[(
                 "layer",
