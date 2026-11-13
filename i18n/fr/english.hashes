@@ -29,12 +29,12 @@ calibrate-import-camera-key 513d600773f58bb4
 calibrate-import-format 537a1501a4a2b949
 calibrate-import-id eb04288b397a9391
 calibrate-import-illuminant c68be10d4c6dba2a
-calibrate-import-lut 5460eb9dda35d865
 calibrate-import-matrix e899e96869e07ebf
 calibrate-import-not-profile 212b5f0d7d9aa1e3
 calibrate-import-nothing 02686ff4f8813026
 calibrate-import-numbers dc518385de31338b
 calibrate-import-refused 227fe114a59b7aae
+calibrate-import-table 04ce9a7a27ba0a4b
 calibrate-import-unreadable a96493339a6a14d7
 calibrate-import-unreadable-file 85ea10f780b3cbdf
 calibrate-load-failed 68ec9d17424153d7
@@ -408,6 +408,10 @@ gui-calibrate-profiles-none 58ea35ebdcb13df1
 gui-calibrate-quality dd1f66443e706af9
 gui-calibrate-report 9910c3e9958e1b5b
 gui-calibrate-report-none 5fc9f65aef639664
+gui-calibrate-residual-after a1043390db50b541
+gui-calibrate-residual-dropped eabeda969d19bba8
+gui-calibrate-residual-held-out 2ad846cb7ec52cc8
+gui-calibrate-residual-kept 8811494da05d9a7a
 gui-calibrate-save e102192242a8aca8
 gui-calibrate-save-heading b46962482d48d241
 gui-calibrate-saved 7c170f48d55892ed
