@@ -245,9 +245,17 @@ fn a_plugin_s_page_renders_its_contract_and_saves_through_the_store() {
         .unwrap();
     w.h.run();
     w.h.run();
-    w.h.get_by_label("Preview quality");
-    w.h.get_by_label("Access token");
-    w.h.get_by_label("Talks to the fake service");
+    for shown in [
+        "Preview quality",
+        "Access token",
+        "Talks to the fake service",
+    ] {
+        assert!(
+            w.h.query_all_by_label_contains(shown).next().is_some(),
+            "{shown} on the page\n{:#?}",
+            w.h.root()
+        );
+    }
     let tree = format!("{:#?}", w.h.root());
     assert!(!tree.contains(SECRET), "the secret is masked on screen");
     let file = std::fs::read_to_string(w.dir.join(config::plugins::PLUGINS_FILE)).unwrap();
