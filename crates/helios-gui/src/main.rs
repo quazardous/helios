@@ -1780,7 +1780,10 @@ fn main() -> Result<(), String> {
     );
     // The `helios` CLI and `helios-mcp` reach this node instead of
     // starting another: its commands served while it holds the vault,
-    // its rendezvous file written beside it, removed as Helios ends.
+    // its rendezvous file written beside it, removed as Helios ends. The
+    // windows' commands are served beside the node's, answered by the
+    // window once it is open.
+    let window_commands = helios_gui::window_commands::Bridge::new();
     let advertised = node
         .as_ref()
         .zip(vault_file.as_deref())
@@ -1791,7 +1794,8 @@ fn main() -> Result<(), String> {
                 bus.clone(),
                 helios_core::jobs::Jobs::new(bus.clone()),
                 &instance,
-            );
+            )
+            .with_windows(std::sync::Arc::new(window_commands.clone()));
             match helios_node_core::endpoint::advertise(
                 file,
                 std::sync::Arc::new(service),
@@ -1990,6 +1994,7 @@ fn main() -> Result<(), String> {
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
+            window_commands.attach(&mut shell, &cc.egui_ctx);
             if let Some(link) = node_link.clone() {
                 shell.attach_node(link);
             }

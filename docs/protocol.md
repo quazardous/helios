@@ -118,11 +118,22 @@ The desktop's embedded node does the same while it holds its library
 (`helios_node_core::endpoint::advertise`): it serves the library's
 commands (`library.import`, `library.importDarktable`,
 `library.keepSidecar`, `library.edit.head`, `library.edit.save`,
-`library.stacks.*`, plus `node.hello` and `commands.list`) on a private
-socket (loopback TCP behind a session token where there are no Unix
+`library.stacks.*`, plus `node.hello`, `commands.list` and
+`command.run`) on a private socket (loopback TCP behind a session token where there are no Unix
 sockets), writes the rendezvous file, whose `inspect` names that same
 endpoint, and removes it as Helios quits. The CLI and `helios-mcp` then
 reach the desktop's node instead of starting another.
+
+That endpoint lists the desktop's window commands too: `commands.list`
+(`window`: the window evaluated, `main` by default) gives the node's
+commands (`scope: "node"`) then the window's (`scope: "window"`, the
+egui-pop commands offered to agents), each with `enabled` and, when
+greyed, `disabledReason`, the reason its menu entry gives ("Only in the
+Helios window", "Does not apply here (…)"). `command.run` (`id`,
+`params`, `origin`, `window`, `scope` to pick one where both have the
+id) runs a window command on the interface's thread in that open window,
+announced on the bus as `control.command` with its origin, and refuses
+it with that reason where it does not apply.
 
 A client (`helios_node::connect`):
 
