@@ -273,6 +273,14 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             "chartprofile",
             ModuleRef::new(helios_module_chartprofile::ChartProfile),
         ),
+        (
+            "cameracolour",
+            ModuleRef::new(helios_module_cameracolour::CameraColour),
+        ),
+        (
+            "cameratone",
+            ModuleRef::new(helios_module_cameratone::CameraTone),
+        ),
         ("flip", ModuleRef::new(helios_module_flip::Flip)),
         (
             "channelmixerrgb",

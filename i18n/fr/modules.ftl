@@ -4,6 +4,50 @@ param-blur-radius =
     .description = écart type, en pixels de pleine résolution
     .label = rayon
 
+param-cameracolour-amount =
+    .description = la part des couleurs du rendu boîtier : 0 aucune, 1 toutes
+    .label = quantité
+
+param-cameracolour-fitter =
+    .description = la version de l’ajusteur qui a produit le rendu, pour sa provenance ; 0 pour aucun
+    .label = ajusteur
+
+param-cameracolour-lut =
+    .description = la table de teinte et de saturation du rendu : son neutre, puis le décalage de teinte (degrés) et l’échelle de saturation de chaque nœud, 72 teintes x 5 saturations x 5 valeurs ; vide pour aucune
+    .label = table
+
+param-cameracolour-matrix =
+    .description = la matrice du rendu, du RVB de travail au RVB de travail, ligne par ligne
+    .label = matrice
+
+param-cameracolour-preview =
+    .description = l’empreinte du JPEG du boîtier sur lequel le rendu a été ajusté, pour sa provenance
+    .label = aperçu
+
+param-cameratone-baseline =
+    .description = le Delta E 2000 moyen du rendu par défaut au JPEG du boîtier, sur les mêmes pixels
+    .label = référence
+
+param-cameratone-chroma =
+    .description = la courbe de chroma : 8 rapports de chroma répartis sur la luminance d’affichage de 0 à 1 ; vide pour aucune
+    .label = chroma
+
+param-cameratone-fitter =
+    .description = la version de l’ajusteur qui a produit le rendu, pour sa provenance ; 0 pour aucun
+    .label = ajusteur
+
+param-cameratone-held-out =
+    .description = le Delta E 2000 moyen du rendu au JPEG du boîtier, sur les pixels mis de côté
+    .label = écart mis de côté
+
+param-cameratone-preview =
+    .description = l’empreinte du JPEG du boîtier sur lequel le rendu a été ajusté, pour sa provenance
+    .label = aperçu
+
+param-cameratone-tone =
+    .description = les nœuds de la courbe de tons depuis le noir, luminance de la scène puis d’affichage, paire après paire ; vide pour aucune
+    .label = tons
+
 param-chartprofile-lut =
     .description = la table résiduelle du profil : son neutre, puis le décalage de teinte (degrés) et l’échelle de saturation de chaque nœud, 72 teintes x 5 saturations x 5 valeurs ; vide pour aucune
     .label = table

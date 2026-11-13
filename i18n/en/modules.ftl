@@ -5,6 +5,50 @@ param-blur-radius =
     .description = standard deviation, in full-resolution pixels
     .label = radius
 
+param-cameracolour-amount =
+    .description = how much of the look's colours: 0 none, 1 all
+    .label = amount
+
+param-cameracolour-fitter =
+    .description = the version of the fitter that made the look, for provenance; 0 for none
+    .label = fitter
+
+param-cameracolour-lut =
+    .description = the look's hue and saturation table: its neutral, then each node's hue shift (degrees) and saturation scale, 72 hues x 5 saturations x 5 values; empty for none
+    .label = lut
+
+param-cameracolour-matrix =
+    .description = the look's matrix, working RGB to working RGB, row by row
+    .label = matrix
+
+param-cameracolour-preview =
+    .description = the hash of the camera's JPEG the look was fitted to, for provenance
+    .label = preview
+
+param-cameratone-baseline =
+    .description = the default render's mean Delta E 2000 to the camera's JPEG on the same pixels
+    .label = baseline
+
+param-cameratone-chroma =
+    .description = the chroma curve: 8 chroma ratios evenly over display luminance 0 to 1; empty for none
+    .label = chroma
+
+param-cameratone-fitter =
+    .description = the version of the fitter that made the look, for provenance; 0 for none
+    .label = fitter
+
+param-cameratone-held-out =
+    .description = the look's mean Delta E 2000 to the camera's JPEG on held-out pixels
+    .label = held_out
+
+param-cameratone-preview =
+    .description = the hash of the camera's JPEG the look was fitted to, for provenance
+    .label = preview
+
+param-cameratone-tone =
+    .description = the tone curve's knots from black, scene then display luminance, pair after pair; empty for none
+    .label = tone
+
 param-channelmixerrgb-adaptation =
     .description = the chromatic adaptation
     .label = adaptation

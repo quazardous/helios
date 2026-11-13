@@ -381,11 +381,11 @@ fn a_raw_gets_darktables_colour_calibration_in_every_template_taking_a_raw() {
             Some(profile) => {
                 assert_eq!(graph.input_nodes(profile).unwrap(), [Some(colorin)], "{id}");
                 assert!(graph.is_bypassed(profile).unwrap(), "{id}");
-                assert_eq!(
-                    graph.input_nodes(calibrated).unwrap(),
-                    [Some(profile)],
-                    "{id}"
-                );
+                // Then a camera look's colour half, bypassed too.
+                let look = graph.find("cameracolour").unwrap();
+                assert_eq!(graph.input_nodes(look).unwrap(), [Some(profile)], "{id}");
+                assert!(graph.is_bypassed(look).unwrap(), "{id}");
+                assert_eq!(graph.input_nodes(calibrated).unwrap(), [Some(look)], "{id}");
             }
             None => assert_eq!(
                 graph.input_nodes(calibrated).unwrap(),
@@ -610,7 +610,7 @@ fn develop_v2() -> Bundle {
 
 #[test]
 fn develop_one_image_3_renders_version_2_s_bits_while_its_chart_profile_is_off() {
-    let v3 = find("helios.develop");
+    let v3 = develop_v3();
     let v2 = develop_v2();
     assert_eq!((v2.template.version, v3.template.version), (2, 3));
     assert!(v2.validate(&templates::modules()).is_ok());
@@ -653,4 +653,82 @@ fn develop_one_image_3_renders_version_2_s_bits_while_its_chart_profile_is_off()
     .unwrap();
     new.set_bypass(profile, false).unwrap();
     assert_ne!(render(&new, view), before);
+}
+
+/// "Develop one image" as version 3 wrote it, before the camera look.
+fn develop_v3() -> Bundle {
+    Bundle::from_files(&[
+        (
+            "template.json",
+            include_str!("data/develop-v3.template.json"),
+        ),
+        (
+            "layout.json",
+            include_str!("../../../templates/develop.helios-template/layout.json"),
+        ),
+    ])
+    .expect("version 3 still reads")
+}
+
+#[test]
+fn develop_one_image_4_renders_version_3_s_bits_while_its_camera_look_is_off() {
+    let v4 = find("helios.develop");
+    let v3 = develop_v3();
+    assert_eq!((v3.template.version, v4.template.version), (3, 4));
+    assert!(v3.validate(&templates::modules()).is_ok());
+    let (mosaic, camera) = (mosaic(), camera(0.3));
+    let (old, old_view) = built(&v3, &mosaic, &camera);
+    let (mut new, view) = built(&v4, &mosaic, &camera);
+    assert!(old.find("cameracolour").is_none() && old.find("cameratone").is_none());
+    // The colour half after the chart profile, the tone half before
+    // sigmoid, both bypassed.
+    let colour = new.find("cameracolour").expect("version 4 carries it");
+    let tone = new.find("cameratone").expect("version 4 carries it");
+    assert_eq!(
+        new.input_nodes(colour).unwrap(),
+        [Some(new.find("chartprofile").unwrap())]
+    );
+    assert_eq!(
+        new.input_nodes(tone).unwrap(),
+        [Some(new.find("exposure").unwrap())]
+    );
+    let sigmoid = new.find("sigmoid").unwrap();
+    assert_eq!(new.input_nodes(sigmoid).unwrap(), [Some(tone)]);
+    assert!(new.is_bypassed(colour).unwrap() && new.is_bypassed(tone).unwrap());
+    let before = render(&old, old_view);
+    assert_eq!(
+        render(&new, view)
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>(),
+        before.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+    );
+    // On, with a look's numbers and sigmoid off, the render moves and
+    // stays a display render.
+    new.set_param(
+        colour,
+        "matrix",
+        Value::List(vec![
+            1.1, -0.06, -0.04, -0.03, 1.05, -0.02, 0.01, -0.08, 1.07,
+        ]),
+    )
+    .unwrap();
+    new.set_param(
+        tone,
+        "tone",
+        Value::List(vec![0.0, 0.0, 0.02, 0.08, 0.18, 0.45, 1.0, 0.9]),
+    )
+    .unwrap();
+    new.set_bypass(colour, false).unwrap();
+    new.set_bypass(tone, false).unwrap();
+    new.set_bypass(sigmoid, true).unwrap();
+    let after = render(&new, view);
+    assert_ne!(after, before);
+    assert!(
+        after
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| p[..3].iter().all(|v| (0.0..=1.0).contains(v)))
+    );
 }

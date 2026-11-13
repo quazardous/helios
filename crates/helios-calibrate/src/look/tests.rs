@@ -784,3 +784,130 @@ fn two_runs_with_a_table_are_bit_identical() {
     };
     assert_eq!(bits(&one), bits(&two));
 }
+
+/// The look rendered by its two modules (`cameracolour`, then
+/// `cameratone`) at their fitted parameters, in single precision.
+fn rendered_by_the_modules(look: &Look, pixels: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    use helios_core::{Context, Image, Module, Region};
+    use helios_module_cameracolour::CameraColour;
+    use helios_module_cameratone::CameraTone;
+    let w = pixels.len() as u32;
+    let data: Vec<f32> = pixels
+        .iter()
+        .flat_map(|p| [p[0] as f32, p[1] as f32, p[2] as f32, 1.0])
+        .collect();
+    let mut image = Image::new(Region::sized(w, 1), 4, data);
+    let colour = CameraColour
+        .manifest()
+        .resolve(&edit::colour_params(look, "preview"))
+        .unwrap();
+    let plan = CameraColour.prepare(&colour, &Context::new()).unwrap();
+    image = CameraColour
+        .process(&plan, &[&image], Region::sized(w, 1))
+        .unwrap()
+        .remove(0);
+    let tone = CameraTone
+        .manifest()
+        .resolve(&edit::tone_params(look, "preview"))
+        .unwrap();
+    let plan = CameraTone.prepare(&tone, &Context::new()).unwrap();
+    image = CameraTone
+        .process(&plan, &[&image], Region::sized(w, 1))
+        .unwrap()
+        .remove(0);
+    image
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| [p[0], p[1], p[2]].map(f64::from))
+        .collect()
+}
+
+#[test]
+fn the_modules_render_a_fitted_look_as_its_reference() {
+    // A look with its table, one with its chroma curve, both together, a
+    // matrix-only one and a tone-only one: the modules' single-precision
+    // render is the fit's own `apply` within 1e-5 on every scene pixel.
+    let full = Case::new(&Scene::new(192, 128), twisted_camera());
+    let twisted = full.fit().unwrap();
+    let standard = standard().fit().unwrap();
+    assert!(twisted.table.is_some(), "{:?}", twisted.report);
+    assert!(standard.chroma.is_some(), "{:?}", standard.report);
+    let both = Look {
+        chroma: standard.chroma.clone(),
+        ..twisted.clone()
+    };
+    let looks = [
+        twisted,
+        standard,
+        both,
+        Case::new(&Scene::new(192, 128), matrix_only_camera())
+            .fit()
+            .unwrap(),
+        {
+            let camera = Camera::new();
+            Case::drawn(&Scene::new(192, 128), |_, _, x| [luma(camera.render(x)); 3])
+                .fit()
+                .unwrap()
+        },
+    ];
+    assert_eq!(looks[4].kind, Kind::ToneOnly);
+    let pixels = &full.sensor.rgb;
+    for look in &looks {
+        let out = rendered_by_the_modules(look, pixels);
+        let mut worst = 0.0f64;
+        for (p, o) in pixels.iter().zip(&out) {
+            let r = apply(look, *p);
+            for c in 0..3 {
+                worst = worst.max((r[c] - o[c]).abs());
+            }
+        }
+        assert!(worst < 1e-5, "{:?}: worst {worst}", look.kind);
+    }
+}
+
+#[test]
+fn with_a_chart_profile_on_the_look_s_colour_half_stays_off() {
+    use crate::apply::{with_profile, without_profile};
+    use serde_json::Value;
+    let look = Case::new(&Scene::new(192, 128), twisted_camera())
+        .fit()
+        .unwrap();
+    // No profile: both halves on, sigmoid off.
+    let on = edit::with_look(&Value::Null, &look, "p");
+    assert!(edit::is_on(&on, edit::COLOUR) && edit::is_on(&on, edit::TONE));
+    assert!(!edit::is_on(&on, edit::DISPLAY));
+    assert!(edit::applied(&on));
+    // A profile applied afterwards turns the colour half off, the tone
+    // half kept on top of the chart's colours.
+    let m = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let charted = with_profile(&on, "chart", &m, None);
+    assert!(!edit::is_on(&charted, edit::COLOUR));
+    assert!(edit::is_on(&charted, edit::TONE));
+    // A look applied with a profile on: the colour half written but off.
+    let refit = edit::with_look(&charted, &look, "p");
+    assert!(!edit::is_on(&refit, edit::COLOUR));
+    assert!(edit::is_on(&refit, edit::TONE));
+    let entry = refit["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == edit::COLOUR)
+        .unwrap();
+    assert_eq!(entry["params"]["fitter"]["int"], i64::from(FITTER_VERSION));
+    // Without the profile, a look applied again turns its colours on.
+    let plain = edit::with_look(&without_profile(&refit), &look, "p");
+    assert!(edit::is_on(&plain, edit::COLOUR));
+    // The look off: both halves off, sigmoid back on, numbers kept.
+    let off = edit::without_look(&plain);
+    assert!(!edit::applied(&off) && !edit::is_on(&off, edit::COLOUR));
+    assert!(edit::is_on(&off, edit::DISPLAY));
+    assert_eq!(
+        off["modules"].as_array().unwrap().len(),
+        plain["modules"].as_array().unwrap().len()
+    );
+    // An edit with no look is left as it is.
+    let bare = serde_json::json!({ "modules": [] });
+    assert_eq!(edit::without_look(&bare), bare);
+}

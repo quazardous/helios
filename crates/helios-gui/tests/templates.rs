@@ -394,6 +394,8 @@ fn a_workspace_from_develop_one_image_reads_a_raw_through_the_raw_chain() {
     assert_eq!(
         names,
         [
+            "cameracolour",
+            "cameratone",
             "channelmixerrgb",
             "chartprofile",
             "colorin",

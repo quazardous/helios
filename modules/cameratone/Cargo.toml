@@ -1,0 +1,18 @@
+[package]
+name = "helios-module-cameratone"
+description = "Camera look, tone half, for Helios: the tone and chroma curves fitted to a raw's embedded JPEG, in the display transform's place"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+# Its pixel step: `core.curve1d@1`.
+helios-bricks.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true
+
+[lints]
+workspace = true

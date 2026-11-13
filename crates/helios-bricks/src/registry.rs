@@ -50,6 +50,9 @@ impl BrickRegistry {
         registry
             .register(ModuleRef::new(crate::huesat::HueSat))
             .expect("core.huesat is a valid brick");
+        registry
+            .register(ModuleRef::new(crate::curve1d::Curve1d))
+            .expect("core.curve1d is a valid brick");
         for brick in crate::values::core() {
             registry
                 .register_value(Arc::from(brick))
@@ -268,6 +271,7 @@ mod tests {
             .collect();
         assert!(ids.contains(&"core.affine@1"), "{ids:?}");
         assert!(ids.contains(&"core.value.exp2@1"), "{ids:?}");
+        assert!(ids.contains(&"core.curve1d@1"), "{ids:?}");
         let affine = &catalogue[ids.iter().position(|i| *i == "core.affine@1").unwrap()];
         assert_eq!(affine["ports"], "(input: image(4)) -> (output: image(4))");
         assert_eq!(affine["forms"], json!(["cpu", "gpu"]));

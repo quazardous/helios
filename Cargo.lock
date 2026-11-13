@@ -2265,6 +2265,8 @@ dependencies = [
  "helios-bricks",
  "helios-colour",
  "helios-core",
+ "helios-module-cameracolour",
+ "helios-module-cameratone",
  "helios-module-channelmixerrgb",
  "helios-module-chartprofile",
  "helios-module-demosaic",
@@ -2474,6 +2476,8 @@ dependencies = [
  "helios-inspect",
  "helios-library",
  "helios-load",
+ "helios-module-cameracolour",
+ "helios-module-cameratone",
  "helios-module-channelmixerrgb",
  "helios-module-chartprofile",
  "helios-module-colorin",
@@ -2595,6 +2599,24 @@ dependencies = [
 name = "helios-module-blur"
 version = "0.87.0"
 dependencies = [
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
+name = "helios-module-cameracolour"
+version = "0.87.0"
+dependencies = [
+ "helios-bricks",
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
+name = "helios-module-cameratone"
+version = "0.87.0"
+dependencies = [
+ "helios-bricks",
  "helios-core",
  "helios-testkit",
 ]
@@ -2735,6 +2757,8 @@ dependencies = [
  "helios-library",
  "helios-load",
  "helios-module-blur",
+ "helios-module-cameracolour",
+ "helios-module-cameratone",
  "helios-module-channelmixerrgb",
  "helios-module-chartprofile",
  "helios-module-colorin",
@@ -2927,6 +2951,8 @@ version = "0.87.0"
 dependencies = [
  "egui-pop-model",
  "helios-core",
+ "helios-module-cameracolour",
+ "helios-module-cameratone",
  "helios-module-channelmixerrgb",
  "helios-module-chartprofile",
  "helios-module-colorin",

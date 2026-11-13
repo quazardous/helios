@@ -27,6 +27,9 @@ helios-module-demosaic = { path = "../../modules/demosaic" }
 [dev-dependencies]
 # A profile with its residual table rendered as the module renders it.
 helios-module-chartprofile = { path = "../../modules/chartprofile" }
+# A camera look rendered by its two modules as fitted.
+helios-module-cameracolour = { path = "../../modules/cameracolour" }
+helios-module-cameratone = { path = "../../modules/cameratone" }
 helios-testkit.workspace = true
 
 [lints]

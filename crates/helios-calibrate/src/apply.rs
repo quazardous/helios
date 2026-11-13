@@ -5,8 +5,9 @@
 //! - [`with_profile`] sets the `chartprofile` node of an edit to a
 //!   profile: its matrix `M_c`, its residual table when it has one and its
 //!   id copied into the parameters (a module does no IO), the node turned
-//!   on. [`without_profile`] turns it
-//!   off, its parameters kept.
+//!   on, and a camera look's colour half (`cameracolour`) off: the chart
+//!   rules the colour, the look's tone may stay on top. [`without_profile`]
+//!   turns it off, its parameters kept.
 //! - [`pick`] chooses among a camera's profiles the one whose illuminant
 //!   is nearest the photo's as-shot light, within [`MAX_UV_DISTANCE`] in
 //!   CIE 1960 `uv`; otherwise none, with the reason.
@@ -18,7 +19,7 @@ use helios_photo::color::Mat3;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::look::HueSatTable;
+use crate::look::{self, HueSatTable};
 
 /// The module, and the node it runs in.
 pub const MODULE: &str = "chartprofile";
@@ -138,7 +139,8 @@ pub fn lut_param(lut: Option<&HueSatTable>) -> Vec<f64> {
 
 /// `edit` (an image's edit, `null` for none yet) with its `chartprofile`
 /// node set to the profile `id` (matrix `matrix`, residual table `lut`)
-/// and turned on; the other nodes kept as they are.
+/// and turned on, a camera look's colour half turned off when the edit
+/// has one; the other nodes kept as they are.
 pub fn with_profile(edit: &Value, id: &str, matrix: &Mat3, lut: Option<&HueSatTable>) -> Value {
     let mut edit = base(edit);
     let entry = json!({ "name": MODULE, "module": MODULE, "params": params(id, matrix, lut) });
@@ -146,6 +148,9 @@ pub fn with_profile(edit: &Value, id: &str, matrix: &Mat3, lut: Option<&HueSatTa
     match modules.iter_mut().find(|m| m["name"] == MODULE) {
         Some(m) => *m = entry,
         None => modules.push(entry),
+    }
+    if modules.iter().any(|m| m["name"] == look::edit::COLOUR) {
+        look::edit::bypass(&mut edit, look::edit::COLOUR, true);
     }
     edit
 }
