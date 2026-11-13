@@ -5,6 +5,8 @@ A Helios node (`helios-node`) serves three endpoints: **inspect**
 builds with `HELIOS_DEBUG_CONTROL` set) and **batch** (`--batch-control`,
 every build, the verbs a batch needs). Each is a Unix socket, or loopback
 TCP behind a session token (`{"auth": "<token>"}` as the first line).
+An endpoint serves at most 64 connections at once: one more gets
+`{"ok": false, "error": "too many connections: …"}` and is closed.
 
 All three speak **JSON-RPC 2.0**, one JSON object per line in each
 direction. Why JSON-RPC, and what other projects do, is in

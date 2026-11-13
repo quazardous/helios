@@ -50,9 +50,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub use transport::{
-    Activity, Address, Bound, Client, Closer, Connection, Listen, OUTCOME_UNKNOWN, Unanswered,
-    activity, new_token, request_at, request_within, serve_at, serve_connections_at, serve_rpc_at,
-    unanswered, write_token,
+    Activity, Address, Bound, Client, Closer, Connection, Listen, MAX_CONNECTIONS, OUTCOME_UNKNOWN,
+    Unanswered, activity, new_token, request_at, request_within, serve_at, serve_connections_at,
+    serve_rpc_at, unanswered, write_token,
 };
 
 /// A request, as sent on the wire.

@@ -12,8 +12,9 @@
 //!
 //! The sockets default to `$HELIOS_SOCKET` and `$HELIOS_CONTROL_SOCKET`.
 //! Started without any, it waits for `helios_sandbox_start`.
-//! A request is at most 1 MiB, an answer's lists and text are cut to
-//! their caps with a "truncated" note, and text from photos' metadata or
+//! A request is at most 1 MiB, a wait 10 minutes and a batch 256 steps;
+//! an answer's lists and text are cut to their caps with a "truncated"
+//! note, an image over 2048 px or 5 MiB is left out with a note, and text from photos' metadata or
 //! files is marked as untrusted data (`helios_node::caps`).
 //! Tools are listed by `tools/list`; see `helios_node::mcp`. The
 //! `helios_ai_*` tools need no node: they set up and tune the AI models of
