@@ -40,6 +40,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use egui_pop::core::icon::Icon;
 use helios_connect::Text;
 use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
 use helios_connect::connect::{Context, FieldKind, Session, Status, WebSteps};
@@ -1273,7 +1274,11 @@ pub(crate) fn choose_ui(
     ui.horizontal(|ui| {
         ui.strong(header);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button("⋯", |ui| {
+            // The menu's button: a drawn icon (the fonts have no "⋯"),
+            // named for screen readers and tests.
+            let name = t(Message::new("gui-account-menu", "Account"));
+            let button = ui.add(Icon::More.label(&name).sense_click());
+            egui::Popup::menu(&button).show(|ui| {
                 if ui
                     .button(t(Message::new("gui-account-reconnect", "Reconnect")))
                     .clicked()
@@ -1298,9 +1303,7 @@ pub(crate) fn choose_ui(
                     asked = Some(Asked::Manage);
                     ui.close();
                 }
-            })
-            .response
-            .on_hover_text(t(Message::new("gui-account-menu", "Account")));
+            });
         });
     });
     ui.separator();

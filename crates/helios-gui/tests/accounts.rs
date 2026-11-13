@@ -1189,7 +1189,7 @@ fn a_picking_source_shows_its_account_once_and_one_primary_action() {
     assert!(shown(&h, "Services"));
     assert!(!shown(&h, "Accounts"));
     assert_eq!(h.query_all_by_label("ann@example.org").count(), 2);
-    assert!(shown(&h, "⋯"));
+    assert!(shown(&h, "Account"));
     // One button only says "Choose photos", and none says "pick".
     assert_eq!(h.query_all_by_label(CHOOSE).count(), 1);
     for word in ["Pick photos", "Pick more", "picking"] {
@@ -1299,7 +1299,7 @@ fn a_refused_account_says_so_and_offers_its_reconnection() {
 #[test]
 fn the_account_menu_opens_settings_accounts() {
     let (mut h, ..) = picking_world(None);
-    click(&mut h, "⋯");
+    click(&mut h, "Account");
     for label in ["Reconnect", "Use another account…", "Manage accounts…"] {
         assert!(shown(&h, label), "{label}");
     }
