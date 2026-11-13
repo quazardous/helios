@@ -829,7 +829,9 @@ the whole application, Ctrl+W closes one window as its close button
 does, Helios stays open while any of its windows exists, every window
 has a menu bar with at least a Window menu) and **built**, except
 reopening a closed main window (see "Built" below). D2, D4, D6 and D7
-keep their proposed defaults, not decided. Now that a focus can be an
+keep their proposed defaults, not decided; D2's and D7's macOS part is
+built (2026-11-13, "Built on macOS" below), its window-following menus
+apart. Now that a focus can be an
 OS window of its own (the Import window, slice 4), this section settles
 what closes one window and what quits Helios, what happens to running
 work, which menus each window shows and where its keys act.
@@ -1064,6 +1066,37 @@ Default: as above, after a macOS build exists; nothing to do before.
   listing the main window, and closing it then quits; the last window
   closed quits.
 
+### Built on macOS (2026-11-13)
+
+- **The global menu bar** (D7). `native_menu` lays out egui-pop's
+  declared menus (`app.main` and its submenus, their `when` and
+  `checked` clauses, their lists) as a native bar does: the application
+  menu first (About Helios, Settings… Cmd+,, Services, Hide, Hide
+  Others, Show All, Quit Helios Cmd+Q), About, Settings and Quit taken
+  out of the other menus, File > New Window first in File, Minimize,
+  Zoom and Bring All to Front in Window, which the system also lists the
+  windows in. The layout is plain data, unit-tested on every platform.
+  `macos` turns it into an `NSMenu` with `muda` (Apache-2.0 OR MIT,
+  adopted: it is the menu crate egui-pop's tray already depends on
+  through `tray-icon`), lays it out again every quarter second and
+  rebuilds the `NSMenu` only when it changed, and runs the command an
+  entry names. The in-window bar is not drawn on macOS. Only the
+  application menu's keys (Cmd+, and Cmd+Q) are the native menu's; the
+  others stay egui-pop's keymap's, so a text field keeps Cmd+C, and the
+  native menus do not show them yet.
+- **The application kept alive** (D2). On macOS closing the last window
+  hides it instead (`LastWindow::StayOpen`, `Closing::Hidden`): Helios
+  goes on with no window, its jobs running, until Cmd+Q. The Dock icon
+  (an `applicationShouldHandleReopen:` answer added to winit's
+  application delegate, which has none), File > New Window and Window >
+  Main window bring it back. Linux and Windows still quit with the last
+  window; tests set macOS's policy on Linux.
+- **Not yet:** the bar following the window in front (the Import
+  window's reduced menus, the main window's commands greyed by D6), the
+  other keys shown in the native menus, and a run on a Mac beyond CI's
+  build: the release's macOS job builds and smoke-tests the bundle
+  headless, it does not click menus.
+
 **Not built yet: reopening the main window.** egui-pop 0.9 moves a
 window into the main one but has no way back: once the main window is
 closed, Window > Main window says it comes back when the window in its
@@ -1077,5 +1110,5 @@ window of its own and draw the shell again in the main window.
 - Window scope for commands (D6), in egui-pop, then Helios's commands
   marked.
 - The quit question (D4), with the jobs and workshop sessions it lists.
-- macOS: the application kept alive and the native menu bar (D2, D7),
-  with the first macOS build.
+- macOS: the bar following the window in front, and the keys shown in
+  the native menus (D7); the rest of D2 and D7 is built.

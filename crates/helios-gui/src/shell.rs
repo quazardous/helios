@@ -90,7 +90,7 @@ mod import_window;
 mod import_wizard;
 mod lifetime;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
-pub use lifetime::Closing;
+pub use lifetime::{Closing, LastWindow};
 mod storage;
 mod storage_admin;
 pub use storage_admin::{
@@ -701,6 +701,9 @@ impl Shell {
             // The import focus opens an OS window of its own: on Wayland,
             // a present mode that never stalls every window behind one.
             .multi_window(true)
+            // On macOS the menus are in the system's menu bar
+            // (`crate::macos`), not drawn in the window.
+            .menu_bar(!cfg!(target_os = "macos"))
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
             .plugins(DefaultPlugins)
@@ -5516,6 +5519,8 @@ impl Shell {
             crate::start::mark_in_first_frame("viewport GPU path installed");
         }
         self.follow_scale(&ctx);
+        // The main window asked back (Helios ran with no window, macOS).
+        self.show_reopened(&ctx);
         self.core.now = ctx.input(|i| i.time);
         let screenshots = std::mem::take(&mut *lock(&self.focus.screenshots));
         for image in screenshots {

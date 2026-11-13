@@ -140,6 +140,8 @@ impl Desktop {
 #[test]
 fn closing_the_last_window_closes_the_vault_through_the_node() {
     let (d, mut h) = desktop("last-window");
+    h.state_mut()
+        .set_last_window(helios_gui::shell::LastWindow::Quit);
     h.state_mut().library_mut().rate(4).unwrap();
     let ctx = h.ctx.clone();
     assert_eq!(

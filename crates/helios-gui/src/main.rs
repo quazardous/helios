@@ -1025,6 +1025,9 @@ struct App {
     exporter: Option<Arc<helios_gui::export::Exporter<helios_vault_sqlite::SqliteStore>>>,
     /// The GUI's connection to the local node, dropped as the GUI ends.
     node: Option<helios_gui::node::Client>,
+    /// macOS's global menu bar.
+    #[cfg(target_os = "macos")]
+    menu_bar: helios_gui::macos::MenuBar,
 }
 
 impl Drop for App {
@@ -1349,8 +1352,9 @@ impl eframe::App for App {
             };
             match closing {
                 Closing::Moved => {}
-                // A question first: nothing drawn in this pass.
-                Closing::Kept => return,
+                // A question first, or the last window closed on macOS
+                // (hidden, Helios goes on): nothing drawn in this pass.
+                Closing::Kept | Closing::Hidden => return,
                 Closing::Quit => {
                     self.closing();
                     return;
@@ -1363,6 +1367,8 @@ impl eframe::App for App {
             let _stall = helios_gui::stall::section("the shell's pass");
             self.shell.ui(ui);
         }
+        #[cfg(target_os = "macos")]
+        self.menu_bar.pass(&mut self.shell, ui.ctx());
         // The GPU path is installed by now: the image's own surface
         // follows the Wide-gamut preview setting.
         let frame: &eframe::Frame = frame;
@@ -2301,6 +2307,8 @@ fn main() -> Result<(), String> {
                 frames: start::Frames::default(),
                 library_reading,
                 preparing: preparing.into_iter().collect(),
+                #[cfg(target_os = "macos")]
+                menu_bar: helios_gui::macos::MenuBar::new(),
             };
             // Back where the workspace was left: the image named on the
             // command line (being made ready, the darkroom on it once it

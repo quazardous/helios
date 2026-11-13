@@ -35,11 +35,14 @@ pub mod keys;
 pub mod library;
 pub mod library_history;
 pub mod log_panel;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod macro_interface;
 pub mod mask_display;
 pub mod mask_tree;
 pub mod masks;
 pub mod modules;
+pub mod native_menu;
 pub mod navigator;
 /// The local node the desktop embeds, from the node's crate.
 pub use helios_node_core::node;
