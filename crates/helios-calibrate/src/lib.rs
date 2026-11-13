@@ -4,8 +4,9 @@
 //! measures every patch and solves a matrix against the chart's reference
 //! values.
 //!
-//! This crate is pure: no IO, no GUI, no pipeline (colour calibration's
-//! CAT16 comes from its module's crate, as plain functions). It holds, so far:
+//! This crate is pure: no IO, no GUI (colour calibration's CAT16 comes from
+//! its module's crate, as plain functions). The one pipeline it runs is the
+//! raw measurement graph it builds itself ([`raw`]). It holds, so far:
 //!
 //! - [`chart`]: the charts Helios knows, their reference values (CIE Lab,
 //!   D50) with their source, and their layout (grid, patch size);
@@ -26,6 +27,8 @@
 //!   in one call;
 //! - [`request`]: `calibrate.chart`'s arguments and answer, serialisable,
 //!   and its dry run on a decoded picture;
+//! - [`raw`]: a raw shot measured on its sensor data through the raw front
+//!   without `colorin`, rendered on the chart's bounding box;
 //! - [`look`]: a camera look fitted to a raw's embedded JPEG (matrix, tone
 //!   and chroma curves), with its gates.
 
@@ -34,6 +37,7 @@ pub mod homography;
 pub mod lab;
 pub mod layout;
 pub mod look;
+pub mod raw;
 pub mod request;
 pub mod run;
 pub mod sampler;
@@ -42,6 +46,7 @@ pub mod solver;
 pub use chart::{Chart, Patch, XRITE_CC24_2000, XRITE_CC24_2014, chart_by_id, charts};
 pub use homography::Homography;
 pub use layout::{ImageView, Layout, Point};
+pub use raw::{Measured, calibrate_raw, measure_raw, measured_region};
 pub use request::{ChartAnswer, ChartArgs, ChartError, calibrate_picture, calibrate_shot};
 pub use run::{Illuminant, Report, Request, RunError, Shot, calibrate, working_to_xyz};
 pub use sampler::{

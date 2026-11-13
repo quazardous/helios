@@ -2,6 +2,8 @@
 //! node's control request, its MCP tool, the `helios` command line and the
 //! desktop's command share (see `docs/design/calibration.md`, section 8).
 //!
+//! A raw is measured on its sensor data by [`crate::raw::calibrate_raw`].
+//!
 //! Only the dry run is answered so far: the report, nothing written.
 //! Saving the profile comes with the profile store.
 //!
@@ -74,6 +76,12 @@ pub enum ChartError {
     BadImage,
     /// No orientation of the handles could be measured and solved.
     Unsolved(Option<SolveError>),
+    /// A raw: the chart's patches fall outside the image.
+    OutsideImage,
+    /// A raw whose camera has no usable colour matrix: no standard matrix.
+    NoCameraMatrix,
+    /// A raw the measurement graph could not develop, with the reason.
+    RawGraph(String),
 }
 
 impl fmt::Display for ChartError {
@@ -86,6 +94,13 @@ impl fmt::Display for ChartError {
             ChartError::UnknownPatch(name) => write!(f, "the chart has no patch `{name}`"),
             ChartError::BadImage => {
                 f.write_str("the image has no pixel or fewer than three channels")
+            }
+            ChartError::OutsideImage => f.write_str("the chart's patches fall outside the image"),
+            ChartError::NoCameraMatrix => {
+                f.write_str("the camera has no usable colour matrix to measure the raw against")
+            }
+            ChartError::RawGraph(reason) => {
+                write!(f, "the raw could not be developed for measuring: {reason}")
             }
             ChartError::Unsolved(reason) => {
                 f.write_str("the chart could not be measured and solved at these corners")?;

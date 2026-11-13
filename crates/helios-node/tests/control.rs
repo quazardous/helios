@@ -394,7 +394,8 @@ fn a_chart_picture_is_calibrated_through_control() {
         .unwrap();
     assert_eq!(b3["status"], "excluded");
 
-    // Refusals: an unknown patch, a raw, corners off the picture.
+    // Refusals: an unknown patch, a raw that cannot be read, corners off
+    // the picture.
     let mut unknown = args.clone();
     unknown.extend(["--exclude", "Z9"]);
     let (code, refused) = s.control(&unknown);
@@ -413,7 +414,7 @@ fn a_chart_picture_is_calibrated_through_control() {
         refused["error"]
             .as_str()
             .unwrap()
-            .contains("not measured yet"),
+            .contains("cannot read the chart shot"),
         "{refused}"
     );
     let (code, usage) = s.control(&["calibrate-chart", picture.to_str().unwrap(), "1,2"]);

@@ -594,7 +594,8 @@ usable. Slices 1 to 5 need no GUI.
    through JSON (orientation, illuminant, every patch kept, `P` the
    identity), excluded and missing patches, the refusals; the node driven
    through the command line on a 16-bit Rec.2020 TIFF (the handles given
-   mirrored, an excluded patch, an unknown patch, a raw refused); the
+   mirrored, an excluded patch, an unknown patch, a raw refused, until
+   4c); the
    desktop command on an sRGB TIFF.
 4c. **The raw measurement graph:** the raw front without `colorin`
    rendered at scale 1 on the patches' bounding box (`rawprepare`,
@@ -604,6 +605,32 @@ usable. Slices 1 to 5 need no GUI.
    builds it; `calibrate.chart` on a raw through it. Tested through the
    request on a synthetic mosaic made from the synthetic chart (the
    inverse of the raw front, in the test kit).
+   **Built** (2026-11-13): `helios_calibrate::raw`. `calibrate_raw` takes
+   the raw's mosaic (in counts, the loader's crop) and its camera, builds
+   the graph `rawprepare` → `whitebalance` (camera reference) →
+   `highlights` → `demosaic` with the camera's description as context,
+   and renders it at scale 1 on `measured_region`: the bounds of every
+   patch's whole square under the eight handle orders, grown by 16
+   pixels, on even pixels (whole Bayer blocks), cut to the image.
+   `demosaic`'s output is measured, `rawprepare`'s read for clipping at
+   `RAW_CLIP_LEVEL`, `M_s = camera_to_working` of the camera's matrix.
+   The handles are shifted into the region and the answer's corners back,
+   so the caller speaks the raw's own pixels. New refusals: the chart
+   outside the image, a camera without a usable matrix, a raw the
+   modules refuse. The node's `calibrate.chart` (and so the MCP tool and
+   the command line) and the desktop command measure a raw through it;
+   the answer's `image` says `raw`. The modules keep their defaults: a raw
+   from a path has no edit yet, its own parameters come with the content
+   id (slice 5). `helios_testkit::mosaic` is the inverse of `rawprepare`
+   and `whitebalance` (a sensor mosaic in counts from white-balanced
+   camera RGB, cut at the white level). Tests on a synthetic 14-bit RGGB
+   mosaic of a shot under 3200 K whose true matrix is off from `colorin`'s:
+   each patch's mean back within 1e-4 (relative) through RCD, the light
+   within 1e-4 in xy, the camera matrix within 1e-3, every patch kept; a
+   white patch over-exposed on the sensor reported `clipped` and the
+   matrix still found; a chart placed off the image refused with its
+   reason; a camera without a matrix refused; the same raw giving the
+   same answer, byte for byte.
 5. **Profiles in the vault:** the two namespaces, save, list, remove,
    export, import, the default rule and the nearest-illuminant pick;
    `calibrate.chart` with `save`. Tested on the in-memory and SQLite

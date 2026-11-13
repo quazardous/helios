@@ -18,8 +18,10 @@ batch-vault-attached 96665044590f1b33
 calibrate-bad-image f103f3ad11e12ef2
 calibrate-dry-run-only 1252211a885be2c3
 calibrate-load-failed 68ec9d17424153d7
+calibrate-no-camera-matrix 1ae4bac1ac8783c0
 calibrate-no-neutral 2ddeab915c68e5c8
-calibrate-raw-not-yet c1bd8029f1c2c178
+calibrate-outside-image 38155592c75b2c12
+calibrate-raw-graph 870e744cbb91fd8b
 calibrate-too-few-patches 39cbc91c1ef232ce
 calibrate-unknown-chart 0bc18b9c0b243c5c
 calibrate-unknown-patch 5e87dc525e69f6b9

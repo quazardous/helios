@@ -1,6 +1,8 @@
 //! Test support for Helios modules and the framework.
 //!
 //! - [`ramp`] and [`noise`]: synthetic images, deterministic by construction.
+//! - [`mosaic`]: a sensor mosaic made from white-balanced camera RGB, the
+//!   inverse of the raw front's first steps.
 //! - [`check_contract`] / [`assert_contract`]: tests generated from a module's
 //!   manifest, run on every module the same way (see `docs/module-contract.md`,
 //!   "How a module is tested").
@@ -44,6 +46,38 @@ pub fn ramp(region: Region, channels: u32) -> Image {
         let fx = (x - region.x) as f32 / w;
         let fy = (y - region.y) as f32 / h;
         f32::midpoint(fx, fy * (c + 1) as f32 / channels as f32)
+    })
+}
+
+/// A sensor mosaic in counts, the inverse of the raw front's
+/// `rawprepare` and `whitebalance`: `rgb` is white-balanced linear camera
+/// RGB over `region` (three channels, row by row); each photosite keeps
+/// the channel its colour in `camera.cfa` reads, divided by that
+/// channel's coefficient in `wb` (green 1), then scaled from the camera's
+/// black level (per photosite of the 2 × 2 block, as `rawprepare` reads
+/// it) to its white level, and cut at the white level, as a sensor
+/// clips.
+///
+/// # Panics
+/// `rgb` holds fewer than three values per pixel of `region`.
+pub fn mosaic(
+    camera: &helios_photo::CameraInfo,
+    wb: [f64; 3],
+    region: Region,
+    rgb: &[f32],
+) -> Image {
+    let width = region.width as usize;
+    assert!(rgb.len() >= width * region.height as usize * 3);
+    Image::from_fn(region, 1, |x, y, _| {
+        let c = match camera.cfa.color_at(x, y) {
+            helios_photo::Channel::Red => 0,
+            helios_photo::Channel::Green => 1,
+            helios_photo::Channel::Blue => 2,
+        };
+        let at = ((y - region.y) as usize * width + (x - region.x) as usize) * 3 + c;
+        let black = camera.black[((y & 1) * 2 + (x & 1)) as usize];
+        let v = f64::from(rgb[at]) / wb[c];
+        (black + v * (camera.white - black)).min(camera.white) as f32
     })
 }
 

@@ -37,9 +37,13 @@ calibrate-dry-run-only = only the dry run is answered so far: saving a profile i
 
 calibrate-load-failed = cannot read the chart shot: { $error }
 
+calibrate-no-camera-matrix = the camera has no usable colour matrix to measure the raw against
+
 calibrate-no-neutral = the chart could not be solved at these corners: no neutral patch is kept
 
-calibrate-raw-not-yet = a raw chart shot is not measured yet: give a decoded picture (TIFF, PNG, JPEG) of it
+calibrate-outside-image = the chart's patches fall outside the image
+
+calibrate-raw-graph = the raw could not be developed for measuring: { $error }
 
 calibrate-too-few-patches = the chart could not be solved at these corners: too few patches are kept
 
