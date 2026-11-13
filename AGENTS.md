@@ -1,9 +1,10 @@
 # Helios: rules for agents
 
 **Before any change, read and follow [docs/next.md](docs/next.md)**: how a
-change reaches `next` (branch, local checks, test only your own part on the
-bench box, merge, stop). It applies to every agent and every repository of
-the project (Helios, egui-pop, egui_stack, egui_fit, egui_hud).
+change reaches `devel`, then `next` (branch from `devel`, local checks, a
+pull request with its test manifest, stop; the tester runs the box jobs and
+merges). It applies to every agent and every repository of the project
+(Helios, egui-pop, egui_stack, egui_fit, egui_hud).
 
 - Public project: everything written to files (code, comments, docs, commit
   messages) is in English, with no private paths, tracker IDs or links an
@@ -24,10 +25,13 @@ the project (Helios, egui-pop, egui_stack, egui_fit, egui_hud).
   AI-assisted project. Keep one purpose per commit, every commit building
   and passing its tests, with a changelog fragment for user-visible changes.
   The darktable fork keeps its own rules (see its `AGENTS.md`).
-- Every change follows `docs/next.md`: branch from
-  `origin/next`, local fmt/check only, test **only your own part** on the box
-  (`test-crate` / `egui-pop-test` on what you touched, never `test-affected`
-  or the whole suite), merge into `next`, stop; never wait for CI.
+- Every change follows `docs/next.md`: branch from `origin/devel`, local
+  fmt/check only, open a pull request into `devel` whose `Tests:` manifest
+  lists **only your own part** (`test-crate` / `egui-pop-test` on what you
+  touched, one test name per filter, never `test-affected` or the whole
+  suite), stop. Authors never merge and never wait for the box or CI; the
+  tester does both. (Until `cargo xtask gate` lands, authors still merge
+  into `next` after their narrow jobs pass.)
 - The bench box is shared by several agents: follow "Rules for agents" in
   `docs/bench.md` (narrowest job first, deadlines in tests, one blocking
   wait per job, never `pgrep`/`pkill` waiters).

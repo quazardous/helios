@@ -50,10 +50,12 @@ the promotion workflow (`.github/workflows/promote.yml`, running
 The promotion that makes a release tags it `vX.Y.Z` and starts the release
 workflow (`.github/workflows/release.yml`) with `publish` on: a tag pushed
 with the workflow's token starts no workflow, a dispatch does. Nobody tags
-by hand. Who decides is the fragment: the change completing a user-visible
-feature asks `release: minor`, a fix wanted at once `release: patch`; a
-one-line fragment `kind: internal` with `release: patch` ships what waits
-on `next`.
+by hand. Who decides is the coordinator, on the tester's advice: after a
+green batch reaches `next`, the tester says what a user would notice since
+the last release and recommends none, a patch or a minor one; a "yes" is a
+one-line fragment `kind: internal` with `release: patch` (or `minor`)
+through the same gate (docs/next.md). Authors put no `release:` line in
+their own fragments.
 
 The release workflow checks the tag against the workspace version, then:
 
