@@ -283,8 +283,7 @@ fn offer<S: Store>(vault: &Vault<S>, camera: &str, make: &str, model: &str, ligh
         &serde_json::json!({ "camera": camera }),
         0,
     )
-    .map(|d| d.answer["profiles"].clone())
-    .unwrap_or_else(|_| serde_json::json!([]));
+    .map_or_else(|_| serde_json::json!([]), |d| d.answer["profiles"].clone());
     serde_json::json!({
         "camera": camera,
         "make": make,
