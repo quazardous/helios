@@ -1184,8 +1184,8 @@ fn album_menu(
     selection: bool,
     movable: bool,
 ) {
-    let (id, smart) = (album.id.as_str(), album.is_smart());
     use crate::dialogs::MenuItem;
+    let (id, smart) = (album.id.as_str(), album.is_smart());
     if !row.secondary_clicked() {
         return;
     }
@@ -3523,7 +3523,14 @@ impl Library {
                     .id_salt("helios.library.albums.scroll")
                     .max_height(200.0)
                     .show(ui, |ui| {
-                        self.album_rows(ui, &tree, None, &selected, selection, &mut chosen);
+                        self.album_rows(
+                            ui,
+                            &tree,
+                            None,
+                            selected.as_deref(),
+                            selection,
+                            &mut chosen,
+                        );
                     });
             });
         let run = |command: &str, args: serde_json::Value| {
@@ -3569,7 +3576,7 @@ impl Library {
         ui: &mut Ui,
         tree: &AlbumTree<'_>,
         parent: Option<&str>,
-        selected: &Option<String>,
+        selected: Option<&str>,
         selection: bool,
         chosen: &mut Option<String>,
     ) {
@@ -3578,7 +3585,7 @@ impl Library {
         for album in tree.members(parent) {
             let mark = if album.is_smart() { "⚙ " } else { "" };
             let text = format!("{mark}{} {}", album.name, self.album_count(album));
-            let on = selected.as_deref() == Some(album.id.as_str());
+            let on = selected == Some(album.id.as_str());
             let movable = tree.has_sets_for(album);
             if !album.is_set() {
                 let mut r = ui.selectable_label(on, text);
