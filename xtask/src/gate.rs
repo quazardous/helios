@@ -282,7 +282,13 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     let children: Vec<_> = plan
         .runs
         .iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
+            // Spaced out: a burst of ssh connections is refused by the box's
+            // sshd (MaxStartups), and the refused job is never submitted.
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
             Command::new(&exe)
                 .arg("bench-remote")
                 .args(&r.args)
@@ -305,7 +311,9 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
                     .lines()
                     .rev()
                     .find(|l| l.contains(&r.ext_job_id))
-                    .unwrap_or("")
+                    // No line names the job: it was never submitted; say why.
+                    .or_else(|| text.lines().rev().find(|l| !l.trim().is_empty()))
+                    .unwrap_or("no output")
                     .to_string();
                 (o.status.success() && !line.contains(" exit "), line)
             }
