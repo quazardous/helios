@@ -77,13 +77,30 @@ impl Scene {
     }
 }
 
-/// A known camera: a matrix keeping (1, 1, 1), an S curve with a
+/// A known camera: a matrix keeping (1, 1, 1), when asked a hue twist
+/// (greens and yellows turned, luminance kept), an S curve with a
 /// shoulder applied as a luminance ratio, and, when asked, chroma falling
 /// off in the highlights.
 #[derive(Clone, Copy)]
 struct Camera {
     matrix: Mat3,
+    twist: bool,
     falloff: bool,
+}
+
+/// The twist's hue shift, in degrees, at hue `h`: up to 15 around 100.
+fn twist(h: f64) -> f64 {
+    15.0 * (-(table::hue_difference(h, 100.0) / 35.0).powi(2)).exp()
+}
+
+fn twisted(p: [f64; 3]) -> [f64; 3] {
+    let [h, s, v] = table::hsv(p);
+    if s <= 0.0 {
+        return p;
+    }
+    let o = table::from_hsv([h + twist(h), s, v]);
+    let k = luma(p) / luma(o);
+    o.map(|c| c * k)
 }
 
 const CAMERA_MATRIX: Mat3 = [
@@ -105,12 +122,14 @@ impl Camera {
     fn new() -> Camera {
         Camera {
             matrix: CAMERA_MATRIX,
+            twist: false,
             falloff: true,
         }
     }
 
     fn render(&self, x: [f64; 3]) -> [f64; 3] {
         let p = mat_apply(&self.matrix, x);
+        let p = if self.twist { twisted(p) } else { p };
         let s = luma(p);
         if s <= 0.0 {
             return [0.0; 3];
@@ -612,4 +631,156 @@ fn every_gate_has_words() {
         r.to_string(),
         "the look stays too far from the camera's JPEG (Delta E 7.0)"
     );
+}
+
+fn twisted_camera() -> Camera {
+    Camera {
+        twist: true,
+        falloff: false,
+        ..Camera::new()
+    }
+}
+
+fn matrix_only_camera() -> Camera {
+    Camera {
+        falloff: false,
+        ..Camera::new()
+    }
+}
+
+/// The held-out mean of `look` with its table taken out.
+fn held_out_without_table(case: &Case, look: &Look) -> f64 {
+    let held = pairs(&case.inputs(), &split(192, 128), None).held;
+    let bare = Look {
+        table: None,
+        ..look.clone()
+    };
+    score(&errors(
+        |i| apply(&bare, case.sensor.rgb[i]),
+        &case.preview,
+        &held,
+        false,
+    ))
+    .mean
+}
+
+#[test]
+fn the_table_earns_its_place() {
+    // A camera with a hue twist: the table is kept, and taking it out
+    // costs more than the margin.
+    let case = Case::new(&Scene::new(192, 128), twisted_camera());
+    let look = case.fit().unwrap();
+    assert_eq!(look.kind, Kind::Full);
+    let table = look.table.clone().expect("a hue twist needs the table");
+    let r = &look.report;
+    let without = held_out_without_table(&case, &look);
+    assert!(
+        r.held_out.mean < without * (1.0 - t::KEEP_GAIN),
+        "with {} without {without}",
+        r.held_out.mean
+    );
+    // The zero-saturation row is the identity, and greys stay grey.
+    for v in 0..VALUES {
+        for h in 0..HUES {
+            assert_eq!(table.node(v, h, 0), [0.0, 1.0, 1.0]);
+        }
+    }
+    for g in [0.01, 0.18, 1.0, 2.0] {
+        let o = apply(&look, [g; 3]);
+        assert!(
+            (o[0] - o[1]).abs() < 1e-12 && (o[1] - o[2]).abs() < 1e-12,
+            "{g}: {o:?}"
+        );
+    }
+    // A matrix-only camera: the table is dropped.
+    let plain = Case::new(&Scene::new(192, 128), matrix_only_camera())
+        .fit()
+        .unwrap();
+    assert_eq!(plain.table, None, "{:?}", plain.report);
+}
+
+#[test]
+fn the_delta_e_refinement_lowers_the_held_out_error() {
+    let case = Case::new(
+        &Scene::new(192, 128),
+        Camera {
+            twist: true,
+            ..Camera::new()
+        },
+    );
+    let inputs = case.inputs();
+    let p = pairs(&inputs, &split(192, 128), None);
+    let pick = |v: &[[f64; 3]], idx: &[usize]| idx.iter().map(|&i| v[i]).collect::<Vec<_>>();
+    let (x, y) = (
+        pick(&case.sensor.rgb, &p.train),
+        pick(&case.preview.rgb, &p.train),
+    );
+    let plain = fit_matrix(&x, &y, case.neutral).unwrap();
+    let refined = refine_matrix(&plain, &x, &y, case.neutral).unwrap();
+    assert_ne!(plain, refined);
+    // The neutral is still kept.
+    let n = mat_apply(&refined, case.neutral);
+    for c in 0..3 {
+        assert!((n[c] - case.neutral[c]).abs() < 1e-12, "{n:?}");
+    }
+    // Completed alike (tone and chroma curves), the refined matrix is
+    // closer to the preview on the held-out pairs.
+    let context = Context {
+        inputs: &inputs,
+        sensor_clip_render: 0.0,
+        preview_clip: 0.0,
+        colour: true,
+    };
+    let a = context.complete(&p, Kind::Full, plain, None).unwrap();
+    let b = context.complete(&p, Kind::Full, refined, None).unwrap();
+    assert!(
+        b.held_out.mean < a.held_out.mean,
+        "refined {} plain {}",
+        b.held_out.mean,
+        a.held_out.mean
+    );
+}
+
+#[test]
+fn a_near_black_frame_gets_a_tone_curve_only() {
+    let scene = Scene {
+        levels: (0.003, 0.02),
+        ..Scene::new(192, 128)
+    };
+    let case = Case::new(&scene, Camera::new());
+    let look = case.fit().unwrap();
+    assert_eq!(look.kind, Kind::ToneOnly);
+    assert_eq!(look.report.notes, vec![Gate::NearBlack]);
+    assert_eq!(look.matrix, IDENTITY);
+    assert_eq!(look.table, None);
+    assert_eq!(look.chroma, None);
+    assert!(look.report.held_out_pairs >= t::MIN_HELD_OUT * t::NEAR_BLACK_COUNTS);
+    assert_eq!(
+        Gate::NearBlack.words(),
+        "the picture is nearly black: tone only"
+    );
+}
+
+#[test]
+fn two_runs_with_a_table_are_bit_identical() {
+    let run = || {
+        Case::new(&Scene::new(192, 128), twisted_camera())
+            .fit()
+            .unwrap()
+    };
+    let (one, two) = (run(), run());
+    assert!(one.table.is_some());
+    assert_eq!(
+        serde_json::to_string(&one).unwrap(),
+        serde_json::to_string(&two).unwrap()
+    );
+    let bits = |l: &Look| {
+        l.matrix
+            .iter()
+            .flatten()
+            .chain(l.table.iter().flat_map(|t| t.nodes.iter().flatten()))
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(bits(&one), bits(&two));
 }

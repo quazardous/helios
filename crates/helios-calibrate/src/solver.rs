@@ -242,7 +242,7 @@ fn summarise(patches: &[PatchResult], delta: impl Fn(&PatchResult) -> f64) -> Su
 
 /// `P = P0 + U Bᵀ` from the unknowns, `U` row-major (3 × the basis'
 /// length).
-fn assemble(base: &Mat3, basis: &[[f64; 3]], u: &[f64]) -> Mat3 {
+pub(crate) fn assemble(base: &Mat3, basis: &[[f64; 3]], u: &[f64]) -> Mat3 {
     let m = basis.len();
     let mut matrix = *base;
     for (i, row) in matrix.iter_mut().enumerate() {
@@ -262,14 +262,19 @@ fn cost(residuals: &[f64]) -> f64 {
 /// Minimises `Σ r_i(u)²` from `start`: a central-difference Jacobian,
 /// Marquardt's damping of the normal equations' diagonal, adapted per step
 /// (eased after a step that lowers the cost, stiffened after one that does
-/// not, which is refused). Never returns worse than `start`.
-fn levenberg_marquardt(residuals: impl Fn(&[f64]) -> Vec<f64>, start: Vec<f64>) -> Vec<f64> {
+/// not, which is refused), at most `iterations` steps. Never returns worse
+/// than `start`. Shared with the camera look's matrix refinement.
+pub(crate) fn levenberg_marquardt(
+    residuals: impl Fn(&[f64]) -> Vec<f64>,
+    start: Vec<f64>,
+    iterations: usize,
+) -> Vec<f64> {
     let unknowns = start.len();
     let mut u = start;
     let mut r = residuals(&u);
     let mut current = cost(&r);
     let mut damping = 1e-3;
-    for _ in 0..REFINE_ITERATIONS {
+    for _ in 0..iterations {
         if current == 0.0 || !current.is_finite() {
             break;
         }
@@ -434,7 +439,11 @@ pub fn solve(problem: &Problem<'_>) -> Result<Solution, SolveError> {
                     })
                     .collect()
             };
-            assemble(&base, &basis, &levenberg_marquardt(residuals, u))
+            assemble(
+                &base,
+                &basis,
+                &levenberg_marquardt(residuals, u, REFINE_ITERATIONS),
+            )
         }
     };
 

@@ -29,8 +29,9 @@
 //!   and its dry run on a decoded picture;
 //! - [`raw`]: a raw shot measured on its sensor data through the raw front
 //!   without `colorin`, rendered on the chart's bounding box;
-//! - [`look`]: a camera look fitted to a raw's embedded JPEG (matrix, tone
-//!   and chroma curves), with its gates.
+//! - [`look`]: a camera look fitted to a raw's embedded JPEG (matrix,
+//!   hue/saturation table, tone and chroma curves), with its gates; it
+//!   shares the solver's Levenberg-Marquardt.
 
 pub mod chart;
 pub mod homography;
