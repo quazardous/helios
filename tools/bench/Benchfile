@@ -447,7 +447,7 @@ timeout = "1h"
 # Lints are warnings, not errors (-D warnings would fail a crate at its
 # first lint and leave every crate depending on it, and its own tests,
 # unlinted): one pass shows them all, and any warning makes the job red.
-about = "clippy on a crate or the workspace with its tests, every lint of every crate in one pass (warnings, --keep-going), red on any warning, before any test job"
+about = "clippy on a crate or the workspace with its tests, every lint in one pass, red on any warning"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
