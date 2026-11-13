@@ -25,12 +25,15 @@
 //! - [`run`]: a chart shot measured, its illuminant estimated and solved
 //!   in one call;
 //! - [`request`]: `calibrate.chart`'s arguments and answer, serialisable,
-//!   and its dry run on a decoded picture.
+//!   and its dry run on a decoded picture;
+//! - [`look`]: a camera look fitted to a raw's embedded JPEG (matrix, tone
+//!   and chroma curves), with its gates.
 
 pub mod chart;
 pub mod homography;
 pub mod lab;
 pub mod layout;
+pub mod look;
 pub mod request;
 pub mod run;
 pub mod sampler;
