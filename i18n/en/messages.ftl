@@ -87,13 +87,31 @@ export-write-failed = cannot write { $path }: { $error }
 
 gui-about-description = A client/server, AI-first image processing framework.
 
+gui-account-add = Add account…
+
 gui-account-connected = connected
 
 gui-account-connecting = connecting…
 
+gui-account-disconnect = Disconnect
+
+gui-account-disconnect-explain = Helios asks the service to revoke its access, forgets this account's keys and tokens on this computer and removes the account. What was imported stays.
+
+gui-account-disconnect-forget = Disconnect and forget its sources
+
+gui-account-disconnect-forget-explain = Helios asks the service to revoke its access, forgets this account's keys and tokens on this computer, removes the account and forgets these sources: { $sources }. What was imported stays.
+
+gui-account-disconnect-keep = Disconnect, keep its sources
+
+gui-account-disconnect-keep-explain = Helios asks the service to revoke its access and forgets this account's keys and tokens on this computer. These sources stay, not connected, until you reconnect: { $sources }.
+
+gui-account-disconnect-title = Disconnect { $account }?
+
 gui-account-identity-missing = Reconnect to see the account
 
 gui-account-needs-attention = needs attention
+
+gui-account-never-used = Never
 
 gui-account-not-connected = not connected
 
@@ -103,9 +121,15 @@ gui-account-reconnect = Reconnect
 
 gui-account-sign-out = Sign out
 
-gui-account-sign-out-explain = Helios forgets this account's keys and tokens on this computer. What was imported stays.
+gui-account-status-connecting = Connecting
 
-gui-account-sign-out-title = Sign out of { $account }?
+gui-account-status-not-connected = Not connected
+
+gui-account-status-ok = OK
+
+gui-account-status-reconnect = Needs reconnecting
+
+gui-account-status-refused = Access refused
 
 gui-album-not-changed = The album was not changed: { $error }
 
@@ -1387,11 +1411,21 @@ gui-scopes-green = Green
 
 gui-scopes-red = Red
 
+gui-settings-account-last-used = Last used
+
 gui-settings-account-name = Account
+
+gui-settings-account-rename = Name
+
+gui-settings-account-rename-help = How this account is called in Helios; the address it signed in as stays beside it.
+
+gui-settings-account-service = Service
 
 gui-settings-account-source = Source
 
-gui-settings-account-state = State
+gui-settings-account-status = Status
+
+gui-settings-account-used-by = Used by
 
 gui-settings-account-why = Why
 
@@ -1399,11 +1433,15 @@ gui-settings-accounts = Accounts
 
 gui-settings-accounts-about = The accounts Helios imports from. Their keys and tokens stay in this computer's keyring; the library keeps only their names.
 
+gui-settings-accounts-add = Add an account
+
 gui-settings-accounts-clients = Use my own OAuth client
 
 gui-settings-accounts-list = Import accounts
 
-gui-settings-accounts-none = No account yet: add one with "Add a source…" in the import window.
+gui-settings-accounts-no-service = No service with accounts is installed.
+
+gui-settings-accounts-none = No account yet: add one below.
 
 gui-settings-backup = Backup
 

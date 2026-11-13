@@ -8,6 +8,9 @@
 //! An account is shown with its address once its sign-in read it; one
 //! signed in before its connector asked who it is offers a reconnection;
 //! a picking done offers "Pick more photos…", a new picking each time.
+//! Settings > Accounts manages them: the sources using each, its last
+//! use and status (a refused token says so), rename, reconnect, and
+//! disconnect asking what to do with the sources; never a token shown.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1221,4 +1224,273 @@ fn a_picking_done_offers_to_pick_more_in_a_new_session() {
     until(&mut h, "the known photo said", |h| {
         shown(h, "1 already in the library, left as they are.")
     });
+}
+
+/// Every log line, to check a token never reaches one.
+struct Capture(std::sync::Mutex<String>);
+
+impl log::Log for Capture {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        use std::fmt::Write as _;
+        let mut all = self.0.lock().unwrap();
+        let _ = writeln!(all, "{}", record.args());
+    }
+
+    fn flush(&self) {}
+}
+
+fn logs() -> &'static Capture {
+    static LOGS: std::sync::OnceLock<&'static Capture> = std::sync::OnceLock::new();
+    LOGS.get_or_init(|| {
+        let c: &'static Capture =
+            Box::leak(Box::new(Capture(std::sync::Mutex::new(String::new()))));
+        let _ = log::set_logger(c);
+        log::set_max_level(log::LevelFilter::Trace);
+        c
+    })
+}
+
+/// The row of the account `id` in `import.accounts`.
+fn account_row(h: &mut Harness<'_, Shell>, id: &str) -> Value {
+    let rows = run(h, "import.accounts", Value::Null, Origin::User).unwrap();
+    rows["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == id)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Settings > Accounts manages the accounts: each listed with the saved
+/// sources using it, its last use and its status; a token the service
+/// refused shows "Access refused", and Reconnect makes it OK again; an
+/// account is renamed in place; Disconnect revokes and forgets its
+/// tokens and asks what to do with its sources: kept with the account,
+/// or forgotten with it (an Undo of the import window brings the source
+/// back). No token reaches the accessibility tree, a log or a file.
+#[test]
+fn settings_accounts_manages_the_accounts_with_their_sources_and_never_shows_a_token() {
+    const ANN_TOKEN: &str = "tok-ann-never-shown-1234";
+    const BOB_TOKEN: &str = "tok-bob-never-shown-5678";
+    logs();
+    let (world, mut h) = world();
+    let mut ann = helios_connect::account::Account::new(ID, "Test server", &[]);
+    ann.label = "ann@nas.local".into();
+    ann.facts.insert("host".into(), "nas.local".into());
+    ann.secrets.push("refresh_token".into());
+    ann.state = AccountState::Connected;
+    ann.last_used = Some(1_700_000_000);
+    world.book.save(&ann).unwrap();
+    world
+        .secrets
+        .set(&ann.id, "refresh_token", ANN_TOKEN)
+        .unwrap();
+    let mut bob =
+        helios_connect::account::Account::new(ID, "Test server", std::slice::from_ref(&ann));
+    bob.label = "bob@nas.local".into();
+    bob.secrets.push("refresh_token".into());
+    bob.state = AccountState::Connected;
+    world.book.save(&bob).unwrap();
+    world
+        .secrets
+        .set(&bob.id, "refresh_token", BOB_TOKEN)
+        .unwrap();
+    // A saved source on Ann's account, as the node keeps it.
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(Some(format!(
+        "[[source]]\nconnector = \"{ID}\"\nname = \"Ann's photos\"\naccount = \"{}\"\n",
+        ann.id
+    ))));
+    let (read, write) = (kept.clone(), kept.clone());
+    h.state_mut().keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+
+    // The list: the sources using each account, its last use, its status.
+    let row = account_row(&mut h, &ann.id);
+    assert_eq!(row["usedBy"], "Ann's photos", "{row}");
+    assert_eq!(row["sources"], json!(["Ann's photos"]));
+    assert_eq!(row["used"], true);
+    assert_eq!(row["status"], "ok");
+    assert_eq!(row["statusText"], "OK");
+    assert_eq!(row["lastUsed"], 1_700_000_000);
+    assert_ne!(row["lastUsedText"], "Never");
+    let row = account_row(&mut h, &bob.id);
+    assert_eq!((&row["used"], &row["usedBy"]), (&json!(false), &json!("")));
+    assert_eq!(row["lastUsedText"], "Never");
+    let services = run(
+        &mut h,
+        "import.accountConnectors",
+        Value::Null,
+        Origin::User,
+    )
+    .unwrap();
+    assert_eq!(services["connectors"][0]["connector"], ID, "{services}");
+
+    // The service refused Ann's token while it was used.
+    helios_connect::account::needs_attention(
+        world.book.as_ref(),
+        &ann.id,
+        "the source refused the sign-in: reconnect",
+    )
+    .unwrap();
+    let row = account_row(&mut h, &ann.id);
+    assert_eq!(row["status"], "token-refused", "{row}");
+    assert_eq!(row["statusText"], "Access refused");
+    assert_eq!(row["tone"], "danger");
+
+    // The page shows it all, with an action per case.
+    run(
+        &mut h,
+        "admin.open",
+        json!({ "path": "accounts/list" }),
+        Origin::User,
+    )
+    .unwrap();
+    until(&mut h, "the accounts page", |h| {
+        shown(h, "Ann's photos")
+            && shown(h, "Access refused")
+            && shown(h, "Disconnect, keep its sources")
+            && shown(h, "Disconnect")
+            && shown(h, "Add account…")
+    });
+
+    // Reconnect replays the steps; the status is OK again, used now.
+    run(
+        &mut h,
+        "import.reconnect",
+        json!({ "account": ann.id }),
+        Origin::User,
+    )
+    .unwrap();
+    until(&mut h, "the form", |h| connection(h)["state"] == "form");
+    run(
+        &mut h,
+        "import.connectionAnswer",
+        json!({ "values": { "host": "nas.local", "user": "ann", "password": "right" } }),
+        Origin::User,
+    )
+    .unwrap();
+    until(&mut h, "connected", |h| {
+        connection(h)["state"] == "connected"
+    });
+    let row = account_row(&mut h, &ann.id);
+    assert_eq!(row["status"], "ok", "{row}");
+    assert!(row["lastUsed"].as_u64().unwrap() > 1_700_000_000);
+
+    // Renamed in place; its name before comes back, to rename it back.
+    let renamed = run(
+        &mut h,
+        "import.renameAccount",
+        json!({ "account": ann.id, "name": "Home NAS" }),
+        Origin::User,
+    )
+    .unwrap();
+    assert_eq!(renamed["before"], "ann@nas.local");
+    assert_eq!(account_row(&mut h, &ann.id)["label"], "Home NAS");
+    assert!(
+        run(
+            &mut h,
+            "import.renameAccount",
+            json!({ "account": ann.id, "name": " " }),
+            Origin::User,
+        )
+        .is_err()
+    );
+
+    // An account no source uses is disconnected whole: token gone.
+    run(
+        &mut h,
+        "import.disconnect",
+        json!({ "account": bob.id }),
+        Origin::User,
+    )
+    .unwrap();
+    h.run_steps(3);
+    assert!(world.book.account(&bob.id).unwrap().is_none());
+    assert_eq!(world.secrets.get(&bob.id, "refresh_token").unwrap(), None);
+
+    // One some source uses is not disconnected until told what to do
+    // with them.
+    world
+        .secrets
+        .set(&ann.id, "refresh_token", ANN_TOKEN)
+        .unwrap();
+    let mut a = world.book.account(&ann.id).unwrap().unwrap();
+    a.secrets.push("refresh_token".into());
+    world.book.save(&a).unwrap();
+    run(
+        &mut h,
+        "import.disconnect",
+        json!({ "account": ann.id }),
+        Origin::User,
+    )
+    .unwrap();
+    h.run_steps(3);
+    assert!(
+        h.state()
+            .notices()
+            .iter()
+            .any(|n| n.text.contains("`sources` says what to do")),
+        "the refusal is told"
+    );
+    assert_eq!(
+        world
+            .secrets
+            .get(&ann.id, "refresh_token")
+            .unwrap()
+            .as_deref(),
+        Some(ANN_TOKEN)
+    );
+    // Kept: the account stays, not connected, its source too.
+    run(
+        &mut h,
+        "import.disconnect",
+        json!({ "account": ann.id, "sources": "keep" }),
+        Origin::User,
+    )
+    .unwrap();
+    h.run_steps(3);
+    assert_eq!(world.secrets.get(&ann.id, "refresh_token").unwrap(), None);
+    assert_eq!(
+        world.book.account(&ann.id).unwrap().unwrap().state,
+        AccountState::NotConnected
+    );
+    assert_eq!(account_row(&mut h, &ann.id)["usedBy"], "Ann's photos");
+    assert_eq!(h.state().import_sources().len(), 1);
+    // Forgotten: the account and its source; Undo brings the source back.
+    run(
+        &mut h,
+        "import.disconnect",
+        json!({ "account": ann.id, "sources": "forget" }),
+        Origin::User,
+    )
+    .unwrap();
+    h.run_steps(3);
+    assert!(world.book.account(&ann.id).unwrap().is_none());
+    assert!(h.state().import_sources().is_empty());
+    assert!(!kept.borrow().clone().unwrap_or_default().contains("Ann's"));
+    h.state_mut().undo_import_source_choice();
+    assert_eq!(h.state().import_sources().len(), 1);
+
+    // No token anywhere it could leak.
+    h.run_steps(3);
+    let tree = format!("{:#?}", h.root());
+    let logged = logs().0.lock().unwrap().clone();
+    let file = kept.borrow().clone().unwrap_or_default();
+    let docs = format!("{:?}", world.book.accounts().unwrap());
+    for token in [ANN_TOKEN, BOB_TOKEN] {
+        assert!(!tree.contains(token), "not in the accessibility tree");
+        assert!(!logged.contains(token), "never logged");
+        assert!(!file.contains(token), "not in the sources' document");
+        assert!(!docs.contains(token), "not in the accounts' documents");
+    }
 }

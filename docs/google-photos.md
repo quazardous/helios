@@ -110,11 +110,14 @@ The account is shown with its address, "Google Photos — name@example.com",
 in the import window, the source editor and **Settings > Accounts**, so
 several accounts stay apart. An account connected before Helios asked
 for the address says **Reconnect to see the account**: one reconnection
-(one consent) shows it. **Settings > Accounts** shows the account; **Sign out** there revokes
-Helios's access at Google and forgets it. When Google refuses the access
-later (you revoked it in your Google account, or a testing app's
-sign-in aged out: Google ends them after seven days), the account shows
-**needs attention** and **Reconnect** signs in again.
+(one consent) shows it. **Settings > Accounts** shows the account, the
+sources using it and when it was last used; rename it there, or
+**Disconnect** it: Helios revokes its access at Google and forgets it,
+and asks whether the sources using it are kept (until you reconnect) or
+forgotten. When Google refuses the access later (you revoked it in your
+Google account, or a testing app's sign-in aged out: Google ends them
+after seven days), the account shows **Access refused** and **Reconnect**
+signs in again.
 
 ## Picking and importing
 

@@ -86,9 +86,37 @@ export-write-failed = impossible d’écrire { $path } : { $error }
 
 gui-about-description = Un framework de traitement d’image client/serveur, pensé d’abord pour l’IA.
 
+gui-account-add = Ajouter un compte…
+
+gui-account-disconnect = Déconnecter
+
+gui-account-disconnect-explain = Helios demande au service de révoquer son accès, oublie les clés et jetons de ce compte sur cet ordinateur et retire le compte. Ce qui a été importé reste.
+
+gui-account-disconnect-forget = Déconnecter et oublier ses sources
+
+gui-account-disconnect-forget-explain = Helios demande au service de révoquer son accès, oublie les clés et jetons de ce compte sur cet ordinateur, retire le compte et oublie ces sources : { $sources }. Ce qui a été importé reste.
+
+gui-account-disconnect-keep = Déconnecter, garder ses sources
+
+gui-account-disconnect-keep-explain = Helios demande au service de révoquer son accès et oublie les clés et jetons de ce compte sur cet ordinateur. Ces sources restent, non connectées, jusqu'à ce que vous le reconnectiez : { $sources }.
+
+gui-account-disconnect-title = Déconnecter { $account } ?
+
 gui-account-identity-missing = Reconnectez pour voir le compte
 
+gui-account-never-used = Jamais
+
 gui-account-pick = Choisir des photos…
+
+gui-account-status-connecting = Connexion en cours
+
+gui-account-status-not-connected = Non connecté
+
+gui-account-status-ok = OK
+
+gui-account-status-reconnect = À reconnecter
+
+gui-account-status-refused = Accès refusé
 
 gui-backup-card-safe = { $card } peut être formatée : chaque photo a ses sauvegardes
 
@@ -625,6 +653,24 @@ gui-scopes-blue = Bleu
 gui-scopes-green = Vert
 
 gui-scopes-red = Rouge
+
+gui-settings-account-last-used = Dernière utilisation
+
+gui-settings-account-rename = Nom
+
+gui-settings-account-rename-help = Le nom de ce compte dans Helios ; l'adresse avec laquelle il s'est connecté reste à côté.
+
+gui-settings-account-service = Service
+
+gui-settings-account-status = État
+
+gui-settings-account-used-by = Utilisé par
+
+gui-settings-accounts-add = Ajouter un compte
+
+gui-settings-accounts-no-service = Aucun service avec des comptes n'est installé.
+
+gui-settings-accounts-none = Aucun compte pour l'instant : ajoutez-en un ci-dessous.
 
 gui-snapshot-failed = capture échouée : { $error }
 

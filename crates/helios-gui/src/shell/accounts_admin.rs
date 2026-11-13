@@ -5,9 +5,26 @@
 //!
 //! - `import.accounts` (read-only): every account, as rows (`/accounts`):
 //!   `id`, `label` (with the account's address once known: "Google
-//!   Photos — name@example.com"), `email`, `connector`, `connectorText`,
-//!   `state`, `stateText`, `why` (also "Reconnect to see the account" for
-//!   one signed in before its connector asked who it is), `tone`.
+//!   Photos — name@example.com"), `name` (its own name, renamed by
+//!   `import.renameAccount`), `email`, `connector`, `connectorText`,
+//!   `state`, `stateText`, `status` (`ok`, `needs-reconnect`,
+//!   `token-refused`: the service refused its token, `not-connected`,
+//!   `connecting`), `statusText`, `why` (also "Reconnect to see the
+//!   account" for one signed in before its connector asked who it is),
+//!   `tone`, `sources` (the names of the saved sources using it),
+//!   `usedBy` (them as one text), `used`, `lastUsed` (seconds since the
+//!   Unix epoch, `null`: never), `lastUsedText`. Never a secret.
+//! - `import.accountConnectors` (read-only): the connectors an account
+//!   is added to, as rows (`/connectors`): `connector`, `connectorText`.
+//! - `import.renameAccount`: gives `account` the `name`; answers the
+//!   name `before`, to rename it back.
+//! - `import.disconnect`: signs `account` out (its token revoked where
+//!   the service can, its secrets forgotten from the keyring), and asks
+//!   what to do with the saved sources using it: `sources: "keep"` keeps
+//!   them and the account, not connected, for a later Reconnect;
+//!   `sources: "forget"` forgets them (steps of the import window's
+//!   Undo) and the account. An account no source uses is forgotten;
+//!   one some use is refused without `sources`.
 //! - `import.addSource`: opens the import window and connects a new
 //!   account of `connector`.
 //! - `import.reconnect`: opens the import window and connects `account`
@@ -65,6 +82,12 @@ pub const CONNECTION_ANSWER: &str = "import.connectionAnswer";
 pub const OAUTH_CLIENTS: &str = "import.oauthClients";
 /// Sets or forgets the person's own OAuth client of a connector.
 pub const SET_OAUTH_CLIENT: &str = "import.setOAuthClient";
+/// The connectors an account is added to (read-only).
+pub const ACCOUNT_CONNECTORS: &str = "import.accountConnectors";
+/// Renames an account.
+pub const RENAME: &str = "import.renameAccount";
+/// Disconnects an account, and keeps or forgets its sources.
+pub const DISCONNECT: &str = "import.disconnect";
 
 fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
@@ -92,7 +115,13 @@ impl Shell {
             if let Some(web) = w.accounts.web.clone() {
                 let (book, secrets) = (book.clone(), secrets.clone());
                 w.connectors.set_token(Arc::new(move |id: &str| {
-                    web.access_token(book.as_ref(), secrets.as_ref(), id)
+                    let token = web.access_token(book.as_ref(), secrets.as_ref(), id);
+                    if token.is_ok()
+                        && let Err(e) = helios_connect::account::touch(book.as_ref(), id)
+                    {
+                        log::warn!("import accounts: {id}: {e}");
+                    }
+                    token
                 }));
             }
             (
@@ -198,6 +227,7 @@ impl Shell {
         if self.has_command(ACCOUNTS) {
             return;
         }
+        let saved = self.import.get_mut().sources.shared.clone();
         let (b, l, i18n) = (book.clone(), labels.clone(), self.core.i18n.clone());
         let asking = identity.clone();
         let listed = self.register(
@@ -221,7 +251,45 @@ impl Shell {
                         .unwrap_or_else(PoisonError::into_inner)
                         .contains(id)
                 };
-                Ok(account_rows(&t, &b.accounts()?, &label, &asks))
+                let saved = saved.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                Ok(account_rows(&t, &b.accounts()?, &saved, &label, &asks))
+            },
+        );
+        let (l, i18n) = (labels.clone(), self.core.i18n.clone());
+        let connectors = self.register(
+            CommandSpec::new(
+                ACCOUNT_CONNECTORS,
+                "List the connectors an import account is added to, by `connector` (for `import.addSource`)",
+                "Library",
+            )
+            .read_only(),
+            move |_, _| {
+                let t = |m: Message| helios_i18n::message(&i18n, &m);
+                let labels = l.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                let rows: Vec<Value> = labels
+                    .iter()
+                    .map(|(id, label)| {
+                        json!({
+                            "connector": id,
+                            "connectorText": t(Message::new(&label.key, &label.en)),
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "connectors": rows }))
+            },
+        );
+        let b = book.clone();
+        let rename = self.register(
+            CommandSpec::new(
+                RENAME,
+                "Rename an import account (`account`, `name`); answers its name `before`, to rename it back",
+                "Library",
+            ),
+            move |args, _| {
+                let id = arg(args, "account")?;
+                let name = args.get("name").and_then(Value::as_str).unwrap_or("");
+                let before = helios_connect::account::rename(b.as_ref(), id, name)?;
+                Ok(json!({ "account": id, "name": name.trim(), "before": before }))
             },
         );
         let (b, s) = (book.clone(), secrets.clone());
@@ -278,7 +346,7 @@ impl Shell {
                 })
             },
         );
-        for r in [listed, sign_out, connection, answer] {
+        for r in [listed, connectors, rename, sign_out, connection, answer] {
             if let Err(e) = r {
                 log::warn!("import accounts: {e}");
             }
@@ -360,6 +428,7 @@ impl Shell {
     /// the import window opens and the connection starts in its dialog.
     pub(super) fn account_command(&mut self, command: &str, args: &Value) -> Result<Value, String> {
         let (connector, account) = match command {
+            DISCONNECT => return self.disconnect_account(args),
             ADD_SOURCE => (arg(args, "connector")?.to_owned(), None),
             RECONNECT => {
                 let id = arg(args, "account")?.to_owned();
@@ -397,10 +466,116 @@ impl Shell {
     }
 }
 
-/// The accounts as Settings > Accounts' rows.
+impl Shell {
+    /// `import.disconnect`, on the interface thread: the account signed
+    /// out (its token revoked where the service can, its secrets
+    /// forgotten), then its sources kept with it, or both forgotten.
+    fn disconnect_account(&mut self, args: &Value) -> Result<Value, String> {
+        let id = arg(args, "account")?.to_owned();
+        let asked = args.get("sources").and_then(Value::as_str);
+        if asked.is_some_and(|s| s != "keep" && s != "forget") {
+            return Err("`sources` is \"keep\" or \"forget\"".into());
+        }
+        let mut w = self.import.get_mut();
+        let book = w
+            .accounts
+            .book
+            .clone()
+            .ok_or("accounts need a library open")?;
+        if book.account(&id)?.is_none() {
+            return Err(format!("no account {id}"));
+        }
+        let using: Vec<super::import_sources::SourceKey> = w
+            .sources
+            .list
+            .iter()
+            .filter(|s| s.account.as_deref() == Some(id.as_str()))
+            .filter_map(super::import_sources::SavedSource::key)
+            .collect();
+        let keep = match asked {
+            _ if using.is_empty() => false,
+            Some(s) => s == "keep",
+            None => {
+                return Err(format!(
+                    "{} saved source(s) use {id}: `sources` says what to do with them, \"keep\" or \"forget\"",
+                    using.len()
+                ));
+            }
+        };
+        w.accounts.sign_out(&id)?;
+        if !keep {
+            for key in &using {
+                w.forget_source(key);
+            }
+            book.remove(&id)?;
+        }
+        drop(w);
+        if let Some(admin) = self.core.app.handle().service(&egui_pop::api::admin::ADMIN) {
+            admin.refresh();
+        }
+        Ok(json!({
+            "account": id,
+            "removed": !keep,
+            "sources": if using.is_empty() { "none" } else if keep { "kept" } else { "forgotten" },
+        }))
+    }
+}
+
+/// The saved sources using the account `id`, by name: the name the
+/// person gave, else the account's.
+fn used_by(sources: &[super::import_sources::SavedSource], account: &Account) -> Vec<String> {
+    sources
+        .iter()
+        .filter(|s| s.account.as_deref() == Some(account.id.as_str()))
+        .map(|s| s.name.clone().unwrap_or_else(|| account.shown()))
+        .collect()
+}
+
+/// When an account was last used, as shown: the local date and time.
+fn last_used_text(t: &dyn Fn(Message) -> String, at: Option<u64>) -> String {
+    use chrono::TimeZone as _;
+    at.and_then(|s| i64::try_from(s).ok())
+        .and_then(|s| chrono::Local.timestamp_opt(s, 0).single())
+        .map_or_else(
+            || t(Message::new("gui-account-never-used", "Never")),
+            |d| d.format("%Y-%m-%d %H:%M").to_string(),
+        )
+}
+
+/// An account's status as Settings > Accounts says it: its name, its
+/// text.
+fn status(account: &Account, unknown: bool) -> (&'static str, Message) {
+    match &account.state {
+        AccountState::Connected if unknown => (
+            "needs-reconnect",
+            Message::new("gui-account-status-reconnect", "Needs reconnecting"),
+        ),
+        AccountState::Connected => ("ok", Message::new("gui-account-status-ok", "OK")),
+        AccountState::NeedsAttention { refused: true, .. } => (
+            "token-refused",
+            Message::new("gui-account-status-refused", "Access refused"),
+        ),
+        AccountState::NeedsAttention { .. } => (
+            "needs-reconnect",
+            Message::new("gui-account-status-reconnect", "Needs reconnecting"),
+        ),
+        AccountState::Connecting { .. } => (
+            "connecting",
+            Message::new("gui-account-status-connecting", "Connecting"),
+        ),
+        AccountState::NotConnected => (
+            "not-connected",
+            Message::new("gui-account-status-not-connected", "Not connected"),
+        ),
+    }
+}
+
+/// The accounts as Settings > Accounts' rows, with the saved `sources`
+/// using each.
 fn account_rows(
     t: &dyn Fn(Message) -> String,
     accounts: &[Account],
+    sources: &[super::import_sources::SavedSource],
     connector: &dyn Fn(&str) -> String,
     asks_email: &dyn Fn(&str) -> bool,
 ) -> Value {
@@ -408,6 +583,8 @@ fn account_rows(
         .iter()
         .map(|a| {
             let unknown = a.identity_missing(asks_email(&a.connector));
+            let (status, status_text) = status(a, unknown);
+            let used = used_by(sources, a);
             let why = match &a.state {
                 AccountState::NeedsAttention { why, .. } => why.clone(),
                 _ if unknown => t(Message::new(
@@ -419,6 +596,7 @@ fn account_rows(
             let tone = match a.state {
                 AccountState::Connected if unknown => json!("warning"),
                 AccountState::Connected => json!("success"),
+                AccountState::NeedsAttention { refused: true, .. } => json!("danger"),
                 AccountState::NeedsAttention { .. } => json!("warning"),
                 _ => Value::Null,
             };
@@ -433,6 +611,14 @@ fn account_rows(
                 "why": why,
                 "tone": tone,
                 "connected": a.state == AccountState::Connected,
+                "name": a.label,
+                "status": status,
+                "statusText": t(status_text),
+                "usedBy": used.join(", "),
+                "used": !used.is_empty(),
+                "sources": used,
+                "lastUsed": a.last_used,
+                "lastUsedText": last_used_text(t, a.last_used),
             })
         })
         .collect();

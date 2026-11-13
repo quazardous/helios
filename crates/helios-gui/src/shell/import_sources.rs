@@ -304,10 +304,16 @@ pub(super) enum SourceAsked {
     Reset,
 }
 
+/// The saved sources as last kept, for the commands that read them off
+/// the window (Settings > Accounts' "Used by").
+pub(crate) type SharedSources = std::sync::Arc<std::sync::Mutex<Vec<SavedSource>>>;
+
 /// The window's saved sources and where they are kept.
 #[derive(Default)]
 pub(crate) struct Sources {
     pub(crate) list: Vec<SavedSource>,
+    /// [`Sources::list`] as last read or kept.
+    pub(crate) shared: SharedSources,
     read: Option<ReadSources>,
     write: Option<WriteSources>,
     undo: Vec<Step>,
@@ -541,10 +547,20 @@ impl Sources {
                 Vec::new()
             }
         };
+        self.share();
         self.identify();
     }
 
+    /// Hands the list to the commands that read it off the window.
+    fn share(&self) {
+        self.shared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone_from(&self.list);
+    }
+
     pub(crate) fn store(&self) {
+        self.share();
         let Some(write) = &self.write else { return };
         let doc = Document {
             sources: self.list.clone(),

@@ -241,6 +241,9 @@ command-help-health =
 command-import-addSource =
     .title = Add a source that needs connecting: opens the import window and runs the connector's connection steps (`connector`)
 
+command-import-disconnect =
+    .title = Disconnect an import account (`account`): its token revoked where the service allows, its secrets forgotten; the saved sources using it are kept with it, not connected (`sources`: "keep") or forgotten with it ("forget"); an account no source uses is forgotten
+
 command-import-reconnect =
     .title = Connect an import account again, from the step that failed (`account`)
 

@@ -402,7 +402,10 @@ fn an_expired_access_token_is_renewed_and_a_refused_renewal_needs_attention() {
     let why = flow().access_token(&w.book, &w.secrets, &id).unwrap_err();
     assert!(why.contains("sign in again"), "{why}");
     match w.book.account(&id).unwrap().unwrap().state {
-        AccountState::NeedsAttention { step, .. } => assert_eq!(step.as_deref(), Some("sign-in")),
+        AccountState::NeedsAttention { step, refused, .. } => {
+            assert_eq!(step.as_deref(), Some("sign-in"));
+            assert!(refused, "the service refused the token");
+        }
         other => panic!("{other:?}"),
     }
     // The dead refresh token is forgotten: the next sign-in asks for

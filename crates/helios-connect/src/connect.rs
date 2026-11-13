@@ -381,6 +381,7 @@ fn run(
                 account.state = AccountState::NeedsAttention {
                     step: Some(step.id.clone()),
                     why: why.clone(),
+                    refused: false,
                 };
                 let _ = context.book.save(&account);
                 shared.set(Status::Failed {
@@ -392,6 +393,7 @@ fn run(
         }
     }
     account.state = AccountState::Connected;
+    account.last_used = Some(crate::account::now());
     match context.book.save(&account) {
         Ok(()) => shared.set(Status::Connected(account)),
         Err(why) => shared.set(Status::Failed {
