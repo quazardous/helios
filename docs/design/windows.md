@@ -1241,11 +1241,11 @@ Audit of the import window, 2026-11-13:
 | Settings (`Ctrl+,`) | The Settings window (one instance), editing the focus it was asked in: the import window's, its header saying so; the import window stays open | Helios test on real viewports (`settings_window.rs`); egui-pop test (`admin_focus.rs`) | OK |
 | egui-pop dialogs (confirmations) | The window they are opened from; each window has its own queue | egui-pop tests | OK |
 | Helios's own modals (consent, connection, picking) | Drawn in the import window's pass | code | OK |
-| Closing the window with an egui-pop dialog open | The dialog moves to the main window's queue | egui-pop docs, code | Open (to decide) |
+| Closing the window with an egui-pop dialog open | Was: the dialog moved to the main window's queue. Now it is cancelled with the window (a window moved into the main window still takes its dialogs there) | wbox `close-with-dialog`; egui-pop tests (`window_scope.rs`) | Fixed |
 | Toasts | The window they are raised from | egui-pop tests | OK |
 | Menus, context menus, tooltips | The window they open in (egui popups per viewport; egui-pop's menu popup follows its window) | egui-pop tests | OK; tooltips not probed |
 | Shortcuts and keyboard focus | The focused window, with its context (`appWindow`) | egui-pop tests; wbox `palette` | OK |
-| A main-window page asked from the window (Storage…) | Opens in the main window, which may stay behind | code | To check |
+| A main-window page asked from the window (Storage…, the health check) | In their own window (the default), the Settings window opens on the page. Popped in over the main window: was opened behind the import window; now the main window is asked to the front (the compositor may refuse an activation without a seat) | wbox `storage`, `storage-popped-in`; Helios test (`import.rs`) | Fixed |
 | Background task when the window closes (folder read) | Closes at once, the main window draws on | `import-close` job | OK |
 | Size and position | Kept per window across runs | egui-pop test | OK |
 | Agent socket and test steps | Address each window (`window`) | egui-pop-agent tests | OK |

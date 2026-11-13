@@ -2136,6 +2136,53 @@ fn import_window_closed_from_its_own_pass_hides_at_once_and_is_woken_no_more() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Storage… asked from the import window, the Settings popped in over the
+/// main window: the main window comes to the front, else the page would
+/// open behind the import window. In their own window (the default), the
+/// Settings window shows and the main window stays where it is.
+#[test]
+fn storage_asked_from_the_import_window_brings_the_main_window_forward() {
+    let (mut h, window, dir) = import_in_its_own_window("storage-forward");
+    let focus_asked = |h: &mut Harness<'static, Shell>| {
+        // The import window worked in, then the main window's pass in the
+        // back applies the command.
+        window_pass(h, window, false);
+        h.state_mut()
+            .run("library.storage", Value::Null, Origin::User)
+            .unwrap();
+        h.input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(false);
+        h.step();
+        h.output().viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::Focus)
+    };
+    assert!(
+        !focus_asked(&mut h),
+        "the Settings in their own window: the main window stays behind"
+    );
+    h.state_mut()
+        .run("admin.close", Value::Null, Origin::User)
+        .unwrap();
+    main_passes_in_the_back(&mut h, 2);
+    // Popped in over the main window.
+    let popped = h
+        .state_mut()
+        .run("admin.popOut", Value::Null, Origin::User)
+        .unwrap();
+    assert_eq!(popped["window"], false, "{popped}");
+    main_passes_in_the_back(&mut h, 2);
+    assert!(
+        focus_asked(&mut h),
+        "Storage… from the import window leaves the main window behind"
+    );
+    assert!(h.state().storage_page_open());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Opens the import window in an OS window of its own (real viewports, as
 /// on the desktop), its sources read: the harness and the window's
 /// viewport.

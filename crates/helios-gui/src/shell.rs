@@ -2365,6 +2365,27 @@ impl Shell {
         result
     }
 
+    /// Opens the Settings on a page (`admin.open` on `path`: Storage, the
+    /// health check). Popped in, the Settings are drawn over the main
+    /// window only: asked from another window (the import window's
+    /// Storage…), the main window comes to the front, as it does when the
+    /// import window closes. In their own window, that window shows.
+    pub(super) fn open_settings_page(&mut self, path: &str) -> Result<Value, String> {
+        let asked = self.core.app.handle().current_window_group();
+        let out = self.run(
+            egui_pop::api::admin::CMD_OPEN.as_str(),
+            json!({ "path": path }),
+            Origin::User,
+        )?;
+        let app = self.core.app.handle();
+        if asked != egui::ViewportId::ROOT && !egui_pop::api::admin::in_window(app) {
+            let ctx = app.egui();
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        Ok(out)
+    }
+
     fn declare_commands(w: &Wiring<'_>, panels: &[PanelSpec]) {
         let mut registry = lock(w.registry);
         let view = w.dialogs.clone();
