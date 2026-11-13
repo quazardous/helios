@@ -47,6 +47,8 @@ open pull requests into `next`; it works through them and reports.
 
 - Only the tester writes `next` (through the gate). Never push to `main`.
 - One round at a time; never two gates running together.
+- **A red `next` CI comes first.** While `next` is red, gate only the pull
+  request that fixes it, alone, before any other batch.
 - Never `test`, `test-affected` or `--affected`: the manifests are the
   scope, and `next`'s CI runs the whole suite.
 - Never wait in the foreground: every box run's wait goes to Monitor.

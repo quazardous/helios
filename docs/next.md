@@ -112,10 +112,16 @@ stress runs (`stability`) never go into CI.
   "Release X.Y.Z" on top of it (version, CHANGELOG, Cargo.lock), tags and
   publishes it; then it fast-forwards `main`, and `next` if it has not
   moved.
-- **One watcher** (the coordinating agent) follows CI on `next`. A red run
-  gets **one fixing agent first**, before any other work: it reproduces the
-  failure, adds the test that would have caught it, fixes it, and opens its
-  pull request into `next` like any change. A bug the owner reports is
+- **One watcher** (the coordinating agent) follows CI on `next`: a
+  standing watch wakes it on every finished run, so a red run is seen
+  within minutes, never hours. **A red `next` comes before everything**
+  (owner, 2026-11-13): a fixing agent starts at once, whatever else is
+  running; it reproduces the failure, adds the test that would have caught
+  it, fixes it, runs its box jobs with `--priority high` (one at a time:
+  the box keeps one high-priority job waiting per project), and opens its
+  pull request into `next` like any change. That pull request is gated
+  **alone and first**; no other batch is gated while `next` is red, unless
+  it carries the fix. A green `next` is what releases. A bug the owner reports is
   handled the same way: agents reproduce and validate it themselves and
   never ask the owner to test.
 - External contributors' pull requests (from forks) target `next` and run
