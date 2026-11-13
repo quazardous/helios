@@ -60,6 +60,10 @@ pub mod code {
     pub const NOT_CANCELLABLE: i64 = -32006;
     /// The call was cancelled before it ended.
     pub const CANCELLED: i64 = -32800;
+    /// Set by the client, never sent by a node: the call was sent and its
+    /// connection closed before the answer came, so it may have run.
+    /// Read the state before sending it again; never resend it blindly.
+    pub const OUTCOME_UNKNOWN: i64 = -32008;
 }
 
 /// A request's id: a number or a string (`null` is accepted, as the

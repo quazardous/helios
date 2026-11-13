@@ -2090,6 +2090,48 @@ impl Store for SqliteStore {
             .get_or_insert_with(|| "the vault is closed".to_string());
         marked.and(flushed)
     }
+
+    /// A second connection to the database file, for reads only: in WAL
+    /// mode its reads see every committed write and wait for none. None in
+    /// memory (another connection would be another database), nor for a
+    /// vault open read-only or closed.
+    fn reader(&self) -> Option<Self> {
+        let path = self.path.as_deref()?;
+        if self.read_only.is_some() || self.closed {
+            return None;
+        }
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let db = Connection::open_with_flags(path, flags).ok()?;
+        db.busy_timeout(self.options.busy_timeout).ok()?;
+        register_functions(&db).ok()?;
+        // It never writes: SQLite refuses it should it try.
+        db.pragma_update(None, "query_only", true).ok()?;
+        Some(Self {
+            db,
+            path: Some(path.to_path_buf()),
+            options: self.options.clone(),
+            report: OpenReport::default(),
+            read_only: Some("a read connection of the vault does not write".into()),
+            closed: true,
+        })
+    }
+
+    /// One read transaction around `f`, so that its statements read the
+    /// same committed state (on the writer, inside its own transaction,
+    /// they already do).
+    fn view<T>(&self, f: impl FnOnce(&Self) -> Result<T, String>) -> Result<T, String> {
+        if !self.db.is_autocommit() {
+            return f(self);
+        }
+        self.db.execute_batch("BEGIN DEFERRED").map_err(err)?;
+        let value = f(self);
+        // A read transaction has nothing to keep: ending it either way
+        // only lets the next read see later commits.
+        let ended = self.db.execute_batch("COMMIT").map_err(err);
+        let value = value?;
+        ended?;
+        Ok(value)
+    }
 }
 
 impl Drop for SqliteStore {

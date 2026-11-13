@@ -29,11 +29,7 @@ fn key(algorithm: &str, digest: &str) -> String {
 impl<S: Store> Vault<S> {
     /// The image a claim was checked against, if any.
     pub fn claimed(&self, algorithm: &str, digest: &str) -> Result<Option<ImageId>, String> {
-        let doc = self
-            .store
-            .lock()
-            .expect("store lock")
-            .document(CLAIMS, &key(algorithm, digest))?;
+        let doc = self.read(|s| s.document(CLAIMS, &key(algorithm, digest)))?;
         doc.and_then(|d| d["image"].as_str().map(ImageId::from_hex))
             .transpose()
     }

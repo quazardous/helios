@@ -139,7 +139,7 @@ fn work(engine: &Engine, rx: &Receiver<(u64, Shown)>, state: &(Mutex<State>, Con
         let (scale, region) = plan(shown.extent);
         let image = engine
             .render_at(&shown.graph, shown.node, &shown.port, region, scale)
-            .map_err(|e| eprintln!("helios-gui: preview: {e}"))
+            .map_err(|e| log::warn!("preview: {e}"))
             .ok();
         let (lock, cv) = state;
         let mut s = lock.lock().unwrap_or_else(PoisonError::into_inner);

@@ -1460,32 +1460,68 @@ fn photos_chosen_and_imported_offer_to_choose_more_in_a_new_page() {
     });
 }
 
-/// Every log line, to check a token never reaches one.
-struct Capture(std::sync::Mutex<String>);
-
-impl log::Log for Capture {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        use std::fmt::Write as _;
-        let mut all = self.0.lock().unwrap();
-        let _ = writeln!(all, "{}", record.args());
-    }
-
-    fn flush(&self) {}
+/// The log file, as the desktop writes it: egui-pop's `Logs`, the `log`
+/// facade's logger, in a folder of its own, at every level. One per test
+/// process.
+fn logs() -> &'static egui_pop::platform::logs::Logs {
+    use egui_pop::platform::logs::{LevelFilter, Logs};
+    static LOGS: std::sync::OnceLock<Logs> = std::sync::OnceLock::new();
+    LOGS.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("helios-accounts-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let logs = Logs::new(dir, "helios");
+        logs.install()
+            .expect("the log file is the process's logger");
+        logs.set_level(LevelFilter::Trace);
+        logs
+    })
 }
 
-fn logs() -> &'static Capture {
-    static LOGS: std::sync::OnceLock<&'static Capture> = std::sync::OnceLock::new();
-    LOGS.get_or_init(|| {
-        let c: &'static Capture =
-            Box::leak(Box::new(Capture(std::sync::Mutex::new(String::new()))));
-        let _ = log::set_logger(c);
-        log::set_max_level(log::LevelFilter::Trace);
-        c
-    })
+/// What the log file holds.
+fn logged() -> String {
+    std::fs::read_to_string(logs().path()).unwrap_or_default()
+}
+
+/// Helios's own warnings reach the log file, their target named: a
+/// picking that failed (its session expired), and a notice the window
+/// shows.
+#[test]
+fn a_failed_picking_and_a_warning_notice_are_written_to_the_log_file() {
+    logs();
+    let book = Arc::new(MemoryAccounts::default());
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut account = helios_connect::account::Account::new(PICKS, "ann@example.org", &[]);
+    account.state = AccountState::Connected;
+    book.save(&account).unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(Picks {
+        sessions: Arc::default(),
+        expired: 1,
+        end: End::Wait,
+    }));
+    shell.set_import_browser(Opened::default().opener());
+    shell.set_import_remote(Arc::new(|_, _, _, _| {
+        Ok(helios_gui::shell::PickImported::default())
+    }));
+    shell.set_import_accounts(book, secrets);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(&mut h, "Pick photos…", |h| shown(h, "Pick photos…"));
+    h.get_by_label("Pick photos…").click();
+    until(&mut h, "the session said expired", |h| {
+        shown(h, "The picking session expired, start again.")
+    });
+    let line = format!(
+        "WARN  helios_gui::shell::import_accounts: picking from {PICKS}: the session expired"
+    );
+    assert!(logged().contains(&line), "no `{line}` in:\n{}", logged());
+    h.state_mut().notify(
+        helios_gui::dialogs::Level::Warning,
+        helios_core::Message::plain("a warning the window shows"),
+    );
+    let line = "WARN  helios: a warning the window shows";
+    assert!(logged().contains(line), "no `{line}` in:\n{}", logged());
 }
 
 /// The row of the account `id` in `import.accounts`.
@@ -1718,7 +1754,7 @@ fn settings_accounts_manages_the_accounts_with_their_sources_and_never_shows_a_t
     // No token anywhere it could leak.
     h.run_steps(3);
     let tree = format!("{:#?}", h.root());
-    let logged = logs().0.lock().unwrap().clone();
+    let logged = logged();
     let file = kept.borrow().clone().unwrap_or_default();
     let docs = format!("{:?}", world.book.accounts().unwrap());
     for token in [ANN_TOKEN, BOB_TOKEN] {

@@ -61,10 +61,23 @@ pub const APPLY: &str = "calibrate.apply";
 pub const EXPORT: &str = "calibrate.profiles.export";
 /// Adds a profile from a shared file, once checked.
 pub const IMPORT: &str = "calibrate.profiles.import";
+/// Fits a camera look to photos' embedded JPEG ([`look`]).
+pub const LOOK_FIT: &str = look::FIT;
+
+pub mod look;
 
 /// The commands that need the vault (`calibrate.chart` aside: a node
 /// without a vault answers its dry run).
-pub const PROFILE_IDS: &[&str] = &[LIST, GET, DELETE, SET_DEFAULT, APPLY, EXPORT, IMPORT];
+pub const PROFILE_IDS: &[&str] = &[
+    LIST,
+    GET,
+    DELETE,
+    SET_DEFAULT,
+    APPLY,
+    EXPORT,
+    IMPORT,
+    LOOK_FIT,
+];
 
 /// Whether `id` is one of the commands run here.
 pub fn handles(id: &str) -> bool {
@@ -193,6 +206,7 @@ pub fn profile_specs() -> Vec<CommandSpec> {
             ),
             ("dry_run", json!({ "type": "boolean" }), false),
         ])),
+        look::spec(),
     ]
 }
 
@@ -263,6 +277,10 @@ pub fn run_as<S: Store>(
     }
     if id == SET_DEFAULT {
         return set_default(vault.ok_or_else(needs_vault)?, params);
+    }
+    if id == LOOK_FIT {
+        let vault = vault.ok_or_else(needs_vault)?;
+        return look::fit_with(vault, params, origin, now, &look::shot);
     }
     if id == CHART {
         return chart(vault, params, now);

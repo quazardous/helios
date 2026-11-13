@@ -1330,7 +1330,7 @@ fn write_drag(d: &Drag, at: [f64; 2], store: &mut Store) {
                 );
             }
         }
-        Err(e) => eprintln!("helios-gui: masks: {e}"),
+        Err(e) => log::warn!("masks: {e}"),
     }
 }
 

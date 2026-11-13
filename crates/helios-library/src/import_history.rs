@@ -74,7 +74,8 @@ pub struct Record {
     /// When it started, in seconds since the epoch.
     pub when: u64,
     /// Who asked for it: `user`, `cli`, `control`, `agent:NAME`,
-    /// `script:NAME`; empty when the caller did not say.
+    /// `script:NAME`, `auto:SOURCE` (an automatic import of the saved
+    /// source named so); empty when the caller did not say.
     pub origin: String,
     /// The folders, cards and files imported. Empty for an importer
     /// plugin's import, whose files its own scan listed.

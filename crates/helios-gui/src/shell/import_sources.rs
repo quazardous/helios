@@ -127,6 +127,12 @@ pub struct SavedSource {
     /// The card's label, as last seen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// When its automatic import was confirmed (`YYYY-MM-DD`): Import
+    /// pressed in the import window on it. Until then a trigger shows it
+    /// there instead of importing; changing the source, its destination
+    /// or its copy mode, or turning the trigger off, clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed: Option<String>,
 }
 
 impl SavedSource {
@@ -147,6 +153,7 @@ impl SavedSource {
             auto: None,
             volume: None,
             label: None,
+            confirmed: None,
         }
     }
 
@@ -187,6 +194,17 @@ enum Ident {
 /// What `key` names, among `list` with `mounted` cards: a folder at a
 /// card's mount root is that card's volume; one where a card source was
 /// last mounted, with no card there now, is that card's.
+/// Whether an automatic import confirmed on `old` still holds on `new`:
+/// the same source, trigger, destination and copy mode.
+fn same_automatic_import(old: &SavedSource, new: &SavedSource) -> bool {
+    let place = |s: &SavedSource| match &s.volume {
+        Some(v) => (Some(v.clone()), None, s.account.clone()),
+        None => (None, s.path.clone(), s.account.clone()),
+    };
+    let goes = |s: &SavedSource| s.choices.as_ref().map(|c| (c.into.clone(), c.copy_folders));
+    new.auto.is_some() && old.auto == new.auto && place(old) == place(new) && goes(old) == goes(new)
+}
+
 fn resolve(list: &[SavedSource], mounted: &[MountedCard], key: &SourceKey) -> Ident {
     if let SourceKey::Folder(p) = key {
         if let Some(m) = mounted.iter().find(|m| &m.root == p) {
@@ -430,7 +448,15 @@ impl Sources {
     /// it away (`None`); one Undo step, its own.
     fn replace(&mut self, key: Option<&SourceKey>, source: Option<SavedSource>) {
         let before = key.and_then(|k| self.before(k));
-        let source = source.map(|s| self.identified(s));
+        let source = source.map(|s| self.identified(s)).map(|mut s| {
+            if before
+                .as_ref()
+                .is_some_and(|(_, old)| !same_automatic_import(old, &s))
+            {
+                s.confirmed = None;
+            }
+            s
+        });
         let gone = key.map(|k| self.resolve(k));
         let new = source.as_ref().and_then(SavedSource::ident);
         let at = before.as_ref().map(|(i, _)| *i);
@@ -450,6 +476,22 @@ impl Sources {
             at: now.checked_sub(ONE_STEP).unwrap_or(now),
         });
         self.store();
+    }
+
+    /// Marks the automatic import of the source of `key` confirmed
+    /// today, when it has a trigger and was not: kept at once, not a step
+    /// of the column's Undo. Whether it was confirmed so.
+    pub(crate) fn confirm(&mut self, key: &SourceKey) -> bool {
+        let Some(i) = self.position(key) else {
+            return false;
+        };
+        let source = &mut self.list[i];
+        if source.auto.is_none() || source.confirmed.is_some() {
+            return false;
+        }
+        source.confirmed = Some(chrono::Local::now().date_naive().to_string());
+        self.store();
+        true
     }
 
     /// A source's own choices.
@@ -927,6 +969,7 @@ mod tests {
                     auto: Some(Trigger::NewFiles),
                     volume: None,
                     label: None,
+                    confirmed: None,
                 },
                 SavedSource {
                     connector: "google-photos".into(),
@@ -939,6 +982,7 @@ mod tests {
                     auto: None,
                     volume: None,
                     label: None,
+                    confirmed: None,
                 },
             ],
         };

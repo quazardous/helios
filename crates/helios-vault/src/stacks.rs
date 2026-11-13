@@ -128,22 +128,24 @@ impl<S: Store> Vault<S> {
     /// Every stack, by id, as the Library shows it: only its members in
     /// the Library ([`in_library`]).
     pub fn stacks(&self) -> Result<Vec<Stack>, String> {
-        let store = self.store.lock().expect("store lock");
-        let mut stacks = Vec::new();
-        for stack in all(&*store)? {
-            stacks.extend(in_library(&*store, stack)?);
-        }
-        stacks.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(stacks)
+        self.read(|store| {
+            let mut stacks = Vec::new();
+            for stack in all(store)? {
+                stacks.extend(in_library(store, stack)?);
+            }
+            stacks.sort_by(|a, b| a.id.cmp(&b.id));
+            Ok(stacks)
+        })
     }
 
     /// A stack, as the Library shows it ([`in_library`]).
     pub fn stack(&self, id: &str) -> Result<Option<Stack>, String> {
-        let store = self.store.lock().expect("store lock");
-        match store.document(STACKS, id)?.map(read).transpose()? {
-            Some(stack) => in_library(&*store, stack),
-            None => Ok(None),
-        }
+        self.read(
+            |store| match store.document(STACKS, id)?.map(read).transpose()? {
+                Some(stack) => in_library(store, stack),
+                None => Ok(None),
+            },
+        )
     }
 
     /// The stack an image is in, if any.
@@ -182,6 +184,9 @@ impl<S: Store> Vault<S> {
             who: who.into(),
             at: now,
         };
+        // Built before the transaction: the writer is held for the checks
+        // and the write alone.
+        let doc = serde_json::to_value(&stack).expect("stacks serialize");
         self.transaction(|store| {
             for m in &unique {
                 if store.image(m)?.is_none() {
@@ -193,7 +198,6 @@ impl<S: Store> Vault<S> {
                     return Err(format!("{} is already in stack {}", m.hex(), other.id));
                 }
             }
-            let doc = serde_json::to_value(&stack).expect("stacks serialize");
             store.set_document(STACKS, &stack.id, Some(&doc))
         })?;
         self.announce(&stack, "created");
@@ -271,10 +275,7 @@ impl<S: Store> Vault<S> {
 
     /// An image's signals, as kept.
     pub fn signals(&self, image: &ImageId) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(SIGNALS, &image.hex())
+        self.read(|s| s.document(SIGNALS, &image.hex()))
     }
 
     /// Adds keys to images' signals (a key already there is replaced, the
@@ -317,10 +318,7 @@ impl<S: Store> Vault<S> {
     /// A library document (`library/<ns>`): what library operations keep
     /// besides images, stacks and signals (their decisions, settings).
     pub fn library_document(&self, ns: &str, key: &str) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(&format!("library/{ns}"), key)
+        self.read(|s| s.document(&format!("library/{ns}"), key))
     }
 
     /// Sets (or with `None` removes) a library document.
@@ -338,10 +336,7 @@ impl<S: Store> Vault<S> {
 
     /// Every library document of a namespace, by key.
     pub fn library_documents(&self, ns: &str) -> Result<Vec<(String, Value)>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .documents(&format!("library/{ns}"))
+        self.read(|s| s.documents(&format!("library/{ns}")))
     }
 }
 

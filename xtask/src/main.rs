@@ -40,7 +40,7 @@
 //!   prints the box's queue.
 //! - `affected [BASE] [--filter | --critical]`: the crates, tests and box
 //!   jobs a change since BASE touches (see `affected.rs`).
-//! - `install-dev [--branch B | --local] | --list | --uninstall`: a dev
+//! - `install-dev [--branch B | --local | --from DIR] | --list | --uninstall`: a dev
 //!   build (the box's latest of a branch, or this checkout's) installed
 //!   outside the checkout with its "Helios Dev" launcher (see
 //!   `install_dev.rs`).
@@ -729,7 +729,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local] | install-dev --list | install-dev --uninstall";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local | --from DIR] | install-dev --list | install-dev --uninstall";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

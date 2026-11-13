@@ -6,7 +6,7 @@ version = "0.1.0"
 license = "GPL-3.0-or-later"
 command = ["helios-google-photos"]
 services = ["import.source"]
-activation = ["onService:import.source"]
+activation = ["onService:import.source", "onHealth"]
 # Google's API lets an application read only the photos picked in its own
 # page (the library-wide scopes were withdrawn in March 2025): the import
 # window browses this source through that page alone.
@@ -20,8 +20,8 @@ thumbnails = true
 limits = { per_minute = 120, per_day = 10000 }
 
 [compat]
-helios = ">=0.87.0, <0.88.0"
-interfaces = { protocol = 1, "import.source" = 1 }
+helios = ">=0.88.0, <0.89.0"
+interfaces = { protocol = 1, "import.source" = 1, health = 1 }
 
 # Where the Picker API answers; only tests change it.
 [settings.api]
@@ -54,3 +54,13 @@ reason = "Talks to Google's Photos Picker API and downloads the photos you picke
 [[capabilities]]
 name = "folder.write"
 reason = "Downloads the picked photos into the folder Helios hands over"
+
+# Its problem check (Help > Health check): each account Helios hands it
+# is tried against the Picker API; one Google no longer takes needs
+# reconnecting.
+[[health]]
+id = "accounts"
+title = "Google Photos accounts"
+watches = "Each Google Photos account still signs in"
+levels = ["ok", "warning"]
+fixes = ["import.reconnect"]
