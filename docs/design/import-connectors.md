@@ -624,6 +624,19 @@ later, so a studio machine ingests a hot folder with no window (C7).
   only" on, which from a cursor means only what came since) and **Save
   as…**. Records are kept a year by default, the last 50 always.
 
+Built (2026-11-13): `helios_library::import_history`. The record is
+written by the library's import itself, so the desktop, the headless
+node, the CLI and an importer plugin all leave one: when, who asked (the
+origin: `user`, `cli`, `agent:NAME`), the sources, the choices as
+`library.import` takes them, the counts, or the error of an import that
+could not start. Its key is the time with the process and a number (a job
+id is unique only in its process); the last 200 are kept. The commands
+`import.history.list` and `import.history.again` are served by the node
+and the desktop; the import window lists the last ten under its sources,
+each with Import again. Not yet: the machine, the saved import it came
+from, the cards' safety and bytes, Save as…, a Window menu entry, remote
+(connector) imports and an automatic import's own origin.
+
 ### 3.5 Where they live
 
 The vault's documents (option C4), one namespace each:
