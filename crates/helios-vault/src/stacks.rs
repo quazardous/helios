@@ -272,6 +272,37 @@ impl<S: Store> Vault<S> {
             .document(SIGNALS, &image.hex())
     }
 
+    /// Adds keys to images' signals (a key already there is replaced, the
+    /// others kept; an image with none starts from an empty document), and
+    /// with `progress` sets a library document (`library/<ns>`, `key`), in
+    /// one transaction: a backfill's batch lands with its progress. An image
+    /// gone meanwhile is passed over. Returns how many images were written.
+    pub fn merge_signals(
+        &self,
+        merges: &[(ImageId, serde_json::Map<String, Value>)],
+        progress: Option<(&str, &str, &Value)>,
+    ) -> Result<usize, String> {
+        self.transaction(|store| {
+            let mut written = 0;
+            for (id, keys) in merges {
+                if store.image(id)?.is_none() {
+                    continue;
+                }
+                let mut doc = match store.document(SIGNALS, &id.hex())? {
+                    Some(Value::Object(map)) => map,
+                    _ => serde_json::Map::new(),
+                };
+                doc.extend(keys.iter().map(|(k, v)| (k.clone(), v.clone())));
+                store.set_document(SIGNALS, &id.hex(), Some(&Value::Object(doc)))?;
+                written += 1;
+            }
+            if let Some((ns, key, value)) = progress {
+                store.set_document(&format!("library/{ns}"), key, Some(value))?;
+            }
+            Ok(written)
+        })
+    }
+
     /// A library document (`library/<ns>`): what library operations keep
     /// besides images, stacks and signals (their decisions, settings).
     pub fn library_document(&self, ns: &str, key: &str) -> Result<Option<Value>, String> {

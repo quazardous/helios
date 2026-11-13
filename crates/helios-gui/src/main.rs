@@ -302,7 +302,8 @@ fn health_plugins(broker: &helios_plugin::Broker) -> Vec<helios_health::plugins:
 /// Fills, on a thread of its own, the capture fields (time, camera, lens,
 /// settings) of the photos imported before Helios kept them
 /// (`helios_library::capture::backfill`): a job in the jobs centre that
-/// resumes where the last one stopped, and does nothing once finished.
+/// resumes where the last one stopped, and does nothing once finished;
+/// then, the same way, the culling signals (`helios_library::cull`).
 fn backfill_captures<S: helios_vault::Store + 'static>(
     vault: Arc<helios_vault::Vault<S>>,
     jobs: helios_core::jobs::Jobs,
@@ -312,6 +313,13 @@ fn backfill_captures<S: helios_vault::Store + 'static>(
             helios_library::capture::backfill(&vault, &jobs, &helios_library::capture::Files, None)
         {
             warn(&format!("capture backfill: {e}"));
+        }
+        // The culling signals (focus, clipping, exposure) of the photos
+        // measured before Helios kept them, after the captures.
+        if let Err(e) =
+            helios_library::cull::backfill(&vault, &jobs, &helios_library::cull::Files, None)
+        {
+            warn(&format!("cull backfill: {e}"));
         }
     });
 }
