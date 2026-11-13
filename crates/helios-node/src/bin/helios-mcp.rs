@@ -12,15 +12,19 @@
 //!
 //! The sockets default to `$HELIOS_SOCKET` and `$HELIOS_CONTROL_SOCKET`.
 //! Started without any, it waits for `helios_sandbox_start`.
+//! A request is at most 1 MiB, an answer's lists and text are cut to
+//! their caps with a "truncated" note, and text from photos' metadata or
+//! files is marked as untrusted data (`helios_node::caps`).
 //! Tools are listed by `tools/list`; see `helios_node::mcp`. The
 //! `helios_ai_*` tools need no node: they set up and tune the AI models of
 //! this machine (`docs/ai-models.md`).
 
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use helios_inspect::Address;
+use helios_node::caps::{Message, read_message, too_large};
 use helios_node::mcp::{Sockets, handle};
 use helios_node::roots::Roots;
 use serde_json::{Value, json};
@@ -86,10 +90,19 @@ fn main() -> ExitCode {
         ai: None,
         roots,
     };
-    let stdin = std::io::stdin();
+    let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
+    // A request over the cap is refused whole, never parsed.
+    while let Ok(Some(message)) = read_message(&mut stdin) {
+        let line = match message {
+            Message::Line(line) => line,
+            Message::TooLarge(size) => {
+                if writeln!(stdout, "{}", too_large(size)).is_err() || stdout.flush().is_err() {
+                    break;
+                }
+                continue;
+            }
+        };
         if line.trim().is_empty() {
             continue;
         }

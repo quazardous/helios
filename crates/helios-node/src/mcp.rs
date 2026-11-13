@@ -75,6 +75,12 @@
 //! sending it again, and never resends a change blindly. "cannot reach
 //! the node" means it was not sent.
 //!
+//! Caps and untrusted text (`crate::caps`): a request is at most 1 MiB,
+//! a `limit` at most 1,000 items; an answer's lists and text are cut to
+//! their caps with a "truncated, N more" note after the JSON, and text
+//! from photos' metadata or files (titles, tags, camera strings, paths)
+//! is named in a note as data, never instructions.
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::{Path, PathBuf};
@@ -83,6 +89,7 @@ use std::sync::Arc;
 use helios_ai::Ai;
 use helios_inspect::{Address, request_at};
 
+use crate::caps;
 use crate::roots::{Access, Roots};
 
 use serde_json::{Map, Value, json};
@@ -2517,10 +2524,7 @@ fn ai_call(sockets: &mut Sockets, request: &Value) -> Value {
         }
     }
     match helios_ai::tools::call(&ai, request, images) {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            false,
-        ),
+        Ok(answer) => answer_result(answer, false),
         Err(e) => tool_result(e, true),
     }
 }
@@ -2549,10 +2553,7 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
         _ => crate::sandbox::stop(&dir).map(|ran| json!({ "stopped": ran })),
     };
     match result {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            false,
-        ),
+        Ok(answer) => answer_result(answer, false),
         Err(e) => tool_result(e, true),
     }
 }
@@ -2570,8 +2571,15 @@ fn send(address: &Address, request: &Value) -> Result<Value, String> {
     })
 }
 
+/// A tool's text result (an error, a message), cut to the answer's cap.
 fn tool_result(text: String, is_error: bool) -> Value {
-    json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
+    json!({ "content": caps::text_content(text), "isError": is_error })
+}
+
+/// A tool's JSON answer, cut to the caps and with its untrusted text
+/// marked (`crate::caps`).
+fn answer_result(answer: Value, is_error: bool) -> Value {
+    json!({ "content": caps::answer_content(answer), "isError": is_error })
 }
 
 /// The workspace tools that only read the workspace's files.
@@ -2679,6 +2687,9 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
     };
+    if let Err(e) = caps::check_limit(&request) {
+        return tool_result(format!("{}: {e}", tool.name), true);
+    }
     if let Err(e) = confine(&sockets.roots, tool, &request) {
         return tool_result(format!("{}: {e}", tool.name), true);
     }
@@ -2696,10 +2707,7 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
     }
     if tool.endpoint == Endpoint::Workspace {
         return match workspace_call(&request, &sockets.node_bin) {
-            Ok(answer) => tool_result(
-                serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-                false,
-            ),
+            Ok(answer) => answer_result(answer, false),
             Err(e) => tool_result(e, true),
         };
     }
@@ -2723,10 +2731,10 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
         }
     };
     match send(socket, &request) {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            answer["ok"] != true,
-        ),
+        Ok(answer) => {
+            let is_error = answer["ok"] != true;
+            answer_result(answer, is_error)
+        }
         Err(e) => tool_result(e, true),
     }
 }
@@ -2777,10 +2785,7 @@ pub fn commands_call(client: &helios_inspect::client::Client, request: &Value) -
         ("commands.list", pick(&["window", "filter", "enabled_only"]))
     };
     match client.request(method, params) {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            false,
-        ),
+        Ok(answer) => answer_result(answer, false),
         Err(e) if e.code == helios_inspect::rpc::code::OUTCOME_UNKNOWN => {
             tool_result(format!("outcome unknown: {}", e.message), true)
         }
@@ -3131,6 +3136,29 @@ mod tests {
                 tool.name
             );
         }
+    }
+
+    #[test]
+    fn a_limit_over_the_cap_is_refused_before_the_node() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+        };
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_workflow_items",
+            json!({ "run": "r1", "limit": 5000 }),
+        );
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(
+                "helios_workflow_items: `limit` 5000 is over the cap of 1000 items: page with `offset`"
+            )
+        );
     }
 
     #[test]

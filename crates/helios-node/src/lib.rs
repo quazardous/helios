@@ -51,6 +51,7 @@ pub use helios_node_core::calibrate;
 /// Reads at scale through cursors (`helios_node_core::cursor`).
 pub use helios_node_core::cursor;
 pub use helios_node_core::library;
+pub mod caps;
 pub mod mcp;
 pub mod roots;
 pub mod sandbox;
