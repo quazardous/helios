@@ -235,6 +235,15 @@ focus opens as a **place** in the main window through the context stack
 (`calibrate` place, Escape or Back leaves it), with the same panels; it
 moves to its own window with no change to its content (section 10, Q6).
 
+**As built (slice 7, 2026-11-13):** the multi-window API landed first,
+and "one window is one focus" (ROADMAP) is newer than Q6: the focus
+opens in an OS window of its own (`calibrate`, `appWindow ==
+'calibrate'`), as the import focus does, with the same bars as every
+Helios window, and in a window of the main one where the backend has no
+windows of its own (kittest, the web). Every action is a node command
+run as the person's: the dry run and the save are `calibrate.chart`, the
+list's actions `calibrate.profiles.*`.
+
 ## 4. Measuring
 
 ### Where
@@ -766,6 +775,21 @@ usable. Slices 1 to 5 need no GUI.
    panels. A kittest scenario drives the corners through accesskit and
    checks the report; snapshots of the panels. Moves to its own window
    with windows.md slice 4 or 7.
+   **Built (2026-11-13):** `calibrate.open {path?, corners?, camera?}`
+   (Calibrate camera colour…, and "Make a profile…" in the module's
+   header) opens the focus in its own window: the shot's picture (a raw's
+   embedded preview stretched over its mosaic) with the four handles and
+   each patch's sampling square coloured by its status; a drag (Ctrl: a
+   tenth of the pointer, Escape: put back) re-solves at release through
+   `calibrate.chart`, and "Put the corner back" undoes a drag. Report:
+   quality, Delta E before and after, worst patches, light, orientation,
+   clipped patches, warnings and the patch table. Save: name, "Use as the
+   default for this camera". Profiles, by camera: default marked, set as
+   default, export (to a folder field), delete, import (a file field).
+   Not built yet: the Chart panel's two grids, a patch's exclusion by a
+   click, renaming, the chart type's choice, a library context menu
+   entry, the File > New Focus entry, a live solve during the drag, the
+   shot read off the interface's thread, and panel snapshots.
 8. **Residual LUT** (off by default): the regularised fit, a LUT data
    input for the module, the strength slider.
 9. **Later:** automatic chart detection (corners proposed, the handles

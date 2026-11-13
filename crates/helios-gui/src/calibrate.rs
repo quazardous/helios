@@ -537,6 +537,22 @@ pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Stor
             "No calibration profile for this camera yet",
         )));
     }
+    let make = text(Message::new(
+        "gui-calibration-header-make",
+        "Make a profile…",
+    ));
+    let r = ui.small_button(&make);
+    egui_pop::core::a11y::name(&r, egui::Role::Button, &make);
+    if r.clicked() {
+        crate::dialogs::request(
+            &ctx,
+            crate::dialogs::Request::Run(
+                crate::shell::CALIBRATE_COMMAND.into(),
+                serde_json::json!({ "camera": offer["camera"] }),
+                helios_shell::commands::Origin::User,
+            ),
+        );
+    }
     if let Some(profile) = picked {
         crate::dialogs::request(
             &ctx,

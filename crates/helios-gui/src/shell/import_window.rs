@@ -1316,7 +1316,7 @@ const GONE_CHECK: std::time::Duration = std::time::Duration::from_millis(50);
 /// (black) whenever something asks it for a frame. Hidden at once, it
 /// waits out of sight; the main window, asked to the front, gets its
 /// frames back. Wayland cannot hide a window: it is minimised there.
-fn hide_closing_window(ctx: &Egui) {
+pub(super) fn hide_closing_window(ctx: &Egui) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
