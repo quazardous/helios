@@ -625,8 +625,10 @@ usable. Slices 1 to 5 need no GUI.
    and `whitebalance` (a sensor mosaic in counts from white-balanced
    camera RGB, cut at the white level). Tests on a synthetic 14-bit RGGB
    mosaic of a shot under 3200 K whose true matrix is off from `colorin`'s:
-   each patch's mean back within 1e-4 (relative) through RCD, the light
-   within 1e-4 in xy, the camera matrix within 1e-3, every patch kept; a
+   each patch's mean back within 1.3e-4 (relative; asserted 5e-4) through
+   RCD, the light within 1e-4 in xy, the camera matrix within 2.6e-5
+   (asserted 1e-4), Delta E 2000 after 0.0014 mean and 0.011 max (2.39
+   before), every patch kept; a
    white patch over-exposed on the sensor reported `clipped` and the
    matrix still found; a chart placed off the image refused with its
    reason; a camera without a matrix refused; the same raw giving the

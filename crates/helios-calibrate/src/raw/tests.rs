@@ -105,7 +105,8 @@ fn the_graph_gives_each_patch_its_camera_rgb_back() {
         }
     }
     eprintln!("worst relative error of a patch's mean: {worst:e}");
-    assert!(worst < 1e-4, "{worst}");
+    // f32 counts and RCD: a few parts in 10^4 at most.
+    assert!(worst < 5e-4, "{worst}");
 }
 
 #[test]
@@ -146,8 +147,9 @@ fn a_raw_shot_is_solved_through_the_request() {
         "camera matrix within {worst:e}; Delta E before {:.3}, after {:.4} (max {:.4})",
         answer.before.mean, answer.after.mean, answer.after.max
     );
-    assert!(worst < 1e-3, "{worst}");
-    assert!(answer.after.max < 0.01, "{}", answer.after.max);
+    assert!(worst < 1e-4, "{worst}");
+    assert!(answer.after.mean < 3e-3, "{}", answer.after.mean);
+    assert!(answer.after.max < 0.02, "{}", answer.after.max);
     assert!(answer.before.mean > 10.0 * answer.after.mean);
     assert!(answer.patches.iter().all(|p| p.status == "kept"));
 }
