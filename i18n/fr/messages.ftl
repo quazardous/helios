@@ -46,6 +46,32 @@ calibrate-default-cameras = les profils d’un défaut sont tous du boîtier { $
 
 calibrate-default-no-camera = effacer le défaut d’un boîtier demande `camera`
 
+calibrate-export-failed = impossible d’écrire { $path } : { $error }
+
+calibrate-import-camera-key = la clé de boîtier « { $key } » ne correspond pas à la marque et au modèle « { $make } { $model } »
+
+calibrate-import-format = le format du profil est { $found } ; ce Helios lit le format { $expected }
+
+calibrate-import-id = l’identifiant du profil n’est pas une empreinte hexadécimale de 64 chiffres
+
+calibrate-import-illuminant = la chromaticité de la lumière { $x }, { $y } est hors du diagramme
+
+calibrate-import-lut = le profil porte une LUT résiduelle, que ce Helios ne prend pas encore
+
+calibrate-import-matrix = la matrice du profil n’est pas une matrice finie et inversible
+
+calibrate-import-not-profile = le fichier n’est pas un profil de calibration Helios
+
+calibrate-import-nothing = calibrate.profiles.import demande `path` ou `file`
+
+calibrate-import-numbers = la correction ou la matrice du boîtier du profil contient des nombres non finis
+
+calibrate-import-refused = le profil est refusé : { $reasons }
+
+calibrate-import-unreadable = le profil est illisible : { $error }
+
+calibrate-import-unreadable-file = impossible de lire { $path } : { $error }
+
 calibrate-image-not-at-hand = aucun fichier de l’image { $image } n’est disponible
 
 calibrate-load-failed = impossible de lire la prise de vue de la mire : { $error }
@@ -298,6 +324,20 @@ gui-graph-wires = Liaisons
 
 gui-graph-wires-curves = Courbes
 
+gui-calibration-default-applied = Profil de calibration « { $name } » appliqué : le défaut de { $camera }
+
+gui-calibration-default-none = Aucun profil de calibration appliqué : { $reason }
+
+gui-calibration-header-about = { $camera }, { $light }, qualité { $quality }
+
+gui-calibration-header-choose = Profil de calibration
+
+gui-calibration-header-empty = Aucun profil de calibration pour ce boîtier pour l’instant
+
+gui-calibration-header-gone = Profil { $id } (absent de la bibliothèque)
+
+gui-calibration-header-none = Aucun profil
+
 gui-graph-wires-orthogonal = Orthogonales
 
 gui-graph-wires-straight = Droites
@@ -308,6 +348,7 @@ gui-history-calibration-default = Définir le défaut de calibration de { $name 
 gui-history-calibration-delete = Supprimer le profil de calibration « { $name } »
 gui-history-calibration-off = Désactiver le profil de calibration
 gui-history-calibration-save = Enregistrer le profil de calibration « { $name } »
+gui-history-calibration-import = Importer le profil de calibration « { $name } »
 gui-history-import = Importer { $count } photos
 gui-history-album-new = Nouvel album « { $name } »
 gui-history-album-rename = Renommer l’album « { $name } »
