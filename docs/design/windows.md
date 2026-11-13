@@ -1136,11 +1136,32 @@ Default: as above, after a macOS build exists; nothing to do before.
   application delegate, which has none), File > New Window and Window >
   Main window bring it back. Linux and Windows still quit with the last
   window; tests set macOS's policy on Linux.
-- **Not yet:** the bar following the window in front (the Import
-  window's reduced menus, the main window's commands greyed by D6), the
-  other keys shown in the native menus, and a run on a Mac beyond CI's
-  build: the release's macOS job builds and smoke-tests the bundle
-  headless, it does not click menus.
+- **The bar follows the window in front** (2026-11-13). Every window's
+  pass notes when it is the focused one and wakes the main window's
+  pass, which lays the bar out again in that window's context
+  (`native_menu::window_context`: its `appWindow`, and `modalOpen` for
+  its group) and runs what is chosen there (`Shell::run_in`): Settings…
+  chosen with the import window in front edit the import window's focus
+  (slice 7). Newer than D7's reduced menus, the bar is the full one in
+  every window ("the same bars in every window" below): the main
+  window's commands (`appWindow == 'main'`) are greyed, not removed. The
+  focus chain's keys stay the main window's, as egui-pop's own context
+  does for a group other than the one drawn.
+- **Keys in the native menus** (`native_menu::native_key`). An entry
+  shows its key only where the native menu may answer it itself (AppKit
+  draws a key beside an item only as its key equivalent, which also
+  takes the key before the window sees it): one chord with `Ctrl`
+  (Command on macOS, as egui-pop's keymap reads it), global, with no
+  clause of its own, firing while typing anyway, not a key text fields
+  edit with (Cmd+A, C, V, X, Y, Z, the arrows, Home, End, Delete,
+  Enter, Tab), and, with a modal open in the window in front, only a
+  binding the modal lets through. A key answers one entry, the first in
+  the bar; Cmd+H, Cmd+Alt+H and Cmd+M stay the system's. Every other key
+  (sequences, keys without Cmd, the editing keys, a surface's keys)
+  stays egui-pop's keymap's and is not shown in the native menu.
+- **Not yet:** a run on a Mac beyond CI's build: the release's macOS
+  job builds and smoke-tests the bundle headless, it does not click
+  menus or press keys.
 
 ### Built: the same bars in every window (2026-11-13)
 
@@ -1176,7 +1197,7 @@ Every Helios window now draws the main window's bars.
   brings the import window forward; the import window's own commands
   stay its buttons.
 - **macOS:** the in-window bar is not drawn, as for the main window; the
-  native bar following the window in front is still to do (D7).
+  native bar follows the window in front (D7, "Built on macOS" above).
 - **Test** (`tests/import.rs`, real viewports): the import window's bar
   has the menu button, the logo and the name, and the same top-level
   menus as the main window; Export… is greyed there with "Only in the …
@@ -1196,8 +1217,8 @@ window of its own and draw the shell again in the main window.
 - Window scope for commands (D6), in egui-pop, then Helios's commands
   marked.
 - The quit question (D4), with the jobs and workshop sessions it lists.
-- macOS: the bar following the window in front, and the keys shown in
-  the native menus (D7); the rest of D2 and D7 is built.
+- macOS: a click-through on a real Mac (the menus following the window
+  in front, their keys); the rest of D2 and D7 is built.
 
 ## 8. Multi-window checklist
 

@@ -2317,6 +2317,30 @@ impl Shell {
         result
     }
 
+    /// Runs a command as `origin` in a given context: what a window's
+    /// native menu chose runs in that window's (`appWindow`), what it
+    /// opens opening there.
+    pub fn run_in(
+        &mut self,
+        id: &str,
+        args: Value,
+        origin: Origin,
+        cx: &egui_pop::model::when::WhenContext,
+    ) -> Result<Value, String> {
+        let result = match CommandId::new(id) {
+            Ok(c) => match self.core.app.run_in(&c, args, to_pop(&origin), cx) {
+                Reply::Done(r) => r,
+                Reply::Later(_) => Ok(json!({ "queued": true })),
+            },
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(e) = &result {
+            let report = crate::report::Context::command(id).cause(e.clone());
+            self.notify_failure(Level::Warning, e.clone(), report);
+        }
+        result
+    }
+
     fn declare_commands(w: &Wiring<'_>, panels: &[PanelSpec]) {
         let mut registry = lock(w.registry);
         let view = w.dialogs.clone();
