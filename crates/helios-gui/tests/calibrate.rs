@@ -194,3 +194,173 @@ fn the_shell_answers_a_chart_dry_run() {
     assert_eq!(head(), None, "the apply undone: no chart profile");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A profile document of camera "Test Bayer" under light `xy`, its
+/// matrix bent by `bend`.
+fn profile(name: &str, xy: [f64; 2], bend: f64) -> serde_json::Value {
+    let summary = json!({ "mean": 1.0, "max": 2.0, "worst": [] });
+    json!({
+        "format": helios_calibrate::PROFILE_FORMAT,
+        "name": name,
+        "camera": { "make": "Test", "model": "Bayer", "key": "test bayer" },
+        "illuminant": { "xy": xy, "cct": 5000.0, "kind": "d" },
+        "chart": "xrite.cc24.2014",
+        "measured": { "space": "camera", "image": "ab", "edit": null,
+                      "corners": CORNERS, "excluded": [] },
+        "base_matrix": null,
+        "matrix": [[1.0 + bend, -bend, 0.0], [0.0, 1.0, 0.0], [0.0, bend, 1.0 - bend]],
+        "correction": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        "lut": null,
+        "report": { "quality": "good", "exposure_ev": 0.0, "before": summary, "after": summary },
+        "created": 0
+    })
+}
+
+#[test]
+fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step() {
+    use egui_kittest::kittest::Queryable;
+    use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
+
+    let camera = helios_photo::CameraInfo {
+        maker: "Test".into(),
+        model: "Bayer".into(),
+        iso: 100.0,
+        exposure_bias: 0.0,
+        exposure_time: 0.01,
+        aperture: 4.0,
+        focal_length: 50.0,
+        black: [0.0; 4],
+        white: 1.0,
+        white_balance: [2.0, 1.0, 1.5, 1.0],
+        xyz_to_camera: [0.9, -0.3, -0.1, -0.4, 1.2, 0.2, -0.05, 0.15, 0.6],
+        cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+        orientation: 1,
+    };
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        Image::from_fn(Region::sized(32, 24), 4, |_, _, _| 0.2),
+    );
+    let node = g
+        .add_module(
+            "chartprofile",
+            ModuleRef::new(helios_module_chartprofile::ChartProfile),
+            &Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", node, "input").unwrap();
+    g.set_context(node, camera.to_context()).unwrap();
+    g.set_bypass(node, true).unwrap();
+
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    for (id, name, xy, bend) in [
+        ("daylight", "Daylight", [0.3127, 0.329], 0.05),
+        ("tungsten", "Tungsten", [0.4476, 0.4074], 0.1),
+    ] {
+        vault
+            .set_calibration_profile(id, Some(&profile(name, xy, bend)))
+            .unwrap();
+    }
+    let other = {
+        let mut p = profile("Other body", [0.3127, 0.329], 0.0);
+        p["camera"] = json!({ "make": "Other", "model": "Body", "key": "other body" });
+        p
+    };
+    vault
+        .set_calibration_profile("other", Some(&other))
+        .unwrap();
+
+    let mut shell = Shell::new(helios_panels(), None);
+    let history = shell.library_history();
+    calibrate::register(
+        &mut shell,
+        Some(calibrate::Node {
+            vault: vault.clone(),
+            bus: Arc::new(helios_core::Bus::new()),
+        }),
+        history,
+    )
+    .unwrap();
+    // As an image of the library opens: the header is offered its camera's
+    // profiles (no default rule: nothing is applied).
+    let image = helios_vault::ImageId::from_hex(&"cd".repeat(32)).unwrap();
+    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_none());
+    shell.set_view_source(g, node, "output").unwrap();
+    let offer = calibrate::read_offer(&shell.values().lock().unwrap()).unwrap();
+    let ids: Vec<&str> = offer["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["daylight", "tungsten"], "the camera's only");
+    assert_eq!(offer["camera"], "test bayer");
+
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Calibration profile");
+
+    let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get(path)
+            .unwrap()
+            .value
+            .clone()
+    };
+    let choose = |h: &mut egui_kittest::Harness<'_, Shell>, profile: &str| {
+        h.state_mut()
+            .run(
+                calibrate::CHOOSE,
+                json!({ "profile": profile }),
+                Origin::User,
+            )
+            .unwrap();
+    };
+    choose(&mut h, "daylight");
+    assert_eq!(read(&h, "bypass/chartprofile"), Value::Bool(false));
+    assert_eq!(
+        read(&h, "node/chartprofile/profile"),
+        Value::Text("daylight".into())
+    );
+    choose(&mut h, "tungsten");
+    let Value::List(m) = read(&h, "node/chartprofile/matrix") else {
+        panic!("a matrix")
+    };
+    assert!((m[0] - 1.1).abs() < 1e-12, "{m:?}");
+    // Each switch is one step of the edit: undone, the previous profile.
+    let undo = |h: &egui_kittest::Harness<'_, Shell>| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .undo(&Origin::User)
+            .unwrap();
+    };
+    undo(&h);
+    assert_eq!(
+        read(&h, "node/chartprofile/profile"),
+        Value::Text("daylight".into())
+    );
+    undo(&h);
+    assert_eq!(read(&h, "bypass/chartprofile"), Value::Bool(true));
+    // Another camera's profile is refused; none turns it off.
+    assert!(
+        h.state_mut()
+            .run(
+                calibrate::CHOOSE,
+                json!({ "profile": "other" }),
+                Origin::User
+            )
+            .is_err()
+    );
+    choose(&mut h, "tungsten");
+    choose(&mut h, "none");
+    assert_eq!(read(&h, "bypass/chartprofile"), Value::Bool(true));
+    h.run();
+}

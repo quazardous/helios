@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "id": "helios.develop",
+  "version": 2,
+  "meta": {
+    "name": "Develop one image",
+    "scenario": "Develop a raw file from its sensor data: its levels, white balance, highlights, demosaicing, camera colours and colour calibration, then exposure and a sigmoid tone curve, the image large, its parameters and scopes beside.",
+    "tags": ["develop", "raw", "tone"]
+  },
+  "network": {
+    "sources": ["raw"],
+    "raw_sources": ["raw"],
+    "nodes": [
+      { "name": "rawprepare", "module": "rawprepare" },
+      { "name": "whitebalance", "module": "whitebalance",
+        "params": { "mode": { "choice": "camera_reference" } } },
+      { "name": "highlights", "module": "highlights" },
+      { "name": "demosaic", "module": "demosaic" },
+      { "name": "colorin", "module": "colorin" },
+      { "name": "channelmixerrgb", "module": "channelmixerrgb",
+        "params": { "illuminant": { "choice": "camera" } } },
+      { "name": "flip", "module": "flip" },
+      { "name": "exposure", "module": "exposure",
+        "params": { "exposure": { "float": 0.7 }, "black": { "float": -0.000244140625 }, "compensate_bias": { "bool": true } } },
+      { "name": "sigmoid", "module": "sigmoid" }
+    ],
+    "connections": [
+      { "from": "raw", "port": "image", "to": "rawprepare", "input": "input" },
+      { "from": "rawprepare", "port": "output", "to": "whitebalance", "input": "input" },
+      { "from": "whitebalance", "port": "output", "to": "highlights", "input": "input" },
+      { "from": "highlights", "port": "output", "to": "demosaic", "input": "input" },
+      { "from": "demosaic", "port": "output", "to": "colorin", "input": "input" },
+      { "from": "colorin", "port": "output", "to": "channelmixerrgb", "input": "input" },
+      { "from": "channelmixerrgb", "port": "output", "to": "flip", "input": "input" },
+      { "from": "flip", "port": "output", "to": "exposure", "input": "input" },
+      { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
+    ],
+    "view": { "node": "sigmoid", "port": "output" }
+  }
+}

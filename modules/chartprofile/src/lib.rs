@@ -14,6 +14,11 @@
 //! - The plan is `P = M_c M_s⁻¹`, applied by `core.matrix3@1`'s step
 //!   ([`helios_bricks::matrix3`]), CPU and GPU.
 //!
+//! Its context also names the camera (make, model) and its as-shot white
+//! balance, never read at render: the module's header shows which camera
+//! the photo is of, and the camera's default profile is picked by the
+//! light the white balance gives.
+//!
 //! An all-zero `matrix` (the default) is no profile: the pixels pass
 //! unchanged. The template puts the module bypassed after `colorin`, so a
 //! render without a profile is unchanged and darktable parity holds.
@@ -104,7 +109,15 @@ impl Module for ChartProfile {
             ],
             inputs: vec![PortSpec::image("input", 4)],
             outputs: vec![PortSpec::image("output", 4)],
-            context: vec![fields::XYZ_TO_CAMERA.into()],
+            // The camera and its as-shot white balance are never read at
+            // render: the header names the camera, and the camera's
+            // default profile is picked by the as-shot light, from them.
+            context: vec![
+                fields::XYZ_TO_CAMERA.into(),
+                fields::MAKER.into(),
+                fields::MODEL.into(),
+                fields::WHITE_BALANCE.into(),
+            ],
             needs: Needs::default(),
             kind: ModuleKind::Process,
             family: Family::Color,

@@ -22,6 +22,7 @@ fn catalogue() -> Catalogue {
         .module(ModuleRef::new(helios_module_highlights::Highlights))
         .module(ModuleRef::new(helios_module_demosaic::Demosaic))
         .module(ModuleRef::new(helios_module_colorin::ColorIn))
+        .module(ModuleRef::new(helios_module_chartprofile::ChartProfile))
         .module(ModuleRef::new(
             helios_module_channelmixerrgb::ChannelMixerRgb,
         ))
@@ -369,6 +370,7 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
             "highlights",
             "demosaic",
             "colorin",
+            "chartprofile",
             "channelmixerrgb",
             "flip",
             "exposure",
@@ -385,6 +387,14 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
         );
         from = to;
     }
+    // Version 3: a colour chart's profile after the camera colours,
+    // bypassed until a profile is applied.
+    assert_eq!(bundle.template.version, 3);
+    assert!(
+        net.nodes
+            .iter()
+            .any(|n| n.name == "chartprofile" && n.bypassed)
+    );
     let built = bundle.build(&catalogue()).unwrap();
     assert_eq!(built.view.0, built.nodes["sigmoid"]);
     // Laid out as the preview template: the image large, the parameters

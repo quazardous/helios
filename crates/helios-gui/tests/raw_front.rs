@@ -592,3 +592,65 @@ fn darktable_s_first_exposure_instance_lands_on_the_base_exposure() {
     assert!((ev(&graph, "exposure") - 2.0).abs() < 1e-9);
     assert_eq!(ev(&graph, "base"), base);
 }
+
+/// "Develop one image" as version 2 wrote it, before its chart profile.
+fn develop_v2() -> Bundle {
+    Bundle::from_files(&[
+        (
+            "template.json",
+            include_str!("data/develop-v2.template.json"),
+        ),
+        (
+            "layout.json",
+            include_str!("../../../templates/develop.helios-template/layout.json"),
+        ),
+    ])
+    .expect("version 2 still reads")
+}
+
+#[test]
+fn develop_one_image_3_renders_version_2_s_bits_while_its_chart_profile_is_off() {
+    let v3 = find("helios.develop");
+    let v2 = develop_v2();
+    assert_eq!((v2.template.version, v3.template.version), (2, 3));
+    assert!(v2.validate(&templates::modules()).is_ok());
+    let (mosaic, camera) = (mosaic(), camera(0.3));
+    let (old, old_view) = built(&v2, &mosaic, &camera);
+    let (mut new, view) = built(&v3, &mosaic, &camera);
+    assert!(old.find("chartprofile").is_none());
+    // After the camera colours, before colour calibration, bypassed.
+    let profile = new.find("chartprofile").expect("version 3 carries it");
+    assert_eq!(
+        new.input_nodes(profile).unwrap(),
+        [Some(new.find("colorin").unwrap())]
+    );
+    assert!(new.is_bypassed(profile).unwrap());
+    let before = render(&old, old_view);
+    assert_eq!(
+        render(&new, view)
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>(),
+        before.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+    );
+    // On, with a profile's matrix, the colours move.
+    let bend = [1.08, -0.05, -0.03, -0.02, 1.01, 0.01, 0.0, -0.04, 1.04];
+    let standard =
+        helios_module_chartprofile::standard(new.context(profile).unwrap().unwrap()).unwrap();
+    let m_c = helios_photo::color::mul(
+        &[
+            [bend[0], bend[1], bend[2]],
+            [bend[3], bend[4], bend[5]],
+            [bend[6], bend[7], bend[8]],
+        ],
+        &standard,
+    );
+    new.set_param(
+        profile,
+        "matrix",
+        Value::List(helios_module_chartprofile::flat(&m_c)),
+    )
+    .unwrap();
+    new.set_bypass(profile, false).unwrap();
+    assert_ne!(render(&new, view), before);
+}

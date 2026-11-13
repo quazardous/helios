@@ -1005,7 +1005,10 @@ fn show_prepared(
         (Some(persist), Some(image)) => persist
             .open_image(shell, image, graph, node, "output")
             .map(|_| ()),
-        _ => shell.set_view_source(graph, node, "output"),
+        _ => {
+            helios_gui::calibrate::set_offer(shell.values(), None);
+            shell.set_view_source(graph, node, "output")
+        }
     }
 }
 
