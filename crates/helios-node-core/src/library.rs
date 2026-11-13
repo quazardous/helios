@@ -522,6 +522,8 @@ mod tests {
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
             json!({}),
+            json!({ "limit": 10 }),
+            json!({ "id": "1700000000000-42-0" }),
         ];
         assert_eq!(examples.len(), IDS.len(), "one example per command");
         for (spec, example) in specs().iter().zip(examples) {
