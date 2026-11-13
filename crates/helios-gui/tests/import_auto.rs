@@ -231,6 +231,7 @@ fn a_card_set_to_import_when_plugged_in_imports_its_new_photos_with_its_choices(
             "layout": "month",
             "rename": "{stem}",
             "duplicates": "skip",
+            "origin": "user",
         })
     );
     run_imports(&mut h, imports, &done);

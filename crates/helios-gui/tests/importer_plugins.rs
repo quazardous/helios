@@ -126,6 +126,7 @@ fn an_importer_asks_for_its_folder_and_its_photos_land_with_their_ratings() {
     let imports = h.state_mut().take_imports();
     let expected = json!({
         "importer": { "plugin": PLUGIN, "importer": IMPORTER, "source": dir },
+        "origin": "user",
     });
     assert_eq!(imports, [expected]);
     // As the desktop's `library.import` runs it: the plugin lists, Helios
