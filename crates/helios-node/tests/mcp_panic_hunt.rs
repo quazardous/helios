@@ -211,12 +211,11 @@ impl Lab {
             for _ in lines {}
         });
         let mut node = Node { child, log };
-        match started.recv_timeout(READY) {
-            Ok(true) => Ok(node),
-            _ => {
-                node.stop();
-                Err(format!("the node did not start: {}", node.log.last_lines()))
-            }
+        if let Ok(true) = started.recv_timeout(READY) {
+            Ok(node)
+        } else {
+            node.stop();
+            Err(format!("the node did not start: {}", node.log.last_lines()))
         }
     }
 
