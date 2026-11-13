@@ -2462,7 +2462,9 @@ impl Tool {
     pub fn request(&self, arguments: &Value) -> Result<Value, String> {
         let given = arguments.as_object().cloned().unwrap_or_default();
         if let Some(unknown) = given.keys().find(|k| {
-            !self.params.iter().any(|p| p.name == *k) && !(self.changes() && *k == REQUEST_ID)
+            let known = self.params.iter().any(|p| p.name == *k);
+            let key = self.changes() && *k == REQUEST_ID;
+            !(known || key)
         }) {
             return Err(format!("{}: unknown argument `{unknown}`", self.name));
         }
