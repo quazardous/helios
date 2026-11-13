@@ -947,7 +947,7 @@ mod tests {
         )
         .unwrap();
         let add = |name: &str, text: &str| {
-            std::fs::write(dir.join("changelog.d").join(name), text).unwrap()
+            std::fs::write(dir.join("changelog.d").join(name), text).unwrap();
         };
         add("a.md", "kind: added\n\nA panel.\n");
         assert!(plan(&dir, "2026-11-13", Gate::Asked).unwrap().is_none());
