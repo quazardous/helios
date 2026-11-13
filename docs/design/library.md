@@ -662,9 +662,28 @@ stored as written. A store resolves it when it runs the query
 system clock moved by the local offset the application sets at its
 start, so "today" is the local day, as cameras write local times. It
 becomes a whole-day range `[start, end)` in the tree the store compiles,
-so SQLite and the memory store select the same photos. Not built yet:
-the quick collection and B, Ctrl+K recent filters, album sets, drag and
-drop onto an album, keyboard undo in the dialog (its buttons only).
+so SQLite and the memory store select the same photos.
+
+Built (2026-11-13), fourth part: **the quick collection** (Lightroom's,
+B). One more document in `library/collections`, under the key `quick`
+and of that kind, `{kind: "quick", images}`: no document yet is an
+empty one; it is not listed with the albums, cannot be renamed or
+deleted, and no album takes its key (a new "Quick" gets `quick-2`).
+`Query::album` naming it selects its photos as an album's, so
+`collection:quick` scopes the grid in both stores. B (bound like the
+culling keys, so not while a text field is typed in, rebindable) runs
+`library.quick.toggle`: when the quick collection holds every photo of
+the selection they go out, else those it lacks go in; one step of the
+library's history per press. The Albums section pins it first
+("⚡ Quick collection" and its count, its menu: add or remove the
+selection, "Save as album…", clear), and each photo in it shows a
+"quick" badge in the grid. `library.quick.saveAs` (`name`, `clear`;
+without `name`, a form with both) makes a plain album of it, emptied or
+not, as one step; `library.quick.clear` empties it. The import window
+shows files still to import, not Library photos, so B has nothing to
+act on there. Not built yet: Ctrl+K recent filters, album sets, drag
+and drop onto an album, keyboard undo in the rule dialog (its buttons
+only).
 
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste

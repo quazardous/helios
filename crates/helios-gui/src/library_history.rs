@@ -82,8 +82,14 @@ pub fn import_label(photos: u64) -> Label {
 
 /// An album change's label: "New album “Trip”", "Add 3 photos to “Trip”"
 /// (`name`: the album's name before the change; `count`: the photos
-/// added or removed).
-pub fn album_label(edit: &crate::library::AlbumEdit, name: &str, count: usize) -> Label {
+/// added or removed; `added`: whether B put photos in the quick
+/// collection, else took them out).
+pub fn album_label(
+    edit: &crate::library::AlbumEdit,
+    name: &str,
+    count: usize,
+    added: bool,
+) -> Label {
     use crate::library::AlbumEdit as E;
     let m = match edit {
         E::Create { .. } => Message::new("gui-history-album-new", "New album “{ $name }”"),
@@ -101,6 +107,19 @@ pub fn album_label(edit: &crate::library::AlbumEdit, name: &str, count: usize) -
             Message::new("gui-history-album-new-smart", "New smart album “{ $name }”")
         }
         E::Rules { .. } => Message::new("gui-history-album-rules", "Edit the rules of “{ $name }”"),
+        E::QuickToggle { .. } if added => Message::new(
+            "gui-history-quick-add",
+            "Add { $count } photos to the quick collection",
+        ),
+        E::QuickToggle { .. } => Message::new(
+            "gui-history-quick-remove",
+            "Remove { $count } photos from the quick collection",
+        ),
+        E::QuickClear => Message::new("gui-history-quick-clear", "Clear the quick collection"),
+        E::QuickSave { .. } => Message::new(
+            "gui-history-quick-save",
+            "Save the quick collection as “{ $name }”",
+        ),
     }
     .with("name", name)
     .with("count", count);

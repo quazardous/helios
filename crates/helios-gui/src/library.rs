@@ -1067,6 +1067,14 @@ pub const COLLECTION_RULES_COMMAND: &str = "library.collection.rules";
 pub const COLLECTION_RULES_EDIT_COMMAND: &str = "library.collection.rules.edit";
 /// Lists the albums, with how many photos each holds.
 pub const COLLECTION_LIST_COMMAND: &str = "library.collection.list";
+/// B: puts the selected photos (`images`, else the selection) in the
+/// quick collection, or takes them out when it holds them all.
+pub const QUICK_TOGGLE_COMMAND: &str = "library.quick.toggle";
+/// Empties the quick collection.
+pub const QUICK_CLEAR_COMMAND: &str = "library.quick.clear";
+/// Makes an album of the quick collection (`name`; `clear` to empty it
+/// too); without `name`, asks it.
+pub const QUICK_SAVE_COMMAND: &str = "library.quick.saveAs";
 
 /// Whether something is to be read again by the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1110,6 +1118,19 @@ pub enum AlbumEdit {
         id: String,
         rules: helios_vault::rules::Rule,
     },
+    /// B: the photos in or out of the quick collection.
+    QuickToggle {
+        images: Vec<String>,
+    },
+    /// The quick collection emptied.
+    QuickClear,
+    /// The quick collection saved as an album (`id`, `name`), emptied
+    /// when `clear`.
+    QuickSave {
+        id: String,
+        name: String,
+        clear: bool,
+    },
 }
 
 impl AlbumEdit {
@@ -1122,7 +1143,11 @@ impl AlbumEdit {
             | AlbumEdit::Add { id, .. }
             | AlbumEdit::Remove { id, .. }
             | AlbumEdit::CreateSmart { id, .. }
-            | AlbumEdit::Rules { id, .. } => id,
+            | AlbumEdit::Rules { id, .. }
+            | AlbumEdit::QuickSave { id, .. } => id,
+            AlbumEdit::QuickToggle { .. } | AlbumEdit::QuickClear => {
+                helios_vault::collections::QUICK
+            }
         }
     }
 }
@@ -1177,6 +1202,45 @@ fn album_menu(row: &egui::Response, id: &str, smart: bool, selection: bool) {
             ],
         ]
         .concat(),
+    );
+}
+
+/// The quick collection's context menu in the Albums section: put the
+/// selected photos in or out (greyed with none), empty it, save it as
+/// an album (greyed when empty).
+fn quick_menu(row: &egui::Response, selection: bool, filled: bool) {
+    use crate::dialogs::MenuItem;
+    if !row.secondary_clicked() {
+        return;
+    }
+    let ctx = &row.ctx;
+    let word = |m: Message| crate::i18n::text(ctx, m);
+    let item = |command: &str, label: Message| {
+        MenuItem::run(command, serde_json::json!({})).labeled(word(label))
+    };
+    crate::dialogs::context_menu(
+        row,
+        vec![
+            item(
+                QUICK_TOGGLE_COMMAND,
+                Message::new(
+                    "gui-library-quick-toggle",
+                    "Add or remove the selected photos",
+                ),
+            )
+            .enabled(selection),
+            MenuItem::Separator,
+            item(
+                QUICK_SAVE_COMMAND,
+                Message::new("gui-library-quick-save", "Save as album…"),
+            )
+            .enabled(filled),
+            item(
+                QUICK_CLEAR_COMMAND,
+                Message::new("gui-library-quick-clear", "Clear the quick collection"),
+            )
+            .enabled(filled),
+        ],
     );
 }
 
@@ -1257,6 +1321,10 @@ pub struct Library {
     albums_wanted: Wanted,
     /// Album changes asked, for the host to make in the vault.
     album_edits: Vec<AlbumEdit>,
+    /// The quick collection's photos, as last read with the albums.
+    quick: Vec<String>,
+    /// The same, for the grid's badge.
+    quick_set: HashSet<String>,
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
@@ -1388,6 +1456,8 @@ impl Default for Library {
             albums: None,
             albums_wanted: Wanted::Yes,
             album_edits: Vec::new(),
+            quick: Vec::new(),
+            quick_set: HashSet::new(),
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
@@ -1489,6 +1559,7 @@ struct PresenceWords {
     soft: String,
     blown: String,
     crushed: String,
+    quick: String,
 }
 
 impl PresenceWords {
@@ -1525,6 +1596,7 @@ impl PresenceWords {
                 ctx,
                 Message::new("gui-library-badge-crushed", "crushed shadows"),
             ),
+            quick: crate::i18n::text(ctx, Message::new("gui-library-badge-quick", "quick")),
         }
     }
 }
@@ -1539,6 +1611,8 @@ struct Items<'a> {
     words: &'a PresenceWords,
     /// Each photo's backups, when the badges show.
     backups: Option<&'a HashMap<String, BackupMark>>,
+    /// The photos in the quick collection.
+    quick: &'a HashSet<String>,
 }
 
 impl Items<'_> {
@@ -1592,6 +1666,9 @@ impl LibraryItems<String> for Items<'_> {
         // Its file rewritten by another application, not acknowledged.
         if entry.changed_outside.is_some() {
             badges.push(Badge::new(self.words.changed.clone()).tone(BadgeTone::Info));
+        }
+        if self.quick.contains(&entry.id) {
+            badges.push(Badge::new(self.words.quick.clone()).tone(BadgeTone::Info));
         }
         if let Some(mark) = self.backups.and_then(|b| b.get(&entry.id)) {
             let w = self.words;
@@ -1859,6 +1936,34 @@ impl Library {
             .count()
     }
 
+    /// The quick collection's photos, by id, as last read (those taken
+    /// out of the Library since among them).
+    pub fn quick(&self) -> &[String] {
+        &self.quick
+    }
+
+    /// How many photos of the Library the quick collection holds.
+    pub fn quick_count(&self) -> usize {
+        self.quick
+            .iter()
+            .filter(|i| self.index.contains_key(*i))
+            .count()
+    }
+
+    /// The quick collection as the vault holds it: the grid's badges
+    /// follow, and its photos are asked again when it is shown.
+    pub fn set_quick(&mut self, images: Vec<String>) {
+        if self.quick == images {
+            return;
+        }
+        self.quick_set = images.iter().cloned().collect();
+        self.quick = images;
+        if self.collection().as_deref() == Some(helios_vault::collections::QUICK) {
+            self.ask_query();
+        }
+        self.reorder();
+    }
+
     /// Whether the host must read the albums ([`Library::set_albums`]),
     /// once.
     pub fn take_albums_wanted(&mut self) -> bool {
@@ -1975,9 +2080,10 @@ impl Library {
     }
 
     /// The badges an image shows in the grid, in the interface's
-    /// language: RAW, offline, missing, changed outside Helios, its
-    /// backups when the library has a strategy, and its culling measures
-    /// (soft focus, blown highlights, crushed shadows) once measured.
+    /// language: RAW, offline, missing, changed outside Helios, in the
+    /// quick collection, its backups when the library has a strategy,
+    /// and its culling measures (soft focus, blown highlights, crushed
+    /// shadows) once measured.
     pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
         let Some(&i) = self.index.get(id) else {
             return Vec::new();
@@ -1991,6 +2097,7 @@ impl Library {
             revision: 0,
             words: &words,
             backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
+            quick: &self.quick_set,
         };
         items.badges(0).into_iter().map(|b| b.text).collect()
     }
@@ -3154,7 +3261,9 @@ impl Library {
     /// (from the selection, when there is one); a click scopes the grid to
     /// an album (its `collection:` term), a click on it again drops the
     /// scope; each row's menu adds or removes the selected photos,
-    /// renames or deletes the album.
+    /// renames or deletes the album. The quick collection is pinned
+    /// first (⚡, its count), its menu emptying it or saving it as an
+    /// album.
     fn albums_section(&mut self, ui: &mut Ui) {
         if self.entries.is_empty() {
             return;
@@ -3180,6 +3289,23 @@ impl Library {
                         )))
                         .clicked();
                 });
+                // The quick collection, always there, pinned first.
+                let quick = helios_vault::collections::QUICK;
+                let count = self.quick_count();
+                let name = word(Message::new("gui-library-quick", "Quick collection"));
+                let r = ui
+                    .selectable_label(
+                        selected.as_deref() == Some(quick),
+                        format!("⚡ {name} {count}"),
+                    )
+                    .on_hover_text(word(Message::new(
+                        "gui-library-quick-tip",
+                        "B adds the selected photos or takes them out",
+                    )));
+                quick_menu(&r, selection, count > 0);
+                if r.clicked() {
+                    chosen = Some(quick.to_string());
+                }
                 let Some(albums) = self.albums.as_deref() else {
                     return;
                 };
@@ -3406,6 +3532,7 @@ impl Library {
                 revision: self.revision,
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
+                quick: &self.quick_set,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -3494,6 +3621,7 @@ impl Library {
                 revision: self.revision,
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
+                quick: &self.quick_set,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,

@@ -13,6 +13,14 @@
 //! each store reads in the same query when [`crate::Query::album`] names
 //! it.
 //!
+//! The **quick collection** is one more document, under the key [`QUICK`]
+//! and of that kind, `{ "kind": "quick", "images": [...] }`: a set of
+//! photos the user gathers for a while (B toggles the selection in and
+//! out, as Lightroom's quick collection), always there (no document yet
+//! is an empty one), never listed with the albums nor renamed or deleted;
+//! [`crate::Query::album`] naming it selects its photos as an album's.
+//! "Save as album" turns it into a plain album, emptying it or not.
+//!
 //! Each change answers what it changed as [`Changes`] holding the
 //! document before and after it, so the Library's undo takes it back
 //! ([`crate::Vault::revert`]) and puts it again ([`crate::Vault::replay`]).
@@ -30,6 +38,8 @@ pub const COLLECTIONS: &str = "library/collections";
 pub const ALBUM: &str = "album";
 /// A smart album's `kind`.
 pub const SMART: &str = "smart";
+/// The quick collection's key and `kind`.
+pub const QUICK: &str = "quick";
 
 /// An album: a name and the photos put in it, or for a smart album the
 /// rules choosing them.
@@ -110,6 +120,8 @@ pub fn album_key(name: &str, taken: impl Fn(&str) -> bool) -> String {
         "" => "album".to_string(),
         b => b.to_string(),
     };
+    // The quick collection's key is never an album's.
+    let taken = |k: &str| k == QUICK || taken(k);
     if !taken(&base) {
         return base;
     }
@@ -231,41 +243,8 @@ impl<S: Store> Vault<S> {
         rules: Option<Rule>,
     ) -> Result<(Album, Changes), String> {
         let name = album_name(name)?;
-        self.transaction(|store| {
-            check_free(&*store, &name, "")?;
-            let id = match id {
-                Some(id) if id.trim().is_empty() => return Err("an album needs an id".into()),
-                Some(id) => {
-                    if store.document(COLLECTIONS, id)?.is_some() {
-                        return Err(format!("a collection `{id}` exists already"));
-                    }
-                    id.to_string()
-                }
-                None => {
-                    let keys: Vec<String> = store
-                        .documents(COLLECTIONS)?
-                        .into_iter()
-                        .map(|(k, _)| k)
-                        .collect();
-                    album_key(&name, |k| keys.iter().any(|t| t == k))
-                }
-            };
-            let mut album = Album {
-                id,
-                name,
-                images: Vec::new(),
-                rules,
-                count: None,
-            };
-            for i in images {
-                let hex = i.hex();
-                if !album.images.contains(&hex) {
-                    album.images.push(hex);
-                }
-            }
-            let changes = put(store, &album.id, None, Some(album.doc()))?;
-            Ok((album, changes))
-        })
+        let images: Vec<String> = images.iter().map(ImageId::hex).collect();
+        self.transaction(|store| create_in(store, id, name, images, rules))
     }
 
     /// Renames an album; the same name again changes nothing.
@@ -314,6 +293,73 @@ impl<S: Store> Vault<S> {
         })
     }
 
+    /// The photos of the quick collection ([`QUICK`]), by id, in the
+    /// order they were put in it (none before it was ever filled).
+    pub fn quick_collection(&self) -> Result<Vec<String>, String> {
+        let store = self.store.lock().expect("store lock");
+        Ok(quick_of(store.document(COLLECTIONS, QUICK)?.as_ref()))
+    }
+
+    /// B: when the quick collection holds every photo of `images`, takes
+    /// them out; else puts in those it lacks. Whether they were put in,
+    /// and what changed.
+    pub fn toggle_quick(&self, images: &[ImageId]) -> Result<(bool, Changes), String> {
+        let ids: Vec<String> = images.iter().map(ImageId::hex).collect();
+        self.transaction(|store| {
+            let before = store.document(COLLECTIONS, QUICK)?;
+            let mut quick = quick_of(before.as_ref());
+            let all_in = !ids.is_empty() && ids.iter().all(|i| quick.contains(i));
+            if all_in {
+                quick.retain(|i| !ids.contains(i));
+            } else {
+                for i in &ids {
+                    if !quick.contains(i) {
+                        quick.push(i.clone());
+                    }
+                }
+            }
+            let changes = put(store, QUICK, before, Some(quick_doc(&quick)))?;
+            Ok((!all_in, changes))
+        })
+    }
+
+    /// Empties the quick collection (its photos stay in the Library).
+    pub fn clear_quick(&self) -> Result<Changes, String> {
+        self.transaction(|store| {
+            let before = store.document(COLLECTIONS, QUICK)?;
+            if quick_of(before.as_ref()).is_empty() {
+                return Ok(Changes::default());
+            }
+            put(store, QUICK, before, Some(quick_doc(&[])))
+        })
+    }
+
+    /// "Save as album": a plain album named `name` (under `id` or a key
+    /// made from it) holding the quick collection's photos, which is
+    /// emptied when `clear` says so; one change. An empty quick
+    /// collection is refused.
+    pub fn save_quick(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        clear: bool,
+    ) -> Result<(Album, Changes), String> {
+        let name = album_name(name)?;
+        self.transaction(|store| {
+            let before = store.document(COLLECTIONS, QUICK)?;
+            let images = quick_of(before.as_ref());
+            if images.is_empty() {
+                return Err("the quick collection is empty".into());
+            }
+            let (album, mut changes) = create_in(store, id, name, images, None)?;
+            if clear {
+                let cleared = put(store, QUICK, before, Some(quick_doc(&[])))?;
+                changes.documents.extend(cleared.documents);
+            }
+            Ok((album, changes))
+        })
+    }
+
     fn change_album(
         &self,
         id: &str,
@@ -329,6 +375,67 @@ impl<S: Store> Vault<S> {
             put(store, id, before, Some(album.doc()))
         })
     }
+}
+
+/// Makes a collection in `store` (see [`Vault::create_album`]).
+fn create_in<S: Store>(
+    store: &mut S,
+    id: Option<&str>,
+    name: String,
+    images: Vec<String>,
+    rules: Option<Rule>,
+) -> Result<(Album, Changes), String> {
+    check_free(&*store, &name, "")?;
+    let id = match id {
+        Some(id) if id.trim().is_empty() => return Err("an album needs an id".into()),
+        Some(QUICK) => return Err(format!("`{QUICK}` is the quick collection's")),
+        Some(id) => {
+            if store.document(COLLECTIONS, id)?.is_some() {
+                return Err(format!("a collection `{id}` exists already"));
+            }
+            id.to_string()
+        }
+        None => {
+            let keys: Vec<String> = store
+                .documents(COLLECTIONS)?
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect();
+            album_key(&name, |k| keys.iter().any(|t| t == k))
+        }
+    };
+    let mut album = Album {
+        id,
+        name,
+        images: Vec::new(),
+        rules,
+        count: None,
+    };
+    for hex in images {
+        if !album.images.contains(&hex) {
+            album.images.push(hex);
+        }
+    }
+    let changes = put(store, &album.id, None, Some(album.doc()))?;
+    Ok((album, changes))
+}
+
+/// The quick collection's photos in its document (none when absent).
+fn quick_of(doc: Option<&Value>) -> Vec<String> {
+    doc.and_then(|d| d.get("images"))
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The quick collection's document holding `images`.
+fn quick_doc(images: &[String]) -> Value {
+    json!({ "kind": QUICK, "images": images })
 }
 
 /// Refuses to put photos in or take them out of a smart album.

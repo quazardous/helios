@@ -315,6 +315,10 @@ gui-history-album-delete = Supprimer l’album « { $name } »
 gui-history-album-add = Ajouter { $count } photos à « { $name } »
 gui-history-album-remove = Retirer { $count } photos de « { $name } »
 gui-history-album-new-smart = Nouvel album dynamique « { $name } »
+gui-history-quick-add = Ajouter { $count } photos à la collection rapide
+gui-history-quick-remove = Retirer { $count } photos de la collection rapide
+gui-history-quick-clear = Vider la collection rapide
+gui-history-quick-save = Enregistrer la collection rapide sous « { $name } »
 gui-history-album-rules = Modifier les règles de « { $name } »
 
 gui-history-preview-applied = appliqué
@@ -1129,6 +1133,14 @@ gui-library-folder-scan = Analyser ce dossier
 gui-library-folder-import = Importer les nouvelles photos d’ici
 gui-library-albums = Albums
 gui-library-albums-none = Aucun album pour l’instant
+gui-library-quick = Collection rapide
+gui-library-quick-tip = B ajoute les photos sélectionnées ou les retire
+gui-library-quick-toggle = Ajouter ou retirer les photos sélectionnées
+gui-library-quick-save = Enregistrer comme album…
+gui-library-quick-clear = Vider la collection rapide
+gui-library-quick-save-title = Enregistrer la collection rapide comme album
+gui-library-quick-save-clear = puis vider la collection rapide
+gui-library-quick-save-verb = Enregistrer
 gui-library-album-new = Nouvel album…
 gui-library-album-add = Ajouter les photos sélectionnées
 gui-library-album-remove = Retirer les photos sélectionnées
@@ -1972,6 +1984,7 @@ gui-library-missing-note = Manquante : son fichier n’est plus où il était, e
 gui-library-plug-in = Branchez { $volume } pour ouvrir cette photo (vu pour la dernière fois le { $date } sur { $node })
 
 gui-library-badge-offline = hors ligne
+gui-library-badge-quick = rapide
 
 gui-library-cannot-open = La bibliothèque ne peut pas être ouverte : { $error }
 

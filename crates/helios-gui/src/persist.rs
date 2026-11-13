@@ -672,6 +672,8 @@ impl<S: Store> Persist<S> {
             };
             let before = self.vault.album(edit.id()).ok().flatten();
             let name = before.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+            // Whether B put the photos in the quick collection.
+            let mut added = true;
             let done = match &edit {
                 E::Create { id, name, images } => ids(images)
                     .and_then(|i| self.vault.create_album(Some(id), name, &i))
@@ -695,10 +697,29 @@ impl<S: Store> Persist<S> {
                     .vault
                     .set_album_rules(id, rules.clone())
                     .map(|c| (name.clone(), 0, c)),
+                E::QuickToggle { images } => {
+                    // The photos it moved: those already in are not counted.
+                    let held = self.vault.quick_collection().map_or(0, |q| q.len());
+                    ids(images)
+                        .and_then(|i| self.vault.toggle_quick(&i))
+                        .map(|(a, c)| {
+                            added = a;
+                            let now = self.vault.quick_collection().map_or(held, |q| q.len());
+                            (String::new(), now.abs_diff(held), c)
+                        })
+                }
+                E::QuickClear => {
+                    let count = self.vault.quick_collection().map_or(0, |q| q.len());
+                    self.vault.clear_quick().map(|c| (String::new(), count, c))
+                }
+                E::QuickSave { id, name, clear } => self
+                    .vault
+                    .save_quick(Some(id), name, *clear)
+                    .map(|(a, c)| (a.name, a.images.len(), c)),
             };
             match done {
                 Ok((name, count, changes)) => {
-                    let label = crate::library_history::album_label(&edit, &name, count);
+                    let label = crate::library_history::album_label(&edit, &name, count, added);
                     history.record(label, changes, now);
                 }
                 Err(e) => shell.notify(
@@ -717,8 +738,15 @@ impl<S: Store> Persist<S> {
             shell.library_mut().ask_albums();
         }
         if shell.library_mut().take_albums_wanted() {
-            match self.vault.albums() {
-                Ok(albums) => shell.library_mut().set_albums(albums),
+            match self
+                .vault
+                .albums()
+                .and_then(|a| Ok((a, self.vault.quick_collection()?)))
+            {
+                Ok((albums, quick)) => {
+                    shell.library_mut().set_quick(quick);
+                    shell.library_mut().set_albums(albums);
+                }
                 Err(e) => shell.notify(
                     Level::Error,
                     Message::new(

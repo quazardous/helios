@@ -661,7 +661,13 @@ command-library-collection-rules-edit =
     .title = Modifier les règles dans l’éditeur ouvert, une modification annulable à la fois : `edit` (add_condition, add_group, remove, move avec `to`, match avec `match` : all, any ou none, field avec `field`, op avec `op`, value avec `value`, `high` (la seconde borne de between, ou le nombre de within) et `unit` (days, weeks ou months), undo, redo, apply, cancel) à `at`, un chemin d’indices depuis le groupe du haut ([]). Une date de prise de vue prend un jour (AAAA-MM-JJ) ou, avec `op: within`, today, this_year ou last. Répond le brouillon, le défaut de chaque condition et les règles quand elles sont valides
 
 command-library-collection-list =
-    .title = Lister les albums : `id`, `name`, `kind` (album ou dynamique), combien de photos chacun contient, les `rules` d’un album dynamique
+    .title = Lister les albums : `id`, `name`, `kind` (album ou dynamique), combien de photos chacun contient, les `rules` d’un album dynamique ; et le nombre `quick` de la collection rapide
+command-library-quick-toggle =
+    .title = Mettre des photos dans la collection rapide (`images` : identifiants, sinon la sélection), ou les en retirer quand elle les contient toutes ; restreindre la bibliothèque à elle avec la collection `quick`
+command-library-quick-clear =
+    .title = Vider la collection rapide ; ses photos restent dans la bibliothèque
+command-library-quick-saveAs =
+    .title = Enregistrer la collection rapide comme album (`name` ; `clear` : la vider aussi) ; sans `name`, le demande. Répond l’`id` de l’album
 
 command-library-scanFolder =
     .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume

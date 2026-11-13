@@ -7,12 +7,16 @@
 //! (L6): made from the selection, filled and emptied, one undo step each,
 //! a click scoping the grid, the album chosen kept with the workspace;
 //! smart albums made through their form, their rules set by an agent
-//! (nested, undone, a fault refused), scoping the grid the same way.
+//! (nested, undone, a fault refused), scoping the grid the same way. The
+//! quick collection: B toggles the selection in and out (one step a
+//! press, not while a text field is typed in), its count and the grid's
+//! badge follow, `collection:quick` scopes the grid, "Save as album"
+//! keeps its photos and empties it or not.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use egui::vec2;
+use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_pop::views::library::filter::Filter;
@@ -864,6 +868,155 @@ fn a_nested_tree_is_built_in_the_rule_editor_each_edit_undone() {
     );
     settle(&mut h, &mut persist, 16.0);
     assert_eq!(grid(&h), ["a.jpg"]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The quick collection's row in the Albums section, by its count.
+fn quick_row(count: usize) -> String {
+    format!("⚡ Quick collection {count}")
+}
+
+/// The steps of the library's history, newest last.
+fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
+    h.state()
+        .library_history()
+        .line()
+        .undo
+        .iter()
+        .map(|s| s.label.text.clone())
+        .collect()
+}
+
+#[test]
+fn b_toggles_the_quick_collection_which_scopes_the_grid_and_saves_as_an_album() {
+    let root = temp("quick");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+    // Always there, pinned first, even with no album.
+    h.get_by_label(&quick_row(0));
+    h.get_by_label("No album yet");
+
+    // B in the grid: the selection goes in, one step; the badge shows.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(3).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    let before = steps(&h).len();
+    h.key_press(Key::B);
+    settle(&mut h, &mut persist, 2.0);
+    assert_eq!(h.state().library().quick_count(), 2);
+    h.get_by_label(&quick_row(2));
+    let s = steps(&h);
+    assert_eq!(s.len(), before + 1);
+    assert_eq!(s.last().unwrap(), "Add 2 photos to the quick collection");
+    let badges = |h: &Harness<'_, Shell>, n: u8| {
+        h.state()
+            .library()
+            .badges_of(&h.ctx, &id(n).hex())
+            .contains(&"quick".to_string())
+    };
+    assert!(badges(&h, 1) && badges(&h, 3) && !badges(&h, 2));
+
+    // B again: out, one more step; undone, back in.
+    h.key_press(Key::B);
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(h.state().library().quick_count(), 0);
+    assert!(!badges(&h, 1));
+    let s = steps(&h);
+    assert_eq!(s.len(), before + 2);
+    assert_eq!(
+        s.last().unwrap(),
+        "Remove 2 photos from the quick collection"
+    );
+    let undone = history.undo(
+        &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(
+        matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+        "{undone:?}"
+    );
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(h.state().library().quick_count(), 2);
+    assert!(badges(&h, 3));
+
+    // B typed in a text field does not toggle.
+    h.get_by_label("Search images").click();
+    h.run();
+    h.key_press(Key::B);
+    settle(&mut h, &mut persist, 10.0);
+    assert_eq!(h.state().library().quick_count(), 2);
+    assert_eq!(steps(&h).len(), before + 1);
+
+    // A click on its row scopes the grid: `collection:quick`.
+    h.get_by_label(&quick_row(2)).click();
+    settle(&mut h, &mut persist, 12.0);
+    assert_eq!(h.state().library().collection().as_deref(), Some("quick"));
+    assert_eq!(grid(&h), ["a.jpg", "c.nef"]);
+    filter(&mut h, &mut persist, "collection:quick camera:R5");
+    assert_eq!(grid(&h), ["c.nef"]);
+    filter(&mut h, &mut persist, "collection:quick");
+    assert_eq!(grid(&h), ["a.jpg", "c.nef"]);
+
+    // Saved as an album, kept: its photos stay in the quick collection.
+    run(&mut h, "library.quick.saveAs", json!({ "name": "Picks" }));
+    settle(&mut h, &mut persist, 16.0);
+    assert_eq!(albums(&h), [("Picks".to_string(), 2)]);
+    assert_eq!(h.state().library().quick_count(), 2);
+    assert_eq!(
+        steps(&h).last().unwrap(),
+        "Save the quick collection as “Picks”"
+    );
+    // Through its form, emptied: the grid scoped to it shows none.
+    run(&mut h, "library.quick.saveAs", json!({}));
+    settle(&mut h, &mut persist, 18.0);
+    run(
+        &mut h,
+        "dialog.answer",
+        json!({ "values": { "name": "Best", "clear": true } }),
+    );
+    settle(&mut h, &mut persist, 20.0);
+    assert_eq!(
+        albums(&h),
+        [("Best".to_string(), 2), ("Picks".to_string(), 2)]
+    );
+    assert_eq!(h.state().library().quick_count(), 0);
+    assert!(grid(&h).is_empty());
+    // Empty: nothing to save.
+    run(&mut h, "library.quick.saveAs", json!({ "name": "Again" }));
+    settle(&mut h, &mut persist, 21.0);
+    let said = warnings(&h);
+    assert!(said.contains("the quick collection is empty"), "{said}");
+    assert_eq!(albums(&h).len(), 2);
+
+    // An agent fills it by ids, then clears it, one step each.
+    run(
+        &mut h,
+        "library.quick.toggle",
+        json!({ "images": [id(2).hex()] }),
+    );
+    settle(&mut h, &mut persist, 22.0);
+    assert_eq!(grid(&h), ["b.jpg"]);
+    assert_eq!(h.state().library().quick_count(), 1);
+    run(&mut h, "library.quick.clear", json!({}));
+    settle(&mut h, &mut persist, 24.0);
+    assert_eq!(h.state().library().quick_count(), 0);
+    assert_eq!(steps(&h).last().unwrap(), "Clear the quick collection");
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

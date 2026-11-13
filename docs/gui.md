@@ -1025,6 +1025,7 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library, culling | `P`, `U` | pick, take the flag off |
 | library, culling | `F2`–`F5`; `6`–`9` | yellow, green, blue, purple; red, yellow, green, blue |
 | library, culling | `Right`, `Left`, `S` | next, previous image (not in Compare); open or close a stack |
+| library, culling | `B` | the selected photos in or out of the quick collection (`library.quick.toggle`, Lightroom) |
 | library | `C` | compare the selected photos (`library.compare`) |
 | Compare place | `Right`, `Left` | the next, previous photo active (`compare.next`, `compare.previous`) |
 | culling | `Space`, `Backspace` | next, previous image (in the grid `Space` selects) |

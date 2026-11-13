@@ -486,6 +486,7 @@ each a command a profile or a template may rebind (the whole map is in
 | 6, 7, 8, 9 | `vault.label.red`, `.yellow`, `.green`, `.blue` |
 | F2, F3, F4, F5 | `vault.label.yellow`, `.green`, `.blue`, `.purple` |
 | S | `vault.stack.toggle` |
+| B | `library.quick.toggle` (the quick collection) |
 | Left, Right | `vault.previous`, `vault.next` |
 | Backspace, Space (culling only) | `vault.previous`, `vault.next` |
 

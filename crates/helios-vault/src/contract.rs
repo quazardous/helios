@@ -54,6 +54,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     folders_count_their_photos_and_those_below_in_one_query(make());
     albums_are_made_filled_renamed_and_forgotten(make());
     an_album_s_changes_are_undone_and_redone(make());
+    the_quick_collection_toggles_clears_and_saves(make());
     smart_album_rules_select_in_one_query(make());
     relative_dates_follow_the_query_s_clock(make());
     smart_albums_scope_count_and_undo(make());
@@ -2410,6 +2411,62 @@ fn an_album_s_changes_are_undone_and_redone<S: Store>(s: S) {
     let kept = v.revert(&made).unwrap();
     assert_eq!(kept.kept, 1);
     assert_eq!(in_album(&v, "trip").len(), 3);
+}
+
+/// The quick collection (`docs/design/library.md`, L6): B toggles photos
+/// in and out (all in: out; else the missing ones in), a query on it
+/// selects them, each change undone; it is no album (not listed, its key
+/// never taken by one); "Save as album" keeps its photos and empties it
+/// or not, in one change.
+fn the_quick_collection_toggles_clears_and_saves<S: Store>(s: S) {
+    use crate::collections::QUICK;
+    let v = Vault::new(with_images(s, 3));
+    let id = |n: u8| image(n).id;
+    assert!(v.quick_collection().unwrap().is_empty());
+    assert!(in_album(&v, QUICK).is_empty(), "never filled: empty");
+    let (added, _) = v.toggle_quick(&[id(1), id(3)]).unwrap();
+    assert!(added);
+    assert_eq!(in_album(&v, QUICK), vec![id(1), id(3)]);
+    // One of two in: the other is put in.
+    let (added, _) = v.toggle_quick(&[id(2), id(3)]).unwrap();
+    assert!(added);
+    assert_eq!(in_album(&v, QUICK), vec![id(1), id(2), id(3)]);
+    // All in: taken out, undone, redone.
+    let (added, out) = v.toggle_quick(&[id(2)]).unwrap();
+    assert!(!added);
+    assert_eq!(in_album(&v, QUICK), vec![id(1), id(3)]);
+    v.revert(&out).unwrap();
+    assert_eq!(in_album(&v, QUICK).len(), 3);
+    v.replay(&out).unwrap();
+    assert_eq!(v.quick_collection().unwrap(), [id(1).hex(), id(3).hex()]);
+    // Not an album: not listed, its key never an album's.
+    assert!(v.albums().unwrap().is_empty());
+    assert!(v.rename_album(QUICK, "x").is_err());
+    assert!(v.delete_album(QUICK).is_err());
+    assert!(v.create_album(Some(QUICK), "x", &[]).is_err());
+    let (quick, _) = v.create_album(None, "Quick", &[]).unwrap();
+    assert_eq!(quick.id, "quick-2");
+    // Saved as an album, kept: one change.
+    let (album, saved) = v.save_quick(None, "Picks", false).unwrap();
+    assert_eq!(album.images, [id(1).hex(), id(3).hex()]);
+    assert_eq!(saved.documents.len(), 1);
+    assert_eq!(in_album(&v, "picks"), vec![id(1), id(3)]);
+    assert_eq!(in_album(&v, QUICK).len(), 2);
+    // Saved and emptied, one change undone whole.
+    let (_, saved) = v.save_quick(Some("best"), "Best", true).unwrap();
+    assert_eq!(saved.documents.len(), 2);
+    assert!(in_album(&v, QUICK).is_empty());
+    assert_eq!(in_album(&v, "best"), vec![id(1), id(3)]);
+    assert!(v.save_quick(None, "Again", false).is_err(), "empty");
+    v.revert(&saved).unwrap();
+    assert!(v.album("best").unwrap().is_none());
+    assert_eq!(in_album(&v, QUICK), vec![id(1), id(3)]);
+    // Cleared, undone.
+    let cleared = v.clear_quick().unwrap();
+    assert!(in_album(&v, QUICK).is_empty());
+    assert!(v.clear_quick().unwrap().is_empty(), "empty: no change");
+    v.revert(&cleared).unwrap();
+    assert_eq!(in_album(&v, QUICK).len(), 2);
 }
 
 /// A smart album's rule tree (`docs/design/library.md`, L6) compiles into
