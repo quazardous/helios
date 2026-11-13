@@ -158,7 +158,7 @@ pub struct ReadCache {
 
 /// The cache's key for a call: its method and its params, `_meta` left
 /// out and object keys in order.
-fn key(method: &str, params: &Value) -> String {
+pub(crate) fn key(method: &str, params: &Value) -> String {
     fn canonical(value: &Value) -> Value {
         match value {
             Value::Object(fields) => {

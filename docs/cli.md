@@ -6,7 +6,11 @@ sandboxes, runs batches and imports darktable edits. Answers are JSON. Exit code
 node answered with an error, 2 wrong usage, 3 the node cannot be reached, 4 the
 request was sent and its answer never came (the connection closed): its outcome
 is unknown, it may have been applied. After a 4, read the state before running
-the request again; never resend a change blindly.
+the request again; never resend a change blindly. Or send it again with the
+same key: every `control` request and every `run` carries one (`--request-id
+KEY`, else a new one, printed after an exit code 4), and the node applies a
+request sent again with its key once, answering it marked `"already_applied":
+true` if it had run (see [protocol.md](protocol.md#request-ids)).
 `helios` with no argument prints the full usage.
 
 ## Inspect and control
@@ -363,7 +367,7 @@ accepted. Its answers are JSON. See [library.md](library.md) for both.
 ```bash
 helios commands [--vault library.db | --node ADDRESS] [--window W] [--filter F] [--enabled]
 helios run ID [--vault library.db | --node ADDRESS] [--param KEY=VALUE]... [--json '{...}']
-              [--window W] [--scope node|window]
+              [--window W] [--scope node|window] [--request-id KEY]
 ```
 
 `commands` lists every command of the vault's node (`commands.list`),
@@ -384,6 +388,8 @@ A window command runs in `--window` as its menu would. When an id is in
 both scopes (`library.import`), the node's runs unless `--scope window`.
 The answer is printed; a refusal goes to the standard error, exit code 1;
 a connection that closed before the answer, exit code 4 (outcome unknown).
+The run's key (`--request-id`, else a new one) is printed after a 4: run it
+again with `--request-id KEY` and the node applies it once.
 
 ```bash
 helios commands --vault library.db --filter undo

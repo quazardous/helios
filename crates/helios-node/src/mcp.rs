@@ -2416,8 +2416,20 @@ pub const TOOLS: &[Tool] = &[
 ];
 
 impl Tool {
+    /// Whether the tool changes something: its request then carries a
+    /// key (`_meta.request_id`, the `request_id` argument or a new one),
+    /// so it may be sent again after an unknown outcome and is applied
+    /// once (`helios_inspect::request_ids`).
+    pub fn changes(&self) -> bool {
+        match self.endpoint {
+            Endpoint::Control => !CONTROL_READS.contains(&self.cmd),
+            Endpoint::Commands => self.cmd == "command.run",
+            Endpoint::Inspect | Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace => false,
+        }
+    }
+
     pub fn input_schema(&self) -> Value {
-        let properties: Map<String, Value> = self
+        let mut properties: Map<String, Value> = self
             .params
             .iter()
             .map(|p| {
@@ -2426,6 +2438,17 @@ impl Tool {
                 (p.name.to_string(), schema)
             })
             .collect();
+        if self.changes() {
+            properties.insert(
+                REQUEST_ID.into(),
+                json!({
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": helios_inspect::request_ids::LONGEST,
+                    "description": "This change's key. Given again after an outcome unknown, the node applies the change once and answers `already_applied`. A new one when left out.",
+                }),
+            );
+        }
         let required: Vec<&str> = self
             .params
             .iter()
@@ -2438,10 +2461,11 @@ impl Tool {
     /// The request this tool sends for these arguments, defaults filled in.
     pub fn request(&self, arguments: &Value) -> Result<Value, String> {
         let given = arguments.as_object().cloned().unwrap_or_default();
-        if let Some(unknown) = given
-            .keys()
-            .find(|k| !self.params.iter().any(|p| p.name == *k))
-        {
+        if let Some(unknown) = given.keys().find(|k| {
+            let known = self.params.iter().any(|p| p.name == *k);
+            let key = self.changes() && *k == REQUEST_ID;
+            !(known || key)
+        }) {
             return Err(format!("{}: unknown argument `{unknown}`", self.name));
         }
         let mut request = Map::new();
@@ -2458,6 +2482,16 @@ impl Tool {
                     return Err(format!("{}: missing argument `{}`", self.name, p.name));
                 }
             }
+        }
+        if self.changes() {
+            let key = match given.get(REQUEST_ID) {
+                None => helios_inspect::request_ids::new_request_id(),
+                Some(key) => key
+                    .as_str()
+                    .ok_or_else(|| format!("{}: `{REQUEST_ID}` is a string", self.name))?
+                    .to_string(),
+            };
+            request.insert("_meta".into(), json!({ REQUEST_ID: key }));
         }
         Ok(Value::Object(request))
     }
@@ -2558,13 +2592,40 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
     }
 }
 
+/// The argument that keys a change (`Tool::changes`).
+const REQUEST_ID: &str = "request_id";
+
+/// The control tools that only read: their requests carry no key.
+const CONTROL_READS: &[&str] = &[
+    "cache.stats",
+    "decisions",
+    "workflow.runs",
+    "workflow.items",
+];
+
+/// What an agent may do after an unknown outcome of `request`: send it
+/// again with its key, when it has one.
+fn resend_hint(request: &Value) -> String {
+    request["_meta"][REQUEST_ID]
+        .as_str()
+        .map_or_else(String::new, |key| {
+            format!(
+                "; or send it again with `{REQUEST_ID}` \"{key}\": the node applies it once and answers `already_applied` if it ran"
+            )
+        })
+}
+
 /// Sends `request` to the node at `address`. A request sent whose answer
 /// never came says its outcome is unknown, rather than that the node
-/// could not be reached: the agent reads the state before resending it.
+/// could not be reached: the agent reads the state before resending it,
+/// or resends it with its key.
 fn send(address: &Address, request: &Value) -> Result<Value, String> {
     request_at(address, request).map_err(|e| {
         if helios_inspect::unanswered(&e) {
-            format!("outcome unknown at the node at {address}: {e}")
+            format!(
+                "outcome unknown at the node at {address}: {e}{}",
+                resend_hint(request)
+            )
         } else {
             format!("cannot reach the node at {address}: {e}")
         }
@@ -2784,11 +2845,16 @@ pub fn commands_call(client: &helios_inspect::client::Client, request: &Value) -
     } else {
         ("commands.list", pick(&["window", "filter", "enabled_only"]))
     };
-    match client.request(method, params) {
+    let pending = match request["_meta"][REQUEST_ID].as_str() {
+        Some(key) if method == "command.run" => client.call_keyed(method, params, key),
+        _ => client.call(method, params),
+    };
+    match pending.wait() {
         Ok(answer) => answer_result(answer, false),
-        Err(e) if e.code == helios_inspect::rpc::code::OUTCOME_UNKNOWN => {
-            tool_result(format!("outcome unknown: {}", e.message), true)
-        }
+        Err(e) if e.code == helios_inspect::rpc::code::OUTCOME_UNKNOWN => tool_result(
+            format!("outcome unknown: {}{}", e.message, resend_hint(request)),
+            true,
+        ),
         Err(e) => tool_result(e.message, true),
     }
 }
@@ -4176,5 +4242,86 @@ mod tests {
         assert_eq!(result["isError"], true);
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("outcome unknown"), "{text}");
+    }
+
+    #[test]
+    fn changes_carry_a_key_and_reads_do_not() {
+        let tool = |name: &str| TOOLS.iter().find(|t| t.name == name).unwrap();
+        let set = tool("helios_set_param");
+        assert!(set.changes());
+        assert!(set.input_schema()["properties"][REQUEST_ID].is_object());
+        let arguments = json!({ "node": "exp", "param": "ev", "value": 1.0 });
+        let first = set.request(&arguments).unwrap();
+        let key = first["_meta"][REQUEST_ID].as_str().unwrap();
+        assert_ne!(
+            set.request(&arguments).unwrap()["_meta"],
+            first["_meta"],
+            "a new key each"
+        );
+        let mut given = arguments.clone();
+        given[REQUEST_ID] = json!("mine");
+        assert_eq!(set.request(&given).unwrap()["_meta"][REQUEST_ID], "mine");
+        assert!(resend_hint(&first).contains(key), "{}", resend_hint(&first));
+        assert!(tool("helios_command_run").changes());
+        for read in [
+            "helios_commands_list",
+            "helios_workflow_runs",
+            "helios_state",
+        ] {
+            let read = tool(read);
+            assert!(!read.changes(), "{}", read.name);
+            assert!(read.input_schema()["properties"].get(REQUEST_ID).is_none());
+        }
+    }
+
+    /// Counts the commands it runs.
+    #[derive(Default)]
+    struct Runs(std::sync::atomic::AtomicU32);
+
+    impl helios_inspect::rpc::Service for Runs {
+        fn call(
+            &self,
+            _: &str,
+            _: Value,
+            _: &helios_inspect::rpc::Call,
+        ) -> Result<Value, helios_inspect::rpc::Error> {
+            let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            Ok(json!({ "runs": n }))
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_run_sent_again_with_its_request_id_is_applied_once() {
+        let dir = std::env::temp_dir().join(format!("helios-mcp-{}-keys", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("node.sock");
+        let runs = Arc::new(Runs::default());
+        helios_inspect::serve_rpc_at(
+            &helios_inspect::Listen::Unix(path.clone()),
+            None,
+            |_: Value, _: &mut helios_inspect::Connection<'_>| None,
+            runs.clone(),
+        )
+        .unwrap();
+        let tool = TOOLS
+            .iter()
+            .find(|t| t.name == "helios_command_run")
+            .unwrap();
+        let arguments = json!({ "id": "theme.select", "request_id": "agent-1" });
+        let run = || {
+            // A new connection each time, as after an unknown outcome.
+            let client =
+                helios_inspect::client::Client::connect(&Address::Unix(path.clone())).unwrap();
+            let result = commands_call(&client, &tool.request(&arguments).unwrap());
+            assert_eq!(result["isError"], false, "{result}");
+            let text = result["content"][0]["text"].as_str().unwrap().to_string();
+            serde_json::from_str::<Value>(&text).unwrap()
+        };
+        assert_eq!(run(), json!({ "runs": 1 }));
+        assert_eq!(run(), json!({ "runs": 1, "already_applied": true }));
+        assert_eq!(runs.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
