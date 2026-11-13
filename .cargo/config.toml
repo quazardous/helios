@@ -8,4 +8,8 @@ survival = "nextest run -p helios-gui -p helios-node --test survival"
 # The stability scenarios (kill -9 in the middle of the headless node's
 # own jobs) and the many-clients stress run: not in CI, run by the bench
 # box's `stability` job, on demand and before a release (docs/bench.md).
-stability = "nextest run -p helios-node --features stability --test stability --test many_clients"
+# The long soak is left out: the `soak` job runs it alone.
+stability = ["nextest", "run", "-p", "helios-node", "--features", "stability", "--test", "stability", "--test", "many_clients", "-E", "not test(soak_long)"]
+# The soak: a moderate mix of clients on one headless node for an hour
+# (HELIOS_SOAK_MINUTES), sampled every 30 s; the bench box's `soak` job.
+soak = ["nextest", "run", "-p", "helios-node", "--features", "stability", "--test", "many_clients", "-E", "test(soak_long)"]

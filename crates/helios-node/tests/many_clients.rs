@@ -34,6 +34,20 @@
 //! default, for `HELIOS_STRESS_SECONDS`, 60 by default, seed
 //! `HELIOS_STRESS_SEED`) sits behind the `stability` feature: the bench
 //! box's `stability` job runs it, never CI.
+//!
+//! The soak is the same scenario, long and moderate: a few clients, each
+//! pausing between its calls, for an hour by default
+//! (`HELIOS_SOAK_MINUTES`, `HELIOS_SOAK_CLIENTS`, `HELIOS_SOAK_EVERY`
+//! seconds between samples, `HELIOS_SOAK_SEED`). Every sample takes the
+//! node's memory, threads and descriptors, its open vault files and the
+//! size of the vault's write-ahead log, what its caches hold, the bus's
+//! subscribers and journal, and how far each subscriber lags behind the
+//! bus. Besides every check above, no measure may grow over the run: once
+//! warmed up, the mean of the last third of the samples stays within a
+//! tolerance of the first third's. The series is written to the file
+//! `HELIOS_SOAK_REPORT` names and a summary printed. A short soak (a few
+//! seconds, sampled twice a second) is a normal test; the long one sits
+//! behind the `stability` feature and runs in the bench box's `soak` job.
 
 #![cfg(unix)]
 
@@ -75,6 +89,9 @@ struct Scale {
     seed: u64,
     /// Pictures of a client's cancelled imports.
     big: usize,
+    /// How long a client waits between two steps: none for the stress
+    /// run, a moderate pace for the soak.
+    pause: Duration,
 }
 
 /// A deterministic generator (splitmix64).
@@ -115,9 +132,21 @@ struct Node {
 }
 
 impl Node {
-    fn start(dir: &Path) -> Self {
+    /// `debug_control` also serves the debug control endpoint
+    /// (`control.sock`), which only debug builds have: the soak reads the
+    /// caches' sizes there.
+    fn start(dir: &Path, debug_control: bool) -> Self {
         std::fs::write(dir.join("network.json"), NETWORK).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_helios-node"));
+        if debug_control {
+            command
+                .arg("--control")
+                .arg(dir.join("control.sock"))
+                .env("HELIOS_DEBUG_CONTROL", "1");
+        } else {
+            command.env_remove("HELIOS_DEBUG_CONTROL");
+        }
+        let mut child = command
             .arg("--graph")
             .arg(dir.join("network.json"))
             .arg("--socket")
@@ -126,7 +155,6 @@ impl Node {
             .arg(dir.join("batch.sock"))
             .arg("--vault")
             .arg(dir.join("vault.db"))
-            .env_remove("HELIOS_DEBUG_CONTROL")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(
@@ -296,6 +324,7 @@ fn client_run(
     shared: &[String],
     own: &Own,
     seed: u64,
+    pause: Duration,
     end: Instant,
     stop: &AtomicBool,
 ) -> Tally {
@@ -482,6 +511,9 @@ fn client_run(
                 }
             }
         }
+        if !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
     }
     tally
 }
@@ -496,12 +528,22 @@ struct Seen {
     disorder: Vec<String>,
 }
 
-/// Follows the bus on the node's inspect socket until `stop`; `saves`
-/// counts the saves seen so far.
+/// Where a subscriber stands while it runs.
+#[derive(Default)]
+struct Following {
+    /// The saves seen so far.
+    saves: AtomicU64,
+    /// The sequence number of the last event seen.
+    last: AtomicU64,
+}
+
+/// Follows the bus's events whose kind starts with `prefix` on the
+/// node's inspect socket until `stop`.
 fn subscribe(
     socket: &Path,
+    prefix: &str,
     stop: Arc<AtomicBool>,
-    saves: Arc<AtomicU64>,
+    following: Arc<Following>,
 ) -> std::thread::JoinHandle<Seen> {
     let mut stream = UnixStream::connect(socket).unwrap();
     stream.set_read_timeout(Some(DEADLINE)).unwrap();
@@ -509,7 +551,7 @@ fn subscribe(
         stream,
         "{}",
         json!({ "jsonrpc": "2.0", "id": 1, "method": "events.subscribe",
-                "params": { "prefix": "control.command" } })
+                "params": { "prefix": prefix } })
     )
     .unwrap();
     // The answer to the subscription first.
@@ -560,14 +602,19 @@ fn subscribe(
                 seen.disorder.push(format!("event {seq} after {last}"));
             }
             last = seq;
+            following.last.store(seq, Ordering::SeqCst);
             seen.events += 1;
-            if event["payload"]["id"] == "library.edit.save" {
+            if event["kind"]
+                .as_str()
+                .is_some_and(|k| k.starts_with("control.command"))
+                && event["payload"]["id"] == "library.edit.save"
+            {
                 let origin = event["payload"]["origin"]
                     .as_str()
                     .unwrap_or("")
                     .to_string();
                 *seen.saves.entry(origin).or_default() += 1;
-                saves.fetch_add(1, Ordering::SeqCst);
+                following.saves.fetch_add(1, Ordering::SeqCst);
             }
         }
         let _ = reader.read_to_end(&mut Vec::new());
@@ -584,8 +631,169 @@ fn quantile(sorted: &[u64], q: f64) -> f64 {
     sorted[at] as f64 / 1000.0
 }
 
-/// The scenario at `scale`, in a folder of its own named `name`.
-fn many_clients(name: &str, scale: Scale) {
+/// A soak's sampling: how often the node is measured.
+#[derive(Clone, Copy, Debug)]
+struct Soak {
+    every: Duration,
+}
+
+/// The node measured once, `at_s` seconds into the run.
+#[derive(Clone, Copy, Debug, Default)]
+struct Sample {
+    at_s: f64,
+    usage: Usage,
+    /// Descriptors open on the vault's files (the database, its
+    /// write-ahead log and shared memory): the SQLite handles.
+    vault_files: u64,
+    wal_bytes: u64,
+    /// What the caches hold, in bytes (debug builds only: the debug
+    /// control endpoint serves `cache.stats`).
+    cache_bytes: Option<u64>,
+    bus_subscribers: u64,
+    journal: u64,
+    /// How many events the slowest subscriber is behind the bus.
+    lag: u64,
+}
+
+impl Sample {
+    fn json(&self) -> Value {
+        json!({
+            "at_s": self.at_s,
+            "rss_kib": self.usage.rss_kib,
+            "threads": self.usage.threads,
+            "fds": self.usage.fds,
+            "vault_files": self.vault_files,
+            "wal_bytes": self.wal_bytes,
+            "cache_bytes": self.cache_bytes,
+            "bus_subscribers": self.bus_subscribers,
+            "journal": self.journal,
+            "lag": self.lag,
+        })
+    }
+}
+
+/// Measures the node `pid` serving the folder `root`; `inspect` and
+/// `control` are clients of its inspect and debug control endpoints.
+fn sample(
+    pid: u32,
+    root: &Path,
+    at_s: f64,
+    inspect: &Client,
+    control: Option<&Client>,
+    following: &[Arc<Following>],
+) -> Sample {
+    let vault = root.join("vault.db");
+    let vault_files = std::fs::read_dir(format!("/proc/{pid}/fd")).map_or(0, |d| {
+        d.filter_map(Result::ok)
+            .filter_map(|e| std::fs::read_link(e.path()).ok())
+            .filter(|target| {
+                target
+                    .as_os_str()
+                    .to_string_lossy()
+                    .starts_with(vault.to_string_lossy().as_ref())
+            })
+            .count() as u64
+    });
+    let wal_bytes = std::fs::metadata(root.join("vault.db-wal")).map_or(0, |m| m.len());
+    let ask = |client: &Client, method: &str, params: Value| {
+        client
+            .call(method, params)
+            .wait_timeout(DEADLINE)
+            .unwrap_or_else(|| panic!("{method}: no answer in {}s", DEADLINE.as_secs()))
+            .unwrap_or_else(|e| panic!("{method}: {e:?}"))
+    };
+    let bus = ask(inspect, "describe", json!({ "entity": "bus" }));
+    let bus = &bus["describe"];
+    let last_seq = bus["last_seq"].as_u64().unwrap_or(0);
+    let slowest = following
+        .iter()
+        .map(|f| f.last.load(Ordering::SeqCst))
+        .min()
+        .unwrap_or(last_seq);
+    let cache_bytes = control.map(|control| {
+        let stats = ask(control, "cache.stats", json!({}));
+        stats["tiers"].as_array().map_or(0, |tiers| {
+            tiers.iter().filter_map(|t| t["used"].as_u64()).sum()
+        })
+    });
+    Sample {
+        at_s,
+        usage: Usage::of(pid),
+        vault_files,
+        wal_bytes,
+        cache_bytes,
+        bus_subscribers: bus["subscribers"].as_u64().unwrap_or(0),
+        journal: bus["journal"]["len"].as_u64().unwrap_or(0),
+        lag: last_seq.saturating_sub(slowest),
+    }
+}
+
+/// One measure's trend over a soak's samples: the first quarter is the
+/// warm-up and left out; the rest is cut in thirds, and the mean of the
+/// last third may not exceed the first third's by more than `tolerance`
+/// (a function of that first mean). `None` with too few samples or when
+/// the measure was not taken.
+fn trend(
+    samples: &[Sample],
+    name: &str,
+    measure: impl Fn(&Sample) -> Option<f64>,
+    tolerance: impl Fn(f64) -> f64,
+) -> Option<(Value, Option<String>)> {
+    let steady: Vec<(f64, f64)> = samples[samples.len() / 4..]
+        .iter()
+        .map(|s| measure(s).map(|v| (s.at_s, v)))
+        .collect::<Option<_>>()?;
+    if steady.len() < 3 {
+        return None;
+    }
+    let third = steady.len() / 3;
+    let mean = |part: &[(f64, f64)]| part.iter().map(|(_, v)| v).sum::<f64>() / part.len() as f64;
+    let first = mean(&steady[..third]);
+    let last = mean(&steady[steady.len() - third..]);
+    // The least-squares slope, for the report.
+    let n = steady.len() as f64;
+    let (mt, mv) = (
+        steady.iter().map(|(t, _)| t).sum::<f64>() / n,
+        steady.iter().map(|(_, v)| v).sum::<f64>() / n,
+    );
+    let num: f64 = steady.iter().map(|(t, v)| (t - mt) * (v - mv)).sum();
+    let den: f64 = steady.iter().map(|(t, _)| (t - mt) * (t - mt)).sum();
+    let per_hour = if den > 0.0 { num / den * 3600.0 } else { 0.0 };
+    let (min, max) = steady
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), (_, v)| {
+            (lo.min(*v), hi.max(*v))
+        });
+    let allowed = tolerance(first);
+    let growth = last - first;
+    let verdict = (growth > allowed).then(|| {
+        format!(
+            "{name} grew from {first:.0} to {last:.0} (allowed {allowed:.0}, {per_hour:.0} an hour)"
+        )
+    });
+    Some((
+        json!({
+            "measure": name,
+            "first_third": first,
+            "last_third": last,
+            "growth": growth,
+            "tolerance": allowed,
+            "per_hour": per_hour,
+            "min": min,
+            "max": max,
+            "flat": verdict.is_none(),
+        }),
+        verdict,
+    ))
+}
+
+/// The scenario at `scale`, in a folder of its own named `name`; with
+/// `soak`, the node is sampled all along and no measure may grow.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario from start to checks, in the order it runs"
+)]
+fn many_clients(name: &str, scale: Scale, soak: Option<Soak>) {
     struct Gone(PathBuf);
     impl Drop for Gone {
         fn drop(&mut self) {
@@ -610,7 +818,8 @@ fn many_clients(name: &str, scale: Scale) {
     let owns: Vec<Own> = (0..scale.clients)
         .map(|c| own(&root, c, scale.big))
         .collect();
-    let mut node = Node::start(&root);
+    let debug_control = soak.is_some() && cfg!(debug_assertions);
+    let mut node = Node::start(&root, debug_control);
     {
         let setup = Client::connect(&node.batch()).unwrap();
         let report = setup
@@ -626,31 +835,67 @@ fn many_clients(name: &str, scale: Scale) {
 
     // The bus followed by a few subscribers from the start.
     let stop = Arc::new(AtomicBool::new(false));
-    let subscribers: Vec<_> = (0..scale.clients.div_ceil(8))
+    // The soak's subscribers follow every event, so their lag is counted
+    // in the bus's own sequence numbers.
+    let (count, prefix) = match soak {
+        Some(_) => (2, ""),
+        None => (scale.clients.div_ceil(8), "control.command"),
+    };
+    let subscribers: Vec<_> = (0..count)
         .map(|_| {
-            let saves = Arc::new(AtomicU64::new(0));
-            let handle = subscribe(&root.join("inspect.sock"), stop.clone(), saves.clone());
-            (handle, saves)
+            let following = Arc::new(Following::default());
+            let handle = subscribe(
+                &root.join("inspect.sock"),
+                prefix,
+                stop.clone(),
+                following.clone(),
+            );
+            (handle, following)
         })
         .collect();
-    // The node's usage sampled while the clients run.
+    // The node's usage sampled while the clients run; the soak's series.
     let peak = Arc::new(Mutex::new(before));
     let sampled = Arc::new(AtomicU64::new(0));
+    let series: Arc<Mutex<Vec<Sample>>> = Arc::default();
+    let started = Instant::now();
     let sampler = {
-        let (stop, peak, sampled) = (stop.clone(), peak.clone(), sampled.clone());
+        let (stop, peak, sampled, series) =
+            (stop.clone(), peak.clone(), sampled.clone(), series.clone());
+        let following: Vec<Arc<Following>> = subscribers.iter().map(|(_, f)| f.clone()).collect();
+        let root = root.clone();
         std::thread::spawn(move || {
+            let clients = soak.map(|soak| {
+                let inspect = Client::connect(&Address::Unix(root.join("inspect.sock")))
+                    .expect("the sampler connects to the inspect socket");
+                let control = debug_control.then(|| {
+                    Client::connect(&Address::Unix(root.join("control.sock")))
+                        .expect("the sampler connects to the debug control socket")
+                });
+                (soak, inspect, control)
+            });
+            let mut next = started;
             while !stop.load(Ordering::SeqCst) {
                 let now = Usage::of(pid);
                 let mut p = peak.lock().unwrap_or_else(PoisonError::into_inner);
                 *p = p.max(now);
                 sampled.fetch_add(1, Ordering::SeqCst);
                 drop(p);
+                if let Some((soak, inspect, control)) = &clients
+                    && Instant::now() >= next
+                {
+                    let at_s = started.elapsed().as_secs_f64();
+                    let s = sample(pid, &root, at_s, inspect, control.as_ref(), &following);
+                    series
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(s);
+                    next += soak.every;
+                }
                 std::thread::sleep(Duration::from_millis(100));
             }
         })
     };
 
-    let started = Instant::now();
     let end = started + scale.run;
     let (done, finished) = mpsc::channel();
     let owns = Arc::new(owns);
@@ -665,7 +910,16 @@ fn many_clients(name: &str, scale: Scale) {
             node.batch(),
         );
         std::thread::spawn(move || {
-            let tally = client_run(c, &address, &shared, &owns[c], scale.seed, end, &workers);
+            let tally = client_run(
+                c,
+                &address,
+                &shared,
+                &owns[c],
+                scale.seed,
+                scale.pause,
+                end,
+                &workers,
+            );
             let _ = done.send(tally);
         });
     }
@@ -705,7 +959,7 @@ fn many_clients(name: &str, scale: Scale) {
     let streamed = Instant::now() + Duration::from_secs(10);
     while subscribers
         .iter()
-        .any(|(_, saves)| saves.load(Ordering::SeqCst) < total_saves)
+        .any(|(_, f)| f.saves.load(Ordering::SeqCst) < total_saves)
         && Instant::now() < streamed
     {
         std::thread::sleep(Duration::from_millis(50));
@@ -777,7 +1031,7 @@ fn many_clients(name: &str, scale: Scale) {
     latencies.sort_unstable();
     let calls: u64 = tallies.iter().map(|t| t.calls).sum();
     let errors: Vec<String> = tallies.iter().flat_map(|t| t.errors.clone()).collect();
-    let report = json!({
+    let mut report = json!({
         "clients": scale.clients,
         "seconds": elapsed.as_secs_f64(),
         "seed": scale.seed,
@@ -805,9 +1059,76 @@ fn many_clients(name: &str, scale: Scale) {
             "samples": sampled.load(Ordering::SeqCst),
         },
     });
-    println!("many-clients: {report}");
-    if let Some(file) = std::env::var_os("HELIOS_STRESS_REPORT") {
-        let _ = std::fs::write(file, format!("{report:#}\n"));
+    let mut growing = Vec::new();
+    if soak.is_some() {
+        let samples = std::mem::take(&mut *series.lock().unwrap_or_else(PoisonError::into_inner));
+        let kib = 1024.0;
+        #[allow(clippy::type_complexity, reason = "a table of measures")]
+        let measures: [(&str, fn(&Sample) -> Option<f64>, fn(f64) -> f64); 9] = [
+            (
+                "rss_kib",
+                |s| Some(s.usage.rss_kib as f64),
+                |base| 16.0 * 1024.0 + base / 10.0,
+            ),
+            ("threads", |s| Some(s.usage.threads as f64), |_| 4.0),
+            ("fds", |s| Some(s.usage.fds as f64), |_| 4.0),
+            ("vault_files", |s| Some(s.vault_files as f64), |_| 2.0),
+            (
+                "wal_bytes",
+                |s| Some(s.wal_bytes as f64),
+                |_| 8.0 * 1024.0 * 1024.0,
+            ),
+            (
+                "cache_bytes",
+                |s| s.cache_bytes.map(|b| b as f64),
+                |base| 16.0 * 1024.0 * 1024.0 + base / 10.0,
+            ),
+            (
+                "bus_subscribers",
+                |s| Some(s.bus_subscribers as f64),
+                |_| 2.0,
+            ),
+            (
+                "journal",
+                |s| Some(s.journal as f64),
+                |_| helios_core::bus::JOURNAL as f64,
+            ),
+            ("lag", |s| Some(s.lag as f64), |_| 512.0),
+        ];
+        let mut trends = Vec::new();
+        for (name, measure, tolerance) in measures {
+            if let Some((t, verdict)) = trend(&samples, name, measure, tolerance) {
+                println!(
+                    "soak: {name:<16} first third {:>12.0}  last third {:>12.0}  range {:.0}..{:.0}  {:+.0} an hour  {}",
+                    t["first_third"].as_f64().unwrap_or(0.0),
+                    t["last_third"].as_f64().unwrap_or(0.0),
+                    t["min"].as_f64().unwrap_or(0.0),
+                    t["max"].as_f64().unwrap_or(0.0),
+                    t["per_hour"].as_f64().unwrap_or(0.0),
+                    if verdict.is_none() { "flat" } else { "GROWS" },
+                );
+                trends.push(t);
+                growing.extend(verdict);
+            }
+        }
+        report["peak_rss_mib"] = json!(peak.rss_kib as f64 / kib);
+        report["samples"] = json!(samples.len());
+        println!("soak: {report}");
+        report["trends"] = json!(trends);
+        report["series"] = json!(samples.iter().map(Sample::json).collect::<Vec<_>>());
+        if let Some(file) = std::env::var_os("HELIOS_SOAK_REPORT") {
+            let _ = std::fs::write(file, format!("{report:#}\n"));
+        }
+        assert!(
+            samples.len() >= 4,
+            "the soak took {} samples, too few for a trend",
+            samples.len()
+        );
+    } else {
+        println!("many-clients: {report}");
+        if let Some(file) = std::env::var_os("HELIOS_STRESS_REPORT") {
+            let _ = std::fs::write(file, format!("{report:#}\n"));
+        }
     }
 
     assert!(
@@ -861,6 +1182,10 @@ fn many_clients(name: &str, scale: Scale) {
         before.rss_kib,
         peak.rss_kib
     );
+    assert!(
+        growing.is_empty(),
+        "the node grew over the soak: {growing:#?}"
+    );
 }
 
 /// The scenario small and short, so it keeps working between stability
@@ -874,7 +1199,9 @@ fn four_clients_read_write_import_and_cancel_on_one_node() {
             run: Duration::from_secs(3),
             seed: 5005,
             big: 8,
+            pause: Duration::ZERO,
         },
+        None,
     );
 }
 
@@ -895,6 +1222,51 @@ fn many_clients_on_one_node_for_a_minute() {
             run: Duration::from_secs(number("HELIOS_STRESS_SECONDS", 60)),
             seed: number("HELIOS_STRESS_SEED", 5005),
             big: 24,
+            pause: Duration::ZERO,
         },
+        None,
+    );
+}
+
+/// The soak small and short, so it keeps working between soak runs.
+#[test]
+fn soak_short_four_clients_sampled_twice_a_second() {
+    many_clients(
+        "soak-short",
+        Scale {
+            clients: 4,
+            run: Duration::from_secs(6),
+            seed: 5005,
+            big: 8,
+            pause: Duration::from_millis(20),
+        },
+        Some(Soak {
+            every: Duration::from_millis(500),
+        }),
+    );
+}
+
+/// The soak of the bench box's `soak` job: an hour by default.
+#[cfg(feature = "stability")]
+#[test]
+fn soak_long_moderate_clients_on_one_node() {
+    let number = |name: &str, default: u64| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    many_clients(
+        "soak",
+        Scale {
+            clients: number("HELIOS_SOAK_CLIENTS", 8) as usize,
+            run: Duration::from_secs(number("HELIOS_SOAK_MINUTES", 60) * 60),
+            seed: number("HELIOS_SOAK_SEED", 5005),
+            big: 24,
+            pause: Duration::from_millis(100),
+        },
+        Some(Soak {
+            every: Duration::from_secs(number("HELIOS_SOAK_EVERY", 30)),
+        }),
     );
 }

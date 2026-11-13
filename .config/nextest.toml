@@ -46,6 +46,14 @@ success-output = "final"
 filter = 'binary(stability)'
 success-output = "final"
 
+# The long soak lasts an hour by default (HELIOS_SOAK_MINUTES); its
+# calls and its run have deadlines, so it cannot hang: a leash of up to
+# three hours. Before the binary's own override, which would match first.
+[[profile.default.overrides]]
+filter = 'binary(many_clients) and test(soak_long)'
+success-output = "final"
+slow-timeout = { period = "60s", terminate-after = 180 }
+
 # The many-clients stress run prints its report (calls per second,
 # latencies, the node's memory and descriptors); the full run lasts a
 # minute by default (HELIOS_STRESS_SECONDS), past the 120 s hang guard
