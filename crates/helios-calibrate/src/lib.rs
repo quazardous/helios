@@ -29,10 +29,13 @@
 //!   and its dry run on a decoded picture;
 //! - [`raw`]: a raw shot measured on its sensor data through the raw front
 //!   without `colorin`, rendered on the chart's bounding box;
+//! - [`apply`]: a profile written into an edit's `chartprofile` node, the
+//!   nearest-illuminant pick and a camera's default rule;
 //! - [`look`]: a camera look fitted to a raw's embedded JPEG (matrix,
 //!   hue/saturation table, tone and chroma curves), with its gates; it
 //!   shares the solver's Levenberg-Marquardt.
 
+pub mod apply;
 pub mod chart;
 pub mod homography;
 pub mod lab;

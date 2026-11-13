@@ -1,0 +1,19 @@
+[package]
+name = "helios-module-chartprofile"
+description = "Chart profile module for Helios: a colour chart calibration's matrix applied after input colour"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-photo.workspace = true
+# Its pixel step: `core.matrix3@1`.
+helios-bricks.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true
+
+[lints]
+workspace = true

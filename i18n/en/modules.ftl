@@ -103,6 +103,14 @@ param-channelmixerrgb-y =
     .description = the illuminant's CIE y (custom illuminant)
     .label = y
 
+param-chartprofile-matrix =
+    .description = the profile's matrix, camera RGB to the working space, row by row; all zero for none
+    .label = matrix
+
+param-chartprofile-profile =
+    .description = the profile's id, for its name and provenance
+    .label = profile
+
 param-decide-exposure-exposure =
     .description = exposure adjustment, in EV: positive brightens, negative darkens
     .label = exposure

@@ -44,6 +44,9 @@ impl BrickRegistry {
         registry
             .register(ModuleRef::new(crate::affine::Affine))
             .expect("core.affine is a valid brick");
+        registry
+            .register(ModuleRef::new(crate::matrix3::Matrix3))
+            .expect("core.matrix3 is a valid brick");
         for brick in crate::values::core() {
             registry
                 .register_value(Arc::from(brick))

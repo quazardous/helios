@@ -349,6 +349,9 @@ const FLIP: &str = "flip";
 /// The colour calibration module put after the raw front.
 const COLOUR_CALIBRATION: &str = "channelmixerrgb";
 
+/// The chart profile module put after the raw front, bypassed.
+const CHART_PROFILE: &str = "chartprofile";
+
 /// The raw front's white balance node, set to the camera's D65 reference
 /// when colour calibration follows.
 const WHITE_BALANCE: &str = "whitebalance";
@@ -356,6 +359,7 @@ const WHITE_BALANCE: &str = "whitebalance";
 /// The raw front after the source `source` (`id`), given a raw: its
 /// nodes opened in the graph under their own names where `taken` does
 /// not hold them, the source wired to its input, then the catalogue's
+/// `chartprofile` (bypassed: on once a calibration profile is applied),
 /// `channelmixerrgb` (colour calibration from the camera's illuminant,
 /// the white balance set to the camera's D65 reference: darktable's
 /// scene-referred default) and `flip` modules (the camera's orientation).
@@ -423,6 +427,15 @@ fn raw_front(
         source,
         output,
     };
+    // A colour chart's profile, right after the camera colours: bypassed,
+    // so a render is unchanged until a profile is applied to the edit.
+    // Left out by a catalogue without it.
+    if at.module(CHART_PROFILE, &Params::new())? {
+        let id = at.output.0;
+        at.graph
+            .set_bypass(id, true)
+            .map_err(|e| format!("`{CHART_PROFILE}`: {e}"))?;
+    }
     // darktable's scene-referred colour: the white balance to the
     // camera's D65 reference, then colour calibration (CAT16) from the
     // illuminant the camera's as-shot coefficients give. Left out by a

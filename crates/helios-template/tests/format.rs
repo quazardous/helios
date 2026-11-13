@@ -558,6 +558,100 @@ fn a_raw_through_the_raw_front_gets_darktables_colour_calibration() {
 }
 
 #[test]
+fn the_raw_front_has_a_bypassed_chart_profile_that_changes_colours_once_on() {
+    use helios_core::{Image, Value};
+    use helios_module_chartprofile::{ChartProfile, flat, standard};
+    let without = image_catalogue().module(ModuleRef::new(
+        helios_module_channelmixerrgb::ChannelMixerRgb,
+    ));
+    let with = without.clone().module(ModuleRef::new(ChartProfile));
+    let b = bundle(&image_template());
+    let camera = helios_photo::CameraInfo {
+        maker: "Nikon".into(),
+        model: "D750".into(),
+        iso: 100.0,
+        exposure_bias: 0.0,
+        exposure_time: 0.01,
+        aperture: 4.0,
+        focal_length: 50.0,
+        black: [0.0; 4],
+        white: 1.0,
+        white_balance: [2.0, 1.0, 1.5, 1.0],
+        xyz_to_camera: [
+            0.9020, -0.2890, -0.0715, -0.4535, 1.2436, 0.2348, -0.0934, 0.1919, 0.7086,
+        ],
+        cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+        orientation: 1,
+    }
+    .to_context();
+    let mosaic = Image::from_fn(Region::sized(16, 16), 1, |x, y, _| {
+        0.05 + 0.01 * (x as f32) + 0.02 * ((x + y) % 3) as f32
+    });
+    let build = |catalogue: &Catalogue| {
+        b.build_with(
+            catalogue,
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .unwrap()
+    };
+    let render = |graph: &helios_core::Graph, node| {
+        Engine::new(Arc::new(Bus::new()))
+            .render(graph, node, "output", Region::sized(16, 16))
+            .unwrap()
+    };
+    let plain = build(&without);
+    assert!(plain.graph.find("chartprofile").is_none());
+    let mut built = build(&with);
+    // After colorin, before colour calibration, bypassed.
+    let profile = built.graph.find("chartprofile").unwrap();
+    let colorin = built.graph.find("colorin").unwrap();
+    let cat = built.graph.find("channelmixerrgb").unwrap();
+    assert_eq!(built.graph.input_nodes(profile).unwrap(), [Some(colorin)]);
+    assert_eq!(built.graph.input_nodes(cat).unwrap(), [Some(profile)]);
+    assert!(built.graph.is_bypassed(profile).unwrap());
+    // Bypassed, the render is the one without it, bit for bit.
+    let at = |g: &helios_core::Graph| g.find("channelmixerrgb").unwrap();
+    let base = render(&plain.graph, at(&plain.graph));
+    assert_eq!(render(&built.graph, cat).data(), base.data());
+    // On, with a profile's matrix: colorin's output moves as M_c M_s^-1.
+    let m_s = standard(built.graph.context(profile).unwrap().unwrap()).unwrap();
+    let bend = [
+        [1.06, -0.04, -0.02],
+        [-0.03, 1.01, 0.02],
+        [0.01, -0.05, 1.04],
+    ];
+    let m_c = helios_photo::color::mul(&bend, &m_s);
+    built
+        .graph
+        .set_param(profile, "matrix", Value::List(flat(&m_c)))
+        .unwrap();
+    built.graph.set_bypass(profile, false).unwrap();
+    let input = render(&built.graph, colorin);
+    let output = render(&built.graph, profile);
+    for (i, o) in input
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(output.data().as_chunks::<4>().0)
+    {
+        let want = helios_photo::color::apply(&bend, [0, 1, 2].map(|c| f64::from(i[c])));
+        for c in 0..3 {
+            assert!(
+                (f64::from(o[c]) - want[c]).abs() <= 1e-5 * want[c].abs().max(1.0),
+                "{o:?} against {want:?}"
+            );
+        }
+        assert_eq!(o[3], i[3]);
+    }
+    assert_ne!(render(&built.graph, cat).data(), base.data());
+}
+
+#[test]
 fn an_image_source_takes_a_picture_as_it_is_and_a_raw_through_the_raw_front() {
     use helios_core::Image;
     let t = image_template();

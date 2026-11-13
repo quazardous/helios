@@ -30,9 +30,21 @@ batch-stopped = arrêté avant d’être écrit : relancer le même lot le termi
 
 batch-vault-attached = --vault avec un nœud déjà lancé ne conserve que les sidecars : il demande --sidecar (le nœud garde ses exécutions dans son propre coffre)
 
+calibrate-auto-no-light = l’image { $image } n’a pas de lumière de prise de vue pour choisir un profil (boîtier { $camera })
+
+calibrate-auto-no-profile = aucun profil de calibration pour le boîtier { $camera } (image { $image })
+
+calibrate-auto-too-far = aucun profil du boîtier { $camera } ne convient à la lumière de l’image { $image } : le plus proche, { $profile }, est à { $distance } en uv (au plus 0,02)
+
 calibrate-bad-image = la prise de vue de la mire n’a aucun pixel ou moins de trois canaux
 
 calibrate-bad-params = calibrate.chart : { $error }
+
+calibrate-bad-profile = le profil de calibration « { $id } » est illisible : { $error }
+
+calibrate-default-cameras = les profils d’un défaut sont tous du boîtier { $camera } ; « { $id } » est de { $other }
+
+calibrate-default-no-camera = effacer le défaut d’un boîtier demande `camera`
 
 calibrate-image-not-at-hand = aucun fichier de l’image { $image } n’est disponible
 
@@ -61,6 +73,10 @@ calibrate-unknown-image = « { $image } » n’est ni un identifiant d’image n
 calibrate-unknown-patch = la mire n’a pas de case « { $patch } »
 
 calibrate-no-neutral = la mire n’a pu être résolue à ces coins : aucune case neutre n’est retenue
+
+calibrate-other-camera = le profil est pour le boîtier { $profile }, l’image { $image } vient de { $camera }
+
+calibrate-photo-load-failed = impossible de lire la photo : { $error }
 
 calibrate-too-few-patches = la mire n’a pu être résolue à ces coins : trop peu de cases sont retenues
 
@@ -287,7 +303,10 @@ gui-graph-wires-orthogonal = Orthogonales
 gui-graph-wires-straight = Droites
 
 gui-history-batch = { $label } ({ $count } valeurs)
+gui-history-calibration-apply = Appliquer le profil de calibration « { $name } »
+gui-history-calibration-default = Définir le défaut de calibration de { $name }
 gui-history-calibration-delete = Supprimer le profil de calibration « { $name } »
+gui-history-calibration-off = Désactiver le profil de calibration
 gui-history-calibration-save = Enregistrer le profil de calibration « { $name } »
 gui-history-import = Importer { $count } photos
 gui-history-album-new = Nouvel album « { $name } »

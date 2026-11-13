@@ -4,6 +4,14 @@ param-blur-radius =
     .description = écart type, en pixels de pleine résolution
     .label = rayon
 
+param-chartprofile-matrix =
+    .description = la matrice du profil, du RVB du boîtier à l’espace de travail, ligne par ligne ; toute à zéro pour aucun
+    .label = matrice
+
+param-chartprofile-profile =
+    .description = l’identifiant du profil, pour son nom et sa provenance
+    .label = profil
+
 param-decide-exposure-exposure =
     .description = réglage d’exposition, en IL : positif éclaircit, négatif assombrit
     .label = exposition

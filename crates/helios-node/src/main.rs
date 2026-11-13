@@ -923,7 +923,8 @@ mod control {
         if helios_node::calibrate::PROFILE_IDS.contains(&id) {
             node.bus.publish(SOURCE, None, &CommandRan { id, origin });
             let vault = node.importer.as_ref().map(|i| i.vault().as_ref());
-            let mut answer = match helios_node::calibrate::run(vault, id, params, now()) {
+            let mut answer = match helios_node::calibrate::run_as(vault, id, params, origin, now())
+            {
                 Ok(done) => {
                     let mut answer = done.answer;
                     answer["ok"] = json!(true);
