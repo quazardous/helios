@@ -135,9 +135,11 @@ characters): a few seconds here instead of a failed job on the box.
 It also refuses a job missing a parameter its command needs. Before any job
 that builds, the box itself runs the short `check` job (`egui-pop-check` for
 egui-pop's jobs), declared as the job's `first` in the Benchfile and run
-once per commit: `cargo check --tests` on the crate the job names, else
-the workspace, with no code generated and no link, stopping at the first
-crate that fails. The job itself is queued only if that check passes:
+once per commit: `cargo clippy --tests --keep-going` on the crate the job
+names, else the workspace, with no code generated and no link. Lints are
+warnings rather than errors, so one pass shows every lint of every crate,
+dependents and tests included; any warning or compile error makes the
+check red. The job itself is queued only if that check passes:
 **a compile error never takes a test job's place** (owner, 2026-11-08). The
 check also warms the branch's target for the job that follows.
 `first=none` on a run skips it; `HELIOS_BENCH_LOCAL_CHECK=1` also runs the
