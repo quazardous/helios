@@ -349,7 +349,10 @@ pub fn backfill_by<S: Store>(
                 // Measured before the fields existed: written again as
                 // kept, which fills them.
                 let filled = vault.fields_of(&[*id], &[helios_vault::cull::FOCUS])?;
-                if filled.first().is_none_or(|f| f.is_empty()) {
+                if filled
+                    .first()
+                    .is_none_or(std::collections::BTreeMap::is_empty)
+                {
                     merges.push((*id, serde_json::Map::new()));
                 }
                 continue;
