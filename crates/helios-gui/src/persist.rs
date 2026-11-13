@@ -676,6 +676,14 @@ impl<S: Store> Persist<S> {
                 E::Remove { id, images } => ids(images)
                     .and_then(|i| self.vault.remove_from_album(id, &i))
                     .map(|c| (name.clone(), images.len(), c)),
+                E::CreateSmart { id, name, rules } => self
+                    .vault
+                    .create_smart_album(Some(id), name, rules.clone())
+                    .map(|(a, c)| (a.name, 0, c)),
+                E::Rules { id, rules } => self
+                    .vault
+                    .set_album_rules(id, rules.clone())
+                    .map(|c| (name.clone(), 0, c)),
             };
             match done {
                 Ok((name, count, changes)) => {

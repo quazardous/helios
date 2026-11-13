@@ -243,6 +243,8 @@ gui-history-album-rename = Renommer l’album « { $name } »
 gui-history-album-delete = Supprimer l’album « { $name } »
 gui-history-album-add = Ajouter { $count } photos à « { $name } »
 gui-history-album-remove = Retirer { $count } photos de « { $name } »
+gui-history-album-new-smart = Nouvel album dynamique « { $name } »
+gui-history-album-rules = Modifier les règles de « { $name } »
 
 gui-history-preview-applied = appliqué
 
@@ -1034,6 +1036,22 @@ gui-library-album-new-verb = Créer
 gui-library-album-rename-title = Renommer l’album
 gui-library-album-rename-verb = Renommer
 gui-library-album-name = nom
+gui-library-album-new-smart = Nouvel album dynamique…
+gui-library-album-rules = Modifier les règles…
+gui-library-album-smart-tip = Album dynamique : ses règles choisissent ses photos
+gui-smart-new-title = Nouvel album dynamique
+gui-smart-rules-title = Les règles de l’album dynamique
+gui-smart-rules-verb = Appliquer
+gui-smart-match = correspondance
+gui-smart-rating = au moins (étoiles)
+gui-smart-label = étiquette de couleur
+gui-smart-flag = marque
+gui-smart-tag = mot-clé
+gui-smart-camera = appareil (contient)
+gui-smart-file-type = type de fichier
+gui-smart-folder = dossier (absolu)
+gui-smart-taken-from = pris à partir du (AAAA-MM-JJ)
+gui-smart-taken-to = pris jusqu’au (AAAA-MM-JJ)
 gui-album-not-changed = L’album n’a pas été modifié : { $error }
 
 gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre

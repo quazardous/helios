@@ -602,9 +602,37 @@ undo step, as the folder). Each change is a command
 (`library.collection.create`, `.rename`, `.delete`, `.add`, `.remove`,
 `.list`) the host makes in the vault as one step of the library's
 history, holding the document before and after (`Changes::documents`;
-an undo leaves a document changed since alone). Not built yet: smart
-albums (the rule tree compiled to a `Query`), the quick collection and
-B, Ctrl+K recent filters, album sets, drag and drop onto an album.
+an undo leaves a document changed since alone).
+
+Built (2026-11-13), second part: **smart albums**. A document
+`{kind: "smart", name, rules}` in the same namespace, its `rules` a tree
+(`helios-vault::rules`): groups `{match: all|any|none, rules: [...]}`
+nested at most 8 deep, conditions `{field, op, value}` on rating, label,
+tag, flag, folder, album, captured, camera, make, lens, file type,
+title, description, ISO, focal length, aperture and shutter; the
+operators follow the field's kind (numbers: `=`, `!=`, `<`, `<=`, `>`,
+`>=`, `between`; sets: `has`, `lacks`; texts: `is`, `is_not`,
+`contains`; the flag: `is`, `is_not`; folder and album: `in`,
+`not_in`). An unknown field, an operator the kind does not take or a
+wrong value is refused with where it is (`rules[1][0]: unknown field…`).
+`Query::rules` holds a tree; each store compiles it with the rest of the
+query (SQLite: one boolean expression of `EXISTS` sub-queries in the
+cursor's statement, each condition 0 or 1 so `none` negates cleanly; the
+memory store: the same rules per photo). `Query::album` naming a smart
+album runs its rules in its place, so the `collection:` term, the
+workspace's `library.collection`, facets and the folders tree work
+unchanged. The Albums section marks a smart album (⚙) and shows its live
+count (one query each, read again whenever the library's history
+moves). "New smart album…" opens a form (name, all or any, stars,
+colour label, flag, tag, camera, file type, folder, a range of days);
+"Edit the rules…" opens it again when the tree is one group the form
+shows, else says to set them with `rules`.
+`library.collection.create` takes `kind: "smart"` and `rules` (or the
+form's keys); `library.collection.rules` sets them, one undoable step;
+photos are never added to or removed from a smart album. Not built yet:
+a tree editor for nested groups, relative dates ("the last 30 days"),
+the quick collection and B, Ctrl+K recent filters, album sets, drag and
+drop onto an album.
 
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste

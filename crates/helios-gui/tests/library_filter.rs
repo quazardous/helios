@@ -5,7 +5,9 @@
 //! The folders tree (L5): its counts, a click scoping the grid, each
 //! row's menu, and the folder chosen kept with the workspace. The albums
 //! (L6): made from the selection, filled and emptied, one undo step each,
-//! a click scoping the grid, the album chosen kept with the workspace.
+//! a click scoping the grid, the album chosen kept with the workspace;
+//! smart albums made through their form, their rules set by an agent
+//! (nested, undone, a fault refused), scoping the grid the same way.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -614,6 +616,116 @@ fn an_album_made_from_the_selection_scopes_the_grid_and_each_change_undoes() {
     settle(&mut h, &mut persist, 28.0);
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     assert_eq!(kept_collection(&config, &ws), None);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The warnings the shell gave so far, as one text.
+fn warnings(h: &Harness<'_, Shell>) -> String {
+    h.state()
+        .notices()
+        .iter()
+        .map(|n| n.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn a_smart_album_made_through_its_form_scopes_the_grid_and_its_rules_undo() {
+    let root = temp("smart");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+
+    // "New smart album…": the form asks its name and its conditions.
+    h.get_by_label("New smart album…").click();
+    settle(&mut h, &mut persist, 2.0);
+    run(
+        &mut h,
+        "dialog.answer",
+        json!({ "values": { "name": "Best", "rating": 3 } }),
+    );
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(albums(&h), [("Best".to_string(), 1)]);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "New smart album “Best”"
+    );
+
+    // A click on it (marked as smart) scopes the grid, as an album's.
+    h.get_by_label("⚙ Best 1").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(h.state().library().collection().as_deref(), Some("best"));
+    assert_eq!(kept_collection(&config, &ws).as_deref(), Some("best"));
+    assert_eq!(grid(&h), ["a.jpg"]);
+
+    // An agent sets nested rules: the grid and the count follow.
+    run(
+        &mut h,
+        "library.collection.rules",
+        json!({ "id": "best", "rules": {"match": "any", "rules": [
+            {"match": "all", "rules": [
+                {"field": "camera", "op": "is", "value": "Z 8"},
+                {"field": "rating", "op": "<=", "value": 1},
+            ]},
+            {"field": "file_type", "op": "is", "value": "nef"},
+        ]} }),
+    );
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
+    assert_eq!(albums(&h), [("Best".to_string(), 2)]);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Edit the rules of “Best”"
+    );
+
+    // Refused with their reason: an unknown field, nested rules in the
+    // form, photos put in a smart album.
+    run(
+        &mut h,
+        "library.collection.rules",
+        json!({ "id": "best", "rules": {"match": "all", "rules": [
+            {"field": "colour", "op": "is", "value": "red"},
+        ]} }),
+    );
+    run(&mut h, "library.collection.rules", json!({ "id": "best" }));
+    run(
+        &mut h,
+        "library.collection.add",
+        json!({ "id": "best", "images": [id(1).hex()] }),
+    );
+    settle(&mut h, &mut persist, 11.0);
+    let said = warnings(&h);
+    assert!(said.contains("unknown field `colour`"), "{said}");
+    assert!(said.contains("more than the form shows"), "{said}");
+    assert!(said.contains("smart album"), "{said}");
+    assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
+
+    // Undone: the first rules again.
+    let undone = history.undo(
+        &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(
+        matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+        "{undone:?}"
+    );
+    settle(&mut h, &mut persist, 14.0);
+    assert_eq!(grid(&h), ["a.jpg"]);
+    assert_eq!(albums(&h), [("Best".to_string(), 1)]);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

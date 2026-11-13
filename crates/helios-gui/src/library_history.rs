@@ -97,6 +97,10 @@ pub fn album_label(edit: &crate::library::AlbumEdit, name: &str, count: usize) -
             "gui-history-album-remove",
             "Remove { $count } photos from “{ $name }”",
         ),
+        E::CreateSmart { .. } => {
+            Message::new("gui-history-album-new-smart", "New smart album “{ $name }”")
+        }
+        E::Rules { .. } => Message::new("gui-history-album-rules", "Edit the rules of “{ $name }”"),
     }
     .with("name", name)
     .with("count", count);

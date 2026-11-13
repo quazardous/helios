@@ -1016,8 +1016,9 @@ fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
 /// The command that scopes the library to a collection (`id`; null: the
 /// whole library), kept with the workspace.
 pub const COLLECTION_COMMAND: &str = "library.collection";
-/// Makes an album (`name`; `images`, else the selection); without
-/// `name`, asks it.
+/// Makes an album (`name`; `images`, else the selection), or with
+/// `kind: "smart"` a smart album (`rules`, a tree, or the form's keys);
+/// without `name`, asks it.
 pub const COLLECTION_CREATE_COMMAND: &str = "library.collection.create";
 /// Renames an album (`id`, `name`); without `name`, asks it.
 pub const COLLECTION_RENAME_COMMAND: &str = "library.collection.rename";
@@ -1027,6 +1028,9 @@ pub const COLLECTION_DELETE_COMMAND: &str = "library.collection.delete";
 pub const COLLECTION_ADD_COMMAND: &str = "library.collection.add";
 /// Takes photos out of an album (`id`; `images`, else the selection).
 pub const COLLECTION_REMOVE_COMMAND: &str = "library.collection.remove";
+/// Sets a smart album's rules (`id`; `rules`, a tree, or the form's
+/// keys); without them, asks them in a form.
+pub const COLLECTION_RULES_COMMAND: &str = "library.collection.rules";
 /// Lists the albums, with how many photos each holds.
 pub const COLLECTION_LIST_COMMAND: &str = "library.collection.list";
 
@@ -1061,6 +1065,17 @@ pub enum AlbumEdit {
         id: String,
         images: Vec<String>,
     },
+    /// A smart album: its rules choose its photos.
+    CreateSmart {
+        id: String,
+        name: String,
+        rules: helios_vault::rules::Rule,
+    },
+    /// A smart album's rules.
+    Rules {
+        id: String,
+        rules: helios_vault::rules::Rule,
+    },
 }
 
 impl AlbumEdit {
@@ -1071,7 +1086,9 @@ impl AlbumEdit {
             | AlbumEdit::Rename { id, .. }
             | AlbumEdit::Delete { id }
             | AlbumEdit::Add { id, .. }
-            | AlbumEdit::Remove { id, .. } => id,
+            | AlbumEdit::Remove { id, .. }
+            | AlbumEdit::CreateSmart { id, .. }
+            | AlbumEdit::Rules { id, .. } => id,
         }
     }
 }
@@ -1079,7 +1096,7 @@ impl AlbumEdit {
 /// An album's context menu in the Albums section, through the shell's
 /// menus: add or remove the selected photos (greyed with none), rename,
 /// delete.
-fn album_menu(row: &egui::Response, id: &str, selection: bool) {
+fn album_menu(row: &egui::Response, id: &str, smart: bool, selection: bool) {
     use crate::dialogs::MenuItem;
     if !row.secondary_clicked() {
         return;
@@ -1089,8 +1106,13 @@ fn album_menu(row: &egui::Response, id: &str, selection: bool) {
     let args = serde_json::json!({ "id": id });
     let item =
         |command: &str, label: Message| MenuItem::run(command, args.clone()).labeled(word(label));
-    crate::dialogs::context_menu(
-        row,
+    // A smart album's photos follow its rules: its menu edits them.
+    let fill = if smart {
+        vec![item(
+            COLLECTION_RULES_COMMAND,
+            Message::new("gui-library-album-rules", "Edit the rules…"),
+        )]
+    } else {
         vec![
             item(
                 COLLECTION_ADD_COMMAND,
@@ -1102,16 +1124,25 @@ fn album_menu(row: &egui::Response, id: &str, selection: bool) {
                 Message::new("gui-library-album-remove", "Remove the selected photos"),
             )
             .enabled(selection),
-            MenuItem::Separator,
-            item(
-                COLLECTION_RENAME_COMMAND,
-                Message::new("gui-library-album-rename", "Rename…"),
-            ),
-            item(
-                COLLECTION_DELETE_COMMAND,
-                Message::new("gui-library-album-delete", "Delete the album"),
-            ),
-        ],
+        ]
+    };
+    crate::dialogs::context_menu(
+        row,
+        [
+            fill,
+            vec![MenuItem::Separator],
+            vec![
+                item(
+                    COLLECTION_RENAME_COMMAND,
+                    Message::new("gui-library-album-rename", "Rename…"),
+                ),
+                item(
+                    COLLECTION_DELETE_COMMAND,
+                    Message::new("gui-library-album-delete", "Delete the album"),
+                ),
+            ],
+        ]
+        .concat(),
     );
 }
 
@@ -1757,8 +1788,12 @@ impl Library {
     }
 
     /// How many photos of the Library an album holds (a photo taken out
-    /// of the Library since does not count).
+    /// of the Library since does not count); a smart album, how many its
+    /// rules selected when the albums were read.
     pub fn album_count(&self, album: &helios_vault::collections::Album) -> usize {
+        if album.is_smart() {
+            return album.count.unwrap_or(0);
+        }
         album
             .images
             .iter()
@@ -3068,12 +3103,21 @@ impl Library {
         let selection = self.targets().is_ok();
         let mut chosen = None;
         let mut create = false;
+        let mut create_smart = false;
         egui::CollapsingHeader::new(word(Message::new("gui-library-albums", "Albums")))
             .id_salt("helios.library.albums")
             .show(ui, |ui| {
-                create = ui
-                    .button(word(Message::new("gui-library-album-new", "New album…")))
-                    .clicked();
+                ui.horizontal(|ui| {
+                    create = ui
+                        .button(word(Message::new("gui-library-album-new", "New album…")))
+                        .clicked();
+                    create_smart = ui
+                        .button(word(Message::new(
+                            "gui-library-album-new-smart",
+                            "New smart album…",
+                        )))
+                        .clicked();
+                });
                 let Some(albums) = self.albums.as_deref() else {
                     return;
                 };
@@ -3089,10 +3133,18 @@ impl Library {
                     .max_height(200.0)
                     .show(ui, |ui| {
                         for album in albums {
-                            let text = format!("{} {}", album.name, self.album_count(album));
+                            // A smart album is marked, its count live.
+                            let mark = if album.is_smart() { "⚙ " } else { "" };
+                            let text = format!("{mark}{} {}", album.name, self.album_count(album));
                             let on = selected.as_deref() == Some(album.id.as_str());
-                            let r = ui.selectable_label(on, text);
-                            album_menu(&r, &album.id, selection);
+                            let mut r = ui.selectable_label(on, text);
+                            if album.is_smart() {
+                                r = r.on_hover_text(word(Message::new(
+                                    "gui-library-album-smart-tip",
+                                    "Smart album: its rules choose its photos",
+                                )));
+                            }
+                            album_menu(&r, &album.id, album.is_smart(), selection);
                             if r.clicked() {
                                 chosen = Some(album.id.clone());
                             }
@@ -3111,6 +3163,12 @@ impl Library {
         };
         if create {
             run(COLLECTION_CREATE_COMMAND, serde_json::json!({}));
+        }
+        if create_smart {
+            run(
+                COLLECTION_CREATE_COMMAND,
+                serde_json::json!({ "kind": helios_vault::collections::SMART }),
+            );
         }
         if let Some(id) = chosen {
             // Through the shell: the album is kept with the workspace.

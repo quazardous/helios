@@ -72,6 +72,9 @@ pub(super) struct Focus {
     /// The album a rename form was opened for (`library.collection.rename`
     /// without `id` renames it).
     pub(super) album_renamed: Option<String>,
+    /// The smart album a rules form was opened for
+    /// (`library.collection.rules` without `id` sets its rules).
+    pub(super) album_ruled: Option<String>,
     /// The open image's decisions, and the Decisions panel's cards.
     pub(super) decisions: Rc<RefCell<crate::decisions::Decisions>>,
     /// Where the workspace imports from, and how (its template's).
@@ -162,6 +165,7 @@ impl Focus {
             comparison: Rc::default(),
             open_in_compare: false,
             album_renamed: None,
+            album_ruled: None,
             decisions: Rc::default(),
             import_source: None,
             imported_ids: Vec::new(),

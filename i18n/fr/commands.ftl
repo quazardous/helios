@@ -640,7 +640,7 @@ command-library-collection =
     .title = Limiter la bibliothèque à un album (`id` ; null : toute la bibliothèque) ; gardé avec l’espace de travail. Sans `id`, dit l’album
 
 command-library-collection-create =
-    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection) ; sans `name`, le demande. Répond son `id`
+    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection), ou avec `kind: smart` un album dynamique (`rules` : un arbre de groupes `{match: all|any|none, rules}` et de conditions `{field, op, value}`, ou les clés du formulaire) ; sans `name`, le demande. Répond son `id`
 
 command-library-collection-rename =
     .title = Renommer un album (`id`, `name`) ; sans `name`, le demande
@@ -654,8 +654,11 @@ command-library-collection-add =
 command-library-collection-remove =
     .title = Retirer des photos d’un album (`id` ; `images` : identifiants, sinon la sélection) ; elles restent dans la bibliothèque
 
+command-library-collection-rules =
+    .title = Fixer les règles d’un album dynamique (`id` ; `rules`, un arbre, ou les clés du formulaire) ; sans elles, les demande. Les champs inconnus et les règles invalides sont refusés avec la raison
+
 command-library-collection-list =
-    .title = Lister les albums : `id`, `name` et combien de photos chacun contient
+    .title = Lister les albums : `id`, `name`, `kind` (album ou dynamique), combien de photos chacun contient, les `rules` d’un album dynamique
 
 command-library-scanFolder =
     .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume

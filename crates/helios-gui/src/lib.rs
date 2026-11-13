@@ -62,6 +62,7 @@ pub mod relay;
 pub mod report;
 pub mod scopes;
 pub mod shell;
+pub mod smart_album;
 pub mod snapshot;
 pub mod stack_review;
 pub mod stall;
