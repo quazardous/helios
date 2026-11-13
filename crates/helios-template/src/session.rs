@@ -157,6 +157,16 @@ impl Session {
             .find_map(|r| r.measures.as_ref().map(|m| &m.after))
     }
 
+    /// The measures after the last step made on test image `image` that
+    /// has them.
+    pub fn last_measures_on(&self, image: usize) -> Option<&BTreeMap<String, f64>> {
+        self.steps
+            .iter()
+            .rev()
+            .filter(|r| r.image == image)
+            .find_map(|r| r.measures.as_ref().map(|m| &m.after))
+    }
+
     /// The net outcome per parameter: the value each one holds after the
     /// whole session (undos included), and the step that set it.
     pub fn net(&self) -> BTreeMap<String, (Value, u32)> {

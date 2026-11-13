@@ -318,3 +318,63 @@ fn refusals_name_the_target_or_the_zone() {
     assert!(e.contains("no zone `sky` drawn"), "{e}");
     let _: Option<Target> = None;
 }
+
+#[test]
+fn junctions_fit_the_schema_and_refusals_name_them() {
+    let with = |junctions: Json, targets: Json| {
+        let mut json = json_of(&targets);
+        json["workshop"]["junctions"] = junctions;
+        json
+    };
+    // A value asked per photo, with its fallback: schema, round trip,
+    // built.
+    let json = with(
+        json!([{ "kind": "value", "name": "brightness", "fallback": 0.5,
+                 "note": "kept as AI, 1 call per photo" }]),
+        json!([]),
+    );
+    let problems = schema::check(&schema::composite(), &json);
+    assert!(problems.is_empty(), "{problems:?}");
+    let f = parse_composite(&json.to_string()).unwrap();
+    let again = parse_composite(&serde_json::to_string(&f).unwrap()).unwrap();
+    assert_eq!(again, f);
+    built(&f).unwrap();
+    let refused = |junctions: Json, targets: Json, want: &str| {
+        let f = parse_composite(&with(junctions, targets).to_string()).unwrap();
+        let e = built(&f).map(|_| ()).unwrap_err();
+        assert!(e.contains("junctions[") && e.contains(want), "{want}: {e}");
+    };
+    refused(
+        json!([{ "kind": "value", "name": "nope", "fallback": 0.0 }]),
+        json!([]),
+        "not an exposed parameter",
+    );
+    refused(
+        json!([{ "kind": "value", "name": "brightness" }]),
+        json!([]),
+        "needs a `fallback`",
+    );
+    refused(
+        json!([{ "kind": "value", "name": "brightness", "fallback": 0.0 }]),
+        json!([{ "param": "brightness", "measure": "luma.median", "value": 0.0 }]),
+        "aimed at a target",
+    );
+    refused(
+        json!([
+            { "kind": "value", "name": "brightness", "fallback": 0.0 },
+            { "kind": "value", "name": "brightness", "fallback": 1.0 }
+        ]),
+        json!([]),
+        "a second junction",
+    );
+    refused(
+        json!([{ "kind": "zone", "name": "moon" }]),
+        json!([]),
+        "no zone of that name",
+    );
+    refused(
+        json!([{ "kind": "zone", "name": "sky" }]),
+        json!([]),
+        "not asked to the AI",
+    );
+}

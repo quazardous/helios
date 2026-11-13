@@ -1763,7 +1763,7 @@ gui-workshops-zone-parametric = Masque paramétrique
 gui-workshops-ai-none = IA par photo : aucune
 gui-workshops-ai-left = IA par photo : { $junctions } jonctions, { $calls } appels
 gui-workshops-confirm = Confirmer
-gui-workshops-confirm-hint = Écrire la version suivante de l’atelier avec ces choix, en une seule étape d’annulation ; une ligne gardée en IA ne peut pas encore être écrite
+gui-workshops-confirm-hint = Écrire la version suivante de l’atelier avec ces choix, en une seule étape d’annulation ; une ligne gardée en IA est demandée à chaque photo
 
 gui-workshops-session-kept = Gardée
 

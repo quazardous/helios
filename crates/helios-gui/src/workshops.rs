@@ -181,13 +181,49 @@ pub struct Design {
 }
 
 /// The workshop session recorded (`shell::workshop_session`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Pilot {
     pub record: helios_template::session::Session,
     /// The value store's step on top of the undo stack when last
     /// followed, and its history's revision.
     pub top: Option<u64>,
     pub rev: u64,
+    /// The test photo open: an index into the record's images.
+    pub photo: usize,
+    /// Each test photo as it was when last open: generalising reads the
+    /// photos not open from here.
+    pub photos: Vec<Option<Photo>>,
+    /// The workshop's node on each test photo's network.
+    pub nodes: Vec<String>,
+    /// Another photo open, not a test photo yet: it joins the session
+    /// with the first move of the workshop's values made on it.
+    pub away: Option<String>,
+}
+
+impl Pilot {
+    /// Adds a step made on the test photo open; returns its number.
+    pub fn push(&mut self, mut record: helios_template::session::Record) -> u32 {
+        record.image = self.photo;
+        self.record.push(record)
+    }
+}
+
+/// A test photo of the session as it was when last open: what entered
+/// the workshop (its proxy) and the workshop's values on it.
+#[derive(Clone)]
+pub struct Photo {
+    pub input: helios_core::Image,
+    pub values: helios_core::Params,
+}
+
+impl std::fmt::Debug for Photo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let r = self.input.region();
+        f.debug_struct("Photo")
+            .field("input", &(r.width, r.height))
+            .field("values", &self.values)
+            .finish()
+    }
 }
 
 /// The Workshops panel: describe, find, the list, the applied workshop.
@@ -670,13 +706,10 @@ impl Panel {
         let mut cancel = false;
         ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(
-                    junctions == 0,
-                    egui::Button::new(text(Message::new("gui-workshops-confirm", "Confirm"))),
-                )
+                .button(text(Message::new("gui-workshops-confirm", "Confirm")))
                 .on_hover_text(text(Message::new(
                     "gui-workshops-confirm-hint",
-                    "Write the workshop's next version with these choices, as one undo step; a row kept as AI cannot be written yet",
+                    "Write the workshop's next version with these choices, as one undo step; a row kept as AI is asked on each photo",
                 )))
                 .clicked()
             {

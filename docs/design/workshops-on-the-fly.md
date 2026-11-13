@@ -428,10 +428,26 @@ a choice each (Same target, Same value, Keep as AI; Parametric mask),
 target row's target replaces its slider's, a fixed row's value becomes
 the slider's default (its target dropped), a fitted zone is drawn by its
 `mask_parametric`; the session is kept and goes on with that version, so
-the edit's version saved next carries its id. Not built yet: a junction
-written into the workshop (a row left on the AI is refused at confirm),
-the cache's share in `A`, and a second test photo in the session (rules
-1 to 4 already take several).
+the edit's version saved next carries its id.
+
+Built (slice 7, fourth part). A second test photo: with a session going
+on, another photo open joins it with the first move of the workshop's
+values made on it (or when the same workshop is applied on it); its
+steps carry its index in `image`, going back to a test photo carries the
+session on there, and moves on a photo not taken yet record nothing.
+Each test photo is kept as it was when last open (what enters the
+workshop, its values), so `workshop.generalise` reads every one
+(`photos`). A row left on the AI is written into the workshop as a
+**junction** (the block's `junctions`): `{"kind": "value", "name":
+<slider>, "fallback": <fixed value>}`, the fixed value also the slider's
+default, or `{"kind": "zone", "name": <zone>}` for a zone the AI still
+draws (`mask_object`), each with its row's note; a junction of a slider
+or zone a later confirm decides otherwise is dropped. The catalogue
+checks them: one per name, a value junction on an exposed number
+parameter no target aims and with a fallback, a zone junction on an AI
+zone. The cache's share in `A` moved to the run (slice 9): which photos
+the decision book already answered depends on the set a run is given,
+so `A` stays `J` per new photo here.
 
 ### Limits
 
@@ -704,7 +720,7 @@ included.
 6. **Proposals while piloting** (S, built 2026-11-11). `workshop.propose`, ghost values,
    Accept, Override, Reject recorded. Test: the fake agent proposes, the
    script overrides; the record holds proposal and override.
-7. **Generalisation** (L, rules 1 to 4, `J` and `A`, Make it automatic and `confirm` built 2026-11-12; a second test photo in the session left). The rules (targets that explain a value,
+7. **Generalisation** (L, built 2026-11-13: rules 1 to 4, `J` and `A`, Make it automatic, `confirm`, junctions in the format, a second test photo in the session). The rules (targets that explain a value,
    fixed values, parametric fits of AI zones, junctions kept), the rows
    with evidence, `J` and `A`, `confirm` writing the next version. Test:
    the scripted session on two synthetic test images gives "Backlight
@@ -718,7 +734,9 @@ included.
    pending junctions; one library-scope step. Test: a synthetic set of
    24 images of varying backlight with a fake agent at one junction: the
    expected flags, the AI calls equal to the photos where the fit fails,
-   a second run with zero calls and the same content keys, undo restores
+   a second run with zero calls and the same content keys (the cache's
+   share in `A`: a dry run over the set says how many photos the book
+   already answers), undo restores
    every edit and leaves a photo edited after the run alone.
 10. **The review** (M). `workshop.review`, the contact sheet, fix one,
     decide a junction, teach it. Test: headless, the flagged photos

@@ -403,11 +403,34 @@ impl Shell {
                 .unwrap_or_default(),
             v => serde_json::from_value(v.clone()).map_err(|e| format!("zones: {e}"))?,
         };
+        // Junctions: the ones the macro's file has, while their zones and
+        // sliders stay.
+        let junctions: Vec<helios_template::format::Junction> = state
+            .bundle
+            .catalogue(&catalogue)
+            .get_composite(&interface.composite)
+            .and_then(|f| f.workshop.as_ref())
+            .map(|w| {
+                w.junctions
+                    .iter()
+                    .filter(|j| match j.kind {
+                        helios_template::format::JunctionKind::Zone => {
+                            zones.iter().any(|z| z.name == j.name)
+                        }
+                        helios_template::format::JunctionKind::Value => {
+                            !targets.iter().any(|t| t.param == j.name)
+                        }
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         let workshop = Workshop {
             intent: intent.trim().to_string(),
             keywords,
             targets,
             zones,
+            junctions,
         };
         let label = format!("save {node} as a workshop");
         self.macro_step(&label, args, origin, |now, values| {
@@ -451,6 +474,7 @@ impl Shell {
             keywords: Vec::new(),
             targets: Vec::new(),
             zones: Vec::new(),
+            junctions: Vec::new(),
         });
         let port = file
             .outputs

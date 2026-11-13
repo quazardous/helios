@@ -1,11 +1,11 @@
 //! "Make it automatic" (`workshop.generalise`, experimental, see
 //! `docs/design/workshops-on-the-fly.md`, section 3): the session's net
-//! outcome on its test photo turned into one row per slider and per AI
+//! outcome on its test photos turned into one row per slider and per AI
 //! zone (`helios_template::generalise`), each with its evidence and a
 //! default, and `J` and `A`, the AI the workshop keeps. Nothing is
 //! written until the user confirms: `confirm` writes the workshop's next
 //! version (the targets, the fixed values as the sliders' defaults, the
-//! fitted zones) as one undo step, and the session is kept, going on
+//! fitted zones, the junctions kept as AI) as one undo step, and the session is kept, going on
 //! with that version (the edit's version saved next carries its id). An agent reads and amends the rows; only the
 //! user confirms.
 
@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::workshop_session::NO_SESSION;
+use crate::workshops::Photo;
 
 /// The rows the panel shows for the user to confirm.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,11 +102,32 @@ impl Shell {
             .workshop
             .clone()
             .ok_or_else(|| format!("`{r}` is not a workshop"))?;
-        let input = self.session_input(&record)?;
-        let values = self.session_values(&record, &file);
+        // Each test photo: the one open as it is now, the others as they
+        // were when last open.
+        self.keep_photo();
+        let photos: Vec<Photo> = {
+            let panel = self.focus.workshops.borrow();
+            let p = panel.pilot.as_ref().ok_or(NO_SESSION)?;
+            p.photos
+                .iter()
+                .enumerate()
+                .map(|(i, photo)| {
+                    photo.clone().ok_or_else(|| {
+                        format!(
+                            "test photo {} has not been seen with the workshop: open it once more",
+                            i + 1
+                        )
+                    })
+                })
+                .collect::<Result<_, String>>()?
+        };
         let engine = self.focus.viewport.borrow().engine().clone();
-        let masks =
-            helios_template::workshop::zone_masks(&engine, &catalogue, &block.zones, &input)?;
+        let masks = photos
+            .iter()
+            .map(|p| {
+                helios_template::workshop::zone_masks(&engine, &catalogue, &block.zones, &p.input)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         let built = catalogue.build_composite(&r, 0)?;
         // The sliders the session set, and those an AI's value holds.
         let net = record.net();
@@ -126,12 +148,15 @@ impl Shell {
             .filter(|z| z.module == AI_ZONE)
             .map(|z| z.name.clone())
             .collect();
-        let case = Case {
-            input: &input,
-            zones: &masks,
-            values: &values,
-        };
-        let cases = [case];
+        let cases: Vec<Case> = photos
+            .iter()
+            .zip(&masks)
+            .map(|(p, zones)| Case {
+                input: &p.input,
+                zones,
+                values: &p.values,
+            })
+            .collect();
         let mut rows =
             generalise::generalise_rendered(&engine, &built, &cases, &params, &zone_names)?;
         generalise::keep_ai_values(&mut rows, &proposed);

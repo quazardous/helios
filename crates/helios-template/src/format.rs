@@ -665,6 +665,39 @@ pub struct Workshop {
     /// workshop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zones: Vec<Zone>,
+    /// The decisions left to the AI on each photo the workshop runs on
+    /// (generalisation's rule 4): what no target, value or parametric
+    /// mask could stand for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub junctions: Vec<Junction>,
+}
+
+/// A decision the AI makes on each photo: a slider's value, or a zone it
+/// draws (a `mask_object` zone). A run asks it per photo, through the
+/// decision book, and uses `fallback` when no AI answers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Junction {
+    pub kind: JunctionKind,
+    /// The exposed number parameter it sets, or the zone it draws.
+    pub name: String,
+    /// For a value: what is used when no AI answers (the test photos'
+    /// value).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<f64>,
+    /// Why it was kept, as generalisation said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// What a junction decides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JunctionKind {
+    /// An exposed number parameter's value.
+    Value,
+    /// A zone's mask.
+    Zone,
 }
 
 /// A named part of the image: the mask a module draws from what enters
