@@ -128,9 +128,7 @@ pub(super) fn history_ui(
     words: &Words,
     t: &dyn Fn(Message) -> String,
 ) -> Option<String> {
-    if history.reader.is_none() {
-        return None;
-    }
+    history.reader.as_ref()?;
     let mut asked = None;
     ui.separator();
     ui.strong(&words.title);
