@@ -25,7 +25,7 @@ use crate::rpc::{Call, Error, Service, code};
 pub const CAPACITY: usize = 1000;
 
 /// How long an endpoint remembers a key.
-pub const KEPT: Duration = Duration::from_secs(10 * 60);
+pub const KEPT: Duration = Duration::from_mins(10);
 
 /// The longest key taken, in bytes.
 pub const LONGEST: usize = 128;
