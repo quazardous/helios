@@ -284,11 +284,7 @@ impl Shell {
 
     /// `help.health`: the Settings app at Health › Check.
     pub(super) fn open_health(&mut self) -> Result<Value, String> {
-        self.run(
-            egui_pop::api::admin::CMD_OPEN.as_str(),
-            json!({ "path": PAGE }),
-            helios_shell::commands::Origin::User,
-        )
+        self.open_settings_page(PAGE)
     }
 
     /// `health.checkNow`: whether a run started (none while one runs).

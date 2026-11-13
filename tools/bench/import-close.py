@@ -201,10 +201,25 @@ def stack(pid: int | None) -> str | None:
     return None
 
 
+def wait_main(comp, timeout: float = 30) -> dict | None:
+    """The main window once the compositor lists it. The agent socket
+    answers before the main window is mapped: a list taken earlier misses
+    it, and the main window, listed next, would pass for the import
+    window (`import_match`)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for w in comp.list_windows().get("windows", []):
+            if w.get("app_id") == APP_ID:
+                return w
+        time.sleep(0.1)
+    return None
+
+
 def import_match(comp, before: set) -> str | None:
     """The window listed now that was not before the import window opened,
     as a wlrctl matcher: by its app id when no window before had it (its
-    title changes as it reads), else by its title."""
+    title changes as it reads), else by its title. `before` must hold the
+    main window (`wait_main`)."""
     listed = comp.list_windows()
     ids = {a for a, _ in before}
     for w in listed.get("windows", []):
@@ -395,8 +410,10 @@ def run(args, index: int, way: str, cover: str) -> dict:
         if not wait_socket(agent, alive, 90):
             return {"run": index, "close": way, "cover": cover, "error": "no agent socket"}
         pid = helios_pid(w["state"])
-        listed = comp.list_windows().get("windows", [])
-        main_title = next((x["title"] for x in listed if x.get("app_id") == APP_ID), "")
+        main = wait_main(comp)
+        if main is None:
+            return {"run": index, "close": way, "cover": cover, "error": "no main window listed"}
+        main_title = main.get("title", "")
         try:
             r = one_close(args, comp, agent, trace, pid, main_title, way, cover)
         except Exception as exc:  # reported, the next close runs

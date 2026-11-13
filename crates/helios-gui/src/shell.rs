@@ -628,6 +628,11 @@ pub struct Shell {
     lifetime: lifetime::Lifetime,
     /// What the node's endpoint asks of the windows' commands.
     window_asks: Option<crate::window_commands::Asks>,
+    /// The window group the shell's toasts go to while it answers, in
+    /// the main window's pass, what another window asked (the import
+    /// window's Import, Forget, Storage…); `None`: the window being drawn
+    /// or commanded, as egui-pop says.
+    toasts_in: Option<egui::ViewportId>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
 }
@@ -1005,6 +1010,7 @@ impl Shell {
             calibration: calibrate_focus::CalibrationFocus::default(),
             lifetime: lifetime::Lifetime::default(),
             window_asks: None,
+            toasts_in: None,
             notes: Vec::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
@@ -2371,6 +2377,27 @@ impl Shell {
             self.notify_failure(Level::Warning, e.clone(), report);
         }
         result
+    }
+
+    /// Opens the Settings on a page (`admin.open` on `path`: Storage, the
+    /// health check). Popped in, the Settings are drawn over the main
+    /// window only: asked from another window (the import window's
+    /// Storage…), the main window comes to the front, as it does when the
+    /// import window closes. In their own window, that window shows.
+    pub(super) fn open_settings_page(&mut self, path: &str) -> Result<Value, String> {
+        let asked = self.core.app.handle().current_window_group();
+        let out = self.run(
+            egui_pop::api::admin::CMD_OPEN.as_str(),
+            json!({ "path": path }),
+            Origin::User,
+        )?;
+        let app = self.core.app.handle();
+        if asked != egui::ViewportId::ROOT && !egui_pop::api::admin::in_window(app) {
+            let ctx = app.egui();
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        Ok(out)
     }
 
     fn declare_commands(w: &Wiring<'_>, panels: &[PanelSpec]) {
@@ -3912,7 +3939,10 @@ impl Shell {
             (t, _) => t,
         };
         if let (Some(t), Some(toasts)) = (toast, self.core.app.handle().service(&TOASTS)) {
-            toasts.notify(t);
+            match self.toasts_in {
+                Some(group) => toasts.notify_in(group, t),
+                None => toasts.notify(t),
+            };
         }
         self.core.notices.push(Notice {
             level,
