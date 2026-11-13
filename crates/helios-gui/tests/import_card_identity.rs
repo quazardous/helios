@@ -142,8 +142,9 @@ fn imports_during(h: &mut Harness<'static, Shell>, long: Duration) -> Vec<Value>
 /// plugged in, renaming its photos `{stem}-kept`.
 fn saved(path: &Path, volume: Option<&str>) -> String {
     let volume = volume.map_or_else(String::new, |v| format!("volume = \"{v}\"\n"));
+    let path = toml::Value::String(path.display().to_string());
     format!(
-        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {path:?}\nauto = \"plugged\"\n{volume}\n\
+        "[[source]]\nconnector = \"card\"\nname = \"Camera\"\npath = {path}\nauto = \"plugged\"\n{volume}\n\
          [source.choices]\ncopy_folders = true\nlayout = \"month\"\nrename = \"{{stem}}-kept\"\n\
          duplicates = \"skip\"\ndarktable = true\n"
     )
