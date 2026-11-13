@@ -4648,27 +4648,33 @@ impl Shell {
                 value,
             });
         };
-        let label =
-            |s: &Self, key: &'static str, english: &'static str| s.text(Message::new(key, english));
+        let label = |s: &Self, message: Message| s.text(message);
         let text = |s: &str| helios_core::Value::Text(s.to_string());
         let choice = |s: &str| helios_core::Value::Choice(s.to_string());
         if creating {
             field(
                 "name",
-                D::text(&label(self, "gui-library-album-name", "name"), ""),
+                D::text(
+                    &label(self, Message::new("gui-library-album-name", "name")),
+                    "",
+                ),
                 text(""),
             );
         }
         let mode = if form.any { "any" } else { "all" };
         field(
             "match",
-            D::choice(&label(self, "gui-smart-match", "match"), &MATCHES, "all"),
+            D::choice(
+                &label(self, Message::new("gui-smart-match", "match")),
+                &MATCHES,
+                "all",
+            ),
             choice(mode),
         );
         field(
             "rating",
             D::int(
-                &label(self, "gui-smart-rating", "at least (stars)"),
+                &label(self, Message::new("gui-smart-rating", "at least (stars)")),
                 0,
                 5,
                 0,
@@ -4678,7 +4684,7 @@ impl Shell {
         field(
             "label",
             D::choice(
-                &label(self, "gui-smart-label", "colour label"),
+                &label(self, Message::new("gui-smart-label", "colour label")),
                 &F::labels(),
                 crate::smart_album::ANY,
             ),
@@ -4687,46 +4693,41 @@ impl Shell {
         field(
             "flag",
             D::choice(
-                &label(self, "gui-smart-flag", "flag"),
+                &label(self, Message::new("gui-smart-flag", "flag")),
                 &F::flags(),
                 crate::smart_album::ANY,
             ),
             choice(&form.flag),
         );
-        for (key, msg, english, value) in [
-            ("tag", "gui-smart-tag", "tag", &form.tag),
+        for (key, message, value) in [
+            ("tag", Message::new("gui-smart-tag", "tag"), &form.tag),
             (
                 "camera",
-                "gui-smart-camera",
-                "camera (contains)",
+                Message::new("gui-smart-camera", "camera (contains)"),
                 &form.camera,
             ),
             (
                 "file_type",
-                "gui-smart-file-type",
-                "file type",
+                Message::new("gui-smart-file-type", "file type"),
                 &form.file_type,
             ),
             (
                 "folder",
-                "gui-smart-folder",
-                "folder (absolute)",
+                Message::new("gui-smart-folder", "folder (absolute)"),
                 &form.folder,
             ),
             (
                 "taken_from",
-                "gui-smart-taken-from",
-                "taken from (YYYY-MM-DD)",
+                Message::new("gui-smart-taken-from", "taken from (YYYY-MM-DD)"),
                 &form.taken_from,
             ),
             (
                 "taken_to",
-                "gui-smart-taken-to",
-                "taken to (YYYY-MM-DD)",
+                Message::new("gui-smart-taken-to", "taken to (YYYY-MM-DD)"),
                 &form.taken_to,
             ),
         ] {
-            field(key, D::text(&label(self, msg, english), ""), text(value));
+            field(key, D::text(&label(self, message), ""), text(value));
         }
         let (title, verb, command) = if creating {
             (
