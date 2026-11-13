@@ -412,6 +412,9 @@ struct Parts {
     /// The controls' context: the Parameters panel sets its box and hand,
     /// the `controls.*` commands read and set it.
     controls: helios_controls::commands::SharedContexts,
+    /// The plugins installed, for Settings > Plugins: set by
+    /// [`ShellBuilder::plugins`] before the application is built.
+    plugin_settings: crate::config::plugins::Shared,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -472,7 +475,8 @@ impl ShellBuilder {
 
     /// The plugins installed: each importer an entry under File > Import
     /// from, each plugin's catalogues added to the interface's (its
-    /// importers' labels translated there). A catalogue refused is said
+    /// importers' labels translated there), each a page of Settings >
+    /// Plugins with its settings. A catalogue refused is said
     /// in the log and left out.
     #[must_use]
     pub fn plugins(self, broker: &helios_plugin::Broker) -> Self {
@@ -493,6 +497,8 @@ impl ShellBuilder {
             }
         }
         self.parts.lists.borrow_mut().importers = entries;
+        *crate::config::lock(&self.parts.plugin_settings) =
+            crate::config::plugins::PluginSettings::of(broker);
         self
     }
 
@@ -664,6 +670,7 @@ impl Shell {
         let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
+        let plugin_settings = crate::config::plugins::Shared::default();
         let lists = Rc::new(RefCell::new(ListSource {
             profiles_dir: config_dir().join("profiles"),
             importers: Vec::new(),
@@ -776,6 +783,7 @@ impl Shell {
             .plugin(egui_pop::api::admin::AdminPlugin)
             .plugin(crate::config::BridgePlugin {
                 i18n: Some(i18n.clone()),
+                plugins: plugin_settings.clone(),
             })
             // egui-pop's theme editor, as a page of the Settings app, on
             // the theme in use.
@@ -843,6 +851,7 @@ impl Shell {
                 subworkspaces,
                 agent_state,
                 controls,
+                plugin_settings,
             },
         }
     }
@@ -872,6 +881,7 @@ impl Shell {
             subworkspaces,
             agent_state,
             controls,
+            plugin_settings: _,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());

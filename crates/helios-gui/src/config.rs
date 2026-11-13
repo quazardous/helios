@@ -54,6 +54,7 @@ use helios_config::{Concern, Config, Kind, Layer, Schema, Value};
 use helios_core::Message;
 use serde_json::{Value as Json, json};
 
+pub mod plugins;
 pub mod store;
 
 pub use store::{INTERFACE_FILE, NodeLayers, NodeSettingsStore};
@@ -331,17 +332,32 @@ pub const WORKSPACE_FILE: &str = "settings.json";
 struct State {
     /// Helios's settings and the configuration folder, once installed.
     installed: Option<(NodeSettingsStore, PathBuf)>,
+    /// The plugins' settings, once installed.
+    plugins: Option<plugins::PluginSettingsStore>,
     /// The open workspace's settings file.
     workspace: Option<PathBuf>,
+    /// Where the plugins' secrets are kept: the system keyring unless
+    /// [`use_secrets`] says otherwise.
+    secrets: Option<Arc<dyn helios_connect::account::Secrets>>,
 }
 
 /// The service: see [`install`] and [`open_workspace`].
 #[derive(Default)]
 pub struct Bridge {
     state: Mutex<State>,
+    /// The plugins whose settings are declared.
+    plugins: Vec<plugins::PluginSettings>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+/// Keeps the plugins' secrets in `secrets` instead of the system
+/// keyring (tests); before [`install`].
+pub fn use_secrets(app: &AppHandle, secrets: Arc<dyn helios_connect::account::Secrets>) {
+    if let Some(bridge) = app.service(&BRIDGE) {
+        lock(&bridge.state).secrets = Some(secrets);
+    }
+}
+
+pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -482,7 +498,6 @@ pub fn title(path: &str) -> Message {
             Message::new("gui-settings-accounts-clients", "Use my own OAuth client")
         }
         "plugins" => Message::new("gui-settings-plugins", "Plugins"),
-        "plugins/capabilities" => Message::new("gui-settings-plugins-capabilities", "Permissions"),
         "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
         "interface/experimental" => Message::new("gui-settings-experimental", "Experimental"),
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
@@ -502,9 +517,14 @@ pub fn title(path: &str) -> Message {
 /// The manifest: Helios's scopes, in the note's order, and its settings
 /// placed in them (the display's, the catalogue's and the backup
 /// destinations' egui-pop settings too), with the Storage and Backup
-/// pages read from the storage commands; its texts through `t` (the
-/// interface's language).
-pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
+/// pages read from the storage commands, and a page per plugin installed
+/// (`plugins`: its permissions and its settings, from its contract); its
+/// texts through `t` (the interface's language).
+pub fn manifest(
+    schema: &Schema,
+    plugins: &[plugins::PluginSettings],
+    t: &dyn Fn(Message) -> String,
+) -> Manifest {
     let tt = |path: &str| t(title(path));
     let mut m = Manifest::new(FORMAT)
         .scope_at("library", &tt("library"), "folder", 30)
@@ -535,7 +555,7 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
             }
         });
     }
-    m.section("storage/catalogue", &tt("storage/catalogue"), |s| {
+    let m = m.section("storage/catalogue", &tt("storage/catalogue"), |s| {
         s.description(&t(Message::new(
             "gui-settings-catalogue-about",
             "Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.",
@@ -564,10 +584,8 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
     .section("accounts/clients", &tt("accounts/clients"), |s| {
         clients_section(s, t);
     })
-    .section("plugins/capabilities", &tt("plugins/capabilities"), |s| {
-        plugins_section(s, t);
-    })
-    .wizard(backup_wizard(t))
+    .wizard(backup_wizard(t));
+    plugins::sections(m, plugins, t)
 }
 
 /// The backup wizard's id: "Set up backups…" on the Backup scope's
@@ -1087,51 +1105,6 @@ fn clients_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
     s.table(table);
 }
 
-/// Settings > Plugins: every installed plugin's capabilities, each with
-/// the reason its manifest gives and a switch granting or taking it back
-/// (`plugin.capabilities`, `plugin.grant`). Taking one back stops the
-/// plugin; it asks again the next time it is needed.
-fn plugins_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
-    use helios_plugin::commands::{CAPABILITIES, GRANT};
-    s.description(&t(Message::new(
-        "gui-settings-plugins-about",
-        "What each plugin may do. A plugin asks the first time it needs a permission; Helios remembers your answer.",
-    )));
-    let table = Records::command(
-        "plugin-capabilities",
-        "",
-        CAPABILITIES,
-        "/capabilities",
-        "id",
-    )
-    .column(
-        "pluginText",
-        &t(Message::new("gui-settings-plugin-name", "Plugin")),
-    )
-    .column(
-        "reason",
-        &t(Message::new("gui-settings-plugin-reason", "Why")),
-    )
-    .row_field(RowField::toggle(
-        "granted",
-        &t(Message::new("gui-settings-plugin-granted", "Allowed")),
-        GRANT,
-        json!({
-            "plugin": "${row.plugin}",
-            "capability": "${row.capability}",
-            "granted": "${value}",
-        }),
-    ))
-    .empty(
-        &t(Message::new(
-            "gui-settings-plugins-none",
-            "No plugin asks for a permission.",
-        )),
-        None,
-    );
-    s.table(table);
-}
-
 /// The Backup scope's strategy, edited in place: on or off, how many
 /// copies, where, one off site, when copies are made (each written at
 /// once through `library.setBackupStrategy`); its disks plugged in and
@@ -1285,6 +1258,9 @@ pub struct BridgePlugin {
     /// The interface's catalogues, for the manifest's texts; English
     /// without.
     pub i18n: Option<egui_pop::i18n::I18n>,
+    /// The plugins installed, their settings declared and placed under
+    /// Plugins, as known when the application is built.
+    pub plugins: plugins::Shared,
 }
 
 impl std::fmt::Debug for BridgePlugin {
@@ -1320,11 +1296,19 @@ impl Plugin for BridgePlugin {
             Some(i) => helios_i18n::message(i, &m),
             None => m.english,
         };
+        let installed = lock(&self.plugins).clone();
+        plugins::declare(ctx, &installed, &t);
         for scope in SCOPES {
             admin.declare_scope(scope);
         }
-        admin.manifest(manifest(&schema, &t));
-        ctx.service(&BRIDGE, Bridge::default())?;
+        admin.manifest(manifest(&schema, &installed, &t));
+        ctx.service(
+            &BRIDGE,
+            Bridge {
+                plugins: installed,
+                ..Bridge::default()
+            },
+        )?;
         Ok(())
     }
 }
@@ -1367,7 +1351,20 @@ pub fn install(
             log::warn!("--set {key}: {e}");
         }
     }
-    lock(&bridge.state).installed = Some((store.clone(), config_dir.to_path_buf()));
+    {
+        let mut st = lock(&bridge.state);
+        let secrets = st
+            .secrets
+            .clone()
+            .unwrap_or_else(|| Arc::new(helios_connect::keyring::SystemSecrets));
+        st.plugins = Some(plugins::PluginSettingsStore::new(
+            &bridge.plugins,
+            &store,
+            config_dir,
+            secrets,
+        ));
+        st.installed = Some((store.clone(), config_dir.to_path_buf()));
+    }
     attach(app, &bridge, &admin);
     store
 }
@@ -1383,7 +1380,7 @@ fn attach(app: &AppHandle, bridge: &Bridge, admin: &Admin) {
         return;
     };
     let workspace = st.workspace.as_deref();
-    let store = store::composite(node, config_dir, workspace);
+    let store = store::composite(node, st.plugins.as_ref(), config_dir, workspace);
     if let Some(file) = workspace {
         let values: BTreeMap<String, Json> = std::fs::read_to_string(file)
             .ok()
@@ -1533,7 +1530,7 @@ mod tests {
     #[test]
     fn every_setting_is_placed_once_with_the_scopes_of_its_concern() {
         let schema = Schema::core();
-        let m = manifest(&schema, &|m| m.english);
+        let m = manifest(&schema, &[], &|m| m.english);
         let bound: Vec<&str> = m.bound_settings().collect();
         for s in schema.iter() {
             assert_eq!(
@@ -1568,7 +1565,7 @@ mod tests {
 
     #[test]
     fn the_manifest_s_texts_go_through_the_catalogues() {
-        let m = manifest(&Schema::core(), &|m| format!("<{}>", m.key));
+        let m = manifest(&Schema::core(), &[], &|m| format!("<{}>", m.key));
         let library = m.scopes.iter().find(|s| s.meta.id == "library").unwrap();
         assert_eq!(library.meta.title, "<gui-settings-library>");
         for s in &m.sections {

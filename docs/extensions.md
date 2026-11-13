@@ -102,6 +102,7 @@ label = "Quality"       # English; the key's name when absent
 help = "The JPEG quality of the previews it asks for"
 group = "Previews"      # the heading it is shown under
 order = 0               # its place in its group, then by name
+per_library = true      # may differ per library (own settings only)
 
 [settings.mode]
 type = "choice"
@@ -130,6 +131,21 @@ default, a choice without choices, a path without its kind, bounds on a
 key that is not a number, `visible_when` naming a key the level does not
 declare, account settings from a plugin without `[[connect]]`, or source
 settings without the `import.source` or `importer` service.
+
+**In Settings.** Settings > Plugins has a page per plugin installed: its
+permissions, then its own settings, drawn from the contract by the
+Settings app's form framework. Each key is a setting `<id>.<key>`: a
+toggle, a number within its bounds and step, a text, a choice, a file or
+folder with Browse, or, for a secret, a masked text. `visible_when`
+shows a key only while the keys it names have those values; a
+`per_library` key offers "Set for: This library". The app's values are
+kept in `plugins.json` in the configuration folder (by plugin, then
+key), a library's in that library's settings layer through the node
+(its `plugin-settings` table), secrets in the system keyring under
+`plugin:<id>`: a secret set shows as a mask, and is never written to a
+file, a log or a settings export. A value read that the contract refuses
+(unknown key, wrong type, out of bounds) is left out, and the Settings
+window says why; a library value another client changes shows at once.
 
 ## Packaging and trust
 
@@ -221,9 +237,9 @@ start and writes them back through the node each time one is granted or
 taken back. A capability the plugin no longer declares is not granted,
 so one a newer version of its manifest adds is asked for again; the
 grants of a plugin no longer installed are dropped when the grants are
-next written. Settings > Plugins lists every plugin's capabilities with
-a switch each (`plugin.capabilities`, `plugin.grant`); taking one back
-stops the plugin.
+next written. Settings > Plugins lists each plugin's capabilities on its
+page with a switch each (`plugin.capabilities`, given `plugin` for one
+plugin's, and `plugin.grant`); taking one back stops the plugin.
 
 A plugin's process still runs with the user's rights: it could read or
 write other files, or run programs it was not granted. Holding the process

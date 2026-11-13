@@ -1994,17 +1994,17 @@ gui-consent-title = Autoriser { $plugin } ?
 
 gui-settings-plugin-granted = Autorisé
 
-gui-settings-plugin-name = Extension
+gui-settings-plugin-no-capability = Elle ne demande aucune autorisation.
 
 gui-settings-plugin-reason = Pourquoi
 
+gui-settings-plugin-refused = Les réglages de cette extension ne sont pas affichés : { $problems }
+
+gui-settings-plugin-settings = Réglages
+
 gui-settings-plugins = Extensions
 
-gui-settings-plugins-about = Ce que chaque extension peut faire. Une extension demande la première fois qu’elle a besoin d’une autorisation ; Helios retient votre réponse.
-
 gui-settings-plugins-capabilities = Autorisations
-
-gui-settings-plugins-none = Aucune extension ne demande d’autorisation.
 
 gui-oauth-client-built-in = Le client de Helios
 

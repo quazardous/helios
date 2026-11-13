@@ -474,8 +474,10 @@ pub struct Lenient {
 /// The top-level tables a layer keeps as written, for another part of
 /// Helios to read: they are not settings, so they are neither checked nor
 /// shown, and a layer written back keeps them. `plugin-grants`: the
-/// capabilities the person allowed each plugin (`helios_plugin::grants`).
-pub const KEPT_TABLES: &[&str] = &["plugin-grants"];
+/// capabilities the person allowed each plugin (`helios_plugin::grants`);
+/// `plugin-settings`: a library's values of plugins' own settings, by
+/// plugin id then key (the configuration contract's `per_library` keys).
+pub const KEPT_TABLES: &[&str] = &["plugin-grants", "plugin-settings"];
 
 /// Settings resolved through their layers.
 #[derive(Clone, Debug)]
