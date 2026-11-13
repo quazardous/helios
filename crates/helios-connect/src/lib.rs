@@ -81,7 +81,9 @@ pub trait Connector: Send + Sync {
         Err(ConnectorError::Unsupported)
     }
 
-    /// A small preview without fetching the file, when `caps.thumbnails`.
+    /// A small preview without fetching the file, when `caps.thumbnails`:
+    /// an encoded picture (JPEG, PNG) at most `max_side` pixels on its
+    /// long side, or about.
     fn thumbnail(
         &self,
         _item: &ItemRef,
@@ -190,6 +192,20 @@ pub struct Caps {
     /// Its items are picked by the person in the service's own page
     /// ([`Connector::pick`]): the import window offers "Pick photos…".
     pub picks: bool,
+    /// What its service lets Helios ask, so reading ahead (glances of
+    /// items not shown yet) stays within it.
+    pub limits: Limits,
+}
+
+/// How many requests a connector's service allows: the read-ahead of
+/// glances pauses at them. `None`: no limit declared.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Limits {
+    /// Requests a minute.
+    pub per_minute: Option<u32>,
+    /// Requests a day: a hint of the service's daily quota.
+    pub per_day: Option<u32>,
 }
 
 /// A hash algorithm a connector may claim.

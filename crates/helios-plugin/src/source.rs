@@ -12,7 +12,12 @@
 //! Methods: `source.probe`, `source.pick` (`{session, pickerUri}`),
 //! `source.wait` (`{ready}`, at most `timeoutSecs`), `source.list`
 //! (`{items, next, complete}`), `source.fetch` (the items into a staging
-//! folder Helios gives, `{fetched, failed}`), `source.close`.
+//! folder Helios gives, `{fetched, failed}`), `source.thumbnail` (an
+//! item's preview into the staging folder, `{file}`, when the manifest
+//! says `thumbnails`), `source.close`.
+//!
+//! The manifest's `thumbnails` and `[limits]` are the connector's caps:
+//! the import window reads glances ahead within those limits.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -113,6 +118,8 @@ impl SourceProvider {
                 accounts: !connect.is_empty(),
                 originals: Originals::Rendered,
                 picks: true,
+                thumbnails: m.thumbnails,
+                limits: m.limits,
                 ..Caps::default()
             },
             needs: Needs {
@@ -151,6 +158,7 @@ impl SourceProvider {
             plugin: self.plugin.clone(),
             id: self.manifest.id.clone(),
             label: self.manifest.label.clone(),
+            caps: self.manifest.caps.clone(),
             token,
             session: Mutex::new(None),
             downloads: Mutex::new(HashMap::new()),
@@ -192,6 +200,8 @@ pub struct PluginSource {
     plugin: String,
     id: String,
     label: Text,
+    /// Its manifest's: what it does, its limits.
+    caps: Caps,
     token: TokenFn,
     /// The picking going: its account and session.
     session: Mutex<Option<(String, String)>>,
@@ -295,6 +305,26 @@ impl PluginSource {
         Ok(answer)
     }
 
+    /// The plugin's preview of one item listed, written into the staging
+    /// folder: its bytes.
+    fn thumbnail_one(&self, item: &ItemRef, max_side: u32) -> Result<Vec<u8>, ConnectorError> {
+        let listed = lock(&self.downloads)
+            .get(&item.id.0)
+            .cloned()
+            .ok_or(ConnectorError::Expired)?;
+        let answer = self.call(
+            &item.source.id,
+            "source.thumbnail",
+            json!({ "item": listed, "maxSide": max_side, "staging": self.staging }),
+            CALL,
+            &Cancel::new(),
+        )?;
+        let file = staged(&self.staging, answer["file"].as_str().unwrap_or_default())?;
+        let bytes = std::fs::read(&file);
+        let _ = std::fs::remove_file(&file);
+        bytes.map_err(|e| ConnectorError::Transient(e.to_string()))
+    }
+
     /// The picking going listed again, every page: each item's download
     /// address renewed.
     fn refresh(&self, cancel: &Cancel) -> Result<(), ConnectorError> {
@@ -370,12 +400,7 @@ impl Connector for PluginSource {
         ConnectorInfo {
             id: self.id.clone(),
             label: self.label.clone(),
-            caps: Caps {
-                accounts: true,
-                originals: Originals::Rendered,
-                picks: true,
-                ..Caps::default()
-            },
+            caps: self.caps.clone(),
         }
     }
 
@@ -481,6 +506,25 @@ impl Connector for PluginSource {
 
     fn access(&self, _item: &ItemRef) -> Access {
         Access::Fetch
+    }
+
+    /// The item's preview, when the manifest says `thumbnails`. An
+    /// address the service let expire is renewed as for a fetch: the
+    /// picking listed again, the preview asked once more.
+    fn thumbnail(&self, item: &ItemRef, max_side: u32) -> Result<Option<Vec<u8>>, ConnectorError> {
+        if !self.caps.thumbnails {
+            return Ok(None);
+        }
+        std::fs::create_dir_all(&self.staging)
+            .map_err(|e| ConnectorError::Fatal(format!("{}: {e}", self.staging.display())))?;
+        let bytes = match self.thumbnail_one(item, max_side) {
+            Err(ConnectorError::Expired) => {
+                self.refresh(&Cancel::new())?;
+                self.thumbnail_one(item, max_side)?
+            }
+            other => other?,
+        };
+        Ok(Some(bytes))
     }
 
     fn fetch(
