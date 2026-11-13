@@ -2,13 +2,16 @@
 //! a selection and a default per camera"), as raw editors keep develop
 //! defaults per camera model (Lightroom's "Set Default Settings" for a
 //! camera): the look's two nodes' parameters kept in the vault's
-//! `look/defaults` namespace under the camera's key, and put on a raw of
-//! that camera the first time it opens ([`default_on_open`]).
+//! `look/defaults` namespace under the camera's key, and put on the raws
+//! of that camera an import brings in ([`default_on_import`]).
 //!
 //! - `look.camera.setDefault {camera, look | image | clear}`: keeps the
 //!   look given (the two nodes' parameters), the look of an image's
 //!   newest edit, or clears the default. One undoable step of the
 //!   library; photos already edited keep their edits.
+
+use std::collections::BTreeMap;
+use std::path::Path;
 
 use helios_calibrate::look::edit::{self, COLOUR, TONE};
 use helios_core::{Message, Params, Value as Param};
@@ -186,37 +189,94 @@ pub fn set_default<S: Store>(vault: &Vault<S>, params: &Value, now: u64) -> Resu
     })
 }
 
-/// The camera's default look put on a raw opened for the first time
-/// (`fresh`: it had no edit before this opening; a calibration profile
-/// the camera's default put on it just before is kept): saved as a new
-/// version of its edit by `origin`. Answers the change, none when the
-/// camera has no default or the photo was edited before.
+/// The origin of the version a camera's default look makes at import:
+/// a photo whose versions all have it was never edited by hand, so its
+/// first opening still puts the camera's default profile on it.
+pub const IMPORT_ORIGIN: &str = "import:camera-look";
+
+/// Whether versions of a photo are only the camera's default look put
+/// at import (none at all included): a photo nobody edited yet.
+pub fn untouched(versions: &[helios_vault::Version]) -> bool {
+    versions.iter().all(|v| v.origin == IMPORT_ORIGIN)
+}
+
+/// The camera key of the raw at `path`, read from its header without
+/// decoding the mosaic, as the open photo's is named; none for a picture
+/// or a file that cannot be read.
+pub fn raw_camera(path: &Path) -> Option<String> {
+    helios_load::raw_camera(path)
+        .ok()
+        .flatten()
+        .map(|(make, model)| helios_calibrate::camera_key(&make, &model))
+}
+
+/// The cameras' default looks put on the photos an import brought in, as
+/// raw editors apply a camera's develop defaults at import (Lightroom):
+/// each image new to the vault in `changes`, never edited, whose file is
+/// a raw of a camera with a default look (`camera_of` names a file's
+/// camera, none for a picture: [`raw_camera`]) gets the look as its
+/// first version, by [`IMPORT_ORIGIN`]. The import's own change of each
+/// photo takes the version in, so undoing the import takes it back too.
+/// Answers how many photos got a look.
 ///
 /// # Errors
 /// The vault cannot be read or written.
-pub fn default_on_open<S: Store>(
+pub fn default_on_import<S: Store>(
+    vault: &Vault<S>,
+    changes: &mut Changes,
+    now: u64,
+    camera_of: &dyn Fn(&Path) -> Option<String>,
+) -> Result<usize, Message> {
+    let looks: BTreeMap<String, (Params, Params)> = vault
+        .look_defaults()
+        .map_err(store_error)?
+        .into_iter()
+        .filter_map(|(camera, doc)| params_of(&doc).map(|p| (camera, p)))
+        .collect();
+    if looks.is_empty() {
+        return Ok(0);
+    }
+    let mut put = 0;
+    for change in &mut changes.images {
+        if change.before.is_some() || change.after.is_none() {
+            continue;
+        }
+        let image = change.image;
+        if !vault.versions(&image).map_err(store_error)?.is_empty() {
+            continue;
+        }
+        let Some((colour, tone)) = vault
+            .locations(&image)
+            .map_err(store_error)?
+            .into_iter()
+            .map(|l| l.path)
+            .find(|p| p.exists())
+            .and_then(|p| camera_of(&p))
+            .and_then(|camera| looks.get(&camera))
+        else {
+            continue;
+        };
+        if save_look(vault, image, colour, tone, IMPORT_ORIGIN, now)? {
+            change.after = vault.rows(&image).map_err(store_error)?;
+            put += 1;
+        }
+    }
+    Ok(put)
+}
+
+/// A look's two nodes' parameters saved as a new version of `image`'s
+/// edit by `origin`; false when the edit held them already.
+fn save_look<S: Store>(
     vault: &Vault<S>,
     image: ImageId,
-    camera: &str,
-    fresh: bool,
+    colour: &Params,
+    tone: &Params,
     origin: &str,
     now: u64,
-) -> Result<Option<Changes>, Message> {
-    if !fresh || camera == "picture" {
-        return Ok(None);
-    }
-    let Some((colour, tone)) = vault
-        .look_default(camera)
-        .map_err(store_error)?
-        .as_ref()
-        .and_then(params_of)
-    else {
-        return Ok(None);
-    };
+) -> Result<bool, Message> {
     let (mut session, head) = helios_vault::EditSession::open(vault, image).map_err(store_error)?;
     let before = head.map_or(Value::Null, |v| v.edit);
-    let after = edit::with_params(&before, &colour, &tone);
-    let rows_before = vault.rows(&image).map_err(store_error)?;
+    let after = edit::with_params(&before, colour, tone);
     let saved = session
         .save(
             vault,
@@ -226,16 +286,21 @@ pub fn default_on_open<S: Store>(
             now,
         )
         .map_err(store_error)?;
-    if saved.is_none() {
-        return Ok(None);
-    }
-    let rows_after = vault.rows(&image).map_err(store_error)?;
-    Ok(Some(Changes {
-        images: vec![helios_vault::undo::Change {
-            image,
-            before: rows_before,
-            after: rows_after,
-        }],
-        ..Changes::default()
-    }))
+    Ok(saved.is_some())
+}
+
+/// The camera's default look, or none, as `look.camera.choose`'s
+/// "Camera look" preset reads it: the two nodes' parameters.
+///
+/// # Errors
+/// The vault cannot be read.
+pub fn look_of_camera<S: Store>(
+    vault: &Vault<S>,
+    camera: &str,
+) -> Result<Option<(Params, Params)>, Message> {
+    Ok(vault
+        .look_default(camera)
+        .map_err(store_error)?
+        .as_ref()
+        .and_then(params_of))
 }

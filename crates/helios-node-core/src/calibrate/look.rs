@@ -17,8 +17,8 @@
 //! averaged and scored on every photo's held-out pairs, then written into
 //! every raw of the selection; with `default`, kept as the camera's
 //! default too. `look.camera.setDefault` keeps or clears a camera's
-//! default look, which a new photo of that camera opens with
-//! ([`defaults`]).
+//! default look, which the raws of that camera an import brings in start
+//! with ([`defaults`]).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -35,7 +35,9 @@ use crate::commands::{CommandSpec, Need, object};
 pub mod defaults;
 pub mod together;
 
-pub use defaults::{SET_DEFAULT, default_on_open, set_default};
+pub use defaults::{
+    IMPORT_ORIGIN, SET_DEFAULT, default_on_import, look_of_camera, raw_camera, set_default,
+};
 
 /// Fits a camera look to photos' embedded JPEG.
 pub const FIT: &str = "look.camera.fit";
@@ -510,8 +512,8 @@ mod tests {
     }
 
     #[test]
-    fn a_camera_s_default_look_is_kept_put_on_a_new_photo_once_and_cleared() {
-        let (vault, dir, ids) = vault_of("default", 2);
+    fn a_camera_s_default_look_is_kept_put_on_its_imported_raws_and_cleared() {
+        let (vault, dir, ids) = vault_of("default", 4);
         let read = shots(|_| "Look");
         // The first photo fitted on its own, its look kept as the default.
         fit_with(
@@ -530,22 +532,52 @@ mod tests {
         .unwrap();
         assert_eq!(kept.answer["kept"], true);
         assert_eq!(kept.changes.documents.len(), 1);
-        // A new photo of that camera opens with it; opened again, not.
-        let put = default_on_open(&vault, ids[1], "synthetic look", true, "user", 30)
-            .unwrap()
-            .unwrap();
-        assert_eq!(put.images.len(), 1);
+        // An import bringing in photos 1 to 3: 1 a raw of that camera, 2 a
+        // raw of another, 3 a picture; photo 0 was in the vault before.
+        let camera_of = |p: &Path| {
+            let name = p.file_name()?.to_str()?;
+            match name {
+                "shot-1.tif" => Some("synthetic look".to_string()),
+                "shot-2.tif" => Some("another camera".to_string()),
+                _ => None,
+            }
+        };
+        let change = |id: ImageId, new: bool| helios_vault::undo::Change {
+            image: id,
+            before: if new { None } else { vault.rows(&id).unwrap() },
+            after: vault.rows(&id).unwrap(),
+        };
+        let mut imported = Changes {
+            images: vec![
+                change(ids[0], false),
+                change(ids[1], true),
+                change(ids[2], true),
+                change(ids[3], true),
+            ],
+            ..Changes::default()
+        };
+        let put = default_on_import(&vault, &mut imported, 30, &camera_of).unwrap();
+        assert_eq!(put, 1);
         assert!(edit::applied(&head(&vault, ids[1]).unwrap()));
-        assert!(
-            default_on_open(&vault, ids[1], "synthetic look", false, "user", 40)
-                .unwrap()
-                .is_none()
+        assert_eq!(head(&vault, ids[2]), None);
+        assert_eq!(head(&vault, ids[3]), None);
+        let versions = vault.versions(&ids[1]).unwrap();
+        assert_eq!(versions[0].origin, IMPORT_ORIGIN);
+        // Still untouched by hand: the first opening puts the camera's
+        // default profile on it.
+        assert!(defaults::untouched(&versions));
+        // The import's own change takes the version in: undone, it goes.
+        assert_eq!(imported.images[1].after, vault.rows(&ids[1]).unwrap());
+        // Imported again (known now), it is left as it is.
+        let mut again = Changes {
+            images: vec![change(ids[1], false)],
+            ..Changes::default()
+        };
+        assert_eq!(
+            default_on_import(&vault, &mut again, 40, &camera_of).unwrap(),
+            0
         );
-        assert!(
-            default_on_open(&vault, ids[1], "another camera", true, "user", 40)
-                .unwrap()
-                .is_none()
-        );
+        assert_eq!(vault.versions(&ids[1]).unwrap().len(), 1);
         // A look never fitted is refused; `clear` clears.
         let refused = set_default(
             &vault,

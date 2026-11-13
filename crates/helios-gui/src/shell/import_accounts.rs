@@ -297,6 +297,11 @@ pub trait LibraryFolder: Send + Sync {
     fn get(&self) -> Result<Option<PathBuf>, String>;
     /// Remembers `dir` as the library folder.
     fn set(&self, dir: &Path) -> Result<(), String>;
+    /// Whether the library keeps a camera's default camera look: the
+    /// import window's Choices then offer to apply it.
+    fn has_camera_looks(&self) -> bool {
+        false
+    }
 }
 
 /// How long a picking waits for the person at most.

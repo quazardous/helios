@@ -753,17 +753,39 @@ import, and the "Camera look" preset in the module's preset menu.
   look's two nodes' parameters kept in the vault's `look/defaults`
   namespace under the camera's key (`look.camera.setDefault {camera,
   look | image | clear}`, one library step; `together` with `default`
-  keeps the look it fitted). A raw opened for the first time gets its
-  camera's default profile, then its default look, as new versions of
-  its edit; photos already edited keep theirs.
+  keeps the look it fitted). The raws of that camera imported from then
+  on start with it (next section); photos already in the library keep
+  their edits.
 - **The header** says "The default look of <camera>" when the open
   photo's look is the camera's default (the same `preview` provenance),
   or that the camera has another default; "Save as the camera's
   default" keeps the open edit's look (its amounts included), "Clear the
   default" clears it.
-- **Not yet:** the default applies when a photo is first opened, not
-  at import (the import job does not render), and the "Camera look"
-  preset.
+
+### Built: the default at import and the preset (2026-11-13)
+
+- **At import,** as Lightroom applies a camera's develop defaults: once
+  an import ends, each photo new to the vault, never edited, whose file
+  is a raw of a camera with a default look gets it as its first version
+  (`helios_node_core::calibrate::look::default_on_import`). The camera
+  is read from the raw's header as the open photo's is named (the
+  decoder's clean make and model, no mosaic decoded), so the key matches
+  the one the header saved. The version's origin is
+  `import:camera-look`, and the import's own library step takes it in:
+  undoing the import takes the look back too. A photo whose only
+  versions have that origin still counts as never edited, so its first
+  opening puts the camera's default profile on it. The look is no
+  longer put on a photo when it first opens: photos already in the
+  library get it from the preset.
+- **The choice.** The import window's Choices show "Apply the camera's
+  default look" when the library keeps one, on by default; it is the
+  local sources' `camera_look` key, kept with the other choices and
+  presets, and `library.import`'s `camera_look` (false leaves the looks
+  off; the node's `library.import` takes it too).
+- **The preset.** The Camera look header has a Presets list; its
+  "Camera look" is `look.camera.choose {look: camera}`: the camera's
+  default look written into the open edit and turned on, or a fit to
+  the camera's JPEG when the camera has none, one undoable step.
 
 **3b. The user's side and the hooks.**
 

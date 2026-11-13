@@ -281,6 +281,9 @@ pub(crate) struct ImportWindow {
     /// The presets, by name, and where they are kept.
     pub(super) presets: BTreeMap<String, Choices>,
     pub(super) presets_file: Option<PathBuf>,
+    /// The library keeps a camera's default look: the Choices offer to
+    /// apply it. Read when the window opens.
+    pub(super) camera_looks: bool,
     /// The name of the preset being saved, while it is typed, and
     /// whether its field is to take the focus.
     naming: Option<(String, bool)>,
@@ -916,6 +919,11 @@ impl Shell {
         }
         w.follow_cards();
         w.clear_contents();
+        w.camera_looks = w
+            .accounts
+            .library
+            .as_ref()
+            .is_some_and(|l| l.has_camera_looks());
         w.open = true;
         w.touched = false;
         w.copy = None;

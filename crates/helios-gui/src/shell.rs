@@ -3158,7 +3158,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "library.importFiles",
-                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`)",
+                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`; `camera_look`: false leaves the cameras' default looks off the raws)",
                 "Library",
             ),
             Box::new(|a, origin| Ok(Action::ImportFiles(a.clone(), origin.clone()))),

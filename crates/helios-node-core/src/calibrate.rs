@@ -755,7 +755,8 @@ pub enum OnOpen {
 }
 
 /// The camera's default profile put on a raw opened for the first time:
-/// a photo never edited, of a camera with a default rule
+/// a photo never edited (the camera's default look put on it at import
+/// aside, [`look::IMPORT_ORIGIN`]), of a camera with a default rule
 /// (`calibration/defaults`), gets the profile `auto` picks from the rule,
 /// saved as its first edit by `origin`. A photo with an edit is left
 /// alone, so it happens once; a pick refused leaves the photo untouched
@@ -770,7 +771,8 @@ pub fn default_on_open<S: Store>(
     origin: &str,
     now: u64,
 ) -> Result<OnOpen, Message> {
-    if !vault.versions(&image).map_err(store_error)?.is_empty() {
+    // The camera's default look put at import is no edit of the person's.
+    if !look::defaults::untouched(&vault.versions(&image).map_err(store_error)?) {
         return Ok(OnOpen::Edited);
     }
     if photo.camera == "picture" {

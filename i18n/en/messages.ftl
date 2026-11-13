@@ -797,6 +797,10 @@ gui-import-window-add-source = Add a source…
 
 gui-import-window-all-types = All types
 
+gui-import-window-camera-look = Apply the camera's default look
+
+gui-import-window-camera-look-help = Raws of a camera with a default camera look start with it, as their first version
+
 gui-import-window-cancel = Cancel
 
 gui-import-window-card-inserted = { $card } inserted
@@ -1199,8 +1203,6 @@ gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet
 
-gui-look-default-applied = Camera look applied: the default of { $camera }
-
 gui-look-fit-selection-done = Camera look of { $camera } fitted from { $fitted } of { $photos } photos: Delta E { $held } (default { $baseline })
 
 gui-look-fit-selection-job = Fit a camera look from { $count } photos
@@ -1219,13 +1221,13 @@ gui-look-header-compare-not-raw = No camera JPEG to compare: the photo is not a 
 
 gui-look-header-default-clear = Clear the default
 
-gui-look-header-default-in-use = The default look of { $camera }: its new photos open with it
+gui-look-header-default-in-use = The default look of { $camera }: its raws are imported with it
 
-gui-look-header-default-other = { $camera } has another default look: its new photos open with that one
+gui-look-header-default-other = { $camera } has another default look: its raws are imported with that one
 
 gui-look-header-default-save = Save as the camera's default
 
-gui-look-header-default-save-about = New photos of { $camera } open with this camera look; photos already edited keep theirs
+gui-look-header-default-save-about = Raws of { $camera } imported from now on start with this camera look; photos already in the library keep theirs
 
 gui-look-header-fit = Fit to the camera's JPEG
 
@@ -1235,11 +1237,17 @@ gui-look-header-fitted = Fitted to the camera's JPEG: Delta E { $held } (default
 
 gui-look-header-none = Not fitted yet: the look starts from the camera's own JPEG
 
+gui-look-header-presets = Presets
+
 gui-look-header-refit = Refit
 
 gui-look-header-refused = Not fitted: { $reason }
 
 gui-look-header-switch = Camera look
+
+gui-look-preset-camera = Camera look
+
+gui-look-preset-camera-about = The camera's default look, or a look fitted to the camera's JPEG when the camera has none
 
 gui-macro-fold-detail = Changed: { $changes }
 

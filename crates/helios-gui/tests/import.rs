@@ -483,6 +483,55 @@ fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A library that keeps a camera's default look.
+struct WithCameraLooks;
+
+impl helios_gui::shell::LibraryFolder for WithCameraLooks {
+    fn get(&self) -> Result<Option<PathBuf>, String> {
+        Ok(None)
+    }
+
+    fn set(&self, _: &Path) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn has_camera_looks(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_one() {
+    let dir = temp("camera-look");
+    let (dcim, _) = fake_card(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_import_library_folder(Arc::new(WithCameraLooks));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    drop_on(&mut h, &dcim.join("IMG_0002.JPG"));
+    read_through(&mut h);
+    // On by default; unticked, the import leaves the looks off.
+    assert!(h.state().import_choices().camera_look);
+    h.get_by_role_and_label(
+        egui::accesskit::Role::CheckBox,
+        "Apply the camera's default look",
+    )
+    .click();
+    h.run_steps(3);
+    assert!(!h.state().import_choices().camera_look);
+    h.get_by_label("Import 1").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "paths": [dcim.join("IMG_0002.JPG")],
+            "duplicates": "skip",
+            "camera_look": false
+        })]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn import_files_run_with_ask_still_asks_with_the_form() {
     let dir = temp("ask");
