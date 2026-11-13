@@ -80,6 +80,8 @@ def settle() -> None:
 
 def probes(args, comp, agent) -> list[dict]:
     out: list[dict] = []
+    if ic.wait_main(comp) is None:
+        return [{"probe": "open", "ok": False, "error": "no main window listed"}]
     before = ic.listed_windows(comp)
     agent.command("library.importWindow", {"source": str(args.folder), "copy": False})
     deadline = time.monotonic() + 30
