@@ -72,11 +72,13 @@ pub fn modules() -> Catalogue {
         .module(ModuleRef::new(helios_module_demosaic::Demosaic))
         .module(ModuleRef::new(helios_module_colorin::ColorIn))
         .module(ModuleRef::new(helios_module_chartprofile::ChartProfile))
+        .module(ModuleRef::new(helios_module_cameracolour::CameraColour))
         .module(ModuleRef::new(
             helios_module_channelmixerrgb::ChannelMixerRgb,
         ))
         .module(ModuleRef::new(helios_module_flip::Flip))
         .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_module_cameratone::CameraTone))
         .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
         .module(ModuleRef::new(m::MaskFeather))

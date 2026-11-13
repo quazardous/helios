@@ -356,9 +356,11 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
             "demosaic",
             "colorin",
             "chartprofile",
+            "cameracolour",
             "channelmixerrgb",
             "flip",
             "exposure",
+            "cameratone",
             "sigmoid"
         ]
     );
@@ -374,12 +376,15 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
     }
     // Version 3: a colour chart's profile after the camera colours,
     // bypassed until a profile is applied.
-    assert_eq!(bundle.template.version, 3);
-    assert!(
-        net.nodes
-            .iter()
-            .any(|n| n.name == "chartprofile" && n.bypassed)
-    );
+    // Version 4: a camera look's colour half after it and its tone half
+    // before sigmoid, both bypassed until a look is applied.
+    assert_eq!(bundle.template.version, 4);
+    for off in ["chartprofile", "cameracolour", "cameratone"] {
+        assert!(
+            net.nodes.iter().any(|n| n.name == off && n.bypassed),
+            "{off}"
+        );
+    }
     let built = bundle.build(&catalogue()).unwrap();
     assert_eq!(built.view.0, built.nodes["sigmoid"]);
     // Laid out as the preview template: the image large, the parameters

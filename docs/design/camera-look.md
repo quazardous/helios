@@ -1,13 +1,14 @@
 # A camera look fitted to the embedded JPEG
 
-Status: **design accepted, step 2 built** (2026-11-13). The plan (study,
-a headless fit, then a module off by default) is accepted with the
+Status: **design accepted, steps 2 and 3a built** (2026-11-13). The plan
+(study, a headless fit, then a module off by default) is accepted with the
 recommended answer to each question of section 8 (two modules, a 192 px
 proxy, the chart ruling the colour, the table inline, the fitter in
 `helios-calibrate`). Step 2, the headless fit, is in
 `helios_calibrate::look`, its follow-up (the hue/saturation table, the
 Delta E 2000 refinement, near-black frames) included (section 5,
-"Built"); steps 3a and 3b are to do.
+"Built"); step 3a's bricks and modules are in (section 6, "Built"); the
+command `look.camera.fit` and step 3b are to do.
 
 Related notes: [calibration.md](calibration.md) (the chart profile,
 the accurate reference this note sits next to),
@@ -567,6 +568,54 @@ calibration.md describes it and calibration reuses it.
   with the look off); on a synthetic raw and preview, the command's
   render matches the fit's held-out score; undo restores the edit; a
   refusal writes nothing.
+
+### Built: 3a (2026-11-13)
+
+The look's two halves are in the chain, off; the command is not.
+
+- **Bricks.** The colour half reuses calibration's `core.huesat@1` (the
+  matrix, then the DNG table, which is `core.matrix3@1`'s step bit for
+  bit without a table): no new colour brick. The tone half is a new
+  `core.curve1d@1` (`helios_bricks::curve1d`, CPU and WGSL): the tone
+  curve as a luminance ratio (knots from black, linear, the look's
+  shoulder past the last knot), then the chroma curve (8 nodes over
+  display luminance), clamped to [0, 1]; at most 64 knots.
+- **Modules.** `cameracolour` (`matrix`, `lut`, `amount`, `fitter`,
+  `preview`) and `cameratone` (`tone`, `chroma`, `fitter`, `preview`,
+  `held_out`, `baseline`). Defaults change no pixel.
+- **In the chain.** "Develop one image" version 4 lists `cameracolour`
+  after `chartprofile` and `cameratone` between `exposure` and `sigmoid`,
+  both bypassed: renders keep version 3's bits. The builder's raw front
+  (a raw opened in a picture template) appends `cameracolour` bypassed
+  after `chartprofile`, as it does the profile. There is no raw front
+  version 2: the network builder inserts modules since calibration.
+- **In the edit** (`helios_calibrate::look::edit`): `with_look` copies a
+  `Look` into both nodes, turns `cameratone` on and `sigmoid` off, and
+  `cameracolour` on unless a chart profile is on (Q3 A);
+  `calibrate`'s `with_profile` turns `cameracolour` off; `without_look`
+  turns both off and `sigmoid` back on.
+- **Tests.** The two modules render fitted looks (full with table and
+  chroma, matrix only, tone only) as `look::apply` within 1e-5; v4 with
+  the look off renders v3's bits; Q3 A on the edit; the brick's contract
+  and its uniforms' size against the WGSL. As for the other bricks, the
+  GPU form is validated by naga, not run against the CPU on a device.
+
+Left to the command (3a's last part, done with 3b):
+
+- `look.camera.fit` (node request, MCP tool, desktop command, command
+  line), rendering the two proxies through the photo's chain.
+- **Where the sensor side is read.** Section 4.1 renders the sensor
+  proxy after `channelmixerrgb` and `exposure`, but `cameracolour` sits
+  right after `colorin`, before them. The command must fit the colour
+  half on what `cameracolour` sees (the `colorin` output) or the chain
+  must move it; the tone half sees `exposure`'s output, as fitted.
+- **Templates without `cameratone`.** `with_look` turns `sigmoid` off;
+  a template showing the edit without `cameratone` (develop preview,
+  export) would then render scene-linear. Those templates need the node
+  (or the builder inserts it before `sigmoid`) before the command writes
+  looks.
+- The tone half's `amount` (blending toward the default tone map spans
+  two nodes).
 
 **3b. The user's side and the hooks.**
 

@@ -1,0 +1,18 @@
+[package]
+name = "helios-module-cameracolour"
+description = "Camera look, colour half, for Helios: the matrix and hue/saturation table fitted to a raw's embedded JPEG, applied after input colour"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+# Its pixel step: `core.huesat@1` (a matrix, then the table).
+helios-bricks.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true
+
+[lints]
+workspace = true
