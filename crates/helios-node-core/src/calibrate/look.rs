@@ -262,14 +262,19 @@ mod tests {
 
     /// Patches of many colours, each a ramp from deep shadow to bright,
     /// in white-balanced camera RGB, mosaicked as the camera records it.
+    /// Saturation stays moderate (channels within 1 ± 0.3 of the ramp):
+    /// the look's tone curve scales the three channels by one luminance
+    /// ratio, so a bright patch whose dominant channel is several times
+    /// its luminance clips where the sigmoid "camera", compressing each
+    /// channel, does not, and the fit rightly refuses that look.
     fn mosaic() -> Image {
         let mut rgb = Vec::with_capacity((W * H * 3) as usize);
         for y in 0..H {
             for x in 0..W {
                 let k = (y / 64) * 8 + x / 64;
                 let hue = f64::from(k) * 0.618_034 % 1.0 * std::f64::consts::TAU;
-                let sat = 0.25 + 0.5 * f64::from(k % 3) / 2.0;
-                let ramp = 0.02 + 0.7 * f64::from(x % 64 + (y % 64) / 8) / 72.0;
+                let sat = 0.1 + 0.1 * f64::from(k % 3);
+                let ramp = 0.01 + 0.4 * f64::from(x % 64 + (y % 64) / 8) / 72.0;
                 let c = [0.0, 2.094, 4.189]
                     .map(|o: f64| (ramp * (1.0 + sat * (hue + o).cos())).clamp(0.0, 0.9) as f32);
                 rgb.extend(c);
