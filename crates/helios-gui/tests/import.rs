@@ -1858,6 +1858,27 @@ fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
     out
 }
 
+/// Where a pass painted a text (its bidirectional isolation marks left
+/// out), if it did.
+fn painted_rect(shapes: &[egui::epaint::ClippedShape], text: &str) -> Option<egui::Rect> {
+    fn walk(shape: &egui::Shape, text: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Text(t) => {
+                let shown: String = t
+                    .galley
+                    .text()
+                    .chars()
+                    .filter(|c| !matches!(c, '\u{2068}' | '\u{2069}'))
+                    .collect();
+                (shown == text).then(|| t.galley.rect.translate(t.pos.to_vec2()))
+            }
+            egui::Shape::Vec(v) => v.iter().find_map(|s| walk(s, text)),
+            _ => None,
+        }
+    }
+    shapes.iter().find_map(|s| walk(&s.shape, text))
+}
+
 /// The application windows the main window's last pass declared, egui's
 /// deferred viewports, as eframe would open them.
 fn declared(h: &Harness<'static, Shell>) -> Vec<egui::ViewportId> {
@@ -1899,6 +1920,18 @@ fn window_run(
     size: egui::Vec2,
     at: Option<egui::Pos2>,
 ) -> egui::FullOutput {
+    window_run_with(h, window, close, size, at, Vec::new())
+}
+
+/// A deferred window's own pass, given input events (a click).
+fn window_run_with(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    close: bool,
+    size: egui::Vec2,
+    at: Option<egui::Pos2>,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
     use egui::{Pos2, RawInput, Rect, ViewportEvent, ViewportId, ViewportInfo};
     let cb = h.output().viewport_output[&window]
         .viewport_ui_cb
@@ -1919,6 +1952,7 @@ fn window_run(
         screen_rect: Some(rect),
         time: Some(h.ctx.input(|i| i.time) + 1.0 / 60.0),
         focused: true,
+        events,
         ..Default::default()
     };
     input.viewports.insert(window, info);
@@ -2147,6 +2181,69 @@ fn import_window_closed_from_its_own_pass_hides_at_once_and_is_woken_no_more() {
     assert_eq!(h.state().import_window_viewport(), None);
     h.run_steps(3);
     assert!(declared(&h).is_empty(), "its window is gone");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A toast raised by what the import window asked (Import without a
+/// library, a forget or Storage… failing) shows in the import window,
+/// not in the main window, though the main window's pass answers it and
+/// the main window is the active one by then.
+#[test]
+fn a_toast_from_the_import_window_s_request_shows_in_the_import_window() {
+    let (mut h, window, dir) = import_in_its_own_window("toast-in-window");
+    // The library goes while the window shows Import still on: its
+    // words follow at the main window's next pass, after the click.
+    h.state_mut()
+        .set_no_library(Some("the disk went away".into()));
+    let size = vec2(1000.0, 700.0);
+    let out = window_run(&mut h, window, false, size, None);
+    let selected = h.state().import_counts().selected;
+    assert!(selected > 0, "nothing ticked to import");
+    let at = painted_rect(&out.shapes, &format!("Import {selected}"))
+        .expect("the Import button")
+        .center();
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let click = vec![egui::Event::PointerMoved(at), press(true)];
+    window_run_with(&mut h, window, false, size, None, click);
+    window_run_with(&mut h, window, false, size, None, vec![press(false)]);
+    // The main window's pass answers it; the user is back in the main
+    // window already, which draws again: the toast stays the import
+    // window's all the same.
+    for _ in 0..2 {
+        h.input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(true);
+        h.run();
+    }
+    assert!(h.state().import_window_open(), "the window stays open");
+    let app = h.state().app().handle().clone();
+    let toasts = app.service(&egui_pop::api::toasts::TOASTS).unwrap();
+    let toast = || {
+        toasts
+            .shown()
+            .into_iter()
+            .find(|t| t.toast.text.contains("the disk went away"))
+            .expect("no toast says why nothing was imported")
+    };
+    let said = toast();
+    assert_eq!(said.window.as_deref(), Some("import"), "{said:?}");
+    // Not drawn by the main window's passes (its status bar says the
+    // notice, as for every one).
+    assert!(said.since.is_none(), "drawn in the main window: {said:?}");
+    // The import window's pass draws it.
+    window_pass(&mut h, window, false);
+    let said = toast();
+    assert!(
+        said.since.is_some(),
+        "not drawn in the import window: {said:?}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
