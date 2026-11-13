@@ -1507,10 +1507,17 @@ fn a_failed_picking_and_a_warning_notice_are_written_to_the_log_file() {
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "Pick photos…", |h| shown(h, "Pick photos…"));
-    h.get_by_label("Pick photos…").click();
-    until(&mut h, "the session said expired", |h| {
-        shown(h, "The picking session expired, start again.")
+    until(&mut h, "the account listed", |h| {
+        shown(h, "ann@example.org")
+    });
+    click(&mut h, "ann@example.org");
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the page said closed", |h| {
+        shown(
+            h,
+            "The Test server page has closed. Open it again to choose your photos.",
+        )
     });
     let line = format!(
         "WARN  helios_gui::shell::import_accounts: picking from {PICKS}: the session expired"
