@@ -21,15 +21,25 @@
 //!   Library, its report in the Log panel and its end said.
 //! - **Another client's change** to the sources (`settings.layerChanged`
 //!   naming the document) is read again ([`Shell::follow_import_sources`]).
+//! - **Safeguards** ([`helios_library::auto_import`], section 3.3): with
+//!   automatic imports paused (`import.automatic.paused`, its command
+//!   [`PAUSE`]) nothing is imported and no folder is watched; a source's
+//!   first run opens the import window on it, where Import confirms it
+//!   (`confirmed` on the source); a batch above the limits
+//!   (`import.automatic.ask_files`, `import.automatic.ask_gb`) is a toast
+//!   whose Open shows it in the import window.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
 use egui::Context as Egui;
+use egui_pop::api::toasts::{TOASTS, Toast};
+use egui_pop::model::ids::CommandId;
 use helios_core::Message;
+use helios_library::auto_import::{self as guard, Batch, Limits, Verdict};
 use helios_shell::commands::Origin;
 use helios_storage::Card;
 use serde::{Deserialize, Serialize};
@@ -38,6 +48,11 @@ use serde_json::json;
 use super::Shell;
 use super::import_sources::{DOCUMENT, SavedSource, SourceKey};
 use crate::dialogs::{Level, Notice};
+
+/// `library.importAutomatic.pause`: pauses the automatic imports (`on`:
+/// true pauses, false resumes; without it, toggles), the
+/// `import.automatic.paused` setting.
+pub const PAUSE: &str = "library.importAutomatic.pause";
 
 /// When a saved source imports on its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +120,12 @@ pub(crate) struct AutoImports {
     /// The sources' document's text, read again after another client
     /// changed it.
     followed: Option<Receiver<String>>,
+    /// The sources whose first run opened the import window since
+    /// Helios started: not opened again for them.
+    asked: HashSet<PathBuf>,
+    /// The sources said not imported since automatic imports were
+    /// paused; cleared when they run again.
+    paused_said: HashSet<PathBuf>,
 }
 
 impl AutoImports {
@@ -217,16 +238,22 @@ impl Shell {
     /// in watched folders queued. The roots of the cards imported so.
     pub(super) fn run_automatic_imports(&mut self) -> Vec<PathBuf> {
         let _stall = crate::stall::section("import window: automatic imports");
+        let limits = self.automatic_import_limits();
         let (plugged, ready, sources, mounted) = {
             let mut w = self.import.get_mut();
             w.follow_kept_sources();
+            // Paused, no folder is watched: what arrives meanwhile is
+            // found by the first scan once they run again.
             let folders: Vec<PathBuf> = w
                 .sources
                 .list
                 .iter()
-                .filter(|s| s.auto == Some(Trigger::NewFiles))
+                .filter(|s| !limits.paused && s.auto == Some(Trigger::NewFiles))
                 .filter_map(|s| s.path.clone())
                 .collect();
+            if !limits.paused {
+                w.auto.paused_said.clear();
+            }
             let ctx = w.ctx.clone();
             w.auto.watch(folders, &ctx);
             let plugged = std::mem::take(&mut w.auto.plugged);
@@ -256,7 +283,7 @@ impl Shell {
             };
             let files = helios_connect::local::files_of(&card.root).unwrap_or_default();
             imported.push(card.root.clone());
-            self.import_automatically(&saved, &card.label, files, true);
+            self.import_automatically(&saved, &card.label, &card.root, files, &limits);
         }
         for (folder, files) in ready {
             // Turned off since the watch found them: left alone.
@@ -267,25 +294,212 @@ impl Shell {
                 || folder.display().to_string(),
                 |n| n.to_string_lossy().into_owned(),
             );
-            self.import_automatically(&saved, &label, files, false);
+            self.import_automatically(&saved, &label, &folder, files, &limits);
         }
         imported
     }
 
-    /// Queues the import of `files` from `saved`, with its own choices
-    /// (else the window's), a card's copied, duplicates skipped; said in
-    /// the Log panel and the notices.
+    /// The safeguards' settings as they are now (their defaults when the
+    /// Settings app holds none).
+    pub(super) fn automatic_import_limits(&self) -> Limits {
+        let store = self.core.app.handle().store();
+        let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+        let value = |key: &str| {
+            store
+                .get(&format!("settings/{key}"))
+                .map(|e| e.value.clone())
+        };
+        let number =
+            |key: &str, default: f64| value(key).and_then(|v| v.as_f64()).unwrap_or(default);
+        Limits::new(
+            value(guard::PAUSED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            number(guard::ASK_FILES, guard::DEFAULT_ASK_FILES as f64),
+            number(guard::ASK_GB, guard::DEFAULT_ASK_GB),
+        )
+    }
+
+    /// `library.importAutomatic.pause`: the `import.automatic.paused`
+    /// setting set (`on`), or toggled; said in the notices.
+    pub(super) fn pause_automatic_imports(
+        &mut self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        use egui_pop::model::values::{Change, Set, Value as PopValue};
+        let on = args
+            .get("on")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(!self.automatic_import_limits().paused);
+        let set = Set::new(
+            &format!("settings/{}", guard::PAUSED),
+            Change::To(PopValue::Bool(on)),
+            egui_pop::model::commands::Origin::User,
+        )
+        .untracked();
+        crate::config::lock(&self.core.app.handle().store())
+            .set(set)
+            .map_err(|e| e.to_string())?;
+        self.note(if on {
+            Message::new("gui-import-auto-paused", "Automatic imports paused")
+        } else {
+            Message::new("gui-import-auto-resumed", "Automatic imports resumed")
+        });
+        Ok(json!({ "paused": on }))
+    }
+
+    /// What becomes of `files` new on `saved` (at `root`), as the
+    /// safeguards say: imported, held while paused, shown in the import
+    /// window for its first run, or offered above the limits.
     fn import_automatically(
         &mut self,
         saved: &SavedSource,
         label: &str,
+        root: &Path,
         files: Vec<PathBuf>,
-        card: bool,
+        limits: &Limits,
     ) {
         if files.is_empty() {
             return;
         }
         let name = saved.name.clone().unwrap_or_else(|| label.to_owned());
+        let bytes = files
+            .iter()
+            .filter_map(|f| std::fs::metadata(f).ok())
+            .map(|m| m.len())
+            .sum();
+        let batch = Batch {
+            confirmed: saved.confirmed.is_some(),
+            files: files.len() as u64,
+            bytes,
+        };
+        match guard::verdict(limits, &batch) {
+            Verdict::Run => {
+                let card = saved.auto == Some(Trigger::Plugged);
+                self.run_automatic_import(saved, &name, files, card);
+            }
+            Verdict::Paused => self.automatic_import_paused(&name, root),
+            Verdict::Confirm => self.confirm_automatic_import(&name, root),
+            Verdict::Ask => self.ask_automatic_import(&name, root, &batch),
+        }
+    }
+
+    /// Paused: said once per source until they run again, with Resume.
+    fn automatic_import_paused(&mut self, name: &str, root: &Path) {
+        if !self
+            .import
+            .get_mut()
+            .auto
+            .paused_said
+            .insert(root.to_path_buf())
+        {
+            return;
+        }
+        let message = Message::new(
+            "gui-import-auto-held",
+            "Automatic imports are paused: { $source } not imported",
+        )
+        .with("source", name);
+        let resume = self.text(Message::new("gui-import-auto-resume", "Resume"));
+        self.toast_with(
+            Level::Info,
+            message,
+            Toast::info,
+            (resume, PAUSE, json!({ "on": false })),
+        );
+    }
+
+    /// The first run: the import window opened on the source (unless it
+    /// is open already, or was opened for it since Helios started), where
+    /// Import confirms it.
+    fn confirm_automatic_import(&mut self, name: &str, root: &Path) {
+        let first = self.import.get_mut().auto.asked.insert(root.to_path_buf());
+        if first && !self.import_window_open() {
+            self.open_import_window(&json!({ "source": root }));
+        }
+        let message = Message::new(
+            "gui-import-auto-confirm",
+            "First automatic import from { $source }: check the photos, then Import confirms it",
+        )
+        .with("source", name);
+        let open = self.text(Message::new("gui-import-auto-open", "Open"));
+        self.toast_with(
+            Level::Info,
+            message,
+            Toast::info,
+            (
+                open,
+                super::import_window::COMMAND,
+                json!({ "source": root }),
+            ),
+        );
+    }
+
+    /// Above the limits: a toast that stays, its Open showing the source
+    /// in the import window.
+    fn ask_automatic_import(&mut self, name: &str, root: &Path, batch: &Batch) {
+        let message = Message::new(
+            "gui-import-auto-ask",
+            "{ $files } new photos ({ $size }) on { $source }: more than an automatic import takes without asking",
+        )
+        .with("files", batch.files)
+        .with(
+            "size",
+            crate::library::size_text(&self.core.app.handle().egui(), batch.bytes),
+        )
+        .with("source", name);
+        let open = self.text(Message::new("gui-import-auto-open", "Open"));
+        self.toast_with(
+            Level::Warning,
+            message,
+            |t| Toast::warning(t).sticky(),
+            (
+                open,
+                super::import_window::COMMAND,
+                json!({ "source": root }),
+            ),
+        );
+    }
+
+    /// A notice with one command: in the Log panel, the notices and a
+    /// toast made by `toast`.
+    fn toast_with(
+        &mut self,
+        level: Level,
+        message: Message,
+        toast: impl Fn(&str) -> Toast,
+        (label, command, args): (String, &str, serde_json::Value),
+    ) {
+        self.core.log.borrow_mut().push(level, message.clone());
+        let text = self.text(message.clone());
+        if let (Ok(id), Some(toasts)) = (
+            CommandId::new(command),
+            self.core.app.handle().service(&TOASTS),
+        ) {
+            toasts.notify(toast(&text).action(&label, id, args));
+        }
+        self.notes.push(text.clone());
+        self.core.notices.push(Notice {
+            level,
+            text,
+            key: message.key,
+            action: Some((label, command.to_string())),
+            at: self.core.now,
+            report: None,
+        });
+    }
+
+    /// Queues the import of `files` from `saved`, with its own choices
+    /// (else the window's), a card's copied, duplicates skipped; said in
+    /// the Log panel and the notices.
+    fn run_automatic_import(
+        &mut self,
+        saved: &SavedSource,
+        name: &str,
+        files: Vec<PathBuf>,
+        card: bool,
+    ) {
+        let name = name.to_owned();
         let choices = {
             let w = self.import.get();
             saved

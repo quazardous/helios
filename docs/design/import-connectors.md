@@ -857,10 +857,39 @@ watched. Turning the trigger off takes the folder off the watch at once.
 again off the interface's thread and replaces the list when it differs,
 so a trigger set elsewhere is watched at once.
 
+**Safeguards** (section 3.3, built 2026-11-13). What becomes of a batch
+a trigger found is decided by `helios_library::auto_import::verdict`, a
+pure function the node will call too (C7), from three declared settings
+of the person (`helios-config`, Settings > Library > Automatic imports,
+read as they change):
+
+| Setting | Default | Effect |
+|---|---|---|
+| `import.automatic.paused` | off | nothing imported, no folder watched; a card plugged in meanwhile is a toast "Automatic imports are paused: Camera not imported" with Resume. Also in the quick settings and the command `library.importAutomatic.pause` (`on`, else toggles) |
+| `import.automatic.ask_files` | 500 | more photos than this ask first (0: never) |
+| `import.automatic.ask_gb` | 20 | more gigabytes than this ask first (0: never) |
+
+- **First run confirmed.** A source carries `confirmed` (the date) once
+  its automatic import was confirmed. Until then its trigger imports
+  nothing: the import window opens on it (once per source while Helios
+  runs; a toast with Open otherwise), and pressing Import there
+  imports and confirms it. Changing the source, its trigger, its
+  destination or its copy mode clears it; so does turning it off. The
+  question "for a source never seen" is this one: only a saved source
+  has a trigger, and a card is its volume (slice 1), so another card is
+  never imported on its own.
+- **Above the limits** the batch is a toast that stays, "312 new photos
+  (4.1 GiB) on Camera: more than an automatic import takes without
+  asking", whose Open shows the source in the import window, where the
+  confirmation lands (docs/design/windows.md, section 8). "Not now" is
+  closing the toast.
+- Order: paused, then the first run, then the size.
+
 Not yet, from sections 3.2 and 3.3:
 - remote sources (a schedule, "every N hours", or a change feed);
-- the first run confirmed in the window, the question above a cap or
-  for a source never seen, one switch pausing them all;
+- an "Import" button on the question's toast (a toast offers one
+  command: Open) and a status bar item while paused; pausing on battery
+  and during a render;
 - the headless node running them (C7, later);
 - an import history record (`import/history`) beyond the Library's undo
   step and the Log panel;
