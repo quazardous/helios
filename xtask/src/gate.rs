@@ -6,6 +6,8 @@
 //!
 //! 1. Each pull request must target `next` and carry a valid manifest
 //!    (`manifest.rs`); one that does not is left out with its reason.
+//! 1b. Each taken pull request's own `check` (clippy) runs first on its
+//!    branch, side by side; one that fails is left out with its lints.
 //! 2. A temporary branch `gate/<n>` is made from `origin/next` and each
 //!    pull request's branch merged into it (`--no-ff`, "Merge pull request
 //!    #N from …"). A branch that does not merge cleanly is left out.
@@ -227,6 +229,64 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     let prs: Vec<Pr> = numbers.iter().map(|n| pr(*n)).collect::<Result<_, _>>()?;
     let mut plan = plan(&prs, &benchfile, &temp);
 
+    // Each pull request's own `check` (clippy, every lint at once) first,
+    // side by side on its own branch: one that fails is left out with its
+    // lints, so it cannot turn the whole batch red.
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let checks: Vec<_> = prs
+        .iter()
+        .filter(|p| plan.take.contains(&p.number))
+        .enumerate()
+        .map(|(i, p)| {
+            if i > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            let child = Command::new(&exe)
+                .args([
+                    "bench-remote",
+                    "check",
+                    &format!("branch={}", p.branch),
+                    &format!("ext_job_id=gate-check-{}", p.number),
+                ])
+                .current_dir(root)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn();
+            (p.number, child)
+        })
+        .collect();
+    for (number, child) in checks {
+        let failed = match child.and_then(std::process::Child::wait_with_output) {
+            Ok(o) if o.status.success() => None,
+            Ok(o) => {
+                let text = String::from_utf8_lossy(&o.stdout).to_string()
+                    + &String::from_utf8_lossy(&o.stderr);
+                let lints: Vec<&str> = text
+                    .lines()
+                    .filter(|l| l.contains(": warning:") || l.contains(": error"))
+                    .take(10)
+                    .collect();
+                Some(if lints.is_empty() {
+                    text.lines()
+                        .rev()
+                        .find(|l| l.contains("gate-check"))
+                        .unwrap_or("no output")
+                        .to_string()
+                } else {
+                    lints.join("\n    ")
+                })
+            }
+            Err(e) => Some(format!("not started: {e}")),
+        };
+        if let Some(why) = failed {
+            plan.take.retain(|n| *n != number);
+            plan.runs.retain(|r| r.pr != number);
+            plan.left_out
+                .push((number, format!("its own check failed:\n    {why}")));
+        }
+    }
+
     // Merge the taken branches on the temporary branch.
     let mut merged = Vec::new();
     for p in prs.iter().filter(|p| plan.take.contains(&p.number)) {
@@ -283,7 +343,6 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
     // Run the jobs side by side: spawned together, then waited on. The
     // desktop build of the tested commit runs beside them, so a green round
     // brings back the programs to install (`install-dev --from`).
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let build = Command::new(&exe)
         .args([
             "bench-remote",
