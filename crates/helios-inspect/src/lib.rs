@@ -43,6 +43,7 @@ pub mod cache;
 pub mod client;
 pub mod discovery;
 pub mod jobs;
+pub mod request_ids;
 pub mod rpc;
 pub mod transport;
 

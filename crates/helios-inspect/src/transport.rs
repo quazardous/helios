@@ -19,6 +19,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::request_ids::{Keyed, Once, Remembered, applied, request_id, reused};
 use crate::rpc::{self, Closers, Running, Service, Sink, dispatch};
 
 /// Where a server listens.
@@ -191,6 +192,15 @@ where
     H: Fn(R, &mut Connection<'_>) -> Option<Value> + Send + Sync + 'static,
 {
     let handler = Arc::new(handler);
+    // The keys of calls sent again (`crate::request_ids`), one store for
+    // the endpoint, both forms.
+    let remembered = Arc::new(Remembered::default());
+    let service = service.map(|service| {
+        Arc::new(Keyed {
+            service,
+            remembered: remembered.clone(),
+        }) as Arc<dyn Service>
+    });
     match listen {
         #[cfg(unix)]
         Listen::Unix(path) => {
@@ -202,9 +212,15 @@ where
             thread::spawn(move || {
                 for stream in listener.incoming().flatten() {
                     let (handler, service) = (handler.clone(), service.clone());
+                    let remembered = remembered.clone();
                     thread::spawn(move || {
                         if let Ok(reader) = stream.try_clone() {
-                            converse(reader, stream, None, &*handler, service);
+                            let serve = Serve {
+                                handler: &*handler,
+                                service,
+                                remembered: &remembered,
+                            };
+                            converse(reader, stream, None, &serve);
                         }
                     });
                 }
@@ -232,10 +248,15 @@ where
             thread::spawn(move || {
                 for stream in listener.incoming().flatten() {
                     let (handler, token) = (handler.clone(), token.clone());
-                    let service = service.clone();
+                    let (service, remembered) = (service.clone(), remembered.clone());
                     thread::spawn(move || {
                         if let Ok(reader) = stream.try_clone() {
-                            converse(reader, stream, Some(&token), &*handler, service);
+                            let serve = Serve {
+                                handler: &*handler,
+                                service,
+                                remembered: &remembered,
+                            };
+                            converse(reader, stream, Some(&token), &serve);
                         }
                     });
                 }
@@ -291,18 +312,27 @@ impl Drop for Open {
     }
 }
 
+/// What answers an endpoint's lines: the older form's handler, the
+/// JSON-RPC service, and the keys of calls sent again.
+struct Serve<'a, H> {
+    handler: &'a H,
+    service: Option<Arc<dyn Service>>,
+    remembered: &'a Remembered,
+}
+
 /// One connection: an optional authentication line, then requests; what
 /// the handler asked to run at the end runs once the client has gone.
 fn converse<R, H>(
     reader: impl Read,
     mut writer: impl Write + Send + 'static,
     token: Option<&str>,
-    handler: &H,
-    service: Option<Arc<dyn Service>>,
+    serve: &Serve<'_, H>,
 ) where
     R: DeserializeOwned,
     H: Fn(R, &mut Connection<'_>) -> Option<Value>,
 {
+    let handler = serve.handler;
+    let service = serve.service.clone();
     let _open = Open::new();
     let mut lines = BufReader::new(reader).lines();
     if let Some(token) = token {
@@ -359,8 +389,8 @@ fn converse<R, H>(
             out: &sink,
             closers: &closers,
         };
-        let response = match parsed.and_then(serde_json::from_value::<R>) {
-            Ok(request) => handler(request, &mut connection),
+        let response = match parsed {
+            Ok(value) => older(value, handler, serve.remembered, &mut connection),
             Err(e) => Some(json!({ "ok": false, "error": format!("bad request: {e}") })),
         };
         if let Some(response) = response
@@ -372,6 +402,54 @@ fn converse<R, H>(
     let closers = std::mem::take(&mut *closers.lock().unwrap_or_else(PoisonError::into_inner));
     for close in closers {
         close();
+    }
+}
+
+/// Answers a line of the older form. With a key (`_meta.request_id`),
+/// a request answered `ok` is remembered and, sent again, answered again
+/// marked `already_applied` without running twice
+/// ([`crate::request_ids`]).
+fn older<R, H>(
+    mut value: Value,
+    handler: &H,
+    remembered: &Remembered,
+    connection: &mut Connection<'_>,
+) -> Option<Value>
+where
+    R: DeserializeOwned,
+    H: Fn(R, &mut Connection<'_>) -> Option<Value>,
+{
+    let refused = |error: String| Some(json!({ "ok": false, "error": error }));
+    let key = match request_id(&value) {
+        Ok(key) => key,
+        Err(e) => return refused(e.message),
+    };
+    if let Some(fields) = value.as_object_mut() {
+        fields.remove("_meta");
+    }
+    let Some(key) = key else {
+        return match serde_json::from_value::<R>(value) {
+            Ok(request) => handler(request, connection),
+            Err(e) => refused(format!("bad request: {e}")),
+        };
+    };
+    let fingerprint = crate::cache::key("", &value);
+    let run = || {
+        let answer = match serde_json::from_value::<R>(value) {
+            Ok(request) => handler(request, connection),
+            Err(e) => refused(format!("bad request: {e}")),
+        };
+        // Only an answer that says it ran is remembered.
+        match answer {
+            Some(answer) if answer["ok"] == true => Ok(answer),
+            other => Err(other),
+        }
+    };
+    match remembered.once(&key, &fingerprint, run) {
+        Once::Ran(Ok(answer)) => Some(answer),
+        Once::Ran(Err(answer)) => answer,
+        Once::Applied(answer) => Some(applied(answer)),
+        Once::Other => refused(reused(&key).message),
     }
 }
 
