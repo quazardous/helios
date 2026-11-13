@@ -59,6 +59,7 @@ fn call(name: &str, arguments: &Value) -> (bool, Value) {
         control: None,
         node_bin: PathBuf::from("helios-node"),
         ai: None,
+        roots: helios_node::roots::Roots::unconfined(),
     };
     let answer = helios_node::mcp::handle(
         &mut sockets,

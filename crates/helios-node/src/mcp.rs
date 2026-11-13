@@ -70,11 +70,13 @@
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use helios_ai::Ai;
 use helios_inspect::{Address, request_at};
+
+use crate::roots::{Access, Roots};
 
 use serde_json::{Map, Value, json};
 
@@ -2455,6 +2457,8 @@ pub struct Sockets {
     pub node_bin: PathBuf,
     /// The AI service, opened at the first `helios_ai_*` call.
     pub ai: Option<Arc<Ai>>,
+    /// The folders the agent may read and write (`crate::roots`).
+    pub roots: Roots,
 }
 
 /// The current image of `node`: its output exported as a PNG through the
@@ -2554,6 +2558,99 @@ fn tool_result(text: String, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
 }
 
+/// The workspace tools that only read the workspace's files.
+const WORKSPACE_READS: &[&str] = &[
+    "workspace.parts",
+    "workspace.state",
+    "context.read",
+    "clipboard.state",
+    "history.list",
+    "history.read",
+];
+
+/// The workspace tools that write into the configuration directory.
+const CONFIG_WRITES: &[&str] = &[
+    "workspace.save_as_template",
+    "macro.publish",
+    "workshop.save",
+];
+
+/// Whether a text reads as a path rather than an id (a template's
+/// `source`, a run's item): absolute, or holding a separator.
+fn path_like(text: &str) -> bool {
+    Path::new(text).is_absolute() || text.contains('/') || text.contains('\\')
+}
+
+/// Refuses a request naming a path outside the agent's roots: each path
+/// argument with the access its tool makes. A command run through the
+/// generic pair does not say what it does with a path, so every absolute
+/// path in its params needs the write root.
+fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
+    if !roots.is_confined() {
+        return Ok(());
+    }
+    let cmd = tool.cmd;
+    let check = |text: &str, access: Access| roots.check(Path::new(text), access).map(|_| ());
+    for param in tool.params {
+        let value = &request[param.name];
+        let access = match param.name {
+            "path" if cmd == "export" => Access::Write,
+            // A template's id or a workspace's folder; elsewhere a node or
+            // an endpoint's name.
+            "source" if tool.endpoint == Endpoint::Workspace && !cmd.starts_with("clipboard.") => {
+                Access::Read
+            }
+            "path" | "file" => Access::Read,
+            "dir" | "out" | "vault" => Access::Write,
+            "workspace" if WORKSPACE_READS.contains(&cmd) => Access::Read,
+            "workspace" => Access::Write,
+            "config" if CONFIG_WRITES.contains(&cmd) => {
+                // Left out, the user's own: written there only if granted.
+                let config = value
+                    .as_str()
+                    .map_or_else(helios_template::workspace::config_dir, PathBuf::from);
+                roots.check(&config, Access::Write)?;
+                continue;
+            }
+            "config" => Access::Read,
+            "items" => {
+                for item in value.as_array().into_iter().flatten() {
+                    let path = item.as_str().or_else(|| item["path"].as_str());
+                    if let Some(path) = path.filter(|p| Path::new(p).is_absolute()) {
+                        check(path, Access::Read)?;
+                    }
+                }
+                continue;
+            }
+            "params" if cmd == "command.run" => {
+                let mut paths = Vec::new();
+                absolute_paths(value, &mut paths);
+                for path in paths {
+                    check(path, Access::Write)?;
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        match value.as_str().filter(|s| !s.is_empty()) {
+            Some(text) if param.name == "source" && !path_like(text) => {}
+            Some(text) => check(text, access)?,
+            None => {}
+        }
+    }
+    Ok(())
+}
+
+/// Every string of `value` that is an absolute path, at any depth.
+fn absolute_paths<'a>(value: &'a Value, into: &mut Vec<&'a str>) {
+    match value {
+        Value::String(s) if Path::new(s).is_absolute() => into.push(s),
+        Value::Array(items) => items.iter().for_each(|v| absolute_paths(v, into)),
+        Value::Object(map) => map.values().for_each(|v| absolute_paths(v, into)),
+        _ => {}
+    }
+}
+
 fn call(sockets: &mut Sockets, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or_default();
     let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
@@ -2563,6 +2660,9 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
     };
+    if let Err(e) = confine(&sockets.roots, tool, &request) {
+        return tool_result(format!("{}: {e}", tool.name), true);
+    }
     if tool.endpoint == Endpoint::Sandbox {
         return sandbox(sockets, tool, &request);
     }
@@ -3089,6 +3189,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
         };
         assert!(
             handle(
@@ -3158,6 +3259,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: Some(Arc::new(ai)),
+            roots: Roots::unconfined(),
         };
         (sockets, runtime)
     }
@@ -3187,6 +3289,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": ws, "config": config });
@@ -3257,6 +3360,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
         };
         let args = json!({ "workspace": root.join("shoot"), "config": root.join("config") });
         for name in [
@@ -3309,6 +3413,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": dir, "config": config });
@@ -3386,6 +3491,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
         };
         let base = json!({ "workspace": root.join("work"), "config": root.join("config") });
         for (name, extra) in [
@@ -3439,6 +3545,7 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": dir, "config": config });
