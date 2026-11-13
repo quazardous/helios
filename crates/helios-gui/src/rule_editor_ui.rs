@@ -66,6 +66,13 @@ impl Words {
                 "focal_length" => Message::new("gui-rule-field-focal-length", "focal length"),
                 "aperture" => Message::new("gui-rule-field-aperture", "aperture"),
                 "shutter" => Message::new("gui-rule-field-shutter", "shutter speed"),
+                "focus" => Message::new("gui-rule-field-focus", "sharpness (focus)"),
+                "clip_white" => {
+                    Message::new("gui-rule-field-clip-white", "blown highlights (share)")
+                }
+                "clip_black" => {
+                    Message::new("gui-rule-field-clip-black", "crushed shadows (share)")
+                }
                 other => Message::plain(other),
             }
         };

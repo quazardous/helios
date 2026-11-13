@@ -206,6 +206,38 @@ fn the_cull_backfill_fills_old_photos_and_resumes_where_it_stopped() {
     let again = cull::backfill(&vault, &jobs(), &measurer, None).unwrap();
     assert_eq!(again, rest);
     assert_eq!(measurer.measures.load(Ordering::SeqCst), 3);
+    // The culling fields followed the signals.
+    let focus = helios_vault::cull::FOCUS;
+    assert!(
+        vault
+            .fields_of(&ids, &[focus])
+            .unwrap()
+            .iter()
+            .all(|f| f.contains_key(focus))
+    );
+    // A run finished before the fields existed: the next one fills them
+    // from the signals kept, measuring nothing.
+    drop(vault);
+    {
+        use helios_vault::Store as _;
+        let mut store = SqliteStore::open(&path).unwrap();
+        store.set_field(&ids[3], focus, None).unwrap();
+        let mut old = serde_json::to_value(&rest).unwrap();
+        old.as_object_mut().unwrap().remove("fields");
+        store
+            .set_document("library/cull", "backfill", Some(&old))
+            .unwrap();
+    }
+    let vault = Vault::new(SqliteStore::open(&path).unwrap());
+    let filled = cull::backfill(&vault, &jobs(), &measurer, None).unwrap();
+    assert!(filled.finished && filled.fields);
+    assert_eq!(
+        measurer.measures.load(Ordering::SeqCst),
+        3,
+        "nothing measured"
+    );
+    let f = vault.fields_of(&ids[3..4], &[focus]).unwrap();
+    assert_eq!(f[0].get(focus), Some(&kept(&vault, &ids[3])["focus"]));
     drop(vault);
     let _ = std::fs::remove_dir_all(&dir);
 }

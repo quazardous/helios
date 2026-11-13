@@ -241,10 +241,7 @@ impl Review {
                                 };
                                 let r = ui.selectable_label(selection.contains(m), label);
                                 let r = if top {
-                                    r.on_hover_text(text(Message::new(
-                                        "gui-stacks-top",
-                                        "Proposed on top: the sharpest",
-                                    )))
+                                    r.on_hover_text(text(top_hint(group)))
                                 } else {
                                     r
                                 };
@@ -286,5 +283,40 @@ impl Review {
             },
         );
         show
+    }
+}
+
+/// The hover text of a group's top: why the proposal put it there (its
+/// `best_why`, in English as the rules wrote it), or the rule in general
+/// for a proposal made before the reason was recorded.
+pub fn top_hint(group: &helios_library::stacks::Group) -> Message {
+    if group.best_why.is_empty() {
+        Message::new("gui-stacks-top", "Proposed on top: the sharpest")
+    } else {
+        Message::new("gui-stacks-top-why", "Proposed on top: { $why }")
+            .with("why", group.best_why.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn group(why: &str) -> helios_library::stacks::Group {
+        helios_library::stacks::Group {
+            members: vec!["a".into(), "b".into()],
+            best: "a".into(),
+            best_why: why.into(),
+            kind: "burst".into(),
+            why: String::new(),
+        }
+    }
+
+    #[test]
+    fn the_top_says_why_it_was_chosen() {
+        let hint = top_hint(&group("sharpest, not clipped"));
+        assert_eq!(hint.key, "gui-stacks-top-why");
+        assert_eq!(hint.english, "Proposed on top: sharpest, not clipped");
+        assert_eq!(top_hint(&group("")).key, "gui-stacks-top");
     }
 }

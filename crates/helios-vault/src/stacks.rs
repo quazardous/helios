@@ -255,13 +255,18 @@ impl<S: Store> Vault<S> {
         })
     }
 
-    /// Keeps an image's signals (or with `None` forgets them).
+    /// Keeps an image's signals (or with `None` forgets them), and its
+    /// culling fields from them ([`crate::cull`]) in the same transaction.
     pub fn set_signals(&self, image: &ImageId, signals: Option<&Value>) -> Result<(), String> {
-        let mut store = self.store.lock().expect("store lock");
-        if store.image(image)?.is_none() {
-            return Err(format!("no image {}", image.hex()));
-        }
-        store.set_document(SIGNALS, &image.hex(), signals)
+        self.transaction(|store| {
+            if store.image(image)?.is_none() {
+                return Err(format!("no image {}", image.hex()));
+            }
+            store.set_document(SIGNALS, &image.hex(), signals)?;
+            set_cull_fields(store, image, signals)
+        })?;
+        self.placed([*image]);
+        Ok(())
     }
 
     /// An image's signals, as kept.
@@ -276,14 +281,15 @@ impl<S: Store> Vault<S> {
     /// others kept; an image with none starts from an empty document), and
     /// with `progress` sets a library document (`library/<ns>`, `key`), in
     /// one transaction: a backfill's batch lands with its progress. An image
-    /// gone meanwhile is passed over. Returns how many images were written.
+    /// gone meanwhile is passed over. The culling fields follow the merged
+    /// documents ([`crate::cull`]). Returns how many images were written.
     pub fn merge_signals(
         &self,
         merges: &[(ImageId, serde_json::Map<String, Value>)],
         progress: Option<(&str, &str, &Value)>,
     ) -> Result<usize, String> {
-        self.transaction(|store| {
-            let mut written = 0;
+        let written = self.transaction(|store| {
+            let mut written = Vec::new();
             for (id, keys) in merges {
                 if store.image(id)?.is_none() {
                     continue;
@@ -293,14 +299,19 @@ impl<S: Store> Vault<S> {
                     _ => serde_json::Map::new(),
                 };
                 doc.extend(keys.iter().map(|(k, v)| (k.clone(), v.clone())));
-                store.set_document(SIGNALS, &id.hex(), Some(&Value::Object(doc)))?;
-                written += 1;
+                let doc = Value::Object(doc);
+                store.set_document(SIGNALS, &id.hex(), Some(&doc))?;
+                set_cull_fields(store, id, Some(&doc))?;
+                written.push(*id);
             }
             if let Some((ns, key, value)) = progress {
                 store.set_document(&format!("library/{ns}"), key, Some(value))?;
             }
             Ok(written)
-        })
+        })?;
+        let count = written.len();
+        self.placed(written);
+        Ok(count)
     }
 
     /// A library document (`library/<ns>`): what library operations keep
@@ -332,6 +343,22 @@ impl<S: Store> Vault<S> {
             .expect("store lock")
             .documents(&format!("library/{ns}"))
     }
+}
+
+/// Copies the culling measures of a signals document to the image's
+/// read-only fields ([`crate::cull`]): one the document lacks is cleared.
+fn set_cull_fields<S: Store>(
+    store: &mut S,
+    id: &ImageId,
+    signals: Option<&Value>,
+) -> Result<(), String> {
+    for (name, value) in crate::cull::values(signals) {
+        let value = value
+            .map(|v| crate::fields::normalize(name, &v))
+            .transpose()?;
+        store.set_field(id, name, value.as_ref())?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -57,6 +57,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     smart_album_rules_select_in_one_query(make());
     relative_dates_follow_the_query_s_clock(make());
     smart_albums_scope_count_and_undo(make());
+    culling_fields_filter_count_sort_and_rule(make());
 }
 
 /// Capture fields are written whole by `set_captures` (a value not read
@@ -2140,6 +2141,7 @@ fn facets_count_each_value_in_one_query<S: Store>(s: S) {
                 "backup",
                 &[("met", 1), ("short", 1), ("unverified", 1), ("none", 2)]
             ),
+            ("cull", &[("unmeasured", 5)]),
         ])
     );
     assert_eq!(all.count("camera", "Z 8"), 2);
@@ -2159,8 +2161,128 @@ fn facets_count_each_value_in_one_query<S: Store>(s: S) {
             ("lens", &[("L1", 1)]),
             ("file_type", &[("cr3", 1), ("jpg", 1)]),
             ("presence", &[("present", 2)]),
+            ("cull", &[("unmeasured", 2)]),
         ])
     );
+}
+
+/// The culling measures (`crate::cull`): written with the signals, copied
+/// to read-only fields, refused to commands; a `cull` filter, its facet,
+/// the sharpness sort and a smart album's rule on them each run in one
+/// query, the same in every store.
+fn culling_fields_filter_count_sort_and_rule<S: Store>(s: S) {
+    use crate::cull::{CLIP_WHITE, FOCUS};
+    use crate::rules::Rule;
+    let (v, ids, _) = library_fixture(s);
+    // 0 sharp; 1 sharper but blown; 2 soft with crushed shadows; 3 soft;
+    // 4 never measured.
+    let measured = [
+        (
+            0,
+            json!({ "cull": 1, "focus": 0.02, "clip_white": [0.0, 0.01, 0.0], "clip_black": [0.0, 0.0, 0.0] }),
+        ),
+        (
+            1,
+            json!({ "cull": 1, "focus": 0.05, "clip_white": [0.06, 0.03, 0.0], "clip_black": [0.0, 0.0, 0.0] }),
+        ),
+        (
+            2,
+            json!({ "cull": 1, "focus": 0.0002, "clip_white": [0.0, 0.0, 0.0], "clip_black": [0.1, 0.2, 0.1] }),
+        ),
+    ];
+    for (i, doc) in &measured {
+        v.set_signals(&ids[*i], Some(doc)).unwrap();
+    }
+    // A merge (the backfill's write) fills them too, the other keys kept.
+    v.set_signals(&ids[3], Some(&json!({ "phash": "00" })))
+        .unwrap();
+    let mut keys = serde_json::Map::new();
+    keys.insert("focus".into(), json!(0.0005));
+    assert_eq!(v.merge_signals(&[(ids[3], keys)], None).unwrap(), 1);
+    assert_eq!(v.signals(&ids[3]).unwrap().unwrap()["phash"], "00");
+    let f = v.fields_of(&ids, &[FOCUS, CLIP_WHITE]).unwrap();
+    assert_eq!(f[1].get(CLIP_WHITE), Some(&json!(0.06)));
+    assert_eq!(f[3].get(FOCUS), Some(&json!(0.0005)));
+    assert!(f[4].is_empty());
+    assert!(
+        v.apply(&[Command::set(ids[0], FOCUS, json!(1.0))], "user", None, 0)
+            .is_err(),
+        "read-only"
+    );
+    let pick = |n: &[usize]| n.iter().map(|&i| ids[i]).collect::<Vec<_>>();
+    let open = |q: Query| {
+        let q0 = v.reads().queries;
+        let cursor = v.open_cursor(q).unwrap();
+        assert_eq!(v.reads().queries - q0, 1, "one query");
+        let got = v.cursor_ids(cursor.id, 0, 99).unwrap();
+        v.close_cursor(cursor.id);
+        got
+    };
+    let states = |names: &[&str]| {
+        let mut got = open(Query {
+            cull: names.iter().map(|n| (*n).to_string()).collect(),
+            ..Query::default()
+        });
+        got.sort();
+        got
+    };
+    let sorted = |n: &[usize]| {
+        let mut p = pick(n);
+        p.sort();
+        p
+    };
+    assert_eq!(states(&["sharp"]), sorted(&[0, 1]));
+    assert_eq!(states(&["soft"]), sorted(&[2, 3]));
+    assert_eq!(states(&["clipped"]), sorted(&[1, 2]));
+    assert_eq!(states(&["unmeasured"]), sorted(&[4]));
+    assert_eq!(states(&["sharp", "unmeasured"]), sorted(&[0, 1, 4]));
+    assert!(
+        v.open_cursor(Query {
+            cull: vec!["blurry".into()],
+            ..Query::default()
+        })
+        .is_err()
+    );
+    // The facet: sharp, soft or unmeasured, and clipped beside.
+    let q0 = v.reads().queries;
+    let facets = v.facets(&Query::default(), None).unwrap();
+    assert_eq!(v.reads().queries - q0, 1, "one query");
+    assert_eq!(
+        facets.of("cull"),
+        [("clipped", 2), ("sharp", 2), ("soft", 2), ("unmeasured", 1)]
+    );
+    // Sharpest first, the unmeasured last.
+    assert_eq!(
+        open(Query {
+            order: Order::desc(Sort::Focus),
+            ..Query::default()
+        }),
+        pick(&[1, 0, 3, 2, 4])
+    );
+    assert_eq!(
+        open(Query {
+            order: Order::asc(Sort::Focus),
+            ..Query::default()
+        }),
+        pick(&[2, 3, 0, 1, 4])
+    );
+    // A smart album "sharp and not clipped".
+    let rules = Rule::parse(&json!({"match": "all", "rules": [
+        {"field": "focus", "op": ">=", "value": crate::cull::SOFT_FOCUS},
+        {"field": "clip_white", "op": "<=", "value": crate::cull::CLIPPED_WHITE},
+        {"field": "clip_black", "op": "<=", "value": crate::cull::CLIPPED_BLACK},
+    ]}))
+    .unwrap();
+    assert_eq!(
+        open(Query {
+            rules: Some(rules),
+            ..Query::default()
+        }),
+        pick(&[0])
+    );
+    // Signals forgotten: the fields go with them.
+    v.set_signals(&ids[0], None).unwrap();
+    assert!(v.fields_of(&ids[..1], &[FOCUS]).unwrap()[0].is_empty());
 }
 
 /// The folders tree's counts (`docs/design/library.md`, L5): every folder

@@ -126,6 +126,9 @@ pub const RULE_FIELDS: &[RuleField] = &[
     f("focal_length", capture::FOCAL_LENGTH, RuleKind::Number),
     f("aperture", capture::APERTURE, RuleKind::Number),
     f("shutter", capture::SHUTTER, RuleKind::Number),
+    f("focus", crate::cull::FOCUS, RuleKind::Number),
+    f("clip_white", crate::cull::CLIP_WHITE, RuleKind::Number),
+    f("clip_black", crate::cull::CLIP_BLACK, RuleKind::Number),
 ];
 
 /// The rule field of that name.

@@ -40,6 +40,7 @@ use std::sync::{Arc, Mutex};
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_vault::capture::CAPTURED;
+use helios_vault::cull;
 use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::{
     CursorId, EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version,
@@ -53,7 +54,17 @@ use crate::library::{Change, Entry};
 
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match).
-const SHOWN: [&str; 6] = [RATING, REJECTED, PICKED, LABELS, TAGS, CAPTURED];
+const SHOWN: [&str; 9] = [
+    RATING,
+    REJECTED,
+    PICKED,
+    LABELS,
+    TAGS,
+    CAPTURED,
+    cull::FOCUS,
+    cull::CLIP_WHITE,
+    cull::CLIP_BLACK,
+];
 
 /// Who the vault's audit trail names for what the desktop writes.
 pub const WHO: &str = "user";

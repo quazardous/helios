@@ -233,6 +233,11 @@ pub struct Backfill {
     pub failed: u64,
     /// Every image of the Library is done.
     pub finished: bool,
+    /// The run copies the measures to the vault's culling fields too
+    /// (`helios_vault::cull`): a run finished before them starts over, to
+    /// fill the fields of the images it measured.
+    #[serde(default)]
+    pub fields: bool,
 }
 
 /// Measures a file: [`crate::signals::measure`], or another measurer in
@@ -283,9 +288,10 @@ pub fn backfill_by<S: Store>(
     batch: usize,
 ) -> Result<Backfill, String> {
     let mut progress = progress(vault)?
-        .filter(|p| p.version == VERSION)
+        .filter(|p| p.version == VERSION && p.fields)
         .unwrap_or(Backfill {
             version: VERSION,
+            fields: true,
             ..Backfill::default()
         });
     if progress.finished {
@@ -340,6 +346,15 @@ pub fn backfill_by<S: Store>(
         for id in batch {
             let kept = vault.signals(id)?;
             if kept.as_ref().is_some_and(Cull::current) {
+                // Measured before the fields existed: written again as
+                // kept, which fills them.
+                let filled = vault.fields_of(&[*id], &[helios_vault::cull::FOCUS])?;
+                if filled
+                    .first()
+                    .is_none_or(std::collections::BTreeMap::is_empty)
+                {
+                    merges.push((*id, serde_json::Map::new()));
+                }
                 continue;
             }
             let present = vault

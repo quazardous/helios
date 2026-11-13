@@ -33,8 +33,9 @@ pub struct FieldSpec {
     pub name: &'static str,
     pub kind: FieldKind,
     pub about: &'static str,
-    /// Read from the file (its capture metadata, [`crate::capture`]): no
-    /// command changes it, only [`crate::Vault::set_captures`].
+    /// Read from the file (its capture metadata, [`crate::capture`], or
+    /// its culling measures, [`crate::cull`]): no command changes it, only
+    /// [`crate::Vault::set_captures`] and the signals' writes.
     pub read_only: bool,
 }
 
@@ -188,6 +189,24 @@ pub const FIELDS: &[FieldSpec] = &[
         name: crate::capture::FILE_TYPE,
         kind: FieldKind::Text,
         about: "the file's type, its extension in lower case (`cr3`, `jpg`)",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::cull::FOCUS,
+        kind: FieldKind::Number,
+        about: "the culling focus measured on the preview: higher is sharper (`crate::cull`)",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::cull::CLIP_WHITE,
+        kind: FieldKind::Number,
+        about: "the largest share of one channel's pixels blown to white, 0 to 1",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::cull::CLIP_BLACK,
+        kind: FieldKind::Number,
+        about: "the largest share of one channel's pixels crushed to black, 0 to 1",
         read_only: true,
     },
 ];
@@ -414,17 +433,21 @@ pub enum Sort {
     Edited,
     /// Its file's size.
     Size,
+    /// Its culling focus ([`crate::cull::FOCUS`]): descending, the
+    /// sharpest first; an unmeasured photo last.
+    Focus,
 }
 
 impl Sort {
     /// Every sort, in the order a menu lists them.
-    pub const ALL: [Sort; 7] = [
+    pub const ALL: [Sort; 8] = [
         Sort::Captured,
         Sort::Imported,
         Sort::Name,
         Sort::Rating,
         Sort::Edited,
         Sort::Size,
+        Sort::Focus,
         Sort::Id,
     ];
 
@@ -438,6 +461,7 @@ impl Sort {
             Sort::Rating => "rating",
             Sort::Edited => "edited",
             Sort::Size => "size",
+            Sort::Focus => "focus",
         }
     }
 
@@ -525,6 +549,9 @@ pub struct Query {
     pub presence: Vec<Presence>,
     /// Backed up in one of these states against a strategy.
     pub backup: Option<BackupFilter>,
+    /// In one of these culling states ([`crate::cull::STATES`]: `sharp`,
+    /// `soft`, `clipped`, `unmeasured`); none given: any image.
+    pub cull: Vec<String>,
     pub order: Order,
 }
 
@@ -610,7 +637,7 @@ pub struct BackupFilter {
 }
 
 /// The facets a library counts (`docs/design/library.md`, L4), by name.
-pub const FACETS: [&str; 8] = [
+pub const FACETS: [&str; 9] = [
     "rating",
     "label",
     "flag",
@@ -619,14 +646,17 @@ pub const FACETS: [&str; 8] = [
     "file_type",
     "presence",
     "backup",
+    "cull",
 ];
 
 /// How many photos of a query carry each value of each facet ([`FACETS`]):
 /// `rating` (0 to 5, unrated as 0), `label` (each colour; a photo with two
 /// counts in both), `flag` (`pick`, `reject`, `none`), `camera`, `lens`,
 /// `file_type` (photos without the value are not counted), `presence`
-/// (`present`, `offline`, `missing`) and `backup` (each [`BackupState`],
-/// only when a rule is given). A value no photo has is absent.
+/// (`present`, `offline`, `missing`), `backup` (each [`BackupState`],
+/// only when a rule is given) and `cull` (`sharp`, `soft` or `unmeasured`,
+/// and `clipped` beside them: [`crate::cull::states_of`]). A value no
+/// photo has is absent.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Facets(pub BTreeMap<String, BTreeMap<String, u64>>);
 
@@ -672,8 +702,15 @@ pub const FLAGS: [&str; 3] = ["pick", "reject", "none"];
 impl Query {
     /// Checks the flags named.
     pub fn check(&self) -> Result<(), String> {
-        match self.flags.iter().find(|f| !FLAGS.contains(&f.as_str())) {
-            Some(f) => Err(format!("`{f}` is not a flag ({})", FLAGS.join(", "))),
+        use crate::cull::STATES;
+        if let Some(f) = self.flags.iter().find(|f| !FLAGS.contains(&f.as_str())) {
+            return Err(format!("`{f}` is not a flag ({})", FLAGS.join(", ")));
+        }
+        match self.cull.iter().find(|c| !STATES.contains(&c.as_str())) {
+            Some(c) => Err(format!(
+                "`{c}` is not a culling state ({})",
+                STATES.join(", ")
+            )),
             None => Ok(()),
         }
     }

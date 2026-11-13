@@ -314,7 +314,7 @@ command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
 
 command-library-sort =
-    .title = Sort the library (`by`: captured, imported, name, rating, edited or size; `descending`); kept with the workspace. Without `by`, says how it is sorted
+    .title = Sort the library (`by`: captured, imported, name, rating, edited, size or focus; `descending`); kept with the workspace. Without `by`, says how it is sorted
 
 command-library-storage =
     .title = Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)

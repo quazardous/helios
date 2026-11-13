@@ -42,6 +42,7 @@ pub mod changed;
 pub mod claims;
 pub mod collections;
 pub mod contract;
+pub mod cull;
 pub mod edit;
 pub mod fields;
 pub mod journal;
@@ -575,6 +576,24 @@ impl MemoryStore {
                 .backup
                 .as_ref()
                 .is_none_or(|b| b.states.contains(&self.backup_state(id, &b.rule)))
+            && (query.cull.is_empty() || {
+                let states = self.cull_states(id);
+                query.cull.iter().any(|c| states.contains(&c.as_str()))
+            })
+    }
+
+    /// A photo's culling states, from its fields ([`cull::states_of`]).
+    fn cull_states(&self, id: &ImageId) -> Vec<&'static str> {
+        let number = |name: &str| {
+            self.fields
+                .get(&(*id, name.to_string()))
+                .and_then(serde_json::Value::as_f64)
+        };
+        cull::states_of(
+            number(cull::FOCUS),
+            number(cull::CLIP_WHITE),
+            number(cull::CLIP_BLACK),
+        )
     }
 }
 
@@ -707,6 +726,7 @@ impl MemoryStore {
                 .images
                 .get(id)
                 .map(|(image, _)| SortKey::Number(image.size as f64)),
+            Sort::Focus => number(cull::FOCUS).map(SortKey::Number),
         }
     }
 
@@ -1112,6 +1132,9 @@ impl Store for MemoryStore {
             facets.add("presence", self.presence_of(id).as_str(), 1);
             if let Some(rule) = backups {
                 facets.add("backup", self.backup_state(id, rule).name(), 1);
+            }
+            for state in self.cull_states(id) {
+                facets.add("cull", state, 1);
             }
         }
         Ok(facets)
