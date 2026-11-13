@@ -269,9 +269,16 @@ mod tests {
             ..Options::default()
         };
         let card = PathBuf::from("/media/EOS_DIGITAL");
-        let r = record(&vault, &[card.clone()], &options, 1000, Ok(&report(3))).unwrap();
+        let r = record(
+            &vault,
+            std::slice::from_ref(&card),
+            &options,
+            1000,
+            Ok(&report(3)),
+        )
+        .unwrap();
         let listed = list(&vault, None).unwrap();
-        assert_eq!(listed, [r.clone()]);
+        assert_eq!(listed, std::slice::from_ref(&r));
         assert_eq!(r.origin, "agent:tester");
         assert_eq!(
             (r.counts.added, r.counts.skipped, r.counts.files),
@@ -323,7 +330,7 @@ mod tests {
         let options = Options {
             listed: Some(Listed {
                 by: "lightroom".into(),
-                files: Default::default(),
+                files: std::collections::BTreeMap::default(),
             }),
             ..Options::default()
         };
