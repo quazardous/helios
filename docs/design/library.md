@@ -699,8 +699,31 @@ the smart albums (as their `collection:` term), each with what it is
 beside it, filtered by typing; Enter applies the one chosen to the grid.
 Ctrl+K, darktable's key, starts chords in Helios (Ctrl+K Z, Ctrl+K
 Ctrl+S), hence Shift; Lightroom's Ctrl+K is keywords. Agents list them
-with `library.filter.recent`. Not built yet: album sets, drag and drop
-onto an album, keyboard undo in the rule dialog (its buttons only).
+with `library.filter.recent`.
+
+Built (2026-11-13), sixth part: **album sets** (Lightroom's collection
+sets). A set is one more document in `library/collections`,
+`{kind: "set", name}`; any collection (album, smart album, set; never
+the quick collection) names the set it is in with its own `set` key, so
+a move is one document changed and a collection is in one set at most.
+Sets nest; one is refused inside itself or inside a set below it, with
+the reason. `Query::album` naming a set runs the union of its members as
+rules in the same statement (`collections::set_rule`: an album is an
+`album in` condition, a smart album its rules, a set an `any` group of
+its members'), so `collection:<set>` scopes both stores in one query and
+counts like a smart album; an `album` rule naming a set (`in`, `not_in`)
+is written out the same way. The Albums section shows sets first at each
+level, each a group that opens and closes (its toggle named for screen
+readers) with its union's count; "New set…", and in each row's menu
+"Move to set…" (a chooser of the sets it may go in, the top first) and,
+for a set, "New set inside…", "Delete the set, keep its albums" (they
+move up into its own set) and "Delete the set and its albums".
+Commands: `library.collection.create {kind: "set", set}`,
+`library.collection.move {id, set|null}` (without `set`, the chooser),
+`library.collection.delete {id, members}`; each one step of the
+library's history. Names stay unique across all collections, as for
+albums. Not built yet: drag and drop onto an album or a set, keyboard
+undo in the rule dialog (its buttons only).
 
 **L7. Selection and batch commands.** Select none, invert, select
 similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste

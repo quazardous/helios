@@ -1242,8 +1242,8 @@ impl SqliteStore {
     /// A query as this store runs it: a smart album's rules in place of
     /// its id ([`helios_vault::rules::resolve`]).
     fn resolved<'a>(&self, query: &'a Query) -> Result<std::borrow::Cow<'a, Query>, String> {
-        helios_vault::rules::resolve(query, |id| {
-            helios_vault::Store::document(self, helios_vault::collections::COLLECTIONS, id)
+        helios_vault::rules::resolve(query, || {
+            helios_vault::Store::documents(self, helios_vault::collections::COLLECTIONS)
         })
     }
 

@@ -665,12 +665,7 @@ impl MemoryStore {
 
     /// A query as this store runs it ([`rules::resolve`]).
     fn resolved<'a>(&self, query: &'a Query) -> Result<std::borrow::Cow<'a, Query>, String> {
-        rules::resolve(query, |id| {
-            Ok(self
-                .documents
-                .get(&(collections::COLLECTIONS.to_string(), id.to_string()))
-                .cloned())
-        })
+        rules::resolve(query, || self.documents(collections::COLLECTIONS))
     }
 }
 

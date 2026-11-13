@@ -58,6 +58,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     smart_album_rules_select_in_one_query(make());
     relative_dates_follow_the_query_s_clock(make());
     smart_albums_scope_count_and_undo(make());
+    album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
 }
 
@@ -2747,4 +2748,119 @@ fn smart_albums_scope_count_and_undo<S: Store>(s: S) {
     v.revert(&set).unwrap();
     v.revert(&made).unwrap();
     assert!(v.album("best").unwrap().is_none());
+}
+
+/// Album sets (`docs/design/library.md`, L6): a set holds albums, smart
+/// albums and sets; a query on it selects the union of its members',
+/// nested sets included, in one query, and an `album` rule naming it
+/// does the same; moving in and out is one change undone; a set never
+/// holds itself; deleting it moves its members up, or forgets them when
+/// asked.
+fn album_sets_nest_scope_the_union_and_move<S: Store>(s: S) {
+    use crate::rules::Rule;
+    let (v, ids, _) = library_fixture(s);
+    let sorted = |mut list: Vec<ImageId>| {
+        list.sort();
+        list
+    };
+    let pick = |n: &[usize]| sorted(n.iter().map(|&i| ids[i]).collect());
+    v.create_album(Some("trip"), "Trip", &[ids[2], ids[4]])
+        .unwrap();
+    v.create_album(Some("home"), "Home", &[ids[3], ids[4]])
+        .unwrap();
+    let rated = Rule::parse(
+        &json!({"match": "all", "rules": [{"field": "rating", "op": ">=", "value": 3}]}),
+    )
+    .unwrap();
+    v.create_smart_album(Some("best"), "Best", rated).unwrap();
+    let (outer, made) = v.create_set(None, "Travel", None).unwrap();
+    assert_eq!((outer.id.as_str(), outer.is_set()), ("travel", true));
+    assert!(in_album(&v, "travel").is_empty(), "an empty set: nothing");
+    let (inner, _) = v
+        .create_set(Some("inner"), "Inner", Some("travel"))
+        .unwrap();
+    assert_eq!(inner.set.as_deref(), Some("travel"));
+    assert!(
+        v.create_set(None, "travel", None).is_err(),
+        "names are unique"
+    );
+    assert!(
+        v.create_set(None, "X", Some("trip")).is_err(),
+        "an album is no set"
+    );
+    // Moved in: the union, nested sets included, in one query.
+    let moved = v.move_collection("trip", Some("inner")).unwrap();
+    v.move_collection("best", Some("travel")).unwrap();
+    let q0 = v.reads().queries;
+    assert_eq!(sorted(in_album(&v, "travel")), pick(&[0, 1, 2, 4]));
+    assert_eq!(v.reads().queries - q0, 1, "one query");
+    assert_eq!(sorted(in_album(&v, "inner")), pick(&[2, 4]));
+    let count = |v: &Vault<S>, id: &str| {
+        v.albums()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == id)
+            .and_then(|a| a.count)
+    };
+    assert_eq!(count(&v, "travel"), Some(4));
+    // A set as a rule's value: its union, or none of it.
+    let rule = |op: &str| {
+        let rules = Rule::parse(
+            &json!({"match": "all", "rules": [{"field": "album", "op": op, "value": "inner"}]}),
+        )
+        .unwrap();
+        let c = v
+            .open_cursor(Query {
+                rules: Some(rules),
+                ..Query::default()
+            })
+            .unwrap();
+        let got = v.cursor_ids(c.id, 0, 99).unwrap();
+        v.close_cursor(c.id);
+        sorted(got)
+    };
+    assert_eq!(rule("in"), pick(&[2, 4]));
+    assert_eq!(rule("not_in"), pick(&[0, 1, 3]));
+    // A set never inside itself, nor below itself.
+    let own = v.move_collection("travel", Some("travel")).unwrap_err();
+    assert!(own.contains("cannot hold itself"), "{own}");
+    let below = v.move_collection("travel", Some("inner")).unwrap_err();
+    assert!(below.contains("cannot hold itself"), "{below}");
+    assert!(
+        v.move_collection("home", Some("trip")).is_err(),
+        "not a set"
+    );
+    // Moved out, undone, redone.
+    let out = v.move_collection("trip", None).unwrap();
+    assert!(in_album(&v, "inner").is_empty());
+    v.revert(&out).unwrap();
+    assert_eq!(sorted(in_album(&v, "inner")), pick(&[2, 4]));
+    v.replay(&out).unwrap();
+    assert_eq!(v.album("trip").unwrap().unwrap().set, None);
+    v.revert(&out).unwrap();
+    assert_eq!(moved.documents.len(), 1, "one document per move");
+    // Deleted: its members move up into the set it was in.
+    let gone = v.delete_album("inner").unwrap();
+    assert!(v.album("inner").unwrap().is_none());
+    assert_eq!(
+        v.album("trip").unwrap().unwrap().set.as_deref(),
+        Some("travel")
+    );
+    assert_eq!(sorted(in_album(&v, "travel")), pick(&[0, 1, 2, 4]));
+    v.revert(&gone).unwrap();
+    assert_eq!(
+        v.album("trip").unwrap().unwrap().set.as_deref(),
+        Some("inner")
+    );
+    // Deleted with its members, the sets below with theirs; undone whole.
+    let all = v.delete_collection("travel", true).unwrap();
+    for id in ["travel", "inner", "trip", "best"] {
+        assert!(v.album(id).unwrap().is_none(), "{id} forgotten");
+    }
+    assert!(v.album("home").unwrap().is_some(), "outside: kept");
+    v.revert(&all).unwrap();
+    assert_eq!(sorted(in_album(&v, "travel")), pick(&[0, 1, 2, 4]));
+    // Photos never go into a set.
+    assert!(v.add_to_album("travel", &[ids[0]]).is_err());
+    let _ = made;
 }

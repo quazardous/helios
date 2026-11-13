@@ -654,13 +654,16 @@ command-library-collection =
     .title = Limiter la bibliothèque à un album (`id` ; null : toute la bibliothèque) ; gardé avec l’espace de travail. Sans `id`, dit l’album
 
 command-library-collection-create =
-    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection), ou avec `kind: smart` un album dynamique (`rules` : un arbre de groupes (`match` : all, any ou none ; `rules`) et de conditions (`field`, `op`, `value`), ou les clés du formulaire) ; sans `name`, le demande. Répond son `id`
+    .title = Nouvel album (`name` ; `images` : identifiants, sinon la sélection), ou avec `kind: smart` un album dynamique (`rules` : un arbre de groupes (`match` : all, any ou none ; `rules`) et de conditions (`field`, `op`, `value`), ou les clés du formulaire), ou avec `kind: set` un ensemble d’albums (`set` : l’ensemble où il va) ; sans `name`, le demande. Répond son `id`
 
 command-library-collection-rename =
     .title = Renommer un album (`id`, `name`) ; sans `name`, le demande
 
 command-library-collection-delete =
-    .title = Supprimer un album (`id`) ; ses photos restent dans la bibliothèque
+    .title = Supprimer un album ou un ensemble (`id`) ; ses photos restent dans la bibliothèque. Les albums d’un ensemble remontent dans l’ensemble où il était, ou avec `members: true` sont supprimés aussi
+
+command-library-collection-move =
+    .title = Déplacer un album, un album dynamique ou un ensemble (`id`) dans un ensemble (`set` ; null : le premier niveau) ; un ensemble ne va jamais en lui-même. Sans `set`, le demande
 
 command-library-collection-add =
     .title = Ajouter des photos à un album (`id` ; `images` : identifiants, sinon la sélection)
@@ -675,7 +678,7 @@ command-library-collection-rules-edit =
     .title = Modifier les règles dans l’éditeur ouvert, une modification annulable à la fois : `edit` (add_condition, add_group, remove, move avec `to`, match avec `match` : all, any ou none, field avec `field`, op avec `op`, value avec `value`, `high` (la seconde borne de between, ou le nombre de within) et `unit` (days, weeks ou months), undo, redo, apply, cancel) à `at`, un chemin d’indices depuis le groupe du haut ([]). Une date de prise de vue prend un jour (AAAA-MM-JJ) ou, avec `op: within`, today, this_year ou last. Répond le brouillon, le défaut de chaque condition et les règles quand elles sont valides
 
 command-library-collection-list =
-    .title = Lister les albums : `id`, `name`, `kind` (album ou dynamique), combien de photos chacun contient, les `rules` d’un album dynamique ; et le nombre `quick` de la collection rapide
+    .title = Lister les albums : `id`, `name`, `kind` (album, dynamique ou ensemble), l’ensemble `set` où il est, combien de photos chacun contient (un ensemble : celles de ses albums réunies), les `rules` d’un album dynamique ; et le nombre `quick` de la collection rapide
 command-library-quick-toggle =
     .title = Mettre des photos dans la collection rapide (`images` : identifiants, sinon la sélection), ou les en retirer quand elle les contient toutes ; restreindre la bibliothèque à elle avec la collection `quick`
 command-library-quick-clear =

@@ -1047,13 +1047,18 @@ fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
 /// whole library), kept with the workspace.
 pub const COLLECTION_COMMAND: &str = "library.collection";
 /// Makes an album (`name`; `images`, else the selection), or with
-/// `kind: "smart"` a smart album (`rules`, a tree, or the form's keys);
+/// `kind: "smart"` a smart album (`rules`, a tree, or the form's keys),
+/// or with `kind: "set"` an album set (`set`: the set it goes in);
 /// without `name`, asks it.
 pub const COLLECTION_CREATE_COMMAND: &str = "library.collection.create";
 /// Renames an album (`id`, `name`); without `name`, asks it.
 pub const COLLECTION_RENAME_COMMAND: &str = "library.collection.rename";
-/// Forgets an album (`id`); its photos stay in the Library.
+/// Forgets an album (`id`); its photos stay in the Library. A set's
+/// albums move up, or with `members: true` are forgotten too.
 pub const COLLECTION_DELETE_COMMAND: &str = "library.collection.delete";
+/// Moves an album or a set (`id`) into a set (`set`; null: the top);
+/// without `set`, asks it.
+pub const COLLECTION_MOVE_COMMAND: &str = "library.collection.move";
 /// Puts photos in an album (`id`; `images`, else the selection).
 pub const COLLECTION_ADD_COMMAND: &str = "library.collection.add";
 /// Takes photos out of an album (`id`; `images`, else the selection).
@@ -1096,8 +1101,22 @@ pub enum AlbumEdit {
         id: String,
         name: String,
     },
+    /// An album forgotten; a set's members move up, or with `members`
+    /// are forgotten too.
     Delete {
         id: String,
+        members: bool,
+    },
+    /// An album set, in the set `set` when given.
+    CreateSet {
+        id: String,
+        name: String,
+        set: Option<String>,
+    },
+    /// An album or a set moved into the set `set` (none: the top).
+    Move {
+        id: String,
+        set: Option<String>,
     },
     Add {
         id: String,
@@ -1139,7 +1158,9 @@ impl AlbumEdit {
         match self {
             AlbumEdit::Create { id, .. }
             | AlbumEdit::Rename { id, .. }
-            | AlbumEdit::Delete { id }
+            | AlbumEdit::Delete { id, .. }
+            | AlbumEdit::CreateSet { id, .. }
+            | AlbumEdit::Move { id, .. }
             | AlbumEdit::Add { id, .. }
             | AlbumEdit::Remove { id, .. }
             | AlbumEdit::CreateSmart { id, .. }
@@ -1154,9 +1175,17 @@ impl AlbumEdit {
 
 /// An album's context menu in the Albums section, through the shell's
 /// menus: add or remove the selected photos (greyed with none), rename,
-/// delete.
-fn album_menu(row: &egui::Response, id: &str, smart: bool, selection: bool) {
+/// move to a set (greyed when there is none to go to), delete. A set's
+/// menu makes a set in it, renames, moves it, deletes it keeping its
+/// albums or with them.
+fn album_menu(
+    row: &egui::Response,
+    album: &helios_vault::collections::Album,
+    selection: bool,
+    movable: bool,
+) {
     use crate::dialogs::MenuItem;
+    let (id, smart) = (album.id.as_str(), album.is_smart());
     if !row.secondary_clicked() {
         return;
     }
@@ -1165,6 +1194,46 @@ fn album_menu(row: &egui::Response, id: &str, smart: bool, selection: bool) {
     let args = serde_json::json!({ "id": id });
     let item =
         |command: &str, label: Message| MenuItem::run(command, args.clone()).labeled(word(label));
+    let move_to = item(
+        COLLECTION_MOVE_COMMAND,
+        Message::new("gui-library-album-move", "Move to set…"),
+    )
+    .enabled(movable);
+    if album.is_set() {
+        crate::dialogs::context_menu(
+            row,
+            vec![
+                MenuItem::run(
+                    COLLECTION_CREATE_COMMAND,
+                    serde_json::json!({ "kind": helios_vault::collections::SET, "set": id }),
+                )
+                .labeled(word(Message::new(
+                    "gui-library-set-new-in",
+                    "New set inside…",
+                ))),
+                MenuItem::Separator,
+                item(
+                    COLLECTION_RENAME_COMMAND,
+                    Message::new("gui-library-album-rename", "Rename…"),
+                ),
+                move_to,
+                MenuItem::Separator,
+                item(
+                    COLLECTION_DELETE_COMMAND,
+                    Message::new("gui-library-set-delete", "Delete the set, keep its albums"),
+                ),
+                MenuItem::run(
+                    COLLECTION_DELETE_COMMAND,
+                    serde_json::json!({ "id": id, "members": true }),
+                )
+                .labeled(word(Message::new(
+                    "gui-library-set-delete-all",
+                    "Delete the set and its albums",
+                ))),
+            ],
+        );
+        return;
+    }
     // A smart album's photos follow its rules: its menu edits them.
     let fill = if smart {
         vec![item(
@@ -1195,6 +1264,7 @@ fn album_menu(row: &egui::Response, id: &str, smart: bool, selection: bool) {
                     COLLECTION_RENAME_COMMAND,
                     Message::new("gui-library-album-rename", "Rename…"),
                 ),
+                move_to,
                 item(
                     COLLECTION_DELETE_COMMAND,
                     Message::new("gui-library-album-delete", "Delete the album"),
@@ -1242,6 +1312,46 @@ fn quick_menu(row: &egui::Response, selection: bool, filled: bool) {
             .enabled(filled),
         ],
     );
+}
+
+/// The albums as the Albums section shows them: each set's members, a
+/// collection whose set is not there at the top.
+struct AlbumTree<'a> {
+    albums: &'a [helios_vault::collections::Album],
+}
+
+impl<'a> AlbumTree<'a> {
+    fn of(albums: &'a [helios_vault::collections::Album]) -> Self {
+        Self { albums }
+    }
+
+    /// Whether `id` names a set of the list.
+    fn is_set(&self, id: &str) -> bool {
+        self.albums.iter().any(|a| a.id == id && a.is_set())
+    }
+
+    /// The collections in the set `parent` (none: the top), sets first,
+    /// each kind by name as the vault lists them.
+    fn members(&self, parent: Option<&str>) -> Vec<&'a helios_vault::collections::Album> {
+        let mut list: Vec<_> = self
+            .albums
+            .iter()
+            .filter(|a| match (parent, a.set.as_deref()) {
+                (None, None) => true,
+                (None, Some(set)) => !self.is_set(set),
+                (Some(p), Some(set)) => p == set,
+                (Some(_), None) => false,
+            })
+            .collect();
+        list.sort_by_key(|a| !a.is_set());
+        list
+    }
+
+    /// Whether there is somewhere to move `album`: out of its set, or
+    /// into a set other than itself.
+    fn has_sets_for(&self, album: &helios_vault::collections::Album) -> bool {
+        album.set.is_some() || self.albums.iter().any(|a| a.is_set() && a.id != album.id)
+    }
 }
 
 /// The longest side of a thumbnail, in pixels.
@@ -1941,9 +2051,10 @@ impl Library {
 
     /// How many photos of the Library an album holds (a photo taken out
     /// of the Library since does not count); a smart album, how many its
-    /// rules selected when the albums were read.
+    /// rules selected when the albums were read; a set, how many its
+    /// members held together then.
     pub fn album_count(&self, album: &helios_vault::collections::Album) -> usize {
-        if album.is_smart() {
+        if album.is_smart() || album.is_set() {
             return album.count.unwrap_or(0);
         }
         album
@@ -3362,6 +3473,7 @@ impl Library {
         let mut chosen = None;
         let mut create = false;
         let mut create_smart = false;
+        let mut create_set = false;
         egui::CollapsingHeader::new(word(Message::new("gui-library-albums", "Albums")))
             .id_salt("helios.library.albums")
             .show(ui, |ui| {
@@ -3374,6 +3486,9 @@ impl Library {
                             "gui-library-album-new-smart",
                             "New smart album…",
                         )))
+                        .clicked();
+                    create_set = ui
+                        .button(word(Message::new("gui-library-set-new", "New set…")))
                         .clicked();
                 });
                 // The quick collection, always there, pinned first.
@@ -3403,27 +3518,19 @@ impl Library {
                     )));
                     return;
                 }
+                let tree = AlbumTree::of(albums);
                 egui::ScrollArea::vertical()
                     .id_salt("helios.library.albums.scroll")
                     .max_height(200.0)
                     .show(ui, |ui| {
-                        for album in albums {
-                            // A smart album is marked, its count live.
-                            let mark = if album.is_smart() { "⚙ " } else { "" };
-                            let text = format!("{mark}{} {}", album.name, self.album_count(album));
-                            let on = selected.as_deref() == Some(album.id.as_str());
-                            let mut r = ui.selectable_label(on, text);
-                            if album.is_smart() {
-                                r = r.on_hover_text(word(Message::new(
-                                    "gui-library-album-smart-tip",
-                                    "Smart album: its rules choose its photos",
-                                )));
-                            }
-                            album_menu(&r, &album.id, album.is_smart(), selection);
-                            if r.clicked() {
-                                chosen = Some(album.id.clone());
-                            }
-                        }
+                        self.album_rows(
+                            ui,
+                            &tree,
+                            None,
+                            selected.as_deref(),
+                            selection,
+                            &mut chosen,
+                        );
                     });
             });
         let run = |command: &str, args: serde_json::Value| {
@@ -3439,6 +3546,12 @@ impl Library {
         if create {
             run(COLLECTION_CREATE_COMMAND, serde_json::json!({}));
         }
+        if create_set {
+            run(
+                COLLECTION_CREATE_COMMAND,
+                serde_json::json!({ "kind": helios_vault::collections::SET }),
+            );
+        }
         if create_smart {
             run(
                 COLLECTION_CREATE_COMMAND,
@@ -3452,6 +3565,78 @@ impl Library {
                 COLLECTION_COMMAND,
                 serde_json::json!({ "id": (!same).then_some(id) }),
             );
+        }
+    }
+
+    /// The rows of the collections in the set `parent` (none: the top),
+    /// a set as a group that opens and closes, its members indented
+    /// below it.
+    fn album_rows(
+        &self,
+        ui: &mut Ui,
+        tree: &AlbumTree<'_>,
+        parent: Option<&str>,
+        selected: Option<&str>,
+        selection: bool,
+        chosen: &mut Option<String>,
+    ) {
+        let ctx = ui.ctx().clone();
+        let word = |m: Message| crate::i18n::text(&ctx, m);
+        for album in tree.members(parent) {
+            let mark = if album.is_smart() { "⚙ " } else { "" };
+            let text = format!("{mark}{} {}", album.name, self.album_count(album));
+            let on = selected == Some(album.id.as_str());
+            let movable = tree.has_sets_for(album);
+            if !album.is_set() {
+                let mut r = ui.selectable_label(on, text);
+                if album.is_smart() {
+                    r = r.on_hover_text(word(Message::new(
+                        "gui-library-album-smart-tip",
+                        "Smart album: its rules choose its photos",
+                    )));
+                }
+                album_menu(&r, album, selection, movable);
+                if r.clicked() {
+                    *chosen = Some(album.id.clone());
+                }
+                continue;
+            }
+            // A set: its toggle (named for screen readers), its row, its
+            // members below when open.
+            let key = ui.make_persistent_id(("helios.library.set", &album.id));
+            let mut state =
+                egui::collapsing_header::CollapsingState::load_with_default_open(&ctx, key, true);
+            let open = state.is_open();
+            ui.horizontal(|ui| {
+                let toggle =
+                    state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
+                let name = word(
+                    Message::new(
+                        "gui-library-set-toggle",
+                        "Show or hide the albums of { $name }",
+                    )
+                    .with("name", album.name.as_str()),
+                );
+                toggle.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, &name)
+                });
+                let r = ui
+                    .selectable_label(on, text.clone())
+                    .on_hover_text(word(Message::new(
+                        "gui-library-set-tip",
+                        "Album set: its albums' photos together",
+                    )));
+                album_menu(&r, album, selection, movable);
+                if r.clicked() {
+                    *chosen = Some(album.id.clone());
+                }
+            });
+            state.store(&ctx);
+            if open {
+                ui.indent(key, |ui| {
+                    self.album_rows(ui, tree, Some(&album.id), selected, selection, chosen);
+                });
+            }
         }
     }
 

@@ -146,9 +146,10 @@ command-help-health.title f0b3089eccbece31
 command-keymap-package-remove.title 09c89d2776f3a70e
 command-keymap-package.title dafef66dd3b9bf88
 command-library-collection-add.title bc2b88d961d3487b
-command-library-collection-create.title 4e9991f0a7f08f9d
-command-library-collection-delete.title c37879e580c9448a
-command-library-collection-list.title 8c46cea022ccd74d
+command-library-collection-create.title 715fcdd4f4b1b07a
+command-library-collection-delete.title 26c9dd4bf07bdfc0
+command-library-collection-list.title 560d1afc2df188c7
+command-library-collection-move.title ef5ca0a093301f55
 command-library-collection-remove.title 7045a731045beddc
 command-library-collection-rename.title 7c0e951da68a2f8f
 command-library-collection-rules-edit.title d274b6e5ffb58cd9
@@ -549,6 +550,8 @@ gui-health-summary-warnings bd449020dd0eead1
 gui-health-undo-ignore 64733d962538833e
 gui-history-album-add 22eb25e8d77638c1
 gui-history-album-delete 1dc55096cd3e33fd
+gui-history-album-move 86e68f39e0e1c335
+gui-history-album-move-out e6973276d626ba77
 gui-history-album-new 47c634dea0360fb4
 gui-history-album-new-smart ea48d37203780d3b
 gui-history-album-remove 8ec6a99c08fd2a03
@@ -569,6 +572,7 @@ gui-history-quick-add 37804b1c3cec7307
 gui-history-quick-clear 9b52b03e469d7bac
 gui-history-quick-remove 334339e3707ea6b9
 gui-history-quick-save d55f15e5e5aec98e
+gui-history-set-new 438a574de74bd810
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-undo cc7022a2d9050a57
 gui-image-not-reopened 422cb049e7d6fe52
@@ -722,6 +726,7 @@ gui-keys-from-template e70109422c5ad48b
 gui-layout-not-saved 942738e1ab7b193d
 gui-library-album-add 4431f7a66bf4fea9
 gui-library-album-delete 7b2511e3687c6a5c
+gui-library-album-move e9dae4f7cd33493b
 gui-library-album-name 23e46144529fec9c
 gui-library-album-new 7f46a9fb51d4fb98
 gui-library-album-new-smart 810ebc2b53b6af2d
@@ -793,6 +798,17 @@ gui-library-quick-toggle 58f2469f03174d34
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
 gui-library-search fddceff6dbd31d81
+gui-library-set-delete 40f1e74389fd36cc
+gui-library-set-delete-all ef418a379bdaeaa0
+gui-library-set-hint 6b5f76f75206e4ba
+gui-library-set-move-title f52e8be44786a810
+gui-library-set-new 1d4add653b68d25f
+gui-library-set-new-in 4bc8d375e6b3d9d5
+gui-library-set-new-title 30d6aabca091aacc
+gui-library-set-none 875269ca5dbfacef
+gui-library-set-tip 82ccdab8aad311a2
+gui-library-set-toggle 3e0ce2ede9209ad2
+gui-library-set-top 61492e70a628cc85
 gui-library-sort-ascending a45193d290e560eb
 gui-library-sort-captured 9d016c2456a256d8
 gui-library-sort-descending e5c36b4e51371498
