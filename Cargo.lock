@@ -2963,9 +2963,11 @@ dependencies = [
  "blake3",
  "helios-vault",
  "log",
+ "quick-xml 0.42.0",
  "rustix 1.1.6",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

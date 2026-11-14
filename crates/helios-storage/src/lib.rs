@@ -8,7 +8,8 @@
 //!   belongs to, when and where it was last seen, and its [`Role`]s.
 //! - [`Volumes`] lists what is mounted now; [`system`] is the machine's
 //!   (Linux reads `/proc/mounts`, `/dev/disk` and `/sys`, see [`detect`];
-//!   other systems list none for now, behind the same trait). Its
+//!   macOS asks `diskutil`, see [`macos`]; Windows asks its volume API,
+//!   see [`windows`]; other systems list none, behind the same trait). Its
 //!   [`Volumes::cards`] keeps the cards and cameras, for the import window.
 //!   Watching them come and go is the node's (`helios-node-core`'s
 //!   `volumes`), on the machine the volumes are plugged into.
@@ -25,10 +26,12 @@
 
 pub mod detect;
 pub mod exclude;
+pub mod macos;
 pub mod marker;
 pub mod registry;
 pub mod scan;
 pub mod strategy;
+pub mod windows;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -297,7 +300,17 @@ impl Volumes for System {
         detect::scan(&detect::Roots::system(), &node())
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    fn volumes(&self) -> Vec<Volume> {
+        macos::scan(&node())
+    }
+
+    #[cfg(windows)]
+    fn volumes(&self) -> Vec<Volume> {
+        windows::scan(&node())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     fn volumes(&self) -> Vec<Volume> {
         Vec::new()
     }
