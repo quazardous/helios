@@ -85,6 +85,7 @@ fn the_system_menu_is_declared_with_keys_ticks_and_lists() {
             "Profiles >",
             "Themes >",
             "Keyboard shortcuts",
+            "Set up Helios…",
             "-",
             "About Helios",
             "-",

@@ -39,7 +39,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         json!({
             "id": self.id,
             "name": self.name,
@@ -49,7 +49,7 @@ impl Snapshot {
         })
     }
 
-    fn from_json(v: &Value) -> Result<Self, String> {
+    pub fn from_json(v: &Value) -> Result<Self, String> {
         let id = v["id"]
             .as_u64()
             .filter(|id| *id != 0)

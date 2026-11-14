@@ -717,6 +717,7 @@ impl ImportWindow {
 
     /// Selects an account's source: the column shows its choices.
     pub(super) fn select_account(&mut self, id: String) {
+        self.ticked.clear();
         self.sources.account = Some(id);
     }
 
