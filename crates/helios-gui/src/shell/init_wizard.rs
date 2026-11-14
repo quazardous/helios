@@ -152,18 +152,22 @@ impl Shell {
         self.core.init.checked = false;
     }
 
-    /// The library folder, as the import's account holds it; `None`
-    /// without a library.
-    fn init_folder(&self) -> Option<Option<PathBuf>> {
+    /// The settings the steps read, the library folder as the import's
+    /// account holds it; `None` without a library.
+    fn init_values(&self) -> Option<DesktopValues> {
         let library = self.import.get().accounts.library.clone()?;
-        Some(
-            library
-                .get()
-                .inspect_err(|e| log::warn!("init: library folder: {e}"))
-                .ok()
-                .flatten()
-                .filter(|p| !p.as_os_str().is_empty()),
-        )
+        let folder = library
+            .get()
+            .inspect_err(|e| log::warn!("init: library folder: {e}"))
+            .ok()
+            .flatten()
+            .filter(|p| !p.as_os_str().is_empty());
+        Some(DesktopValues { folder })
+    }
+
+    /// The library folder chosen, if any.
+    fn init_folder(&self) -> Option<PathBuf> {
+        self.init_values().and_then(|v| v.folder)
     }
 
     /// Makes sure the steps `request` asks are done, the wizard opened on
@@ -178,7 +182,7 @@ impl Shell {
         if self.core.init.running.is_some() {
             return Err("the setup is already open".into());
         }
-        let folder = self.init_folder().flatten();
+        let folder = self.init_folder();
         let values = DesktopValues {
             folder: folder.clone(),
         };
@@ -235,13 +239,11 @@ impl Shell {
     /// are done, or left (then saying why it cannot import yet). `false`:
     /// nothing is missing, open it now.
     pub(super) fn ensure_for_import(&mut self, args: &Value) -> bool {
-        let Some(folder) = self.init_folder() else {
+        let Some(values) = self.init_values() else {
             return false;
         };
         let registry = Registry::builtin();
-        let missing = registry
-            .missing(IMPORT, &DesktopValues { folder })
-            .unwrap_or_default();
+        let missing = registry.missing(IMPORT, &values).unwrap_or_default();
         let Some(first) = missing.first() else {
             self.import.get_mut().not_set_up = None;
             return false;
@@ -294,7 +296,7 @@ impl Shell {
             return;
         };
         let values = DesktopValues {
-            folder: self.init_folder().flatten(),
+            folder: self.init_folder(),
         };
         run.reply.end(&values);
     }
@@ -341,15 +343,16 @@ impl Shell {
             }
         }
         // The first run: once the library is known.
-        if self.core.init.first_run && !self.core.init.checked {
-            if let Some(folder) = self.init_folder() {
-                self.core.init.checked = true;
-                let missing = Registry::builtin()
-                    .status(&DesktopValues { folder })
-                    .is_ok_and(|s| s.iter().any(|s| s.required && !s.done));
-                if missing && let Err(e) = self.init_ensure(&Request::all(), Then::Nothing, false) {
-                    log::warn!("init: the first run: {e}");
-                }
+        if self.core.init.first_run
+            && !self.core.init.checked
+            && let Some(values) = self.init_values()
+        {
+            self.core.init.checked = true;
+            let missing = Registry::builtin()
+                .status(&values)
+                .is_ok_and(|s| s.iter().any(|s| s.required && !s.done));
+            if missing && let Err(e) = self.init_ensure(&Request::all(), Then::Nothing, false) {
+                log::warn!("init: the first run: {e}");
             }
         }
         // The wizard closed without its finish: cancelled.
