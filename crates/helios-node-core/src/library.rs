@@ -426,37 +426,36 @@ fn trash<S: Store>(
 ) -> Result<Value, String> {
     use helios_library::trash::{self, Outcome};
     let volumes = trash::volumes(vault)?;
-    let id = match params["job"].as_str() {
-        Some(job) => job.to_string(),
-        None => {
-            let ids = named(vault, params, "images")?;
-            if ids.is_empty() {
-                return Err("`images` names no photo".into());
-            }
-            if params["plan"].as_bool() == Some(true) {
-                let files = trash::plan(vault, &ids, &volumes)?;
-                let job = trash::Job {
-                    id: String::new(),
-                    at: now(),
-                    by: origin.into(),
-                    images: ids.iter().map(ImageId::hex).collect(),
-                    files,
-                    done: false,
-                };
-                let refused: Vec<_> = job
-                    .files
-                    .iter()
-                    .filter(|f| f.outcome == Outcome::Refused)
-                    .collect();
-                return Ok(json!({
-                    "images": ids.len(),
-                    "files": job.count(Outcome::Pending),
-                    "folders": job.folders(),
-                    "refused": to_json(&refused),
-                }));
-            }
-            trash::start(vault, &ids, &volumes, origin, now())?.id
+    let id = if let Some(job) = params["job"].as_str() {
+        job.to_string()
+    } else {
+        let ids = named(vault, params, "images")?;
+        if ids.is_empty() {
+            return Err("`images` names no photo".into());
         }
+        if params["plan"].as_bool() == Some(true) {
+            let files = trash::plan(vault, &ids, &volumes)?;
+            let job = trash::Job {
+                id: String::new(),
+                at: now(),
+                by: origin.into(),
+                images: ids.iter().map(ImageId::hex).collect(),
+                files,
+                done: false,
+            };
+            let refused: Vec<_> = job
+                .files
+                .iter()
+                .filter(|f| f.outcome == Outcome::Refused)
+                .collect();
+            return Ok(json!({
+                "images": ids.len(),
+                "files": job.count(Outcome::Pending),
+                "folders": job.folders(),
+                "refused": to_json(&refused),
+            }));
+        }
+        trash::start(vault, &ids, &volumes, origin, now())?.id
     };
     let jobs = helios_core::jobs::Jobs::new(Arc::clone(bus));
     let worked = trash::work(vault, &id, &*trash::bin(), Some(&jobs), now())?;

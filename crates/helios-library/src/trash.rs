@@ -95,13 +95,19 @@ static REDIRECT: RwLock<Option<PathBuf>> = RwLock::new(None);
 /// Sends this process's trash jobs to `folder` instead of the system
 /// trash (tests, sandboxes); `None` goes back to the system trash.
 pub fn redirect(folder: Option<PathBuf>) {
-    *REDIRECT.write().unwrap_or_else(|e| e.into_inner()) = folder;
+    *REDIRECT
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = folder;
 }
 
 /// The trash of this process: the folder [`redirect`] set, else the
 /// system's.
 pub fn bin() -> Box<dyn Bin> {
-    match REDIRECT.read().unwrap_or_else(|e| e.into_inner()).clone() {
+    match REDIRECT
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+    {
         Some(folder) => Box::new(FolderBin(folder)),
         None => Box::new(SystemBin),
     }
@@ -349,10 +355,7 @@ pub fn work<S: Store>(
             );
         }
         let file = &mut job.files[i];
-        if !file.path.exists() {
-            file.outcome = Outcome::Missing;
-            file.reason = None;
-        } else {
+        if file.path.exists() {
             match bin.put(&file.path) {
                 Ok(()) => {
                     file.outcome = Outcome::Trashed;
@@ -367,6 +370,9 @@ pub fn work<S: Store>(
                     file.reason = Some(e);
                 }
             }
+        } else {
+            file.outcome = Outcome::Missing;
+            file.reason = None;
         }
         // Each outcome kept as it comes: a job stopped here resumes
         // after it.
