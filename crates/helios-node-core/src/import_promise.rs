@@ -104,8 +104,30 @@ pub fn start<S: Store + Send + 'static>(
     if source.is_none() && !matches!(rule, Rule::Items(_)) {
         return Err("`library.import` needs a `source`, or a rule naming its `items`".into());
     }
-    // Its choices are checked now, not once the work runs.
-    crate::library::import_options(params, None)?;
+    // Its choices and sources are checked now, not once the work runs:
+    // a refusal is the answer, not a failed promise.
+    let options = crate::library::import_options(params, None)?;
+    match &options.placement {
+        helios_library::import::Placement::Reference if options.rename.is_some() => {
+            return Err("renaming needs a copy: a referenced file stays as it is".into());
+        }
+        helios_library::import::Placement::Copy { into: None }
+            if helios_library::import::library_root(promises.vault())?.is_none() =>
+        {
+            return Err(
+                "copying needs the library folder: give it once (`into`) and it is remembered"
+                    .into(),
+            );
+        }
+        _ => {}
+    }
+    let named: Vec<&Path> = match &rule {
+        Rule::Items(items) => items.iter().map(PathBuf::as_path).collect(),
+        Rule::All | Rule::New => source.iter().map(PathBuf::as_path).collect(),
+    };
+    if let Some(missing) = named.iter().find(|p| !p.exists()) {
+        return Err(format!("{}: no such file or folder", missing.display()));
+    }
     let label = match (&source, &rule) {
         (_, Rule::Items(items)) => format!("Import {} items", items.len()),
         (Some(source), _) => format!("Import {}", name_of(source)),

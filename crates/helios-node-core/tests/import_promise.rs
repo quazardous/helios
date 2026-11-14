@@ -150,6 +150,21 @@ fn an_import_by_rule_answers_a_promise_that_progresses_and_settles_with_its_outc
             .request("library.import", json!({ "source": roll, "rule": "some" }))
             .is_err()
     );
+    assert!(
+        client
+            .request(
+                "library.import",
+                json!({ "source": roll, "rename": "{date}" })
+            )
+            .is_err(),
+        "renaming needs a copy"
+    );
+    assert!(
+        client
+            .request("library.import", json!({ "source": dir.join("gone") }))
+            .is_err(),
+        "no such folder"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
