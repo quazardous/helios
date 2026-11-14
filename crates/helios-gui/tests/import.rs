@@ -553,12 +553,13 @@ fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A library that keeps a camera's default look.
-struct WithCameraLooks;
+/// A library that keeps a camera's default look, its folder chosen (the
+/// import window asks for it first otherwise).
+struct WithCameraLooks(PathBuf);
 
 impl helios_gui::shell::LibraryFolder for WithCameraLooks {
     fn get(&self) -> Result<Option<PathBuf>, String> {
-        Ok(None)
+        Ok(Some(self.0.clone()))
     }
 
     fn set(&self, _: &Path) -> Result<(), String> {
@@ -575,7 +576,7 @@ fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_on
     let dir = temp("camera-look");
     let (dcim, _) = fake_card(&dir);
     let mut shell = Shell::new(helios_panels(), None);
-    shell.set_import_library_folder(Arc::new(WithCameraLooks));
+    shell.set_import_library_folder(Arc::new(WithCameraLooks(dir.join("library"))));
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     drop_on(&mut h, &dcim.join("IMG_0002.JPG"));
