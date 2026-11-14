@@ -215,6 +215,7 @@ pub fn choices(options: &Options) -> Value {
     if let Some(rename) = &options.rename {
         c["rename"] = json!(rename.text());
     }
+    crate::import_profile::write(options, &mut c);
     c
 }
 

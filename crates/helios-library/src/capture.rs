@@ -251,10 +251,21 @@ pub fn backfill_by<S: Store>(
                 continue;
             }
             let sightings = vault.sightings(id)?;
-            // The library's copy, a card's file only without one.
-            let from_file = order
-                .file(&vault.locations(id)?)
-                .map(|l| reader.read(&l.path));
+            // The library's copy, a card's file only without one: the
+            // present locations in read order, through the reader (a
+            // library copy deleted since the last scan gives way to the
+            // next), with no look at the disk of its own.
+            let mut locations = vault.locations(id)?;
+            order.sort(&mut locations);
+            let mut from_file = None;
+            for l in locations.iter().filter(|l| l.present()) {
+                let read = reader.read(&l.path);
+                let ok = read.is_ok();
+                from_file = Some(read);
+                if ok {
+                    break;
+                }
+            }
             match from_file {
                 Some(Ok(c)) => {
                     progress.read += 1;
