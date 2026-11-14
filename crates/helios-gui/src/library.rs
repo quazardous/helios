@@ -4473,7 +4473,7 @@ mod tests {
         // 1 2 3
         // 4 5 6
         let picture = ColorImage::new([3, 2], (1..=6).map(px).collect());
-        let reds = |p: &ColorImage| p.pixels.iter().map(|c| c.r()).collect::<Vec<_>>();
+        let reds = |p: &ColorImage| p.pixels.iter().map(Color32::r).collect::<Vec<_>>();
         let right = turned(picture.clone(), 1);
         assert_eq!(right.size, [2, 3]);
         assert_eq!(reds(&right), [4, 1, 5, 2, 6, 3]);
