@@ -17,8 +17,9 @@
 //!
 //! An account whose connector lets the person choose photos in the
 //! service's own page (Google Photos) is shown once in the Sources column,
-//! under Services, and the Contents column shows it with one header line
-//! and its menu, then the one primary action of where it stands
+//! under Services, and the Detail column's connector section shows it
+//! with one header line and its menu, then the one primary action of
+//! where it stands
 //! ([`choose_ui`]): connect, choose photos, the wait for the service's
 //! page as a status line with Cancel (never a dialog), what came back, or
 //! one plain sentence and one action when something went wrong. The
@@ -1436,10 +1437,12 @@ pub(crate) fn choose_ui(
         .as_ref()
         .filter(|p| p.account == id)
         .map(Picking::status);
+    // The text wraps to the Detail column's width: a line wider than the
+    // column would widen its content past its edge.
     let spinning = |ui: &mut egui::Ui, text: String| {
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             ui.spinner();
-            ui.label(text);
+            ui.add(egui::Label::new(text).wrap());
         });
     };
     let warned = |ui: &mut egui::Ui, text: String| {
@@ -1505,11 +1508,9 @@ pub(crate) fn choose_ui(
                     ui.ctx().copy_text(url.clone());
                 }
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                cancel = ui
-                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                    .clicked();
-            });
+            cancel = ui
+                .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                .clicked();
         }
         Some(PickStatus::Importing { items }) => spinning(
             ui,

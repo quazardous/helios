@@ -176,17 +176,20 @@ impl Serialize for ContentHash {
     }
 }
 
-/// Read back from its 64 hex digits, as it is written.
+/// Read back from the 64 hex digits it is written as.
 impl<'de> Deserialize<'de> for ContentHash {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
         let hex = String::deserialize(d)?;
-        let bad = || serde::de::Error::custom(format!("`{hex}` is not a 64-digit hex hash"));
         if hex.len() != 64 || !hex.is_ascii() {
-            return Err(bad());
+            return Err(D::Error::custom(format!(
+                "`{hex}` is not a hash's 64 hex digits"
+            )));
         }
         let mut bytes = [0u8; 32];
         for (i, b) in bytes.iter_mut().enumerate() {
-            *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| bad())?;
+            *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+                .map_err(|_| D::Error::custom(format!("`{hex}` is not a hash's 64 hex digits")))?;
         }
         Ok(Self(bytes))
     }
