@@ -202,8 +202,9 @@ impl ImportWindow {
 pub(super) enum Shown {
     /// The grid (all photos, the tree's folder, the timeline).
     Grid,
-    /// The service's page where photos are chosen, for this account.
-    Picker(String),
+    /// An account whose photos are chosen in its service's page (from
+    /// the Detail column).
+    Picker,
     /// Nothing Helios lists.
     NotListed,
 }
@@ -234,7 +235,7 @@ pub(super) fn switch_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &BrowseW
         _ => None,
     };
     match (w.browsing.current, account) {
-        (Some(Browser::Picker), Some(id)) => Shown::Picker(id),
+        (Some(Browser::Picker), Some(_)) => Shown::Picker,
         (_, Some(_)) | (Some(Browser::Collections | Browser::Picker), None) => Shown::NotListed,
         _ => Shown::Grid,
     }
