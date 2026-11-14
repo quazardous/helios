@@ -213,6 +213,9 @@ pub struct StatusLine {
     /// The health check's worst finding needing attention, and how many
     /// need it (`crate::shell::health`); `None` while all is well.
     pub health: Option<(helios_health::Level, usize)>,
+    /// The background tasks running and failed unseen
+    /// (`crate::activity`); `None` while none runs and none failed.
+    pub activity: Option<crate::activity::Summary>,
 }
 
 /// The status line, shared between the shell and its block.
@@ -226,6 +229,10 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
         // height (the viewport under it would move).
         ui.set_min_height(ui.spacing().interact_size.y);
         ui.horizontal_centered(|ui| {
+            if let Some(summary) = &line.activity {
+                crate::activity::indicator(ui, app, summary);
+                ui.separator();
+            }
             if let Some((level, count)) = line.health {
                 health_badge(ui, app, level, count);
                 ui.separator();

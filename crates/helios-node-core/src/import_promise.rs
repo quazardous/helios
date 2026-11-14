@@ -19,10 +19,14 @@
 //! - **After a stop or a crash** the kind is resumable: the node takes
 //!   the promise up again and runs the same import, which skips what is
 //!   already in the library (dedupe makes reading again safe).
+//! - **Watched in the process** ([`Watch`]): the desktop that owns the
+//!   node hears each file's line and the report before the promise
+//!   settles, for what only it keeps (its undo step, its Duplicates and
+//!   Log panels, the backups run after an import).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 use helios_connect::{Cancel, ConnectorProvider, ConnectorServices};
@@ -33,6 +37,28 @@ use serde_json::{Value, json};
 
 use crate::endpoint::{Imported, SOURCE};
 use crate::promises::{Handle, Promises};
+
+/// What a process holding the node hears of its imports by rule, on the
+/// import's thread: each file's line as `helios_library::import` gives
+/// it, then the end. The request is the promise's (`library.import`'s
+/// params, with `origin`).
+pub trait ImportWatch: Send + Sync {
+    /// A file's line.
+    fn line(&self, request: &Value, line: &Value);
+    /// The import ended (cancelled too): `report.changes` may be taken,
+    /// the promise settles after; `camera_looks` were put on its raws.
+    fn ended(
+        &self,
+        request: &Value,
+        report: &mut helios_library::import::Report,
+        camera_looks: usize,
+    );
+    /// The import failed before its end.
+    fn failed(&self, request: &Value, error: &str);
+}
+
+/// Where the watch of a node's imports is set: none at first.
+pub type Watch = Arc<RwLock<Option<Arc<dyn ImportWatch>>>>;
 
 /// The kind of the import's promises.
 pub const KIND: &str = "import";
@@ -152,10 +178,21 @@ fn name_of(path: &Path) -> String {
 /// (`library.imported`, as an import by `paths`).
 #[must_use]
 pub fn register<S: Store + Send + 'static>(promises: Promises<S>, bus: Arc<Bus>) -> Promises<S> {
+    register_watched(promises, bus, Watch::default())
+}
+
+/// [`register`], each import heard by what `watch` holds when it runs.
+#[must_use]
+pub fn register_watched<S: Store + Send + 'static>(
+    promises: Promises<S>,
+    bus: Arc<Bus>,
+    watch: Watch,
+) -> Promises<S> {
     let vault = promises.vault().clone();
     let jobs = promises.jobs().clone();
     promises.kind(KIND, true, move |handle| {
-        run(&vault, &jobs, &bus, &handle);
+        let watcher = watch.read().unwrap_or_else(PoisonError::into_inner).clone();
+        run(&vault, &jobs, &bus, &handle, watcher.as_deref());
     })
 }
 
@@ -193,6 +230,7 @@ fn run<S: Store + Send + 'static>(
     jobs: &Jobs,
     bus: &Arc<Bus>,
     handle: &Handle<S>,
+    watch: Option<&dyn ImportWatch>,
 ) {
     let request = handle.request().clone();
     let stop = Arc::new(AtomicBool::new(false));
@@ -220,7 +258,10 @@ fn run<S: Store + Send + 'static>(
             })
             .ok()
     };
-    let outcome = import(vault, jobs, bus, handle, &request, &stop);
+    let outcome = import(vault, jobs, bus, handle, &request, &stop, watch);
+    if let (Err(e), Some(watch)) = (&outcome, watch) {
+        watch.failed(&request, e);
+    }
     ended.store(true, Ordering::SeqCst);
     if let Some(watcher) = watcher {
         let _ = watcher.join();
@@ -240,6 +281,7 @@ fn import<S: Store + Send + 'static>(
     handle: &Handle<S>,
     request: &Value,
     stop: &Arc<AtomicBool>,
+    watch: Option<&dyn ImportWatch>,
 ) -> Result<Value, String> {
     let rule = Rule::of(request)?;
     let mut options = crate::library::import_options(request, Some(stop.clone()))?;
@@ -275,6 +317,9 @@ fn import<S: Store + Send + 'static>(
         &options,
         now(),
         &mut |line| {
+            if let Some(watch) = watch {
+                watch.line(request, line);
+            }
             if line["status"] == "cancelled" {
                 return;
             }
@@ -301,6 +346,9 @@ fn import<S: Store + Send + 'static>(
         )
         .map_err(|m| m.english)?
     };
+    if let Some(watch) = watch {
+        watch.ended(request, &mut report, looks);
+    }
     bus.publish(SOURCE, None, &Imported { report: &report });
     Ok(json!({
         "report": report,
