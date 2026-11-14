@@ -916,20 +916,18 @@ fn no_library_folder_is_a_warning_until_one_is_chosen() {
     let x = finding(&h, "library.folder").unwrap().fix.unwrap();
     assert_eq!(x.command, helios_health::checks::CHOOSE_LIBRARY_FOLDER);
 
-    // Chosen (as the chooser's answer or an agent's `path`): the checks
+    // Chosen (as the setup's answer or an agent's `path`): the checks
     // run again and the warning clears.
+    let chosen = std::env::temp_dir().join(format!("helios-health-folder-{}", std::process::id()));
     h.state_mut()
         .run(
             &x.command,
-            json!({ "path": "/photos/Helios" }),
+            json!({ "path": chosen.display().to_string() }),
             Origin::User,
         )
         .unwrap();
     h.run();
-    assert_eq!(
-        folder.lock().unwrap().as_deref(),
-        Some(Path::new("/photos/Helios"))
-    );
+    assert_eq!(folder.lock().unwrap().as_deref(), Some(chosen.as_path()));
     until(&mut h, "the folder chosen", |h| {
         finding(h, "library.folder").is_some_and(|f| f.level == Level::Ok)
     });

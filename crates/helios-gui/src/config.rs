@@ -636,8 +636,100 @@ pub fn manifest(
     .section("accounts/clients", &tt("accounts/clients"), |s| {
         clients_section(s, t);
     })
-    .wizard(backup_wizard(t));
+    .wizard(backup_wizard(t))
+    .wizard(init_wizard(&helios_init::Registry::builtin(), t));
     plugins::sections(m, plugins, t)
+}
+
+/// The first-run setup (`crate::shell` `init_wizard`): a step per init
+/// step, in order; its fields are the settings the step fills, as their
+/// declarations say (`helios_config::KEPT_ELSEWHERE`), required on a
+/// required step; an optional step is skipped ("Later"). The library
+/// folder is a path field with "Choose…" (the folder chooser) and a
+/// check that it can be written, with room left. No summary: Finish on
+/// the last step writes the settings (`init.apply`).
+pub fn init_wizard(registry: &helios_init::Registry, t: &dyn Fn(Message) -> String) -> Wizard {
+    use crate::shell::init_wizard::{APPLY, CHECK_FOLDER, CHOOSE, WIZARD};
+    let mut w = Wizard::new(
+        WIZARD,
+        &t(Message::new("gui-init-wizard", "Set up Helios")),
+        APPLY,
+    )
+    .description(&t(Message::new(
+        "gui-init-wizard-about",
+        "A few choices before the first photos: each can be changed later.",
+    )))
+    .no_summary()
+    .verb(&t(Message::new("gui-init-wizard-finish", "Finish")));
+    let steps = registry.ordered().unwrap_or_else(|e| {
+        log::warn!("init: {e}");
+        Vec::new()
+    });
+    for step in steps {
+        w = w.step(&step.id, &t(step.title.clone()), |s| {
+            s.description(&t(step.why.clone()));
+            for key in &step.fills {
+                let kind = match helios_config::kept_elsewhere(key)
+                    .map(|d| d.kind)
+                    .or_else(|| Schema::core().get(key).map(|d| d.kind))
+                {
+                    Some(Kind::Toggle { .. }) => FieldKind::Toggle,
+                    Some(Kind::Number { .. }) => FieldKind::Number,
+                    Some(Kind::Choice { .. }) => FieldKind::Choice,
+                    _ if key == helios_init::LIBRARY_FOLDER_SETTING => FieldKind::Path,
+                    _ => FieldKind::Text,
+                };
+                let mut field = Field::draft(WIZARD, key, &t(step.title.clone()), kind);
+                if step.required {
+                    field = field.required();
+                }
+                if key == helios_init::LIBRARY_FOLDER_SETTING {
+                    field = field.validate(CHECK_FOLDER).help(&t(Message::new(
+                        "gui-init-library-folder-help",
+                        "A folder on a disk with room for your photos; it is made if missing.",
+                    )));
+                }
+                s.field(field);
+                if key == helios_init::LIBRARY_FOLDER_SETTING {
+                    s.action(Action::command(CHOOSE).title(&t(Message::new(
+                        "gui-init-library-folder-choose",
+                        "Choose…",
+                    ))));
+                }
+            }
+        });
+        if !step.required {
+            w = w.optional();
+        }
+    }
+    w
+}
+
+/// The `validate` hook of the setup's library folder field: what is wrong
+/// with the folder typed, read without writing anything.
+fn check_library_folder(
+    t: impl Fn(Message) -> String + Send + Sync + 'static,
+) -> egui_pop::api::admin::model::hooks::Hook {
+    use egui_pop::api::admin::model::Tone;
+    use egui_pop::api::admin::model::hooks::{Hook, Problem};
+    Hook::Validate(Box::new(move |values| {
+        let key = helios_init::LIBRARY_FOLDER_SETTING;
+        let Some(path) = values
+            .get(key)
+            .and_then(Json::as_str)
+            .filter(|p| !p.trim().is_empty())
+        else {
+            return Vec::new();
+        };
+        helios_library::import::library_folder_problem(Path::new(path.trim()))
+            .map(|p| Problem {
+                field: key.to_owned(),
+                tone: Tone::Danger,
+                message: t(p.message()),
+            })
+            .into_iter()
+            .collect()
+    }))
 }
 
 /// The backup wizard's id: "Set up backups…" on the Backup scope's
@@ -1506,6 +1598,14 @@ impl Plugin for BridgePlugin {
             admin.declare_scope(scope);
         }
         admin.manifest(manifest(&schema, &installed, &t));
+        let words = self.i18n.clone();
+        admin.hook(
+            crate::shell::init_wizard::CHECK_FOLDER,
+            check_library_folder(move |m| match &words {
+                Some(i) => helios_i18n::message(i, &m),
+                None => m.english,
+            }),
+        );
         admin.set_foci(focus::Foci);
         ctx.service(
             &BRIDGE,

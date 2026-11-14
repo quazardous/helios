@@ -11,6 +11,8 @@ category-developer = Developer
 
 category-experimental = Experimental
 
+category-helios = Helios
+
 category-masks = Masks
 
 category-node-graph = Node graph
