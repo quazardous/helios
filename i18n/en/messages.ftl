@@ -1195,6 +1195,8 @@ gui-import-window-own-choices = Its own import choices
 
 gui-import-window-pair = RAW+JPG
 
+gui-import-window-pair-short = R+J
+
 gui-import-window-profile = Import profile
 
 gui-import-window-raw-only = Raw only
