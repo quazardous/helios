@@ -478,7 +478,7 @@ fn a_vault_held_locked_does_not_delay_the_frame_that_starts_an_export() {
     let (said, refused) = std::sync::mpsc::channel();
     let started = std::time::Instant::now();
     exporter.start(helios_template::workspace::blank(), ask, move |e| {
-        drop(said.send(e))
+        drop(said.send(e));
     });
     let took = started.elapsed();
     assert!(
