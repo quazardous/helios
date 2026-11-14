@@ -2475,19 +2475,63 @@ gui-storage-mark = Marquer ce disque…
 
 gui-storage-forget-hint = Retire ce que la carte des images sait des fichiers de ce volume hors de la Bibliothèque ; le volume reste connu
 
-gui-import-window-delete-preset = Supprimer le préréglage
+gui-import-window-profile = Profil d’import
 
-gui-import-window-preset = Préréglage
+gui-import-window-manage-profiles = Gérer les profils…
 
-gui-import-window-preset-default = Par défaut
+gui-import-profile-library = Bibliothèque
 
-gui-import-window-preset-last-used = Dernier utilisé
+gui-import-profile-summary-added = Ajoutées là où elles sont
 
-gui-import-window-preset-name = Nom du préréglage
+gui-import-profile-summary-applied = mots-clés ou marques appliqués
 
-gui-import-window-preset-save = Enregistrer
+gui-import-profile-summary-ask = doublons demandés
 
-gui-import-window-save-preset = Enregistrer comme préréglage…
+gui-import-profile-summary-copied = Copiées dans { $place }
+
+gui-import-profile-summary-filtered = filtrées
+
+gui-import-profile-summary-keep = doublons gardés
+
+gui-import-profile-summary-original = noms d’origine
+
+gui-import-profile-summary-renamed = renommées { $pattern }
+
+gui-import-profile-summary-skip = doublons ignorés
+
+gui-import-profiles-title = Profils d’import
+
+gui-import-profiles-new = Nouveau
+
+gui-import-profiles-new-name = Nouveau profil
+
+gui-import-profiles-duplicate = Dupliquer
+
+gui-import-profiles-copy-of = Copie de { $name }
+
+gui-import-profiles-rename = Renommer
+
+gui-import-profiles-delete = Supprimer
+
+gui-import-profiles-save-name = Enregistrer
+
+gui-import-profiles-default-for = Par défaut pour
+
+gui-import-profiles-example = Exemple
+
+gui-import-profiles-copy = Copie
+
+gui-import-profiles-copy-help = Une source qui ne peut pas être ajoutée là où elle est, ou qui est effacée après l’import, est toujours copiée
+
+gui-import-profiles-naming = Nommage
+
+gui-import-profiles-filter = Filtre
+
+gui-import-profiles-apply = Appliquer
+
+gui-import-profiles-advanced = Avancé
+
+gui-import-profiles-done = Terminé
 
 gui-import-window-totals = { $photos ->
     [one] { $photos } photo, { $size }

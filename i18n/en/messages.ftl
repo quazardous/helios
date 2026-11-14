@@ -983,6 +983,60 @@ gui-import-no-library-folder = Choose a library folder first: imports copy photo
 
 gui-import-path = card or folder
 
+gui-import-profile-library = Library
+
+gui-import-profile-summary-added = Added where they are
+
+gui-import-profile-summary-applied = keywords or marks applied
+
+gui-import-profile-summary-ask = asked about duplicates
+
+gui-import-profile-summary-copied = Copied into { $place }
+
+gui-import-profile-summary-filtered = filtered
+
+gui-import-profile-summary-keep = duplicates kept
+
+gui-import-profile-summary-original = original names
+
+gui-import-profile-summary-renamed = renamed { $pattern }
+
+gui-import-profile-summary-skip = duplicates skipped
+
+gui-import-profiles-advanced = Advanced
+
+gui-import-profiles-apply = Apply
+
+gui-import-profiles-copy = Copy
+
+gui-import-profiles-copy-help = A source that cannot be added where it is, or that is wiped after import, is always copied
+
+gui-import-profiles-copy-of = { $name } copy
+
+gui-import-profiles-default-for = Default for
+
+gui-import-profiles-delete = Delete
+
+gui-import-profiles-done = Done
+
+gui-import-profiles-duplicate = Duplicate
+
+gui-import-profiles-example = Example
+
+gui-import-profiles-filter = Filter
+
+gui-import-profiles-naming = Naming
+
+gui-import-profiles-new = New
+
+gui-import-profiles-new-name = New profile
+
+gui-import-profiles-rename = Rename
+
+gui-import-profiles-save-name = Save
+
+gui-import-profiles-title = Import profiles
+
 gui-import-remember = Remember for this workspace
 
 gui-import-remember-help = The workspace's import source: the next import does not ask
@@ -1037,8 +1091,6 @@ gui-import-window-darktable = Read darktable edits
 
 gui-import-window-darktable-help = Each .xmp sidecar, duplicates included, becomes a version of its photo
 
-gui-import-window-delete-preset = Delete preset
-
 gui-import-window-duplicates = Duplicates
 
 gui-import-window-duplicates-ask = Ask
@@ -1085,6 +1137,8 @@ gui-import-window-layout-year = By year
 
 gui-import-window-library-folder = The Library folder
 
+gui-import-window-manage-profiles = Manage profiles…
+
 gui-import-window-more = More
 
 gui-import-window-more-note = Metadata templates and time offsets come later.
@@ -1121,23 +1175,13 @@ gui-import-window-own-choices = Its own import choices
 
 gui-import-window-pair = RAW+JPG
 
-gui-import-window-preset = Preset
-
-gui-import-window-preset-default = Default
-
-gui-import-window-preset-last-used = Last used
-
-gui-import-window-preset-name = Preset name
-
-gui-import-window-preset-save = Save
+gui-import-window-profile = Import profile
 
 gui-import-window-raw-only = Raw only
 
 gui-import-window-reading = Reading { $path }
 
 gui-import-window-remove-favourite = Remove from favourites
-
-gui-import-window-save-preset = Save as preset…
 
 gui-import-window-select = Select:
 
