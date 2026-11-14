@@ -106,21 +106,33 @@ impl Desktop {
     /// The GUI ends as the desktop's does: its closing frame sends the
     /// last change, the window's link goes, and the client disconnects
     /// (`on_exit`). Then the node, asked to quit, closes the vault on its
-    /// own; the host waits for it.
-    fn gui_ends(mut self, mut h: egui_kittest::Harness<'static, Shell>) {
+    /// own; the host waits for it. Each step is marked as the desktop's
+    /// quit marks it (`helios_gui::quit`); returns how long the quit took.
+    fn gui_ends(mut self, mut h: egui_kittest::Harness<'static, Shell>) -> std::time::Duration {
+        use helios_gui::quit;
+        let started = std::time::Instant::now();
+        quit::requested();
         self.persist.frame_settled(h.state_mut(), 10.0);
+        quit::mark("vault written (closing frame)");
+        h.state_mut().exit().unwrap();
+        quit::mark("interface settings, keys and layout saved");
         drop(self.persist);
+        quit::mark("vault link dropped");
         drop(h);
+        quit::mark("shell dropped");
         let link = self.node.link();
         assert!(link.quitting(), "the shell asked the node to quit");
         assert!(!link.stopped(), "the GUI is still connected");
         drop(self.client.take());
+        quit::mark("GUI client disconnected from the node");
         assert!(
             link.wait_stopped(std::time::Duration::from_secs(10)),
             "the node closed the vault"
         );
         assert!(link.flushes() > 0, "flushed as it stopped");
         self.node.stop();
+        quit::mark("node stopped");
+        let took = started.elapsed();
         let store = helios_vault_sqlite::SqliteStore::open(&self.dir.join("vault.db")).unwrap();
         assert!(!store.report().unclean_shutdown, "closed cleanly");
         let vault = helios_vault::Vault::new(store);
@@ -131,6 +143,7 @@ impl Desktop {
         assert_eq!(row.get(helios_vault::fields::RATING), Some(&json!(4)));
         drop(vault);
         let _ = std::fs::remove_dir_all(&self.dir);
+        took
     }
 }
 
@@ -164,6 +177,29 @@ fn quitting_closes_the_vault_through_the_node() {
     h.run_steps(2);
     assert!(h.state().quitting());
     d.gui_ends(h);
+}
+
+/// A quit with nothing running is quick: the closing frame's last write,
+/// the interface saved, the GUI dropped, the node's stop with its last
+/// flush and the vault closed, each step marked. The bound: none of these
+/// waits on a job or a deadline, so they take milliseconds; 2 s leaves a
+/// debug build on a loaded box ample room, and stays under the node's own
+/// deadline (`quit::VAULT_DEADLINE`, 3 s), past which the black window the
+/// owner saw would come back.
+#[test]
+fn a_quit_with_nothing_running_ends_quickly() {
+    let (d, mut h) = desktop("quick");
+    h.state_mut().library_mut().rate(4).unwrap();
+    h.state_mut()
+        .run("workbench.quit", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    assert!(h.state().quitting());
+    let took = d.gui_ends(h);
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "the quit took {took:?}"
+    );
 }
 
 /// Quit while an export, the node's job, runs: the question comes first;

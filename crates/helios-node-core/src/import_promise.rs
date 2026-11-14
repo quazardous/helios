@@ -23,13 +23,24 @@
 //!   node hears each file's line and the report before the promise
 //!   settles, for what only it keeps (its undo step, its Duplicates and
 //!   Log panels, the backups run after an import).
+//! - **Photos chosen in a service's page** (Google Photos): the process
+//!   that holds the connector and its picking hands them to the node
+//!   ([`hand`]), then asks `library.import {remote: <key>, rule}`. The
+//!   promise downloads them one by one (`helios_library::fetch`): each
+//!   item a step of the progress with its outcome; a rate limit or a
+//!   quota answer waits and goes on, an expired download address is
+//!   listed again, the account's token is renewed per call by the
+//!   connector's host. A pick lives in its process only: after a restart
+//!   the promise fails, not retryable, and the photos chosen again skip
+//!   those imported before (their item ids are known to the Library).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
-use helios_connect::{Cancel, ConnectorProvider, ConnectorServices};
+use helios_connect::{Cancel, Connector, ConnectorProvider, ConnectorServices, Item, SourceRef};
 use helios_core::Bus;
 use helios_core::jobs::Jobs;
 use helios_vault::{Store, Vault};
@@ -112,7 +123,52 @@ impl Rule {
 /// Whether `library.import`'s params ask for an import by rule (answered
 /// with a promise) rather than of `paths` (answered with its report).
 pub fn by_rule(params: &Value) -> bool {
-    !params["source"].is_null() || !params["rule"].is_null()
+    !params["source"].is_null() || !params["rule"].is_null() || !params["remote"].is_null()
+}
+
+/// Photos chosen in a service's page, handed to the node by the process
+/// holding their connector, for `library.import {remote: <key>}`.
+pub struct Handed {
+    /// The connector that listed them, its picking still open: it
+    /// fetches them.
+    pub connector: Arc<dyn Connector>,
+    pub source: SourceRef,
+    pub items: Vec<Item>,
+    /// Whether the service's picking is ended once they are imported (a
+    /// picking yes, an album listed no).
+    pub end_pick: bool,
+}
+
+/// The picks handed in this process, by key, until imported.
+static HANDED: LazyLock<Mutex<HashMap<String, Arc<Handed>>>> = LazyLock::new(Mutex::default);
+static NEXT_PICK: AtomicU64 = AtomicU64::new(1);
+
+fn picks() -> std::sync::MutexGuard<'static, HashMap<String, Arc<Handed>>> {
+    HANDED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Hands `pick` to the node's imports: the key `library.import`'s
+/// `remote` names it by. It stays until an import of it ends (a failed or
+/// cancelled one keeps it, for Retry).
+pub fn hand(pick: Handed) -> String {
+    let key = format!(
+        "pick-{}-{}",
+        std::process::id(),
+        NEXT_PICK.fetch_add(1, Ordering::Relaxed)
+    );
+    picks().insert(key.clone(), Arc::new(pick));
+    key
+}
+
+fn handed(key: &str) -> Option<Arc<Handed>> {
+    picks().get(key).cloned()
+}
+
+/// Why an import of a pick cannot run: the pick is not in this process.
+fn pick_gone(key: &str) -> String {
+    format!(
+        "the photos chosen ({key}) are gone with the session that chose them: choose them again, those already imported are skipped"
+    )
 }
 
 /// Starts the import `params` ask for (`source`, `rule` and the import's
@@ -126,6 +182,9 @@ pub fn start<S: Store + Send + 'static>(
     origin: &str,
 ) -> Result<helios_vault::promises::Promise, String> {
     let rule = Rule::of(params)?;
+    if let Some(key) = params["remote"].as_str() {
+        return start_remote(promises, params, origin, key, &rule);
+    }
     let source = params["source"].as_str().map(PathBuf::from);
     if source.is_none() && !matches!(rule, Rule::Items(_)) {
         return Err("`library.import` needs a `source`, or a rule naming its `items`".into());
@@ -159,6 +218,42 @@ pub fn start<S: Store + Send + 'static>(
         (Some(source), _) => format!("Import {}", name_of(source)),
         (None, _) => "Import".into(),
     };
+    let mut request = params.clone();
+    if let Some(fields) = request.as_object_mut() {
+        fields.remove("_meta");
+        fields.insert("origin".into(), json!(origin));
+    }
+    promises.start(KIND, &label, request)
+}
+
+/// [`start`] for a pick handed to the node ([`hand`]).
+fn start_remote<S: Store + Send + 'static>(
+    promises: &Promises<S>,
+    params: &Value,
+    origin: &str,
+    key: &str,
+    rule: &Rule,
+) -> Result<helios_vault::promises::Promise, String> {
+    let pick = handed(key).ok_or_else(|| pick_gone(key))?;
+    if matches!(rule, Rule::Items(_)) {
+        return Err("a pick is imported `all` or `new`: its items are the ones chosen".into());
+    }
+    let options = crate::library::import_options(params, None)?;
+    // Always a copy: into the folder given, else the library folder.
+    let into = matches!(
+        &options.placement,
+        helios_library::import::Placement::Copy { into: Some(_) }
+    );
+    if !into && helios_library::import::library_root(promises.vault())?.is_none() {
+        return Err(
+            "copying needs the library folder: give it once (`into`) and it is remembered".into(),
+        );
+    }
+    let label = format!(
+        "Import {} photos from {}",
+        pick.items.len(),
+        pick.source.label
+    );
     let mut request = params.clone();
     if let Some(fields) = request.as_object_mut() {
         fields.remove("_meta");
@@ -270,7 +365,13 @@ fn run<S: Store + Send + 'static>(
         Ok(_) if stop.load(Ordering::SeqCst) || handle.cancel_asked() => handle.cancelled(),
         Ok(result) => handle.done(result),
         Err(_) if handle.cancel_asked() => handle.cancelled(),
-        Err(e) => handle.failed(&e, true),
+        Err(e) => {
+            // A pick gone with its process cannot be tried again.
+            let retryable = request["remote"]
+                .as_str()
+                .is_none_or(|key| handed(key).is_some());
+            handle.failed(&e, retryable);
+        }
     }
 }
 
@@ -288,6 +389,30 @@ fn import<S: Store + Send + 'static>(
     options.origin = request["origin"].as_str().map(Into::into);
     if rule == Rule::New {
         options.duplicates = helios_library::import::Duplicates::Skip;
+    }
+    if let Some(key) = request["remote"].as_str() {
+        let pick = handed(key).ok_or_else(|| pick_gone(key))?;
+        let (mut report, failed) =
+            fetched(vault, jobs, handle, request, &pick, &options, &rule, watch)?;
+        let result = ended(
+            vault,
+            bus,
+            request,
+            &mut report,
+            failed,
+            &Value::Null,
+            watch,
+        );
+        if !report.cancelled {
+            // Imported: the service forgets the picking, the node the pick.
+            if pick.end_pick
+                && let Err(e) = pick.connector.end_pick()
+            {
+                log::debug!(target: "helios::node", "end of a picking: {e:?}");
+            }
+            picks().remove(key);
+        }
+        return result;
     }
     let cancel = Cancel::from_flag(stop.clone());
     let (sources, total) = match &rule {
@@ -335,6 +460,29 @@ fn import<S: Store + Send + 'static>(
         },
     );
     let mut report = report?;
+    ended(
+        vault,
+        bus,
+        request,
+        &mut report,
+        failed,
+        &json!(record),
+        watch,
+    )
+}
+
+/// What every import by rule does once its files are in: the cameras'
+/// looks put on its raws, the watch told, the import announced; the
+/// promise's result.
+fn ended<S: Store + Send + 'static>(
+    vault: &Arc<Vault<S>>,
+    bus: &Arc<Bus>,
+    request: &Value,
+    report: &mut helios_library::import::Report,
+    failed: Vec<Value>,
+    history: &Value,
+    watch: Option<&dyn ImportWatch>,
+) -> Result<Value, String> {
     let looks = if request["camera_look"] == false {
         0
     } else {
@@ -347,13 +495,61 @@ fn import<S: Store + Send + 'static>(
         .map_err(|m| m.english)?
     };
     if let Some(watch) = watch {
-        watch.ended(request, &mut report, looks);
+        watch.ended(request, report, looks);
     }
-    bus.publish(SOURCE, None, &Imported { report: &report });
+    bus.publish(SOURCE, None, &Imported { report });
     Ok(json!({
         "report": report,
         "failed": failed,
-        "history": record,
+        "history": history,
         "camera_looks": looks,
     }))
+}
+
+/// The photos of `pick` downloaded and imported
+/// (`helios_library::fetch::import_remote`), each item a step of the
+/// promise's progress with its name: the report and the items that
+/// failed, with their reasons.
+#[allow(clippy::too_many_arguments)]
+fn fetched<S: Store + Send + 'static>(
+    vault: &Arc<Vault<S>>,
+    jobs: &Jobs,
+    handle: &Handle<S>,
+    request: &Value,
+    pick: &Handed,
+    options: &helios_library::import::Options,
+    rule: &Rule,
+    watch: Option<&dyn ImportWatch>,
+) -> Result<(helios_library::import::Report, Vec<Value>), String> {
+    let total = pick.items.len() as u64;
+    handle.progress(0, Some(total), None);
+    let remote = helios_library::fetch::Remote {
+        connector: pick.connector.as_ref(),
+        source: pick.source.clone(),
+        items: pick.items.clone(),
+        new_only: *rule == Rule::New,
+    };
+    let mut done = 0u64;
+    let mut failed = Vec::new();
+    let report =
+        helios_library::fetch::import_remote(vault, jobs, &remote, options, now(), &mut |line| {
+            if let Some(watch) = watch {
+                watch.line(request, line);
+            }
+            if line["status"] == "cancelled" {
+                return;
+            }
+            done += 1;
+            if line["status"] == "failed" {
+                failed.push(
+                    json!({ "path": line["path"], "item": line["item"], "error": line["error"] }),
+                );
+            }
+            let name = line["path"]
+                .as_str()
+                .map(|p| name_of(Path::new(p)))
+                .unwrap_or_default();
+            handle.progress(done, Some(total.max(done)), Some(&name));
+        })?;
+    Ok((report, failed))
 }

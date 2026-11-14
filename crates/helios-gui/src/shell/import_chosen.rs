@@ -396,6 +396,10 @@ impl Shell {
                 .collect();
             (hook, jobs, args, w.ctx.clone(), album)
         };
+        if self.core.activity.has_node() {
+            self.hand_chosen(jobs, &args, album);
+            return;
+        }
         let spawned = std::thread::Builder::new()
             .name("import-chosen".into())
             .spawn(move || {
@@ -444,6 +448,54 @@ impl Shell {
             w.albums.close();
         }
         w.close_after_import();
+    }
+
+    /// [`Self::import_chosen`] on the desktop's node: each visit's photos
+    /// handed to it (`import_promise::hand`) and imported as its promise
+    /// (`library.import {remote}`), answered at once. The downloads run in
+    /// the node's job, each photo's progress and outcome on the promise's
+    /// line; the window stays, showing it, and may close while it runs.
+    fn hand_chosen(
+        &mut self,
+        jobs: Vec<(Arc<Batch>, Vec<helios_connect::Item>)>,
+        args: &Value,
+        album: bool,
+    ) {
+        let mut params = args.clone();
+        if let Some(fields) = params.as_object_mut() {
+            for key in ["paths", "path", "origin"] {
+                fields.remove(key);
+            }
+            let darktable = fields.get("darktable") != Some(&json!(false));
+            fields.insert("darktable".into(), json!(darktable));
+        }
+        for (batch, items) in jobs {
+            if items.is_empty() {
+                // Given up: the service forgets the page.
+                if !album {
+                    super::import_accounts::end_picks(vec![batch]);
+                }
+                continue;
+            }
+            let key =
+                helios_node_core::import_promise::hand(helios_node_core::import_promise::Handed {
+                    connector: batch.connector.clone(),
+                    source: batch.source.clone(),
+                    items,
+                    end_pick: !album,
+                });
+            let mut asked = params.clone();
+            asked["remote"] = json!(key);
+            asked["rule"] = json!("all");
+            if let Err(e) = self.core.activity.start(asked) {
+                self.warn(e);
+            }
+        }
+        let mut w = self.import.get_mut();
+        if album {
+            w.albums.close();
+        }
+        w.save();
     }
 }
 
