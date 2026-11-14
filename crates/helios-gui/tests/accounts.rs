@@ -1174,7 +1174,7 @@ fn an_account_source_offers_its_connectors_three_browsers_and_keeps_the_one_chos
 }
 
 /// A connector that picks in its service's page alone (Google Photos):
-/// no switch, the Contents column shows the account once, its menu, and
+/// no switch, the Detail column shows the account once, its menu, and
 /// its one primary action.
 #[test]
 fn a_picking_source_shows_its_account_once_and_one_primary_action() {
@@ -1207,7 +1207,39 @@ fn a_picking_source_shows_its_account_once_and_one_primary_action() {
     }
 }
 
-/// While the service's page is open: a status line in the Contents
+/// The import window's three zones: the sources left, the photos in the
+/// middle, the selected source's detail right. The account selected, its
+/// connector's section (its name, "Choose photos") is in the right zone,
+/// below the choices every source shares; the middle only says where to
+/// choose.
+#[test]
+fn the_selected_source_s_connector_shows_its_detail_on_the_right() {
+    let (h, _opened, _folder, _imported, _) = picking_world(None);
+    for heading in ["Sources", "Contents", "Choices", "Duplicates"] {
+        assert!(shown(&h, heading), "{heading}");
+    }
+    let middle = h
+        .get_by_label("Choose photos in the panel on the right: they show here.")
+        .rect();
+    let choose = h.get_by_label(CHOOSE).rect();
+    assert!(
+        choose.left() >= middle.right(),
+        "Choose photos in the right zone: {choose:?} beside {middle:?}"
+    );
+    // The connector's section is headed by its name, in the right zone,
+    // below the shared choices.
+    let section = h
+        .query_all_by_label("Test server")
+        .map(|n| n.rect())
+        .find(|r| r.left() >= middle.right())
+        .expect("the connector's name heads its section");
+    let duplicates = h.get_by_label("Duplicates").rect();
+    assert!(duplicates.left() >= middle.right());
+    assert!(duplicates.top() < section.top());
+    assert!(section.top() < choose.top());
+}
+
+/// While the service's page is open: a status line in the Detail
 /// column, never a dialog, with Cancel back to the primary action.
 #[test]
 fn choosing_waits_on_a_status_line_and_cancel_goes_back() {

@@ -17,8 +17,9 @@
 //!
 //! An account whose connector lets the person choose photos in the
 //! service's own page (Google Photos) is shown once in the Sources column,
-//! under Services, and the Contents column shows it with one header line
-//! and its menu, then the one primary action of where it stands
+//! under Services, and the Detail column's connector section shows it
+//! with one header line and its menu, then the one primary action of
+//! where it stands
 //! ([`choose_ui`]): connect, choose photos, the wait for the service's
 //! page as a status line with Cancel (never a dialog), what came back, or
 //! one plain sentence and one action when something went wrong. The

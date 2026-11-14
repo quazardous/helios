@@ -20,11 +20,14 @@
 //!   only" is on, a RAW+JPEG pair is one entry. Import takes the files
 //!   selected (`library.importFiles` with `paths` and the choices).
 //!   Folders or cards dropped on it from the system open as its sources.
-//! - **Choices**, the right column ([`super::import_choices`]): copy or
-//!   add where they are, where copies go and how they are named, with
-//!   examples from the first photo ticked; duplicates; darktable edits.
-//!   It follows the selected source, each keeping its own choices
-//!   ([`super::import_sources`]).
+//! - **Detail**, the right column ([`super::import_detail`]): the choices
+//!   every source shares on top (duplicates, darktable edits), then the
+//!   selected source's connector section under its name: its account and
+//!   "Choose photos" for a service whose photos are chosen in its own
+//!   page, copy or add where they are, where copies go and how they are
+//!   named (with examples from the first photo ticked), the connector's
+//!   own parameters. It follows the selected source, each keeping its own
+//!   choices ([`super::import_sources`]).
 //! - **The footer**: the preset menu (Default, the presets saved, "Save
 //!   as preset…", "Delete preset"), the totals of the photos ticked,
 //!   Cancel and Import.
@@ -77,6 +80,7 @@ use super::Shell;
 use super::import_auto::Trigger;
 use super::import_browsers::Shown;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
+use super::import_detail::Part;
 use super::import_sources::SourceKey;
 use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
 use crate::import_scan::{
@@ -630,8 +634,8 @@ fn account_event(asked: super::import_accounts::Asked) -> Event {
     }
 }
 
-/// The Contents column for an account whose photos are chosen in its
-/// service's page ([`super::import_accounts::choose_ui`]).
+/// The Detail column's part for an account whose photos are chosen in
+/// its service's page ([`super::import_accounts::choose_ui`]).
 fn choose_contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, account: &str) -> Option<Event> {
     use super::import_accounts::{ChooseAsked, translated};
     let texts = w.texts.clone()?;
@@ -640,21 +644,7 @@ fn choose_contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, account: &str) ->
         || connector.clone(),
         |p| translated(Some(&texts), &p.manifest().label),
     );
-    let saved = w
-        .sources
-        .named()
-        .into_iter()
-        .find(|(k, _)| matches!(k, SourceKey::Account(id) if id == account))
-        .map(|(_, name)| name);
-    let header = w
-        .accounts
-        .listed()
-        .iter()
-        .find(|a| a.id == account)
-        .map_or_else(
-            || account.to_owned(),
-            |a| super::import_accounts::header_of(a, saved.as_deref()),
-        );
+    let header = account_header(w, account);
     match super::import_accounts::choose_ui(
         ui,
         &mut w.accounts,
@@ -667,6 +657,25 @@ fn choose_contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, account: &str) ->
         ChooseAsked::Account(asked) => Some(account_event(asked)),
         ChooseAsked::Into => Some(Event::ChooseInto),
     }
+}
+
+/// An account's header line: its saved source's name, else its own, with
+/// its address.
+fn account_header(w: &mut ImportWindow, account: &str) -> String {
+    let saved = w
+        .sources
+        .named()
+        .into_iter()
+        .find(|(k, _)| matches!(k, SourceKey::Account(id) if id == account))
+        .map(|(_, name)| name);
+    w.accounts
+        .listed()
+        .iter()
+        .find(|a| a.id == account)
+        .map_or_else(
+            || account.to_owned(),
+            |a| super::import_accounts::header_of(a, saved.as_deref()),
+        )
 }
 
 /// The Contents column's and the status bar's words.
@@ -690,6 +699,9 @@ struct GridWords {
     offline: String,
     /// The browsers' switch and words.
     browse: super::import_browsers::BrowseWords,
+    /// A source whose photos are chosen in its service's page: where to
+    /// choose them.
+    choose_on_the_right: String,
 }
 
 /// The window's words, in the shell's language.
@@ -1612,6 +1624,10 @@ impl ImportWindow {
             pair: t(Message::new("gui-import-window-pair", "RAW+JPG")),
             offline: t(Message::new("gui-import-window-offline", "offline")),
             browse: super::import_browsers::BrowseWords::new(t),
+            choose_on_the_right: t(Message::new(
+                "gui-import-window-choose-on-the-right",
+                "Choose photos in the panel on the right: they show here.",
+            )),
         }
     }
 
@@ -1879,11 +1895,11 @@ impl ImportWindow {
                         event = Some(Event::Dropped(paths));
                     }
                 }
-                Shown::Picker(account) => {
+                // Its connection and "Choose photos" are in the Detail
+                // column; the photos chosen show here.
+                Shown::Picker => {
                     ui.separator();
-                    if let Some(e) = choose_contents_ui(ui, w, &account) {
-                        event = Some(e);
-                    }
+                    ui.weak(&words.grid.choose_on_the_right);
                 }
                 Shown::NotListed => {
                     ui.separator();
@@ -1891,12 +1907,44 @@ impl ImportWindow {
                 }
             }
         });
+        // The Detail column: the choices every source shares on top, the
+        // selected source's connector section below
+        // ([`super::import_detail`]).
         column(ui, "helios.import.choices", right, &mut |ui| {
             let mut storage = false;
-            let asked = import_choices::choices_ui(ui, w, &words.choices, &mut |ui| {
-                ui.separator();
-                storage = backup_line_ui(ui, words);
-            });
+            let mut asked = None;
+            let detail = w.detail();
+            import_choices::header_ui(ui, w, &words.choices);
+            egui::ScrollArea::vertical()
+                .id_salt("helios.import.choices")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    import_choices::shared_ui(ui, w, &words.choices);
+                    ui.separator();
+                    ui.heading(&detail.label);
+                    for part in &detail.parts {
+                        match part {
+                            Part::Account { id, picker: true } => {
+                                if let Some(e) = choose_contents_ui(ui, w, id) {
+                                    event = Some(e);
+                                }
+                                ui.separator();
+                            }
+                            Part::Account { id, picker: false } => {
+                                ui.label(account_header(w, id));
+                            }
+                            Part::Copy => {
+                                import_choices::copy_ui(ui, w, &words.choices, &mut asked);
+                            }
+                            Part::Params => {
+                                ui.separator();
+                                w.detail_params_ui(ui, &detail);
+                            }
+                        }
+                    }
+                    ui.separator();
+                    storage = backup_line_ui(ui, words);
+                });
             if let Some(Asked::Into) = asked {
                 event = Some(Event::ChooseInto);
             }
