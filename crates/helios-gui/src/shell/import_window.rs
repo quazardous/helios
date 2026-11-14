@@ -1528,10 +1528,15 @@ impl Shell {
         let (choices, copy, ticked) = {
             let mut w = self.import.get_mut();
             let copy = w.copies();
-            let any_card = w.ticked.iter().any(|p| w.is_card(p));
+            // A source whose connector decides the copy (a card's, a
+            // service's) leaves the window's copy choice as it was.
+            let decided = w
+                .ticked
+                .iter()
+                .any(|p| w.path_setup(p).placement != helios_connect::Placement::Add);
             // The window's choices are kept as the last used; a saved
             // source's are kept on it already.
-            if !any_card && w.sources.showing.is_none() {
+            if !decided && w.sources.showing.is_none() {
                 w.choices.copy_folders = copy;
             }
             if w.sources.showing.is_none() {
@@ -1549,11 +1554,7 @@ impl Shell {
                 // choices; copied or not as it says, unless switched.
                 let own = w.sources.kept().then(|| {
                     let c = w.choices_for(path);
-                    let copy = if w.is_card(path) {
-                        w.copy.unwrap_or(true)
-                    } else {
-                        w.copy.unwrap_or(c.copy_folders)
-                    };
+                    let copy = w.copies_from(path, &c);
                     (c, copy)
                 });
                 (w.contents.selected_files(path), w.is_card(path), own)

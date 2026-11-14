@@ -60,6 +60,7 @@ impl ConnectorProvider for FolderProvider {
                 asks: crate::SetupAsks::Path,
                 icon: "folder".into(),
                 auto: Some(crate::AutoImport::NewFiles),
+                ..crate::Setup::default()
             }),
         }
     }

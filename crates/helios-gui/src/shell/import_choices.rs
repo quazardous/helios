@@ -250,16 +250,38 @@ pub(super) struct ChoiceWords {
 }
 
 impl ImportWindow {
-    /// Whether the import copies: as the person switched it, else a
-    /// card's photos copied, a folder's as last chosen.
-    /// A source whose connector cannot add in place always copies.
+    /// Whether the import copies, as the connectors of the sources
+    /// ticked declare ([`helios_connect::Placement`]): one that cannot
+    /// add in place always copies; else as the person switched it, else
+    /// copied when a connector copies by default (a card's), else as the
+    /// choices say.
     pub(super) fn copies(&self) -> bool {
+        use helios_connect::Placement;
         if !self.sources.honours.add_in_place {
             return true;
         }
-        self.copy.unwrap_or_else(|| {
-            self.ticked.iter().any(|p| self.is_card(p)) || self.choices.copy_folders
-        })
+        let placements: Vec<Placement> = self
+            .ticked
+            .iter()
+            .map(|p| self.path_setup(p).placement)
+            .collect();
+        if placements.contains(&Placement::CopyOnly) {
+            return true;
+        }
+        self.copy
+            .unwrap_or_else(|| placements.contains(&Placement::Copy) || self.choices.copy_folders)
+    }
+
+    /// Whether an import from `path` with `choices` copies: as its
+    /// connector declares, then as the person switched it, then as the
+    /// choices say.
+    pub(super) fn copies_from(&self, path: &Path, choices: &Choices) -> bool {
+        use helios_connect::Placement;
+        match self.path_setup(path).placement {
+            Placement::CopyOnly => true,
+            Placement::Copy => self.copy.unwrap_or(true),
+            Placement::Add => self.copy.unwrap_or(choices.copy_folders),
+        }
     }
 
     /// The first photo ticked, the examples' sample.
@@ -307,6 +329,25 @@ impl Shell {
         w.profiles = super::import_profile_store::Profiles::load(&dir, &last);
         w.choices = w.profiles.choices(&w.profiles.current);
         w.choices_file = Some(file);
+        w.link_sources();
+    }
+
+    /// Keeps the import profiles in the person's document the node keeps
+    /// (`user/import-profiles`), read now through `read` and written
+    /// through `write` on each change: the same profiles the node's
+    /// `import.profiles.*` commands, `library.import {profile}` and its
+    /// automatic imports read. The profiles of the library's file are
+    /// written there the first time.
+    pub fn keep_import_profiles_with(
+        &mut self,
+        read: super::import_profile_store::ReadProfiles,
+        write: super::import_profile_store::WriteProfiles,
+    ) {
+        let mut w = self.import.get_mut();
+        w.profiles.keep_with(&read, write);
+        if w.sources.showing.is_none() && w.manager.is_none() {
+            w.choices = w.profiles.choices(&w.profiles.current);
+        }
         w.link_sources();
     }
 
@@ -394,6 +435,8 @@ impl ImportWindow {
                         "Date, time and camera",
                     )),
                 ])
+                // Only the names the source's connector can give.
+                .filter(|(p, _)| w.sources.setup.names_pattern(p))
                 .collect(),
             custom: t(Message::new("gui-import-window-name-custom", "Custom")),
             name_example,
