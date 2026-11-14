@@ -179,6 +179,59 @@ pub fn stack<S: Store>(
     Ok((stacks, changes))
 }
 
+/// What an import does once its files are in: the pairs among the images
+/// it `brought` (each with the file it came from) stacked by
+/// [`IMPORT`]. Answers how many stacks it made and the step.
+///
+/// # Errors
+/// The vault cannot be read or written.
+pub fn stack_brought<S: Store>(
+    vault: &Vault<S>,
+    brought: &[(PathBuf, ImageId)],
+    now: u64,
+) -> Result<(u64, Changes), String> {
+    let mut candidates = Vec::with_capacity(brought.len());
+    for (path, id) in brought {
+        let signals: Option<Signals> = vault
+            .signals(id)?
+            .and_then(|v| serde_json::from_value(v).ok());
+        candidates.push(Candidate::new(*id, path.clone(), signals.as_ref()));
+    }
+    let (stacks, changes) = stack(vault, &candidates, IMPORT, now)?;
+    Ok((stacks.len() as u64, changes))
+}
+
+/// The image of an import's line (`id`), when the file came in (added,
+/// located or unchanged).
+pub fn brought(line: &serde_json::Value, status: crate::import::Status) -> Option<ImageId> {
+    use crate::import::Status;
+    if !matches!(status, Status::Added | Status::Located | Status::Unchanged) {
+        return None;
+    }
+    line["id"].as_str().and_then(|h| ImageId::from_hex(h).ok())
+}
+
+/// Takes the pairs an import stacked ([`stack_brought`], `None` when its
+/// option is off) into its `report`: the count, the step joined to the
+/// import's own, a line in its job's log.
+pub fn said(
+    job: &helios_core::jobs::Report,
+    stacked: Option<Result<(u64, Changes), String>>,
+    report: &mut crate::import::Report,
+) {
+    match stacked {
+        None => {}
+        Some(Ok((count, step))) => {
+            report.stacked = count;
+            report.changes.documents.extend(step.documents);
+            if count > 0 {
+                job.log(format!("{count} RAW+JPEG pairs stacked, the raw on top"));
+            }
+        }
+        Some(Err(e)) => job.log(format!("RAW+JPEG pairs not stacked: {e}")),
+    }
+}
+
 /// "Stack RAW+JPEG Pairs" on `images`: the pairs among them stacked, as
 /// [`stack`] does; one step.
 ///

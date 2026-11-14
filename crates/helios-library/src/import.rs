@@ -977,28 +977,6 @@ impl<S: Store> Run<'_, S> {
         }
     }
 
-    /// Stacks the RAW+JPEG pairs among the images brought in (each with
-    /// the file it came from), the raw on top ([`crate::pairs`]); answers
-    /// the step.
-    fn stack_pairs(&mut self, brought: &[(PathBuf, ImageId)]) -> Result<Changes, String> {
-        let mut candidates = Vec::with_capacity(brought.len());
-        for (path, id) in brought {
-            let signals: Option<crate::signals::Signals> = self
-                .vault
-                .signals(id)?
-                .and_then(|v| serde_json::from_value(v).ok());
-            candidates.push(crate::pairs::Candidate::new(
-                *id,
-                path.clone(),
-                signals.as_ref(),
-            ));
-        }
-        let (stacks, changes) =
-            crate::pairs::stack(self.vault, &candidates, crate::pairs::IMPORT, self.now)?;
-        self.report.stacked = stacks.len() as u64;
-        Ok(changes)
-    }
-
     /// The image of the file at `path` when it was seen before, unchanged
     /// since (the same size and modification time, its content hashed
     /// then): known without a read.
@@ -1617,9 +1595,7 @@ fn run_import<S: Store>(
             }
             Status::Skipped | Status::Asked => {}
         }
-        if matches!(status, Status::Added | Status::Located | Status::Unchanged)
-            && let Some(id) = line["id"].as_str().and_then(|h| ImageId::from_hex(h).ok())
-        {
+        if let Some(id) = crate::pairs::brought(&line, status) {
             brought.push((path.clone(), id));
         }
         emit(&line);
@@ -1643,24 +1619,13 @@ fn run_import<S: Store>(
         }
     }
     // The RAW+JPEG pairs it brought in, stacked: in its undo step too.
-    let stacked = if options.stack_pairs {
-        run.stack_pairs(&brought)
-    } else {
-        Ok(Changes::default())
-    };
+    let stacked = options
+        .stack_pairs
+        .then(|| crate::pairs::stack_brought(vault, &brought, now));
     // What a cancelled import added is recorded too: its undo takes it
     // back.
     run.report.changes = run.changes();
-    match stacked {
-        Ok(step) => run.report.changes.documents.extend(step.documents),
-        Err(e) => job.log(format!("RAW+JPEG pairs not stacked: {e}")),
-    }
-    if run.report.stacked > 0 {
-        job.log(format!(
-            "{} RAW+JPEG pairs stacked, the raw on top",
-            run.report.stacked
-        ));
-    }
+    crate::pairs::said(&job, stacked, &mut run.report);
     if run.stopped() && run.report.files < total {
         run.report.cancelled = true;
         job.log(format!(

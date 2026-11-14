@@ -753,6 +753,9 @@ fn run_remote<S: Store>(
         touched: Vec::new(),
         log: Vec::new(),
     };
+    // The images brought in, by the item's path: their RAW+JPEG pairs are
+    // stacked at the end.
+    let mut brought: Vec<(PathBuf, ImageId)> = Vec::new();
     for (done, item) in remote.items.iter().enumerate() {
         if run.stopped() {
             break;
@@ -792,6 +795,9 @@ fn run_remote<S: Store>(
             }
             Status::Skipped | Status::Asked => {}
         }
+        if let Some(id) = crate::pairs::brought(&line, status) {
+            brought.push((PathBuf::from(&item.path), id));
+        }
         emit(&line);
     }
     // Parts left by cuts stay for the next run; the folder goes when empty.
@@ -799,7 +805,11 @@ fn run_remote<S: Store>(
     if let Some(shared) = run.staging.parent() {
         let _ = std::fs::remove_dir(shared);
     }
+    let stacked = options
+        .stack_pairs
+        .then(|| crate::pairs::stack_brought(vault, &brought, now));
     run.report.changes = run.changes();
+    crate::pairs::said(&job, stacked, &mut run.report);
     if run.stopped() && run.report.files < total {
         run.report.cancelled = true;
         job.log(format!(
