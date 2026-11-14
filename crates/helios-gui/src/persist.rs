@@ -143,6 +143,17 @@ pub struct Persist<S: Store> {
     stacking: Option<Receiver<Result<Stacked, String>>>,
     /// Asked again while they were read: read once more.
     stack_again: bool,
+    /// The library's other reads through the node (the Library's filter
+    /// history, the folders' counts), answered at a coming frame.
+    asked: Vec<(Asked, Pending)>,
+}
+
+/// A read of the library sent to the node, shown when it is answered.
+enum Asked {
+    /// The Library's pinned and recent filters (`library.documents.get`).
+    FilterHistory,
+    /// The photos counted by folder (`library.folders`).
+    Folders,
 }
 
 /// A write of the library sent to the node.
@@ -159,6 +170,16 @@ enum Write {
     Accept(String, Option<Vec<usize>>),
     /// A proposal declined (`library.stacks.decline`).
     Decline(String),
+    /// A library document kept, or removed when none
+    /// (`library.documents.set`).
+    Document {
+        ns: &'static str,
+        key: &'static str,
+        document: Option<Value>,
+    },
+    /// A workshop session's record kept, or dropped when none
+    /// (`library.workshop.sessions.set`).
+    Session(String, Option<Value>),
 }
 
 impl Write {
@@ -179,6 +200,14 @@ impl Write {
                 json!({ "decision": decision, "groups": groups }),
             ),
             Self::Decline(decision) => ("library.stacks.decline", json!({ "decision": decision })),
+            Self::Document { ns, key, document } => (
+                "library.documents.set",
+                json!({ "ns": ns, "key": key, "document": document }),
+            ),
+            Self::Session(id, record) => (
+                "library.workshop.sessions.set",
+                json!({ "id": id, "record": record }),
+            ),
         }
     }
 
@@ -186,7 +215,12 @@ impl Write {
     fn images(&self) -> impl Iterator<Item = &str> {
         let changes = match self {
             Self::Fields(changes) => changes.as_slice(),
-            Self::Expand(..) | Self::Suggest(_) | Self::Accept(..) | Self::Decline(_) => &[],
+            Self::Expand(..)
+            | Self::Suggest(_)
+            | Self::Accept(..)
+            | Self::Decline(_)
+            | Self::Document { .. }
+            | Self::Session(..) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
     }
@@ -672,6 +706,77 @@ fn show_stacked(shell: &mut Shell, stacked: Stacked) {
     shell.stack_review_mut().set_decisions(stacked.decisions);
 }
 
+/// Drops the workshop sessions a former run left unkept, through the
+/// node `node` (`library.workshop.sessions.list`, then `.set` for each):
+/// how many were dropped. Waits for the node, so it runs on a thread of
+/// its own, never the UI's.
+///
+/// # Errors
+/// The node's refusal, or a node that does not answer.
+pub fn drop_unkept_sessions(node: &Client) -> Result<usize, String> {
+    let listed = node
+        .request("library.workshop.sessions.list", json!({}))
+        .map_err(|e| e.message)?;
+    let mut n = 0;
+    for session in listed["sessions"].as_array().into_iter().flatten() {
+        if session["record"]["kept"].as_bool() == Some(true) {
+            continue;
+        }
+        let Some(id) = session["id"].as_str() else {
+            continue;
+        };
+        node.request(
+            "library.workshop.sessions.set",
+            json!({ "id": id, "record": null }),
+        )
+        .map_err(|e| e.message)?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Shows a read of [`Asked`] the node answered.
+fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_inspect::rpc::Error>) {
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(e) => {
+            match asked {
+                // The filters' history is a convenience: a warning.
+                Asked::FilterHistory => shell.notify(Level::Warning, e.message),
+                Asked::Folders => unreadable(shell, e.message),
+            }
+            return;
+        }
+    };
+    match asked {
+        Asked::FilterHistory => {
+            use crate::recent_filters::FilterHistory;
+            let doc = Some(&answer["document"]).filter(|d| !d.is_null());
+            shell
+                .library_mut()
+                .set_filter_history(FilterHistory::of(doc));
+        }
+        Asked::Folders => match folders_of(&answer) {
+            Ok(folders) => shell.library_mut().set_folders(folders),
+            Err(e) => unreadable(shell, e),
+        },
+    }
+}
+
+/// The photos counted by folder, from `library.folders`'s answer.
+fn folders_of(answer: &Value) -> Result<helios_vault::VolumeFolders, String> {
+    let mut folders = helios_vault::VolumeFolders::new();
+    for volume in answer["folders"].as_array().into_iter().flatten() {
+        let id = volume["volume"]
+            .as_str()
+            .map(|v| helios_vault::storage::VolumeId(v.to_string()));
+        let counts = serde_json::from_value(volume["folders"].clone())
+            .map_err(|e| format!("the folders' counts: {e}"))?;
+        folders.insert(id, counts);
+    }
+    Ok(folders)
+}
+
 /// Says the library could not be read.
 fn unreadable(shell: &mut Shell, error: String) {
     shell.notify(
@@ -743,6 +848,7 @@ impl<S: Store + 'static> Persist<S> {
             searching: None,
             stacking: None,
             stack_again: false,
+            asked: Vec::new(),
         }
     }
 
@@ -766,6 +872,7 @@ impl<S: Store + 'static> Persist<S> {
             || self.filling.is_some()
             || self.searching.is_some()
             || self.stacking.is_some()
+            || !self.asked.is_empty()
     }
 
     /// Waits until the node has answered every call made, and shows what
@@ -815,6 +922,14 @@ impl<S: Store + 'static> Persist<S> {
             }
         }
         self.reading = still;
+        let mut still = Vec::new();
+        for (asked, pending) in std::mem::take(&mut self.asked) {
+            match pending.poll() {
+                None => still.push((asked, pending)),
+                Some(answer) => show_asked(shell, &asked, answer),
+            }
+        }
+        self.asked = still;
         self.pump_reads(shell);
     }
 
@@ -905,7 +1020,12 @@ impl<S: Store + 'static> Persist<S> {
                 .with("error", e.message),
             ),
             (
-                Write::Expand(..) | Write::Suggest(_) | Write::Accept(..) | Write::Decline(_),
+                Write::Expand(..)
+                | Write::Suggest(_)
+                | Write::Accept(..)
+                | Write::Decline(_)
+                | Write::Document { .. }
+                | Write::Session(..),
                 Err(e),
             ) => shell.notify(Level::Warning, e.message),
         }
@@ -1329,25 +1449,32 @@ impl<S: Store + 'static> Persist<S> {
 
     /// Reads the Library's pinned and recent filters once, and writes
     /// them back each time they change (`crate::recent_filters`): a
-    /// library document, outside the library's history.
+    /// library document, outside the library's history. Both go through
+    /// the node: the read is shown at a coming frame, the write is sent
+    /// in its turn with the library's other writes.
     fn keep_filter_history(&mut self, shell: &mut Shell) {
-        use crate::recent_filters::{FilterHistory, KEY, NS};
+        use crate::recent_filters::{KEY, NS};
         if shell.library_mut().take_filter_history_wanted() {
-            let read = self.vault.library_document(NS, KEY);
-            match read {
-                Ok(doc) => shell
-                    .library_mut()
-                    .set_filter_history(FilterHistory::of(doc.as_ref())),
-                Err(e) => shell.notify(Level::Warning, e),
-            }
+            let pending = self
+                .node
+                .call("library.documents.get", json!({ "ns": NS, "key": KEY }));
+            self.asked.push((Asked::FilterHistory, pending));
+        }
+        // Not written over the stored one before it is read.
+        let reading = self
+            .asked
+            .iter()
+            .any(|(asked, _)| matches!(asked, Asked::FilterHistory));
+        if reading {
+            return;
         }
         let write = shell.library_mut().take_filter_history_write();
-        if let Some(history) = write
-            && let Err(e) = self
-                .vault
-                .set_library_document(NS, KEY, Some(&history.to_json()))
-        {
-            shell.notify(Level::Warning, e);
+        if let Some(history) = write {
+            self.writes.push_back(Write::Document {
+                ns: NS,
+                key: KEY,
+                document: Some(history.to_json()),
+            });
         }
     }
 
@@ -1489,19 +1616,11 @@ impl<S: Store + 'static> Persist<S> {
         if shell.library_mut().take_resort() {
             self.ask_fill(shell, false);
         }
-        // The Folders section open: its counts, one store query.
+        // The Folders section open: its counts, one store query, read
+        // through the node and shown at a coming frame.
         if shell.library_mut().take_folders_wanted() {
-            match self.vault.folders(&helios_vault::Query::default()) {
-                Ok(folders) => shell.library_mut().set_folders(folders),
-                Err(e) => shell.notify(
-                    Level::Error,
-                    Message::new(
-                        "gui-vault-unreadable",
-                        "Cannot read the library: { $error }",
-                    )
-                    .with("error", e),
-                ),
-            }
+            let pending = self.node.call("library.folders", json!({}));
+            self.asked.push((Asked::Folders, pending));
         }
         self.edit_albums(shell, now);
         let query = shell.library_mut().take_query();
@@ -1548,26 +1667,20 @@ impl<S: Store + 'static> Persist<S> {
 
     /// Keeps the workshop sessions' records the desktop wrote, and drops
     /// those it ended unkept.
-    fn write_sessions(&self, shell: &mut Shell) {
+    /// Each is sent to the node in its turn with the library's other
+    /// writes (`library.workshop.sessions.set`).
+    fn write_sessions(&mut self, shell: &mut Shell) {
         for (id, record) in shell.take_session_writes() {
-            if let Err(e) = self.vault.set_workshop_session(&id, record.as_ref()) {
-                shell.notify(Level::Warning, e);
-            }
+            self.writes.push_back(Write::Session(id, record));
         }
     }
 
     /// Drops the workshop sessions a former run left unkept (it ended
     /// before their session did): a session is kept only when the user
-    /// says so (or, later, when it is generalised).
+    /// says so (or, later, when it is generalised). Waits for the node:
+    /// for a thread of its own ([`drop_unkept_sessions`]).
     pub fn drop_unkept_sessions(&self) -> Result<usize, String> {
-        let mut n = 0;
-        for (id, record) in self.vault.workshop_sessions()? {
-            if record["kept"].as_bool() != Some(true) {
-                self.vault.set_workshop_session(&id, None)?;
-                n += 1;
-            }
-        }
-        Ok(n)
+        drop_unkept_sessions(&self.node)
     }
 
     /// Saves the edit when the value store committed a step, or while a
