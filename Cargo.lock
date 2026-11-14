@@ -2545,6 +2545,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-init"
+version = "0.88.0"
+dependencies = [
+ "helios-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-inspect"
 version = "0.88.0"
 dependencies = [
@@ -2801,6 +2810,7 @@ dependencies = [
  "helios-core",
  "helios-export",
  "helios-health",
+ "helios-init",
  "helios-inspect",
  "helios-library",
  "helios-load",

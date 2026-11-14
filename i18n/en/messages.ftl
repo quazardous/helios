@@ -1651,6 +1651,8 @@ gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
 
+gui-pick-choose-folder = Choose the library folder…
+
 gui-pointer-choice-close = Close the pointer profile notice
 
 gui-pointer-choice-darktable = Use darktable's
@@ -2720,6 +2722,10 @@ health-vault-ok-detail = { $file } passed SQLite's quick check
 health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
+
+init-library-folder = Library folder
+
+init-library-folder-why = Imports copy photos into it, and picked photos go there.
 
 look-load-failed = cannot read the photo: { $error }
 

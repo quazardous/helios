@@ -1,0 +1,15 @@
+[package]
+name = "helios-init"
+description = "Helios's init contract: the setup steps modules declare (what each asks, the settings it fills, when it is done, what it depends on), the steps a module requires, and partial runs a host draws"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
