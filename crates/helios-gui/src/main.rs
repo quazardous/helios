@@ -1210,6 +1210,7 @@ struct App {
     /// macOS's global menu bar.
     #[cfg(target_os = "macos")]
     menu_bar: helios_gui::macos::MenuBar,
+    _rest_dropped: quit::MarkOnDrop,
 }
 
 impl Drop for App {
@@ -2200,6 +2201,37 @@ fn main() -> Result<(), String> {
     // ends (`on_exit`); the shell asks the node to quit.
     let node_link = node.as_ref().map(LocalNode::link);
     let node_client = node.as_ref().map(LocalNode::connect);
+    // The work left for after the window: the node stopped (its last
+    // flush, the vault closed) against its deadline, whether or not the
+    // shell asked it to quit (an error ending eframe). Run as eframe
+    // returns, or by the watch should eframe not return (`quit`).
+    let after_window = {
+        let ending = ending.clone();
+        let args = args.clone();
+        quit::AfterClose::new(move || {
+            // No client finds the node any more once it stops.
+            drop(advertised);
+            drop(vault);
+            let mut finisher = quit::Finisher::default();
+            if let Some(node) = node {
+                finisher.spawn("node stopped", quit::VAULT_DEADLINE, move || node.stop());
+            }
+            for left in finisher.finish() {
+                warn(&format!("quit: {left} was left unfinished"));
+            }
+            ending.finish();
+            // A catalogue restore was asked: the next Helios applies it as
+            // it opens the library.
+            if RESTART.load(Ordering::Relaxed) {
+                let started = std::env::current_exe()
+                    .and_then(|exe| std::process::Command::new(exe).args(&args).spawn());
+                if let Err(e) = started {
+                    warn(&format!("restart after the catalogue restore: {e}"));
+                }
+            }
+        })
+    };
+    let watched = after_window.clone();
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
@@ -2609,6 +2641,9 @@ fn main() -> Result<(), String> {
                 preparing: preparing.into_iter().collect(),
                 #[cfg(target_os = "macos")]
                 menu_bar: helios_gui::macos::MenuBar::new(),
+                _rest_dropped: quit::MarkOnDrop(
+                    "images, library readers and exporter dropped",
+                ),
             };
             // Back where the workspace was left: the image named on the
             // command line (being made ready, the darkroom on it once it
@@ -2617,32 +2652,21 @@ fn main() -> Result<(), String> {
                 app.restore_darkroom();
             }
             start::mark("application ready");
-            Box::new(app)
+            // eframe let go of the application: the quit's work is done
+            // but for the node's stop; past the grace, it goes on without
+            // eframe, whose window would stay up until an event came.
+            Box::new(quit::Released::new(app, move || {
+                watched.watch(quit::GRACE, || {
+                    quit::mark("eframe did not return: the process ends");
+                    if let Some(dir) = platform::crash_dir() {
+                        helios_gui::ending::mark_clean(&dir);
+                    }
+                    std::process::exit(0);
+                });
+            }))
         })
         .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");
-    // No client finds the node any more once it stops.
-    drop(advertised);
-    // The window is gone: the node stops (its last flush, the vault
-    // closed), against its deadline, whether or not the shell asked it
-    // to quit (an error ending eframe).
-    drop(vault);
-    let mut finisher = quit::Finisher::default();
-    if let Some(node) = node {
-        finisher.spawn("node stopped", quit::VAULT_DEADLINE, move || node.stop());
-    }
-    for left in finisher.finish() {
-        warn(&format!("quit: {left} was left unfinished"));
-    }
-    ending.finish();
-    // A catalogue restore was asked: the next Helios applies it as it
-    // opens the library.
-    if RESTART.load(Ordering::Relaxed) {
-        let started = std::env::current_exe()
-            .and_then(|exe| std::process::Command::new(exe).args(&args).spawn());
-        if let Err(e) = started {
-            warn(&format!("restart after the catalogue restore: {e}"));
-        }
-    }
+    after_window.run();
     ran
 }
