@@ -115,6 +115,8 @@ pub fn options(args: &Value) -> Result<Options, String> {
         .get("darktable")
         .and_then(Value::as_bool)
         .unwrap_or(true);
+    // Which files are taken, and what every photo is given.
+    helios_library::import_profile::read(args, &mut options)?;
     // Who asked, for the import history.
     options.origin = text("origin");
     Ok(options)

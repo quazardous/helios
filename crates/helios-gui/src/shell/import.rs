@@ -406,6 +406,12 @@ impl Shell {
         {
             args["duplicates"] = duplicates;
         }
+        // A saved source's filter and what its photos are given.
+        for key in ["filter", "apply"] {
+            if let Some(value) = choices.get(key).filter(|v| !v.is_null()) {
+                args[key] = value.clone();
+            }
+        }
         self.core.imports.push(args.clone());
         json!({ "queued": args })
     }
