@@ -1627,8 +1627,6 @@ gui-import-window-reading = Lecture de { $path }
 
 gui-import-window-last-import = Dernière importation le { $when }
 
-gui-import-window-recent = Récents
-
 gui-import-window-remove-favourite = Retirer des favoris
 
 gui-import-window-forget = Oublier ce dossier
@@ -1642,8 +1640,6 @@ gui-import-window-select-all = tout
 gui-import-window-select-day = jour
 
 gui-import-window-select-none = rien
-
-gui-import-window-saved = Sources enregistrées
 
 gui-import-window-sources = Sources
 

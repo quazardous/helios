@@ -683,6 +683,7 @@ gui-import-ended c5137118d2a51aff
 gui-import-ended-reported 4a72175477f43d3b
 gui-import-failed dbdb6ddf097d8f5c
 gui-import-form-title 1bab6c9d205270b1
+gui-import-history-imports cfdb4501fe960455
 gui-import-metadata 4527af2f3dee5442
 gui-import-no-library 8616507b955eb56d
 gui-import-no-library-error 20cc542909de7d21
@@ -722,6 +723,7 @@ gui-import-window-edit-source ab3bf326294210ac
 gui-import-window-empty fe07d84361c8a78d
 gui-import-window-example 3ee1ea9bdc5fbf23
 gui-import-window-favourites 7192206bcca57ec5
+gui-import-window-folders a4ab9b34eea3af48
 gui-import-window-forget b048c9b09ccf06b2
 gui-import-window-forget-hint c993c16ae95c1288
 gui-import-window-forget-source a5f2cd948afc14b5
@@ -730,6 +732,7 @@ gui-import-window-import a96568bcea9b92b7
 gui-import-window-in-library 8e2f7088b5da9f30
 gui-import-window-into 952ca2732019c6b3
 gui-import-window-jpeg-only 34a4b2b6c3e60873
+gui-import-window-last-import ecae09035fc86f16
 gui-import-window-layout-day e8439d0cb1de69ac
 gui-import-window-layout-flat 60ad7e2150fbb745
 gui-import-window-layout-month e1786549d2001be0
@@ -760,10 +763,8 @@ gui-import-window-preset-name f41facfa4e4eb1f9
 gui-import-window-preset-save 835b5f8f6d37f13e
 gui-import-window-raw-only eac6413624051d2d
 gui-import-window-reading 59df8331cab08c20
-gui-import-window-recent ab73b8f8d0246524
 gui-import-window-remove-favourite 11a4a0210fc6c7f9
 gui-import-window-save-preset d5959d6734b43199
-gui-import-window-saved afdf48d8ea12ac54
 gui-import-window-select f316597ce3cda715
 gui-import-window-select-all 078b4da375df7e32
 gui-import-window-select-day 2523e08b936a09ad

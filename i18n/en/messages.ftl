@@ -943,9 +943,9 @@ gui-import-window-empty = No photos in the sources ticked
 
 gui-import-window-example = e.g. { $example }
 
-gui-import-window-folders = Folders
-
 gui-import-window-favourites = Favourites
+
+gui-import-window-folders = Folders
 
 gui-import-window-forget = Forget this folder
 
@@ -962,6 +962,8 @@ gui-import-window-in-library = in your Library
 gui-import-window-into = Into
 
 gui-import-window-jpeg-only = JPEG only
+
+gui-import-window-last-import = Last import { $when }
 
 gui-import-window-layout-day = By day
 
@@ -1023,15 +1025,9 @@ gui-import-window-raw-only = Raw only
 
 gui-import-window-reading = Reading { $path }
 
-gui-import-window-last-import = Last import { $when }
-
-gui-import-window-recent = Recent
-
 gui-import-window-remove-favourite = Remove from favourites
 
 gui-import-window-save-preset = Save as preset…
-
-gui-import-window-saved = Saved sources
 
 gui-import-window-select = Select:
 
