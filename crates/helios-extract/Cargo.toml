@@ -12,9 +12,5 @@ serde_json.workspace = true
 blake3.workspace = true
 toml = "1"
 
-[dev-dependencies]
-# The derived schemas stay within helios-ai's JSON Schema subset.
-helios-ai.workspace = true
-
 [lints]
 workspace = true
