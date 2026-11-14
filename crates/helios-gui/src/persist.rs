@@ -160,6 +160,9 @@ enum Write {
     Accept(String, Option<Vec<usize>>),
     /// A proposal declined (`library.stacks.decline`).
     Decline(String),
+    /// Photos taken out of the Library (`library.images.remove`), asked
+    /// at a time (seconds): one step of the library's history.
+    Remove(Vec<String>, f64),
 }
 
 impl Write {
@@ -180,6 +183,10 @@ impl Write {
                 json!({ "decision": decision, "groups": groups }),
             ),
             Self::Decline(decision) => ("library.stacks.decline", json!({ "decision": decision })),
+            Self::Remove(images, _) => (
+                helios_node_core::library::REMOVE,
+                json!({ "images": images }),
+            ),
         }
     }
 
@@ -187,7 +194,11 @@ impl Write {
     fn images(&self) -> impl Iterator<Item = &str> {
         let changes = match self {
             Self::Fields(changes) => changes.as_slice(),
-            Self::Expand(..) | Self::Suggest(_) | Self::Accept(..) | Self::Decline(_) => &[],
+            Self::Expand(..)
+            | Self::Suggest(_)
+            | Self::Accept(..)
+            | Self::Decline(_)
+            | Self::Remove(..) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
     }
@@ -896,7 +907,31 @@ impl<S: Store + 'static> Persist<S> {
         answer: Result<Value, helios_inspect::rpc::Error>,
     ) {
         match (&write, answer) {
+            (Write::Remove(_, at), Ok(answer)) => {
+                // The step the node made, recorded so Ctrl+Z puts the
+                // photos back; the Library reads itself again on the
+                // vault's event.
+                match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+                    Ok(changes) => {
+                        let count = changes.images.len();
+                        let label = crate::library_history::remove_label(count);
+                        shell.library_history().record(label, changes, *at);
+                    }
+                    Err(e) => shell.notify(
+                        Level::Warning,
+                        format!("the photos taken out cannot be put back with undo: {e}"),
+                    ),
+                }
+            }
             (_, Ok(_)) => {}
+            (Write::Remove(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-not-removed",
+                    "The photos were not removed from the Library: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Fields(_), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1479,6 +1514,12 @@ impl<S: Store + 'static> Persist<S> {
         self.write_sessions(shell);
         self.pin_snapshots(shell);
         self.answer_stacks(shell);
+        let removals = shell.library_mut().take_removals();
+        self.writes.extend(
+            removals
+                .into_iter()
+                .map(|images| Write::Remove(images, now)),
+        );
         let expansions = shell.library_mut().take_expansions();
         self.writes.extend(
             expansions
@@ -1530,6 +1571,7 @@ impl<S: Store + 'static> Persist<S> {
             } else if event.kind == "library.decision" {
                 decided = true;
             } else if event.kind == helios_vault::LOCATIONS_CHANGED
+                || event.kind == helios_vault::LIBRARY_CHANGED
                 || event.kind == helios_vault::changed::CHANGED_OUTSIDE
                 || event.kind == helios_vault::capture::CAPTURES_SET
             {

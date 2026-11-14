@@ -206,7 +206,16 @@ the colour labels, the others kept). `library.fields.get` (`images`,
 `fields`, `locations`) reads those fields as stored: `rows` (`id`,
 `fields`, and `locations` when asked), in the order asked.
 
-The desktop's library writes its fields and its stacks' expansion this
+`library.images.remove` (`images`) takes photos out of the Library
+(Lightroom's "Remove from Catalog"): their Library flag only, set by
+the call's origin; their files, fields, versions and sightings stay,
+and an import finds them again by their hash. It answers `removed` (how
+many were in it) and `changes`, the step as the vault records it, which
+its revert puts back: the desktop's Ctrl+Z. Announced as
+`vault.library_changed`, as an undo or a redo of a library step is.
+
+The desktop's library writes its fields, its stacks' expansion and its
+photos taken out this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
 answers are picked up at the next frames. Its grid reads the same way:
@@ -231,7 +240,7 @@ reads), keyed by method and params, and follows the node's events
 | `vault.field_changed`, `vault.version_added`, `edit.saved` | the reads naming its `image` |
 | `vault.stack_changed`, `library.decision` | the stacks' reads |
 | `settings.layerChanged` | the settings' reads |
-| `library.imported`, `vault.locations_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
+| `library.imported`, `vault.locations_changed`, `vault.library_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
 
 - An answer read at a sequence older than an event already heard is
   checked against that event before it is kept.

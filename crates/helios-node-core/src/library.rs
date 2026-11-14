@@ -3,7 +3,8 @@
 //! versions (`library.importDarktable`, one sidecar file with
 //! `library.keepSidecar`) and an image's edit read and saved
 //! (`library.edit.head`, `library.edit.save`), photos' fields set and
-//! read (`library.fields.set`, `library.fields.get`), the facet counts of
+//! read (`library.fields.set`, `library.fields.get`), photos taken out
+//! of the Library (`library.images.remove`), the facet counts of
 //! a query (`library.facets`), the photos changed outside Helios
 //! (`library.changed.list`), the import history listed
 //! (`import.history.list`) and one import run again
@@ -33,6 +34,7 @@ pub const IDS: &[&str] = &[
     "library.edit.save",
     "library.fields.set",
     "library.fields.get",
+    REMOVE,
     "library.facets",
     "library.changed.list",
     "library.stacks.list",
@@ -47,6 +49,11 @@ pub const IDS: &[&str] = &[
     HISTORY_LIST,
     AGAIN,
 ];
+
+/// Takes photos out of the Library (Lightroom's "Remove from Catalog"):
+/// their flag only, no file touched; answers the step (`changes`), which
+/// the vault's revert undoes.
+pub const REMOVE: &str = "library.images.remove";
 
 /// Lists the import history (`helios_library::import_history`).
 pub const HISTORY_LIST: &str = "import.history.list";
@@ -137,6 +144,11 @@ pub fn specs() -> Vec<CommandSpec> {
                                     `set_if_absent` sets only an empty field" }),
             true,
         )])),
+        library(
+            REMOVE,
+            "Take photos out of the Library, their files untouched",
+        )
+        .params(object(&[("images", images(), true)])),
         library("library.fields.get", "Read photos' fields")
             .params(object(&[
                 ("images", images(), true),
@@ -462,6 +474,15 @@ pub fn run<S: Store>(
                     .map(|(id, fields)| json!({ "id": id.hex(), "fields": fields }))
                     .collect::<Vec<_>>(),
             }))
+        }
+        REMOVE => {
+            let ids = named(vault, params, "images")?;
+            if ids.is_empty() {
+                return Err("`images` names no photo".into());
+            }
+            vault.set_in_library(&ids, false, origin, now()).map(
+                |changes| json!({ "removed": changes.images.len(), "changes": to_json(&changes) }),
+            )
         }
         "library.facets" => {
             let query = crate::cursor::query_of(&params["query"])?;
