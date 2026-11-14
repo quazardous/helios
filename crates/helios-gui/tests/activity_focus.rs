@@ -499,13 +499,11 @@ fn the_desktops_jobs_show_as_promises_with_or_without_their_bar() {
         shown(h, helios_gui::activity::MARK).is_some_and(|r| r.value == Some(3.0))
     });
     // A snapshot cannot stop: no Cancel in its detail.
-    in_list(&h, "Snapshot the catalogue").click();
-    h.run_steps(3);
+    open(&mut h, &snapshot_p.id);
     assert_eq!(focus(&h)["selected"], json!(snapshot_p.id));
     assert!(h.query_by_label("Cancel").is_none());
     // Cancel on the backup's promise reaches its job.
-    in_list(&h, "Back up to Disk A").click();
-    h.run_steps(3);
+    open(&mut h, &backup_p.id);
     in_detail(&h, "Cancel").click();
     until(&mut h, "the backup asked to stop", |_| {
         stop.load(Ordering::SeqCst)
@@ -516,7 +514,8 @@ fn the_desktops_jobs_show_as_promises_with_or_without_their_bar() {
     trash.progress(Progress::new().counts(3, 3));
     trash.finished();
     snapshot.finished();
-    in_list(&h, "Move 3 files to the trash").click();
+    // Selected by id: the row moves as the job settles.
+    open(&mut h, &trash_p.id);
     until(&mut h, "the trash's outcome", |h| {
         h.query_by_label("3/3").is_some() && h.query_by_label("read-only").is_some()
     });
