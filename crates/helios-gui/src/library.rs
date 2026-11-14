@@ -67,6 +67,7 @@ use helios_vault::fields::{
 use serde_json::Value;
 
 mod batch;
+mod grouping;
 mod versions;
 
 /// The batch a change was asked in, if any
@@ -80,6 +81,7 @@ pub use batch::{
     TrashAsk, Turn,
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
+pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
 /// The library's name in egui-pop's steps and commands (`library` in
@@ -1599,8 +1601,11 @@ pub struct Library {
     /// The photo whose heads were asked, until they come.
     versions_asked: Option<String>,
     /// What the strip and the commands asked of photos' versions, for
-    /// the host.
-    version_asks: Vec<VersionAsk>,
+    /// the host, each with its batch.
+    version_asks: Vec<(VersionAsk, Batch)>,
+    /// What the commands asked of the stacks (group, ungroup, top), for
+    /// the host, each with its batch.
+    stack_asks: Vec<(StackAsk, Batch)>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1766,6 +1771,7 @@ impl Default for Library {
             versions_wanted: None,
             versions_asked: None,
             version_asks: Vec::new(),
+            stack_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -4209,6 +4215,25 @@ impl Library {
                             crate::i18n::text(
                                 ui.ctx(),
                                 Message::new("gui-library-remove-version", "Remove Version…"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::Separator,
+                        crate::dialogs::MenuItem::command(GROUP_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-stack-group", "Group into Stack"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(UNGROUP_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-stack-ungroup", "Unstack"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(STACK_TOP_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-stack-top", "Move to Top of Stack"),
                             ),
                         ),
                         crate::dialogs::MenuItem::Separator,

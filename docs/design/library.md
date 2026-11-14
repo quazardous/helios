@@ -838,6 +838,16 @@ versions as cells" (L-C5 option C), a render of each head in the strip
 (Ctrl+Shift+G), set the top; RAW+JPEG pairs stacked at import (L-C6).
 Test: stack commands; an import fixture with pairs.
 
+Part 1 built (2026-11-14): "Group into Stack" (`library.stack.group`,
+Ctrl+G), "Unstack" (`library.stack.ungroup`, Ctrl+Shift+G) and "Move
+to Top of Stack" (`library.stack.top`), in the grid's context menu too,
+through the node's `library.stacks.group`, `.ungroup` and `.top`.
+Grouping photos of a stack with others merges the stack (Lightroom's
+habit); the photo under the cursor goes on top. Each is one step of the
+library history (the stacks' documents before and after), and joins a
+`command.batch`'s step as the other library commands do. Not yet: the
+RAW+JPEG pairs stacked at import.
+
 **L12. Keyword tree.** A Keywords section: the tree from `|` paths with
 counts, click to filter, drag on photos, rename and merge a branch as
 one batch step (L-C7). After it, the "B extras": synonyms (a keyword
