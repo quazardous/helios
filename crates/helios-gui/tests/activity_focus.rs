@@ -182,14 +182,15 @@ fn a_running_import_shows_with_its_bar_and_counts_and_a_job_without_progress_has
     until(&mut h, "the import's counts", |h| {
         h.get_all_by_label("120 of 412").count() == 2
     });
-    assert!(h.query_by_label("IMG_0120.JPG").is_some());
+    // The file at hand, in the detail's current step and its log.
+    assert_eq!(h.get_all_by_label("IMG_0120.JPG").count(), 2);
     assert!(h.query_by_label("An agent").is_some());
     // A click on the trash's row selects it: the detail follows.
     in_list(&h, "Empty the trash").click();
     h.run_steps(3);
     assert_eq!(focus(&h)["selected"], json!(trash.id));
     until(&mut h, "the trash's detail", |h| {
-        h.query_by_label("3 so far").is_some() && h.query_by_label("scanning").is_some()
+        h.query_by_label("3 so far").is_some() && h.get_all_by_label("scanning").count() > 0
     });
     // Cancel from the detail stops it.
     in_detail(&h, "Cancel").click();
