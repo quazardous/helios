@@ -412,6 +412,7 @@ pub fn query_json(query: &Query) -> Value {
         ("labels", &query.labels),
         ("flags", &query.flags),
         ("tags", &query.tags),
+        ("keywords", &query.keywords),
         ("words", &query.words),
         ("cameras", &query.cameras),
         ("lenses", &query.lenses),
@@ -475,6 +476,7 @@ pub fn query_json(query: &Query) -> Value {
 ///
 /// ```json
 /// {"min_rating": 3, "labels": ["red"], "flags": ["pick"], "tags": ["sea"],
+///  "keywords": ["Animals|Dog"],
 ///  "captured_from": 0, "captured_before": 1, "words": ["beach"],
 ///  "cameras": [], "lenses": [], "file_types": ["cr3"], "folder": "/photos",
 ///  "album": "id", "presence": ["present"], "cull": ["sharp"],
@@ -516,6 +518,7 @@ pub fn query_of(value: &Value) -> Result<Query, String> {
             "labels" => query.labels = strings(name, v)?,
             "flags" => query.flags = strings(name, v)?,
             "tags" => query.tags = strings(name, v)?,
+            "keywords" => query.keywords = strings(name, v)?,
             "captured_from" => query.captured_from = Some(int(name, v)?),
             "captured_before" => query.captured_before = Some(int(name, v)?),
             "words" => query.words = strings(name, v)?,

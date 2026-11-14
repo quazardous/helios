@@ -62,6 +62,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
     a_rotation_turns_resets_and_undoes(make());
+    keyword_branches_filter_rename_merge_and_undo(make());
     a_duplicate_is_a_new_head_beside_its_source(make());
     a_copy_is_picked_as_current_removed_and_brought_back(make());
     promises_are_created_progressed_settled_and_listed(make());
@@ -3033,6 +3034,92 @@ fn a_rotation_turns_resets_and_undoes<S: Store>(s: S) {
     let audit = v.audit(&b).unwrap();
     assert!(audit.iter().any(|e| e.field == ROTATION && e.who == "user"));
     assert!(v.rotate(&[image(9).id], Turn::Right, "user", 11).is_err());
+}
+
+/// Hierarchical keywords (L12): a branch filters its path and those
+/// below it in one query; a rename and a merge move a branch on every
+/// photo in one audited step, which the vault's revert undoes.
+fn keyword_branches_filter_rename_merge_and_undo<S: Store>(s: S) {
+    let mut s = with_images(s, 4);
+    let ids: Vec<ImageId> = (1..=4).map(|i| image(i).id).collect();
+    s.set_field(&ids[0], TAGS, Some(&json!(["Animals|Dog", "sea"])))
+        .unwrap();
+    s.set_field(&ids[1], TAGS, Some(&json!(["Animals|Cat"])))
+        .unwrap();
+    s.set_field(&ids[2], TAGS, Some(&json!(["Animals"])))
+        .unwrap();
+    s.set_field(&ids[3], TAGS, Some(&json!(["Animalsx", "Pets|Dog"])))
+        .unwrap();
+    let branch = |s: &S, b: &[&str]| {
+        s.select(&Query {
+            keywords: b.iter().map(|k| (*k).to_string()).collect(),
+            ..Query::default()
+        })
+        .unwrap()
+    };
+    assert_eq!(
+        branch(&s, &["Animals"]),
+        vec![ids[0], ids[1], ids[2]],
+        "the path and below, not a name that starts the same"
+    );
+    assert_eq!(branch(&s, &["Animals|Dog"]), vec![ids[0]]);
+    assert_eq!(
+        branch(&s, &["Animals", "sea"]),
+        vec![ids[0]],
+        "every branch"
+    );
+    assert!(branch(&s, &["Dog"]).is_empty(), "a level is not a branch");
+    let v = Vault::new(s);
+    let tags =
+        |v: &Vault<S>, id: &ImageId| v.fields_of(&[*id], &[TAGS]).unwrap()[0].get(TAGS).cloned();
+
+    // A rename onto a keyword that exists is a merge: refused.
+    assert!(
+        v.rename_keyword("Animals|Dog", "Pets|Dog", "user", 1)
+            .is_err()
+    );
+    assert!(v.rename_keyword("Nothing", "Else", "user", 1).is_err());
+    assert!(
+        v.rename_keyword("Animals", "Animals|All", "user", 1)
+            .is_err()
+    );
+    let renamed = v.rename_keyword("Animals", " Fauna ", "user", 2).unwrap();
+    assert_eq!(renamed.photos, 3);
+    assert_eq!(tags(&v, &ids[0]), Some(json!(["Fauna|Dog", "sea"])));
+    assert_eq!(tags(&v, &ids[2]), Some(json!(["Fauna"])));
+    assert_eq!(
+        tags(&v, &ids[3]),
+        Some(json!(["Animalsx", "Pets|Dog"])),
+        "untouched"
+    );
+    assert!(
+        v.audit(&ids[1])
+            .unwrap()
+            .iter()
+            .any(|e| e.field == TAGS && e.who == "user")
+    );
+
+    // A merge needs its target; what both carry becomes one.
+    assert!(v.merge_keyword("Fauna|Cat", "Nowhere", "user", 3).is_err());
+    let merged = v.merge_keyword("Fauna|Dog", "Pets|Dog", "user", 3).unwrap();
+    assert_eq!(merged.photos, 1);
+    assert_eq!(tags(&v, &ids[0]), Some(json!(["Pets|Dog", "sea"])));
+    v.revert(&merged.changes).unwrap();
+    assert_eq!(
+        tags(&v, &ids[0]),
+        Some(json!(["Fauna|Dog", "sea"])),
+        "undone"
+    );
+    v.replay(&merged.changes).unwrap();
+    assert_eq!(
+        tags(&v, &ids[0]),
+        Some(json!(["Pets|Dog", "sea"])),
+        "redone"
+    );
+    v.revert(&merged.changes).unwrap();
+    v.revert(&renamed.changes).unwrap();
+    assert_eq!(tags(&v, &ids[0]), Some(json!(["Animals|Dog", "sea"])));
+    assert_eq!(tags(&v, &ids[1]), Some(json!(["Animals|Cat"])));
 }
 
 /// "Duplicate" (L10): a copy of the newest head's edit, or of no edit,

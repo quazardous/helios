@@ -528,6 +528,10 @@ pub struct Query {
     pub flags: Vec<String>,
     /// Carrying every one of these tags.
     pub tags: Vec<String>,
+    /// Carrying, for each of these keyword branches, a tag of it: the
+    /// path itself or one below it (`Animals` takes `Animals|Dog`,
+    /// [`crate::keywords`]).
+    pub keywords: Vec<String>,
     /// Taken at or after this capture time (the `captured` field: the
     /// camera's clock read as UTC, in seconds); an image without one
     /// never matches a capture range.

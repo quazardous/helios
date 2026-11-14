@@ -66,6 +66,8 @@ pub const IDS: &[&str] = &[
     "library.stacks.top",
     STACKS_GROUP,
     STACKS_UNGROUP,
+    KEYWORDS_RENAME,
+    KEYWORDS_MERGE,
     "library.stacks.suggest",
     "library.stacks.accept",
     "library.stacks.decline",
@@ -127,6 +129,15 @@ pub const STACKS_GROUP: &str = "library.stacks.group";
 /// Ungroups the stacks photos are in, the photos untouched; answers the
 /// stacks and the step (`changes`).
 pub const STACKS_UNGROUP: &str = "library.stacks.ungroup";
+
+/// Renames a keyword branch (`from`, `to`: `|` paths) on every photo of
+/// the Library, the keywords below it along; answers how many photos and
+/// the step (`changes`) the vault's revert undoes.
+pub const KEYWORDS_RENAME: &str = "library.keywords.rename";
+
+/// Merges a keyword branch (`from`) into another one photos carry
+/// (`into`); answers how many photos and the step (`changes`).
+pub const KEYWORDS_MERGE: &str = "library.keywords.merge";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -196,6 +207,12 @@ fn string() -> Value {
 
 fn absolute() -> Value {
     json!({ "type": "string", "description": "an absolute path" })
+}
+
+/// A keyword's path, levels joined with `|` (`Animals|Dog`).
+fn keyword_path(about: &str) -> Value {
+    json!({ "type": "string",
+            "description": format!("{about}: a keyword path, levels joined with `|`") })
 }
 
 fn images() -> Value {
@@ -439,6 +456,22 @@ pub fn specs() -> Vec<CommandSpec> {
             "Ungroup the stacks photos are in, the photos untouched; undoable",
         )
         .params(object(&[("images", images(), true)])),
+        library(
+            KEYWORDS_RENAME,
+            "Rename a keyword branch on every photo, the keywords below it along; undoable",
+        )
+        .params(object(&[
+            ("from", keyword_path("the branch renamed"), true),
+            ("to", keyword_path("its new path, no keyword yet"), true),
+        ])),
+        library(
+            KEYWORDS_MERGE,
+            "Merge a keyword branch into another on every photo; undoable",
+        )
+        .params(object(&[
+            ("from", keyword_path("the branch merged"), true),
+            ("into", keyword_path("the branch it goes into, carried by photos"), true),
+        ])),
         library("library.stacks.suggest", "Suggest stacks").params(object(&[
             ("images", images(), false),
             ("resolver", json!({ "type": ["string", "null"] }), false),
@@ -1243,6 +1276,15 @@ pub fn run<S: Store>(
                             "changes": to_json(&changes) })
                 })
         }
+        KEYWORDS_RENAME | KEYWORDS_MERGE => {
+            let from = text(params, "from");
+            let moved = if id == KEYWORDS_RENAME {
+                vault.rename_keyword(from, text(params, "to"), origin, now())
+            } else {
+                vault.merge_keyword(from, text(params, "into"), origin, now())
+            };
+            moved.map(|m| json!({ "photos": m.photos, "changes": to_json(&m.changes) }))
+        }
         STACKS_UNGROUP => {
             let members = named(vault, params, "images")?;
             vault.ungroup_stacks(&members).map(|(gone, changes)| {
@@ -1471,6 +1513,8 @@ mod tests {
             json!({ "stack": "s", "image": "/p/a.raf" }),
             json!({ "images": ["/p/a.raf", "0a"], "top": "0a" }),
             json!({ "images": ["0a"] }),
+            json!({ "from": "Animals", "to": "Fauna" }),
+            json!({ "from": "Animals|Dog", "into": "Pets|Dog" }),
             json!({ "images": [], "resolver": null, "window": 3.0, "distance": 8 }),
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
@@ -1762,6 +1806,73 @@ mod tests {
         vault.revert(&undo).unwrap();
         assert_eq!(call(HEADS, json!({})).unwrap()["heads"][&hex], 2);
         assert!(call(VERSIONS_SWITCH, json!({ "image": hex, "version": "zz" })).is_err());
+    }
+
+    #[test]
+    fn a_keyword_branch_is_renamed_and_merged_each_step_undone() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let dir = std::env::temp_dir().join(format!("helios-keywords-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ids: Vec<String> = (0..2)
+            .map(|i| {
+                let path = dir.join(format!("shot{i}.raw"));
+                std::fs::write(&path, format!("photo {i}")).unwrap();
+                vault.import_file(&path, 1).unwrap().hex()
+            })
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user");
+        let tags = |i: usize| {
+            let got = call(
+                "library.fields.get",
+                json!({ "images": [ids[i]], "fields": ["tags"] }),
+            )
+            .unwrap();
+            got["rows"][0]["fields"]["tags"].clone()
+        };
+        call(
+            "library.fields.set",
+            json!({ "changes": [
+                { "image": ids[0], "field": "tags", "value": ["Animals|Dog"] },
+                { "image": ids[1], "field": "tags", "value": ["Pets|Dog", "Animals"] },
+            ] }),
+        )
+        .unwrap();
+        let undo = |answer: &Value| {
+            let changes: helios_vault::Changes =
+                serde_json::from_value(answer["changes"].clone()).unwrap();
+            vault.revert(&changes).unwrap();
+        };
+        assert!(
+            call(
+                KEYWORDS_RENAME,
+                json!({ "from": "Animals|Dog", "to": "Pets|Dog" })
+            )
+            .is_err(),
+            "a keyword already: a merge"
+        );
+        let renamed = call(KEYWORDS_RENAME, json!({ "from": "Animals", "to": "Fauna" })).unwrap();
+        assert_eq!(renamed["photos"], 2, "{renamed}");
+        assert_eq!(tags(0), json!(["Fauna|Dog"]));
+        let merged = call(
+            KEYWORDS_MERGE,
+            json!({ "from": "Fauna|Dog", "into": "Pets|Dog" }),
+        )
+        .unwrap();
+        assert_eq!(merged["photos"], 1, "{merged}");
+        assert_eq!(tags(0), json!(["Pets|Dog"]));
+        undo(&merged);
+        undo(&renamed);
+        assert_eq!(tags(0), json!(["Animals|Dog"]));
+        assert_eq!(tags(1), json!(["Animals", "Pets|Dog"]));
+        assert!(
+            call(
+                KEYWORDS_MERGE,
+                json!({ "from": "Animals", "into": "Nowhere" })
+            )
+            .is_err()
+        );
     }
 
     #[test]

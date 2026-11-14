@@ -870,6 +870,20 @@ one batch step (L-C7). After it, the "B extras": synonyms (a keyword
 also found under its synonyms, exported to XMP as Lightroom does),
 and keywords as entities that keep their identity through a rename. Test: tree from a fixture; a rename undone.
 
+Part 1 built (2026-11-14): the Keywords section in the sources panel,
+the tree drawn from the photos' tags the Library already holds (no read
+of the vault; built again only when tags change), a photo counted once
+per branch. A click scopes the grid (`keyword:<path>`, the vault's
+`Query::keywords`: the path or one below it, in the same query as the
+other filters). A branch dragged onto a grid photo tags it (the
+selection when the photo is in it), photos dragged onto a branch take
+it, its menu adds it to or removes it from the selection (marks, as
+`library.tag`). "Rename…" and "Merge into…" (or a branch dropped on
+another) move a branch on every photo through the node's
+`library.keywords.rename` and `.merge`: one audited step of the library
+history. Not yet: synonyms and keywords as entities (the "B extras"),
+a keyword field in the metadata panel (L13).
+
 **L13. Metadata panel.** EXIF read-only (from L2 and the loader),
 editable title, description, creator, copyright, keywords; templates
 (Photo Mechanic's stamp) applied on the selection and at import. Test:

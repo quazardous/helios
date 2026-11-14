@@ -68,6 +68,7 @@ use serde_json::Value;
 
 mod batch;
 mod grouping;
+mod keywords;
 mod versions;
 
 /// The batch a change was asked in, if any
@@ -82,6 +83,10 @@ pub use batch::{
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
 pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
+pub use keywords::{
+    DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
+    KEYWORD_MERGE_COMMAND, KEYWORD_REMOVE_COMMAND, KEYWORD_RENAME_COMMAND, KeywordAsk,
+};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
 /// The library's name in egui-pop's steps and commands (`library` in
@@ -594,6 +599,7 @@ pub fn query_of(filter: &Filter) -> Query {
         labels: filter.labels.iter().map(|l| l.name().to_string()).collect(),
         flags: filter.flags.iter().map(|f| f.name().to_string()).collect(),
         tags: filter.tags.clone(),
+        keywords: terms.keywords,
         captured_from: filter.from.as_deref().and_then(day_start),
         captured_before: filter.to.as_deref().and_then(day_start).map(|d| d + 86_400),
         words: terms.words,
@@ -630,6 +636,9 @@ pub struct Terms {
     /// The import session the photos came in with (its id in the import
     /// history): the Library's Imports section.
     pub import: Option<String>,
+    /// The keyword branches the photos carry a keyword of (`Animals`
+    /// takes `Animals|Dog`): the Library's Keywords section.
+    pub keywords: Vec<String>,
     pub presence: Vec<helios_vault::Presence>,
     /// The backup states every `backup:` term allows (`None`: no term).
     pub backup: Option<Vec<helios_vault::BackupState>>,
@@ -688,7 +697,8 @@ pub fn quoted(value: &str) -> String {
 /// leaves): `camera:<model>`, `lens:<lens>`, `type:<cr3>` (each exact;
 /// several of one key take any of them), `folder:<path>` (a copy there
 /// or below), `collection:<id>` (in that album), `import:<id>` (brought
-/// in by that import session), `presence:present|offline|missing`,
+/// in by that import session), `keyword:<path>` (a keyword of that
+/// branch: the path or one below it), `presence:present|offline|missing`,
 /// `cull:sharp|soft|clipped|unmeasured` (several: any of them) and
 /// `backup:<state>` (several: every one holds). A key with a value it does not know stays
 /// a word, as before.
@@ -714,6 +724,8 @@ pub fn helios_terms(text: &str) -> Terms {
             t.collection = Some(v);
         } else if let Some(v) = value("import:") {
             t.import = Some(v);
+        } else if let Some(v) = value("keyword:") {
+            t.keywords.push(v);
         } else if let Some(p) = value("presence:").and_then(|v| match v.to_lowercase().as_str() {
             "present" => Some(helios_vault::Presence::Present),
             "offline" => Some(helios_vault::Presence::Offline),
@@ -1420,6 +1432,8 @@ pub enum DropOn {
     Quick,
     /// An album: they go in. A smart album or a set refuses them.
     Album(String),
+    /// A keyword branch of the Keywords section (its path): they take it.
+    Keyword(String),
 }
 
 /// Whether `album` takes photos dropped on it, else why not.
@@ -1475,11 +1489,22 @@ fn drop_target(
                 ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
                 crate::i18n::text(ctx, m.clone())
             }
-            None => crate::i18n::text(
-                ctx,
-                Message::new("gui-library-drop-add", "Add { $count } photos")
-                    .with("count", photos.0.len()),
-            ),
+            None => match &target {
+                DropOn::Keyword(path) => crate::i18n::text(
+                    ctx,
+                    Message::new(
+                        "gui-library-keyword-drop",
+                        "Tag { $count } photos with { $keyword }",
+                    )
+                    .with("count", photos.0.len())
+                    .with("keyword", path.as_str()),
+                ),
+                _ => crate::i18n::text(
+                    ctx,
+                    Message::new("gui-library-drop-add", "Add { $count } photos")
+                        .with("count", photos.0.len()),
+                ),
+            },
         };
         // The row's own tooltip, at the pointer: egui hides hover tooltips
         // while something is dragged, so it is shown here, not through
@@ -1507,6 +1532,7 @@ fn drop_target(
             COLLECTION_ADD_COMMAND,
             serde_json::json!({ "id": id, "images": photos.0 }),
         ),
+        DropOn::Keyword(path) => (KEYWORD_ADD_COMMAND, keywords::drop_args(&path, &photos)),
     };
     crate::dialogs::request(
         ctx,
@@ -1662,6 +1688,13 @@ pub struct Library {
     /// What the commands asked of the stacks (group, ungroup, top), for
     /// the host, each with its batch.
     stack_asks: Vec<(StackAsk, Batch)>,
+    /// How many photos carry a keyword of each branch (the Keywords
+    /// section), built from the photos' tags; none until built again
+    /// after they change.
+    keyword_counts: Option<std::collections::BTreeMap<String, u64>>,
+    /// What the commands asked of the keyword branches (rename, merge),
+    /// for the host, each with its batch.
+    keyword_asks: Vec<(KeywordAsk, Batch)>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1830,6 +1863,8 @@ impl Default for Library {
             versions_asked: None,
             version_asks: Vec::new(),
             stack_asks: Vec::new(),
+            keyword_counts: None,
+            keyword_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -2675,6 +2710,8 @@ impl Library {
         tags.sort_unstable();
         tags.dedup();
         self.known_tags = tags;
+        // Built again when the Keywords section is drawn.
+        self.keyword_counts = None;
     }
 
     /// The vault's stacks: each member of one whose top image the library
@@ -4259,6 +4296,7 @@ impl Library {
         self.facets_bar(ui);
         self.folders_section(ui);
         self.albums_section(ui);
+        self.keywords_section(ui);
         self.imports_section(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
@@ -4306,6 +4344,7 @@ impl Library {
         let in_view = self.in_view.borrow().clone();
         self.feed_in_view(in_view, true);
         carry_out(ui.ctx(), &out.signals);
+        self.drop_keyword_on_grid(&out.response);
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell

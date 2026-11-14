@@ -17,6 +17,9 @@
 //! - **One step per rotation** (L9): the photos' `rotation` field
 //!   before and after, as the node's `library.images.rotate` answers
 //!   them.
+//! - **One step per keyword branch renamed or merged** (L12): every
+//!   photo's tags before and after, as the node's
+//!   `library.keywords.rename` and `.merge` answer them.
 //! - **One step per manual stack change** (L11): a group, an unstack, a
 //!   new top; the stacks' documents before and after, as the node's
 //!   `library.stacks.group`, `.ungroup` and `.top` answer them.
@@ -263,6 +266,34 @@ pub fn stack_label(ask: &crate::library::StackAsk) -> Label {
         text: m.english.clone(),
         key: Some(m.key),
         args,
+    }
+}
+
+/// A keyword branch's step: "Rename keyword Animals to Fauna", "Merge
+/// keyword Animals|Dog into Pets|Dog".
+pub fn keyword_label(ask: &crate::library::KeywordAsk) -> Label {
+    use crate::library::KeywordAsk;
+    let (from, to) = ask.paths();
+    let m = match ask {
+        KeywordAsk::Rename { .. } => Message::new(
+            "gui-history-keyword-rename",
+            "Rename keyword { $from } to { $to }",
+        ),
+        KeywordAsk::Merge { .. } => Message::new(
+            "gui-history-keyword-merge",
+            "Merge keyword { $from } into { $to }",
+        ),
+    }
+    .with("from", from)
+    .with("to", to);
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [
+            ("from".to_string(), from.to_string()),
+            ("to".to_string(), to.to_string()),
+        ]
+        .into(),
     }
 }
 
