@@ -60,6 +60,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     smart_albums_scope_count_and_undo(make());
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
+    a_rotation_turns_resets_and_undoes(make());
 }
 
 /// For a store with read handles ([`Store::reader`]): a read that is not
@@ -2911,4 +2912,37 @@ fn album_sets_nest_scope_the_union_and_move<S: Store>(s: S) {
     // Photos never go into a set.
     assert!(v.add_to_album("travel", &[ids[0]]).is_err());
     let _ = made;
+}
+
+/// Photos turned left, right and back (L9): one audited step, which the
+/// vault's revert undoes; a reset of an unturned photo is no change.
+fn a_rotation_turns_resets_and_undoes<S: Store>(s: S) {
+    use crate::rotation::{ROTATION, Turn, quarter_turns};
+    let v = Vault::new(with_images(s, 2));
+    let (a, b) = (image(1).id, image(2).id);
+    let turns = |v: &Vault<S>, id: &ImageId| {
+        let rows = v.fields_of(&[*id], &[ROTATION]).unwrap();
+        quarter_turns(rows[0].get(ROTATION))
+    };
+    let step = v.rotate(&[a, b], Turn::Right, "user", 5).unwrap();
+    assert_eq!(step.images.len(), 2);
+    assert_eq!((turns(&v, &a), turns(&v, &b)), (1, 1));
+    v.rotate(&[a], Turn::Left, "user", 6).unwrap();
+    v.rotate(&[a, a], Turn::Left, "user", 7).unwrap();
+    assert_eq!(
+        turns(&v, &a),
+        3,
+        "named twice, turned once; left of upright is three quarters clockwise"
+    );
+    let reset = v.rotate(&[b], Turn::Reset, "user", 9).unwrap();
+    assert_eq!(turns(&v, &b), 0);
+    assert!(
+        v.rotate(&[b], Turn::Reset, "user", 10).unwrap().is_empty(),
+        "an unturned photo is left out"
+    );
+    v.revert(&reset).unwrap();
+    assert_eq!(turns(&v, &b), 1, "undone: turned again");
+    let audit = v.audit(&b).unwrap();
+    assert!(audit.iter().any(|e| e.field == ROTATION && e.who == "user"));
+    assert!(v.rotate(&[image(9).id], Turn::Right, "user", 11).is_err());
 }

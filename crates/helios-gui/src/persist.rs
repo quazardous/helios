@@ -56,7 +56,7 @@ use helios_inspect::client::{Client, Pending};
 use helios_node_core::cursor::query_json;
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
-use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, TAGS, TITLE};
+use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, ROTATION, TAGS, TITLE};
 use helios_vault::{
     EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version, edit,
 };
@@ -71,13 +71,14 @@ type Searched = (Vec<String>, helios_vault::Facets);
 
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match; the title is copied with the marks).
-const SHOWN: [&str; 10] = [
+const SHOWN: [&str; 11] = [
     RATING,
     REJECTED,
     PICKED,
     LABELS,
     TAGS,
     TITLE,
+    ROTATION,
     CAPTURED,
     cull::FOCUS,
     cull::CLIP_WHITE,
@@ -179,6 +180,9 @@ enum Write {
     /// Photos taken out of the Library (`library.images.remove`), asked
     /// at a time (seconds): one step of the library's history.
     Remove(Vec<String>, f64),
+    /// Photos turned (`library.images.rotate`), asked at a time
+    /// (seconds): one step of the library's history.
+    Rotate(Vec<String>, crate::library::Turn, f64),
     /// Photos' files moved to the system trash, confirmed
     /// (`library.images.trash`): a journaled job, not a history step.
     Trash(Vec<String>),
@@ -231,6 +235,10 @@ impl Write {
                 helios_node_core::library::REMOVE,
                 json!({ "images": images }),
             ),
+            Self::Rotate(images, turn, _) => (
+                helios_node_core::library::ROTATE,
+                json!({ "images": images, "turn": turn_word(*turn) }),
+            ),
             Self::Trash(images) => (
                 helios_node_core::library::TRASH,
                 json!({ "images": images }),
@@ -271,6 +279,7 @@ impl Write {
             | Self::Accept(..)
             | Self::Decline(_)
             | Self::Remove(..)
+            | Self::Rotate(..)
             | Self::Trash(_)
             | Self::Document { .. }
             | Self::Session(..)
@@ -279,6 +288,16 @@ impl Write {
             | Self::Snapshots(..) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
+    }
+}
+
+/// A turn as `library.images.rotate` names it.
+fn turn_word(turn: crate::library::Turn) -> &'static str {
+    use crate::library::Turn;
+    match turn {
+        Turn::Left => "left",
+        Turn::Right => "right",
+        Turn::Reset => "reset",
     }
 }
 
@@ -1238,6 +1257,22 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
+            (Write::Rotate(_, turn, at), Ok(answer)) => {
+                // The step the node made, recorded so Ctrl+Z turns the
+                // photos back; the vault's events show the turn.
+                match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+                    Ok(changes) if changes.is_empty() => {}
+                    Ok(changes) => {
+                        let label =
+                            crate::library_history::rotate_label(*turn, changes.images.len());
+                        shell.library_history().record(label, changes, *at);
+                    }
+                    Err(e) => shell.notify(
+                        Level::Warning,
+                        format!("the photos turned cannot be turned back with undo: {e}"),
+                    ),
+                }
+            }
             (Write::Trash(_), Ok(done)) => {
                 let trashed = done["trashed"].as_u64().unwrap_or(0);
                 let failed = done["failed"].as_array().map_or(0, Vec::len);
@@ -1293,6 +1328,14 @@ impl<S: Store + 'static> Persist<S> {
             ),
             (_, Ok(_)) => {}
             (Write::Trash(_), Err(e)) => not_trashed(shell, &e.message),
+            (Write::Rotate(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-not-rotated",
+                    "The photos were not rotated: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Remove(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1845,6 +1888,12 @@ impl<S: Store + 'static> Persist<S> {
             removals
                 .into_iter()
                 .map(|images| Write::Remove(images, now)),
+        );
+        let rotations = shell.library_mut().take_rotations();
+        self.writes.extend(
+            rotations
+                .into_iter()
+                .map(|(images, turn)| Write::Rotate(images, turn, now)),
         );
         for ask in shell.library_mut().take_trash_asks() {
             if ask.confirmed {
