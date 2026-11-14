@@ -3212,6 +3212,18 @@ impl Shell {
                 "Remove Version…: remove a copy of a photo with the edits only it holds (`image`: an id, else the photo under the cursor; `version`: a head's id, else its current one), asked first unless `confirmed`; a photo keeps one version; Ctrl+Z brings it back",
             ),
             (
+                crate::library::GROUP_COMMAND,
+                "Group into Stack: the photos in one stack (`images`: ids, else the selection; `top`: the photo on top, else the one under the cursor), the stacks they are in merged; Ctrl+Z takes it back",
+            ),
+            (
+                crate::library::UNGROUP_COMMAND,
+                "Unstack: ungroup the stacks the photos are in (`images`: ids, else the selection), the photos untouched; Ctrl+Z groups them again",
+            ),
+            (
+                crate::library::STACK_TOP_COMMAND,
+                "Move to Top of Stack: the photo shown for its stack (`image`: an id, else the photo under the cursor); Ctrl+Z puts the former top back",
+            ),
+            (
                 crate::library::TRASH_COMMAND,
                 "Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z",
             ),
@@ -5252,6 +5264,15 @@ impl Shell {
                 let (image, version) =
                     lib.ask_remove_version(text("image"), text("version"), confirmed)?;
                 Ok(json!({ "image": image, "version": version, "asked": !confirmed }))
+            }
+            crate::library::GROUP_COMMAND => Ok(json!({
+                "grouped": lib.group_stack(images()?, text("top").map(String::from))?
+            })),
+            crate::library::UNGROUP_COMMAND => {
+                Ok(json!({ "ungrouped": lib.ungroup_stack(images()?)? }))
+            }
+            crate::library::STACK_TOP_COMMAND => {
+                Ok(json!({ "stack": lib.top_of_stack(text("image"))? }))
             }
             TRASH_COMMAND => Ok(json!({ "asked": lib.ask_trash(images()?, confirmed)? })),
             DELETE_REJECTED_COMMAND => Ok(json!({

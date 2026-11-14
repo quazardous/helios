@@ -160,6 +160,18 @@ pub fn defaults() -> Vec<(String, String, String)> {
         crate::library::DUPLICATE_COMMAND,
         &format!("{} && !textInputFocus", behind_no_picker(&library)),
     );
+    // Group into Stack and Unstack, as Lightroom's Ctrl+G and
+    // Ctrl+Shift+G (Ctrl+G is the graph's macro there: another context).
+    for (k, command) in [
+        ("Ctrl+G", crate::library::GROUP_COMMAND),
+        ("Ctrl+Shift+G", crate::library::UNGROUP_COMMAND),
+    ] {
+        bind(
+            k,
+            command,
+            &format!("{} && !textInputFocus", behind_no_picker(&library)),
+        );
+    }
     // Move to Trash… and Delete Rejected…, as Lightroom's "Remove and
     // Delete from Disk" (Ctrl+Alt+Shift+Delete) and "Delete Rejected
     // Photos" (Ctrl+Backspace); both ask first.
