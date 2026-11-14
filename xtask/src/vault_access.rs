@@ -14,6 +14,12 @@
 //! The files that still do it are listed in `xtask/allow/vault-access.toml`,
 //! each with its reason. The list may only shrink: an entry whose file no
 //! longer opens anything is reported, so it is removed with the code.
+//!
+//! A second rule holds the desktop (`crates/helios-gui/src`) to the node's
+//! client: no `Vault` and no `vault` in its code, so it neither names the
+//! vault's type nor calls a vault it was handed. The desktop's files that
+//! still do are listed in `xtask/allow/gui-vault.toml`, each with its
+//! reason, and that list only shrinks too.
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +36,16 @@ const FORBIDDEN: &[&str] = &[
     "rusqlite::Connection",
     "Connection::open",
 ];
+
+/// The desktop's sources, held to the node's client.
+pub const GUI_SRC: &str = "crates/helios-gui/src";
+
+/// The desktop's allow-list, relative to the workspace root.
+pub const GUI_ALLOW_LIST: &str = "xtask/allow/gui-vault.toml";
+
+/// The words the desktop's code may not hold: the vault's type, and a
+/// vault in hand (a field, a variable, an accessor).
+const GUI_FORBIDDEN: &[&str] = &["Vault", "vault"];
 
 /// One allow-list entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +87,88 @@ pub fn problems(root: &Path) -> Vec<String> {
         hits.extend(scan(&rel, &text));
     }
     judge(&hits, &allow)
+}
+
+/// Runs the desktop's rule over the workspace at `root`.
+pub fn gui_problems(root: &Path) -> Vec<String> {
+    let allow = match std::fs::read_to_string(root.join(GUI_ALLOW_LIST)) {
+        Ok(text) => match parse_allow_list(&text) {
+            Ok(list) => list,
+            Err(e) => return vec![format!("{GUI_ALLOW_LIST}: {e}")],
+        },
+        Err(e) => return vec![format!("{GUI_ALLOW_LIST}: {e}")],
+    };
+    let mut files = Vec::new();
+    walk(&root.join(GUI_SRC), &mut files);
+    files.sort();
+    let mut hits = Vec::new();
+    for file in files {
+        let rel = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if exempt_path(&rel) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        hits.extend(scan_gui(&rel, &text));
+    }
+    judge_gui(&hits, &allow)
+}
+
+/// The desktop's uses of the vault in one file, test code excepted: the
+/// words `Vault` and `vault` as whole identifiers (`helios_vault::` and
+/// strings such as `"helios.vault"` are not).
+pub fn scan_gui(rel: &str, text: &str) -> Vec<Hit> {
+    let code = strip_tests(&strip_comments_and_strings(text));
+    let mut hits = Vec::new();
+    for (i, line) in code.lines().enumerate() {
+        if let Some(what) = GUI_FORBIDDEN.iter().find(|w| has_word(line, w)) {
+            hits.push(Hit {
+                path: rel.to_string(),
+                line: i + 1,
+                what,
+            });
+        }
+    }
+    hits
+}
+
+/// Whether `line` holds `word` as a whole identifier.
+fn has_word(line: &str, word: &str) -> bool {
+    let ident = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    line.match_indices(word).any(|(at, _)| {
+        !ident(line[..at].chars().next_back()) && !ident(line[at + word.len()..].chars().next())
+    })
+}
+
+/// [`judge`] for the desktop's rule.
+pub fn judge_gui(hits: &[Hit], allow: &[Allowed]) -> Vec<String> {
+    let mut problems: Vec<String> = hits
+        .iter()
+        .filter(|h| !allow.iter().any(|a| a.path == h.path))
+        .map(|h| {
+            format!(
+                "{}:{}: `{}` in the desktop: read and write through the node's client (or, for now, add the file to {GUI_ALLOW_LIST} with its reason)",
+                h.path, h.line, h.what
+            )
+        })
+        .collect();
+    problems.extend(
+        allow
+            .iter()
+            .filter(|a| !hits.iter().any(|h| h.path == a.path))
+            .map(|a| {
+                format!(
+                    "{GUI_ALLOW_LIST}: `{}` no longer uses the vault: remove its entry",
+                    a.path
+                )
+            }),
+    );
+    problems
 }
 
 /// Turns the hits and the allow-list into problems: every hit outside the
@@ -490,6 +588,45 @@ pub fn after() {}
             parse_allow_list("[[allow]]\npath = \"a.rs\"\nreason = \"x\"\n[[allow]]\npath = \"a.rs\"\nreason = \"y\"\n")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_desktop_file_calling_the_vault_is_refused() {
+        let path = "crates/helios-gui/src/panel.rs";
+        let src = "\
+use helios_vault::ImageId;
+
+pub fn shown(persist: &Persist) -> usize {
+    persist.vault().images().len()
+}
+
+const PANEL: &str = \"helios.vault\";
+// a vault, in a comment
+";
+        let hits = scan_gui(path, src);
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!((hits[0].line, hits[0].what), (4, "vault"));
+        let problems = judge_gui(&hits, &[]);
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].starts_with("crates/helios-gui/src/panel.rs:4:"));
+        assert!(judge_gui(&hits, &[allow(path)]).is_empty());
+        // The type named is refused too; test code is not read.
+        let typed = "fn f<S: Store>(v: &Vault<S>) {}\n";
+        assert_eq!(scan_gui(path, typed)[0].what, "Vault");
+        assert!(scan_gui(path, TEST_ONLY).is_empty());
+        // An entry whose file no longer uses the vault is reported.
+        let problems = judge_gui(&[], &[allow(path)]);
+        assert!(
+            problems[0].contains("no longer uses the vault"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn the_desktop_passes_with_its_allow_list() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let problems = gui_problems(root);
+        assert!(problems.is_empty(), "{problems:#?}");
     }
 
     #[test]

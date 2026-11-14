@@ -1574,7 +1574,7 @@ impl<S: Store + 'static> Persist<S> {
         // Opened for the first time, a raw gets its camera's default
         // calibration profile and default camera look (as its first
         // edit, read just below).
-        for said in crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
+        for said in crate::calibrate::on_open(&self.node, image, &graph, shell.values()) {
             shell.notify(Level::Info, said);
         }
         // The steps of an image still on their way are written first: its

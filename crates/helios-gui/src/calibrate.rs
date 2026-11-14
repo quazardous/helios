@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use egui_pop::api::history::Label;
 use helios_core::{Bus, Message};
+use helios_inspect::client::Client;
 use helios_node_core::calibrate::{
     self as node, APPLY, CHART, DELETE, EXPORT, GET, IMPORT, LIST, LOOK_FIT, LOOK_SET_DEFAULT,
     SET_DEFAULT,
@@ -373,32 +374,23 @@ pub fn photo_of(graph: &helios_core::Graph) -> Option<(node::Photo, String, Stri
 
 /// The offer for a camera: its profiles, as listed.
 fn offer<S: Store>(vault: &Vault<S>, camera: &str, make: &str, model: &str, light: Value) -> Value {
-    let profiles = node::run(
-        Some(vault),
-        LIST,
-        &serde_json::json!({ "camera": camera }),
-        0,
-    )
-    .map_or_else(|_| serde_json::json!([]), |d| d.answer["profiles"].clone());
-    // The camera's default look, by what it was fitted to: the header
-    // says when the open photo's look is it.
-    let look_default = vault
-        .look_default(camera)
-        .ok()
-        .flatten()
-        .and_then(|d| node::look::defaults::preview_of(&d))
-        .map_or(
-            Value::Null,
-            |preview| serde_json::json!({ "preview": preview }),
-        );
-    serde_json::json!({
-        "camera": camera,
-        "make": make,
-        "model": model,
-        "light": light,
-        "profiles": profiles,
-        "look_default": look_default,
-    })
+    let read = node::offer(vault, &serde_json::json!({ "camera": camera }))
+        .unwrap_or_else(|_| serde_json::json!({ "camera": camera, "profiles": [] }));
+    header(read, make, model, light)
+}
+
+/// The header's offer: the node's ([`node::offer`]) with the photo's
+/// make, model and as-shot light.
+fn header(mut offered: Value, make: &str, model: &str, light: Value) -> Value {
+    offered["make"] = Value::String(make.into());
+    offered["model"] = Value::String(model.into());
+    offered["light"] = light;
+    if offered["path"].is_null()
+        && let Some(fields) = offered.as_object_mut()
+    {
+        fields.remove("path");
+    }
+    offered
 }
 
 /// Sets the offer the module's header reads (none: no photo with it).
@@ -440,12 +432,13 @@ fn refresh_offer<S: Store>(vault: &Vault<S>, store: &std::sync::Mutex<helios_val
 
 /// A photo opened in the viewport (`graph`, its network built): the
 /// module's header offered the camera's profiles and, opened for the
-/// first time, the camera's default profile put on it
-/// ([`node::default_on_open`]; the camera's default look came at import,
+/// first time, the camera's default profile put on it, both through the
+/// desktop's node (`calibrate.open`, [`node::default_on_open`]; the
+/// camera's default look came at import,
 /// [`node::look::default_on_import`]). Answers what to tell: the profile
 /// applied, or why the default picked none; never an error dialog.
-pub fn on_open<S: Store>(
-    vault: &Vault<S>,
+pub fn on_open(
+    client: &Client,
     image: helios_vault::ImageId,
     graph: &helios_core::Graph,
     store: &std::sync::Mutex<helios_values::Store>,
@@ -457,37 +450,50 @@ pub fn on_open<S: Store>(
         return Vec::new();
     };
     let light = photo.light.map_or(Value::Null, |l| serde_json::json!(l));
-    let mut offered = offer(vault, &photo.camera, &make, &model, light);
+    let opened = client.request(
+        node::OPEN,
+        serde_json::json!({ "image": image.hex(), "camera": photo.camera, "light": light }),
+    );
+    let mut opened = match opened {
+        Ok(opened) => opened,
+        Err(e) => {
+            set_offer(store, None);
+            set_refusal(store, "");
+            return vec![
+                Message::new(
+                    "gui-vault-unreadable",
+                    "Cannot read the library: { $error }",
+                )
+                .with("error", e.message),
+            ];
+        }
+    };
     // The camera look's header fits this image, and compares its file's
     // embedded JPEG.
+    let mut offered = header(opened["offer"].take(), &make, &model, light);
     offered["image"] = Value::String(image.hex());
-    if let Some(path) = vault.file_to_read(&image).ok().flatten().map(|l| l.path) {
-        offered["path"] = Value::String(path.to_string_lossy().into_owned());
-    }
     set_offer(store, Some(&offered));
     set_refusal(store, "");
-    let now = seconds() as u64;
-    let mut said = Vec::new();
-    match node::default_on_open(vault, image, &photo, crate::persist::WHO, now) {
-        Ok(node::OnOpen::Applied { name, .. }) => said.push(
+    let default = &opened["default"];
+    let text = |k: &str| default[k].as_str().unwrap_or_default().to_string();
+    match default["outcome"].as_str() {
+        Some("applied") => vec![
             Message::new(
                 "gui-calibration-default-applied",
                 "Calibration profile “{ $name }” applied: the default of { $camera }",
             )
-            .with("name", name)
+            .with("name", text("name"))
             .with("camera", photo.camera.clone()),
-        ),
-        Ok(node::OnOpen::Refused(reason)) => said.push(
+        ],
+        Some("refused") => vec![
             Message::new(
                 "gui-calibration-default-none",
                 "No calibration profile applied: { $reason }",
             )
-            .with("reason", reason.english),
-        ),
-        Ok(_) => {}
-        Err(e) => said.push(e),
+            .with("reason", text("reason")),
+        ],
+        _ => Vec::new(),
     }
-    said
 }
 
 /// [`CHOOSE`]: the profile set on the open photo's `chartprofile` node,
