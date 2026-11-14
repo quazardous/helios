@@ -312,21 +312,19 @@ impl Registry {
                 !out.iter().any(|o| o.id == s.id)
                     && s.after.iter().all(|a| out.iter().any(|o| &o.id == a))
             });
-            match next {
-                Some(s) => out.push(s),
-                None => {
-                    let looped: Vec<&str> = self
-                        .steps
-                        .iter()
-                        .filter(|s| !out.iter().any(|o| o.id == s.id))
-                        .map(|s| s.id.as_str())
-                        .collect();
-                    return Err(format!(
-                        "steps come after each other in a loop: {}",
-                        looped.join(", ")
-                    ));
-                }
-            }
+            let Some(s) = next else {
+                let looped: Vec<&str> = self
+                    .steps
+                    .iter()
+                    .filter(|s| !out.iter().any(|o| o.id == s.id))
+                    .map(|s| s.id.as_str())
+                    .collect();
+                return Err(format!(
+                    "steps come after each other in a loop: {}",
+                    looped.join(", ")
+                ));
+            };
+            out.push(s);
         }
         Ok(out)
     }

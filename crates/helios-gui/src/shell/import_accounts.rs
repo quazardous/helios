@@ -308,6 +308,9 @@ pub struct Imported {
 pub trait LibraryFolder: Send + Sync {
     /// The library folder, if one is known.
     fn get(&self) -> Result<Option<PathBuf>, String>;
+
+    /// Remembers `dir` as the library folder (`library.chooseFolder`).
+    fn set(&self, dir: &std::path::Path) -> Result<(), String>;
 }
 
 /// How long the service's page is waited for at most.
