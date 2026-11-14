@@ -183,27 +183,35 @@ def storage_probe(args, comp, agent, title: str, name: str) -> dict:
     }
 
 
-def appears(agent, window: str, label: str, more_than: int, within: float = 5.0) -> int:
+def appears(agent, window: str, label: str, more_than: int, within: float) -> tuple[int, str]:
     """How many nodes of `window`'s tree are named `label`, once more
-    than `more_than` or after `within` seconds."""
+    than `more_than` or after `within` seconds; and the last error a
+    tree request gave, if any (`labelled` reads one as 0 nodes)."""
     deadline = time.monotonic() + within
-    n = labelled(agent, window, label)
-    while n <= more_than and time.monotonic() < deadline:
+    error = ""
+    while True:
+        try:
+            n = agent.ui({"action": "tree", "window": window, "label": label}).get("count", 0)
+        except (OSError, RuntimeError, ValueError) as exc:
+            n, error = 0, str(exc)
+        if n > more_than or time.monotonic() >= deadline:
+            return n, error
         time.sleep(0.1)
-        n = labelled(agent, window, label)
-    return n
 
 
 def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str) -> dict:
     """`action` (`hover`, `secondary_click`) on the folder's row in the
-    import window: where `label` (the popup's text) shows."""
+    import window: where `label` (the popup's text) shows. A tooltip
+    shows after egui's delay, and on the box (the release build in a
+    headless compositor, the CPU throttled) it took more than 5 s to
+    reach the window's tree, though it was drawn: so up to 20 s."""
     row = {"window": "import", "role": "CheckBox", "label": args.folder.name, "nth": 0}
     base = (labelled(agent, "main", label), labelled(agent, "import", label))
     try:
         agent.ui({"action": action, **row})
     except (OSError, RuntimeError, ValueError) as exc:
         return {"probe": name, "ok": False, "error": f"{action}: {exc}"}
-    imp = appears(agent, "import", label, base[1])
+    imp, error = appears(agent, "import", label, base[1], within=20.0)
     main = labelled(agent, "main", label)
     where = "import" if imp > base[1] else "main" if main > base[0] else "nowhere"
     shot(comp, args, name)
@@ -213,27 +221,8 @@ def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str
         "seen": f"{what} in the {where} window",
         "counts": {"main": [base[0], main], "import": [base[1], imp]},
     }
-    if where == "nowhere":
-        diag = {}
-        for w in ("import", "main"):
-            try:
-                diag[w + "-label"] = agent.ui({"action": "tree", "window": w, "label": label})
-            except (OSError, RuntimeError, ValueError) as exc:
-                diag[w + "-label"] = {"error": str(exc)}
-            try:
-                nodes = agent.ui({"action": "tree", "window": w}).get("nodes", [])
-                diag[w] = {
-                    "count": len(nodes),
-                    "near": [
-                        n
-                        for n in nodes
-                        if label in f"{n.get('label', '')} {n.get('value', '')}"
-                        or n.get("role") not in ("GenericContainer", "Label", "Button", "CheckBox")
-                    ][:40],
-                }
-            except (OSError, RuntimeError, ValueError) as exc:
-                diag[w] = {"error": str(exc)}
-        out["diag"] = diag
+    if where == "nowhere" and error:
+        out["error"] = error
     return out
 
 
