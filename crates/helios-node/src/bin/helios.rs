@@ -847,12 +847,13 @@ fn unsettled(promise: &serde_json::Value) -> bool {
 /// One progress line of a running promise: its label, `done/total` and
 /// its note.
 fn progress_text(promise: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
     let mut text = promise["label"].as_str().unwrap_or("Working").to_string();
     if let Some(done) = promise["done"].as_u64() {
-        text.push_str(&match promise["total"].as_u64() {
-            Some(total) => format!(": {done}/{total}"),
-            None => format!(": {done}"),
-        });
+        let _ = match promise["total"].as_u64() {
+            Some(total) => write!(text, ": {done}/{total}"),
+            None => write!(text, ": {done}"),
+        };
     }
     if let Some(note) = promise["note"].as_str().filter(|n| !n.is_empty()) {
         text.push(' ');
@@ -1759,5 +1760,40 @@ fn main() -> ExitCode {
             eprintln!("helios: cannot reach the node at {}: {e}", call.socket);
             ExitCode::from(3)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_running_promise_shows_its_progress() {
+        let p = json!({ "label": "Import photos", "state": "running",
+                        "done": 3, "total": 10, "note": "a.jpg" });
+        assert_eq!(progress_text(&p), "Import photos: 3/10 a.jpg");
+        let p = json!({ "label": "Import photos", "state": "running", "done": 3 });
+        assert_eq!(progress_text(&p), "Import photos: 3");
+        assert_eq!(progress_text(&json!({ "state": "pending" })), "Working");
+    }
+
+    #[test]
+    fn a_promise_is_settled_once_done_failed_or_cancelled() {
+        assert!(unsettled(&json!({ "state": "pending" })));
+        assert!(unsettled(&json!({ "state": "running" })));
+        for state in ["done", "failed", "cancelled"] {
+            assert!(!unsettled(&json!({ "state": state })), "{state}");
+        }
+        assert!(!unsettled(&serde_json::Value::Null));
+        assert_eq!(settled_code(&json!({ "state": "done" })), ExitCode::SUCCESS);
+        assert_eq!(
+            settled_code(&json!({ "state": "cancelled" })),
+            ExitCode::from(130)
+        );
+        assert_eq!(
+            settled_code(&json!({ "state": "failed" })),
+            ExitCode::from(1)
+        );
     }
 }
