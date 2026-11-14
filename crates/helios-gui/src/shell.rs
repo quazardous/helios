@@ -52,8 +52,9 @@ pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{
     BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND,
-    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, PAGE as HEALTH_PAGE,
-    findings_answer as health_findings_answer,
+    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE,
+    OTHERS as HEALTH_OTHERS, PAGE as HEALTH_PAGE, findings_answer as health_findings_answer,
+    owner_key as health_owner_key,
 };
 pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;
@@ -916,7 +917,7 @@ impl Shell {
             subworkspaces,
             agent_state,
             controls,
-            plugin_settings: _,
+            plugin_settings,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -970,7 +971,7 @@ impl Shell {
             duplicates: Rc::default(),
             imports: Vec::new(),
             no_library: None,
-            health: health::HealthPage::default(),
+            health: health::HealthPage::new(plugin_settings),
             storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),

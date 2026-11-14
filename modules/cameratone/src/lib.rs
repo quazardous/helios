@@ -7,6 +7,11 @@
 //!   luminance (`core.curve1d@1`'s `tone`); empty for none.
 //! - `chroma`: the chroma curve's 8 ratios over display luminance; empty
 //!   for none.
+//! - `amount`: 0 to 1, the curves blended toward the identity (each
+//!   knot's display luminance `s + a (d - s)`, each chroma ratio
+//!   `1 + a (k - 1)`); 1 is the fit as it is. At 0 the tone half only
+//!   clamps to the display range, so a user can keep part of the
+//!   camera's tone.
 //! - `fitter`, `preview`, `held_out`, `baseline`: the fitter's version,
 //!   the preview's hash and the fit's held-out mean Delta E 2000 against
 //!   the default render's, for provenance and the header; never read at
@@ -38,6 +43,25 @@ const SCORE_REACH: f64 = 1.0e3;
 
 pub struct CameraTone;
 
+/// A `tone` parameter (knots, scene then display) blended toward the
+/// identity by `amount`: each knot's display luminance `s + a (d - s)`,
+/// its scene luminance kept, so the knots stay increasing. No knots stay
+/// none.
+pub fn blend_tone(tone: &[f64], amount: f64) -> Vec<f64> {
+    tone.chunks(2)
+        .flat_map(|k| match *k {
+            [s, d] => vec![s, s + amount * (d - s)],
+            _ => k.to_vec(),
+        })
+        .collect()
+}
+
+/// A `chroma` parameter blended toward the identity by `amount`: each
+/// ratio `1 + a (k - 1)`. No curve stays none.
+pub fn blend_chroma(chroma: &[f64], amount: f64) -> Vec<f64> {
+    chroma.iter().map(|k| 1.0 + amount * (k - 1.0)).collect()
+}
+
 fn list(params: &Params, name: &str) -> Vec<f64> {
     params
         .get(name)
@@ -61,6 +85,15 @@ impl Module for CameraTone {
         };
         let mut params = curve1d::param_specs();
         params.extend([
+            ParamSpec {
+                name: "amount".into(),
+                description: "how much of the look's tone: 0 none, 1 all".into(),
+                kind: ParamKind::Float {
+                    min: 0.0,
+                    max: 1.0,
+                    default: 1.0,
+                },
+            },
             ParamSpec {
                 name: "fitter".into(),
                 description: "the version of the fitter that made the look, for provenance; \
@@ -109,7 +142,12 @@ impl Module for CameraTone {
     }
 
     fn prepare(&self, params: &Params, _: &Context) -> Result<Curve1dPlan, String> {
-        curve1d::plan(&list(params, "tone"), &list(params, "chroma"))
+        let amount = params.get("amount").and_then(Value::as_f64).unwrap_or(1.0);
+        let (tone, chroma) = (list(params, "tone"), list(params, "chroma"));
+        if amount == 1.0 {
+            return curve1d::plan(&tone, &chroma);
+        }
+        curve1d::plan(&blend_tone(&tone, amount), &blend_chroma(&chroma, amount))
     }
 
     fn gpu_kernel(&self) -> Option<GpuKernel> {
@@ -173,6 +211,35 @@ mod tests {
             .with("held_out", Value::Float(2.4))
             .with("baseline", Value::Float(9.8));
         assert_eq!(run(noted, data), reference);
+    }
+
+    #[test]
+    fn its_amount_blends_the_curves_toward_the_identity_in_one_parameter() {
+        let tone = vec![0.0, 0.0, 0.1, 0.3, 0.5, 0.7, 1.0, 0.9];
+        let chroma = vec![1.3, 1.2, 1.1, 1.0, 1.0, 0.9, 0.6, 0.3];
+        let data = vec![0.05, 0.1, 0.08, 1.0, 0.4, 0.5, 0.3, 1.0];
+        let set = Params::new()
+            .with("tone", Value::List(tone.clone()))
+            .with("chroma", Value::List(chroma.clone()));
+        // At 1, the fit as it is.
+        let full = run(set.clone().with("amount", Value::Float(1.0)), data.clone());
+        assert_eq!(full, run(set.clone(), data.clone()));
+        // At 0, the identity: the pixels kept (in the display range).
+        let none = run(set.clone().with("amount", Value::Float(0.0)), data.clone());
+        for (a, b) in none.iter().zip(&data) {
+            assert!((a - b).abs() < 1e-5, "{none:?} against {data:?}");
+        }
+        // Halfway, the knots halfway, the chroma ratios halfway.
+        let half = run(set.with("amount", Value::Float(0.5)), data.clone());
+        let mut reference = data;
+        curve1d::apply(
+            &curve1d::plan(&blend_tone(&tone, 0.5), &blend_chroma(&chroma, 0.5)).unwrap(),
+            &mut reference,
+        );
+        assert_eq!(half, reference);
+        assert!((blend_tone(&tone, 0.5)[3] - 0.2).abs() < 1e-12);
+        assert!((blend_chroma(&chroma, 0.5)[0] - 1.15).abs() < 1e-12);
+        assert!(blend_tone(&[], 0.5).is_empty());
     }
 
     #[test]

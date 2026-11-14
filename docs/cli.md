@@ -400,6 +400,12 @@ helios run library.stacks.dissolve --vault library.db --json '{"stack":"s1"}'
 `helios-mcp` offers the same pair to agents (`helios_commands_list`,
 `helios_command_run`, origin `agent:mcp`).
 
+`helios-mcp --tools compact` lists only that pair and the sandbox pair
+(`helios_sandbox_start`, `helios_sandbox_stop`): four tools instead of
+about a hundred, for an agent whose context is short. Every command stays
+reachable through `helios_command_run`; a call to another tool is refused
+and says so. `--tools full`, the default, offers every tool.
+
 ## Through the vault's node
 
 `import`, `import-darktable`, `stacks`, `commands`, `run` and `batch --sidecar --vault`

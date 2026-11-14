@@ -339,3 +339,75 @@ fn fields_are_set_by_op_and_read_back() {
     );
     assert!(refused.is_err(), "an unknown op is refused");
 }
+
+/// What the desktop's grid reads through the node: a window with each
+/// photo's locations, `library.fields.get` with them too, the facet
+/// counts of a query and the photos changed outside Helios; a query's
+/// JSON form, backup filter and smart-album rules included, reads back as
+/// the same query.
+#[test]
+fn the_grids_reads_carry_locations_facets_and_whole_queries() {
+    use helios_node_core::cursor::{query_json, query_of};
+    use helios_vault::fields::{BackupFilter, BackupState, BackupVolume, Backups};
+    use helios_vault::storage::VolumeId;
+    let mut store = with_photos(MemoryStore::default(), 2);
+    let at = std::path::PathBuf::from("/photos/a.jpg");
+    store
+        .put_location(&id(1), &helios_vault::Location::seen(at, 100, 7, 7))
+        .unwrap();
+    let node = Node::new(store);
+    let client = node.client("user");
+    rate(&client, &id(1), 4);
+
+    let opened = client.request("cursor.open", json!({})).unwrap();
+    let window = client
+        .request(
+            "cursor.window",
+            json!({ "cursor": opened["cursor"], "offset": 0, "len": 2,
+                    "fields": ["rating"], "locations": true }),
+        )
+        .unwrap();
+    let rows = window["rows"].as_array().unwrap();
+    assert_eq!(rows[0]["locations"][0]["path"], "/photos/a.jpg", "{window}");
+    assert_eq!(rows[0]["locations"][0]["presence"], "present", "{window}");
+    assert_eq!(rows[1]["locations"], json!([]), "{window}");
+    let got = client
+        .request(
+            "library.fields.get",
+            json!({ "images": [id(1).hex()], "fields": ["rating"], "locations": true }),
+        )
+        .unwrap();
+    assert_eq!(got["rows"][0]["locations"][0]["size"], 100, "{got}");
+
+    let counted = client
+        .request("library.facets", json!({ "query": { "min_rating": 1 } }))
+        .unwrap();
+    assert_eq!(counted["facets"]["rating"]["4"], 1, "{counted}");
+    let changed = client.request("library.changed.list", json!({})).unwrap();
+    assert_eq!(changed["images"], json!([]), "{changed}");
+
+    let query = helios_vault::Query {
+        min_rating: Some(2),
+        tags: vec!["sea".into()],
+        presence: vec![helios_vault::Presence::Offline],
+        backup: Some(BackupFilter {
+            rule: Backups {
+                volumes: vec![BackupVolume {
+                    id: VolumeId("v1".into()),
+                    drive: "d1".into(),
+                    off_site: true,
+                }],
+                copies: 2,
+                off_site_required: true,
+            },
+            states: vec![BackupState::Short, BackupState::None],
+        }),
+        now: Some(1_000),
+        order: helios_vault::Order {
+            by: helios_vault::Sort::parse("captured").unwrap(),
+            descending: true,
+        },
+        ..helios_vault::Query::default()
+    };
+    assert_eq!(query_of(&query_json(&query)).unwrap(), query);
+}

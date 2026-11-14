@@ -635,9 +635,15 @@ id is unique only in its process); the last 200 are kept. The commands
 and the desktop; the import window lists the last ten under its sources,
 each with Import again. An automatic import is recorded as `auto:<source>`
 (the saved source's name), on the desktop and the headless node alike.
+An import from a connector's source (a Google Photos pick, any source
+whose items are fetched) is recorded too, by `helios_library::fetch`
+itself (built 2026-11-13): its source is the connector's (`remote`: the
+connector, the source's id and its name) in place of paths, and its
+choices say `copy`, a fetched item being always a copy. It has no Import
+again: it runs again from its source in the import window, listed or
+picked anew (a pick is not remembered on Google's side).
 Not yet: the machine, the saved import it came
-from, the cards' safety and bytes, Save as…, a Window menu entry and remote
-(connector) imports.
+from, the cards' safety and bytes, Save as…, a Window menu entry.
 
 ### 3.5 Where they live
 
@@ -907,7 +913,11 @@ read as they change):
 - Order: paused, then the first run, then the size.
 
 Not yet, from sections 3.2 and 3.3:
-- remote sources (a schedule, "every N hours", or a change feed);
+- remote sources (a schedule, "every N hours", or a change feed). Their
+  imports already leave their history record (section 3.4); none of the
+  connectors Helios has can be imported automatically yet: Google Photos
+  lets an application read only what the person picks (4.1), and no
+  connector declares `caps.changes`;
 - an "Import" button on the question's toast (a toast offers one
   command: Open) and a status bar item while paused; pausing on battery
   and during a render (on the headless node too).
