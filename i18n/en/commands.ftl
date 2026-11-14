@@ -334,6 +334,12 @@ command-library-importWindow =
 command-library-importWith =
     .title = Import with an importer plugin (`plugin`, `importer`; `source`: the file or folder it reads, asked when absent; `copy`, `darktable`)
 
+command-library-marks-copy =
+    .title = Copy a photo's marks: rating, colour labels, tags and title (`image`: an id, else the photo under the cursor). Answers them
+
+command-library-marks-paste =
+    .title = Paste the copied marks (`images`: ids, else the selection; `marks`: some of rating, labels, tags, title, all by default; `mode`: merge, the default, adds labels and tags, overwrite makes each mark the copy's)
+
 command-library-openFolder =
     .title = Open a folder in the file manager (`path`)
 
@@ -351,6 +357,15 @@ command-library-quick-toggle =
 
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
+
+command-library-select-invert =
+    .title = Invert the selection: the photos shown that were not selected
+
+command-library-select-none =
+    .title = Select no photo, the cursor gone too
+
+command-library-select-similar =
+    .title = Select the photos shown like the selected ones (`by`: day, taken the same day, the default; or stack, in the same stack)
 
 command-library-sort =
     .title = Sort the library (`by`: captured, imported, name, rating, edited, size or focus; `descending`); kept with the workspace. Without `by`, says how it is sorted

@@ -46,6 +46,8 @@ pub const LABELS: &str = "labels";
 /// and a reject never share a rating's value.
 pub const PICKED: &str = "picked";
 pub const TAGS: &str = "tags";
+/// A photo's title, a line of text.
+pub const TITLE: &str = "title";
 
 /// The fields of an image, declared once.
 pub const FIELDS: &[FieldSpec] = &[
@@ -82,7 +84,7 @@ pub const FIELDS: &[FieldSpec] = &[
         read_only: false,
     },
     FieldSpec {
-        name: "title",
+        name: TITLE,
         kind: FieldKind::Text,
         about: "title",
         read_only: false,

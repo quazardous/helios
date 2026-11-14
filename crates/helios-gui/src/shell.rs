@@ -204,6 +204,9 @@ enum Action {
     AutoAdvance(Option<bool>),
     /// Expand or collapse the stack under the library's cursor.
     ToggleStack,
+    /// A selection or batch command of the library (`library.select.*`,
+    /// `library.marks.*`) with its arguments.
+    LibraryBatch(&'static str, Value),
     /// Import a card or folder: as the workspace's import source says,
     /// or asked (`library.importSource`'s arguments).
     ImportSource(Value, Origin),
@@ -3112,6 +3115,33 @@ impl Shell {
             ),
             Box::new(|_, _| Ok(Action::ToggleStack)),
         );
+        for (id, title) in [
+            (
+                crate::library::SELECT_NONE_COMMAND,
+                "Select no photo, the cursor gone too",
+            ),
+            (
+                crate::library::SELECT_INVERT_COMMAND,
+                "Invert the selection: the photos shown that were not selected",
+            ),
+            (
+                crate::library::SELECT_SIMILAR_COMMAND,
+                "Select the photos shown like the selected ones (`by`: day, taken the same day, the default; or stack, in the same stack)",
+            ),
+            (
+                crate::library::MARKS_COPY_COMMAND,
+                "Copy a photo's marks: rating, colour labels, tags and title (`image`: an id, else the photo under the cursor). Answers them",
+            ),
+            (
+                crate::library::MARKS_PASTE_COMMAND,
+                "Paste the copied marks (`images`: ids, else the selection; `marks`: some of rating, labels, tags, title, all by default; `mode`: merge, the default, adds labels and tags, overwrite makes each mark the copy's)",
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, _| Ok(Action::LibraryBatch(id, a.clone()))),
+            );
+        }
         add(
             CommandSpec::new(
                 "library.importSource",
@@ -5030,6 +5060,51 @@ impl Shell {
         Ok(answer)
     }
 
+    /// The library's selection and batch commands (`library.select.*`,
+    /// `library.marks.*`): the selection is the focus's, and so are the
+    /// marks copied.
+    fn library_batch(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
+        use crate::library::{
+            CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode,
+            SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
+        };
+        let text = |key: &str| args.get(key).and_then(Value::as_str);
+        let mut lib = self.focus.library.borrow_mut();
+        match command {
+            SELECT_NONE_COMMAND => {
+                lib.select_none();
+                Ok(json!({ "selected": 0 }))
+            }
+            SELECT_INVERT_COMMAND => Ok(json!({ "selected": lib.invert_selection() })),
+            SELECT_SIMILAR_COMMAND => {
+                let by = Similar::parse(text("by").unwrap_or("day"))?;
+                Ok(json!({ "selected": lib.select_similar(by)? }))
+            }
+            MARKS_COPY_COMMAND => lib.copy_marks(text("image")).map(CopiedMarks::to_json),
+            MARKS_PASTE_COMMAND => {
+                let images = match args.get("images") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::Array(list)) => Some(
+                        list.iter()
+                            .filter_map(Value::as_str)
+                            .map(String::from)
+                            .collect(),
+                    ),
+                    Some(other) => return Err(format!("`images`: {other} is not a list of ids")),
+                };
+                let kinds: Vec<&str> = match args.get("marks") {
+                    None | Some(Value::Null) => MARK_KINDS.to_vec(),
+                    Some(Value::Array(list)) => list.iter().filter_map(Value::as_str).collect(),
+                    Some(other) => return Err(format!("`marks`: {other} is not a list")),
+                };
+                let mode = PasteMode::parse(text("mode").unwrap_or("merge"))?;
+                let count = lib.paste_marks(images, &kinds, mode)?;
+                Ok(json!({ "images": count, "marks": kinds }))
+            }
+            other => Err(format!("`{other}` is not a selection command")),
+        }
+    }
+
     /// The quick collection's commands (`library.quick.*`), queued for the
     /// host as the albums' are: one step of the library's history each.
     fn quick_edit(
@@ -6030,6 +6105,11 @@ impl Shell {
                 .borrow_mut()
                 .toggle_stack()
                 .map_err(|e| format!("vault.stack.toggle: {e}"))?,
+            Action::LibraryBatch(id, args) => {
+                return self
+                    .library_batch(id, &args)
+                    .map_err(|e| format!("{id}: {e}"));
+            }
             Action::Zoom(z) => self.focus.viewport.borrow_mut().zoom(z, &self.core.values),
             Action::Fold(area) => {
                 let h = self.core.app.handle();

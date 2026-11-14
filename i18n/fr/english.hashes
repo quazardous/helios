@@ -169,12 +169,17 @@ command-library-importFiles.title a7190ef3f937e18a
 command-library-importSource.title b212d23cfe694c9e
 command-library-importWindow.title 5cf073c01aa7d73f
 command-library-importWith.title 8da42d005844e0c1
+command-library-marks-copy.title 110f7a1c6333475d
+command-library-marks-paste.title d7524ecd5be40fab
 command-library-openFolder.title 79525ab3a42262e5
 command-library-pasteFiles.title 409587651f782f9a
 command-library-quick-clear.title 1c4b266b7b1ccc5c
 command-library-quick-saveAs.title 81d31076888b75b1
 command-library-quick-toggle.title 1b2258b0758413c4
 command-library-scanFolder.title 65e0df53774b720b
+command-library-select-invert.title 9fabaf6253c7fd7d
+command-library-select-none.title cf5dfbd241a5672e
+command-library-select-similar.title 341f6a0f2b867360
 command-library-sort.title ac723c2319de076f
 command-library-storage.title 72ca240c73a1c7aa
 command-macro-dissolve.title e472cc526f105a70
