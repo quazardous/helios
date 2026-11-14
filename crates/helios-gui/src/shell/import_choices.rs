@@ -19,9 +19,10 @@
 //! Into and Name apply to a copy only: "Add where they are" hides them.
 //! The choices reach the import as `library.importFiles`'s arguments
 //! ([`Choices::args`]) and are kept, as the last used, per library
-//! ([`Shell::remember_import_choices_in`]). A preset is a named
-//! [`Choices`], kept beside them (`import-presets.json`): copy or add
-//! for folders included, a card still copied unless switched.
+//! ([`Shell::remember_import_choices_in`]). An import profile is a named
+//! [`Choices`] ([`super::import_profile_store`]): the Detail column shows
+//! the profile in use and what it does, the profile editor
+//! ([`super::import_profile_editor`]) these choices.
 
 use std::path::{Path, PathBuf};
 
@@ -166,6 +167,15 @@ pub(super) struct Sample {
     pub camera: Option<String>,
 }
 
+impl Sample {
+    /// When it was taken (`year, month, day`).
+    pub fn date(&self) -> Option<(i64, u32, u32)> {
+        use chrono::Datelike;
+        let t = self.time?;
+        Some((i64::from(t.year()), t.month(), t.day()))
+    }
+}
+
 /// The examples of a sample: its folder (`2026/2026-11-02/`) and its
 /// name (`20261102_IMG_0001.JPG`); the name is an error when the
 /// pattern is not one.
@@ -273,27 +283,6 @@ impl ImportWindow {
         })
     }
 
-    /// The preset the choices are, when they are one.
-    pub(super) fn preset_of_choices(&self) -> Option<String> {
-        self.presets
-            .iter()
-            .find(|(_, c)| **c == self.choices)
-            .map(|(name, _)| name.clone())
-    }
-
-    fn save_presets(&self) {
-        let Some(file) = &self.presets_file else {
-            return;
-        };
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let text = serde_json::to_string_pretty(&self.presets).unwrap_or_default();
-        if let Err(e) = std::fs::write(file, text) {
-            log::warn!("import presets: {}: {e}", file.display());
-        }
-    }
-
     /// Keeps the choices, as the last used, where the desktop said.
     pub(super) fn save_choices(&self) {
         let Some(file) = &self.choices_file else {
@@ -311,47 +300,20 @@ impl ImportWindow {
 
 impl Shell {
     /// Keeps the import window's choices, as the last used, in `file`
-    /// (JSON, one per library), read now.
-    /// The presets are kept beside it, in `import-presets.json`.
+    /// (JSON, one per library), read now. The import profiles are kept
+    /// beside it ([`super::import_profile_store`]), the old presets and
+    /// named filters migrated into them the first time.
     pub fn remember_import_choices_in(&mut self, file: PathBuf) {
         let read = |f: &Path| std::fs::read_to_string(f).ok();
         let mut w = self.import.get_mut();
-        w.choices = read(&file)
+        let last: Choices = read(&file)
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        let presets = file.with_file_name("import-presets.json");
-        w.presets = read(&presets)
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
-        w.presets_file = Some(presets);
-        let filters = file.with_file_name(super::import_profiles::FILE);
-        w.filters = read(&filters)
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
-        w.filters_file = Some(filters);
+        let dir = file.parent().map(Path::to_path_buf).unwrap_or_default();
+        w.profiles = super::import_profile_store::Profiles::load(&dir, &last);
+        w.choices = w.profiles.choices(&w.profiles.current);
         w.choices_file = Some(file);
-    }
-
-    /// The import presets' names, in order.
-    pub fn import_presets(&self) -> Vec<String> {
-        self.import.get().presets.keys().cloned().collect()
-    }
-
-    /// Sets the Choices column to a preset's (`None`: Default): copy or
-    /// add for folders included, a card still copied unless switched.
-    pub fn apply_import_preset(&mut self, name: Option<&str>) {
-        self.import.get_mut().apply_preset(name);
-    }
-
-    /// Saves the choices as the preset `name`, replacing one of that name.
-    /// The copy or add shown is kept for folders when no card is ticked.
-    pub fn save_import_preset(&mut self, name: &str) {
-        self.import.get_mut().save_preset(name);
-    }
-
-    /// Deletes the preset `name`; the choices stay as they are.
-    pub fn delete_import_preset(&mut self, name: &str) {
-        self.import.get_mut().delete_preset(name);
+        w.link_sources();
     }
 
     /// The import window's choices.
@@ -371,38 +333,6 @@ impl Shell {
 }
 
 impl ImportWindow {
-    /// Sets the choices to a preset's (`None`: Default).
-    pub(super) fn apply_preset(&mut self, name: Option<&str>) {
-        let choices = match name {
-            Some(name) => match self.presets.get(name) {
-                Some(c) => c.clone(),
-                None => return,
-            },
-            None => Choices::default(),
-        };
-        self.choices = choices;
-        self.copy = None;
-        self.custom = false;
-    }
-
-    /// Saves the choices as the preset `name`.
-    pub(super) fn save_preset(&mut self, name: &str) {
-        let mut choices = self.choices.clone();
-        if !self.ticked.iter().any(|p| self.is_card(p)) {
-            choices.copy_folders = self.copies();
-        }
-        self.choices.copy_folders = choices.copy_folders;
-        self.presets.insert(name.to_string(), choices);
-        self.save_presets();
-    }
-
-    /// Deletes the preset `name`.
-    pub(super) fn delete_preset(&mut self, name: &str) {
-        if self.presets.remove(name).is_some() {
-            self.save_presets();
-        }
-    }
-
     pub(super) fn choice_words(
         &self,
         t: &dyn Fn(Message) -> String,
@@ -677,7 +607,7 @@ pub(super) fn copy_ui(
 }
 
 /// Into and Name: a copy's.
-fn copy_choices_ui(
+pub(super) fn copy_choices_ui(
     ui: &mut egui::Ui,
     w: &mut ImportWindow,
     words: &ChoiceWords,

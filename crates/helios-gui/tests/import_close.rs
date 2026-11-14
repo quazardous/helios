@@ -234,11 +234,21 @@ fn a_sources_choices_written_to_a_busy_node_hold_neither_a_frame_nor_the_close()
     );
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
+    let keep_all = h
+        .state_mut()
+        .put_import_profile(helios_gui::shell::ImportProfile {
+            id: String::new(),
+            name: "Keep all".into(),
+            choices: helios_gui::shell::Choices::default(),
+        });
     open_on(&mut h, &folder);
     until(&mut h, "the folder read", |h| h.state().import_read());
     h.run_steps(2);
-    // A choice changed: saved on the source, through the node.
-    h.get_by_label("Keep").click();
+    // A profile picked: saved on the source, through the node.
+    h.get_by_value("Everyday").click();
+    h.run_steps(2);
+    let _ = keep_all;
+    h.get_by_label("Keep all").click();
     let at = Instant::now();
     h.step();
     assert!(

@@ -160,9 +160,11 @@ fn a_named_filter_and_tags_on_a_saved_source_shape_its_automatic_import_and_its_
     assert_eq!(choices(&first).filter, keepers);
     assert_eq!(choices(&hot).filter, keepers);
     assert_eq!(choices(&hot).apply, apply);
-    // Kept: the named filter beside the presets, the source's in the
-    // sources' document.
-    let filters = std::fs::read_to_string(dir.join("library/import-filters.json")).unwrap();
+    // Kept: the named filter as a filter preset with the import
+    // profiles, the source's in the sources' document, each source
+    // pointing at a profile made of its choices.
+    assert!(sources.iter().all(|s| s.profile.is_some()), "{sources:?}");
+    let filters = std::fs::read_to_string(dir.join("library/import-profiles.json")).unwrap();
     assert!(filters.contains("Keepers"), "{filters}");
     assert_eq!(
         h.state().import_filters(),
