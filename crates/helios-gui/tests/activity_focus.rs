@@ -20,16 +20,20 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use egui_pop::api::windows::WindowId;
 use egui_pop::core::indicator;
-use helios_core::jobs::Jobs;
+use helios_core::jobs::{Jobs, Progress, Start};
 use helios_gui::shell::ACTIVITY_WINDOW;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_inspect::client::Client;
 use helios_node_core::endpoint::VaultService;
+use helios_node_core::job_promises::{JobPromises, Standing};
 use helios_node_core::promises::{Handle, Promises};
 use helios_shell::commands::Origin;
 use helios_vault::promises::{Promise, State};
 use helios_vault::{MemoryStore, Vault};
 use serde_json::{Value, json};
+
+/// The import history's record the stand-in import settles with.
+const HISTORY: &str = "01763130000-0004242-000000001";
 
 /// What the stand-in runners are told.
 #[derive(Default)]
@@ -55,6 +59,7 @@ fn run(gate: &Gate, handle: &Handle<MemoryStore>) {
         "fail" => {
             return handle.done(json!({
                 "report": { "added": 410, "skipped": 0, "failed": 2 },
+                "history": HISTORY,
                 "failed": [
                     { "path": "/card/DCIM/IMG_0007.JPG", "error": "unreadable" },
                     { "path": "/card/DCIM/IMG_0009.JPG", "error": "unreadable" },
@@ -95,6 +100,46 @@ fn node(gate: &Arc<Gate>) -> (Arc<Client>, Arc<Promises<MemoryStore>>) {
     let service = VaultService::new(vault, bus, jobs, "test").with_promises(promises.clone());
     let client = Arc::new(Client::in_process(Arc::new(service)).with_origin("user"));
     (client, promises)
+}
+
+/// The desktop's node as [`node`] makes it, with the desktop's jobs
+/// mirrored as its promises (`job_promises`): the jobs and the mirror.
+fn node_with_jobs(
+    gate: &Arc<Gate>,
+) -> (
+    Arc<Client>,
+    Arc<Promises<MemoryStore>>,
+    Jobs,
+    JobPromises,
+    Arc<Vault<MemoryStore>>,
+) {
+    let (client, promises) = node(gate);
+    let desktop = Jobs::new(Arc::new(helios_core::Bus::new()));
+    promises.cancel_through(desktop.clone());
+    let vault = promises.vault().clone();
+    let mirror = JobPromises::start(vault.clone(), desktop.bus().subscribe());
+    (client, promises, desktop, mirror, vault)
+}
+
+/// The promise of job `job`, once the mirror made it.
+fn promise_of(h: &mut Harness<'_, Shell>, vault: &Vault<MemoryStore>, job: &str) -> Promise {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let found = vault
+            .promises(&helios_vault::promises::Filter {
+                owner: Some(job.into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .next();
+        if let Some(p) = found {
+            return p;
+        }
+        assert!(Instant::now() < deadline, "no promise of job `{job}`");
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn start(promises: &Promises<MemoryStore>, kind: &str, label: &str, script: &str) -> Promise {
@@ -398,4 +443,107 @@ fn activity_snapshots() {
         h.run_steps(4);
         results.add(h.try_snapshot(name));
     }
+}
+
+/// Every kind of the desktop's jobs shows as a promise: with a bar when it
+/// counts (the trash, a backup), without one when it does not (a
+/// snapshot) or never ends (the image map, which the status bar does not
+/// count); its detail says its outcome, and Cancel reaches the job.
+#[test]
+fn the_desktops_jobs_show_as_promises_with_or_without_their_bar() {
+    let gate = Arc::new(Gate::default());
+    let (client, _promises, jobs, _mirror, vault) = node_with_jobs(&gate);
+    let trash = jobs.start(Start::new("trash-1", "Move 3 files to the trash", "trash").total(3));
+    trash.progress(Progress::new().counts(1, 3).item("b.raw"));
+    let backup =
+        Arc::new(jobs.start(Start::new("backup-1", "Back up to Disk A", "backup").total(9)));
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = stop.clone();
+        backup.on_cancel(move || stop.store(true, Ordering::SeqCst));
+    }
+    let snapshot = jobs
+        .start(Start::new("snapshot-1", "Snapshot the catalogue", "snapshot").not_cancellable());
+    let map = Standing::start(vault.clone(), "map", "Image map");
+    let mut h = shell_on(client);
+    let trash_p = promise_of(&mut h, &vault, "trash-1");
+    let backup_p = promise_of(&mut h, &vault, "backup-1");
+    let snapshot_p = promise_of(&mut h, &vault, "snapshot-1");
+    let map_id = map.id().unwrap().to_string();
+    open(&mut h, &trash_p.id);
+    until(&mut h, "every job listed", |h| {
+        row_bar(h, &trash_p.id) == Some(true)
+            && row_bar(h, &backup_p.id) == Some(true)
+            && row_bar(h, &snapshot_p.id) == Some(false)
+            && row_bar(h, &map_id) == Some(false)
+    });
+    // The trash's detail: its counts and the file at hand.
+    until(&mut h, "the trash's counts", |h| {
+        h.query_all_by_label("1 of 3").count() == 2
+    });
+    assert!(h.query_all_by_label("b.raw").count() >= 1);
+    // The status bar counts the three jobs, not the map.
+    until(&mut h, "the indicator", |h| {
+        shown(h, helios_gui::activity::MARK).is_some_and(|r| r.value == Some(3.0))
+    });
+    // A snapshot cannot stop: no Cancel in its detail.
+    in_list(&h, "Snapshot the catalogue").click();
+    h.run_steps(3);
+    assert_eq!(focus(&h)["selected"], json!(snapshot_p.id));
+    assert!(h.query_by_label("Cancel").is_none());
+    // Cancel on the backup's promise reaches its job.
+    in_list(&h, "Back up to Disk A").click();
+    h.run_steps(3);
+    in_detail(&h, "Cancel").click();
+    until(&mut h, "the backup asked to stop", |_| {
+        stop.load(Ordering::SeqCst)
+    });
+    backup.cancelled();
+    // The trash ends with a failed file: the detail says it.
+    trash.item_failed("/photos/c.raw", "read-only");
+    trash.progress(Progress::new().counts(3, 3));
+    trash.finished();
+    snapshot.finished();
+    in_list(&h, "Move 3 files to the trash").click();
+    until(&mut h, "the trash's outcome", |h| {
+        h.query_by_label("3/3").is_some() && h.query_by_label("read-only").is_some()
+    });
+    assert!(h.query_by_label("c.raw").is_some());
+    drop(map);
+}
+
+/// A finished job's result links: an export's folder, an import's
+/// session in the Library and its record in the import history.
+#[test]
+fn result_links_open_the_folder_the_library_and_the_import_history() {
+    let gate = Arc::new(Gate::default());
+    let (client, promises, jobs, _mirror, vault) = node_with_jobs(&gate);
+    let export = jobs.start(Start::new("export-1", "Export a.jpg", "export").total(1));
+    export.finished_result(json!({ "path": "/out/a.jpg", "folder": "/out" }));
+    let import = start(&promises, "import", "Import 412 photos", "fail");
+    let mut h = shell_on(client);
+    let export_p = promise_of(&mut h, &vault, "export-1");
+    open(&mut h, &export_p.id);
+    until(&mut h, "the export's link", |h| {
+        focus(h)["links"]
+            == json!([{ "command": "library.openFolder", "args": { "path": "/out" } }])
+    });
+    assert!(h.query_by_label("Open folder").is_some());
+    // The import fails once; run again it settles with its record.
+    open(&mut h, &import.id);
+    until(&mut h, "Retry", |h| h.query_by_label("Retry").is_some());
+    h.get_by_label("Retry").click();
+    until(&mut h, "the import's links", |h| {
+        h.query_by_label("Show in Library").is_some()
+    });
+    h.get_by_label("Show in Library").click();
+    until(&mut h, "the import's session shown", |h| {
+        h.state().library().import_session().as_deref() == Some(HISTORY)
+    });
+    h.get_by_label("Import history").click();
+    until(&mut h, "the import window open", |h| {
+        h.state().import_window_open()
+    });
+    let linked: Vec<Value> = focus(&h)["linked"].as_array().unwrap().clone();
+    assert_eq!(linked.len(), 2, "{linked:?}");
 }

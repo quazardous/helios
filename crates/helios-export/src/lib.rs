@@ -624,7 +624,11 @@ fn submit_job(
                     exported.path.display(),
                     exported.bytes
                 ));
-                report.finished();
+                // Where it went: the Activity focus offers its folder.
+                report.finished_result(serde_json::json!({
+                    "path": exported.path,
+                    "folder": exported.path.parent(),
+                }));
                 // A worker can start the job before `submit_message`
                 // returns its id.
                 let job = *job_id.wait();

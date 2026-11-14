@@ -175,13 +175,60 @@ pub fn take(
     Ok((taken, copies))
 }
 
+/// The kind of a snapshot's job (and of its promise, in the Activity
+/// focus).
+pub const JOB_KIND: &str = "snapshot";
+
+/// [`take`], reported as a job on `jobs` when given (kind [`JOB_KIND`],
+/// finished with the snapshot's `folder`): the node's promise of it shows
+/// in the Activity focus.
+///
+/// # Errors
+/// As [`take`].
+pub fn take_reported(
+    jobs: Option<&helios_core::jobs::Jobs>,
+    node: &Client,
+    mounted: &[Volume],
+    file: &Path,
+    reason: &str,
+    keep: usize,
+) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let job = jobs.map(|jobs| {
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        jobs.start(
+            helios_core::jobs::Start::new(
+                &format!("{JOB_KIND}-{n}"),
+                "Snapshot the catalogue",
+                JOB_KIND,
+            )
+            .not_cancellable(),
+        )
+    });
+    let taken = take(node, mounted, file, reason, keep);
+    if let Some(job) = job {
+        match &taken {
+            Ok((at, copies)) => job.finished_result(serde_json::json!({
+                "folder": at.parent(),
+                "path": at,
+                "copies": copies,
+            })),
+            Err(e) => job.failed(e),
+        }
+    }
+    taken
+}
+
 /// Takes a snapshot by hand ([`take`]) on a thread of its own: the copy
 /// of the catalogue waits for any writer holding it, so the frame that
-/// asked does not. `done` hears the snapshot and its copies, or why not.
+/// asked does not. Reported as a job on `jobs` when given
+/// ([`take_reported`]). `done` hears the snapshot and its copies, or why
+/// not.
 ///
 /// # Errors
 /// No thread to take it on.
 pub fn take_by_hand(
+    jobs: Option<helios_core::jobs::Jobs>,
     node: &std::sync::Arc<Client>,
     file: &Path,
     keep: usize,
@@ -192,7 +239,14 @@ pub fn take_by_hand(
         .name("catalogue-snapshot".into())
         .spawn(move || {
             let mounted = helios_storage::system().volumes();
-            done(take(&node, &mounted, &file, "by-hand", keep));
+            done(take_reported(
+                jobs.as_ref(),
+                &node,
+                &mounted,
+                &file,
+                "by-hand",
+                keep,
+            ));
         })
         .map(|_| ())
         .map_err(|e| e.to_string())

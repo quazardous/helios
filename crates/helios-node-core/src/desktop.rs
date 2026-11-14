@@ -20,6 +20,7 @@ use helios_vault::{ImageId, Location, Store, Vault};
 use serde_json::Value;
 
 use crate::endpoint::VaultService;
+use crate::job_promises::JobPromises;
 use crate::promises::Promises;
 
 /// The node's library, for the desktop in its process.
@@ -89,6 +90,25 @@ impl<S: Store + 'static> Library<S> {
             Some(promises) => service.with_promises(promises.clone()),
             None => service,
         }
+    }
+
+    /// Every job reported on `jobs` (the desktop's: exports, the trash,
+    /// backups, snapshots…) mirrored as a promise of the node's
+    /// ([`crate::job_promises`]) from now on, a promise's cancel reaching
+    /// its job. The caller has the node adopt it last
+    /// ([`crate::node::Link::adopt`]): the node's stop waits for the
+    /// other jobs first, so their ends are mirrored before it stops.
+    pub fn mirror_jobs(&self, jobs: &Jobs) -> Arc<JobPromises>
+    where
+        Vault<S>: Send + Sync,
+    {
+        if let Some(promises) = &self.promises {
+            promises.cancel_through(jobs.clone());
+        }
+        Arc::new(JobPromises::start(
+            self.vault.clone(),
+            jobs.bus().subscribe(),
+        ))
     }
 
     /// The node's backups on this library, followed in `jobs`.

@@ -613,6 +613,22 @@ them (they survive a restart), and every client of the node sees them.
   `attempts`; any other is settled `failed` with the reason
   `interrupted`, `retryable` when the node knows its kind. No promise
   stays running with nobody working on it.
+- **Every long job is one.** The desktop's jobs (`job.*`: an export, a
+  batch, the trash, a backup, a catalogue snapshot, a calibration, a
+  workshop run, the capture and cull passes) are mirrored as promises of
+  their node (`helios_node_core::job_promises`), owned by the job's id,
+  their `request` `{"job": id, "cancellable": bool}`: running with the
+  job's `done` of `total` and its item as `note`, settled `done` with
+  `{job, done, total, failed: [{path, error}], skipped}` and what the job
+  finished with (`folder`, `path`, `actions`), `failed` (not retryable) or
+  `cancelled`. `promises.cancel` cancels the job. A job inside another
+  (an export of a batch) and the background upkeep (`map`,
+  `stacks.suggest`, `importer.scan`) are left out. The newest 100 settled
+  ones are kept.
+- **Work with no end** (the image map, kind `map`; the thumbnail
+  re-check, `thumbs`) stands as one promise while it runs, its `request`
+  `{"standing": true}`: no total, settled `done` when it stops. The
+  status bar does not count it as running.
 - The desktop shows a promise as one line (`helios_gui::promise_line`):
   what it stands for, its progress, then its outcome, with Cancel while
   it runs and Retry when it failed and may be retried.
