@@ -222,6 +222,8 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
             "corner {i}: {c} for {target:?}"
         );
     }
+    // The last drag's dry run lands off the frame.
+    settle(&mut h);
     let s = state(&h);
     let after = s["report"]["after"]["mean"].as_f64().expect("a report");
     assert!(after < 1.0, "on the patches: Delta E {after}, was {first}");
