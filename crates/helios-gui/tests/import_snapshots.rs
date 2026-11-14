@@ -133,6 +133,13 @@ fn the_import_window_snapshots() {
         let mut h = window(Vec::new(), json!({ "paths": [folder] }), scale);
         assert!(!h.state().import_copies());
         results.add(h.try_snapshot(name("folder", scale)));
+        // The import profile editor, on the folder's profile.
+        h.state_mut().open_import_profiles();
+        for _ in 0..4 {
+            h.run();
+        }
+        assert!(h.state().import_profiles_open());
+        results.add(h.try_snapshot(name("profiles", scale)));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

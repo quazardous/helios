@@ -20,17 +20,17 @@
 //!   only" is on, a RAW+JPEG pair is one entry. Import takes the files
 //!   selected (`library.importFiles` with `paths` and the choices).
 //!   Folders or cards dropped on it from the system open as its sources.
-//! - **Detail**, the right column ([`super::import_detail`]): the choices
-//!   every source shares on top (duplicates, darktable edits), then the
-//!   selected source's connector section under its name: its account and
-//!   "Choose photos" for a service whose photos are chosen in its own
-//!   page, copy or add where they are, where copies go and how they are
-//!   named (with examples from the first photo ticked), the connector's
-//!   own parameters. It follows the selected source, each keeping its own
-//!   choices ([`super::import_sources`]).
-//! - **The footer**: the preset menu (Default, the presets saved, "Save
-//!   as preset…", "Delete preset"), the totals of the photos ticked,
-//!   Cancel and Import.
+//! - **Detail**, the right column ([`super::import_detail`]): the import
+//!   profile in use on top (a menu: Everyday, the person's profiles,
+//!   "Manage profiles…") with what it does in one line
+//!   ([`super::import_profile_store`]), then the selected source's
+//!   connector section under its name: its account and "Choose photos"
+//!   for a service whose photos are chosen in its own page, the
+//!   connector's own parameters. It follows the selected source, each
+//!   pointing at its profile ([`super::import_sources`]); the profile's
+//!   choices are set in the profile editor
+//!   ([`super::import_profile_editor`]), which takes the window's body.
+//! - **The footer**: the totals of the photos ticked, Cancel and Import.
 //! - **A card inserted** while the window is closed: a toast whose action
 //!   opens the window on it.
 //! - **Files or folders dropped** on Helios, or pasted: the window opens
@@ -81,7 +81,7 @@ use super::Shell;
 mod source_list;
 use super::import_auto::Trigger;
 use super::import_browsers::Shown;
-use super::import_choices::{self, Asked, ChoiceWords, Choices};
+use super::import_choices::{self, ChoiceWords, Choices};
 use super::import_detail::Part;
 use super::import_sources::SourceKey;
 use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
@@ -357,21 +357,17 @@ pub(crate) struct ImportWindow {
     selection_synced: Option<(u64, usize, u64)>,
     /// The files dropped or pasted: in their folder, only they are ticked.
     picked: Vec<PathBuf>,
-    /// The presets, by name, and where they are kept.
-    pub(super) presets: BTreeMap<String, Choices>,
-    pub(super) presets_file: Option<PathBuf>,
-    /// The named filter profiles, and where they are kept
-    /// ([`super::import_profiles`]).
-    pub(super) filters: BTreeMap<String, helios_library::import_profile::Filter>,
-    pub(super) filters_file: Option<PathBuf>,
+    /// The import profiles, with the filter presets, and where they are
+    /// kept ([`super::import_profile_store`]).
+    pub(super) profiles: super::import_profile_store::Profiles,
+    /// The profile editor, while it is open: the window's body shows it
+    /// ([`super::import_profile_editor`]).
+    pub(super) manager: Option<super::import_profile_editor::Manager>,
     /// The Include and Apply During Import sections' typing.
     pub(super) profile_edit: super::import_profiles::Editing,
     /// The library keeps a camera's default look: the Choices offer to
     /// apply it. Read when the window opens.
     pub(super) camera_looks: bool,
-    /// The name of the preset being saved, while it is typed, and
-    /// whether its field is to take the focus.
-    naming: Option<(String, bool)>,
     /// The "Add a source…" wizard, while it is open: the window's body
     /// shows its steps ([`super::import_wizard`]).
     pub(super) wizard: Option<super::import_wizard::Wizard>,
@@ -719,10 +715,10 @@ pub(crate) fn shorten_middle(text: &str, fits: impl Fn(&str) -> bool) -> String 
 enum Event {
     Cancel,
     Import,
-    /// A preset applied (`None`: Default).
-    Preset(Option<String>),
-    SavePreset(String),
-    DeletePreset(String),
+    /// An import profile picked in the profile menu (its id).
+    Profile(String),
+    /// "Manage profiles…": the profile editor.
+    ManageProfiles,
     Choose,
     ChooseInto,
     Favourite(PathBuf, bool),
@@ -856,13 +852,11 @@ struct Words {
     cancel: String,
     import_count: String,
     totals: String,
-    preset: String,
-    default_preset: String,
-    last_used: String,
-    save_preset: String,
-    preset_name: String,
-    save: String,
-    delete_preset: String,
+    /// The profile menu: its label, "Manage profiles…", and what the
+    /// profile in use does.
+    profile: String,
+    manage_profiles: String,
+    profile_summary: String,
     nothing: String,
     none_ticked: String,
     /// Why nothing can be imported: no library open.
@@ -1173,7 +1167,7 @@ impl Shell {
         w.touched = false;
         w.copy = None;
         w.custom = false;
-        w.naming = None;
+        w.manager = None;
         w.ticked.clear();
         w.picked.clear();
         w.dropped.clear();
@@ -1519,9 +1513,8 @@ impl Shell {
             | Event::Favourite(..)
             | Event::Pin(..)
             | Event::Account(_)
-            | Event::Preset(_)
-            | Event::SavePreset(_)
-            | Event::DeletePreset(_) => {}
+            | Event::Profile(_)
+            | Event::ManageProfiles => {}
         }
     }
 
@@ -1775,22 +1768,17 @@ impl ImportWindow {
                         crate::library::size_text(ctx, counts.selected_bytes),
                     ),
             ),
-            preset: t(Message::new("gui-import-window-preset", "Preset")),
-            default_preset: t(Message::new("gui-import-window-preset-default", "Default")),
-            last_used: t(Message::new(
-                "gui-import-window-preset-last-used",
-                "Last used",
+            profile: t(Message::new("gui-import-window-profile", "Import profile")),
+            manage_profiles: t(Message::new(
+                "gui-import-window-manage-profiles",
+                "Manage profiles…",
             )),
-            save_preset: t(Message::new(
-                "gui-import-window-save-preset",
-                "Save as preset…",
-            )),
-            preset_name: t(Message::new("gui-import-window-preset-name", "Preset name")),
-            save: t(Message::new("gui-import-window-preset-save", "Save")),
-            delete_preset: t(Message::new(
-                "gui-import-window-delete-preset",
-                "Delete preset",
-            )),
+            profile_summary: super::import_profile_store::summary(
+                &self.choices,
+                self.copies(),
+                sample.and_then(import_choices::Sample::date),
+                &t,
+            ),
             nothing: t(Message::new(
                 "gui-import-window-nothing",
                 "Tick a card or a folder to import",
@@ -1883,6 +1871,8 @@ impl ImportWindow {
         self.follow_browser();
         let shown = self.sources.showing.clone();
         let before = self.choices.clone();
+        // The profile editor edits a profile, not the source shown.
+        let managing = self.manager.is_some();
         let sample = self.sample();
         let Some(words) = self.words(&ctx, sample.as_ref()) else {
             return;
@@ -1957,9 +1947,8 @@ impl ImportWindow {
                 self.save();
             }
             Some(Event::Account(asked)) => self.account_asked(asked),
-            Some(Event::Preset(name)) => self.apply_preset(name.as_deref()),
-            Some(Event::SavePreset(name)) => self.save_preset(&name),
-            Some(Event::DeletePreset(name)) => self.delete_preset(&name),
+            Some(Event::Profile(id)) => self.use_profile(&id),
+            Some(Event::ManageProfiles) => self.open_manager(),
             // The shell's, at the main window's next pass.
             Some(
                 e @ (Event::Import
@@ -1987,7 +1976,12 @@ impl ImportWindow {
         }
         // The chooser's answer comes in this window too.
         self.receive_chosen_folder();
-        self.keep_source_choices(shown, &before);
+        if managing || self.manager.is_some() {
+            self.keep_profile_edits();
+        } else {
+            self.keep_source_choices(shown, &before);
+        }
+        self.link_sources();
     }
 
     /// Adds, reconnects or signs out an account, as the Sources column
@@ -2076,6 +2070,13 @@ impl ImportWindow {
         // The wizard takes the columns' and the footer's room.
         if self.wizard.is_some() {
             self.wizard_ui(ui, app);
+            return event;
+        }
+        // So does the profile editor.
+        if self.manager.is_some() {
+            if self.manager_ui(ui, &words.choices) {
+                event = Some(Event::ChooseInto);
+            }
             return event;
         }
         let w = self;
@@ -2168,14 +2169,14 @@ impl ImportWindow {
         // ([`super::import_detail`]).
         column(ui, "helios.import.choices", right, &mut |ui| {
             let mut storage = false;
-            let mut asked = None;
             let detail = w.detail();
-            import_choices::header_ui(ui, w, &words.choices);
+            if let Some(e) = profile_ui(ui, w, words) {
+                event = Some(e);
+            }
             egui::ScrollArea::vertical()
                 .id_salt("helios.import.choices")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    import_choices::shared_ui(ui, w, &words.choices);
                     ui.separator();
                     ui.heading(&detail.label);
                     for part in &detail.parts {
@@ -2189,9 +2190,8 @@ impl ImportWindow {
                             Part::Account { id, picker: false } => {
                                 ui.label(account_header(w, id));
                             }
-                            Part::Copy => {
-                                import_choices::copy_ui(ui, w, &words.choices, &mut asked);
-                            }
+                            // The profile's: in the profile editor.
+                            Part::Copy => {}
                             Part::Params => {
                                 ui.separator();
                                 w.detail_params_ui(ui, &detail);
@@ -2201,9 +2201,6 @@ impl ImportWindow {
                     ui.separator();
                     storage = backup_line_ui(ui, words);
                 });
-            if let Some(Asked::Into) = asked {
-                event = Some(Event::ChooseInto);
-            }
             if storage {
                 event = Some(Event::Storage);
             }
@@ -2221,9 +2218,6 @@ impl ImportWindow {
             }
             ui.separator();
             ui.horizontal(|ui| {
-                if let Some(e) = presets_ui(ui, w, words) {
-                    event = Some(e);
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let count = w.contents.counts().selected;
                     let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
@@ -2406,69 +2400,34 @@ fn columns(rect: egui::Rect, gap: f32) -> [egui::Rect; 3] {
     ]
 }
 
-/// The footer's preset menu: Default, the presets saved, "Save as
-/// preset…" (a name asked in place) and "Delete preset" (the one the
-/// choices are).
-fn presets_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<Event> {
+/// The top of the Detail column: the import profile in use (a menu of
+/// the profiles, then "Manage profiles…"), whose source it is for, and
+/// what it does in one line.
+fn profile_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<Event> {
     let mut event = None;
-    let current = w.preset_of_choices();
-    let shown = match &current {
-        Some(name) => name.clone(),
-        None if w.choices == Choices::default() => words.default_preset.clone(),
-        None => words.last_used.clone(),
-    };
-    egui::ComboBox::new("helios.import.preset", &words.preset)
+    ui.heading(&words.choices.heading);
+    let in_use = w.profile_in_use();
+    let shown = w
+        .profiles
+        .get(&in_use)
+        .map_or_else(|| in_use.clone(), |p| p.name.clone());
+    egui::ComboBox::new("helios.import.profile", &words.profile)
         .selected_text(shown)
         .show_ui(ui, |ui| {
-            let default = current.is_none() && w.choices == Choices::default();
-            if ui
-                .selectable_label(default, &words.default_preset)
-                .clicked()
-            {
-                event = Some(Event::Preset(None));
-            }
-            for name in w.presets.keys() {
-                if ui
-                    .selectable_label(current.as_ref() == Some(name), name)
-                    .clicked()
-                {
-                    event = Some(Event::Preset(Some(name.clone())));
+            for p in w.profiles.list() {
+                if ui.selectable_label(p.id == in_use, &p.name).clicked() {
+                    event = Some(Event::Profile(p.id.clone()));
                 }
             }
             ui.separator();
-            if ui.selectable_label(false, &words.save_preset).clicked() {
-                w.naming = Some((current.clone().unwrap_or_default(), true));
-            }
-            if ui
-                .add_enabled(
-                    current.is_some(),
-                    egui::Button::selectable(false, &words.delete_preset),
-                )
-                .clicked()
-                && let Some(name) = &current
-            {
-                event = Some(Event::DeletePreset(name.clone()));
+            if ui.selectable_label(false, &words.manage_profiles).clicked() {
+                event = Some(Event::ManageProfiles);
             }
         });
-    if let Some((name, focus)) = &mut w.naming {
-        let edit = ui.add(
-            egui::TextEdit::singleline(name)
-                .hint_text(&words.preset_name)
-                .desired_width(140.0),
-        );
-        if std::mem::take(focus) {
-            edit.request_focus();
-        }
-        let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let name = name.trim().to_string();
-        let save = ui.add_enabled(!name.is_empty(), egui::Button::new(&words.save));
-        if (save.clicked() || entered) && !name.is_empty() {
-            event = Some(Event::SavePreset(name));
-            w.naming = None;
-        } else if ui.small_button("×").on_hover_text(&words.cancel).clicked() {
-            w.naming = None;
-        }
+    if let Some(shown_for) = &words.choices.shown_for {
+        ui.weak(shown_for);
     }
+    ui.add(egui::Label::new(egui::RichText::new(&words.profile_summary).weak()).wrap());
     event
 }
 

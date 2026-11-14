@@ -233,7 +233,7 @@ fn settings_accounts_lists_the_accounts_and_signs_out_and_reconnects() {
 /// remote one always copies, and has no darktable sidecars); a folder
 /// ticked shows them again.
 #[test]
-fn the_choices_follow_the_selected_source_and_hide_what_its_connector_cannot_honour() {
+fn the_profile_follows_the_selected_source_and_a_remote_one_always_copies() {
     let (world, mut h) = world();
     let mut account = helios_connect::account::Account::new(ID, "ann@nas.local", &[]);
     account.state = AccountState::Connected;
@@ -258,19 +258,25 @@ fn the_choices_follow_the_selected_source_and_hide_what_its_connector_cannot_hon
     )
     .unwrap();
     until(&mut h, "the account listed", |h| shown(h, "ann@nas.local"));
-    assert!(shown(&h, "Add where they are") && shown(&h, "Read darktable edits"));
     h.get_by_label("ann@nas.local").click();
     until(&mut h, "the account's choices", |h| {
         shown(h, "ann@nas.local: the default choices")
     });
-    assert!(
-        !shown(&h, "Add where they are"),
-        "a remote source always copies"
-    );
-    assert!(!shown(&h, "Read darktable edits"), "no sidecars there");
+    // A remote source always copies, whatever the profile says.
     assert!(h.state().import_copies());
-    // A choice changed is the account's own.
-    h.get_by_label("Keep").click();
+    let _ = h.get_by_label_contains("Copied into Library/");
+    // A profile picked is the account's own.
+    let keep_all = h
+        .state_mut()
+        .put_import_profile(helios_gui::shell::ImportProfile {
+            id: String::new(),
+            name: "Keep all".into(),
+            choices: helios_gui::shell::Choices {
+                duplicates: helios_library::import::Duplicates::Keep,
+                ..helios_gui::shell::Choices::default()
+            },
+        });
+    assert!(h.state_mut().use_import_profile(&keep_all));
     until(&mut h, "the account's own choices", |h| {
         shown(h, "ann@nas.local: its own choices")
     });
@@ -288,9 +294,9 @@ fn the_choices_follow_the_selected_source_and_hide_what_its_connector_cannot_hon
     )
     .unwrap();
     until(&mut h, "the folder's choices", |h| {
-        shown(h, "Add where they are") && shown(h, "Read darktable edits")
+        h.state().import_choices().duplicates.as_str() == "skip"
     });
-    assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
+    assert_eq!(h.state().import_profile_in_use(), "everyday");
     let _ = std::fs::remove_dir_all(&folder);
 }
 
@@ -1324,7 +1330,7 @@ fn a_picking_source_shows_its_account_once_and_one_primary_action() {
 #[test]
 fn the_selected_source_s_connector_shows_its_detail_on_the_right() {
     let (h, _opened, _folder, _imported, _) = picking_world(None);
-    for heading in ["Sources", "Contents", "Choices", "Duplicates"] {
+    for heading in ["Sources", "Contents", "Choices", "Import profile"] {
         assert!(shown(&h, heading), "{heading}");
     }
     let middle = h
@@ -1336,13 +1342,13 @@ fn the_selected_source_s_connector_shows_its_detail_on_the_right() {
         "Choose photos in the right zone: {choose:?} beside {middle:?}"
     );
     // The connector's section is headed by its name, in the right zone,
-    // below the shared choices.
+    // below the profile in use.
     let section = h
         .query_all_by_label("Test server")
         .map(|n| n.rect())
         .find(|r| r.left() >= middle.right())
         .expect("the connector's name heads its section");
-    let duplicates = h.get_by_label("Duplicates").rect();
+    let duplicates = h.get_by_label("Import profile").rect();
     assert!(duplicates.left() >= middle.right());
     assert!(duplicates.top() < section.top());
     assert!(section.top() < choose.top());
