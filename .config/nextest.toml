@@ -71,3 +71,12 @@ slow-timeout = { period = "30s", terminate-after = 20 }
 [[profile.default.overrides]]
 filter = 'binary(library_scale)'
 slow-timeout = { period = "30s", terminate-after = 10 }
+
+# The MCP panic hunt: thousands of calls through helios-mcp, a node and
+# a server started per tool. Every call has its own deadline and the hunt
+# stops after a bounded number of wrong calls: it cannot hang, so a
+# longer leash than the 120 s hang guard.
+[[profile.default.overrides]]
+filter = 'binary(mcp_panic_hunt)'
+success-output = "final"
+slow-timeout = { period = "60s", terminate-after = 10 }
