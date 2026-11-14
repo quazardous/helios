@@ -62,6 +62,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
     a_rotation_turns_resets_and_undoes(make());
+    a_group_edit_is_one_step_mixed_fields_kept(make());
     keyword_branches_filter_rename_merge_and_undo(make());
     a_duplicate_is_a_new_head_beside_its_source(make());
     a_copy_is_picked_as_current_removed_and_brought_back(make());
@@ -3036,6 +3037,71 @@ fn a_rotation_turns_resets_and_undoes<S: Store>(s: S) {
     let audit = v.audit(&b).unwrap();
     assert!(audit.iter().any(|e| e.field == ROTATION && e.who == "user"));
     assert!(v.rotate(&[image(9).id], Turn::Right, "user", 11).is_err());
+}
+
+/// A group edit (L13): a field set on three photos with mixed values,
+/// the others kept; keywords added and a branch taken off across them;
+/// one audited step, undone and done again.
+fn a_group_edit_is_one_step_mixed_fields_kept<S: Store>(s: S) {
+    use crate::meta::{CREATOR, TITLE, commands};
+    use serde_json::Value;
+    let mut s = with_images(s, 3);
+    let ids: Vec<ImageId> = (1..=3).map(|i| image(i).id).collect();
+    for (id, title) in ids.iter().zip(["a", "b", "c"]) {
+        s.set_field(id, TITLE, Some(&json!(title))).unwrap();
+    }
+    s.set_field(&ids[0], TAGS, Some(&json!(["Animals|Dog", "sea"])))
+        .unwrap();
+    let v = Vault::new(s);
+    let read = |v: &Vault<S>, field: &str| -> Vec<Option<Value>> {
+        v.fields_of(&ids, &[field])
+            .unwrap()
+            .into_iter()
+            .map(|f| f.get(field).cloned())
+            .collect()
+    };
+    let tags_now = |id: &ImageId| {
+        v.fields_of(&[*id], &[TAGS]).unwrap()[0]
+            .get(TAGS)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    let mut set = serde_json::Map::new();
+    set.insert(CREATOR.into(), json!("Ann"));
+    let edit = commands(
+        &ids,
+        &set,
+        &["Trips|2026".to_string()],
+        &["Animals".to_string()],
+        &crate::meta::Labels::default(),
+        &tags_now,
+    )
+    .unwrap();
+    let step = v.set_meta(&edit, "user", 5).unwrap();
+    assert_eq!(step.images.len(), 3, "one step over the three photos");
+    assert_eq!(read(&v, CREATOR), vec![Some(json!("Ann")); 3]);
+    assert_eq!(
+        read(&v, TITLE),
+        vec![Some(json!("a")), Some(json!("b")), Some(json!("c"))],
+        "a mixed field not named keeps each photo's value"
+    );
+    assert_eq!(tags_now(&ids[0]), vec!["Trips|2026", "sea"]);
+    assert_eq!(tags_now(&ids[2]), vec!["Trips|2026"]);
+    v.revert(&step).unwrap();
+    assert_eq!(read(&v, CREATOR), vec![None; 3], "undone");
+    assert_eq!(tags_now(&ids[0]), vec!["Animals|Dog", "sea"]);
+    assert!(tags_now(&ids[1]).is_empty());
+    v.replay(&step).unwrap();
+    assert_eq!(read(&v, CREATOR), vec![Some(json!("Ann")); 3], "redone");
+    assert!(
+        v.set_meta(&edit, "user", 6).unwrap().is_empty(),
+        "the same edit again changes nothing"
+    );
+    assert!(v.audit(&ids[1]).unwrap().iter().any(|e| e.field == CREATOR));
 }
 
 /// Hierarchical keywords (L12): a branch filters its path and those

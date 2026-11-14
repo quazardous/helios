@@ -48,6 +48,12 @@ pub const PICKED: &str = "picked";
 pub const TAGS: &str = "tags";
 /// A photo's title, a line of text.
 pub const TITLE: &str = "title";
+/// A photo's description (caption), free text.
+pub const DESCRIPTION: &str = "description";
+/// Who made the photo (IPTC's creator, XMP's `dc:creator`).
+pub const CREATOR: &str = "creator";
+/// Its copyright notice (XMP's `dc:rights`).
+pub const COPYRIGHT: &str = "copyright";
 /// Quarter turns clockwise the user gave a photo, on top of its file's
 /// EXIF orientation ([`crate::rotation`]).
 pub const ROTATION: &str = "rotation";
@@ -93,9 +99,21 @@ pub const FIELDS: &[FieldSpec] = &[
         read_only: false,
     },
     FieldSpec {
-        name: "description",
+        name: DESCRIPTION,
         kind: FieldKind::Text,
         about: "description",
+        read_only: false,
+    },
+    FieldSpec {
+        name: CREATOR,
+        kind: FieldKind::Text,
+        about: "who made the photo",
+        read_only: false,
+    },
+    FieldSpec {
+        name: COPYRIGHT,
+        kind: FieldKind::Text,
+        about: "copyright notice",
         read_only: false,
     },
     FieldSpec {

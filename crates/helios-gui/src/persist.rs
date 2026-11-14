@@ -73,13 +73,16 @@ type Searched = (Vec<String>, helios_vault::Facets);
 
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match; the title is copied with the marks).
-const SHOWN: [&str; 11] = [
+const SHOWN: [&str; 14] = [
     RATING,
     REJECTED,
     PICKED,
     LABELS,
     TAGS,
     TITLE,
+    helios_vault::meta::DESCRIPTION,
+    helios_vault::meta::CREATOR,
+    helios_vault::meta::COPYRIGHT,
     ROTATION,
     CAPTURED,
     cull::FOCUS,
@@ -166,6 +169,11 @@ enum Asked {
     TrashPlan(crate::library::TrashAsk),
     /// A photo's heads, for the versions strip (`library.versions.list`).
     Versions(String),
+    /// The metadata templates (`library.documents.get`).
+    Templates,
+    /// A photo's capture details, for the Metadata section
+    /// (`library.fields.get`).
+    Exif(String),
 }
 
 /// A write of the library sent to the node.
@@ -214,6 +222,9 @@ enum Write {
     /// (`library.keywords.rename`, `.merge`), asked at a time (seconds):
     /// one step of the library's history.
     Keyword(crate::library::KeywordAsk, f64, crate::library::Batch),
+    /// Photos' metadata set as a group (`library.meta.set`), asked at a
+    /// time (seconds): one step of the library's history.
+    Meta(crate::library::MetaEdit, f64, crate::library::Batch),
     /// RAW+JPEG files paired or unpaired (`library.pairs.pair`,
     /// `.unpair`), asked at a time (seconds): one step of the library's
     /// history.
@@ -312,6 +323,7 @@ impl Write {
                     ),
                 }
             }
+            Self::Meta(edit, ..) => (helios_node_core::library::META_SET, edit.params()),
             Self::Pair(ask, ..) => {
                 use crate::library::PairAsk;
                 match ask {
@@ -376,6 +388,7 @@ impl Write {
             | Self::RemoveVersion(..)
             | Self::Stack(..)
             | Self::Keyword(..)
+            | Self::Meta(..)
             | Self::Pair(..)
             | Self::Document { .. }
             | Self::Session(..)
@@ -974,7 +987,11 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
             match asked {
                 // The filters' history is a convenience: a warning.
                 Asked::FilterHistory => shell.notify(Level::Warning, e.message),
-                Asked::Folders | Asked::Albums | Asked::Versions(_) => {
+                Asked::Folders
+                | Asked::Albums
+                | Asked::Versions(_)
+                | Asked::Templates
+                | Asked::Exif(_) => {
                     unreadable(shell, e.message);
                 }
                 Asked::TrashPlan(_) => not_trashed(shell, &e.message),
@@ -1020,6 +1037,19 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
                 .filter_map(crate::library::VersionHead::from_json)
                 .collect();
             shell.library_mut().set_versions(image.clone(), heads);
+        }
+        Asked::Templates => {
+            let doc = Some(&answer["document"]).filter(|d| !d.is_null());
+            shell
+                .library_mut()
+                .set_templates(crate::library::Template::list_of(doc));
+        }
+        Asked::Exif(image) => {
+            let fields = answer["rows"][0]["fields"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            shell.library_mut().set_exif(image.clone(), fields);
         }
     }
 }
@@ -1536,6 +1566,31 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
+            (Write::Meta(edit, at, batch), Ok(answer)) => {
+                // The step the node made, recorded so Ctrl+Z sets the
+                // photos' metadata back; the vault's events show it.
+                match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+                    Ok(changes) if changes.is_empty() => {}
+                    Ok(changes) => {
+                        let label = crate::library_history::meta_label(edit.images.len());
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
+                    }
+                    Err(e) => shell.notify(
+                        Level::Warning,
+                        format!("the metadata cannot be set back with undo: {e}"),
+                    ),
+                }
+            }
+            (Write::Meta(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-meta-not-set",
+                    "The metadata was not set: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Keyword(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -2170,6 +2225,35 @@ impl<S: Store + 'static> Persist<S> {
         self.editing.as_ref().map(|e| &e.session)
     }
 
+    /// Reads the metadata templates once, writes them back each time they
+    /// change (a library document through the node, outside the
+    /// library's history), and reads the capture details the Metadata
+    /// section shows.
+    fn keep_templates(&mut self, shell: &mut Shell) {
+        use helios_vault::meta::{TEMPLATES_KEY, TEMPLATES_NS};
+        if let Some(image) = shell.library_mut().take_exif_wanted() {
+            let pending = self.node.call(
+                "library.fields.get",
+                json!({ "images": [image], "fields": helios_vault::capture::NAMES }),
+            );
+            self.asked.push((Asked::Exif(image), pending));
+        }
+        if shell.library_mut().take_templates_wanted() {
+            let pending = self.node.call(
+                "library.documents.get",
+                json!({ "ns": TEMPLATES_NS, "key": TEMPLATES_KEY }),
+            );
+            self.asked.push((Asked::Templates, pending));
+        }
+        if let Some(list) = shell.library_mut().take_templates_write() {
+            self.writes.push_back(Write::Document {
+                ns: TEMPLATES_NS,
+                key: TEMPLATES_KEY,
+                document: Some(crate::library::Template::document(&list)),
+            });
+        }
+    }
+
     /// Reads the Library's pinned and recent filters once, and writes
     /// them back each time they change (`crate::recent_filters`): a
     /// library document, outside the library's history. Both go through
@@ -2267,6 +2351,13 @@ impl<S: Store + 'static> Persist<S> {
                 .into_iter()
                 .map(|(ask, batch)| Write::Keyword(ask, now, batch)),
         );
+        let meta_edits = shell.library_mut().take_meta_edits();
+        self.writes.extend(
+            meta_edits
+                .into_iter()
+                .map(|(edit, batch)| Write::Meta(edit, now, batch)),
+        );
+        self.keep_templates(shell);
         let pair_asks = shell.library_mut().take_pair_asks();
         self.writes.extend(
             pair_asks

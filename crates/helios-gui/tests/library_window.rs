@@ -181,3 +181,34 @@ fn library_window_snapshots() {
     h.run_steps(4);
     results.add(h.try_snapshot("library-window-pop-dark-1x"));
 }
+
+/// The Metadata section on one photo, then on two whose fields differ
+/// (‹mixed›), in the Library window.
+#[test]
+fn library_metadata_snapshots() {
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut list = entries();
+    for (e, title) in list.iter_mut().zip(["Harbour", "Market", "Dunes"]) {
+        e.title = Some(title.to_string());
+        e.creator = Some("Ann Lee".into());
+        e.rating = 3;
+        e.labels = vec!["green".into()];
+        e.tags = vec!["Trips|2026".into()];
+    }
+    list[1].rating = 5;
+    list[1].tags.push("Market".into());
+    shell.set_library(list);
+    shell.library_mut().select(0);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    h.run_steps(4);
+    results.add(h.try_snapshot("library-metadata-single"));
+    h.state_mut()
+        .library_mut()
+        .select_ids(&["a".to_string(), "b".to_string()]);
+    h.run_steps(4);
+    h.get_by_label("2 photos selected");
+    results.add(h.try_snapshot("library-metadata-mixed"));
+}
