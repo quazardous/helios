@@ -635,7 +635,7 @@ command-help-health =
     .title = Bilan de santé…
 
 command-activity-show =
-    .title = Tâches de fond…
+    .title = Activité… (`id` : la tâche sélectionnée, une promesse de `promises.list`)
 
 command-health-fix =
     .title = Lancer la correction d’un constat de santé, puis les vérifications à nouveau (`id`)

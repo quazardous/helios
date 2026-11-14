@@ -253,6 +253,14 @@ gui-backup-wizard-step-when = When
 
 gui-backup-wizard-when-about = Back up now on the Backup page makes copies at any time.
 
+gui-boot-gpu = Opening the graphics device
+
+gui-boot-interface = Building the interface
+
+gui-boot-library-read = Reading the library
+
+gui-boot-plugins = Reading the plugins
+
 gui-caches-clear = Clear
 
 gui-caches-clear-all = Clear caches
@@ -576,6 +584,10 @@ gui-editor-params-refused = A parameter does not fit what the connector takes: {
 gui-editor-save = Save the source
 
 gui-editor-title = Edit source
+
+gui-end-changes = Saving your changes
+
+gui-end-interface = Saving the interface settings
 
 gui-export-bits = PNG bits per channel
 
@@ -1246,6 +1258,70 @@ gui-job-import-failed = Import failed
 gui-job-other-done = Job finished
 
 gui-job-other-failed = Job failed
+
+gui-jobs-added = Added
+
+gui-jobs-attempts = Attempts
+
+gui-jobs-by-agent = An agent
+
+gui-jobs-by-cli = The command line
+
+gui-jobs-by-node = Automatic
+
+gui-jobs-by-user = You
+
+gui-jobs-clear = Clear finished
+
+gui-jobs-detail = Job detail
+
+gui-jobs-elapsed = Elapsed
+
+gui-jobs-filter-kind = Kind shown
+
+gui-jobs-filter-state = State shown
+
+gui-jobs-items-failed = Failed
+
+gui-jobs-kind = Kind
+
+gui-jobs-kind-all = Every kind
+
+gui-jobs-left = Time left
+
+gui-jobs-log = Log
+
+gui-jobs-none = No background jobs
+
+gui-jobs-none-selected = No job selected
+
+gui-jobs-show-library = Show in Library
+
+gui-jobs-skipped = Skipped
+
+gui-jobs-source = Source
+
+gui-jobs-started = Started
+
+gui-jobs-started-by = Started by
+
+gui-jobs-state = State
+
+gui-jobs-state-all = Every state
+
+gui-jobs-state-done = Done
+
+gui-jobs-state-failed = Failed or cancelled
+
+gui-jobs-state-running = Running
+
+gui-jobs-step = Now
+
+gui-jobs-title = Jobs
+
+gui-jobs-unchanged = Already there
+
+gui-jobs-window = Activity
 
 gui-keys-from-template = template
 
@@ -2333,6 +2409,14 @@ gui-snapshot-unreadable = Snapshot “{ $name }” cannot be read: { $error }
 
 gui-snapshots-not-saved = The snapshots were not saved: { $error }
 
+gui-splash-closing = Closing Helios…
+
+gui-splash-quit-now = Quit now
+
+gui-splash-starting = Starting Helios…
+
+gui-splash-still-working = Still working…
+
 gui-stacks-accept-all = Accept all
 
 gui-stacks-accept-checked = Accept the checked
@@ -3025,6 +3109,8 @@ look-render-failed = cannot render the raw: { $error }
 
 node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end, the workflow.* requests, library.import, settings.layer.*, commands.list and command.run
 
+node-boot-vault = Opening the library
+
 node-command-debug-only = only the debug control endpoint runs it (helios-node --control, debug builds)
 
 node-command-needs-vault = the node keeps no vault: start it with --vault
@@ -3038,6 +3124,12 @@ node-command-params = `{ $id }` refused its params: { $error }
 node-command-unknown = no command `{ $id }`
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
+
+node-end-jobs = Stopping background jobs
+
+node-end-jobs-waiting = Waiting for { $count } running jobs to finish
+
+node-end-vault = Saving and closing the library
 
 node-job-unknown = job { $job } is unknown or already ended
 

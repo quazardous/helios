@@ -1136,19 +1136,6 @@ impl Shell {
     /// a file its folder with only the files given ticked; `copy` sets
     /// copy or add), else on the first card, else on the last source used.
     /// Open already, its window comes to the front.
-    /// The import window, where the imports show with their progress
-    /// and outcome: brought forward when open, as it is, else opened.
-    pub(super) fn show_import_activity(&mut self) {
-        let shown = {
-            let w = self.import.get();
-            w.open.then(|| w.shown.clone()).flatten()
-        };
-        match shown {
-            Some(id) => self.core.app.handle().raise_window(&id),
-            None => self.open_import_window(&Value::Null),
-        }
-    }
-
     pub(super) fn open_import_window(&mut self, args: &Value) {
         // The strategy line reads the strategy and its disks as they are.
         self.refresh_volumes();

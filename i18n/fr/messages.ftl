@@ -190,6 +190,14 @@ gui-account-status-refused = Accès refusé
 
 gui-backup-card-safe = { $card } peut être formatée : chaque photo a ses sauvegardes
 
+gui-boot-gpu = Ouverture du périphérique graphique
+
+gui-boot-interface = Construction de l’interface
+
+gui-boot-library-read = Lecture de la bibliothèque
+
+gui-boot-plugins = Lecture des plugins
+
 gui-caches-clear = Vider
 
 gui-caches-clear-all = Vider les caches
@@ -354,6 +362,10 @@ gui-editor-params-refused = Un paramètre ne correspond pas à ce que le connect
 gui-editor-save = Enregistrer la source
 
 gui-editor-title = Modifier la source
+
+gui-end-changes = Enregistrement de vos modifications
+
+gui-end-interface = Enregistrement des réglages de l’interface
 
 gui-gesture-in-progress = { $gesture } est en cours
 
@@ -656,6 +668,38 @@ gui-job-import-failed = Échec de l’import
 gui-job-other-done = Tâche terminée
 
 gui-job-other-failed = Échec de la tâche
+gui-jobs-added = Ajoutées
+gui-jobs-attempts = Tentatives
+gui-jobs-by-agent = Un agent
+gui-jobs-by-cli = La ligne de commande
+gui-jobs-by-node = Automatique
+gui-jobs-by-user = Vous
+gui-jobs-clear = Effacer les terminées
+gui-jobs-detail = Détail de la tâche
+gui-jobs-elapsed = Écoulé
+gui-jobs-filter-kind = Type affiché
+gui-jobs-filter-state = État affiché
+gui-jobs-items-failed = En échec
+gui-jobs-kind = Type
+gui-jobs-kind-all = Tous les types
+gui-jobs-left = Temps restant
+gui-jobs-log = Journal
+gui-jobs-none = Aucune tâche de fond
+gui-jobs-none-selected = Aucune tâche sélectionnée
+gui-jobs-show-library = Afficher dans la Bibliothèque
+gui-jobs-skipped = Ignorées
+gui-jobs-source = Source
+gui-jobs-started = Début
+gui-jobs-started-by = Lancée par
+gui-jobs-state = État
+gui-jobs-state-all = Tous les états
+gui-jobs-state-done = Terminée
+gui-jobs-state-failed = En échec ou annulée
+gui-jobs-state-running = En cours
+gui-jobs-step = Maintenant
+gui-jobs-title = Tâches
+gui-jobs-unchanged = Déjà présentes
+gui-jobs-window = Activité
 
 gui-keys-from-template = modèle
 
@@ -995,6 +1039,14 @@ gui-snapshot-saved = { $target } capturé dans { $path }
 
 gui-snapshots-not-saved = Les instantanés n’ont pas été enregistrés : { $error }
 
+gui-splash-closing = Fermeture de Helios…
+
+gui-splash-quit-now = Quitter maintenant
+
+gui-splash-starting = Démarrage de Helios…
+
+gui-splash-still-working = Toujours en cours…
+
 gui-status-culled = { $picked ->
     [one] { $picked } retenue
    *[other] { $picked } retenues
@@ -1265,6 +1317,8 @@ look-mixed-cameras = les photos viennent de { $count } boîtiers ({ $cameras }) 
 
 node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end, aux requêtes workflow.*, à library.import, à settings.layer.*, à commands.list et à command.run
 
+node-boot-vault = Ouverture de la bibliothèque
+
 node-command-debug-only = seul le point d’accès de contrôle de débogage l’exécute (helios-node --control, versions de débogage)
 
 node-command-needs-vault = le nœud ne garde aucun coffre : lancez-le avec --vault
@@ -1278,6 +1332,12 @@ node-command-params = `{ $id }` a refusé ses paramètres : { $error }
 node-command-unknown = aucune commande `{ $id }`
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
+
+node-end-jobs = Arrêt des tâches de fond
+
+node-end-jobs-waiting = Attente de la fin de { $count } tâches en cours
+
+node-end-vault = Enregistrement et fermeture de la bibliothèque
 
 node-job-unknown = la tâche { $job } est inconnue ou déjà terminée
 

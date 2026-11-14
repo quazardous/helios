@@ -2,8 +2,8 @@
 //! answered at once with a promise) and may close while it runs; the main
 //! window's status bar follows the promise: a spinner, the count of tasks
 //! and "Importing 120/412", gone once it settles; a failure leaves a
-//! warning badge until it is clicked, which opens the import window with
-//! the import's outcome. Cancel on the import's line stops it; Import
+//! warning badge until it is clicked, which opens the Activity focus on
+//! the failed import. Cancel on the import's line stops it; Import
 //! again goes through a promise too.
 //!
 //! The node is the desktop's (`VaultService` in process) with a stand-in
@@ -239,14 +239,16 @@ fn a_failed_import_leaves_a_badge_until_it_is_clicked() {
     assert!(shown(&h, helios_gui::activity::MARK).is_none());
     let badge = shown(&h, helios_gui::activity::FAILED_MARK).unwrap();
     assert_eq!(badge.value, Some(1.0));
-    // A click shows the import window, with the failure and Retry; the
-    // badge goes.
+    // A click opens the Activity focus on the failed import, with its
+    // reason and Retry; the badge goes.
     click(&mut h, helios_gui::activity::FAILED_MARK);
-    until(&mut h, "the import window", |h| {
-        h.state().import_window_open()
+    until(&mut h, "the Activity focus", |h| {
+        h.state().activity_focus_state()["open"] == true
     });
+    let failed = h.state().activity_focus_state()["selected"].clone();
+    assert!(failed.is_string(), "the failure selected: {failed}");
     until(&mut h, "the outcome", |h| {
-        h.query_by_label("Failed: the disk is full").is_some()
+        h.query_all_by_label("Failed: the disk is full").count() > 0
     });
     assert!(h.query_by_label("Retry").is_some());
     until(&mut h, "the badge gone", |h| {
