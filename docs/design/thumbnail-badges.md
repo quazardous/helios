@@ -1,7 +1,8 @@
 # Thumbnail badges
 
-Status: study (2026-11-14). Nothing here is built yet; the slices at the
-end are the proposal.
+Status: study (2026-11-14); slices 1 and 2 built (2026-11-14): the import
+grid's marks are egui-pop `MarkChip`s, "in your Library" shown on every
+photo the Library holds, whether or not "New only" is on.
 
 The owner's ask: in the import window, a photo the Library holds already
 carries the words "in your Library" over its thumbnail (beside

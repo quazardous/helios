@@ -320,6 +320,11 @@ fn the_import_grid_shows_a_card_by_day_greys_what_the_library_holds_and_pairs_ra
     assert_eq!((counts.photos, counts.new, counts.selected), (3, 2, 2));
     let _ = h.get_by_label_contains("3 photos, 2 new");
     let _ = h.get_by_label("Import 2");
+    // New only off: the photo the Library holds is still marked, its
+    // icon's name said with its own.
+    h.get_by_label("New only").click();
+    h.run_steps(3);
+    let _ = h.get_by_label("IMG_0002.JPG · in your Library");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
