@@ -867,6 +867,8 @@ gui-import-history-counts = { $added } added, { $located } located, { $unchanged
 
 gui-import-history-failed = failed
 
+gui-import-history-imports = Imports
+
 gui-import-history-none = No import yet
 
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
@@ -942,6 +944,8 @@ gui-import-window-edit-source = Edit source…
 gui-import-window-empty = No photos in the sources ticked
 
 gui-import-window-example = e.g. { $example }
+
+gui-import-window-folders = Folders
 
 gui-import-window-favourites = Favourites
 
@@ -1020,6 +1024,8 @@ gui-import-window-preset-save = Save
 gui-import-window-raw-only = Raw only
 
 gui-import-window-reading = Reading { $path }
+
+gui-import-window-last-import = Last import { $when }
 
 gui-import-window-recent = Recent
 

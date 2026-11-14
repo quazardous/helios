@@ -1554,6 +1554,10 @@ gui-import-window-empty = Aucune photo dans les sources cochées
 
 gui-import-window-example = ex. { $example }
 
+gui-import-history-imports = Importations
+
+gui-import-window-folders = Dossiers
+
 gui-import-window-favourites = Favoris
 
 gui-import-window-import = Importer { $count }
@@ -1623,6 +1627,8 @@ gui-import-window-pair = RAW+JPG
 gui-import-window-raw-only = Raw seulement
 
 gui-import-window-reading = Lecture de { $path }
+
+gui-import-window-last-import = Dernière importation le { $when }
 
 gui-import-window-recent = Récents
 
