@@ -731,8 +731,9 @@ fn a_vault_held_locked_does_not_delay_the_frame_that_asks_a_review() {
         .set_document("library/elsewhere", "held", Some(&json!(true)))
         .unwrap();
     let started = Instant::now();
-    let answer = h
-        .state_mut()
+    // Queued by the shell, run by the frame below, which hands the
+    // review to a thread of its own.
+    h.state_mut()
         .run("workshop.review", json!({ "run": "run" }), Origin::User)
         .unwrap();
     h.run();
@@ -741,7 +742,6 @@ fn a_vault_held_locked_does_not_delay_the_frame_that_asks_a_review() {
         took < Duration::from_millis(500),
         "the frame waited {took:?} for the vault"
     );
-    assert_eq!(answer["pending"], true, "{answer}");
     std::thread::sleep(Duration::from_millis(200));
 
     // Let go: a coming frame shows the review.
