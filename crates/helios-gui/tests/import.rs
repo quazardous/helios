@@ -479,14 +479,13 @@ fn the_sources_column_s_panels_select_one_source_at_a_time() {
     h.get_by_label("Garden").click();
     h.run_steps(3);
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&two));
-    use egui::accesskit::Toggled;
     assert_eq!(
         h.get_by_label("Garden").accesskit_node().toggled(),
-        Some(Toggled::True)
+        Some(egui::accesskit::Toggled::True)
     );
     assert_eq!(
         h.get_by_label("Trip").accesskit_node().toggled(),
-        Some(Toggled::False)
+        Some(egui::accesskit::Toggled::False)
     );
     read_through(&mut h);
     assert_eq!(h.state().import_counts().selected, 3);

@@ -237,7 +237,7 @@ impl ImportWindow {
             name,
             detail,
             // Its own choices, marked.
-            mark: self.sources.has_own(path).then(|| Mark {
+            mark: self.sources.has_own(path).then_some(Mark {
                 text: "●",
                 colour: egui::Color32::GRAY,
             }),
@@ -303,16 +303,15 @@ impl ImportWindow {
             detail.push(t(word));
         }
         if detail.is_empty() {
-            let connector = self
-                .connectors
-                .provider(&account.connector)
-                .map(|p| {
+            let connector = self.connectors.provider(&account.connector).map_or_else(
+                || account.connector.clone(),
+                |p| {
                     crate::shell::import_accounts::translated(
                         self.texts.as_ref(),
                         &p.manifest().label,
                     )
-                })
-                .unwrap_or_else(|| account.connector.clone());
+                },
+            );
             detail.push(connector);
         }
         Item {
