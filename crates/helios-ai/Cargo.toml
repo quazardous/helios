@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+# Extractor answers checked, and the note of the one corrective retry.
+helios-extract.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 blake3.workspace = true

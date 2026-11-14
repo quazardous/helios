@@ -1101,6 +1101,7 @@ impl Shell {
             fell_back: BTreeSet::new(),
             about_generation: None,
             jobs,
+            _library_walks: library_history.walks(),
             library_history,
             status,
             ended: crate::jobs::Ended::default(),
@@ -6913,6 +6914,7 @@ impl Shell {
         self.engine_notices();
         self.copied_image();
         self.job_notices();
+        self.library_walks_frame(&ctx);
         self.follow_queue(&ctx);
         self.menus_ui(&ctx);
         self.rule_editor_ui(&ctx);
@@ -7159,7 +7161,13 @@ impl Shell {
         let mut line = self.core.status.borrow_mut();
         line.recording = self.focus.recording.is_some();
         line.note = self.notes.last().cloned();
-        line.hint = self.focus.viewport.borrow().masks().hint(ctx);
+        line.hint = self
+            .focus
+            .viewport
+            .borrow()
+            .masks()
+            .hint(ctx)
+            .or_else(|| self.library_walking());
         line.decisions = self.core.stack_review.borrow().decisions().len();
         {
             let decisions = self.focus.decisions.borrow();
@@ -7191,6 +7199,36 @@ impl Shell {
     /// ([`crate::library_history::LibraryHistory::set_apply`]).
     pub fn library_history(&self) -> crate::library_history::LibraryHistory {
         self.core.library_history.clone()
+    }
+
+    /// The library's walks off the frame: the window woken as each lands,
+    /// a refused one said in a toast (its steps are back in the line).
+    fn library_walks_frame(&mut self, ctx: &egui::Context) {
+        if !self.core.library_history.wakes() {
+            let ctx = ctx.clone();
+            self.core
+                .library_history
+                .set_wake(Arc::new(move || ctx.request_repaint()));
+        }
+        for reason in self.core.library_history.take_refusals() {
+            let m = Message::new("gui-history-library-refused", "Undo refused: { $reason }")
+                .with("reason", reason.as_str());
+            let report = crate::report::Context::command("edit.undo").cause(reason);
+            self.notify_failure(Level::Warning, m, report);
+        }
+    }
+
+    /// What the status line says while the library's history walks off
+    /// the frame: "Undoing “Rotate 3 photos left”…".
+    fn library_walking(&self) -> Option<String> {
+        let (redo, label) = self.core.library_history.in_flight().into_iter().next()?;
+        let m = if redo {
+            Message::new("gui-history-library-redoing", "Redoing “{ $step }”…")
+        } else {
+            Message::new("gui-history-library-undoing", "Undoing “{ $step }”…")
+        }
+        .with("step", label.text.as_str());
+        Some(self.text(m))
     }
 
     /// The jobs that ended since the last frame: said on

@@ -12,7 +12,9 @@
 //! Node first: every action is a command of the desktop's node
 //! (`calibrate.chart` for the dry run and the save, `calibrate.profiles.*`
 //! for the list), run by the shell as the person's. The window's pass
-//! only queues what was asked ([`Event`]); the main window's pass runs it.
+//! only queues what was asked ([`Event`]); the main window's pass sends
+//! it off the frame (`calibrate::with_landing`): the window says it works
+//! while the node answers, and shows each answer at the frame it lands.
 
 use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
@@ -67,6 +69,27 @@ enum Event {
     Import,
 }
 
+/// A command sent off the frame: what lands is read as.
+#[derive(Clone, Debug)]
+enum Ask {
+    /// An event's command (a dry run: the `n`th asked).
+    Event(Event, u64),
+    /// A save that also sets the camera's default: its answer.
+    Save { as_default: bool },
+    /// The default set after a save: the save's answer.
+    SavedDefault(Value),
+    /// The profiles listed, the `n`th time.
+    List(u64),
+    /// A camera's default profiles, read for the `n`th list.
+    Defaults(String, u64),
+}
+
+/// An ask in flight and where its answer lands.
+struct InFlight {
+    ask: Ask,
+    answer: std::sync::mpsc::Receiver<Result<Value, String>>,
+}
+
 /// The shot shown: its picture and the size of the image measured.
 struct Picture {
     image: egui::ColorImage,
@@ -110,6 +133,12 @@ pub(crate) struct Calibration {
     import_path: String,
     events: Vec<Event>,
     texts: Option<Arc<dyn Fn(Message) -> String + Send + Sync>>,
+    /// The asks whose answer has not landed.
+    in_flight: Vec<InFlight>,
+    /// The last dry run asked: an older one landing later is dropped.
+    solves: u64,
+    /// The last listing asked, likewise.
+    lists: u64,
 }
 
 /// The focus: its state shared with the window's content.
@@ -233,6 +262,13 @@ impl Calibration {
             egui::ScrollArea::vertical()
                 .id_salt("helios.calibrate.report")
                 .show(ui, |ui| {
+                    if !self.in_flight.is_empty() {
+                        // Words, not a spinner: no frame drawn for nothing.
+                        ui.weak(self.text(Message::new(
+                            "gui-calibrate-working",
+                            "Waiting for the library…",
+                        )));
+                    }
                     self.report_ui(ui);
                     ui.separator();
                     self.save_ui(ui);
@@ -751,47 +787,145 @@ impl Shell {
             "error": c.error,
             "profiles": c.profiles,
             "defaults": c.defaults,
+            "busy": !c.in_flight.is_empty(),
         })
     }
 
-    /// The profiles listed again, and each camera's default.
+    /// The profiles listed again, then each camera's default, off the
+    /// frame.
     fn refresh_profiles(&mut self) {
         let camera = self.calibration.get().camera.clone();
         let args = camera.map_or_else(|| json!({}), |c| json!({ "camera": c }));
-        let Ok(listed) = self.run_quiet(helios_node_core::calibrate::LIST, args) else {
-            return;
+        let n = {
+            let mut c = self.calibration.state.borrow_mut();
+            c.lists += 1;
+            c.lists
         };
-        let profiles: Vec<Value> = listed["profiles"].as_array().cloned().unwrap_or_default();
-        let mut defaults = BTreeMap::new();
-        let mut cameras: Vec<&str> = profiles
-            .iter()
-            .filter_map(|p| p["camera"]["key"].as_str())
-            .collect();
-        cameras.sort_unstable();
-        cameras.dedup();
-        for camera in cameras {
-            // A dry run of a clear answers the rule as it is.
-            let asked = json!({ "camera": camera, "profiles": [], "dry_run": true });
-            if let Ok(a) = self.run_quiet(helios_node_core::calibrate::SET_DEFAULT, asked) {
-                let ids = a["before"]["profiles"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect();
-                defaults.insert(camera.to_string(), ids);
-            }
-        }
-        let mut c = self.calibration.state.borrow_mut();
-        c.profiles = profiles;
-        c.defaults = defaults;
+        self.send(helios_node_core::calibrate::LIST, args, Ask::List(n));
     }
 
-    /// A command run as the person's, its failure kept for the focus to
-    /// show rather than toasted.
-    fn run_quiet(&mut self, id: &str, args: Value) -> Result<Value, String> {
-        let c = CommandId(id);
-        c.run(self, args)
+    /// Runs command `id` as the person's off the frame: its answer lands
+    /// as `ask` at a coming frame (at once when it answered at once).
+    fn send(&mut self, id: &str, args: Value, ask: Ask) {
+        let (landing, answer) = std::sync::mpsc::channel();
+        let (result, taken) =
+            crate::calibrate::with_landing(landing, || CommandId(id).run(self, args));
+        if taken && result.is_ok() {
+            self.calibration
+                .state
+                .borrow_mut()
+                .in_flight
+                .push(InFlight { ask, answer });
+        } else {
+            self.landed(ask, result);
+        }
+    }
+
+    /// The answers landed since the last frame, read.
+    fn calibration_landings(&mut self, ctx: &Egui) {
+        let mut landed = Vec::new();
+        self.calibration.state.borrow_mut().in_flight.retain(|f| {
+            match f.answer.try_recv() {
+                Ok(r) => landed.push((f.ask.clone(), r)),
+                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => landed.push((
+                    f.ask.clone(),
+                    Err("the calibration's work was dropped".into()),
+                )),
+            }
+            false
+        });
+        if landed.is_empty() {
+            return;
+        }
+        for (ask, result) in landed {
+            self.landed(ask, result);
+        }
+        // The focus's own window shows what landed.
+        let app = self.core.app.handle().clone();
+        if let Some(v) = app.window_viewport(&WindowId::new(WINDOW)) {
+            ctx.request_repaint_of(v);
+        }
+        ctx.request_repaint();
+    }
+
+    /// What an ask's answer changes in the focus.
+    fn landed(&mut self, ask: Ask, result: Result<Value, String>) {
+        use helios_node_core::calibrate::SET_DEFAULT;
+        match ask {
+            Ask::Event(event, n) => {
+                if event == Event::Solve {
+                    let mut c = self.calibration.state.borrow_mut();
+                    if n == c.solves {
+                        match result {
+                            Ok(answer) => {
+                                c.error = None;
+                                c.report = Some(answer);
+                            }
+                            Err(e) => {
+                                c.report = None;
+                                c.error = Some(e);
+                            }
+                        }
+                    }
+                    return;
+                }
+                self.finished(&event, result);
+            }
+            Ask::Save { as_default } => match result {
+                Ok(saved) if as_default => {
+                    let id = saved["profile"]["id"].clone();
+                    self.send(
+                        SET_DEFAULT,
+                        json!({ "profiles": [id] }),
+                        Ask::SavedDefault(saved),
+                    );
+                }
+                r => self.finished(&Event::Save, r),
+            },
+            Ask::SavedDefault(saved) => self.finished(&Event::Save, result.map(|_| saved)),
+            Ask::List(n) => {
+                if n != self.calibration.get().lists {
+                    return;
+                }
+                let Ok(listed) = result else {
+                    return;
+                };
+                let profiles: Vec<Value> =
+                    listed["profiles"].as_array().cloned().unwrap_or_default();
+                let mut cameras: Vec<String> = profiles
+                    .iter()
+                    .filter_map(|p| p["camera"]["key"].as_str().map(String::from))
+                    .collect();
+                cameras.sort_unstable();
+                cameras.dedup();
+                {
+                    let mut c = self.calibration.state.borrow_mut();
+                    c.profiles = profiles;
+                    c.defaults.retain(|k, _| cameras.contains(k));
+                }
+                for camera in cameras {
+                    // A dry run of a clear answers the rule as it is.
+                    let asked = json!({ "camera": camera, "profiles": [], "dry_run": true });
+                    self.send(SET_DEFAULT, asked, Ask::Defaults(camera, n));
+                }
+            }
+            Ask::Defaults(camera, n) => {
+                let mut c = self.calibration.state.borrow_mut();
+                if n != c.lists {
+                    return;
+                }
+                if let Ok(a) = result {
+                    let ids = a["before"]["profiles"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect();
+                    c.defaults.insert(camera, ids);
+                }
+            }
+        }
     }
 
     /// Each frame of the main window: what the window asked, run, and its
@@ -800,24 +934,26 @@ impl Shell {
         let texts: Arc<dyn Fn(Message) -> String + Send + Sync> = Arc::new(self.texts());
         self.calibration.state.borrow_mut().texts = Some(texts);
         let events = std::mem::take(&mut self.calibration.state.borrow_mut().events);
+        if !events.is_empty() || !self.calibration.get().in_flight.is_empty() {
+            crate::calibrate::drawn_in(ctx, self.values());
+        }
         for event in events {
             self.calibration_event(event);
         }
+        self.calibration_landings(ctx);
         let app = self.core.app.handle().clone();
         FRAME.follow(&app, ctx, &self.calibration.state);
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "each event and what it says in one place"
-    )]
+    /// Sends what the window asked off the frame.
     fn calibration_event(&mut self, event: Event) {
         use helios_node_core::calibrate::{CHART, DELETE, EXPORT, IMPORT, SET_DEFAULT};
         let (path, corners) = {
             let c = self.calibration.get();
             (c.path.trim().to_string(), c.corners)
         };
-        let result = match &event {
+        let ask = |e: &Event| Ask::Event(e.clone(), 0);
+        match &event {
             Event::Open => {
                 let opened = self.calibration.state.borrow_mut().open_shot(None);
                 if opened {
@@ -827,13 +963,19 @@ impl Shell {
                         .events
                         .push(Event::Solve);
                 }
-                return;
             }
-            Event::Solve => self.run(
-                CHART,
-                json!({ "path": path, "corners": corners, "dry_run": true }),
-                Origin::User,
-            ),
+            Event::Solve => {
+                let n = {
+                    let mut c = self.calibration.state.borrow_mut();
+                    c.solves += 1;
+                    c.solves
+                };
+                self.send(
+                    CHART,
+                    json!({ "path": path, "corners": corners, "dry_run": true }),
+                    Ask::Event(Event::Solve, n),
+                );
+            }
             Event::Save => {
                 let (name, as_default) = {
                     let c = self.calibration.get();
@@ -843,38 +985,35 @@ impl Shell {
                 if !name.is_empty() {
                     args["name"] = json!(name);
                 }
-                let saved = self.run(CHART, args, Origin::User);
-                match (&saved, as_default) {
-                    (Ok(a), true) => {
-                        let id = a["profile"]["id"].clone();
-                        self.run(SET_DEFAULT, json!({ "profiles": [id] }), Origin::User)
-                            .and(saved)
-                    }
-                    _ => saved,
-                }
+                self.send(CHART, args, Ask::Save { as_default });
             }
             Event::SetDefault(id) => {
-                self.run(SET_DEFAULT, json!({ "profiles": [id] }), Origin::User)
+                self.send(SET_DEFAULT, json!({ "profiles": [id] }), ask(&event));
             }
-            Event::Delete(id) => self.run(DELETE, json!({ "profile": id }), Origin::User),
+            Event::Delete(id) => self.send(DELETE, json!({ "profile": id }), ask(&event)),
             Event::Export(id) => {
                 let folder = self.calibration.get().folder.trim().to_string();
-                self.run(
+                self.send(
                     EXPORT,
                     json!({ "profile": id, "path": folder }),
-                    Origin::User,
-                )
+                    ask(&event),
+                );
             }
             Event::Import => {
                 let file = self.calibration.get().import_path.trim().to_string();
-                self.run(
+                self.send(
                     IMPORT,
                     json!({ "path": file, "dry_run": false }),
-                    Origin::User,
-                )
+                    ask(&event),
+                );
             }
-        };
-        let said = match (&event, &result) {
+        }
+    }
+
+    /// An action's answer landed: what it did said, or why it failed;
+    /// the profiles listed again.
+    fn finished(&mut self, event: &Event, result: Result<Value, String>) {
+        let said = match (event, &result) {
             (_, Err(_)) | (Event::Solve | Event::Open, _) => None,
             (Event::Save, Ok(a)) => Some(
                 Message::new("gui-calibrate-saved", "Profile “{ $name }” saved")
@@ -899,24 +1038,14 @@ impl Shell {
         {
             let mut c = self.calibration.state.borrow_mut();
             match result {
-                Ok(answer) => {
+                Ok(_) => {
                     c.error = None;
-                    if event == Event::Solve {
-                        c.report = Some(answer);
-                    }
                     c.said = said;
                 }
-                Err(e) => {
-                    if event == Event::Solve {
-                        c.report = None;
-                    }
-                    c.error = Some(e);
-                }
+                Err(e) => c.error = Some(e),
             }
         }
-        if event != Event::Solve {
-            self.refresh_profiles();
-        }
+        self.refresh_profiles();
     }
 }
 

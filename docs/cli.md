@@ -343,7 +343,7 @@ drives a running node through either endpoint.
 
 ```bash
 helios import --vault library.db [--reference | --copy [--into DIR]] [--rename PATTERN]
-              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--no-wait]
               FOLDERS-CARDS-OR-FILES...
 helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve STACK
               | expand STACK | collapse STACK | top STACK IMAGE
@@ -356,14 +356,16 @@ referenced in place or copied into the library folder (renamed by a
 pattern, sidecars along), finds exact duplicates by content and handles
 them by policy, and measures each image's near-duplicate signals. The
 node answers at once with a promise (docs/protocol.md, "Promises"),
-printed as `{"promise": ...}`: the import goes on in the node, and
-`helios run promises.wait --param id=…` waits for it. One folder or
-card is imported whole (`--new`: only what the library does not know);
-several sources, or files, as the items named. With `--wait` it waits:
-one JSON line per file that failed, then `{"report": ..., "promise":
-..., "history": ...}`; exit 1 when a file failed, 130 when interrupted
-(Ctrl-C cancels the import before its next file and leaves no
-half-written copy).
+and the command waits for it to settle, its progress on the standard
+error when that is a terminal: one JSON line per file that failed, then
+`{"report": ..., "promise": ..., "history": ...}`; exit 1 when a file
+or the import failed, 130 when interrupted (Ctrl-C cancels the import
+before its next file and leaves no half-written copy). With `--no-wait`
+the promise is printed as `{"promise": ...}` at once: the import goes
+on in the node, and `helios run promises.wait --param id=…` waits for
+it. (`--wait`, the default, is still accepted.) One folder or card is
+imported whole (`--new`: only what the library does not know); several
+sources, or files, as the items named.
 
 `stacks` lists, makes and dissolves stacks, and asks for stack
 suggestions, which are recorded as decisions and applied only once
@@ -374,7 +376,7 @@ accepted. Its answers are JSON. See [library.md](library.md) for both.
 ```bash
 helios commands [--vault library.db | --node ADDRESS] [--window W] [--filter F] [--enabled]
 helios run ID [--vault library.db | --node ADDRESS] [--param KEY=VALUE]... [--json '{...}']
-              [--window W] [--scope node|window] [--request-id KEY]
+              [--window W] [--scope node|window] [--request-id KEY] [--no-wait]
 helios batch-run [--vault library.db | --node ADDRESS] --json '{"steps": [...]}'
               [--window W] [--request-id KEY]
 helios run [--vault library.db | --node ADDRESS] 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...]
@@ -395,7 +397,10 @@ its words, `--enabled` those that can run.
 `run` runs one by its id (`command.run`) as the CLI (origin `cli`):
 `--json` gives its params as one object, each `--param KEY=VALUE` sets
 one (the value read as JSON, `2` or `true`, else as text). Its params are
-checked against its schema; a greyed command is refused with its reason.
+checked against its schema; a greyed command is refused with its reason. A
+command answering with a promise (`library.import` by rule) is waited
+for, as `helios import` is, and its settled promise printed: exit 1 when
+it failed, 130 when cancelled; `--no-wait` prints it at once.
 A window command runs in `--window` as its menu would. When an id is in
 both scopes (`library.import`), the node's runs unless `--scope window`.
 The answer is printed; a refusal goes to the standard error, exit code 1;
