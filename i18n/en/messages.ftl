@@ -717,6 +717,8 @@ gui-history-calibration-off = Turn the calibration profile off
 
 gui-history-calibration-save = Save the calibration profile “{ $name }”
 
+gui-history-camera-look-default = Change the default camera look of { $name }
+
 gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
@@ -890,6 +892,10 @@ gui-import-window-add-favourite = Add to favourites
 gui-import-window-add-source = Add a source…
 
 gui-import-window-all-types = All types
+
+gui-import-window-camera-look = Apply the camera's default look
+
+gui-import-window-camera-look-help = Raws of a camera with a default camera look start with it, as their first version
 
 gui-import-window-cancel = Cancel
 
@@ -1311,6 +1317,12 @@ gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet
 
+gui-look-fit-selection-done = Camera look of { $camera } fitted from { $fitted } of { $photos } photos: Delta E { $held } (default { $baseline })
+
+gui-look-fit-selection-job = Fit a camera look from { $count } photos
+
+gui-look-fit-selection-none = No camera look fitted: { $reasons }
+
 gui-look-header-chart = Colour half off: the chart profile rules the colours
 
 gui-look-header-compare = Compare with the camera's JPEG
@@ -1321,6 +1333,16 @@ gui-look-header-compare-no-jpeg = No camera JPEG to compare: the raw carries non
 
 gui-look-header-compare-not-raw = No camera JPEG to compare: the photo is not a raw
 
+gui-look-header-default-clear = Clear the default
+
+gui-look-header-default-in-use = The default look of { $camera }: its raws are imported with it
+
+gui-look-header-default-other = { $camera } has another default look: its raws are imported with that one
+
+gui-look-header-default-save = Save as the camera's default
+
+gui-look-header-default-save-about = Raws of { $camera } imported from now on start with this camera look; photos already in the library keep theirs
+
 gui-look-header-fit = Fit to the camera's JPEG
 
 gui-look-header-fit-about = Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit
@@ -1329,11 +1351,17 @@ gui-look-header-fitted = Fitted to the camera's JPEG: Delta E { $held } (default
 
 gui-look-header-none = Not fitted yet: the look starts from the camera's own JPEG
 
+gui-look-header-presets = Presets
+
 gui-look-header-refit = Refit
 
 gui-look-header-refused = Not fitted: { $reason }
 
 gui-look-header-switch = Camera look
+
+gui-look-preset-camera = Camera look
+
+gui-look-preset-camera-about = The camera's default look, or a look fitted to the camera's JPEG when the camera has none
 
 gui-macro-fold-detail = Changed: { $changes }
 
@@ -2751,7 +2779,19 @@ library-folder-not-absolute = Give the folder's full path.
 
 library-folder-not-writable = Helios cannot write in this folder: { $why }
 
+look-default-bad-params = the look's { $node } parameters: { $error }
+
+look-default-no-camera = a camera's default look needs `camera`
+
+look-default-not-fitted = no fitted camera look to keep: fit one to the camera's JPEG first
+
+look-default-what = give one of `look`, `image` or `clear`
+
+look-fit-cancelled = the camera look's fit was cancelled: nothing was written
+
 look-load-failed = cannot read the photo: { $error }
+
+look-mixed-cameras = the photos are of { $count } cameras ({ $cameras }): a camera look is fitted from photos of one camera; select one camera's photos
 
 look-render-failed = cannot render the raw: { $error }
 

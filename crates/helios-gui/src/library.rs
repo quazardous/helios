@@ -4011,6 +4011,7 @@ impl Library {
                     items: vec![
                         crate::dialogs::MenuItem::command("library.export"),
                         crate::dialogs::MenuItem::command("library.copyFiles"),
+                        crate::dialogs::MenuItem::command("library.fitCameraLook"),
                         crate::dialogs::MenuItem::Separator,
                         crate::dialogs::MenuItem::command(REMOVE_COMMAND).labeled(
                             crate::i18n::text(

@@ -299,7 +299,7 @@ impl Shell {
 
     /// Queues an import of `target` (`path` or `paths`) with the choices of
     /// `args` (`copy`, `into`, `layout`, `rename`, `duplicates`,
-    /// `darktable`), remembered first when asked. Without a library open,
+    /// `darktable`, `camera_look`), remembered first when asked. Without a library open,
     /// nothing is queued: the error says so.
     fn import_now(
         &mut self,
@@ -336,6 +336,10 @@ impl Shell {
         }
         if !darktable {
             target["darktable"] = json!(false);
+        }
+        // The cameras' default looks are applied unless turned off.
+        if args["camera_look"] == false {
+            target["camera_look"] = json!(false);
         }
         // Run later as the user: who asked is said, for the history.
         target["origin"] = json!(who);

@@ -95,6 +95,9 @@ or folders on Helios (the window opens with them as its source).
     - **Duplicates**: skip (default), keep, or ask.
     - **Read darktable edits** (sidecars as versions), when the
       connector honours them.
+    - **Apply the camera's default look**, when the library keeps a
+      camera's default look: on by default, a raw of that camera starts
+      with it as its first version.
     - **More** (folded): metadata template and time offset, once they
       exist.
   - **The connector's section**, under its name. Each connector fills it

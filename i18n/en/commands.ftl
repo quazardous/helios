@@ -328,6 +328,9 @@ command-library-filter-recent =
 command-library-filter-switch =
     .title = Show the recent and pinned filters and the smart albums, to apply one to the library
 
+command-library-fitCameraLook =
+    .title = Fit a camera look from the selection: one look from photos of one camera, fitted to their embedded JPEGs and written into each (`images`: ids, else the selection; `default`: keep it as the camera's default too)
+
 command-library-folder =
     .title = Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder
 
@@ -335,7 +338,7 @@ command-library-importAutomatic-pause =
     .title = Pause automatic imports, or resume them (`on`: true pauses, false resumes; without it, toggles)
 
 command-library-importFiles =
-    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`)
+    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`; `camera_look`: false leaves the cameras' default looks off the raws)
 
 command-library-importSource =
     .title = Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)

@@ -498,6 +498,8 @@ gui-history-quick-clear = Vider la collection rapide
 gui-history-quick-save = Enregistrer la collection rapide sous « { $name } »
 gui-history-album-rules = Modifier les règles de « { $name } »
 
+gui-history-camera-look-default = Modifier le rendu boîtier par défaut de { $name }
+
 gui-history-camera-look-fit = Ajuster le rendu boîtier au JPEG de l’appareil
 
 gui-history-preview-applied = appliqué
@@ -607,6 +609,12 @@ gui-library-badge-no-backup = sans sauvegarde
 gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
+gui-look-fit-selection-done = Rendu boîtier de { $camera } ajusté sur { $fitted } photos sur { $photos } : Delta E { $held } (par défaut { $baseline })
+
+gui-look-fit-selection-job = Ajuster un rendu boîtier sur { $count } photos
+
+gui-look-fit-selection-none = Aucun rendu boîtier ajusté : { $reasons }
+
 gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
 
 gui-look-header-compare = Comparer au JPEG de l’appareil
@@ -617,6 +625,16 @@ gui-look-header-compare-no-jpeg = Aucun JPEG de l’appareil à comparer : le ra
 
 gui-look-header-compare-not-raw = Aucun JPEG de l’appareil à comparer : la photo n’est pas un raw
 
+gui-look-header-default-clear = Effacer le défaut
+
+gui-look-header-default-in-use = Le rendu par défaut de { $camera } : ses raws sont importés avec lui
+
+gui-look-header-default-other = { $camera } a un autre rendu par défaut : ses raws sont importés avec celui-là
+
+gui-look-header-default-save = Enregistrer comme défaut du boîtier
+
+gui-look-header-default-save-about = Les raws de { $camera } importés désormais partent de ce rendu boîtier ; les photos déjà dans la bibliothèque gardent le leur
+
 gui-look-header-fit = Ajuster au JPEG de l’appareil
 
 gui-look-header-fit-about = Ajuste une matrice, une table teinte et saturation et des courbes de tons au JPEG intégré de l’appareil, vérifiés sur des pixels qui n’ont pas servi à l’ajustement
@@ -625,11 +643,17 @@ gui-look-header-fitted = Ajusté au JPEG de l’appareil : Delta E { $held } (pa
 
 gui-look-header-none = Pas encore ajusté : le rendu part du JPEG de l’appareil lui-même
 
+gui-look-header-presets = Préréglages
+
 gui-look-header-refit = Réajuster
 
 gui-look-header-refused = Non ajusté : { $reason }
 
 gui-look-header-switch = Rendu boîtier
+
+gui-look-preset-camera = Rendu boîtier
+
+gui-look-preset-camera-about = Le rendu par défaut du boîtier, ou un rendu ajusté au JPEG de l’appareil quand le boîtier n’en a pas
 
 gui-mask-display = Afficher le masque
 
@@ -1162,6 +1186,18 @@ health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
 
 health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
 
+look-default-bad-params = les paramètres { $node } du rendu : { $error }
+
+look-default-no-camera = le rendu par défaut d’un boîtier demande `camera`
+
+look-default-not-fitted = aucun rendu boîtier ajusté à garder : ajustez-en d’abord un au JPEG de l’appareil
+
+look-default-what = donnez un seul de `look`, `image` ou `clear`
+
+look-fit-cancelled = l’ajustement du rendu boîtier a été annulé : rien n’a été écrit
+
+look-mixed-cameras = les photos viennent de { $count } boîtiers ({ $cameras }) : un rendu boîtier s’ajuste sur les photos d’un seul boîtier ; sélectionnez les photos d’un boîtier
+
 node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end, aux requêtes workflow.*, à library.import, à settings.layer.*, à commands.list et à command.run
 
 node-command-debug-only = seul le point d’accès de contrôle de débogage l’exécute (helios-node --control, versions de débogage)
@@ -1512,6 +1548,10 @@ gui-import-window-add-favourite = Ajouter aux favoris
 gui-import-window-all-types = Tous les types
 
 gui-import-window-add-source = Ajouter une source…
+
+gui-import-window-camera-look = Appliquer le rendu par défaut du boîtier
+
+gui-import-window-camera-look-help = Les raws d’un boîtier qui a un rendu boîtier par défaut partent de lui, comme première version
 
 gui-import-window-cancel = Annuler
 

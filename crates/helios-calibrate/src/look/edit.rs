@@ -7,6 +7,8 @@
 //!   (the look's tone curve takes the display transform's place),
 //!   `cameracolour` on unless a chart profile is on: the chart rules the
 //!   colour, and the look's tone stays on top of it (Q3 A).
+//! - [`with_params`] does the same from the nodes' parameters (a
+//!   camera's default look).
 //! - [`without_look`] turns both halves off and `sigmoid` back on, their
 //!   parameters kept.
 //! - [`crate::apply::with_profile`] turns `cameracolour` off for the same
@@ -75,10 +77,20 @@ pub fn tone_params(look: &Look, preview: &str) -> Params {
 /// nodes set, `cameratone` on and `sigmoid` off, `cameracolour` on unless
 /// a chart profile is on; the other nodes kept as they are.
 pub fn with_look(edit: &Value, look: &Look, preview: &str) -> Value {
+    with_params(
+        edit,
+        &colour_params(look, preview),
+        &tone_params(look, preview),
+    )
+}
+
+/// [`with_look`] from the two nodes' parameters as they were written
+/// (a camera's default look, kept as its nodes' parameters).
+pub fn with_params(edit: &Value, colour: &Params, tone: &Params) -> Value {
     let charted = apply::applied(edit).is_some();
     let mut edit = base(edit);
-    set(&mut edit, COLOUR, &colour_params(look, preview), charted);
-    set(&mut edit, TONE, &tone_params(look, preview), false);
+    set(&mut edit, COLOUR, colour, charted);
+    set(&mut edit, TONE, tone, false);
     bypass(&mut edit, DISPLAY, true);
     edit
 }

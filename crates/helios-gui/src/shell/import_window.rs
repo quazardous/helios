@@ -180,6 +180,9 @@ struct ShellWords {
 
 /// The import window's state: shared by the shell and the window's
 /// content (see the module's docs).
+// Its flags (open, touched, custom, camera_looks) are independent states of
+// the window, not one mode spread over several bools.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 pub(crate) struct ImportWindow {
     open: bool,
@@ -290,6 +293,9 @@ pub(crate) struct ImportWindow {
     /// The presets, by name, and where they are kept.
     pub(super) presets: BTreeMap<String, Choices>,
     pub(super) presets_file: Option<PathBuf>,
+    /// The library keeps a camera's default look: the Choices offer to
+    /// apply it. Read when the window opens.
+    pub(super) camera_looks: bool,
     /// The name of the preset being saved, while it is typed, and
     /// whether its field is to take the focus.
     naming: Option<(String, bool)>,
@@ -996,6 +1002,11 @@ impl Shell {
         }
         w.follow_cards();
         w.clear_contents();
+        w.camera_looks = w
+            .accounts
+            .library
+            .as_ref()
+            .is_some_and(|l| l.has_camera_looks());
         w.open = true;
         w.touched = false;
         w.copy = None;
