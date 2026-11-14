@@ -692,14 +692,20 @@ fn library_commands(
                 };
                 let ended = match &through {
                     // The plugin lists, Helios imports.
-                    Some(plugins) => helios_gui::importers::run(
-                        plugins,
-                        vault.as_ref(),
-                        &jobs,
-                        &asked,
-                        seconds(),
-                        &mut emit,
-                    ),
+                    Some(plugins) => {
+                        let import = |files: &[std::path::PathBuf], options: &_, emit: &mut _| {
+                            let library = vault.as_ref();
+                            helios_library::import::import(
+                                library,
+                                &jobs,
+                                files,
+                                options,
+                                seconds(),
+                                emit,
+                            )
+                        };
+                        helios_gui::importers::run(plugins, &jobs, &asked, &mut emit, import)
+                    }
                     None => helios_library::import::import(
                         vault.as_ref(),
                         &jobs,
@@ -1128,7 +1134,12 @@ struct App {
     /// Images being made ready, opened in the viewport as each is.
     preparing: Vec<Preparing>,
     /// Starts the exports the shell asks for; the node runs them.
-    exporter: Option<Arc<helios_gui::export::Exporter<helios_vault_sqlite::SqliteStore>>>,
+    exporter: Option<Arc<helios_gui::export::Exporter>>,
+    /// Why an export asked for did not start, heard from its thread.
+    export_refused: (
+        std::sync::mpsc::Sender<String>,
+        std::sync::mpsc::Receiver<String>,
+    ),
     /// The GUI's connection to the local node, dropped as the GUI ends.
     node: Option<helios_gui::node::Client>,
     /// macOS's global menu bar.
@@ -1212,11 +1223,8 @@ impl App {
         let Some(persist) = &self.persist else {
             return;
         };
-        let (vault, engine, bundle) = (
-            persist.vault().clone(),
-            self.shell.render_engine(),
-            self.bundle(),
-        );
+        let (reader, engine, bundle) =
+            (persist.reader(), self.shell.render_engine(), self.bundle());
         for (id, size) in asked {
             let path = self.shell.library().file(&id).map(Path::to_path_buf);
             let Some(path) = path else {
@@ -1230,7 +1238,7 @@ impl App {
             };
             let to = sink.clone();
             let spawned = helios_gui::head_render::spawn(
-                vault.clone(),
+                reader.clone(),
                 engine.clone(),
                 bundle.clone(),
                 path,
@@ -1524,19 +1532,28 @@ impl eframe::App for App {
                 helios_shell::commands::Origin::User,
             );
         }
-        // Exports asked for: planned over the library and run as jobs.
+        // Exports asked for: planned over the library through the node on
+        // a thread of their own and run as jobs; a refusal comes back at a
+        // coming frame.
         for ask in self.shell.take_exports() {
-            let ran = match &self.exporter {
-                Some(exporter) => exporter.run(&self.bundle(), &ask),
-                None => Err("no library open: exports take their images from one".into()),
-            };
-            if let Err(e) = ran {
-                self.shell.notify(
-                    helios_gui::dialogs::Level::Error,
-                    Message::new("gui-export-failed", "The export did not start: { $error }")
-                        .with("error", e),
-                );
+            match &self.exporter {
+                Some(exporter) => {
+                    let refused = self.export_refused.0.clone();
+                    exporter.start(self.bundle(), ask, move |e| drop(refused.send(e)));
+                }
+                None => drop(
+                    self.export_refused
+                        .0
+                        .send("no library open: exports take their images from one".into()),
+                ),
             }
+        }
+        while let Ok(e) = self.export_refused.1.try_recv() {
+            self.shell.notify(
+                helios_gui::dialogs::Level::Error,
+                Message::new("gui-export-failed", "The export did not start: { $error }")
+                    .with("error", e),
+            );
         }
         self.render_heads();
         let activated = self.shell.library_mut().take_activated();
@@ -2229,11 +2246,11 @@ fn main() -> Result<(), String> {
                 shell.set_import_accounts(book, secrets);
             }
             // What the vault holds, for its "in your Library" prefilter.
-            if let Some(vault) = known_vault.clone() {
-                shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));
+            if let Some(p) = &persist {
+                shell.set_import_known(helios_gui::import_scan::known_of(p.node().clone()));
                 // An offline folder's photos, as the image map recorded
                 // them, with the thumbnails the library's cache has.
-                shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+                shell.set_import_recorded(helios_gui::import_scan::recorded_of(p.node().clone()));
             }
             // The imports recorded, listed in the window to run again.
             if let Some(p) = &persist {
@@ -2272,11 +2289,11 @@ fn main() -> Result<(), String> {
                         .parent()
                         .map(|d| d.join(".helios"))
                 }));
-                shell.set_import_map(helios_gui::image_map::recorder(
+                shell.set_import_map(Arc::new(helios_node_core::map::recorder(
                     vault.clone(),
                     settings.clone(),
                     helios.clone(),
-                ));
+                )));
                 // The map's job: the import window's cells in view first,
                 // then each volume plugged in.
                 let feed = helios_library::map_job::Feed::default();
@@ -2309,18 +2326,29 @@ fn main() -> Result<(), String> {
                         plugged.plugged(m.id.clone());
                     }
                 });
-                if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
-                    helios_gui::image_map::start_thumb_check(
-                        vault.clone(),
-                        &shell.jobs(),
-                        cache,
-                        &settings,
-                        helios.clone(),
-                        feed.clone(),
-                    );
-                }
+                // The map's job and the thumbnail re-check run on the
+                // node's vault, as its jobs: the node stops them before
+                // the vault closes.
+                let thumbs = THUMB_CACHE.get().cloned().flatten().map(|cache| {
+                    let listed = cache.clone();
+                    let before: Box<dyn FnOnce() + Send> = Box::new(move || {
+                        listed.list();
+                    });
+                    let cache: Box<dyn helios_library::thumb_check::Thumbs> = Box::new(cache);
+                    (cache, before)
+                });
                 backfill_captures(vault.clone(), shell.jobs());
-                helios_gui::image_map::start_job(vault, shell.jobs(), settings, helios, feed);
+                let map = helios_node_core::map::ImageMap::start(
+                    vault,
+                    shell.jobs(),
+                    settings,
+                    helios,
+                    feed,
+                    thumbs,
+                );
+                if let Some(link) = &node_link {
+                    link.adopt(map);
+                }
             }
             // The health check (Help > Health check): Helios's checks
             // over this machine's volumes and the vault, a while after
@@ -2464,7 +2492,7 @@ fn main() -> Result<(), String> {
             // the viewport's engine, each one library step.
             if let Some(p) = &persist {
                 let runner = Arc::new(helios_gui::workshop_run::Runner::new(
-                    p.vault().clone(),
+                    p.node().clone(),
                     shell.viewport().engine().clone(),
                     shell.jobs(),
                     shell.library_history(),
@@ -2489,7 +2517,7 @@ fn main() -> Result<(), String> {
                 // budget for the desktop, so exporting the image open does
                 // not compute again what the darkroom holds.
                 helios_gui::export::Exporter::new(
-                    p.vault().clone(),
+                    p.node().clone(),
                     shell.jobs(),
                     shell.export_sink(),
                     move || ctx.request_repaint(),
@@ -2500,6 +2528,7 @@ fn main() -> Result<(), String> {
             let mut app = App {
                 node: node_client,
                 exporter,
+                export_refused: std::sync::mpsc::channel(),
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,

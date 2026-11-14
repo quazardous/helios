@@ -755,6 +755,10 @@ gui-history-undo = Undo
 
 gui-history-user-batch = { $count } commands
 
+gui-history-version-remove = Remove version
+
+gui-history-version-switch = Switch version
+
 gui-history-workshop-accept = Workshop “{ $name }”: a photo accepted
 
 gui-history-workshop-decide = Workshop “{ $name }”: a junction decided
@@ -1355,6 +1359,8 @@ gui-library-reading = Reading the library…
 
 gui-library-remove = Remove from Library
 
+gui-library-remove-version = Remove Version…
+
 gui-library-rotate-left = Rotate Left
 
 gui-library-rotate-reset = Reset Rotation
@@ -1412,6 +1418,12 @@ gui-library-sync = Sync zoom and pan
 gui-library-tags = Tags
 
 gui-library-trash = Move to Trash…
+
+gui-library-version-copy = Copy
+
+gui-library-version-not-changed = The photo's versions were not changed: { $error }
+
+gui-library-versions-strip = Versions
 
 gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 
@@ -2408,6 +2420,12 @@ gui-trash-title = Move { $count } photos to the Trash?
 gui-trash-verb = Move to Trash
 
 gui-vault-unreadable = Cannot read the library: { $error }
+
+gui-version-remove-detail = This copy of the photo and the edits only it holds leave the Library; the file and the other versions stay. Undo brings it back.
+
+gui-version-remove-title = Remove version { $number }?
+
+gui-version-remove-verb = Remove Version
 
 gui-window-frame-error = window frame: { $error }
 

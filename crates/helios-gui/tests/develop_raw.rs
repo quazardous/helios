@@ -203,7 +203,11 @@ fn darktable_test_raws_develop_through_the_raw_front_of_an_image_network() {
 /// rather than export its preview.
 fn exports_as_develop_shows(raw: &Path) {
     let name = raw.display();
-    let vault = helios_vault::Vault::new(helios_vault::MemoryStore::default());
+    let persist = helios_gui::persist::Persist::new(
+        helios_vault::MemoryStore::default(),
+        Arc::new(Bus::new()),
+    );
+    let client = persist.node().clone();
     let engine = Engine::new(Arc::new(Bus::new()));
     let item = helios_export::batch::Item {
         image: "0".repeat(64),
@@ -213,7 +217,7 @@ fn exports_as_develop_shows(raw: &Path) {
         skip: None,
         error: None,
     };
-    let exported = helios_gui::export::render_item(&vault, &engine, &image_network(), &item)
+    let exported = helios_gui::export::render_item(&client, &engine, &image_network(), &item)
         .unwrap_or_else(|e| panic!("{name}: {e}"));
     let (graph, node) = templates::open_file(raw, &develop()).unwrap();
     let extent = graph.extent(node).unwrap().unwrap();
@@ -229,7 +233,7 @@ fn exports_as_develop_shows(raw: &Path) {
     assert!(worst < 1e-5, "{name}: the export differs by {worst}");
     let mut pictures = image_network();
     pictures.template.network.image_sources.clear();
-    let e = helios_gui::export::render_item(&vault, &engine, &pictures, &item)
+    let e = helios_gui::export::render_item(&client, &engine, &pictures, &item)
         .err()
         .unwrap();
     assert!(e.contains("cannot develop a raw"), "{name}: {e}");

@@ -13,8 +13,11 @@ use std::sync::Arc;
 
 use helios_core::{Engine, Image, Region};
 use helios_template::Bundle;
-use helios_vault::edit::{self, EditSession};
-use helios_vault::{ImageId, Store, Vault};
+use helios_vault::Version;
+use helios_vault::edit;
+use serde_json::{Value, json};
+
+use crate::persist::Reader;
 
 /// What a render of an image's head version gives back.
 #[derive(Clone, Debug)]
@@ -52,17 +55,22 @@ pub fn plan(extent: Region, size: u32) -> (f64, Region) {
 /// version rendered, and the render. A raw goes through its sensor data,
 /// never its embedded preview (see [`crate::templates::develop_file`]); a
 /// part of the edit the network has no place for is left out, as the
-/// darkroom does.
-pub fn render<S: Store>(
-    vault: &Vault<S>,
+/// darkroom does. The head is read through the node (`library.edit.head`,
+/// from the reads' cache when it holds it).
+pub fn render(
+    reader: &Reader,
     engine: &Engine,
     bundle: &Bundle,
     path: &Path,
-    image: ImageId,
+    image: &str,
     size: u32,
 ) -> Result<(Option<String>, Image), String> {
     let (mut graph, node) = crate::templates::develop_file(path, bundle)?;
-    let (_, head) = EditSession::open(vault, image)?;
+    let read = reader.read("library.edit.head", json!({ "image": image }))?;
+    let head: Option<Version> = match &read["head"] {
+        Value::Null => None,
+        row => Some(serde_json::from_value(row.clone()).map_err(|e| e.to_string())?),
+    };
     if let Some(head) = &head {
         edit::apply_to_graph(&mut graph, &head.edit)?;
     }
@@ -79,23 +87,19 @@ pub fn render<S: Store>(
 
 /// Renders on a thread of its own and hands the result to `send`; an
 /// error when no thread could be started.
-pub fn spawn<S: Store + 'static>(
-    vault: Arc<Vault<S>>,
+pub fn spawn(
+    reader: Reader,
     engine: Arc<Engine>,
     bundle: Bundle,
     path: PathBuf,
     id: String,
     size: u32,
     send: impl FnOnce(HeadRender) + Send + 'static,
-) -> Result<(), String>
-where
-    Vault<S>: Send + Sync,
-{
+) -> Result<(), String> {
     std::thread::Builder::new()
         .name("helios-head-render".into())
         .spawn(move || {
-            let rendered = ImageId::from_hex(&id)
-                .and_then(|image| render(&vault, &engine, &bundle, &path, image, size));
+            let rendered = render(&reader, &engine, &bundle, &path, &id, size);
             let (version, image) = match rendered {
                 Ok((version, image)) => (version, Ok(image)),
                 Err(e) => (None, Err(e)),

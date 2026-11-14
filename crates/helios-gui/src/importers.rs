@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use helios_core::Message;
 use helios_core::jobs::{Jobs, Progress, Start};
-use helios_library::import::{self, Duplicates, Listed, Metadata, Options, Placement, Report};
+use helios_library::import::{Duplicates, Listed, Metadata, Options, Placement, Report};
 use helios_plugin::manifest::SourceKind;
 use helios_plugin::{Broker, Cancel};
-use helios_vault::{IMAGE_EXTENSIONS, Store, Vault};
+use helios_vault::IMAGE_EXTENSIONS;
 use serde_json::{Value, json};
 
 /// The File menu's submenu of importers, and the list that fills it.
@@ -126,16 +126,16 @@ pub fn options(args: &Value) -> Result<Options, String> {
 /// `plugin`, `importer`, `source`, with the import's options beside it):
 /// the plugin's scan as a job of its own (cancelled from the jobs centre,
 /// the plugin told to stop), one `{ "scanned": … }` line saying what it
-/// found, left out and warned about, then the import of the files found
-/// as `helios_library::import` runs it, each file's line to `emit`. A
-/// scan cancelled is an import cancelled before its first file.
-pub fn run<S: Store>(
+/// found, left out and warned about, then `import` imports the files
+/// found with the options the plugin's values join (the host's import,
+/// `helios_library::import` where the library is), each file's line to
+/// `emit`. A scan cancelled is an import cancelled before its first file.
+pub fn run<E: FnMut(&Value)>(
     broker: &Broker,
-    vault: &Vault<S>,
     jobs: &Jobs,
     args: &Value,
-    now: u64,
-    emit: &mut impl FnMut(&Value),
+    emit: &mut E,
+    import: impl FnOnce(&[PathBuf], &Options, &mut E) -> Result<Report, String>,
 ) -> Result<Report, String> {
     let spec = &args["importer"];
     let field = |key: &str| {
@@ -225,5 +225,5 @@ pub fn run<S: Store>(
             })
             .collect(),
     });
-    import::import(vault, jobs, &files, &options, now, emit)
+    import(&files, &options, emit)
 }

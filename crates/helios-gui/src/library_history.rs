@@ -176,6 +176,20 @@ pub fn remove_label(photos: usize) -> Label {
     }
 }
 
+/// A step of a photo's versions: "Switch version", "Remove version".
+pub fn version_label(removed: bool) -> Label {
+    let m = if removed {
+        Message::new("gui-history-version-remove", "Remove version")
+    } else {
+        Message::new("gui-history-version-switch", "Switch version")
+    };
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: std::collections::BTreeMap::default(),
+    }
+}
+
 /// A rotation's label: "Rotate 3 photos left", "Rotate 3 photos
 /// right", "Reset the rotation of 3 photos".
 pub fn rotate_label(turn: crate::library::Turn, photos: usize) -> Label {
