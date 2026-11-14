@@ -307,6 +307,18 @@ token bucket per account.
 4. **Google Photos on the same job.** The pick's pages stream to the grid
    and the job; downloads go through the per-account bucket, two at a
    time; quota and refused-refresh pauses.
+   Done: the photos chosen are handed to the desktop's node and imported
+   as its `import` promise (`library.import {remote, rule}`): Import
+   answers at once, the downloads run in the node's job with each item's
+   progress and outcome, the window shows the promise's line and may
+   close; a rate limit (`Retry-After`, else a doubling wait) and an
+   expired address are waited out and gone on from; the token is renewed
+   per call by the connector's host; a pick chosen again skips what is
+   imported. Left: the pick's pages streamed to the grid (it is listed
+   whole, about 20 requests for 2,000 items, before the grid fills), the
+   per-account bucket shared by downloads and glances with two downloads
+   at a time, the quota and refused-refresh pauses ("going on at 14:05",
+   "Reconnect Google Photos") instead of a failure after five waits.
 5. **Contract and middle-zone states.** `Caps::listing`,
    `thumbnail_cost`, `import_without_listing`, `Limits::parallel`, in the
    manifest; the list view (name, date, size, kind) chosen from them and
