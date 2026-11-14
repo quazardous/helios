@@ -529,8 +529,9 @@ fn row_of(row: &Value) -> Result<LibraryRow, String> {
     })
 }
 
-/// An image as the library shows it, and where it can be read (its first
-/// present copy).
+/// An image as the library shows it, and where it can be read: its first
+/// present copy, the node listing them in read order (the library's copy
+/// before a card's file, `helios_vault::ReadOrder`).
 fn entry_of(row: LibraryRow, changed: &HashMap<String, u64>) -> (Entry, Option<PathBuf>) {
     let presence = Presence::of(&row.locations);
     // The volume to plug in, for an image with no copy at hand.

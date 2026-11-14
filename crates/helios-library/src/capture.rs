@@ -231,6 +231,7 @@ pub fn backfill_by<S: Store>(
     }
     let stopped =
         || stop.load(Ordering::SeqCst) || cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst));
+    let order = vault.read_order()?;
     for batch in left.chunks(batch.max(1)) {
         while paused.load(Ordering::SeqCst) && !stopped() {
             std::thread::sleep(Duration::from_millis(100));
@@ -250,10 +251,10 @@ pub fn backfill_by<S: Store>(
                 continue;
             }
             let sightings = vault.sightings(id)?;
-            let present = sightings
-                .iter()
-                .find(|s| s.presence == helios_vault::Presence::Present);
-            let from_file = present.map(|s| reader.read(&s.path));
+            // The library's copy, a card's file only without one.
+            let from_file = order
+                .file(&vault.locations(id)?)
+                .map(|l| reader.read(&l.path));
             match from_file {
                 Some(Ok(c)) => {
                     progress.read += 1;

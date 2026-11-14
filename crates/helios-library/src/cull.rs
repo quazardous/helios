@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use helios_core::Image;
 use helios_core::jobs::{Jobs, Progress, Start};
-use helios_vault::{ImageId, Presence, Query, Store, Vault};
+use helios_vault::{ImageId, Query, Store, Vault};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -330,6 +330,7 @@ pub fn backfill_by<S: Store>(
     }
     let stopped =
         || stop.load(Ordering::SeqCst) || cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst));
+    let order = vault.read_order()?;
     for batch in left.chunks(batch.max(1)) {
         while paused.load(Ordering::SeqCst) && !stopped() {
             std::thread::sleep(Duration::from_millis(100));
@@ -357,15 +358,12 @@ pub fn backfill_by<S: Store>(
                 }
                 continue;
             }
-            let present = vault
-                .sightings(id)?
-                .into_iter()
-                .find(|s| s.presence == Presence::Present);
-            let Some(sighting) = present else {
+            // The library's copy, a card's file only without one.
+            let Some(file) = order.file(&vault.locations(id)?).map(|l| l.path.clone()) else {
                 progress.missing += 1;
                 continue;
             };
-            match measurer.measure(&sighting.path) {
+            match measurer.measure(&file) {
                 Ok(signals) => {
                     progress.measured += 1;
                     let keys = if kept.is_some() {

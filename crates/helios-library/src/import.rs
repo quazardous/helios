@@ -86,10 +86,6 @@ pub const KIND: &str = "import";
 /// The imports' job ids in this process: `import-1`, `import-2`...
 pub(crate) static NEXT: AtomicU64 = AtomicU64::new(1);
 
-/// Where the library folder is kept (`library/settings`, key `root`).
-const SETTINGS: &str = "settings";
-const ROOT: &str = "root";
-
 /// Where imported files end up.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Placement {
@@ -515,14 +511,12 @@ impl Report {
 
 /// The library folder copies go to, as the vault remembers it.
 pub fn library_root<S: Store>(vault: &Vault<S>) -> Result<Option<PathBuf>, String> {
-    Ok(vault
-        .library_document(SETTINGS, ROOT)?
-        .and_then(|v| v["path"].as_str().map(PathBuf::from)))
+    vault.library_folder()
 }
 
 /// Remembers the library folder copies go to.
 pub fn set_library_root<S: Store>(vault: &Vault<S>, root: &Path) -> Result<(), String> {
-    vault.set_library_document(SETTINGS, ROOT, Some(&json!({ "path": root })))
+    vault.set_library_folder(root)
 }
 
 /// The room a library folder needs at least to be offered: 1 GiB.

@@ -176,11 +176,11 @@ impl<S: Store + Send + 'static> Runner<S> {
 
     /// The photo's file name, for the review's rows.
     fn file_name(&self, image: &ImageId) -> Option<String> {
-        self.vault
-            .locations(image)
-            .ok()?
-            .into_iter()
-            .next()?
+        let locations = self.vault.locations(image).ok()?;
+        let order = self.vault.read_order().ok()?;
+        order
+            .pick(&locations)
+            .or(locations.first())?
             .path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
