@@ -248,7 +248,7 @@ fn a_failed_import_leaves_a_badge_until_it_is_clicked() {
     let failed = h.state().activity_focus_state()["selected"].clone();
     assert!(failed.is_string(), "the failure selected: {failed}");
     until(&mut h, "the outcome", |h| {
-        h.get_all_by_label("Failed: the disk is full").count() > 0
+        h.query_all_by_label("Failed: the disk is full").count() > 0
     });
     assert!(h.query_by_label("Retry").is_some());
     until(&mut h, "the badge gone", |h| {

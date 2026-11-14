@@ -53,7 +53,7 @@ const EMBEDDED_ID: &str = "helios.activity.embedded";
 const MIN_SIZE: Vec2 = egui::vec2(640.0, 360.0);
 const MAX_DEFAULT_SIZE: Vec2 = egui::vec2(1100.0, 720.0);
 /// A row's height in the Jobs list.
-const ROW: f32 = 44.0;
+const ROW: f32 = 50.0;
 /// How many failed items the detail lists.
 const FAILED_SHOWN: usize = 20;
 
@@ -407,7 +407,11 @@ impl Jobs {
     fn progress_ui(&self, ui: &mut egui::Ui, p: &Promise, bar: Option<f32>) {
         match (&p.state, bar) {
             (State::Running { done, total, .. }, Some(f)) => {
-                ui.add(egui::ProgressBar::new(f).desired_width(140.0));
+                ui.add(
+                    egui::ProgressBar::new(f)
+                        .desired_width(140.0)
+                        .desired_height(10.0),
+                );
                 ui.label(text(
                     ui,
                     Message::new("gui-promise-counts", "{ $done } of { $total }")

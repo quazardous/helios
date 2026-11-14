@@ -180,7 +180,7 @@ fn a_running_import_shows_with_its_bar_and_counts_and_a_job_without_progress_has
     assert_eq!(row_bar(&h, &trash.id), Some(false));
     // The detail: the counts (the row says them too) and the file at hand.
     until(&mut h, "the import's counts", |h| {
-        h.get_all_by_label("120 of 412").count() == 2
+        h.query_all_by_label("120 of 412").count() == 2
     });
     // The file at hand, in the detail's current step and its log.
     assert_eq!(h.get_all_by_label("IMG_0120.JPG").count(), 2);
@@ -190,7 +190,7 @@ fn a_running_import_shows_with_its_bar_and_counts_and_a_job_without_progress_has
     h.run_steps(3);
     assert_eq!(focus(&h)["selected"], json!(trash.id));
     until(&mut h, "the trash's detail", |h| {
-        h.query_by_label("3 so far").is_some() && h.get_all_by_label("scanning").count() > 0
+        h.query_by_label("3 so far").is_some() && h.query_all_by_label("scanning").count() > 0
     });
     // Cancel from the detail stops it.
     in_detail(&h, "Cancel").click();
@@ -199,7 +199,7 @@ fn a_running_import_shows_with_its_bar_and_counts_and_a_job_without_progress_has
     });
     // Cancel from the list, on the import's row hovered.
     until(&mut h, "the trash settled", |h| {
-        h.get_all_by_label("Cancel").count() == 0
+        h.query_all_by_label("Cancel").count() == 0
     });
     let row = in_list(&h, "Import 412 photos").rect().center();
     h.hover_at(row);
