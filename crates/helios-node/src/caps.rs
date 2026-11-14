@@ -6,8 +6,9 @@
 //!   [`MAX_LIST`]; more is refused, the agent pages with `offset`.
 //! - A wait's `timeout_ms` is at most [`MAX_WAIT_MS`] (10 minutes); more
 //!   is refused, the agent waits again.
-//! - A batch's `items` hold at most [`MAX_BATCH`] steps; more are refused,
-//!   the agent sends the rest in another call.
+//! - A batch's `items`, and a command batch's `steps`, hold at most
+//!   [`MAX_BATCH`] steps; more are refused, the agent sends the rest in
+//!   another call.
 //! - An image in an answer (a preview, as `{mime, width, height, base64}`)
 //!   is at most [`MAX_PREVIEW_EDGE`] pixels on its long edge and
 //!   [`MAX_IMAGE`] bytes; a larger one is left out, with a note saying why.
@@ -40,6 +41,8 @@ pub const MAX_LIST: usize = 1000;
 pub const MAX_WAIT_MS: u64 = 600_000;
 /// The most steps (`items`) one batch holds.
 pub const MAX_BATCH: usize = 256;
+// The node refuses a longer command batch itself, at the same cap.
+const _: () = assert!(MAX_BATCH == helios_inspect::batch::MAX_STEPS);
 /// The longest edge of an image an answer carries, in pixels.
 pub const MAX_PREVIEW_EDGE: u64 = 2048;
 /// The largest image an answer carries, decoded: 5 MiB.
@@ -131,7 +134,14 @@ pub fn too_large(size: usize) -> Value {
 pub fn check_request(request: &Value) -> Result<(), String> {
     check_limit(request)?;
     check_wait(request)?;
-    check_batch(request)
+    check_batch(request)?;
+    // A command batch's steps, each a command run's params.
+    for step in request["steps"].as_array().into_iter().flatten() {
+        check_limit(step)?;
+        check_wait(step)?;
+        check_batch(step)?;
+    }
+    Ok(())
 }
 
 /// Refuses a `timeout_ms` over [`MAX_WAIT_MS`], the tool's own or a
@@ -153,11 +163,13 @@ pub fn check_wait(request: &Value) -> Result<(), String> {
 }
 
 /// Refuses a batch of more than [`MAX_BATCH`] `items`, the tool's own or
-/// a command run's (`params.items`).
+/// a command run's (`params.items`), or a command batch of more than
+/// [`MAX_BATCH`] `steps`.
 pub fn check_batch(request: &Value) -> Result<(), String> {
     for (name, items) in [
         ("items", &request["items"]),
         ("params.items", &request["params"]["items"]),
+        ("steps", &request["steps"]),
     ] {
         if let Some(n) = items.as_array().map(Vec::len)
             && n > MAX_BATCH
@@ -498,6 +510,14 @@ mod tests {
         );
         let e = check_batch(&json!({ "params": { "items": items(300) } })).unwrap_err();
         assert!(e.contains("`params.items` holds 300 steps"), "{e}");
+        // A command batch's steps, and each step's own params.
+        let steps = |n: usize| vec![json!({ "id": "library.stacks.list" }); n];
+        assert!(check_request(&json!({ "steps": steps(MAX_BATCH) })).is_ok());
+        let e = check_request(&json!({ "steps": steps(MAX_BATCH + 1) })).unwrap_err();
+        assert!(e.contains("`steps` holds 257 steps"), "{e}");
+        let e = check_request(&json!({ "steps": [{ "id": "x", "params": { "limit": 5000 } }] }))
+            .unwrap_err();
+        assert!(e.contains("params.limit"), "{e}");
     }
 
     #[test]

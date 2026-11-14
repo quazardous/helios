@@ -49,6 +49,7 @@
 //!     helios commands [--vault FILE|--node ADDRESS] [--window W] [--filter F] [--enabled]
 //!     helios run ID [--vault FILE|--node ADDRESS] [--param KEY=VALUE]... [--json PARAMS] [--request-id KEY]
 //!                [--window W] [--scope node|window]
+//!     helios batch-run [--vault FILE|--node ADDRESS] --json '{"steps": [...]}' [--window W] [--request-id KEY]
 //!
 //!     helios doctor display
 //!     helios doctor ai
@@ -191,6 +192,8 @@ const USAGE: &str = "usage:
   helios commands --vault FILE|--node ADDRESS [--window W] [--filter F] [--enabled]
   helios run ID --vault FILE|--node ADDRESS [--param KEY=VALUE]... [--json PARAMS]
              [--window W] [--scope node|window]
+  helios batch-run --vault FILE|--node ADDRESS --json '{\"steps\": [{\"id\": ID, \"params\": {...}}, ...]}'
+             [--window W] [--request-id KEY]
   helios doctor display
   helios doctor ai";
 
@@ -1194,6 +1197,17 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
             }
             ("command.run", call)
         }
+        ("batch-run", []) => {
+            let Some(mut batch) = parsed.json.clone() else {
+                return usage("batch-run takes --json '{\"steps\": [...]}'");
+            };
+            batch["origin"] = json!("cli");
+            if let Some(window) = &parsed.window {
+                batch["window"] = json!(window);
+            }
+            ("command.batch", batch)
+        }
+        ("batch-run", _) => return usage("batch-run takes no words: its steps go in --json"),
         ("commands", _) => return usage("commands takes no words, only options"),
         _ => return usage("run takes one command id"),
     };
@@ -1207,7 +1221,7 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
     };
     // A run carries a key: sent again with it after an unknown outcome,
     // the node applies it once.
-    let key = (method == "command.run").then(|| {
+    let key = (method != "commands.list").then(|| {
         parsed
             .request_id
             .clone()
@@ -1219,6 +1233,10 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
                 "{}",
                 serde_json::to_string_pretty(&answer).expect("JSON values serialize")
             );
+            // A batch with a failed step, its results printed.
+            if answer["failed"].as_u64().is_some_and(|n| n > 0) && method == "command.batch" {
+                return ExitCode::from(1);
+            }
             ExitCode::SUCCESS
         }
         Err(e) if e.code == rpc::code::OUTCOME_UNKNOWN => {
@@ -1345,7 +1363,10 @@ fn main() -> ExitCode {
     if args.first().is_some_and(|a| a == "stacks") {
         return stacks(&args[1..]);
     }
-    if let Some(verb) = args.first().filter(|a| *a == "commands" || *a == "run") {
+    if let Some(verb) = args
+        .first()
+        .filter(|a| ["commands", "run", "batch-run"].contains(&a.as_str()))
+    {
         return commands(verb, &args[1..]);
     }
     if args.first().is_some_and(|a| a == "doctor") {
