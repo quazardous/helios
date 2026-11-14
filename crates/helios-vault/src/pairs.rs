@@ -177,9 +177,8 @@ pub fn merge_marks(
             }
             raw
         }
-        (Some(_), None) => raw,
         (None, Some(_)) => jpeg,
-        (None, None) => raw,
+        (Some(_) | None, None) => raw,
     };
     for name in [PICKED, REJECTED] {
         if let Some(v) = from.get(name) {

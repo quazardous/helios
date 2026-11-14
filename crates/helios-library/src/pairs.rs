@@ -238,12 +238,11 @@ pub fn pair<S: Store>(
     now: u64,
 ) -> Result<(Vec<Paired>, Changes), String> {
     let all;
-    let images = match images {
-        Some(ids) => ids,
-        None => {
-            all = library_photos(vault)?;
-            &all
-        }
+    let images = if let Some(ids) = images {
+        ids
+    } else {
+        all = library_photos(vault)?;
+        &all
     };
     let pairs = if exact_pair {
         vec![exact(vault, images)?]
