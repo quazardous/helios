@@ -675,8 +675,30 @@ fn root_of<S: Store>(vault: &Vault<S>, options: &Options) -> Result<PathBuf, Str
 /// `resumed_at` or `error` when they apply). An item that fails is
 /// reported and the others go on; the import fails only when it cannot
 /// start. Whatever [`Options::placement`] says, each item becomes a
-/// verified copy in the library folder.
+/// verified copy in the library folder. It leaves its record in the
+/// import history ([`crate::import_history::record_remote`]).
 pub fn import_remote<S: Store>(
+    vault: &Vault<S>,
+    jobs: &Jobs,
+    remote: &Remote<'_>,
+    options: &Options,
+    now: u64,
+    emit: &mut impl FnMut(&Value),
+) -> Result<Report, String> {
+    let ended = run_remote(vault, jobs, remote, options, now, emit);
+    // As a local import's: a record that cannot be written does not undo
+    // the import, it is said.
+    let outcome = ended.as_ref().map_err(String::as_str);
+    if let Err(e) =
+        crate::import_history::record_remote(vault, &remote.source, options, now, outcome)
+    {
+        eprintln!("import history: {e}");
+    }
+    ended
+}
+
+/// [`import_remote`], before its record.
+fn run_remote<S: Store>(
     vault: &Vault<S>,
     jobs: &Jobs,
     remote: &Remote<'_>,

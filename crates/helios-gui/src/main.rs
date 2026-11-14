@@ -74,10 +74,8 @@ fn warn(text: &str) {
 /// The library being read on a thread of its own as the window opens.
 type LibraryReading = std::sync::mpsc::Receiver<Result<helios_gui::persist::LibraryRows, String>>;
 
-/// Starts reading the library from `vault` on a thread of its own.
-fn read_library(
-    vault: Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>,
-) -> LibraryReading {
+/// Starts reading the library through the node on a thread of its own.
+fn read_library(reader: helios_gui::persist::Reader) -> LibraryReading {
     let (tx, reading) = std::sync::mpsc::channel();
     let sender = tx.clone();
     let spawned = std::thread::Builder::new()
@@ -85,7 +83,8 @@ fn read_library(
         .spawn(move || {
             // In the default sort: a workspace sorted otherwise reads it
             // again once shown.
-            let rows = helios_gui::persist::read_library(&vault, helios_gui::library::DEFAULT_SORT);
+            let rows =
+                helios_gui::persist::read_library(&reader, helios_gui::library::DEFAULT_SORT);
             if let Ok(rows) = &rows {
                 start::mark(&format!("library read ({} images, its thread)", rows.len()));
             }
@@ -97,13 +96,6 @@ fn read_library(
     reading
 }
 
-/// Fills the library from the vault, and reads the thumbnails behind it:
-/// from the thumbnail cache, else from the first copy still present.
-fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
-    let rows = helios_gui::persist::read_library(persist.vault(), shell.library().sort())?;
-    show_library(shell, persist, rows)
-}
-
 /// Shows the library read (on a thread of its own at the start), and reads
 /// the thumbnails behind it.
 fn show_library(
@@ -112,16 +104,22 @@ fn show_library(
     rows: helios_gui::persist::LibraryRows,
 ) -> Result<(), String> {
     let files = persist.show_library(shell, rows)?;
+    show_thumbnails(shell, &files);
+    Ok(())
+}
+
+/// Reads the thumbnails behind the library shown: from the thumbnail
+/// cache, else from the first copy still present.
+fn show_thumbnails(shell: &mut Shell, files: &[(String, std::path::PathBuf)]) {
     // Quick open opens them from there.
     shell.set_image_files(files.iter().cloned());
     // A new pool replaces the last (an import filled the library again):
     // the thumbnails already shown are not read again.
     let cache = THUMB_CACHE.get().cloned().flatten();
-    let loader = helios_gui::thumbnails::start(shell, cache, &files, warn);
+    let loader = helios_gui::thumbnails::start(shell, cache, files, warn);
     *THUMB_LOADER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(loader);
-    Ok(())
 }
 
 /// The thumbnail cache of the library opened (none without a vault, or
@@ -589,7 +587,12 @@ fn library_commands(
         let history = history.clone();
         let backed = after_import.clone();
         shell.set_import_remote(Arc::new(move |job, mut emit| {
-            let options = helios_gui::importers::options(&job.args)?;
+            let mut options = helios_gui::importers::options(&job.args)?;
+            // A pick is the person's, in the import window, unless the
+            // job's arguments say who asked.
+            if options.origin.is_none() {
+                options.origin = Some("user".into());
+            }
             // The window asks for Into before the service's page opens
             // when there is no library folder; should it be gone since,
             // say so in the desktop's words, not the command line's.
@@ -749,38 +752,28 @@ fn library_commands(
             Ok(json!({ "cleared": cleared }))
         },
     )?;
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    // The stacks' commands run on the desktop's node, as whoever ran
+    // them; the answer is the node's, without its envelope.
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.suggest",
             "Suggest stacks (`images`: ids, every image when absent; `resolver`)",
             "Library",
         ),
-        move |args, _| {
-            let images = args
-                .get("images")
-                .and_then(Value::as_array)
-                .map(|ids| {
-                    ids.iter()
-                        .map(|i| helios_vault::ImageId::from_hex(i.as_str().unwrap_or("")))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()?
-                .unwrap_or_default();
+        move |args, origin| {
+            let images = args.get("images").cloned().unwrap_or_else(|| json!([]));
             let resolver = text(args, "resolver").unwrap_or_else(|| stacks::RULES.into());
-            let resolvers = stacks::Resolvers::default();
-            stacks::suggest(
-                vault.as_ref(),
-                Some(bus.as_ref()),
-                &resolvers,
-                &resolver,
-                &images,
-                seconds(),
+            on_node(
+                &node,
+                "library.stacks.suggest",
+                json!({ "images": images, "resolver": resolver }),
+                origin,
+                "decision",
             )
-            .map(|d| stacks::to_json(&d))
         },
     )?;
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.accept",
@@ -789,26 +782,20 @@ fn library_commands(
         ),
         move |args, origin| {
             let id = text(args, "decision").ok_or("`decision` is missing")?;
-            let groups: Option<Vec<usize>> =
-                args.get("groups").and_then(Value::as_array).map(|g| {
-                    g.iter()
-                        .filter_map(Value::as_u64)
-                        .map(|n| n as usize)
-                        .collect()
-                });
-            let who = helios_gui::persist::who(origin);
-            stacks::accept(
-                vault.as_ref(),
-                Some(bus.as_ref()),
-                &id,
-                groups.as_deref(),
-                &who,
-                seconds(),
+            let groups: Option<Vec<u64>> = args
+                .get("groups")
+                .and_then(Value::as_array)
+                .map(|g| g.iter().filter_map(Value::as_u64).collect());
+            on_node(
+                &node,
+                "library.stacks.accept",
+                json!({ "decision": id, "groups": groups }),
+                origin,
+                "decision",
             )
-            .map(|d| stacks::to_json(&d))
         },
     )?;
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.decline",
@@ -817,9 +804,13 @@ fn library_commands(
         ),
         move |args, origin| {
             let id = text(args, "decision").ok_or("`decision` is missing")?;
-            let who = helios_gui::persist::who(origin);
-            stacks::decline(vault.as_ref(), Some(bus.as_ref()), &id, &who, seconds())
-                .map(|d| stacks::to_json(&d))
+            on_node(
+                &node,
+                "library.stacks.decline",
+                json!({ "decision": id }),
+                origin,
+                "decision",
+            )
         },
     )?;
     // The image map: forget a folder or a volume (its sightings not in
@@ -855,30 +846,55 @@ fn library_commands(
                 .map(|n| serde_json::json!({ "forgotten": n }))
         },
     )?;
-    let vault = persist.vault().clone();
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new("library.stacks.list", "List the stacks", "Library"),
-        move |_, _| {
-            vault
-                .stacks()
-                .map(|s| serde_json::to_value(s).expect("stacks serialize"))
-        },
+        move |_, origin| on_node(&node, "library.stacks.list", json!({}), origin, "stacks"),
     )?;
-    let vault = persist.vault().clone();
+    let node = persist.node().clone();
     shell.register(
         CommandSpec::new(
             "library.stacks.dissolve",
             "Dissolve a stack, keeping its images (`stack`)",
             "Library",
         ),
-        move |args, _| {
+        move |args, origin| {
             let id = text(args, "stack").ok_or("`stack` is missing")?;
-            vault
-                .dissolve_stack(&id)
-                .map(|s| serde_json::to_value(s).expect("stacks serialize"))
+            on_node(
+                &node,
+                "library.stacks.dissolve",
+                json!({ "stack": id }),
+                origin,
+                "stack",
+            )
         },
     )?;
     Ok(())
+}
+
+/// How long a command run on the desktop's node is waited for.
+const NODE_ANSWER: std::time::Duration = std::time::Duration::from_mins(1);
+
+/// Runs `method` on the desktop's node as `origin` ran it, waiting for
+/// the node, and returns the answer's `key`.
+fn on_node(
+    node: &helios_inspect::client::Client,
+    method: &str,
+    params: serde_json::Value,
+    origin: &helios_shell::commands::Origin,
+    key: &str,
+) -> Result<serde_json::Value, String> {
+    let who = helios_gui::persist::who(origin);
+    let pending = node.call_with(
+        method,
+        params,
+        helios_inspect::client::CallMeta::origin(&who),
+    );
+    match pending.wait_timeout(NODE_ANSWER) {
+        Some(Ok(mut answer)) => Ok(answer[key].take()),
+        Some(Err(e)) => Err(e.message),
+        None => Err(format!("the node did not answer `{method}`")),
+    }
 }
 
 /// A file through the workspace's network (its template's, as edited;
@@ -1503,11 +1519,10 @@ impl eframe::App for App {
             self.shell.notify(helios_gui::dialogs::Level::Error, e);
         }
         if self.refill.swap(false, Ordering::Relaxed)
-            && let Some(persist) = &self.persist
+            && let Some(persist) = &mut self.persist
         {
-            if let Err(e) = fill_library(&mut self.shell, persist) {
-                warn(&format!("cannot fill the library: {e}"));
-            }
+            // Read off the UI thread, shown at a coming frame.
+            persist.ask_fill(&self.shell, true);
             // The workspace proposes stacks after each import, to review.
             if self.shell.suggests_stacks() {
                 self.shell.stack_review_mut().suggest(Vec::new());
@@ -1518,19 +1533,21 @@ impl eframe::App for App {
                 let _stall = helios_gui::stall::section("the library's changes sent to the vault");
                 persist.frame(&mut self.shell, seconds_f64());
             }
-            // A write still with the node: its answer is picked up at a
-            // coming frame.
-            if persist.busy() {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(16));
-            }
             // A scan changed where copies are (a disk plugged in or
             // out): the photos' badges and thumbnails follow.
             if persist.take_locations_changed() {
                 self.shell.refresh_volumes();
-                if let Err(e) = fill_library(&mut self.shell, persist) {
-                    warn(&format!("cannot fill the library: {e}"));
-                }
+                persist.ask_fill(&self.shell, true);
+            }
+            // The library read again: its thumbnails.
+            if let Some(files) = persist.take_filled() {
+                show_thumbnails(&mut self.shell, &files);
+            }
+            // A call still with the node (a write, a read of the library):
+            // its answer is picked up at a coming frame.
+            if persist.busy() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(16));
             }
             // While a gesture goes on, come back to save it in time.
             if self.shell.values().lock().is_ok_and(|v| v.uncommitted()) {
@@ -1886,7 +1903,7 @@ fn main() -> Result<(), String> {
     }
     let vault = node.as_ref().map(|n| n.vault().clone());
     // The library is read while the window opens.
-    let library_reading = vault.clone().map(read_library);
+    let library_reading = persist.as_ref().map(|p| read_library(p.reader()));
     // Helios's settings, resolved once from their layers: the machine's
     // file, the library's and the person's layers the node keeps (as
     // `helios-node --vault` does), `--set`. Every part reads them from

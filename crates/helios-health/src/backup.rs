@@ -11,7 +11,7 @@ use helios_storage::{Volume, registry};
 use helios_vault::{Store, Vault};
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Event, Finding, Fix, Level};
 
 /// The owner of the backup checks ([`checks`]).
 pub const OWNER: &str = "backup";
@@ -190,6 +190,7 @@ impl Check for StrategyMet {
     fn declaration(&self) -> Declaration {
         Declaration::new("Every photo has the verified copies its strategy asks for")
             .levels(&[Level::Ok, Level::Warning])
+            .on(&[Event::Volumes])
             .fixes(&["library.backupNow", "library.storage"])
     }
 
@@ -256,6 +257,7 @@ impl Check for DestinationsSeen {
     fn declaration(&self) -> Declaration {
         Declaration::new("The strategy's backup disks were plugged in lately")
             .levels(&[Level::Ok, Level::Warning])
+            .on(&[Event::Volumes])
             .fixes(&["library.storage"])
     }
 
@@ -392,6 +394,7 @@ impl Check for Cards {
     fn declaration(&self) -> Declaration {
         Declaration::new("The cards still inserted whose photos are short of their backups")
             .levels(&[Level::Warning])
+            .on(&[Event::Volumes])
             .fixes(&["library.backupNow"])
     }
 

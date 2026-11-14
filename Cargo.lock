@@ -2437,6 +2437,7 @@ name = "helios-gpu"
 version = "0.88.0"
 dependencies = [
  "bytemuck",
+ "helios-bricks",
  "helios-core",
  "helios-module-blur",
  "helios-module-exposure",

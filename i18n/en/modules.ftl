@@ -25,6 +25,10 @@ param-cameracolour-preview =
     .description = the hash of the camera's JPEG the look was fitted to, for provenance
     .label = preview
 
+param-cameratone-amount =
+    .description = how much of the look's tone: 0 none, 1 all
+    .label = amount
+
 param-cameratone-baseline =
     .description = the default render's mean Delta E 2000 to the camera's JPEG on the same pixels
     .label = baseline

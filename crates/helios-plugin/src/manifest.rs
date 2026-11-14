@@ -44,8 +44,8 @@
 //!
 //! `[[health]]` declares the plugin's problem checks, through the health
 //! contract ([`helios_health::Declaration`]): each its id, its title,
-//! what it watches, the levels it may raise and the fix commands it may
-//! offer. Helios runs them through the plugin's process (`health.check`,
+//! what it watches, the levels it may raise, the fix commands it may
+//! offer and when it runs (`every_minutes`, `on`). Helios runs them through the plugin's process (`health.check`,
 //! the `health` interface, started on `onHealth`: [`crate::health`]); an
 //! unsound declaration refuses the plugin, like a bad setting.
 //!
@@ -56,6 +56,7 @@
 //! watches = "Each Google Photos account still signs in"
 //! levels = ["ok", "warning"]
 //! fixes = ["import.reconnect"]
+//! every_minutes = 360
 //! ```
 
 use std::collections::BTreeMap;
@@ -334,6 +335,14 @@ pub struct HealthDecl {
     /// The commands its findings' fixes may run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<String>,
+    /// How often it runs again, in minutes (at least 5); none: Helios's
+    /// own period (daily).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every_minutes: Option<u32>,
+    /// The events that run it at once besides its clock: `volumes` (a
+    /// volume came or went).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on: Vec<helios_health::Event>,
 }
 
 impl HealthDecl {
@@ -343,6 +352,8 @@ impl HealthDecl {
             watches: self.watches.clone(),
             levels: self.levels.clone(),
             fixes: self.fixes.clone(),
+            every_minutes: self.every_minutes,
+            on: self.on.clone(),
         }
     }
 }

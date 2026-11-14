@@ -10,7 +10,7 @@ use helios_core::Message;
 use helios_storage::{Role, Volume, capacity_text, registry};
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Event, Finding, Fix, Level};
 
 /// The owner of the storage checks ([`storage`]).
 pub const STORAGE_OWNER: &str = "storage";
@@ -98,6 +98,8 @@ impl Check for FreeSpace {
     fn declaration(&self) -> Declaration {
         Declaration::new("Free space on the library's volume and on every volume Helios writes to")
             .levels(&[Level::Ok, Level::Warning, Level::Problem])
+            .every(60)
+            .on(&[Event::Volumes])
             .fixes(&["library.storage"])
     }
 
@@ -263,6 +265,7 @@ impl Check for Library {
     fn declaration(&self) -> Declaration {
         Declaration::new("The library's database opens, and its disk has room to grow")
             .levels(&[Level::Ok, Level::Warning, Level::Problem])
+            .on(&[Event::Volumes])
             .fixes(&["library.openFolder", "library.storage"])
     }
 
