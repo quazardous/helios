@@ -2,7 +2,7 @@
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
 command-activity-show =
-    .title = Background tasks…
+    .title = Activity… (`id`: the job selected, a promise of `promises.list`)
 
 command-calibrate-open =
     .title = Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)
