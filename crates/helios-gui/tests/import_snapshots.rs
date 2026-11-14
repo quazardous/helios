@@ -17,6 +17,7 @@ use egui_kittest::{Harness, SnapshotResults};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
 use helios_storage::Card as Volume;
+use helios_vault::{MemoryStore, Vault};
 use serde_json::{Value, json};
 
 /// The same folder on every run: the window shows folder names.
@@ -68,7 +69,18 @@ fn photos(dir: &Path) -> PathBuf {
 /// The shell watching `cards`, the import window opened with `args` and
 /// its sources read through, at `scale`.
 fn window(cards: Vec<Volume>, args: Value, scale: f32) -> Harness<'static, Shell> {
+    window_with(cards, args, scale, |_| {})
+}
+
+/// [`window`], the shell set up by `setup` first.
+fn window_with(
+    cards: Vec<Volume>,
+    args: Value,
+    scale: f32,
+    setup: impl FnOnce(&mut Shell),
+) -> Harness<'static, Shell> {
     let mut shell = Shell::new(helios_panels(), None);
+    setup(&mut shell);
     let any = !cards.is_empty();
     shell.watch_cards(Arc::new(cards));
     let mut h = headless::harness_at(shell, vec2(1280.0, 800.0), scale);
@@ -93,6 +105,27 @@ fn window(cards: Vec<Volume>, args: Value, scale: f32) -> Harness<'static, Shell
         h.run();
     }
     h
+}
+
+/// A card's photos with marks: one the Library holds (`IMG_0002`, from
+/// another folder) and a RAW with its JPEG (`IMG_0003`); what the
+/// Library holds.
+fn marked(dir: &Path) -> helios_gui::import_scan::Known {
+    let dcim = dir.join("MARKED/DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    put(&dcim.join("IMG_0001.JPG"), &jpeg("a"), 2);
+    put(&dcim.join("IMG_0002.JPG"), &jpeg("b"), 2);
+    put(&dcim.join("IMG_0003.CR2"), &jpeg("c"), 3);
+    put(&dcim.join("IMG_0003.JPG"), &jpeg("c"), 3);
+    let library = dir.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::copy(jpeg("b"), library.join("b.jpg")).unwrap();
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    vault.import_file(&library.join("b.jpg"), 0).unwrap();
+    let client = helios_gui::persist::Persist::on(vault, Arc::new(helios_core::Bus::new()))
+        .node()
+        .clone();
+    helios_gui::import_scan::known_of(client)
 }
 
 fn name(state: &str, scale: f32) -> String {
@@ -131,6 +164,18 @@ fn the_import_window_snapshots() {
                 results.add(h.try_snapshot(name(&format!("card-{mode}"), scale)));
             }
         }
+        // A card whose photos carry marks: in your Library (an icon, top
+        // right) and RAW+JPG (an "R+J" chip, bottom right).
+        let cards = vec![Volume {
+            label: "MARKED".into(),
+            root: dir.join("MARKED"),
+            capacity: Some(64_000_000_000),
+        }];
+        let known = marked(&dir);
+        let mut h = window_with(cards, json!(null), scale, |s| s.set_import_known(known));
+        let _ = h.get_by_label("IMG_0002.JPG · in your Library");
+        let _ = h.get_by_label("IMG_0003.CR2 + IMG_0003.JPG · RAW+JPG");
+        results.add(h.try_snapshot(name("card-marks", scale)));
         // A folder: added where it is.
         let mut h = window(Vec::new(), json!({ "paths": [folder] }), scale);
         assert!(!h.state().import_copies());

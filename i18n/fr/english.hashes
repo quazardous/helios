@@ -865,6 +865,7 @@ gui-import-window-offline 01064de9e41d67ce
 gui-import-window-open 36112b331ee04a37
 gui-import-window-own-choices 0ccd5ad8fef959ec
 gui-import-window-pair cd1d4bc78361cc21
+gui-import-window-pair-short b1184542deebe696
 gui-import-window-profile 4d102f73cf61f011
 gui-import-window-raw-only eac6413624051d2d
 gui-import-window-reading 59df8331cab08c20

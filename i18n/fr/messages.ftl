@@ -1836,6 +1836,8 @@ gui-import-window-open = Importer des photos…
 
 gui-import-window-pair = RAW+JPG
 
+gui-import-window-pair-short = R+J
+
 gui-import-window-raw-only = Raw seulement
 
 gui-import-window-reading = Lecture de { $path }
