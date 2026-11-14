@@ -550,6 +550,12 @@ driver, not a rewrite.
   copies shown on request; RAW+JPEG pairs as stacks made at import; path
   keywords first; file operations inside library and archive volumes;
   browse state per window. Slice L1 (the library read at scale) first.
+  (2026-11-14, decided) **RAW+JPEG pairs are one photo with several
+  files** (docs/design/raw-jpeg-pairs.md), replacing the stacks made at
+  import: each file has a role (the RAW master carries the edits, the
+  camera's JPEG or HEIF is its rendering); marks, albums and edits
+  belong to the photo; delete, backups and "safe to format" count every
+  file. Slices pending the owner's go.
 
 **Sync model.** (2026-10-10) Take git's *model* rather than git itself:
 content-addressed objects, a DAG of versions, refs, offline replicas,
