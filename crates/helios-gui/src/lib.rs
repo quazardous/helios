@@ -70,6 +70,7 @@ pub mod scopes;
 pub mod shell;
 pub mod smart_album;
 pub mod snapshot;
+pub mod splash;
 pub mod stack_review;
 pub mod stall;
 pub mod start;

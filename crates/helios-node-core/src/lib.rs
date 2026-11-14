@@ -21,6 +21,7 @@ pub mod jobs;
 pub mod library;
 pub mod map;
 pub mod node;
+pub mod phases;
 pub mod promises;
 pub mod quit;
 pub mod reads;
