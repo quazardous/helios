@@ -113,6 +113,10 @@ impl Finisher {
 /// application, before the quit goes on without it.
 pub const GRACE: Duration = Duration::from_millis(200);
 
+/// The same, once the end splash saw the end's steps done: the node is
+/// stopped, what is left is quick.
+pub const GRACE_AFTER_SPLASH: Duration = Duration::from_millis(50);
+
 /// The work left for after the window: run once, by whoever comes first
 /// (the host as eframe returns, or the watch past [`GRACE`]).
 #[derive(Clone)]
