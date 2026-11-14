@@ -192,6 +192,18 @@ fn the_shell_answers_a_chart_dry_run() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Frames until the window settles, within a minute. The preview and
+/// the viewport's tiles render on threads of their own and each asks a
+/// frame as it lands, in no fixed number after an edit: a run that does
+/// not settle within the harness's steps is run again, not failed.
+fn frames(h: &mut egui_kittest::Harness<'_, Shell>) {
+    let end = std::time::Instant::now() + std::time::Duration::from_mins(1);
+    while h.run_ok().is_none() {
+        assert!(std::time::Instant::now() < end, "the window settles");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// Frames until `done` holds of the shell's values: what the user asks
 /// of the node runs off the frame. Within a minute: a deadline, not a
 /// guess at how long it takes.
@@ -200,9 +212,9 @@ fn until(h: &mut egui_kittest::Harness<'_, Shell>, done: impl Fn(&helios_values:
     while !done(&h.state().values().lock().unwrap()) {
         assert!(std::time::Instant::now() < end, "the node answers");
         std::thread::sleep(std::time::Duration::from_millis(10));
-        h.run();
+        h.run_ok();
     }
-    h.run();
+    frames(h);
 }
 
 /// A profile document of camera "Test Bayer" under light `xy`, its
@@ -324,7 +336,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    frames(&mut h);
     h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Calibration profile");
 
     let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
@@ -389,7 +401,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
     choose(&mut h, "tungsten");
     choose(&mut h, "none");
     assert_eq!(read(&h, "bypass/chartprofile"), Value::Bool(true));
-    h.run();
+    frames(&mut h);
 }
 
 #[test]
@@ -537,7 +549,7 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    frames(&mut h);
     h.get_by_label("Not fitted yet: the look starts from the camera's own JPEG");
     // Nothing fitted: the switch waits for a fit.
     assert!(
@@ -554,7 +566,7 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
     // nothing is written, in the edit or the library.
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Fit to the camera's JPEG")
         .click();
-    h.run();
+    h.step();
     // The fit runs through the node off the frame: its refusal comes at a
     // coming frame.
     until(&mut h, |s| !calibrate::read_refusal(s).is_empty());
@@ -596,13 +608,13 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
         }
     }
     calibrate::set_refusal(h.state().values(), "");
-    h.run();
+    frames(&mut h);
     h.get_by_label("Fitted to the camera's JPEG: Delta E 2.4 (default 9.8)");
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Refit");
     h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Camera look")
         .click();
-    h.run();
-    h.run();
+    frames(&mut h);
+    frames(&mut h);
     assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(false));
     assert_eq!(read(&h, "bypass/cameracolour"), Value::Bool(false));
     assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(true));
@@ -634,7 +646,7 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
             Origin::User,
         )
         .unwrap();
-    h.run();
+    frames(&mut h);
     assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(false));
     assert_eq!(read(&h, "bypass/cameracolour"), Value::Bool(true));
     h.get_by_label("Colour half off: the chart profile rules the colours");
@@ -687,7 +699,7 @@ fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
             Origin::User,
         )
         .unwrap();
-    h.run();
+    frames(&mut h);
     let offered = |h: &egui_kittest::Harness<'_, Shell>| {
         calibrate::read_offer(&h.state().values().lock().unwrap()).unwrap()["look_default"].clone()
     };
@@ -700,8 +712,8 @@ fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
         "Save as the camera's default",
     )
     .click();
-    h.run();
-    h.run();
+    frames(&mut h);
+    frames(&mut h);
     assert_eq!(offered(&h)["preview"], "fitted-to");
     assert_eq!(history.line().undo.len(), 1);
     h.get_by_label("The default look of Test Bayer: its raws are imported with it");
@@ -709,8 +721,8 @@ fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
     // Cleared: another step, and the header says no more.
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Clear the default")
         .click();
-    h.run();
-    h.run();
+    frames(&mut h);
+    frames(&mut h);
     assert_eq!(offered(&h), serde_json::Value::Null);
     assert_eq!(history.line().undo.len(), 2);
     assert!(
@@ -763,14 +775,14 @@ fn the_camera_look_preset_puts_the_camera_s_default_look_on_in_one_step() {
             ("node/cameratone/preview", Value::Text("fitted-to".into())),
         ],
     );
-    h.run();
+    frames(&mut h);
     h.get_by_role_and_label(
         egui::accesskit::Role::Button,
         "Save as the camera's default",
     )
     .click();
-    h.run();
-    h.run();
+    frames(&mut h);
+    frames(&mut h);
     // The photo's own look changed and turned off since.
     set(
         &h,
@@ -789,14 +801,14 @@ fn the_camera_look_preset_puts_the_camera_s_default_look_on_in_one_step() {
             Origin::User,
         )
         .unwrap();
-    h.run();
+    frames(&mut h);
     // Presets, then "Camera look": the camera's default, turned on.
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Presets")
         .click();
-    h.run();
+    frames(&mut h);
     h.get_by_role_and_label(egui::accesskit::Role::MenuItem, "Camera look")
         .click();
-    h.run();
+    h.step();
     // Read through the node off the frame.
     until(&mut h, |s| {
         s.get("node/cameratone/preview")
@@ -833,7 +845,7 @@ fn the_camera_look_tone_amount_is_one_edit_step() {
 
     let (shell, _history, dir) = look_shell("look-amount");
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    frames(&mut h);
     let read = |h: &egui_kittest::Harness<'_, Shell>| {
         h.state()
             .values()
@@ -856,7 +868,7 @@ fn the_camera_look_tone_amount_is_one_edit_step() {
         ))
         .unwrap();
     }
-    h.run();
+    frames(&mut h);
     assert_eq!(read(&h), Value::Float(0.5));
     // One step of the edit: undone, all of the fit again.
     h.state()
@@ -865,7 +877,7 @@ fn the_camera_look_tone_amount_is_one_edit_step() {
         .unwrap()
         .undo(&Origin::User)
         .unwrap();
-    h.run();
+    frames(&mut h);
     assert_eq!(read(&h), Value::Float(1.0));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -880,7 +892,7 @@ fn the_camera_look_compare_shows_the_camera_jpeg_left_of_the_split() {
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    frames(&mut h);
     let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
         h.state()
             .values()
@@ -899,8 +911,8 @@ fn the_camera_look_compare_shows_the_camera_jpeg_left_of_the_split() {
         "Compare with the camera's JPEG",
     )
     .click();
-    h.run();
-    h.run();
+    frames(&mut h);
+    frames(&mut h);
     h.get_by_label("No camera JPEG to compare: the photo is not a raw");
     assert_eq!(read(&h, calibrate::LOOK_COMPARE), Value::Bool(false));
     assert_eq!(read(&h, "view/viewport/compare"), Value::Bool(false));
@@ -917,7 +929,7 @@ fn the_camera_look_compare_shows_the_camera_jpeg_left_of_the_split() {
         if c == 0 { x as f32 / 16.0 } else { 0.25 }
     });
     h.state().viewport_mut().show_camera_jpeg(&jpeg).unwrap();
-    h.run();
+    frames(&mut h);
     let before = h.state().viewport().before_shown().unwrap();
     assert_eq!(before.extent, after);
     let node = before

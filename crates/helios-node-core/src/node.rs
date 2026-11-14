@@ -37,7 +37,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use helios_core::Bus;
+use helios_core::{Bus, Message};
 use helios_storage::Volumes;
 use helios_vault::{Store, Vault};
 
@@ -54,6 +54,7 @@ pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
 /// replaces kept aside; a restore that fails leaves the catalogue as it
 /// was, and says why in the log.
 pub fn open_library(path: &std::path::Path) -> Result<helios_vault_sqlite::SqliteStore, String> {
+    let _step = crate::phases::boot().begin(Message::new("node-boot-vault", "Opening the library"));
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -159,6 +160,11 @@ impl Life {
     /// recording its copy) waits in its own `cancel_all`.
     fn settle_jobs(&self) {
         let jobs = self.jobs();
+        // Leaving them is safe: what they wrote is in the vault, the rest
+        // is done again (an export asked again, a backup run again).
+        let step = crate::phases::end()
+            .begin(Message::new("node-end-jobs", "Stopping background jobs"))
+            .can_skip();
         if self.read(|s| s.quit == Some(AtQuit::Cancel)) {
             for j in &jobs {
                 j.cancel_all();
@@ -166,8 +172,16 @@ impl Life {
             return;
         }
         for j in &jobs {
-            if !j.running().is_empty() {
+            let running = j.running().len();
+            if running > 0 {
                 crate::quit::mark("the node waits for its running jobs");
+                step.why(
+                    Message::new(
+                        "node-end-jobs-waiting",
+                        "Waiting for { $count } running jobs to finish",
+                    )
+                    .with("count", running as f64),
+                );
             }
             while !j.wait(Duration::from_mins(1)) {
                 log::info!(target: "helios::node", "still waiting for running jobs");
@@ -415,7 +429,12 @@ fn close<S: Store>(vault: &Vault<S>, life: &Life) {
         watch.stop();
     }
     life.settle_jobs();
+    let closing = crate::phases::end().begin(Message::new(
+        "node-end-vault",
+        "Saving and closing the library",
+    ));
     let done = vault.shut_down();
+    drop(closing);
     if let Err(e) = &done {
         log::warn!(target: "helios::node", "cannot close the vault cleanly: {e}");
     }

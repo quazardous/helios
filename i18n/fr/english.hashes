@@ -409,6 +409,10 @@ gui-backup-wizard-step-destination 574b66e16d19e575
 gui-backup-wizard-step-off-site 3ba2fc36b3595ead
 gui-backup-wizard-step-when 5a1ca3dc9cd43721
 gui-backup-wizard-when-about 7ced3c3f78fbec92
+gui-boot-gpu 371d501e10261b59
+gui-boot-interface 0419bd85a4dc6675
+gui-boot-library-read 513fd95e00c955ab
+gui-boot-plugins 7c1ffdaaccf6dc86
 gui-caches-clear 238f7a82e564b550
 gui-caches-clear-all 5a9e1858d3723185
 gui-caches-clear-all-ask 2d49557a52649106
@@ -561,6 +565,8 @@ gui-editor-params fff7588f4a1a3651
 gui-editor-params-refused 17e99425fe05031e
 gui-editor-save bf722ac13bbc1962
 gui-editor-title bbab0761ce200edc
+gui-end-changes f9f7579c9692b35f
+gui-end-interface 977fdf5514d528ca
 gui-export-bits 445ead6584b2ae46
 gui-export-cancelled 1b689c82cb971e12
 gui-export-clash 49f01efc23c89024
@@ -1401,6 +1407,10 @@ gui-snapshot-failed 9fc35f847a376d40
 gui-snapshot-saved b4ee66de70743f70
 gui-snapshot-unreadable 1d37a0dd2471ebfb
 gui-snapshots-not-saved 699c2313ef030286
+gui-splash-closing b856c00a07e2358c
+gui-splash-quit-now b6f7a067e4bf4e90
+gui-splash-starting d92670ff70bdc40b
+gui-splash-still-working b5d17905488fa4c0
 gui-stacks-accept-all ca4fde6fed9d9c84
 gui-stacks-accept-checked 624152a268a8731b
 gui-stacks-bracket b1ba6eb8d4e226ff
@@ -1744,6 +1754,7 @@ menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133
 node-batch-only 4c5b1c030894c77b
+node-boot-vault f4e65038df2fbe47
 node-command-debug-only 567e960246ad044d
 node-command-needs-vault e304707e4a7d2ace
 node-command-needs-window e396d1bcf84e2c11
@@ -1751,6 +1762,9 @@ node-command-origin 0ec35222dda3dfce
 node-command-params c982161f016803d8
 node-command-unknown 173dc16b73b51bb0
 node-edit-not-saved 6371e83fc812ed88
+node-end-jobs d0e441db3a0c02dd
+node-end-jobs-waiting 4d8e763910f656bf
+node-end-vault 5a5158cf56c6d779
 node-job-unknown 39f3e78315b7e6c2
 node-load-refused 3c406345cb7a783e
 node-no-extent 5a0f925ebc9af4d3

@@ -195,6 +195,7 @@ fn every_command_has_a_schema_its_example_fits() {
         json!({ "images": ["/a.nef"], "dry_run": true }),
         json!({ "camera": "nikon z 6", "clear": true }),
         json!({ "camera": "nikon z 6", "image": null }),
+        json!({ "camera": "nikon z 6" }),
         json!({ "image": "0a", "camera": "nikon z 6", "light": [0.31, 0.33] }),
     ];
     let specs = specs();
