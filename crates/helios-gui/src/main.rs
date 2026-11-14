@@ -698,14 +698,18 @@ fn library_commands(
                 };
                 let ended = match &through {
                     // The plugin lists, Helios imports.
-                    Some(plugins) => helios_gui::importers::run(
-                        plugins,
-                        vault.as_ref(),
-                        &jobs,
-                        &asked,
-                        seconds(),
-                        &mut emit,
-                    ),
+                    Some(plugins) => {
+                        helios_gui::importers::run(plugins, &jobs, &asked, &mut emit, |files, options, emit| {
+                            helios_library::import::import(
+                                vault.as_ref(),
+                                &jobs,
+                                files,
+                                options,
+                                seconds(),
+                                emit,
+                            )
+                        })
+                    }
                     None => helios_library::import::import(
                         vault.as_ref(),
                         &jobs,

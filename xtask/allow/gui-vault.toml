@@ -20,10 +20,6 @@ path = "crates/helios-gui/src/image_map.rs"
 reason = "the image map's scan writes sightings and reads the known volumes from the vault; to move to the node"
 
 [[allow]]
-path = "crates/helios-gui/src/importers.rs"
-reason = "a foreign catalog's import runs helios_library::import on the vault; to move to the node's importer"
-
-[[allow]]
 path = "crates/helios-gui/src/shell/storage.rs"
 reason = "the Storage page reads and writes volumes, the strategy and backup statuses on the vault; to move to storage commands on the node"
 
