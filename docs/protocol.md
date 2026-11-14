@@ -51,6 +51,24 @@ Changes to the protocol are additive within a major version: a new
 method, a new optional field. A client reads `node.hello` to know what it
 talks to.
 
+## Init steps
+
+The setup steps modules declare (the library folder first, see
+[module-contract.md](module-contract.md#init-steps-what-a-module-asks-first))
+are read on a vault's endpoint:
+
+- `init.steps`: every step in order, each with its `id`, `owner`,
+  `title`, `why`, the settings it `fills`, its `command` when one fills
+  it, `required`, its `done` test (`{"set": [settings]}`) and the steps it
+  comes `after`; `requires` lists, by module, the steps it needs.
+- `init.status` (`module`, optional): each step with `done`, and
+  `missing`, by module, the required steps (with their dependencies) not
+  done yet. An unknown `module` is refused.
+
+An agent fills a step by setting its settings, or by running its command
+(`library.chooseFolder` with a `path`, on a desktop), then reads
+`init.status` again.
+
 ## Events
 
 After `events.subscribe` answers, the node sends, on the same connection
@@ -214,8 +232,20 @@ many were in it) and `changes`, the step as the vault records it, which
 its revert puts back: the desktop's Ctrl+Z. Announced as
 `vault.library_changed`, as an undo or a redo of a library step is.
 
-The desktop's library writes its fields, its stacks' expansion and its
-photos taken out this
+`library.documents.get` (`ns`, `key`) reads a library document
+(`document`, null when there is none), such as the Library's pinned and
+recent filters; `library.documents.set` (`ns`, `key`, `document`) keeps
+one, a null `document` removing it. `library.folders` (`query`, the
+whole Library when none) counts the photos by folder: `folders`, one
+entry per volume (`volume`, null for files on no known volume) with its
+`folders` (each folder's path and how many photos it holds).
+`library.workshop.sessions.list` lists the workshop sessions' records
+(`sessions`: `id`, `record`), and `library.workshop.sessions.set` (`id`,
+`record`) keeps one, a null `record` dropping it.
+
+The desktop's library writes its fields, its stacks' expansion, its
+filter history, its workshop sessions' records and its photos taken out
+this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
 answers are picked up at the next frames. Its grid reads the same way:
@@ -224,6 +254,8 @@ catalog moves, read whole again when its sort changes or the cursor is
 gone), the search filter's photos through a cursor of their own and its
 counts through `library.facets`, each read on a thread of its own and
 shown at a coming frame, through a `ReadCache` fed by the bus's events.
+The Folders section's counts and the filter history are read through
+the node too, and shown at the frame their answer comes.
 
 ## A client cache
 

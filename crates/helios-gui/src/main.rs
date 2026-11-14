@@ -1891,9 +1891,19 @@ fn main() -> Result<(), String> {
         });
     let persist = node.as_ref().map(|n| Persist::on(n.vault().clone(), bus));
     start::mark("vault opened (and migrated)");
-    // Workshop sessions a former run left unkept are dropped (C6).
-    if let Some(Err(e)) = persist.as_ref().map(Persist::drop_unkept_sessions) {
-        warn(&format!("the workshop sessions: {e}"));
+    // Workshop sessions a former run left unkept are dropped (C6), through
+    // the node on a thread of its own: the window does not wait for it.
+    if let Some(node) = persist.as_ref().map(|p| p.node().clone()) {
+        let dropping = std::thread::Builder::new()
+            .name("helios-unkept-sessions".into())
+            .spawn(move || {
+                if let Err(e) = helios_gui::persist::drop_unkept_sessions(&node) {
+                    log::warn!(target: "helios", "the workshop sessions: {e}");
+                }
+            });
+        if let Err(e) = dropping {
+            warn(&format!("the workshop sessions: {e}"));
+        }
     }
     let vault = node.as_ref().map(|n| n.vault().clone());
     // The library is read while the window opens.

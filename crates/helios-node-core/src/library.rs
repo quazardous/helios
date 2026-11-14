@@ -9,7 +9,9 @@
 //! (`library.changed.list`), the import history listed
 //! (`import.history.list`) and one import run again
 //! (`import.history.again`, run as `library.import` by whoever serves
-//! it). `helios-node` lists them
+//! it), the library's documents (`library.documents.get`, `.set`), its
+//! folders counted (`library.folders`) and the workshop sessions' records
+//! (`library.workshop.sessions.list`, `.set`). `helios-node` lists them
 //! with its verbs; the desktop's node serves them too
 //! ([`crate::endpoint`]). They run on the vault the node owns, by whoever
 //! the call's origin names; the stacks' changes are announced on the
@@ -46,6 +48,11 @@ pub const IDS: &[&str] = &[
     "library.stacks.accept",
     "library.stacks.decline",
     "library.stacks.decisions",
+    "library.documents.get",
+    "library.documents.set",
+    "library.folders",
+    "library.workshop.sessions.list",
+    "library.workshop.sessions.set",
     HISTORY_LIST,
     AGAIN,
 ];
@@ -223,6 +230,43 @@ pub fn specs() -> Vec<CommandSpec> {
         library("library.stacks.decline", "Decline suggested stacks")
             .params(object(&[decision()])),
         library("library.stacks.decisions", "List the stack suggestions").read_only(),
+        library("library.documents.get", "Read a library document")
+            .params(object(&[("ns", string(), true), ("key", string(), true)]))
+            .read_only(),
+        library("library.documents.set", "Keep a library document").params(object(&[
+            ("ns", string(), true),
+            ("key", string(), true),
+            (
+                "document",
+                json!({ "description": "any JSON value; null removes the document" }),
+                true,
+            ),
+        ])),
+        library("library.folders", "Count the photos by folder")
+            .params(object(&[(
+                "query",
+                json!({ "type": "object",
+                        "description": "which photos, as a cursor's query (docs/protocol.md, Cursors)" }),
+                false,
+            )]))
+            .read_only(),
+        library(
+            "library.workshop.sessions.list",
+            "List the workshop sessions' records",
+        )
+        .read_only(),
+        library(
+            "library.workshop.sessions.set",
+            "Keep or drop a workshop session's record",
+        )
+        .params(object(&[
+            ("id", string(), true),
+            (
+                "record",
+                json!({ "type": ["object", "null"], "description": "null drops the record" }),
+                true,
+            ),
+        ])),
         CommandSpec::new(HISTORY_LIST, "List the import history", "Library")
             .needs(Need::Vault)
             .params(object(&[(
@@ -572,6 +616,40 @@ pub fn run<S: Store>(
         "library.stacks.decisions" => {
             suggest::decisions(vault).map(|d| json!({ "decisions": to_json(&d) }))
         }
+        "library.documents.get" => vault
+            .library_document(text(params, "ns"), text(params, "key"))
+            .map(|document| json!({ "document": document })),
+        "library.documents.set" => {
+            let document = Some(&params["document"]).filter(|d| !d.is_null());
+            vault
+                .set_library_document(text(params, "ns"), text(params, "key"), document)
+                .map(|()| json!({ "kept": document.is_some() }))
+        }
+        "library.folders" => {
+            let query = crate::cursor::query_of(&params["query"])?;
+            vault.folders(&query).map(|folders| {
+                json!({
+                    "folders": folders
+                        .into_iter()
+                        .map(|(volume, folders)| json!({ "volume": volume.map(|v| v.0), "folders": folders }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+        }
+        "library.workshop.sessions.list" => vault.workshop_sessions().map(|sessions| {
+            json!({
+                "sessions": sessions
+                    .into_iter()
+                    .map(|(id, record)| json!({ "id": id, "record": record }))
+                    .collect::<Vec<_>>(),
+            })
+        }),
+        "library.workshop.sessions.set" => {
+            let record = Some(&params["record"]).filter(|r| !r.is_null());
+            vault
+                .set_workshop_session(text(params, "id"), record)
+                .map(|()| json!({ "kept": record.is_some() }))
+        }
         other => Err(format!("no library command `{other}`")),
     }
 }
@@ -604,6 +682,11 @@ mod tests {
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
             json!({}),
+            json!({ "ns": "filters", "key": "history" }),
+            json!({ "ns": "filters", "key": "history", "document": { "pinned": [] } }),
+            json!({ "query": {} }),
+            json!({}),
+            json!({ "id": "w1", "record": null }),
             json!({ "limit": 10 }),
             json!({ "id": "1700000000000-42-0" }),
         ];
@@ -611,6 +694,53 @@ mod tests {
         for (spec, example) in specs().iter().zip(examples) {
             validate(&spec.params, &example).unwrap_or_else(|e| panic!("{}: {e}", spec.id));
         }
+    }
+
+    #[test]
+    fn documents_folders_and_workshop_sessions_are_kept_and_read() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user").unwrap();
+        let key = json!({ "ns": "filters", "key": "history" });
+        assert_eq!(
+            call("library.documents.get", key.clone()),
+            json!({ "document": null })
+        );
+        let doc = json!({ "pinned": ["rating >= 3"] });
+        let mut set = key.clone();
+        set["document"] = doc.clone();
+        assert_eq!(call("library.documents.set", set), json!({ "kept": true }));
+        assert_eq!(
+            call("library.documents.get", key.clone()),
+            json!({ "document": doc })
+        );
+        let mut removed = key.clone();
+        removed["document"] = Value::Null;
+        call("library.documents.set", removed);
+        assert_eq!(
+            call("library.documents.get", key),
+            json!({ "document": null })
+        );
+
+        assert_eq!(call("library.folders", json!({})), json!({ "folders": [] }));
+
+        let record = json!({ "kept": true, "steps": [] });
+        call(
+            "library.workshop.sessions.set",
+            json!({ "id": "w1", "record": record }),
+        );
+        call(
+            "library.workshop.sessions.set",
+            json!({ "id": "w2", "record": { "kept": false } }),
+        );
+        call(
+            "library.workshop.sessions.set",
+            json!({ "id": "w2", "record": null }),
+        );
+        assert_eq!(
+            call("library.workshop.sessions.list", json!({})),
+            json!({ "sessions": [{ "id": "w1", "record": record }] })
+        );
     }
 
     #[test]
