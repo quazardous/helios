@@ -164,9 +164,14 @@ impl<S: Store> Vault<S> {
             let mut images = Vec::new();
             let mut events = Vec::new();
             for id in &ids {
-                let before =
+                let mut before =
                     rows_of(&*store, id)?.ok_or_else(|| format!("no image {}", id.hex()))?;
                 let old = store.field(id, TAGS)?;
+                // Tags no command wrote (an import's, a sidecar's) have
+                // no audit row yet: the step keeps them all the same.
+                if let Some(old) = &old {
+                    before.fields.insert(TAGS.to_string(), old.clone());
+                }
                 let tags: Vec<Value> = old
                     .as_ref()
                     .and_then(Value::as_array)
