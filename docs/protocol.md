@@ -337,6 +337,35 @@ null when none is set) and the volumes it knows (`volumes`, by name):
 the desktop copies a catalogue snapshot to the strategy's disks plugged
 in with them.
 
+The Storage page reads and writes through `storage.*`, each on the
+node's vault:
+
+- `storage.volumes` reads the volumes the library knows (`volumes`, by
+  name) and how many copies of photos each holds (`photos`, by volume
+  id): `{"volumes": [{"id": "uuid:a", "name": "Backup", …}], "photos":
+  {"uuid:a": 120}}`.
+- `storage.statuses` reads every photo's backup status against the
+  library's strategy, by image id: `{"statuses": {"0a…": {"have": 1,
+  "want": 1, "off_site_ok": true, "unverified": 0}}}`.
+- `storage.volume.save` (`volume`, as read) keeps its name, roles, off
+  site and RAID flags and answers the volume kept;
+  `{"volume": {"id": "uuid:a", "name": "Backup"}}`.
+- `storage.volume.mark` (`volume`, `mount`, `library`) writes the
+  identity file on a volume plugged in at `mount` and moves its record to
+  the marker's id: `{"volume": {"id": "label:B"}, "mount": "/media/b",
+  "library": "/photos"}`.
+- `storage.strategy.set` (`strategy`, null removes it) keeps the
+  library's backup strategy and answers `{"set": true}`.
+- `storage.card.safety` (`root`, `path`, `label`, `files`: `[path, image
+  id or null]` for each file read on the card) answers the card with
+  `safe_to_format` computed now: `{"root": "/photos", "path":
+  "/media/card", "label": "EOS_DIGITAL", "files":
+  [["/media/card/DCIM/a.cr3", null]]}`.
+
+The desktop sends the writes from a thread of their own, in the order
+made, then reads `library.storage.get`, `storage.volumes` and
+`storage.statuses` again; a frame shows what was last read.
+
 `calibrate.offer` (`camera`, and `image` when a photo is open) reads
 what a photo's calibration header offers: the camera's `profiles` as
 `calibrate.profiles.list` lists them, its default camera look's

@@ -3,9 +3,9 @@
 //! (`helios_storage::strategy`), each photo's backups and the cards
 //! waiting for theirs.
 //!
-//! The shell holds no vault: the host gives a [`StorageLink`]
-//! ([`VaultStorage`] over the vault and the machine's volumes, tests
-//! their own). The same link names the volumes of offline photos in the
+//! The shell reaches no catalogue itself: the host gives a
+//! [`StorageLink`] ([`NodeStorage`] over the desktop's node and the
+//! machine's volumes, read and written off the frame). The same link names the volumes of offline photos in the
 //! Library ([`crate::library::Library::set_volumes`]).
 //!
 //! The Storage page is the Settings app's Storage and Backup scopes
@@ -15,16 +15,17 @@
 //! health check's free-space fix does).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 
 use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::core::icon::Icon;
 use helios_core::Message;
+use helios_inspect::client::Client;
 use helios_library::import::Card;
-use helios_storage::strategy::{self, BackupStatus, Destination, Scope, Strategy};
+use helios_storage::strategy::{self, BackupStatus, Destination, Strategy};
 use helios_storage::{Role, Volume, VolumeId, VolumeKind, Volumes, registry};
-use helios_vault::{Store, Vault};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::Shell;
 
@@ -66,105 +67,292 @@ pub trait StorageLink: Send + Sync {
     fn card_safety(&self, card: &Card) -> Result<Card, String> {
         Ok(card.clone())
     }
+    /// Reads everything again, off the caller's thread when the link
+    /// reads through a node; [`StorageLink::seq`] moves once it is read.
+    fn refresh(&self) {}
+    /// Moves each time what the link answers changed: the shell shows it
+    /// again at its next frame.
+    fn seq(&self) -> u64 {
+        0
+    }
 }
 
-/// The link over a vault and the volumes mounted.
-pub struct VaultStorage<S: Store> {
-    vault: Arc<Vault<S>>,
+/// The link over the desktop's node and the volumes mounted
+/// (`library.storage.get` and the `storage.*` commands).
+///
+/// Nothing here waits for the node on the caller's thread: the reads
+/// answer what was last read, and a thread of its own runs the writes in
+/// the order made, then reads the volumes, the strategy and the backups
+/// again ([`StorageLink::refresh`] asks the same). Each read that comes
+/// back moves [`StorageLink::seq`], so the shell shows it at a coming
+/// frame.
+pub struct NodeStorage {
     mounted: Arc<dyn Volumes>,
     /// What a marker names as the library that wrote it.
     library: String,
+    node: Weak<Client>,
+    cached: Arc<Cached>,
+    jobs: Sender<Job>,
 }
 
-impl<S: Store> VaultStorage<S> {
-    pub fn new(
-        vault: Arc<Vault<S>>,
-        mounted: Arc<dyn Volumes>,
-        library: impl Into<String>,
-    ) -> Self {
-        Self {
-            vault,
+/// What [`NodeStorage`] last read, and the jobs not yet done.
+#[derive(Default)]
+struct Cached {
+    read: Mutex<Read>,
+    /// Jobs sent and not yet done, and the condition
+    /// [`NodeStorage::settle`] waits on.
+    pending: Mutex<usize>,
+    done: Condvar,
+}
+
+#[derive(Default)]
+struct Read {
+    known: Vec<Volume>,
+    photos: HashMap<VolumeId, usize>,
+    strategy: Option<Strategy>,
+    statuses: HashMap<String, BackupStatus>,
+    seq: u64,
+}
+
+enum Job {
+    Read,
+    Save(Volume),
+    Mark(Volume, String),
+    Strategy(Option<Strategy>),
+}
+
+impl NodeStorage {
+    /// The link over `node`, read once at once (off the caller's thread).
+    pub fn new(node: &Arc<Client>, mounted: Arc<dyn Volumes>, library: impl Into<String>) -> Self {
+        let (jobs, queue) = std::sync::mpsc::channel();
+        let cached = Arc::new(Cached::default());
+        let (weak, c) = (Arc::downgrade(node), cached.clone());
+        let spawned = std::thread::Builder::new()
+            .name("storage-node".into())
+            .spawn(move || work(&weak, &c, &queue));
+        if let Err(e) = spawned {
+            log::warn!("storage: no thread to reach the node: {e}");
+        }
+        let link = Self {
             mounted,
             library: library.into(),
+            node: Arc::downgrade(node),
+            cached,
+            jobs,
+        };
+        link.send(Job::Read);
+        link
+    }
+
+    fn send(&self, job: Job) {
+        *self
+            .cached
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) += 1;
+        if self.jobs.send(job).is_err() {
+            self.cached.finished(1);
+        }
+    }
+
+    fn read(&self) -> std::sync::MutexGuard<'_, Read> {
+        self.cached
+            .read
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits until every job sent is done, `timeout` at most: whether it
+    /// was.
+    pub fn settle(&self, timeout: std::time::Duration) -> bool {
+        let pending = self
+            .cached
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (left, _) = self
+            .cached
+            .done
+            .wait_timeout_while(pending, timeout, |n| *n > 0)
+            .unwrap_or_else(PoisonError::into_inner);
+        *left == 0
+    }
+
+    /// Whether a job sent is not done yet.
+    pub fn busy(&self) -> bool {
+        *self
+            .cached
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            > 0
+    }
+}
+
+impl Cached {
+    fn finished(&self, n: usize) {
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        *pending = pending.saturating_sub(n);
+        if *pending == 0 {
+            self.done.notify_all();
         }
     }
 }
 
-/// `known` with what is mounted now: online ones first, each group by
-/// name (as the registry sorts them).
-pub fn merge(known: Vec<Volume>, mounted: &[Volume]) -> Vec<Volume> {
-    let (mut online, offline): (Vec<Volume>, Vec<Volume>) = known
-        .into_iter()
-        .map(|mut v| {
-            if let Some(m) = mounted.iter().find(|m| m.id == v.id) {
-                v.mount.clone_from(&m.mount);
-                v.free = m.free.or(v.free);
-                v.capacity = m.capacity.or(v.capacity);
+/// The link's thread: each batch of jobs waiting, the writes in order,
+/// then one read of all the page shows.
+fn work(node: &Weak<Client>, cached: &Cached, queue: &Receiver<Job>) {
+    while let Ok(first) = queue.recv() {
+        let batch: Vec<Job> = std::iter::once(first).chain(queue.try_iter()).collect();
+        let n = batch.len();
+        if let Some(node) = node.upgrade() {
+            for job in batch {
+                let written = match job {
+                    Job::Read => Ok(Value::Null),
+                    Job::Save(v) => node.request("storage.volume.save", json!({ "volume": v })),
+                    Job::Mark(v, library) => node.request(
+                        "storage.volume.mark",
+                        json!({ "volume": v, "mount": v.mount, "library": library }),
+                    ),
+                    Job::Strategy(s) => {
+                        node.request("storage.strategy.set", json!({ "strategy": s }))
+                    }
+                };
+                if let Err(e) = written {
+                    log::warn!("storage: {}", e.message);
+                }
             }
-            v
-        })
-        .partition(Volume::online);
-    online.extend(offline);
-    online
+            match read_all(&node) {
+                Ok(mut read) => {
+                    let mut kept = cached.read.lock().unwrap_or_else(PoisonError::into_inner);
+                    read.seq = kept.seq + 1;
+                    *kept = read;
+                }
+                Err(e) => log::warn!("storage: {e}"),
+            }
+        }
+        cached.finished(n);
+    }
 }
 
-impl<S> StorageLink for VaultStorage<S>
-where
-    S: Store + Send + 'static,
-{
+/// The volumes known, the photos on each, the strategy and the backups,
+/// read through `node`.
+fn read_all(node: &Client) -> Result<Read, String> {
+    let ask = |method: &str| node.request(method, json!({})).map_err(|e| e.message);
+    let stored = ask("library.storage.get")?;
+    let volumes = ask("storage.volumes")?;
+    let statuses = ask("storage.statuses")?;
+    let field = |v: &Value, what: &str| -> Result<Value, String> {
+        v.get(what)
+            .cloned()
+            .ok_or_else(|| format!("no `{what}` read"))
+    };
+    fn from<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, String> {
+        serde_json::from_value(v).map_err(|e| e.to_string())
+    }
+    let photos: HashMap<String, usize> = from(field(&volumes, "photos")?)?;
+    Ok(Read {
+        known: from(field(&stored, "volumes")?)?,
+        strategy: from(field(&stored, "strategy")?)?,
+        photos: photos
+            .into_iter()
+            .map(|(id, n)| (VolumeId(id), n))
+            .collect(),
+        statuses: from(field(&statuses, "statuses")?)?,
+        seq: 0,
+    })
+}
+
+impl StorageLink for NodeStorage {
     fn volumes(&self) -> Result<Vec<Volume>, String> {
-        Ok(merge(
-            registry::known(&self.vault)?,
-            &self.mounted.volumes(),
-        ))
+        let known = self.read().known.clone();
+        Ok(registry::merge(known, &self.mounted.volumes()))
     }
 
     fn photos(&self) -> Result<HashMap<VolumeId, usize>, String> {
-        let mut counts = HashMap::new();
-        for (_, location) in self.vault.all_locations()? {
-            if let Some(v) = location.volume {
-                *counts.entry(v).or_default() += 1;
-            }
-        }
-        Ok(counts)
+        Ok(self.read().photos.clone())
     }
 
+    /// Kept as `registry::save` keeps it and shown at once; written in
+    /// turn.
     fn save(&self, volume: &Volume) -> Result<Volume, String> {
-        registry::save(&self.vault, volume)
+        let saved = {
+            let mut read = self.read();
+            let record = read
+                .known
+                .iter_mut()
+                .find(|v| v.id == volume.id)
+                .ok_or_else(|| format!("no volume {}", volume.id))?;
+            let name = volume.name.trim();
+            record.name = if name.is_empty() {
+                record.label.clone().unwrap_or_else(|| record.name.clone())
+            } else {
+                name.to_string()
+            };
+            record.roles.clone_from(&volume.roles);
+            record.off_site = volume.off_site;
+            record.raid = volume.raid;
+            let saved = Volume {
+                mount: volume.mount.clone(),
+                ..record.clone()
+            };
+            read.seq += 1;
+            saved
+        };
+        self.send(Job::Save(saved.clone()));
+        Ok(saved)
     }
 
+    /// Written in turn by the node: the volume answered is the one asked,
+    /// its new id read back with the others.
     fn mark(&self, volume: &Volume) -> Result<Volume, String> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        registry::mark(&self.vault, volume, &self.library, now)
+        self.send(Job::Mark(volume.clone(), self.library.clone()));
+        Ok(volume.clone())
     }
 
     fn strategy(&self) -> Result<Option<Strategy>, String> {
-        strategy::load(&self.vault, &Scope::Library)
+        Ok(self.read().strategy.clone())
     }
 
     fn set_strategy(&self, strategy: Option<&Strategy>) -> Result<(), String> {
-        strategy::save(&self.vault, &Scope::Library, strategy)
+        {
+            let mut read = self.read();
+            read.strategy = strategy.cloned();
+            read.seq += 1;
+        }
+        self.send(Job::Strategy(strategy.cloned()));
+        Ok(())
     }
 
     fn statuses(&self) -> Result<HashMap<String, BackupStatus>, String> {
-        let s = strategy::load(&self.vault, &Scope::Library)?;
-        let volumes = registry::known(&self.vault)?;
-        Ok(strategy::statuses(&self.vault, &volumes, s.as_ref())?
-            .into_iter()
-            .map(|(id, (status, _))| (id.hex(), status))
-            .collect())
+        Ok(self.read().statuses.clone())
     }
 
+    /// Asks the node and waits for it: the shell calls it off its frame.
     fn card_safety(&self, card: &Card) -> Result<Card, String> {
-        helios_library::import::card_safety(
-            &self.vault,
-            &card.root,
-            &card.path,
-            &card.label,
-            card.files.clone(),
-        )
+        let node = self.node.upgrade().ok_or("the node is gone")?;
+        let files: Vec<Value> = card
+            .files
+            .iter()
+            .map(|(path, id)| json!([path, id.as_ref().map(helios_vault::ImageId::hex)]))
+            .collect();
+        let answer = node
+            .request(
+                "storage.card.safety",
+                json!({ "root": card.root, "path": card.path, "label": card.label, "files": files }),
+            )
+            .map_err(|e| e.message)?;
+        let mut now = card_of(&answer).ok_or("no card answered")?;
+        now.files.clone_from(&card.files);
+        Ok(now)
+    }
+
+    fn refresh(&self) {
+        self.send(Job::Read);
+    }
+
+    fn seq(&self) -> u64 {
+        self.read().seq
     }
 }
 
@@ -181,6 +369,11 @@ pub(crate) struct StoragePage {
     waiting: Vec<Card>,
     /// The same, for the health check's thread.
     shared_waiting: Arc<Mutex<Vec<Card>>>,
+    /// The link's [`StorageLink::seq`] last shown.
+    seen: u64,
+    /// The waiting cards checked again off the frame, once a backup
+    /// ended: each one's path and what it is now.
+    checking: Option<Receiver<Vec<(std::path::PathBuf, Result<Card, String>)>>>,
 }
 
 impl Shell {
@@ -193,8 +386,17 @@ impl Shell {
     }
 
     /// Reads the volumes again: the page's list, and the volumes the
-    /// Library names (a scan ran, a disk came or went).
+    /// Library names (a scan ran, a disk came or went). What the link
+    /// reads off the frame shows at a coming one.
     pub fn refresh_volumes(&mut self) {
+        if let Some(link) = &self.core.storage.link {
+            link.refresh();
+        }
+        self.show_volumes();
+    }
+
+    /// The volumes and the strategy as the link answers them now.
+    fn show_volumes(&mut self) {
         let Some(link) = self.core.storage.link.clone() else {
             return;
         };
@@ -217,8 +419,17 @@ impl Shell {
     }
 
     /// Each photo's backups read again (one read for the Library), for
-    /// its badges and its `backup:` filters.
+    /// its badges and its `backup:` filters; what the link reads off the
+    /// frame shows at a coming one.
     pub fn refresh_backups(&mut self) {
+        if let Some(link) = &self.core.storage.link {
+            link.refresh();
+        }
+        self.show_backups();
+    }
+
+    /// Each photo's backups as the link answers them now.
+    fn show_backups(&mut self) {
         let Some(link) = self.core.storage.link.clone() else {
             return;
         };
@@ -287,21 +498,60 @@ impl Shell {
     }
 
     /// A backup job ended: the badges read again, and each card still
-    /// inserted that waited for its backups checked again; one now safe
-    /// to format says so ("`EOS_DIGITAL` is safe to format: every photo
-    /// has its backups"). A card taken out is no longer followed.
+    /// inserted that waited for its backups checked again, off the frame
+    /// ([`Shell::storage_frame`] says the result). A card taken out is no
+    /// longer followed.
     pub(super) fn backup_ended(&mut self) {
         self.refresh_backups();
         let Some(link) = self.core.storage.link.clone() else {
             return;
         };
-        let waiting = std::mem::take(&mut self.core.storage.waiting);
-        for card in waiting {
-            if !card.path.is_dir() {
-                continue;
+        self.core.storage.waiting.retain(|c| c.path.is_dir());
+        self.share_waiting();
+        let cards = self.core.storage.waiting.clone();
+        if cards.is_empty() {
+            return;
+        }
+        let (send, checked) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("card-safety".into())
+            .spawn(move || {
+                let now = cards
+                    .iter()
+                    .map(|c| (c.path.clone(), link.card_safety(c)))
+                    .collect();
+                let _ = send.send(now);
+            });
+        match spawned {
+            Ok(_) => self.core.storage.checking = Some(checked),
+            Err(e) => log::warn!("cards: no thread to check them: {e}"),
+        }
+    }
+
+    /// Each frame: what the link read since shows, and the cards checked
+    /// since a backup ended say whether they are safe to format.
+    pub(super) fn storage_frame(&mut self) {
+        if let Some(link) = &self.core.storage.link {
+            let seq = link.seq();
+            if seq != self.core.storage.seen {
+                self.core.storage.seen = seq;
+                self.show_volumes();
+                self.show_backups();
             }
-            match link.card_safety(&card) {
+        }
+        let checked = match &self.core.storage.checking {
+            Some(r) => match r.try_recv() {
+                Ok(checked) => checked,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+            },
+            None => return,
+        };
+        self.core.storage.checking = None;
+        for (path, now) in checked {
+            match now {
                 Ok(now) if now.safe_to_format => {
+                    self.core.storage.waiting.retain(|c| c.path != path);
                     let message = Message::new(
                         "gui-backup-card-safe",
                         "{ $card } is safe to format: every photo has its backups",
@@ -317,11 +567,8 @@ impl Shell {
                         .push(crate::dialogs::Level::Info, message);
                     self.notes.push(text);
                 }
-                Ok(_) => self.core.storage.waiting.push(card),
-                Err(e) => {
-                    log::warn!("{}: {e}", card.label);
-                    self.core.storage.waiting.push(card);
-                }
+                Ok(_) => {}
+                Err(e) => log::warn!("{}: {e}", path.display()),
             }
         }
         self.share_waiting();

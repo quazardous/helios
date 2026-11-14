@@ -16,7 +16,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{By, Queryable as _};
 use helios_core::Bus;
 use helios_gui::persist::Persist;
-use helios_gui::shell::{STORAGE_COMMAND, VaultStorage};
+use helios_gui::shell::{NodeStorage, STORAGE_COMMAND};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_library::backup;
 use helios_library::import::{self, Options, Placement};
@@ -80,6 +80,7 @@ struct World {
     vault: Arc<Vault<SqliteStore>>,
     persist: Persist<SqliteStore>,
     plugged: Arc<Plugged>,
+    link: Arc<NodeStorage>,
     studio: Volume,
     backup: Volume,
     photo: String,
@@ -105,16 +106,19 @@ impl World {
         plugged.set(&[&studio, &backup]);
         scan::scan(&vault, &plugged.volumes(), "studio-pc", FIRST, None).unwrap();
         let mut shell = Shell::new(helios_panels(), None);
-        shell.set_storage(Arc::new(VaultStorage::new(
-            vault.clone(),
-            plugged.clone(),
-            "test",
-        )));
+        let link = Arc::new(NodeStorage::new(persist.node(), plugged.clone(), "test"));
+        assert!(
+            link.settle(Duration::from_secs(10)),
+            "read through the node"
+        );
+        shell.set_storage(link.clone());
+        assert!(link.settle(Duration::from_secs(10)));
         let world = Self {
             dir,
             vault,
             persist,
             plugged,
+            link,
             studio,
             backup,
             photo,
@@ -131,6 +135,16 @@ impl World {
         assert!(self.persist.take_locations_changed(), "the scan is heard");
         h.state_mut().refresh_volumes();
         self.persist.fill_library(h.state_mut()).unwrap();
+        self.settle(h);
+    }
+
+    /// Waits for the Storage link's reads through the node, then shows
+    /// them as a frame does.
+    fn settle(&self, h: &mut Harness<'_, Shell>) {
+        assert!(
+            self.link.settle(Duration::from_secs(10)),
+            "the node answers"
+        );
         h.run();
     }
 }
@@ -391,6 +405,7 @@ fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
     };
     strategy::save(&world.vault, &Scope::Library, Some(&two)).unwrap();
     h.state_mut().refresh_volumes();
+    world.settle(&mut h);
     assert_eq!(
         h.state().import_backup_line(),
         (
@@ -414,6 +429,7 @@ fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
     .unwrap();
     world.plugged.set(&[&backup]);
     h.state_mut().refresh_volumes();
+    world.settle(&mut h);
     assert_eq!(
         h.state().import_backup_line().0,
         "2 copies: Backup (plugged in), Studio (not seen for 3 days)"
@@ -449,7 +465,7 @@ fn photos_show_their_backups_and_the_search_filters_on_them() {
     let refresh = |h: &mut Harness<'_, Shell>, world: &World| {
         h.state_mut().refresh_volumes();
         world.persist.fill_library(h.state_mut()).unwrap();
-        h.run();
+        world.settle(h);
     };
     strategy::save(&world.vault, &Scope::Library, Some(&Strategy::default())).unwrap();
     refresh(&mut h, &world);
@@ -608,6 +624,7 @@ fn the_storage_scope_reads_the_volumes_and_the_strategy_from_commands() {
             Origin::User,
         )
         .unwrap();
+    assert!(world.link.settle(Duration::from_secs(10)));
     assert!(
         known(&world.vault, "uuid:studio")
             .roles
@@ -621,6 +638,8 @@ fn the_storage_scope_reads_the_volumes_and_the_strategy_from_commands() {
         .unwrap();
     assert_eq!(none["set"], false);
     strategy::save(&world.vault, &Scope::Library, Some(&Strategy::default())).unwrap();
+    h.state_mut().refresh_volumes();
+    world.settle(&mut h);
     let set = h
         .state_mut()
         .run(BACKUP_STRATEGY_COMMAND, json!(null), Origin::User)
@@ -769,4 +788,76 @@ fn the_backup_wizard_sets_up_the_strategy() {
         .unwrap();
     assert_eq!(s.destinations, [strategy::Destination::Role(Role::Archive)]);
     assert!(!s.off_site_required);
+}
+
+/// The Storage page reaches the vault through the desktop's node, off
+/// the frame: while another writer holds the vault file locked, a role
+/// given, a strategy set and the volumes read again cost no frame; once it
+/// lets go, they are kept and shown.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_storage_pages_frames() {
+    use helios_gui::shell::VOLUME_ROLE_COMMAND;
+    use helios_vault::Store as _;
+
+    let (world, shell) = World::new("held");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&world.dir.join("vault.db")).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&json!(true)))
+        .unwrap();
+    let started = Instant::now();
+    h.state_mut()
+        .run(
+            VOLUME_ROLE_COMMAND,
+            json!({ "volume": "uuid:studio", "role": "backup" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.state_mut()
+        .run(
+            "library.setUpBackups",
+            json!({ "copies": 1, "destination": "backup" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.state_mut().refresh_volumes();
+    h.state_mut().refresh_backups();
+    for _ in 0..3 {
+        h.run();
+    }
+    let slowest = started.elapsed();
+    assert!(
+        world.link.busy(),
+        "the writes wait for the vault, not the frame"
+    );
+    assert!(
+        slowest < Duration::from_secs(1),
+        "the frames waited {slowest:?} for the vault"
+    );
+    // Shown at once all the same.
+    assert!(h.state().storage_strategy().is_some());
+    assert!(
+        h.state().storage_volumes()[0].roles.contains(&Role::Backup),
+        "{:?}",
+        h.state().storage_volumes()
+    );
+
+    // Let go: kept.
+    other.rollback().unwrap();
+    drop(other);
+    world.settle(&mut h);
+    assert!(
+        known(&world.vault, "uuid:studio")
+            .roles
+            .contains(&Role::Backup)
+    );
+    assert!(
+        strategy::load(&world.vault, &Scope::Library)
+            .unwrap()
+            .is_some()
+    );
 }
