@@ -70,7 +70,7 @@ fn item_ui(
 ) -> ItemAsked {
     let body = ui.text_style_height(&egui::TextStyle::Body);
     let small = ui.text_style_height(&egui::TextStyle::Small);
-    let height = body + small + 10.0;
+    let height = body + small + 16.0;
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
