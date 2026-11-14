@@ -294,6 +294,9 @@ pub(crate) struct ImportWindow {
     /// The browsers of the source the Contents column shows, and the one
     /// shown ([`super::import_browsers`]).
     pub(super) browsing: super::import_browsers::Browsing,
+    /// The photos chosen in a service's page, while the grid shows them
+    /// ([`super::import_chosen`]).
+    pub(super) chosen: Option<super::import_chosen::ChosenContents>,
 }
 
 impl ImportWindow {
@@ -336,7 +339,8 @@ impl ImportWindow {
     }
 
     /// Stops reading and forgets what was read.
-    fn clear_contents(&mut self) {
+    pub(super) fn clear_contents(&mut self) {
+        self.chosen = None;
         self.scans.clear();
         self.glance_first
             .lock()
@@ -481,7 +485,7 @@ impl ImportWindow {
     }
 
     /// The thumbnails of the Contents, made the first time.
-    fn thumbnails(&mut self) -> Arc<ImportThumbnails> {
+    pub(super) fn thumbnails(&mut self) -> Arc<ImportThumbnails> {
         let cache = self.thumb_cache.clone();
         self.thumbs
             .get_or_insert_with(|| Arc::new(ImportThumbnails::new(cache)))
@@ -551,7 +555,7 @@ fn mounted_card(change: &Change, card: &Card) -> super::import_sources::MountedC
 
 /// A file's glance into the contents; a glance without a preview tells
 /// the thumbnails there is none (a pair's other file may still give one).
-fn take_glance(
+pub(super) fn take_glance(
     contents: &mut Contents,
     thumbs: &ImportThumbnails,
     path: &Path,
@@ -637,7 +641,7 @@ fn account_event(asked: super::import_accounts::Asked) -> Event {
 /// The Detail column's part for an account whose photos are chosen in
 /// its service's page ([`super::import_accounts::choose_ui`]).
 fn choose_contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, account: &str) -> Option<Event> {
-    use super::import_accounts::{ChooseAsked, translated};
+    use super::import_accounts::translated;
     let texts = w.texts.clone()?;
     let connector = w.connector_of(&SourceKey::Account(account.to_owned()));
     let service = w.connectors.provider(&connector).map_or_else(
@@ -645,18 +649,18 @@ fn choose_contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, account: &str) ->
         |p| translated(Some(&texts), &p.manifest().label),
     );
     let header = account_header(w, account);
-    match super::import_accounts::choose_ui(
+    let chosen = w.shows_chosen_of(account);
+    super::import_accounts::choose_ui(
         ui,
         &mut w.accounts,
         &w.connectors,
         account,
         &header,
         &service,
+        chosen,
         &|m| texts(m),
-    )? {
-        ChooseAsked::Account(asked) => Some(account_event(asked)),
-        ChooseAsked::Into => Some(Event::ChooseInto),
-    }
+    )
+    .map(account_event)
 }
 
 /// An account's header line: its saved source's name, else its own, with
@@ -1334,6 +1338,11 @@ impl Shell {
             self.warn(e);
             return;
         }
+        // The grid shows the photos chosen in a service's page.
+        if self.import.get().chosen.is_some() {
+            self.import_chosen();
+            return;
+        }
         let (choices, copy, ticked) = {
             let mut w = self.import.get_mut();
             let copy = w.copies();
@@ -1394,12 +1403,20 @@ impl Shell {
             }
             w.memory.last = Some(path.clone());
         }
-        let mut w = self.import.get_mut();
-        w.save();
+        self.import.get_mut().close_after_import();
+    }
+}
+
+impl ImportWindow {
+    /// An import started: the window closes, what it showed forgotten,
+    /// the photos chosen and not imported given up.
+    pub(super) fn close_after_import(&mut self) {
+        self.save();
         crate::start::trace_frame("import window closed");
-        w.open = false;
-        w.going_away();
-        w.clear_contents();
+        self.open = false;
+        self.going_away();
+        self.clear_contents();
+        self.accounts.window_closed();
     }
 }
 
@@ -1454,8 +1471,6 @@ impl ImportWindow {
                 let wizard = self.wizard.as_mut();
                 if !wizard.is_some_and(|wz| wz.take_into(p.clone())) {
                     self.choices.into = Some(p);
-                    // Asked for by an account's Contents: settled.
-                    self.accounts.on_into_chosen();
                 }
             }
         }
@@ -1643,7 +1658,10 @@ impl ImportWindow {
             return;
         }
         self.follow_cards();
-        self.follow_scans();
+        // The photos chosen in a service's page, else the sources ticked.
+        if !self.follow_chosen() {
+            self.follow_scans();
+        }
         self.history.follow();
         // The Choices column shows the selected source's; a change made
         // in this pass is saved on it at its end.
@@ -1780,20 +1798,10 @@ impl ImportWindow {
             // Turned into the shell's event where it is asked.
             Asked::Manage => Ok(()),
             Asked::Pick(id) => {
-                // The Choices column's Into while it shows the account's
-                // choices; else the source's own, else the window's.
-                let key = SourceKey::Account(id.clone());
-                let into = if self.sources.showing.as_ref() == Some(&key) {
-                    self.choices.into.clone()
-                } else {
-                    self.sources
-                        .own(&key)
-                        .unwrap_or_else(|| self.window_choices())
-                        .into
-                        .clone()
-                };
+                // Where they go is never asked: the source's `download`
+                // folder, at the footer's Import.
                 let wake = self.waker();
-                self.accounts.pick(&self.connectors, &id, into, wake)
+                self.accounts.pick(&self.connectors, &id, wake)
             }
         };
         if let Err(e) = done {
@@ -1896,8 +1904,13 @@ impl ImportWindow {
                     }
                 }
                 // Its connection and "Choose photos" are in the Detail
-                // column; the photos chosen show here.
-                Shown::Picker => {
+                // column; the photos chosen fill the ordinary grid here.
+                Shown::Picker(account) if w.shows_chosen_of(&account) => {
+                    if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
+                        event = Some(Event::Dropped(paths));
+                    }
+                }
+                Shown::Picker(_) => {
                     ui.separator();
                     ui.weak(&words.grid.choose_on_the_right);
                 }
@@ -1963,7 +1976,7 @@ impl ImportWindow {
                     let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
                     let why = if let Some(e) = &words.no_library {
                         e
-                    } else if w.ticked.is_empty() {
+                    } else if w.ticked.is_empty() && w.chosen.is_none() {
                         &words.nothing
                     } else if let Some(e) = bad_name {
                         e
@@ -2541,8 +2554,10 @@ fn contents_ui(
             .flat_map(|i| c.cells[i].raw.iter().chain(&c.cells[i].picture).cloned())
             .collect();
         show_glances(&mut w.glances_shown, c, &in_view);
-        // The image map reads the photos in view first.
+        // The image map reads the photos in view first (a service's
+        // photos chosen have no file to read).
         if let Some(feed) = &w.map_feed
+            && w.chosen.is_none()
             && in_view != w.on_screen
         {
             feed.on_screen(in_view.clone());
@@ -2624,11 +2639,12 @@ impl ImportWindow {
             }
         }
         let place = self
-            .ticked
-            .first()
-            .cloned()
+            .chosen_root()
+            .map(Path::to_path_buf)
+            .or_else(|| self.ticked.first().cloned())
             .unwrap_or_else(|| PathBuf::from(NOWHERE));
-        let done = self.scans.len() == self.ticked.len() && self.scans.iter().all(|s| s.2);
+        let done = self.chosen.is_some()
+            || self.scans.len() == self.ticked.len() && self.scans.iter().all(|s| s.2);
         let sig = (
             self.contents.revision(),
             self.contents.new_only,

@@ -458,13 +458,11 @@ gui-choose-closed 2057e0ea9e1b8bb7
 gui-choose-connect 8ba1755f48951806
 gui-choose-connecting 268d46e2c91c444d
 gui-choose-copy-link 909c17fbe896c979
-gui-choose-done 19c95ed7feb6813d
-gui-choose-failed 9926b06e981eb68d
 gui-choose-identity e1cebce72fe74af3
-gui-choose-importing a61d47728658ad72
 gui-choose-into 71f49c7db07f374f
-gui-choose-known 73cee6dfac1983b6
-gui-choose-more b38022e2617f2368
+gui-choose-library-unread 24969006abbabb1f
+gui-choose-more-hint 90007708f47be84e
+gui-choose-more-short fb5a05dd99a88a0f
 gui-choose-no-into c9ead2ed32914db7
 gui-choose-not-connected be7dfda4bd1add90
 gui-choose-not-open c03333cf61ec8488

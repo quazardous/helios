@@ -228,6 +228,8 @@ gui-caption-profile = Profil utilisé : { $name }
 
 gui-choose-about = { $service } s'ouvre dans votre navigateur. Choisissez vos photos, appuyez sur OK, puis revenez ici.
 
+gui-choose-chosen = Les photos choisies s'affichent au milieu : cochez celles à importer, puis appuyez sur Importer.
+
 gui-choose-closed = La page { $service } s'est fermée. Ouvrez-la à nouveau pour choisir vos photos.
 
 gui-choose-connect = Connecter { $service }
@@ -236,19 +238,20 @@ gui-choose-connecting = Connectez-vous dans votre navigateur, puis revenez ici.
 
 gui-choose-copy-link = Copier le lien
 
-gui-choose-done = { $count } photos importées.
 
-gui-choose-failed = Les photos n'ont pas été importées : { $why }
 
 gui-choose-identity = Reconnectez-vous une fois pour voir de quel compte il s'agit.
 
-gui-choose-importing = Import de { $count } photos…
+
+gui-choose-library-unread = Impossible de lire le dossier de la bibliothèque : { $why }
+
+gui-choose-more-hint = Rouvre la page : les photos choisies là-bas s'ajoutent à celles-ci
+
+gui-choose-more-short = En choisir d'autres…
 
 gui-choose-into = Choisir le dossier…
 
-gui-choose-known = { $count } étaient déjà dans votre bibliothèque.
 
-gui-choose-more = Choisir d'autres photos…
 
 gui-choose-no-into = Choisissez d'abord où copier les photos : Dans, dans la colonne Choix.
 
@@ -1524,6 +1527,8 @@ gui-import-window-cards = Cartes et appareils
 gui-import-window-change-into = Choisir où vont les copies
 
 gui-import-window-choices = Choix
+
+gui-import-window-choose-on-the-right = Choisissez les photos dans le panneau de droite : elles s'affichent ici.
 
 gui-import-window-choose = Choisir un dossier…
 

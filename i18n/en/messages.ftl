@@ -387,6 +387,8 @@ gui-catalogue-today = today
 
 gui-choose-about = { $service } opens in your browser. Choose your photos, press Done there, then come back here.
 
+gui-choose-chosen = The photos chosen show in the middle: tick the ones to import, then press Import.
+
 gui-choose-closed = The { $service } page has closed. Open it again to choose your photos.
 
 gui-choose-connect = Connect { $service }
@@ -395,19 +397,15 @@ gui-choose-connecting = Sign in in your browser, then come back here.
 
 gui-choose-copy-link = Copy the link
 
-gui-choose-done = { $count } photos imported.
-
-gui-choose-failed = The photos were not imported: { $why }
-
 gui-choose-identity = Reconnect once to show which account this is.
-
-gui-choose-importing = Importing { $count } photos…
 
 gui-choose-into = Choose the folder…
 
-gui-choose-known = { $count } were already in your Library.
+gui-choose-library-unread = Could not read the library folder: { $why }
 
-gui-choose-more = Choose more photos…
+gui-choose-more-hint = Opens the page again: the photos chosen there are added to these
+
+gui-choose-more-short = Choose more…
 
 gui-choose-no-into = Choose where the photos are copied first: Into, in the Choices column.
 
