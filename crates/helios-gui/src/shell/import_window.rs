@@ -77,6 +77,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
+
+mod source_list;
 use super::import_auto::Trigger;
 use super::import_browsers::Shown;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
@@ -104,6 +106,9 @@ pub(super) struct Memory {
     pub(super) recent: Vec<PathBuf>,
     #[serde(default)]
     pub(super) favourites: Vec<PathBuf>,
+    /// The accounts pinned among the Favorites, by id.
+    #[serde(default)]
+    pub(super) pinned: Vec<String>,
     #[serde(default)]
     last: Option<PathBuf>,
 }
@@ -505,10 +510,12 @@ impl ImportWindow {
         self.cards.iter().any(|c| c.root == path)
     }
 
+    /// One source at a time: `path` selected alone, or none.
     fn tick(&mut self, path: &Path, on: bool) {
         self.ticked.retain(|p| p != path);
         if on {
-            self.ticked.push(path.to_path_buf());
+            self.sources.account = None;
+            self.ticked = vec![path.to_path_buf()];
         }
     }
 
@@ -623,6 +630,8 @@ enum Event {
     Choose,
     ChooseInto,
     Favourite(PathBuf, bool),
+    /// An account pinned among the Favorites, or unpinned.
+    Pin(String, bool),
     /// "Forget this folder" (`library.forgetFolder`).
     Forget(PathBuf),
     /// "Storage…": the Storage page, to set up a backup.
@@ -723,9 +732,9 @@ struct Words {
     sources: String,
     cards: String,
     no_cards: String,
-    recent: String,
-    /// The sources saved under a name, and the wizard adding one.
-    saved: String,
+    folders: String,
+    history: String,
+    services: String,
     add_source: String,
     favourites: String,
     no_favourites: String,
@@ -1033,7 +1042,9 @@ impl Shell {
                 if !w.dropped.contains(&source) {
                     w.dropped.push(source.clone());
                 }
-                if !w.ticked.contains(&source) {
+                // One source at a time: the first given; the others are
+                // listed under Folders, a click away.
+                if w.ticked.is_empty() {
                     w.ticked.push(source);
                 }
             }
@@ -1051,14 +1062,18 @@ impl Shell {
         } else if let Some(last) = w.memory.last.clone().filter(|p| p.exists()) {
             w.ticked.push(last);
         }
-        // A folder given is listed with the recent ones, to show it ticked.
+        // The folders given are listed with the recent ones, under
+        // Folders: the one selected, and the others a click away.
         let given: Vec<PathBuf> = w
             .ticked
             .iter()
+            .chain(w.dropped.iter())
             .filter(|p| !w.is_card(p) && !w.memory.recent.contains(p))
             .cloned()
             .collect();
         if !given.is_empty() {
+            let mut given = given;
+            given.dedup();
             for p in given.into_iter().rev() {
                 w.memory.recent.insert(0, p);
             }
@@ -1338,6 +1353,7 @@ impl Shell {
             | Event::Choose
             | Event::ChooseInto
             | Event::Favourite(..)
+            | Event::Pin(..)
             | Event::Account(_)
             | Event::Preset(_)
             | Event::SavePreset(_)
@@ -1524,8 +1540,9 @@ impl ImportWindow {
                 "gui-import-window-no-cards",
                 "No card inserted",
             )),
-            recent: t(Message::new("gui-import-window-recent", "Recent")),
-            saved: t(Message::new("gui-import-window-saved", "Saved sources")),
+            folders: t(Message::new("gui-import-window-folders", "Folders")),
+            history: t(Message::new("gui-import-history", "History")),
+            services: t(Message::new("gui-import-window-services", "Services")),
             add_source: t(Message::new(
                 "gui-import-window-add-source",
                 "Add a source…",
@@ -1750,6 +1767,13 @@ impl ImportWindow {
                 }
                 self.save();
             }
+            Some(Event::Pin(id, on)) => {
+                self.memory.pinned.retain(|p| p != &id);
+                if on {
+                    self.memory.pinned.push(id);
+                }
+                self.save();
+            }
             Some(Event::Account(asked)) => self.account_asked(asked),
             Some(Event::Preset(name)) => self.apply_preset(name.as_deref()),
             Some(Event::SavePreset(name)) => self.save_preset(&name),
@@ -1797,10 +1821,6 @@ impl ImportWindow {
     pub(super) fn account_run(&mut self, asked: super::import_accounts::Asked) {
         use super::import_accounts::Asked;
         let done = match asked {
-            Asked::Select(id) => {
-                self.select_account(id);
-                Ok(())
-            }
             Asked::Add(connector) => self.connect_account(&connector, None),
             Asked::Reconnect(id) => {
                 let connector = self
@@ -1911,7 +1931,7 @@ impl ImportWindow {
             add(&mut ui);
         };
         column(ui, "helios.import.sources", left, &mut |ui| {
-            sources_ui(ui, w, words, &mut event);
+            source_list::sources_ui(ui, w, words, &mut event);
         });
         column(ui, "helios.import.contents", middle, &mut |ui| {
             ui.heading(&words.contents);
@@ -2075,225 +2095,6 @@ fn backup_line_ui(ui: &mut egui::Ui, words: &Words) -> bool {
         }
     })
     .inner
-}
-
-fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mut Option<Event>) {
-    ui.heading(&words.sources);
-    egui::ScrollArea::vertical()
-        .id_salt("helios.import.sources")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            // The registry's sources: those detected (cards) first, then
-            // the folders given, under Recent and Favourites.
-            let mut places = w.memory.recent.clone();
-            places.extend(w.memory.favourites.iter().cloned());
-            w.connectors.set_places(places);
-            let sources = w.connectors.sources();
-            let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
-            ui.strong(&words.cards);
-            if detected.is_empty() {
-                ui.weak(&words.no_cards);
-            }
-            for (source, _) in &detected {
-                let Some(root) = &source.root else { continue };
-                let mut label = match source.capacity {
-                    Some(b) => format!("{} · {}", source.label, helios_storage::capacity_text(b)),
-                    None => source.label.clone(),
-                };
-                // The card's volume, briefly: the same card wherever it is
-                // mounted.
-                if let Some(id) = w
-                    .sources
-                    .card_at(root)
-                    .and_then(|m| super::import_sources::brief_id(&m.id))
-                {
-                    label = format!("{label} · {id}");
-                }
-                if let Some(e) = source_row(ui, w, words, root, label, None) {
-                    *event = Some(e);
-                }
-            }
-            let label_of = |path: &Path| {
-                given
-                    .iter()
-                    .find(|(s, _)| s.root.as_deref() == Some(path))
-                    .map_or_else(|| name_of(path), |(s, _)| s.label.clone())
-            };
-            // The sources saved under a name, folders and accounts.
-            let named = w.sources.named();
-            let named_folders: Vec<PathBuf> = named
-                .iter()
-                .filter_map(|(k, _)| match k {
-                    SourceKey::Folder(p) => Some(p.clone()),
-                    SourceKey::Account(_) => None,
-                })
-                .collect();
-            if named.iter().any(|(k, _)| matches!(k, SourceKey::Folder(_))) {
-                ui.separator();
-                ui.strong(&words.saved);
-            }
-            for (key, name) in named.clone() {
-                match key {
-                    SourceKey::Folder(path) => {
-                        if let Some(e) = source_row(ui, w, words, &path, name, None) {
-                            *event = Some(e);
-                        }
-                    }
-                    // Shown once, under Services, by this name.
-                    SourceKey::Account(_) => {}
-                }
-            }
-            ui.separator();
-            ui.strong(&words.recent);
-            let favourites = w.memory.favourites.clone();
-            for path in w.memory.recent.clone() {
-                if named_folders.contains(&path) {
-                    continue;
-                }
-                let star = (!favourites.contains(&path)).then_some((&words.add_favourite, true));
-                if let Some(e) = source_row(ui, w, words, &path, label_of(&path), star) {
-                    *event = Some(e);
-                }
-            }
-            ui.strong(&words.favourites);
-            if favourites.is_empty() {
-                ui.weak(&words.no_favourites);
-            }
-            for path in favourites {
-                if named_folders.contains(&path) {
-                    continue;
-                }
-                let remove = Some((&words.remove_favourite, false));
-                if let Some(e) = source_row(ui, w, words, &path, label_of(&path), remove) {
-                    *event = Some(e);
-                }
-            }
-            // The folders saved with their own choices, listed neither
-            // as recent nor as favourites.
-            for path in w.sources.folders() {
-                if w.memory.recent.contains(&path)
-                    || w.memory.favourites.contains(&path)
-                    || named_folders.contains(&path)
-                {
-                    continue;
-                }
-                if let Some(e) = source_row(ui, w, words, &path, label_of(&path), None) {
-                    *event = Some(e);
-                }
-            }
-            ui.separator();
-            if ui.button(&words.choose).clicked() {
-                *event = Some(Event::Choose);
-            }
-            if ui.button(&words.add_source).clicked() {
-                w.open_wizard();
-            }
-            if let Some(texts) = w.texts.clone() {
-                let selected = w.sources.account.clone().filter(|_| w.sources.kept());
-                // An account saved as a source: shown by its name, its
-                // source's own items in its menu.
-                let saved: std::collections::BTreeMap<String, String> = named
-                    .iter()
-                    .filter_map(|(k, name)| match k {
-                        SourceKey::Account(id) => Some((id.clone(), name.clone())),
-                        SourceKey::Folder(_) => None,
-                    })
-                    .collect();
-                let kept = w.sources.kept();
-                let mut item = None;
-                let mut items = |ui: &mut egui::Ui, id: &str| {
-                    if kept && saved.contains_key(id) {
-                        ui.separator();
-                        if let Some(a) = menu_items(ui, words, None) {
-                            item = Some((a, id.to_owned()));
-                        }
-                    }
-                };
-                let asked = super::import_accounts::accounts_ui(
-                    ui,
-                    &mut w.accounts,
-                    &w.connectors,
-                    selected.as_deref(),
-                    &saved,
-                    &mut items,
-                    &|m| texts(m),
-                );
-                if let Some((a, id)) = item {
-                    w.source_menu_asked(a, SourceKey::Account(id));
-                }
-                match asked {
-                    Some(super::import_accounts::Asked::Select(id)) => w.select_account(id),
-                    Some(asked) => *event = Some(account_event(asked)),
-                    None => {}
-                }
-                // The imports done, each to run again.
-                let words = super::import_history::Words::new(&|m| texts(m));
-                if let Some(id) =
-                    super::import_history::history_ui(ui, &w.history, &words, &|m| texts(m))
-                {
-                    *event = Some(Event::Again(id));
-                }
-            }
-        });
-}
-
-/// A source's row: its tick, a favourite's button when given, and
-/// "Forget this folder" in its menu.
-fn source_row(
-    ui: &mut egui::Ui,
-    w: &mut ImportWindow,
-    words: &Words,
-    path: &Path,
-    label: String,
-    favourite: Option<(&String, bool)>,
-) -> Option<Event> {
-    let mut event = None;
-    ui.horizontal(|ui| {
-        let mut on = w.ticked.iter().any(|p| p == path);
-        let tick = ui
-            .checkbox(&mut on, label)
-            .on_hover_text(path.display().to_string());
-        if tick.changed() {
-            w.tick(path, on);
-            w.touched = true;
-            w.sources.account = None;
-        }
-        if w.sources.has_own(path) {
-            ui.weak("●").on_hover_text(&words.choices.own_choices);
-        }
-        let mut asked = None;
-        let kept = w.sources.kept();
-        let auto = (
-            Trigger::offered(w.is_card(path)),
-            w.sources
-                .get(&SourceKey::Folder(path.to_path_buf()))
-                .and_then(|s| s.auto),
-        );
-        tick.context_menu(|ui| {
-            if kept {
-                asked = menu_items(ui, words, Some(auto));
-                ui.separator();
-            }
-            if ui
-                .button(&words.forget)
-                .on_hover_text(&words.forget_hint)
-                .clicked()
-            {
-                event = Some(Event::Forget(path.to_path_buf()));
-                ui.close();
-            }
-        });
-        if let Some(asked) = asked {
-            w.source_menu_asked(asked, SourceKey::Folder(path.to_path_buf()));
-        }
-        if let Some((text, add)) = favourite {
-            let icon = if add { "☆" } else { "×" };
-            if ui.small_button(icon).on_hover_text(text).clicked() {
-                event = Some(Event::Favourite(path.to_path_buf(), add));
-            }
-        }
-    });
-    event
 }
 
 /// What a source's menu asked.
