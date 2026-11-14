@@ -6,7 +6,8 @@
 //!
 //! The endpoint's threads ask; the interface answers on its own thread, at
 //! its next frame ([`Shell::serve_window_commands`]), which a request
-//! wakes. A [`Bridge`] is made before the window exists (the node is
+//! wakes. A command whose work waits for the frame (the shell's queued
+//! actions) answers its result once done, a frame later. A [`Bridge`] is made before the window exists (the node is
 //! advertised first) and attached once the shell is built: until then it
 //! says the window is not open yet.
 //!
@@ -24,6 +25,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::host::{Pending, Reply};
 use egui_pop::api::windows::CONTEXT_APP_WINDOW;
 use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::CommandId;
@@ -77,8 +79,9 @@ impl Drop for Open {
     }
 }
 
-/// The requests the shell answers at each frame.
-pub struct Asks(Receiver<Ask>);
+/// The requests the shell answers at each frame, and the commands run
+/// whose results come at a later frame, with where to answer them.
+pub struct Asks(Receiver<Ask>, Vec<(Pending, Sender<Result<Value, String>>)>);
 
 /// Where requests go once the shell answers, and what to wake.
 type Link = Option<(Sender<Ask>, egui::Context)>;
@@ -95,7 +98,7 @@ impl Bridge {
     /// The shell answers from now on; a request wakes `ctx`.
     pub fn attach(&self, shell: &mut Shell, ctx: &egui::Context) {
         let (tx, rx) = channel();
-        shell.serve_window_commands(Asks(rx));
+        shell.serve_window_commands(Asks(rx, Vec::new()));
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some((tx, ctx.clone()));
     }
 
@@ -155,8 +158,17 @@ impl WindowCommands for Bridge {
     }
 }
 
-/// Answers the requests waiting, on the interface's thread.
-pub(crate) fn answer(shell: &mut Shell, asks: &Asks, ctx: &egui::Context) {
+/// Answers the requests waiting, on the interface's thread: a command
+/// whose work waits for the frame answers once it is done (the shell's
+/// queue runs after this, so at the next frame).
+pub(crate) fn answer(shell: &mut Shell, asks: &mut Asks, ctx: &egui::Context) {
+    asks.1.retain(|(pending, reply)| match pending.take() {
+        Some(result) => {
+            let _ = reply.send(result);
+            false
+        }
+        None => true,
+    });
     while let Ok(ask) = asks.0.try_recv() {
         match ask {
             Ask::List { window, reply } => {
@@ -169,10 +181,16 @@ pub(crate) fn answer(shell: &mut Shell, asks: &Asks, ctx: &egui::Context) {
                 window,
                 batch,
                 reply,
-            } => {
-                let _ = reply.send(run(shell, ctx, &id, params, &origin, &window, batch));
-            }
+            } => match run(shell, ctx, &id, params, &origin, &window, batch) {
+                Reply::Done(result) => {
+                    let _ = reply.send(result);
+                }
+                Reply::Later(pending) => asks.1.push((pending, reply)),
+            },
         }
+    }
+    if !asks.1.is_empty() {
+        ctx.request_repaint();
     }
 }
 
@@ -289,7 +307,8 @@ fn origin_of(origin: &str) -> Origin {
 
 /// Runs command `id` in open window `window`, refused with its reason
 /// where it does not apply there; within `batch`, what it changes in the
-/// library is the batch's step.
+/// library is the batch's step. A command whose work waits for the frame
+/// answers later.
 fn run(
     shell: &mut Shell,
     ctx: &egui::Context,
@@ -298,7 +317,24 @@ fn run(
     origin: &str,
     window: &str,
     batch: Option<Group>,
-) -> Result<Value, String> {
+) -> Reply {
+    let cx = match runnable(shell, ctx, id, window) {
+        Ok(cx) => cx,
+        Err(e) => return Reply::Done(Err(e)),
+    };
+    crate::library_history::within_batch(batch, || {
+        shell.dispatch_in(id, params, origin_of(origin), &cx)
+    })
+}
+
+/// The context command `id` runs in, in open window `window`; refused
+/// with its reason where it does not apply there.
+fn runnable(
+    shell: &Shell,
+    ctx: &egui::Context,
+    id: &str,
+    window: &str,
+) -> Result<WhenContext, String> {
     check_window(window)?;
     let app = shell.app().handle().clone();
     if !app.windows().iter().any(|w| w.id.as_str() == window) {
@@ -313,13 +349,7 @@ fn run(
     if let Some(reason) = disabled_reason(&app, ctx, &spec, &cx) {
         return Err(reason);
     }
-    if batch.is_none() {
-        return shell.run_in(id, params, origin_of(origin), &cx);
-    }
-    shell.library_mut().set_batch(batch);
-    let ran = shell.run_in(id, params, origin_of(origin), &cx);
-    shell.library_mut().set_batch(None);
-    ran
+    Ok(cx)
 }
 
 #[cfg(test)]

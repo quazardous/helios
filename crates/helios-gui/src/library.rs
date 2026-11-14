@@ -1580,9 +1580,6 @@ pub struct Library {
     /// Album changes asked, for the host to make in the vault, each with
     /// the batch it was asked in.
     album_edits: Vec<(AlbumEdit, Batch)>,
-    /// The batch whose command runs now ([`Library::set_batch`]): what it
-    /// asks is one step of the library's history.
-    batch: Batch,
     /// The quick collection's photos, as last read with the albums.
     quick: Vec<String>,
     /// The same, for the grid's badge.
@@ -1749,7 +1746,6 @@ impl Default for Library {
             albums: None,
             albums_wanted: Wanted::Yes,
             album_edits: Vec::new(),
-            batch: None,
             quick: Vec::new(),
             quick_set: HashSet::new(),
             head_counts: HashMap::new(),
@@ -2370,19 +2366,13 @@ impl Library {
 
     /// Queues an album change for the host ([`Library::take_album_edits`]).
     pub fn edit_album(&mut self, edit: AlbumEdit) {
-        self.album_edits.push((edit, self.batch.clone()));
+        self.album_edits
+            .push((edit, crate::library_history::current_batch()));
     }
 
     /// The album changes asked since, in order, each with its batch.
     pub fn take_album_edits(&mut self) -> Vec<(AlbumEdit, Batch)> {
         std::mem::take(&mut self.album_edits)
-    }
-
-    /// The batch whose command runs now (`None` once it ran): the
-    /// changes it asks are one step of the library's history
-    /// (`crate::library_history::Group`).
-    pub fn set_batch(&mut self, batch: Batch) {
-        self.batch = batch;
     }
 
     /// The vault query of the filter in force, its backup rule set.

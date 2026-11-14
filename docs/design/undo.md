@@ -230,8 +230,11 @@ next step saves the whole network.
   batch runs, a batch within a batch staying in the outer one. Each
   window command run in it carries the group to the window's thread,
   and what it asks of the library (a rotation, a removal, an album
-  change) is stamped with it when asked, so a user's click meanwhile is
-  never taken in.
+  change) is stamped with it when asked, the shell's queued actions
+  keeping the batch their command ran in, so a user's click meanwhile is
+  never taken in. A window command whose work waits for the frame now
+  answers once it is done, so a batch sees a queued step's failure and
+  stops there.
 - **The step.** The writes are recorded when the node answers them, as
   before; a stamped one goes into its batch's step while that step is
   the newest, else starts one. The step holds each command's changes in

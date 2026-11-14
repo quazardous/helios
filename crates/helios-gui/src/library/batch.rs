@@ -381,7 +381,8 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.removals.push((keys, self.batch.clone()));
+        self.removals
+            .push((keys, crate::library_history::current_batch()));
         Ok(count)
     }
 
@@ -408,7 +409,8 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.rotations.push((keys, turn, self.batch.clone()));
+        self.rotations
+            .push((keys, turn, crate::library_history::current_batch()));
         Ok(count)
     }
 

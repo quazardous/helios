@@ -31,6 +31,7 @@
 //!   nothing. A batch that changed nothing undoable leaves no step; the
 //!   user's own actions between two batches stay steps of their own.
 
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_pop::api::history::{
@@ -62,6 +63,26 @@ pub struct Group {
     /// The batch's, unique in the process.
     pub id: u64,
     pub origin: PopOrigin,
+}
+
+thread_local! {
+    /// The batch whose command runs now on this thread (the interface's).
+    static BATCH: RefCell<Option<Group>> = const { RefCell::new(None) };
+}
+
+/// The batch whose command runs now: what it asks of the library is
+/// stamped with it ([`within_batch`]).
+pub fn current_batch() -> Option<Group> {
+    BATCH.with(|b| b.borrow().clone())
+}
+
+/// Runs `f` as a command of `batch` (none: the user's or alone), then
+/// puts back the batch that ran before.
+pub fn within_batch<T>(batch: Option<Group>, f: impl FnOnce() -> T) -> T {
+    let before = BATCH.with(|b| b.replace(batch));
+    let out = f();
+    BATCH.with(|b| *b.borrow_mut() = before);
+    out
 }
 
 struct Entry {
