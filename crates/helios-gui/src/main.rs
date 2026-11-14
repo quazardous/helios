@@ -570,13 +570,17 @@ fn library_commands(
     // Library is filled again.
     let history = shell.library_history();
     {
-        let (vault, done, ctx) = (vault.clone(), done.clone(), ctx.clone());
+        // Walked by the node (`library.changes.apply`): the step's rows
+        // all moved or none.
+        let (node, done, ctx) = (persist.node().clone(), done.clone(), ctx.clone());
         history.set_apply(Arc::new(move |changes, forward| {
-            let r = if forward {
-                vault.replay(changes)
-            } else {
-                vault.revert(changes)
-            };
+            let r = node
+                .request(
+                    "library.changes.apply",
+                    json!({ "changes": changes, "forward": forward }),
+                )
+                .map_err(|e| e.message)
+                .and_then(|walked| serde_json::from_value(walked).map_err(|e| e.to_string()));
             done.store(true, Ordering::Relaxed);
             ctx.request_repaint();
             r

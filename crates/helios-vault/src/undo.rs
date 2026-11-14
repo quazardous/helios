@@ -107,7 +107,7 @@ impl Changes {
 }
 
 /// What a revert or a replay did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct Replayed {
     /// Images taken out of the vault.
     pub removed: u64,
