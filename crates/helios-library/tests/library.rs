@@ -1306,3 +1306,123 @@ fn a_duplicate_of_the_library_is_found_by_a_lookup_not_a_read() {
     let (report, lines) = run(&vault, None, &[p.join("roll")], &Options::default());
     assert_eq!((report.added, report.skipped), (1, 0), "{lines:?}");
 }
+
+/// A cull measurer noting the files it reads.
+struct Noting(std::sync::Mutex<Vec<PathBuf>>);
+
+impl helios_library::cull::Measurer for Noting {
+    fn measure(&self, path: &Path) -> Result<Signals, String> {
+        self.0.lock().unwrap().push(path.to_path_buf());
+        Ok(Signals::default())
+    }
+}
+
+/// A photo copied from a card into the Library, in a vault of its own:
+/// the card's file, the library copy, and the vault knowing both.
+fn copied_from_a_card(name: &str) -> (Place, Vault<MemoryStore>, ImageId, PathBuf, PathBuf) {
+    let p = Place::new(name);
+    let card = p.join("card/DCIM/100");
+    let on_card = card.join("IMG_0001.png");
+    picture(&on_card, 0, 1.0, 0);
+    let vault = vault();
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(p.join("library")),
+        },
+        ..Options::default()
+    };
+    let (report, lines) = run(&vault, None, &[p.join("card")], &options);
+    assert_eq!((report.added, report.copied), (1, 1), "{lines:?}");
+    let id = report.changes.images[0].image;
+    let at: Vec<PathBuf> = vault
+        .locations(&id)
+        .unwrap()
+        .into_iter()
+        .map(|l| l.path)
+        .collect();
+    assert_eq!(at.len(), 2, "the copy and the card's file: {at:?}");
+    // Measured by the import: forgotten, for the cull backfill to measure.
+    vault.set_signals(&id, None).unwrap();
+    let copy = at
+        .iter()
+        .find(|a| a.starts_with(p.join("library")))
+        .expect("a library copy")
+        .clone();
+    (p, vault, id, std::path::absolute(&on_card).unwrap(), copy)
+}
+
+fn export_source(
+    vault: &Vault<MemoryStore>,
+    id: ImageId,
+    out: &Path,
+) -> helios_export::batch::Item {
+    use helios_export::batch::{Clash, Settings};
+    use helios_export::{Format, Output};
+    let settings = Settings {
+        output: Output::from(Format::Jpeg { quality: 90 }),
+        folder: out.to_path_buf(),
+        pattern: "{stem}".into(),
+        clash: Clash::Number,
+    };
+    helios_library::export::plan(vault, &[id], settings, None)
+        .unwrap()
+        .items
+        .remove(0)
+}
+
+fn culled(vault: &Vault<MemoryStore>) -> (helios_library::cull::Backfill, Vec<PathBuf>) {
+    let measurer = Noting(std::sync::Mutex::default());
+    let done =
+        helios_library::cull::backfill_by(vault, &Jobs::new(Arc::default()), &measurer, None, 8)
+            .unwrap();
+    (done, measurer.0.into_inner().unwrap())
+}
+
+/// An image copied from a card has two locations, the library copy and
+/// the card's file: export, cull and a library view read the library
+/// copy, the card plugged in or not; without the library copy, the
+/// card's file; without either, the image is said missing.
+#[test]
+fn an_image_copied_from_a_card_is_read_from_its_library_copy() {
+    let (p, vault, id, on_card, copy) = copied_from_a_card("read-library-copy");
+    let out = p.join("out");
+    assert!(on_card.is_file() && copy.is_file());
+
+    // Both at hand: the library copy, for export, cull and a view.
+    assert_eq!(export_source(&vault, id, &out).source, copy);
+    assert_eq!(vault.file_to_read(&id).unwrap().unwrap().path, copy);
+    let (done, read) = culled(&vault);
+    assert_eq!((done.measured, read), (1, vec![copy.clone()]));
+    let rows = vault.library_rows(&[id], &[]).unwrap();
+    let first = rows[0].locations.iter().find(|l| l.present()).unwrap();
+    assert_eq!(first.path, copy, "a view's first present copy");
+
+    // The library copy gone: the card's file.
+    std::fs::remove_file(&copy).unwrap();
+    assert_eq!(export_source(&vault, id, &out).source, on_card);
+
+    // Neither: a clear "no copy" in the request.
+    std::fs::remove_file(&on_card).unwrap();
+    let item = export_source(&vault, id, &out);
+    assert!(
+        item.error.as_deref().is_some_and(|e| e.contains("no copy")),
+        "{item:?}"
+    );
+    assert_eq!(vault.file_to_read(&id).unwrap(), None);
+}
+
+/// Cull without the library copy measures the card's file, and with
+/// neither counts the photo missing.
+#[test]
+fn cull_falls_back_to_the_card_then_says_missing() {
+    let (_p, vault, _, on_card, copy) = copied_from_a_card("cull-card-fallback");
+    std::fs::remove_file(&copy).unwrap();
+    let (done, read) = culled(&vault);
+    assert_eq!((done.measured, read), (1, vec![on_card]));
+
+    let (_p, vault, _, on_card, copy) = copied_from_a_card("cull-none-at-hand");
+    std::fs::remove_file(&copy).unwrap();
+    std::fs::remove_file(&on_card).unwrap();
+    let (done, read) = culled(&vault);
+    assert_eq!((done.measured, done.missing, read.len()), (0, 1, 0));
+}

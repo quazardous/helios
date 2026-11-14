@@ -246,12 +246,9 @@ pub fn default_on_import<S: Store>(
             continue;
         }
         let Some((colour, tone)) = vault
-            .locations(&image)
+            .file_to_read(&image)
             .map_err(store_error)?
-            .into_iter()
-            .map(|l| l.path)
-            .find(|p| p.exists())
-            .and_then(|p| camera_of(&p))
+            .and_then(|l| camera_of(&l.path))
             .and_then(|camera| looks.get(&camera))
         else {
             continue;

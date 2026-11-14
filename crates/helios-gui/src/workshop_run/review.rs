@@ -272,9 +272,7 @@ impl<S: Store + Send + 'static> Runner<S> {
         let (_, head) = edit::EditSession::open(&self.vault, *image)?;
         let location = self
             .vault
-            .locations(image)?
-            .into_iter()
-            .find(helios_vault::Location::present)
+            .file_to_read(image)?
             .ok_or("no file of the photo is at hand")?;
         let mut graph = (self.load)(&location.path, &ask.bundle)?;
         if let Some(v) = &head {
