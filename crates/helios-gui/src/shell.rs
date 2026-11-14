@@ -91,6 +91,7 @@ pub use import_accounts::Imported as PickImported;
 pub use import_accounts::LibraryFolder;
 mod import_auto;
 mod import_choices;
+mod import_detail;
 mod import_history;
 mod import_sources;
 mod import_window;

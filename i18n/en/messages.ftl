@@ -919,6 +919,8 @@ gui-import-window-choices-undo = Undo
 
 gui-import-window-choose = Choose a folder…
 
+gui-import-window-choose-on-the-right = Choose photos in the panel on the right: they show here.
+
 gui-import-window-contents = Contents
 
 gui-import-window-copy = Copy into the Library

@@ -587,6 +587,26 @@ impl Sources {
         self.store();
     }
 
+    /// Sets a source's own parameters (the Detail column's), saving the
+    /// source when new; not a step of the column's Undo.
+    pub(crate) fn set_params(
+        &mut self,
+        key: &SourceKey,
+        connector: &str,
+        params: BTreeMap<String, serde_json::Value>,
+    ) {
+        if let Some(i) = self.position(key) {
+            self.list[i].params = params;
+        } else {
+            let source = self.identified(SavedSource {
+                params,
+                ..SavedSource::new(connector.to_string(), key)
+            });
+            self.list.push(source);
+        }
+        self.store();
+    }
+
     /// The account sources' parameters, kept up to date as the sources
     /// are read and kept.
     pub(crate) fn params(&self) -> SourceParams {

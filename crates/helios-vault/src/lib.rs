@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
 use helios_core::{ContentHash, Describe};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use storage::VolumeId;
 
@@ -75,7 +75,7 @@ pub use versions::{Version, VersionId};
 pub type VolumeFolders = BTreeMap<Option<VolumeId>, BTreeMap<String, u64>>;
 
 /// An image, identified by the hash of its file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ImageId(pub ContentHash);
 
 impl ImageId {
@@ -102,7 +102,7 @@ pub fn parse_hash(hex: &str) -> Result<ContentHash, String> {
 }
 
 /// What the vault knows of an image itself.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Image {
     pub id: ImageId,
     pub size: u64,
@@ -115,7 +115,9 @@ pub struct Image {
 pub const LOCATIONS_CHANGED: &str = "vault.locations_changed";
 
 /// Whether a location's file can be read now.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
     /// The file is there.
@@ -160,7 +162,7 @@ impl Presence {
 
 /// Where a copy of an image was seen: the [`Sighting`] of a file whose
 /// content (its image) is known, as the Library reads it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
     /// Its absolute path, as last resolved: on a volume, the volume's
     /// mount point joined with [`Location::rel_path`].

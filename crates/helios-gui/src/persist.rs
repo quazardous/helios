@@ -144,6 +144,19 @@ pub struct Persist<S: Store> {
     stacking: Option<Receiver<Result<Stacked, String>>>,
     /// Asked again while they were read: read once more.
     stack_again: bool,
+    /// The library's other reads through the node (the Library's filter
+    /// history, the folders' counts), answered at a coming frame.
+    asked: Vec<(Asked, Pending)>,
+}
+
+/// A read of the library sent to the node, shown when it is answered.
+enum Asked {
+    /// The Library's pinned and recent filters (`library.documents.get`).
+    FilterHistory,
+    /// The photos counted by folder (`library.folders`).
+    Folders,
+    /// The albums and the quick collection (`library.albums.list`).
+    Albums,
 }
 
 /// A write of the library sent to the node.
@@ -160,6 +173,19 @@ enum Write {
     Accept(String, Option<Vec<usize>>),
     /// A proposal declined (`library.stacks.decline`).
     Decline(String),
+    /// A library document kept, or removed when none
+    /// (`library.documents.set`).
+    Document {
+        ns: &'static str,
+        key: &'static str,
+        document: Option<Value>,
+    },
+    /// A workshop session's record kept, or dropped when none
+    /// (`library.workshop.sessions.set`).
+    Session(String, Option<Value>),
+    /// An album or the quick collection changed (`library.albums.edit`),
+    /// recorded in the library's history at `f64` (seconds) once done.
+    Album(crate::library::AlbumEdit, f64),
 }
 
 impl Write {
@@ -180,6 +206,15 @@ impl Write {
                 json!({ "decision": decision, "groups": groups }),
             ),
             Self::Decline(decision) => ("library.stacks.decline", json!({ "decision": decision })),
+            Self::Document { ns, key, document } => (
+                "library.documents.set",
+                json!({ "ns": ns, "key": key, "document": document }),
+            ),
+            Self::Session(id, record) => (
+                "library.workshop.sessions.set",
+                json!({ "id": id, "record": record }),
+            ),
+            Self::Album(edit, _) => ("library.albums.edit", album_params(edit)),
         }
     }
 
@@ -187,9 +222,42 @@ impl Write {
     fn images(&self) -> impl Iterator<Item = &str> {
         let changes = match self {
             Self::Fields(changes) => changes.as_slice(),
-            Self::Expand(..) | Self::Suggest(_) | Self::Accept(..) | Self::Decline(_) => &[],
+            Self::Expand(..)
+            | Self::Suggest(_)
+            | Self::Accept(..)
+            | Self::Decline(_)
+            | Self::Document { .. }
+            | Self::Session(..)
+            | Self::Album(..) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
+    }
+}
+
+/// The params of `library.albums.edit` making `edit`.
+fn album_params(edit: &crate::library::AlbumEdit) -> Value {
+    use crate::library::AlbumEdit as E;
+    match edit {
+        E::Create { id, name, images } => {
+            json!({ "op": "create", "id": id, "name": name, "images": images })
+        }
+        E::Rename { id, name } => json!({ "op": "rename", "id": id, "name": name }),
+        E::Delete { id, members } => json!({ "op": "delete", "id": id, "members": members }),
+        E::CreateSet { id, name, set } => {
+            json!({ "op": "createSet", "id": id, "name": name, "set": set })
+        }
+        E::Move { id, set } => json!({ "op": "move", "id": id, "set": set }),
+        E::Add { id, images } => json!({ "op": "add", "id": id, "images": images }),
+        E::Remove { id, images } => json!({ "op": "remove", "id": id, "images": images }),
+        E::CreateSmart { id, name, rules } => {
+            json!({ "op": "createSmart", "id": id, "name": name, "rules": rules.to_json() })
+        }
+        E::Rules { id, rules } => json!({ "op": "rules", "id": id, "rules": rules.to_json() }),
+        E::QuickToggle { images } => json!({ "op": "quickToggle", "images": images }),
+        E::QuickClear => json!({ "op": "quickClear" }),
+        E::QuickSave { id, name, clear } => {
+            json!({ "op": "quickSave", "id": id, "name": name, "clear": clear })
+        }
     }
 }
 
@@ -673,6 +741,94 @@ fn show_stacked(shell: &mut Shell, stacked: Stacked) {
     shell.stack_review_mut().set_decisions(stacked.decisions);
 }
 
+/// Drops the workshop sessions a former run left unkept, through the
+/// node `node` (`library.workshop.sessions.list`, then `.set` for each):
+/// how many were dropped. Waits for the node, so it runs on a thread of
+/// its own, never the UI's.
+///
+/// # Errors
+/// The node's refusal, or a node that does not answer.
+pub fn drop_unkept_sessions(node: &Client) -> Result<usize, String> {
+    let listed = node
+        .request("library.workshop.sessions.list", json!({}))
+        .map_err(|e| e.message)?;
+    let mut n = 0;
+    for session in listed["sessions"].as_array().into_iter().flatten() {
+        if session["record"]["kept"].as_bool() == Some(true) {
+            continue;
+        }
+        let Some(id) = session["id"].as_str() else {
+            continue;
+        };
+        node.request(
+            "library.workshop.sessions.set",
+            json!({ "id": id, "record": null }),
+        )
+        .map_err(|e| e.message)?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Shows a read of [`Asked`] the node answered.
+fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_inspect::rpc::Error>) {
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(e) => {
+            match asked {
+                // The filters' history is a convenience: a warning.
+                Asked::FilterHistory => shell.notify(Level::Warning, e.message),
+                Asked::Folders | Asked::Albums => unreadable(shell, e.message),
+            }
+            return;
+        }
+    };
+    match asked {
+        Asked::FilterHistory => {
+            use crate::recent_filters::FilterHistory;
+            let doc = Some(&answer["document"]).filter(|d| !d.is_null());
+            shell
+                .library_mut()
+                .set_filter_history(FilterHistory::of(doc));
+        }
+        Asked::Folders => match folders_of(&answer) {
+            Ok(folders) => shell.library_mut().set_folders(folders),
+            Err(e) => unreadable(shell, e),
+        },
+        Asked::Albums => {
+            let albums = answer["albums"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(helios_vault::collections::Album::from_json)
+                .collect();
+            let quick = answer["quick"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect();
+            shell.library_mut().set_quick(quick);
+            shell.library_mut().set_albums(albums);
+        }
+    }
+}
+
+/// The photos counted by folder, from `library.folders`'s answer.
+fn folders_of(answer: &Value) -> Result<helios_vault::VolumeFolders, String> {
+    let mut folders = helios_vault::VolumeFolders::new();
+    for volume in answer["folders"].as_array().into_iter().flatten() {
+        let id = volume["volume"]
+            .as_str()
+            .map(|v| helios_vault::storage::VolumeId(v.to_string()));
+        let counts = serde_json::from_value(volume["folders"].clone())
+            .map_err(|e| format!("the folders' counts: {e}"))?;
+        folders.insert(id, counts);
+    }
+    Ok(folders)
+}
+
 /// Says the library could not be read.
 fn unreadable(shell: &mut Shell, error: String) {
     shell.notify(
@@ -744,6 +900,7 @@ impl<S: Store + 'static> Persist<S> {
             searching: None,
             stacking: None,
             stack_again: false,
+            asked: Vec::new(),
         }
     }
 
@@ -767,6 +924,7 @@ impl<S: Store + 'static> Persist<S> {
             || self.filling.is_some()
             || self.searching.is_some()
             || self.stacking.is_some()
+            || !self.asked.is_empty()
     }
 
     /// Waits until the node has answered every call made, and shows what
@@ -816,6 +974,14 @@ impl<S: Store + 'static> Persist<S> {
             }
         }
         self.reading = still;
+        let mut still = Vec::new();
+        for (asked, pending) in std::mem::take(&mut self.asked) {
+            match pending.poll() {
+                None => still.push((asked, pending)),
+                Some(answer) => show_asked(shell, &asked, answer),
+            }
+        }
+        self.asked = still;
         self.pump_reads(shell);
     }
 
@@ -896,6 +1062,27 @@ impl<S: Store + 'static> Persist<S> {
         answer: Result<Value, helios_inspect::rpc::Error>,
     ) {
         match (&write, answer) {
+            (Write::Album(edit, at), Ok(done)) => {
+                match serde_json::from_value::<helios_vault::Changes>(done["changes"].clone()) {
+                    Ok(changes) => {
+                        let name = done["name"].as_str().unwrap_or_default();
+                        let count = to_usize(&done["count"]);
+                        let added = done["added"].as_bool().unwrap_or(true);
+                        let label = crate::library_history::album_label(edit, name, count, added);
+                        shell.library_history().record(label, changes, *at);
+                    }
+                    Err(e) => shell.notify(Level::Warning, e.to_string()),
+                }
+                self.read_albums_if_wanted(shell);
+            }
+            (Write::Album(..), Err(e)) => shell.notify(
+                Level::Error,
+                Message::new(
+                    "gui-album-not-changed",
+                    "The album was not changed: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (_, Ok(_)) => {}
             (Write::Fields(_), Err(e)) => shell.notify(
                 Level::Warning,
@@ -906,7 +1093,12 @@ impl<S: Store + 'static> Persist<S> {
                 .with("error", e.message),
             ),
             (
-                Write::Expand(..) | Write::Suggest(_) | Write::Accept(..) | Write::Decline(_),
+                Write::Expand(..)
+                | Write::Suggest(_)
+                | Write::Accept(..)
+                | Write::Decline(_)
+                | Write::Document { .. }
+                | Write::Session(..),
                 Err(e),
             ) => shell.notify(Level::Warning, e.message),
         }
@@ -1330,137 +1522,58 @@ impl<S: Store + 'static> Persist<S> {
 
     /// Reads the Library's pinned and recent filters once, and writes
     /// them back each time they change (`crate::recent_filters`): a
-    /// library document, outside the library's history.
+    /// library document, outside the library's history. Both go through
+    /// the node: the read is shown at a coming frame, the write is sent
+    /// in its turn with the library's other writes.
     fn keep_filter_history(&mut self, shell: &mut Shell) {
-        use crate::recent_filters::{FilterHistory, KEY, NS};
+        use crate::recent_filters::{KEY, NS};
         if shell.library_mut().take_filter_history_wanted() {
-            let read = self.vault.library_document(NS, KEY);
-            match read {
-                Ok(doc) => shell
-                    .library_mut()
-                    .set_filter_history(FilterHistory::of(doc.as_ref())),
-                Err(e) => shell.notify(Level::Warning, e),
-            }
+            let pending = self
+                .node
+                .call("library.documents.get", json!({ "ns": NS, "key": KEY }));
+            self.asked.push((Asked::FilterHistory, pending));
+        }
+        // Not written over the stored one before it is read.
+        let reading = self
+            .asked
+            .iter()
+            .any(|(asked, _)| matches!(asked, Asked::FilterHistory));
+        if reading {
+            return;
         }
         let write = shell.library_mut().take_filter_history_write();
-        if let Some(history) = write
-            && let Err(e) = self
-                .vault
-                .set_library_document(NS, KEY, Some(&history.to_json()))
-        {
-            shell.notify(Level::Warning, e);
+        if let Some(history) = write {
+            self.writes.push_back(Write::Document {
+                ns: NS,
+                key: KEY,
+                document: Some(history.to_json()),
+            });
         }
     }
 
-    /// Makes the album changes the library asked, each one step of the
-    /// library's history; reads the albums again when that history moved
-    /// (a change, an undo, a redo, an import).
+    /// Sends the album changes the library asked to the node, each one
+    /// step of the library's history once answered ([`Persist::written`]);
+    /// reads the albums again when that history moved (a change, an undo,
+    /// a redo, an import).
     fn edit_albums(&mut self, shell: &mut Shell, now: f64) {
-        use crate::library::AlbumEdit as E;
-        let edits = shell.library_mut().take_album_edits();
-        let history = shell.library_history();
-        for edit in edits {
-            let ids = |images: &[String]| -> Result<Vec<ImageId>, String> {
-                images.iter().map(|i| ImageId::from_hex(i)).collect()
-            };
-            let before = self.vault.album(edit.id()).ok().flatten();
-            let name = before.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-            // Whether B put the photos in the quick collection.
-            let mut added = true;
-            let done = match &edit {
-                E::Create { id, name, images } => ids(images)
-                    .and_then(|i| self.vault.create_album(Some(id), name, &i))
-                    .map(|(a, c)| (a.name, a.images.len(), c)),
-                E::Rename { id, name: to } => self
-                    .vault
-                    .rename_album(id, to)
-                    .map(|c| (name.clone(), 0, c)),
-                E::Delete { id, members } => self
-                    .vault
-                    .delete_collection(id, *members)
-                    .map(|c| (name.clone(), 0, c)),
-                E::CreateSet { id, name, set } => self
-                    .vault
-                    .create_set(Some(id), name, set.as_deref())
-                    .map(|(a, c)| (a.name, 0, c)),
-                E::Move { id, set } => self
-                    .vault
-                    .move_collection(id, set.as_deref())
-                    .map(|c| (name.clone(), 0, c)),
-                E::Add { id, images } => ids(images)
-                    .and_then(|i| self.vault.add_to_album(id, &i))
-                    .map(|c| (name.clone(), images.len(), c)),
-                E::Remove { id, images } => ids(images)
-                    .and_then(|i| self.vault.remove_from_album(id, &i))
-                    .map(|c| (name.clone(), images.len(), c)),
-                E::CreateSmart { id, name, rules } => self
-                    .vault
-                    .create_smart_album(Some(id), name, rules.clone())
-                    .map(|(a, c)| (a.name, 0, c)),
-                E::Rules { id, rules } => self
-                    .vault
-                    .set_album_rules(id, rules.clone())
-                    .map(|c| (name.clone(), 0, c)),
-                E::QuickToggle { images } => {
-                    // The photos it moved: those already in are not counted.
-                    let held = self.vault.quick_collection().map_or(0, |q| q.len());
-                    ids(images)
-                        .and_then(|i| self.vault.toggle_quick(&i))
-                        .map(|(a, c)| {
-                            added = a;
-                            let now = self.vault.quick_collection().map_or(held, |q| q.len());
-                            (String::new(), now.abs_diff(held), c)
-                        })
-                }
-                E::QuickClear => {
-                    let count = self.vault.quick_collection().map_or(0, |q| q.len());
-                    self.vault.clear_quick().map(|c| (String::new(), count, c))
-                }
-                E::QuickSave { id, name, clear } => self
-                    .vault
-                    .save_quick(Some(id), name, *clear)
-                    .map(|(a, c)| (a.name, a.images.len(), c)),
-            };
-            match done {
-                Ok((name, count, changes)) => {
-                    let label = crate::library_history::album_label(&edit, &name, count, added);
-                    history.record(label, changes, now);
-                }
-                Err(e) => shell.notify(
-                    Level::Error,
-                    Message::new(
-                        "gui-album-not-changed",
-                        "The album was not changed: { $error }",
-                    )
-                    .with("error", e),
-                ),
-            }
+        for edit in shell.library_mut().take_album_edits() {
+            self.writes.push_back(Write::Album(edit, now));
         }
         self.keep_filter_history(shell);
-        let rev = history.rev();
+        self.read_albums_if_wanted(shell);
+    }
+
+    /// Asks the node the albums and the quick collection when the
+    /// library's history moved or the Library wants them.
+    fn read_albums_if_wanted(&mut self, shell: &mut Shell) {
+        let rev = shell.library_history().rev();
         if rev != self.history_rev {
             self.history_rev = rev;
             shell.library_mut().ask_albums();
         }
         if shell.library_mut().take_albums_wanted() {
-            match self
-                .vault
-                .albums()
-                .and_then(|a| Ok((a, self.vault.quick_collection()?)))
-            {
-                Ok((albums, quick)) => {
-                    shell.library_mut().set_quick(quick);
-                    shell.library_mut().set_albums(albums);
-                }
-                Err(e) => shell.notify(
-                    Level::Error,
-                    Message::new(
-                        "gui-vault-unreadable",
-                        "Cannot read the library: { $error }",
-                    )
-                    .with("error", e),
-                ),
-            }
+            let pending = self.node.call("library.albums.list", json!({}));
+            self.asked.push((Asked::Albums, pending));
         }
     }
 
@@ -1490,19 +1603,11 @@ impl<S: Store + 'static> Persist<S> {
         if shell.library_mut().take_resort() {
             self.ask_fill(shell, false);
         }
-        // The Folders section open: its counts, one store query.
+        // The Folders section open: its counts, one store query, read
+        // through the node and shown at a coming frame.
         if shell.library_mut().take_folders_wanted() {
-            match self.vault.folders(&helios_vault::Query::default()) {
-                Ok(folders) => shell.library_mut().set_folders(folders),
-                Err(e) => shell.notify(
-                    Level::Error,
-                    Message::new(
-                        "gui-vault-unreadable",
-                        "Cannot read the library: { $error }",
-                    )
-                    .with("error", e),
-                ),
-            }
+            let pending = self.node.call("library.folders", json!({}));
+            self.asked.push((Asked::Folders, pending));
         }
         self.edit_albums(shell, now);
         let query = shell.library_mut().take_query();
@@ -1549,26 +1654,20 @@ impl<S: Store + 'static> Persist<S> {
 
     /// Keeps the workshop sessions' records the desktop wrote, and drops
     /// those it ended unkept.
-    fn write_sessions(&self, shell: &mut Shell) {
+    /// Each is sent to the node in its turn with the library's other
+    /// writes (`library.workshop.sessions.set`).
+    fn write_sessions(&mut self, shell: &mut Shell) {
         for (id, record) in shell.take_session_writes() {
-            if let Err(e) = self.vault.set_workshop_session(&id, record.as_ref()) {
-                shell.notify(Level::Warning, e);
-            }
+            self.writes.push_back(Write::Session(id, record));
         }
     }
 
     /// Drops the workshop sessions a former run left unkept (it ended
     /// before their session did): a session is kept only when the user
-    /// says so (or, later, when it is generalised).
+    /// says so (or, later, when it is generalised). Waits for the node:
+    /// for a thread of its own ([`drop_unkept_sessions`]).
     pub fn drop_unkept_sessions(&self) -> Result<usize, String> {
-        let mut n = 0;
-        for (id, record) in self.vault.workshop_sessions()? {
-            if record["kept"].as_bool() != Some(true) {
-                self.vault.set_workshop_session(&id, None)?;
-                n += 1;
-            }
-        }
-        Ok(n)
+        drop_unkept_sessions(&self.node)
     }
 
     /// Saves the edit when the value store committed a step, or while a

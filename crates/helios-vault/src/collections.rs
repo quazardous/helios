@@ -123,6 +123,17 @@ impl Album {
         })
     }
 
+    /// An album read back from its JSON (as it is serialized: by the
+    /// node's `library.albums.list`); none when it is not one.
+    pub fn from_json(json: &Value) -> Option<Album> {
+        let mut album = Album::of(json.get("id").and_then(Value::as_str)?, json)?;
+        album.count = json
+            .get("count")
+            .and_then(Value::as_u64)
+            .and_then(|c| usize::try_from(c).ok());
+        Some(album)
+    }
+
     fn doc(&self) -> Value {
         let mut doc = match &self.rules {
             Some(rules) => json!({ "kind": SMART, "name": self.name, "rules": rules.to_json() }),
