@@ -669,7 +669,8 @@ mod tests {
                         "vault.integrity",
                         "library.default",
                         "library.folder",
-                        "library.changed-outside"
+                        "library.changed-outside",
+                        "library.raw-jpeg-pairs"
                     ]
                 ),
                 (

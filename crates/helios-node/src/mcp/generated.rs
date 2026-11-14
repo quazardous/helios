@@ -32,9 +32,9 @@ pub const PREFIX: &str = "helios_cmd_";
 /// The longest tool name MCP clients take.
 pub const LONGEST_NAME: usize = 64;
 
-/// The most generated tools offered; past it the last ids (by id) are left
-/// out, still reached through `helios_command_run`.
-pub const MOST_TOOLS: usize = 120;
+/// The most generated tools offered; past it the last names are left out,
+/// still reached through `helios_command_run`.
+pub const MOST_TOOLS: usize = 200;
 
 /// The longest description; a longer one is cut, with a pointer to
 /// `helios_commands_list`.
