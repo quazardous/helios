@@ -1835,7 +1835,10 @@ mod tests {
                 .map(|s| s.meta.id.clone())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(shown(Default::default()), ["a.one", "a.two"]);
+        assert_eq!(
+            shown(std::collections::BTreeMap::default()),
+            ["a.one", "a.two"]
+        );
         let skip = crate::shell::init_wizard::skip_key("a.one");
         assert_eq!(shown([(skip, serde_json::json!(true))].into()), ["a.two"]);
     }
