@@ -284,6 +284,12 @@ pub struct Options {
     /// where the volume is mounted: a card read once is "already seen"
     /// wherever it is mounted next.
     pub mounted: Option<Vec<helios_storage::Volume>>,
+    /// Which files of the sources are taken; `None`: all
+    /// ([`crate::import_profile::Filter`]).
+    pub filter: Option<crate::import_profile::Filter>,
+    /// What every photo imported is given: keywords, a rating, a colour
+    /// label ([`crate::import_profile::Apply`]).
+    pub apply: Option<crate::import_profile::Apply>,
 }
 
 /// A removable volume mounted now: its mount point and its identity.
@@ -334,6 +340,8 @@ impl Default for Options {
             cancel: None,
             origin: None,
             mounted: None,
+            filter: None,
+            apply: None,
         }
     }
 }
@@ -1261,6 +1269,7 @@ impl<S: Store> Run<'_, S> {
     /// Applies what an importer listed for the file at `path` to its image
     /// `id`: the fields changed under the line's `metadata`.
     fn keep_metadata(&mut self, path: &Path, id: ImageId, line: &mut Value) -> Result<(), String> {
+        self.keep_applied(id, line)?;
         let Some(listed) = &self.options.listed else {
             return Ok(());
         };
@@ -1276,6 +1285,21 @@ impl<S: Store> Run<'_, S> {
         if applied.changed > 0 {
             self.report.metadata += 1;
         }
+        Ok(())
+    }
+
+    /// Gives the image `id` what the import applies to every photo
+    /// ([`Options::apply`]): its fields changed under the line's `applied`.
+    fn keep_applied(&mut self, id: ImageId, line: &mut Value) -> Result<(), String> {
+        let Some(apply) = &self.options.apply else {
+            return Ok(());
+        };
+        let commands = apply.metadata().commands(id);
+        if commands.is_empty() {
+            return Ok(());
+        }
+        let applied = self.vault.apply(&commands, "import", None, self.now)?;
+        line["applied"] = json!({ "changed": applied.changed, "kept": applied.unchanged });
         Ok(())
     }
 
@@ -1736,7 +1760,19 @@ fn prepare<S: Store>(
         if !source.exists() {
             return Err(format!("{}: no such file or folder", source.display()));
         }
-        let files = files_of(&source)?;
+        let mut files = files_of(&source)?;
+        if let Some(filter) = &options.filter {
+            files.retain(|f| filter.takes_file(f));
+            if filter.new_only {
+                let mut kept = Vec::with_capacity(files.len());
+                for f in files {
+                    if vault.at_path(&f)?.is_none_or(|(_, l)| !l.present()) {
+                        kept.push(f);
+                    }
+                }
+                files = kept;
+            }
+        }
         let (kind, root) = source_kind(&source);
         listed.push(Source {
             path: source,

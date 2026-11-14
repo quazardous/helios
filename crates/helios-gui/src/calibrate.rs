@@ -1172,7 +1172,7 @@ pub fn look_header_ui(
         if r.clicked() {
             run("fit");
         }
-        presets_ui(ui, image, &run);
+        presets_ui(ui, image);
     });
     compare_ui(ui, store, &compare);
     if let Some(default) = default {
@@ -1184,7 +1184,9 @@ pub fn look_header_ui(
 /// "Camera look" puts the camera's default look on, or fits one to the
 /// camera's JPEG when the camera has none ([`LOOK_CHOOSE`] with
 /// `camera`, one undoable step). Off for a photo outside the library.
-fn presets_ui(ui: &mut egui::Ui, enabled: bool, run: &dyn Fn(&str)) {
+/// The list is the shell's menu (`dialogs::Request::Menu`), opened under
+/// the button.
+fn presets_ui(ui: &mut egui::Ui, enabled: bool) {
     let ctx = ui.ctx().clone();
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let presets = text(Message::new("gui-look-header-presets", "Presets"));
@@ -1194,21 +1196,25 @@ fn presets_ui(ui: &mut egui::Ui, enabled: bool, run: &dyn Fn(&str)) {
         "The camera's default look, or a look fitted to the camera's JPEG when the camera has none",
     ));
     let r = ui
-        .add_enabled_ui(enabled, |ui| {
-            ui.menu_button(&presets, |ui| {
-                let r = ui.button(&camera).on_hover_text(&about);
-                egui_pop::core::a11y::name(&r, egui::Role::MenuItem, &camera);
-                crate::name_rect(&ctx, "helios.cameralook.preset.camera", r.rect);
-                if r.clicked() {
-                    run("camera");
-                    ui.close();
-                }
-            })
-            .response
-        })
-        .inner;
+        .add_enabled(enabled, egui::Button::new(&presets))
+        .on_hover_text(&about);
     egui_pop::core::a11y::name(&r, egui::Role::Button, &presets);
     crate::name_rect(&ctx, "helios.cameralook.presets", r.rect);
+    if r.clicked() {
+        crate::dialogs::request(
+            &ctx,
+            crate::dialogs::Request::Menu {
+                at: r.rect.left_bottom(),
+                items: vec![
+                    crate::dialogs::MenuItem::run(
+                        LOOK_CHOOSE,
+                        serde_json::json!({ "look": "camera" }),
+                    )
+                    .labeled(camera),
+                ],
+            },
+        );
+    }
 }
 
 /// What the header knows of the camera's default look.
