@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use egui_pop::api::app::AppHandle;
-use egui_pop::api::host::{Pending, Reply};
+use egui_pop::api::host::Reply;
 use egui_pop::api::windows::CONTEXT_APP_WINDOW;
 use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::CommandId;
@@ -81,7 +81,23 @@ impl Drop for Open {
 
 /// The requests the shell answers at each frame, and the commands run
 /// whose results come at a later frame, with where to answer them.
-pub struct Asks(Receiver<Ask>, Vec<(Pending, Sender<Result<Value, String>>)>);
+pub struct Asks(Receiver<Ask>, Vec<(Receiver<Answer>, Sender<Answer>)>);
+
+/// A command's result.
+type Answer = Result<Value, String>;
+
+thread_local! {
+    /// Where the action a window command queues sends its result
+    /// ([`take_tap`]), while it is dispatched.
+    static TAP: RefCell<Option<Sender<Answer>>> = const { RefCell::new(None) };
+}
+
+/// Where the result of the action being queued goes, if a window command
+/// run through the endpoint queued it: the shell's queue sends it there
+/// once applied.
+pub fn take_tap() -> Option<Sender<Answer>> {
+    TAP.with(|t| t.borrow_mut().take())
+}
 
 /// Where requests go once the shell answers, and what to wake.
 type Link = Option<(Sender<Ask>, egui::Context)>;
@@ -162,12 +178,16 @@ impl WindowCommands for Bridge {
 /// whose work waits for the frame answers once it is done (the shell's
 /// queue runs after this, so at the next frame).
 pub(crate) fn answer(shell: &mut Shell, asks: &mut Asks, ctx: &egui::Context) {
-    asks.1.retain(|(pending, reply)| match pending.take() {
-        Some(result) => {
+    asks.1.retain(|(result, reply)| match result.try_recv() {
+        Ok(result) => {
             let _ = reply.send(result);
             false
         }
-        None => true,
+        Err(std::sync::mpsc::TryRecvError::Empty) => true,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            let _ = reply.send(Err("the command's queued work was dropped".into()));
+            false
+        }
     });
     while let Ok(ask) = asks.0.try_recv() {
         match ask {
@@ -181,12 +201,22 @@ pub(crate) fn answer(shell: &mut Shell, asks: &mut Asks, ctx: &egui::Context) {
                 window,
                 batch,
                 reply,
-            } => match run(shell, ctx, &id, params, &origin, &window, batch) {
-                Reply::Done(result) => {
-                    let _ = reply.send(result);
+            } => {
+                let (tap, result) = channel();
+                TAP.with(|t| *t.borrow_mut() = Some(tap));
+                let ran = run(shell, ctx, &id, params, &origin, &window, batch);
+                // Taken: the command queued an action that answers.
+                let tapped = TAP.with(|t| t.borrow_mut().take()).is_none();
+                match ran {
+                    Reply::Done(result) => {
+                        let _ = reply.send(result);
+                    }
+                    Reply::Later(_) if tapped => asks.1.push((result, reply)),
+                    Reply::Later(_) => {
+                        let _ = reply.send(Ok(json!({ "queued": true })));
+                    }
                 }
-                Reply::Later(pending) => asks.1.push((pending, reply)),
-            },
+            }
         }
     }
     if !asks.1.is_empty() {

@@ -376,6 +376,7 @@ type Queue = Arc<
             Action,
             Option<Resolver>,
             Option<crate::library_history::Group>,
+            Option<std::sync::mpsc::Sender<Result<Value, String>>>,
         )>,
     >,
 >;
@@ -2473,7 +2474,12 @@ impl Shell {
             .expect("shell commands are declared once");
         let (q, later) = (w.queue.clone(), w.later.clone());
         let push = move |a: Action| {
-            lock(&q).push((a, later.take(), crate::library_history::current_batch()));
+            lock(&q).push((
+                a,
+                later.take(),
+                crate::library_history::current_batch(),
+                crate::window_commands::take_tap(),
+            ));
         };
         let mut add = |spec: CommandSpec, action: ActionOf| {
             let push = push.clone();
@@ -6487,12 +6493,15 @@ impl Shell {
             if actions.is_empty() {
                 break;
             }
-            for (a, resolver, batch) in actions {
+            for (a, resolver, batch, tap) in actions {
                 // Run in the batch its command ran in: what it asks of
                 // the library is the batch's step.
                 let result = crate::library_history::within_batch(batch, || self.apply(ctx, a));
                 if let Err(e) = &result {
                     self.warn(e.clone());
+                }
+                if let Some(tap) = tap {
+                    let _ = tap.send(result.clone());
                 }
                 if let Some(r) = resolver {
                     r.resolve(result);
