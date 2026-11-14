@@ -2192,9 +2192,15 @@ fn the_versions_strip_switches_and_a_removed_copy_comes_back_with_undo() {
     assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
     settle(&mut h, &mut persist, 30.0);
     assert_eq!(persist.vault().heads(&id(1)).unwrap().len(), 2);
+    assert!(persist.take_locations_changed(), "the vault's event heard");
     persist.ask_fill(h.state(), true);
     settle(&mut h, &mut persist, 40.0);
-    assert_eq!(h.state().library().heads_of(&photo), Some(2));
+    settle(&mut h, &mut persist, 45.0);
+    assert_eq!(
+        h.state().library().heads_of(&photo),
+        Some(2),
+        "the Library read again counts the copy"
+    );
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

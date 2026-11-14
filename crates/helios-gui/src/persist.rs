@@ -522,6 +522,10 @@ fn read_heads(reader: &Reader) -> Result<HashMap<String, usize>, String> {
 struct Stacked {
     stacks: Vec<helios_vault::Stack>,
     decisions: Vec<helios_library::stacks::Decision>,
+    /// How many heads the photos with more than one have: a copy made,
+    /// removed or brought back by an undo changes them without moving
+    /// the library.
+    heads: HashMap<String, usize>,
 }
 
 /// Reads the stacks and the proposals through the node
@@ -534,7 +538,11 @@ fn read_stacked(reader: &Reader) -> Result<Stacked, String> {
     let waiting = reader.read("library.stacks.decisions", json!({}))?;
     let decisions = serde_json::from_value(waiting["decisions"].clone())
         .map_err(|e| format!("the node's stack proposals: {e}"))?;
-    Ok(Stacked { stacks, decisions })
+    Ok(Stacked {
+        stacks,
+        decisions,
+        heads: read_heads(reader)?,
+    })
 }
 
 /// [`read_stacked`] once the read cache heard the bus up to `seq`, so a
@@ -1675,8 +1683,11 @@ impl<S: Store + 'static> Persist<S> {
         shell: &mut Shell,
         shown: Shown,
         moved: Option<Moved>,
-        stacked: Stacked,
+        mut stacked: Stacked,
     ) -> Vec<(String, PathBuf)> {
+        shell
+            .library_mut()
+            .set_heads(std::mem::take(&mut stacked.heads));
         if let Some(moved) = moved {
             // The entries shown, their fields kept up to date by the
             // vault's events.
