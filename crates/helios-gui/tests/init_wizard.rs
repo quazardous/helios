@@ -198,3 +198,51 @@ fn the_fix_and_the_menu_open_the_setup_and_a_path_sets_the_folder() {
     until(&mut h, "the setup from the menu", |h| setup(h).is_some());
     let _ = std::fs::remove_dir_all(&chosen);
 }
+
+/// The setup is a focus screen: the main window's whole page while it
+/// runs, whatever the Settings app's window setting (Helios opens it in a
+/// window of its own), nothing of the library under it; finished, the
+/// library is back.
+#[test]
+fn the_setup_is_a_focus_screen_and_the_library_comes_back_after_it() {
+    let (shell, folder) = fresh(false);
+    let mut h = headless::harness(shell, vec2(1280.0, 900.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    assert!(
+        egui_pop::api::admin::in_window(&app),
+        "Helios opens the Settings app in a window of its own"
+    );
+    assert!(h.query_all_by_label("Library").count() > 0, "the library");
+
+    run(&mut h, "helios.setUp", json!({})).unwrap();
+    until(&mut h, "the setup", |h| setup(h).is_some());
+    let s = setup(&mut h).unwrap();
+    assert_eq!(s["focus"], true, "{s}");
+    assert_eq!(s["count"], 1, "the run's steps alone: {s}");
+    assert!(!egui_pop::api::admin::in_window(&app), "in the main window");
+    until(&mut h, "the folder step drawn", |h| {
+        h.query_by_label("Choose…").is_some()
+    });
+    assert_eq!(
+        h.query_all_by_label("Library").count(),
+        0,
+        "nothing of the library under the setup"
+    );
+
+    let chosen = scratch("focus");
+    run(
+        &mut h,
+        "admin.wizard.set",
+        json!({ "key": "library.folder", "value": chosen.display().to_string() }),
+    )
+    .unwrap();
+    run(&mut h, "admin.wizard.finish", json!({})).unwrap();
+    until(&mut h, "the setup closed", |h| setup(h).is_none());
+    assert_eq!(folder.lock().unwrap().as_deref(), Some(chosen.as_path()));
+    until(&mut h, "the library back", |h| {
+        h.query_all_by_label("Library").count() > 0
+    });
+    assert!(egui_pop::api::admin::in_window(&app), "the setting holds");
+    let _ = std::fs::remove_dir_all(&chosen);
+}

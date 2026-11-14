@@ -368,6 +368,8 @@ accepted. Its answers are JSON. See [library.md](library.md) for both.
 helios commands [--vault library.db | --node ADDRESS] [--window W] [--filter F] [--enabled]
 helios run ID [--vault library.db | --node ADDRESS] [--param KEY=VALUE]... [--json '{...}']
               [--window W] [--scope node|window] [--request-id KEY]
+helios batch-run [--vault library.db | --node ADDRESS] --json '{"steps": [...]}'
+              [--window W] [--request-id KEY]
 ```
 
 `commands` lists every command of the vault's node (`commands.list`),
@@ -397,11 +399,24 @@ helios run theme.select --vault library.db --param name=helios-light
 helios run library.stacks.dissolve --vault library.db --json '{"stack":"s1"}'
 ```
 
-`helios-mcp` offers the same pair to agents (`helios_commands_list`,
-`helios_command_run`, origin `agent:mcp`).
+`batch-run` runs several commands in one call (`command.batch`, see
+[protocol.md](protocol.md#command-batches)): `--json` gives
+`{"steps": [{"id", "params"}, …]}`, with `"stop_on_error": false` to run
+every step whatever the others did (the first failed step stops the rest
+otherwise). It prints each step's result in order; exit code 1 when a
+step failed, 4 when the outcome is unknown (the batch's key printed, as
+for `run`). Not atomic: the steps run before a failed one stay applied.
+At most 256 steps.
 
-`helios-mcp --tools compact` lists only that pair and the sandbox pair
-(`helios_sandbox_start`, `helios_sandbox_stop`): four tools instead of
+```bash
+helios batch-run --vault library.db --json '{"steps":[{"id":"theme.select","params":{"name":"helios-light"}},{"id":"library.stacks.list"}]}'
+```
+
+`helios-mcp` offers the same to agents (`helios_commands_list`,
+`helios_command_run`, `helios_command_batch`, origin `agent:mcp`).
+
+`helios-mcp --tools compact` lists only those three and the sandbox pair
+(`helios_sandbox_start`, `helios_sandbox_stop`): five tools instead of
 about a hundred, for an agent whose context is short. Every command stays
 reachable through `helios_command_run`; a call to another tool is refused
 and says so. `--tools full`, the default, offers every tool.
@@ -445,7 +460,8 @@ granted, before anything is sent to a node.
   a link leading nowhere is refused.
 - A template's id (`source`) is not a path; a template folder is read.
 - `helios_command_run` does not say what a command does with a path: under
-  roots, every absolute path in its params must lie under the write root.
+  roots, every absolute path in its params must lie under the write root;
+  so must every one in `helios_command_batch`'s steps.
 - Left out, the configuration directory is the user's: a tool writing
   there (`helios_workspace_save_as_template`, `helios_macro_publish`) is
   refused unless the write root holds it; pass `config` under it.
@@ -467,8 +483,9 @@ helios-mcp --read-root ~/Pictures --write-root ~/helios-agent
   `helios_ai_jobs_wait`, or `params.timeout_ms` of `helios_command_run`)
   is at most 600,000 ms (10 minutes); more is refused, wait again.
 - A batch holds at most 256 steps (`items` of `helios_workflow_submit`, or
-  `params.items`); more is refused, send the rest in another call (the
-  same network and settings extend the same run).
+  `params.items`; `steps` of `helios_command_batch`); more is refused,
+  send the rest in another call (the same network and settings extend the
+  same run).
 - An image in an answer (`{mime, width, height, base64}`, a workshop's
   proxy) is at most 2048 px on its long edge and 5 MiB. A larger one keeps
   its size but its `base64` is null, and a note says "Image left out" with

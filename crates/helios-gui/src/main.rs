@@ -1162,11 +1162,10 @@ impl App {
         let bundle = self.bundle();
         let persist = self.persist.as_mut().ok_or("no vault open")?;
         let image = helios_vault::ImageId::from_hex(id)?;
+        // The library's copy, a card's file only without one.
         let path = persist
             .vault()
-            .locations(&image)?
-            .into_iter()
-            .find(helios_vault::Location::present)
+            .file_to_read(&image)?
             .map(|l| l.path)
             .ok_or_else(|| {
                 // On a disk not plugged in: say which one.

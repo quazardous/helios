@@ -46,6 +46,7 @@ pub mod cull;
 pub mod edit;
 pub mod fields;
 pub mod journal;
+pub mod read_order;
 pub mod rules;
 pub mod settings;
 pub mod sightings;
@@ -64,6 +65,7 @@ pub use fields::{
     AuditEntry, BackupFilter, BackupState, BackupVolume, Backups, Command, Facets, Order, Query,
     Sort,
 };
+pub use read_order::ReadOrder;
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
 pub use undo::{Change, Changes, DocumentChange, ImageRows, Replayed};

@@ -197,12 +197,13 @@ pub struct Client {
 
 impl Client {
     /// A client of the endpoint `service` answers in this process: each
-    /// call runs on a thread of its own, as a socket's do.
+    /// call runs on a thread of its own, as a socket's do. It answers
+    /// `command.batch` too, its steps run on `service` ([`crate::batch`]).
     pub fn in_process(service: Arc<dyn Service>) -> Self {
         let notify = Notify::default();
         Self::over(
             Arc::new(InProcess {
-                service,
+                service: Arc::new(crate::batch::Batched(service)),
                 running: Arc::default(),
                 closers: Closers::default(),
                 notify: notify.clone(),
