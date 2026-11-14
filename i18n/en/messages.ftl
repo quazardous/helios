@@ -1063,9 +1063,11 @@ gui-import-verb = Import
 
 gui-import-window-add = Add where they are
 
+gui-import-window-add-button = Add…
+
 gui-import-window-add-favourite = Add to favourites
 
-gui-import-window-add-source = Add a source…
+gui-import-window-add-hint = Add a source: a folder, a card, an account…
 
 gui-import-window-all-types = All types
 
@@ -1077,8 +1079,6 @@ gui-import-window-cancel = Cancel
 
 gui-import-window-card-inserted = { $card } inserted
 
-gui-import-window-card-note = A card's photos are copied: the card is formatted later, the copies stay.
-
 gui-import-window-cards = Cards and cameras
 
 gui-import-window-change-into = Choose where copies go
@@ -1088,12 +1088,6 @@ gui-import-window-choices = Choices
 gui-import-window-choices-default = { $source }: the default choices
 
 gui-import-window-choices-own = { $source }: its own choices
-
-gui-import-window-choices-reset = Reset to defaults
-
-gui-import-window-choices-reset-help = This source takes the default choices again
-
-gui-import-window-choices-undo = Undo
 
 gui-import-window-choose = Choose a folder…
 
@@ -1157,10 +1151,6 @@ gui-import-window-library-folder = The Library folder
 
 gui-import-window-manage-profiles = Manage profiles…
 
-gui-import-window-more = More
-
-gui-import-window-more-note = Metadata templates and time offsets come later.
-
 gui-import-window-name = Name
 
 gui-import-window-name-custom = Custom
@@ -1179,7 +1169,11 @@ gui-import-window-no-cards = No card inserted
 
 gui-import-window-no-favourites = None yet
 
+gui-import-window-no-folders = No folder yet
+
 gui-import-window-no-sample = Tick a photo to see an example
+
+gui-import-window-no-services = No account yet
 
 gui-import-window-none-ticked = Tick the photos to import
 
@@ -2613,13 +2607,17 @@ gui-wizard-add = Add the source
 
 gui-wizard-back = Back
 
-gui-wizard-card = Cards and cameras are listed on their own when they are inserted, with the default choices: there is nothing to add.
-
-gui-wizard-choices = How its photos are imported. You can change these later in the Choices column.
-
 gui-wizard-choose = Choose…
 
+gui-wizard-copied = This source's photos are always copied into the Library: it cannot add them where they are.
+
+gui-wizard-customise = Customise…
+
+gui-wizard-customise-help = Opens the import profiles: edit this one, or make a new one; the profile left selected is this source's
+
 gui-wizard-folder = Folder
+
+gui-wizard-how = How its photos are imported: an import profile. You can change it later in the Detail column.
 
 gui-wizard-kind = What kind of source is it?
 
@@ -2635,9 +2633,13 @@ gui-wizard-no-folder = No folder there
 
 gui-wizard-no-library = Open a library first: accounts are kept in it
 
+gui-wizard-no-volume = Insert a card or plug in a camera: it is listed here as soon as it is mounted.
+
 gui-wizard-sign-in = Sign in to an account…
 
 gui-wizard-title = Add a source
+
+gui-wizard-volume = Which one?
 
 gui-workshop-run-job = Workshop “{ $name }”
 

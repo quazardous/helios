@@ -46,14 +46,20 @@ or folders on Helios (the window opens with them as its source).
   - **History**: the folders imported from lately (from the import
     history, with their last import), then the imports themselves, each
     with "Import again";
-  - **Folders**: the folders saved or given, then "Choose a folder…"
-    (egui-pop's folder chooser);
+  - **Folders**: the folders saved or given;
   - **Cards and cameras**: removable volumes holding `DCIM`, named by
     label and capacity, refreshed when one appears or goes;
-  - **Services**: the accounts, then "Add a source…". The account
+  - **Services**: the accounts. The account
     selected whose service lists its albums (`caps.collections`) shows
     them under it, page by page ("More albums"); an album clicked is the
     source alone (built 2026-11-14).
+
+  **One "Add…" button** beside the column's title replaces the
+  sections' own buttons (owner, 2026-11-14): it opens a wizard in the
+  window (import-connectors.md, section 3.7) whose steps come from what
+  the connector chosen declares, its "how to import" step picking an
+  import profile. The sections only list what exists, an empty one
+  saying so.
 
   **One source at a time**: a click selects an item alone (no
   checkboxes, no multi-select), highlighted wherever it is listed; the
@@ -102,7 +108,7 @@ or folders on Helios (the window opens with them as its source).
     A source points at its profile; picking one in the menu points the
     selected source at it.
   - **The profile editor** ("Manage profiles…", in the window's body as
-    the "Add a source…" wizard): the profiles on the left (New,
+    the "Add…" wizard): the profiles on the left (New,
     Duplicate, Rename, Delete; the connectors whose default profile it
     is), the selected profile's choices on the right, grouped as Copy,
     Naming, Filter, Apply and Advanced, with a live example of a file's

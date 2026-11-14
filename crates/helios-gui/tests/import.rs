@@ -1139,8 +1139,15 @@ fn the_import_window_keeps_its_size() {
         .run("library.importWindow", json!(null), Origin::User)
         .unwrap();
     headless::assert_window_stable(&mut h, TITLE, 120);
-    // egui-pop's folder chooser, opened from it.
-    h.get_by_label("Choose a folder…").click();
+    // egui-pop's folder chooser, opened from the "Add…" wizard's folder
+    // step.
+    h.get_by_label("Add…").click();
+    h.run_steps(3);
+    h.get_by_label("Folder").click();
+    h.run_steps(3);
+    h.get_by_label("Next").click();
+    h.run_steps(3);
+    h.get_by_label("Choose…").click();
     h.run_steps(3);
     headless::assert_window_stable(&mut h, "Choose a folder…", 60);
     let _ = std::fs::remove_dir_all(&dir);
@@ -2146,7 +2153,7 @@ fn import_opens_in_its_own_window_reads_in_its_status_bar_and_closes_alone() {
     );
     // Nothing of it inside the main window.
     assert!(headless::window_rect(&h, "Import photos").is_none());
-    assert!(h.query_by_label("Choose a folder…").is_none());
+    assert!(h.query_by_label("Add…").is_none());
     // Agents name it: a snapshot of its window, refused once it is gone.
     assert!(app.debug_snapshot_in(Some("import")).is_ok());
     // Its pass draws it; its status bar names what is read, while read.
@@ -2164,7 +2171,7 @@ fn import_opens_in_its_own_window_reads_in_its_status_bar_and_closes_alone() {
         Some(window),
         "drawn in its own window"
     );
-    assert!(drawn.iter().any(|t| t == "Choose a folder…"), "{drawn:?}");
+    assert!(drawn.iter().any(|t| t == "Add…"), "{drawn:?}");
     assert!(!reading.is_empty(), "no status bar line while reading");
     for line in &reading {
         assert!(
@@ -2610,7 +2617,7 @@ fn closing_the_main_window_keeps_the_import_window_and_window_main_brings_it_bac
         "it took the main window's place"
     );
     // Drawn in the main window now, with the main menus.
-    assert!(h.query_by_label("Choose a folder…").is_some());
+    assert!(h.query_by_label("Add…").is_some());
     h.get_by_label("Window").click();
     h.run_steps(2);
     assert!(
@@ -3229,13 +3236,13 @@ fn click(h: &mut Harness<'static, Shell>, label: &str) {
 }
 
 /// The wizard opened in the import window and taken to `step` (0: the
-/// kinds, 1: the folder, 2: the choices, 3: the name) for `folder`.
+/// kinds, 1: the folder, 2: how to import, 3: the name) for `folder`.
 fn wizard_at(h: &mut Harness<'static, Shell>, step: usize, folder: &Path) {
     h.state_mut()
         .run("library.importWindow", Value::Null, Origin::User)
         .unwrap();
     h.run_steps(3);
-    click(h, "Add a source…");
+    click(h, "Add…");
     assert!(h.state().import_wizard_open());
     // Each kind says what it does.
     let _ = h.get_by_label("A folder on this computer or a share it mounts, with its subfolders");
@@ -3249,7 +3256,8 @@ fn wizard_at(h: &mut Harness<'static, Shell>, step: usize, folder: &Path) {
     }
     type_in_focused(h, &folder.display().to_string());
     click(h, "Next");
-    let _ = h.get_by_label("Add where they are");
+    // How to import: the profiles, Everyday picked.
+    let _ = h.get_by_label("Everyday");
     if step == 2 {
         return;
     }
@@ -3257,7 +3265,8 @@ fn wizard_at(h: &mut Harness<'static, Shell>, step: usize, folder: &Path) {
 }
 
 #[test]
-fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_after_a_restart() {
+fn the_add_wizard_saves_a_folder_pointing_at_its_profile_selected_listed_and_kept_after_a_restart()
+{
     let dir = temp("wizard");
     let trips = dir.join("trips");
     std::fs::create_dir_all(&trips).unwrap();
@@ -3266,14 +3275,21 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
     {
         let (node, kept) = node_at(&vault);
         let mut h = shell_keeping(&kept);
+        let monthly = h.state_mut().put_import_profile(ImportProfile {
+            id: String::new(),
+            name: "Monthly".into(),
+            choices: Choices {
+                copy_folders: true,
+                layout: Layout::Month,
+                duplicates: Duplicates::Keep,
+                ..Choices::default()
+            },
+        });
         wizard_at(&mut h, 2, &trips);
-        // The choices start from the window's, every one of them offered
-        // for a folder.
-        let _ = h.get_by_label("Read darktable edits");
-        click(&mut h, "Copy into the Library");
-        click(&mut h, "By month");
-        click(&mut h, "Keep");
-        // Back keeps them.
+        // Every profile is offered, each said in one line.
+        let _ = h.get_by_label("Monthly");
+        click(&mut h, "Monthly");
+        // Back keeps it.
         click(&mut h, "Back");
         click(&mut h, "Next");
         click(&mut h, "Next");
@@ -3287,11 +3303,17 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
             (
                 source.connector.as_str(),
                 source.name.as_deref(),
-                source.path.as_deref()
+                source.path.as_deref(),
+                source.profile.as_deref(),
             ),
-            ("folder", Some("trips"), Some(trips.as_path()))
+            (
+                "folder",
+                Some("trips"),
+                Some(trips.as_path()),
+                Some(monthly.as_str())
+            )
         );
-        let choices = source.choices.clone().expect("its own choices");
+        let choices = source.choices.clone().expect("its profile's choices");
         assert_eq!(
             (
                 choices.copy_folders,
@@ -3300,10 +3322,10 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
             ),
             (true, "month", "keep")
         );
-        // Selected: ticked, its choices in the column, its row under its
-        // name.
+        // Selected, and the middle zone lists it.
         assert_eq!(h.state().import_ticked(), std::slice::from_ref(&trips));
-        let _ = h.get_by_label("trips: its own choices");
+        read_through(&mut h);
+        assert_eq!(h.state().import_counts().selected, 1);
         let _ = h.get_by_label("Folders");
         let text = kept
             .read(helios_gui::shell::IMPORT_SOURCES)
@@ -3313,7 +3335,7 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
         drop(h);
         node.stop();
     }
-    // After a restart, its row is back under its name, with its choices.
+    // After a restart, its row is back under its name, with its profile.
     let (node, kept) = node_at(&vault);
     let mut h = shell_keeping(&kept);
     h.state_mut()
@@ -3322,8 +3344,86 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
     h.run_steps(3);
     let _ = h.get_by_label("Folders");
     click(&mut h, "trips");
-    let _ = h.get_by_label("trips: its own choices");
     assert_eq!(h.state().import_choices().layout.as_str(), "month");
+    drop(h);
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn import_sources_add_saves_the_source_the_wizard_saves() {
+    let dir = temp("sources-add");
+    let (trips, family) = (dir.join("trips"), dir.join("family"));
+    for folder in [&trips, &family] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    let (node, kept) = node_at(&dir.join("vault.db"));
+    let mut h = shell_keeping(&kept);
+    // The wizard, every step left as it starts.
+    wizard_at(&mut h, 3, &trips);
+    click(&mut h, "Add the source");
+    // The command (its work runs at the next frame), with the folder
+    // connector's one parameter.
+    h.state_mut()
+        .run(
+            "import.sources.add",
+            json!({ "connector": "folder", "path": family }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run_steps(3);
+    let sources = h.state().import_sources();
+    assert_eq!(sources.len(), 2, "{sources:?}");
+    let (wizard, command) = (&sources[0], &sources[1]);
+    assert_eq!(command.path.as_deref(), Some(family.as_path()));
+    assert_eq!(command.name.as_deref(), Some("family"));
+    // Everything else as the wizard's.
+    assert_eq!(
+        (
+            &command.connector,
+            &command.profile,
+            &command.choices,
+            &command.params,
+            &command.auto,
+        ),
+        (
+            &wizard.connector,
+            &wizard.profile,
+            &wizard.choices,
+            &wizard.params,
+            &wizard.auto,
+        )
+    );
+    // Selected in the window, open.
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&family));
+    // What it answers; what the connector's setup does not take is
+    // refused.
+    let answer = h
+        .state_mut()
+        .add_import_source(&json!({ "connector": "folder", "path": trips, "name": "Trips" }))
+        .unwrap();
+    assert_eq!(answer["profile"], "everyday", "{answer}");
+    assert_eq!(answer["name"], "Trips", "{answer}");
+    for (args, why) in [
+        (json!({ "connector": "nothing" }), "no connector"),
+        (json!({ "connector": "folder" }), "`path` is required"),
+        (
+            json!({ "connector": "folder", "path": dir.join("absent") }),
+            "no folder",
+        ),
+        (
+            json!({ "connector": "folder", "path": trips, "profile": "absent" }),
+            "no import profile",
+        ),
+        (
+            json!({ "connector": "card", "volume": "NOT_MOUNTED" }),
+            "no such volume",
+        ),
+    ] {
+        let e = h.state_mut().add_import_source(&args).unwrap_err();
+        assert!(e.contains(why), "{args}: {e}");
+    }
+    assert_eq!(h.state().import_sources().len(), 2);
     drop(h);
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
@@ -3343,8 +3443,14 @@ fn cancelling_the_add_a_source_wizard_at_any_step_leaves_no_source() {
         assert!(h.state().import_sources().is_empty(), "step {step}");
         assert!(h.state().import_ticked().is_empty(), "step {step}");
         // The window's own columns are back.
-        let _ = h.get_by_label("Choose a folder…");
+        let _ = h.get_by_label("Add…");
     }
+    // Esc leaves it as Cancel does.
+    wizard_at(&mut h, 2, &trips);
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().import_wizard_open());
+    assert!(h.state().import_sources().is_empty());
     assert_eq!(kept.read(helios_gui::shell::IMPORT_SOURCES).unwrap(), None);
     drop(h);
     node.stop();
@@ -3371,6 +3477,15 @@ fn edit_source_saves_a_recent_folder_with_its_copy_or_add_and_name_kept_after_a_
     {
         let (node, kept) = node_at(&vault);
         let mut h = shell_keeping(&kept);
+        h.state_mut().put_import_profile(ImportProfile {
+            id: String::new(),
+            name: "Monthly".into(),
+            choices: Choices {
+                copy_folders: true,
+                layout: Layout::Month,
+                ..Choices::default()
+            },
+        });
         open_on(&mut h, &trips);
         // A recent folder, remembered but not saved.
         assert!(h.state().import_sources().is_empty());
@@ -3384,10 +3499,8 @@ fn edit_source_saves_a_recent_folder_with_its_copy_or_add_and_name_kept_after_a_
             "the editor starts at the setup"
         );
         click(&mut h, "Next");
-        // A folder honours both: copy or add is offered.
-        let _ = h.get_by_label("Add where they are");
-        click(&mut h, "Copy into the Library");
-        click(&mut h, "By month");
+        // How to import: a profile.
+        click(&mut h, "Monthly");
         click(&mut h, "Next");
         type_in_focused(&mut h, " raw");
         click(&mut h, "Save the source");
@@ -3411,7 +3524,7 @@ fn edit_source_saves_a_recent_folder_with_its_copy_or_add_and_name_kept_after_a_
         row_menu(&mut h, &name);
         click(&mut h, "Edit source…");
         click(&mut h, "Next");
-        click(&mut h, "Add where they are");
+        click(&mut h, "Everyday");
         click(&mut h, "Next");
         click(&mut h, "Save the source");
         let sources = h.state().import_sources();

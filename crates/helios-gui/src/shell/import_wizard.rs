@@ -1,48 +1,58 @@
-//! The import window's "Add a source…" wizard
-//! (`docs/design/import-connectors.md`, section 3.7): the window's body
-//! becomes its steps, Back, Next and Cancel under them.
+//! The import window's "Add…" wizard (`docs/design/import-connectors.md`,
+//! section 3.7): the window's body becomes its steps, Back, Next and
+//! Cancel under them. The window names no connector: every step comes
+//! from what the chosen connector declares
+//! ([`helios_connect::ConnectorManifest::setup`]).
 //!
-//! 1. **Kind**: the connectors installed, each with one line saying what
-//!    it does: a folder, cards and cameras, then those signing in to an
-//!    account (a plugin's, such as Google Photos).
-//! 2. **Setup**, the connector's own: a folder typed or chosen; an
-//!    account picked among the connector's, or signed in to through the
-//!    connection dialog (a plugin's consent asked first when it lacks
-//!    capabilities). A card needs nothing: cards are listed on their own.
-//! 3. **Choices**: the Choices column's, started from the window's and
-//!    without those the connector cannot honour ([`Honours::of`]); for a
-//!    folder or a card, "Import automatically" ([`super::import_auto`]).
-//! 4. **Name**: the folder's, or the account's, to start with.
+//! 1. **Kind**: the connectors installed that declare a setup, each with
+//!    its icon, its name and one line saying what it does, as it
+//!    declares them.
+//! 2. **Setup**, what the connector asks ([`SetupAsks`]): a folder typed
+//!    or chosen; a volume among those mounted; an account picked among
+//!    the connector's, or signed in to through the connection dialog (a
+//!    plugin's consent asked first when it lacks capabilities). Then the
+//!    connector's own parameters (its source contract's keys that are
+//!    not choices).
+//! 3. **How to import**: an import profile ([`super::import_profile_store`]),
+//!    its connector's default (else Everyday) preselected, each said in
+//!    one line; "Customise…" opens the profile editor and comes back
+//!    with the profile it left selected. A connector that cannot add in
+//!    place says its photos are copied. "Import automatically", when the
+//!    connector offers it ([`helios_connect::AutoImport`]).
+//! 4. **Name**: the folder's, the volume's or the account's, to start
+//!    with.
 //!
-//! The source is then saved ([`super::import_sources::Sources::add`]) and
-//! selected: a folder ticked, an account clicked. Cancel leaves nothing
-//! behind; an account signed in to on the way stays an account.
+//! The source is then saved ([`super::import_sources::Sources::add`]),
+//! pointing at its profile, and selected: the middle zone lists it.
+//! Cancel or Esc leaves nothing behind; an account signed in to on the
+//! way stays an account. The command `import.sources.add`
+//! ([`super::Shell::add_import_source`]) saves the same source without
+//! the wizard.
 //!
 //! **"Edit source…"** opens the same steps on a source of the Sources
-//! column, from its setup: the folder or account, then its connector's
-//! own parameters (the keys of its source contract that are not
-//! choices, [`helios_connect::ConnectorProvider::config`]); its choices,
-//! copy or add offered only when the connector honours both; its name.
-//! Save puts it in place of the source edited, one step of the column's
-//! Undo; a remembered source (a recent folder, a card) is saved by it.
+//! column, from its setup. Save puts it in place of the source edited,
+//! one step of the column's Undo; a remembered source (a recent folder,
+//! a card) is saved by it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
+use egui_pop::core::icon::{Icon, Size};
 use egui_pop::core::overlay::DialogLayout;
 use egui_pop::core::param::{self, Mode};
 use egui_pop::model::values::Value as PopValue;
-use helios_connect::ConnectorManifest;
 use helios_connect::account::AccountState;
+use helios_connect::{ConnectorManifest, Setup, SetupAsks};
 use helios_core::Message;
 use helios_core::config::{Contract, KeyType, Level};
 use serde_json::{Map, Value};
 
 use super::import_accounts::{Asked, state_text, translated};
 use super::import_auto::{self, Trigger};
-use super::import_choices::{self, Choices};
+use super::import_choices::Choices;
+use super::import_profile_store::EVERYDAY;
 use super::import_sources::{Honours, SavedSource, SourceKey};
 use super::import_window::ImportWindow;
 use crate::config::plugins::SECRET_SET;
@@ -52,33 +62,8 @@ use crate::config::plugins::SECRET_SET;
 pub(crate) enum Step {
     Kind,
     Setup,
-    Choices,
+    How,
     Name,
-}
-
-/// What a connector's setup asks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Setup {
-    /// A folder on this machine.
-    Folder,
-    /// Nothing: cards are listed on their own when inserted.
-    Card,
-    /// An account of the connector.
-    Account,
-}
-
-impl Setup {
-    fn of(manifest: &ConnectorManifest) -> Option<Self> {
-        if manifest.id == helios_connect::folder::ID {
-            Some(Self::Folder)
-        } else if manifest.id == helios_connect::card::ID {
-            Some(Self::Card)
-        } else if !manifest.connect.is_empty() {
-            Some(Self::Account)
-        } else {
-            None
-        }
-    }
 }
 
 /// The wizard, while it is open.
@@ -86,16 +71,20 @@ pub(crate) struct Wizard {
     pub(crate) step: Step,
     /// The connector chosen, and what its setup asks.
     connector: Option<(String, Setup)>,
-    /// The folder, as typed or chosen.
+    /// The folder, as typed or chosen; a volume's mount point.
     folder: String,
     /// The account picked.
     account: Option<String>,
     /// The accounts there were when the wizard opened: one signed in to
     /// since is picked.
     before: Vec<String>,
-    choices: Choices,
+    /// The import profile picked (its id).
+    profile: String,
+    /// What the connector honours, read when its setup is done.
     honours: Honours,
-    custom: bool,
+    /// Whether the connector copies its photos unless told otherwise
+    /// (its source contract's `copy` default).
+    copies: bool,
     name: String,
     /// The folder chooser, while it is open.
     choosing: Option<Pending>,
@@ -118,16 +107,16 @@ pub(crate) struct Wizard {
 }
 
 impl Wizard {
-    fn new(choices: Choices, before: Vec<String>) -> Self {
+    fn new(before: Vec<String>) -> Self {
         Self {
             step: Step::Kind,
             connector: None,
             folder: String::new(),
             account: None,
             before,
-            choices,
+            profile: EVERYDAY.into(),
             honours: Honours::default(),
-            custom: false,
+            copies: false,
             name: String::new(),
             choosing: None,
             focus: false,
@@ -139,6 +128,11 @@ impl Wizard {
             account_read: None,
             auto: None,
         }
+    }
+
+    /// What the chosen connector's setup asks.
+    fn asks(&self) -> Option<SetupAsks> {
+        self.connector.as_ref().map(|(_, s)| s.asks)
     }
 
     /// Whether the parameters set fit the connector's contract.
@@ -160,31 +154,26 @@ impl Wizard {
         (!typed.is_empty() && path.is_dir()).then(|| path.to_path_buf())
     }
 
-    /// The choices given to an Into chosen while they are shown.
-    pub(crate) fn take_into(&mut self, into: PathBuf) -> bool {
-        if self.step == Step::Choices {
-            self.choices.into = Some(into);
-            return true;
-        }
-        false
+    /// The profile the editor left selected, picked as the wizard comes
+    /// back.
+    pub(super) fn take_profile(&mut self, id: &str) {
+        id.clone_into(&mut self.profile);
     }
 }
 
-/// The connectors the wizard offers: a folder, cards, then those signing
-/// in to an account, in the order installed.
+/// The connectors the wizard offers: those declaring a setup, in the
+/// order installed.
 fn kinds(w: &ImportWindow) -> Vec<(ConnectorManifest, Setup)> {
-    let mut kinds: Vec<_> = w
-        .connectors
+    w.connectors
         .manifests()
         .into_iter()
-        .filter_map(|m| Setup::of(&m).map(|s| (m, s)))
-        .collect();
-    kinds.sort_by_key(|(_, s)| match s {
-        Setup::Folder => 0,
-        Setup::Card => 1,
-        Setup::Account => 2,
-    });
-    kinds
+        .filter_map(|m| m.setup().map(|s| (m, s)))
+        .collect()
+}
+
+/// An icon by its Phosphor name, else egui-pop's own `fallback`.
+fn icon(name: &str, fallback: Icon) -> Icon {
+    egui_pop::core::icon::registry::lookup(&format!("phosphor:{name}")).unwrap_or(fallback)
 }
 
 /// The keys of a connector's source contract that are its own
@@ -203,9 +192,21 @@ enum Go {
     Cancel,
 }
 
+/// A new source, as the wizard or `import.sources.add` gives it: its
+/// connector, what its setup asked, and how it imports.
+pub(crate) struct NewSource {
+    pub(crate) connector: String,
+    /// A folder or a volume's mount point.
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) account: Option<String>,
+    pub(crate) name: String,
+    pub(crate) profile: String,
+    pub(crate) params: BTreeMap<String, Value>,
+    pub(crate) auto: Option<Trigger>,
+}
+
 impl ImportWindow {
-    /// Opens the wizard at its first step, the window's choices to start
-    /// from.
+    /// Opens the wizard at its first step.
     pub(super) fn open_wizard(&mut self) {
         let before = self
             .accounts
@@ -213,7 +214,18 @@ impl ImportWindow {
             .iter()
             .map(|a| a.id.clone())
             .collect();
-        self.wizard = Some(Wizard::new(self.window_choices().clone(), before));
+        self.wizard = Some(Wizard::new(before));
+    }
+
+    /// The profile a new source of `connector` starts with: the
+    /// connector's default, else Everyday.
+    pub(super) fn default_profile(&self, connector: &str) -> String {
+        self.profiles
+            .defaults
+            .get(connector)
+            .filter(|id| self.profiles.get(id).is_some())
+            .cloned()
+            .unwrap_or_else(|| EVERYDAY.into())
     }
 
     /// The connector's own parameters for the wizard: its source
@@ -244,16 +256,10 @@ impl ImportWindow {
         let connector = self.connector_of(&key);
         let saved = self.sources.get(&key).cloned();
         let manifest = self.connectors.provider(&connector).map(|p| p.manifest());
-        let Some(setup) = manifest.as_ref().and_then(Setup::of) else {
+        let Some(setup) = manifest.as_ref().and_then(ConnectorManifest::setup) else {
             return;
         };
-        let mut wz = Wizard::new(
-            saved
-                .as_ref()
-                .and_then(|s| s.choices.clone())
-                .unwrap_or_else(|| self.window_choices().clone()),
-            Vec::new(),
-        );
+        let mut wz = Wizard::new(Vec::new());
         let (contract, params) = self.wizard_params(
             &connector,
             &saved.as_ref().map(|s| s.params.clone()).unwrap_or_default(),
@@ -261,6 +267,11 @@ impl ImportWindow {
         wz.contract = contract;
         wz.params = params;
         wz.step = Step::Setup;
+        wz.profile = saved
+            .as_ref()
+            .and_then(|s| s.profile.clone())
+            .filter(|id| self.profiles.get(id).is_some())
+            .unwrap_or_else(|| self.default_profile(&connector));
         wz.connector = Some((connector, setup));
         match &key {
             SourceKey::Folder(p) => wz.folder = p.display().to_string(),
@@ -279,7 +290,7 @@ impl ImportWindow {
     }
 
     /// The wizard in the window's room: its step, then Back, Next and
-    /// Cancel.
+    /// Cancel. Esc cancels it.
     pub(super) fn wizard_ui(&mut self, ui: &mut egui::Ui, app: &egui_pop::api::app::AppHandle) {
         let Some(texts) = self.texts.clone() else {
             return;
@@ -316,7 +327,7 @@ impl ImportWindow {
                     self.account_settings_ui(ui, &t);
                     self.params_ui(ui, &t);
                 }
-                Step::Choices => self.wizard_choices_ui(ui, &t, app),
+                Step::How => self.how_ui(ui, &t),
                 Step::Name => self.name_ui(ui, &t),
             });
         let ready = self.wizard_ready();
@@ -351,14 +362,22 @@ impl ImportWindow {
                 }
             });
         });
+        // Esc leaves everything as it was, as Cancel does; not while the
+        // folder chooser or a connection dialog is over it.
+        let dialog = self.wizard.as_ref().is_some_and(|wz| wz.choosing.is_some())
+            || self.accounts.connecting.is_some()
+            || self.accounts.consent.is_some();
+        if go.is_none() && !dialog && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            go = Some(Go::Cancel);
+        }
         match go {
             Some(Go::Cancel) => self.wizard = None,
             Some(Go::Back) => {
                 if let Some(wz) = self.wizard.as_mut() {
                     wz.step = match wz.step {
                         Step::Kind | Step::Setup => Step::Kind,
-                        Step::Choices => Step::Setup,
-                        Step::Name => Step::Choices,
+                        Step::How => Step::Setup,
+                        Step::Name => Step::How,
                     };
                 }
             }
@@ -376,15 +395,13 @@ impl ImportWindow {
             Step::Kind => wz.connector.is_some(),
             Step::Setup => {
                 wz.params_fit()
-                    && match wz.connector.as_ref().map(|(_, s)| *s) {
-                        Some(Setup::Folder) => wz.folder().is_some(),
-                        Some(Setup::Account) => wz.account.is_some(),
-                        // A card is edited where it is mounted.
-                        Some(Setup::Card) => wz.editing.is_some(),
+                    && match wz.asks() {
+                        Some(SetupAsks::Path | SetupAsks::Volume) => wz.folder().is_some(),
+                        Some(SetupAsks::Account) => wz.account.is_some(),
                         None => false,
                     }
             }
-            Step::Choices => helios_library::rename::Pattern::parse(&wz.choices.rename).is_ok(),
+            Step::How => self.profiles.get(&wz.profile).is_some(),
             Step::Name => !wz.name.trim().is_empty(),
         }
     }
@@ -404,29 +421,31 @@ impl ImportWindow {
                     .map(|(id, _)| id.clone())
                     .unwrap_or_default();
                 let (contract, params) = self.wizard_params(&connector, &BTreeMap::new());
+                let profile = self.default_profile(&connector);
                 if let Some(wz) = self.wizard.as_mut() {
                     wz.contract = contract;
                     wz.params = params;
+                    wz.profile = profile;
                     wz.step = Step::Setup;
                     wz.focus = true;
                 }
             }
             Step::Setup => {
-                let honours = self.wizard_honours();
-                let Some(wz) = self.wizard.as_mut() else {
-                    return;
-                };
-                // What the connector cannot honour is never kept on it.
-                wz.honours = honours;
-                if !honours.add_in_place {
-                    wz.choices.copy_folders = true;
+                let connector = self
+                    .wizard
+                    .as_ref()
+                    .and_then(|wz| wz.connector.as_ref())
+                    .map(|(id, _)| id.clone())
+                    .unwrap_or_default();
+                let honours = self.connector_honours(&connector);
+                let copies = self.connector_copies(&connector);
+                if let Some(wz) = self.wizard.as_mut() {
+                    wz.honours = honours;
+                    wz.copies = copies;
+                    wz.step = Step::How;
                 }
-                if !honours.darktable {
-                    wz.choices.darktable = false;
-                }
-                wz.step = Step::Choices;
             }
-            Step::Choices => {
+            Step::How => {
                 let name = self.wizard_default_name();
                 if let Some(wz) = self.wizard.as_mut() {
                     if wz.name.trim().is_empty() {
@@ -440,36 +459,39 @@ impl ImportWindow {
         }
     }
 
-    /// What the chosen connector honours.
-    fn wizard_honours(&self) -> Honours {
-        self.wizard
-            .as_ref()
-            .and_then(|wz| wz.connector.as_ref())
-            .map_or_else(Honours::default, |(id, _)| self.connector_honours(id))
-    }
-
-    /// The name to start with: the folder's, or the account's.
+    /// The name to start with: the account's, the volume's label, or
+    /// the folder's.
     fn wizard_default_name(&self) -> String {
         let Some(wz) = &self.wizard else {
             return String::new();
         };
-        if let Some(id) = &wz.account {
-            return self.account_label(id);
-        }
-        wz.folder().map_or_else(String::new, |p| {
-            p.file_name().map_or_else(
-                || p.display().to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            )
-        })
+        self.default_name(wz.folder().as_deref(), wz.account.as_deref())
     }
 
-    /// The source saved, with its choices and its name, and selected.
+    /// A new source's name to start with: the account's, the volume's
+    /// label, or the folder's.
+    fn default_name(&self, path: Option<&Path>, account: Option<&str>) -> String {
+        if let Some(id) = account {
+            return self.account_label(id);
+        }
+        let Some(p) = path else {
+            return String::new();
+        };
+        if let Some(card) = self.sources.card_at(p) {
+            return card.label.clone();
+        }
+        p.file_name().map_or_else(
+            || p.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+    }
+
+    /// The source saved, with its profile and its name, and selected.
     fn finish_wizard(&mut self) {
         let Some(wz) = self.wizard.take() else {
             return;
         };
-        let Some((connector, _)) = wz.connector.clone() else {
+        let Some((connector, setup)) = wz.connector.clone() else {
             return;
         };
         if let Some(id) = wz
@@ -479,60 +501,90 @@ impl ImportWindow {
         {
             self.keep_account_settings(id, &wz.account_contract, &wz.account_values);
         }
-        let path = wz.folder();
-        let account = if path.is_some() { None } else { wz.account };
-        let key = match (&path, &account) {
-            (Some(p), _) => SourceKey::Folder(p.clone()),
-            (None, Some(a)) => SourceKey::Account(a.clone()),
-            (None, None) => return,
+        let (path, account) = match setup.asks {
+            SetupAsks::Path | SetupAsks::Volume => (wz.folder(), None),
+            SetupAsks::Account => (None, wz.account.clone()),
         };
-        let mut choices = wz.choices;
-        // What the connector cannot honour is never kept on it, whatever
-        // the source held before: a copy-only connector's photos are
-        // copied.
-        if !wz.honours.add_in_place {
-            choices.copy_folders = true;
-        }
-        if !wz.honours.darktable {
-            choices.darktable = false;
-        }
+        let new = NewSource {
+            connector,
+            path,
+            account,
+            name: wz.name.trim().to_string(),
+            profile: wz.profile.clone(),
+            params: wz.params.into_iter().collect(),
+            auto: wz.auto,
+        };
+        let Some(old) = wz.editing else {
+            if let Some(key) = self.add_new_source(new) {
+                self.select_new(key);
+            }
+            return;
+        };
+        let Some(key) = new
+            .path
+            .clone()
+            .map(SourceKey::Folder)
+            .or_else(|| new.account.clone().map(SourceKey::Account))
+        else {
+            return;
+        };
         // An edited source keeps the browser it was shown in, and the
         // card it is on while its folder is the same.
-        let edited = wz.editing.as_ref().and_then(|k| self.sources.get(k));
+        let edited = self.sources.get(&old);
         let browser = edited.and_then(|s| s.browser);
         let (volume, label) = edited
-            .filter(|s| s.path == path)
+            .filter(|s| s.path == new.path)
             .map(|s| (s.volume.clone(), s.label.clone()))
             .unwrap_or_default();
         let source = SavedSource {
-            connector,
-            name: Some(wz.name.trim().to_string()),
-            path,
-            account,
-            // Found again among the profiles, or made, by `link_sources`.
-            profile: None,
-            choices: Some(choices),
-            params: wz.params.into_iter().collect(),
+            connector: new.connector,
+            name: Some(new.name),
+            path: new.path,
+            account: new.account,
+            choices: Some(self.profiles.choices(&new.profile)),
+            profile: Some(new.profile),
+            params: new.params,
             browser,
-            auto: wz.auto,
+            auto: new.auto,
             volume,
             label,
             confirmed: edited.and_then(|s| s.confirmed.clone()),
         };
-        if let Some(old) = &wz.editing {
-            self.replace_source(old, source);
-            // A folder moved is ticked where it is now.
-            if let SourceKey::Folder(was) = old {
-                self.ticked.retain(|p| p != was);
-            }
-        } else {
-            self.sources.add(source);
-            // The column shows it afresh, even when it was shown already.
-            if self.sources.showing.is_some() {
-                self.choices = self.sources.window.clone();
-                self.sources.showing = None;
-            }
+        self.replace_source(&old, source);
+        // A folder moved is ticked where it is now.
+        if let SourceKey::Folder(was) = &old {
+            self.ticked.retain(|p| p != was);
         }
+        self.select_new(key);
+    }
+
+    /// Saves a new source pointing at its profile; its key. `None`: it
+    /// has neither a folder nor an account.
+    pub(super) fn add_new_source(&mut self, new: NewSource) -> Option<SourceKey> {
+        let key = new
+            .path
+            .clone()
+            .map(SourceKey::Folder)
+            .or_else(|| new.account.clone().map(SourceKey::Account))?;
+        let source = SavedSource {
+            name: Some(new.name),
+            choices: Some(self.profiles.choices(&new.profile)),
+            profile: Some(new.profile),
+            params: new.params,
+            auto: new.auto,
+            ..SavedSource::new(new.connector, &key)
+        };
+        self.sources.add(source);
+        // The column shows it afresh, even when it was shown already.
+        if self.sources.showing.is_some() {
+            self.choices = self.sources.window.clone();
+            self.sources.showing = None;
+        }
+        Some(key)
+    }
+
+    /// Selects a source just saved: the middle zone lists it.
+    pub(super) fn select_new(&mut self, key: SourceKey) {
         match key {
             SourceKey::Folder(p) => {
                 self.sources.account = None;
@@ -557,7 +609,11 @@ impl ImportWindow {
             }
         }
         let wants = match (&wz.connector, &wz.account) {
-            (Some((id, Setup::Account)), None) if wz.step == Step::Setup => id.clone(),
+            (Some((id, setup)), None)
+                if wz.step == Step::Setup && setup.asks == SetupAsks::Account =>
+            {
+                id.clone()
+            }
             _ => return,
         };
         let before = wz.before.clone();
@@ -593,23 +649,30 @@ impl ImportWindow {
                 .connector
                 .as_ref()
                 .is_some_and(|(id, _)| *id == manifest.id);
-            let enabled = setup != Setup::Account || library;
+            // Accounts are kept in the library.
+            let enabled = setup.asks != SetupAsks::Account || library;
             let label = translated(texts.as_ref(), &manifest.label);
-            let row = ui.add_enabled(enabled, egui::Button::selectable(chosen, label));
-            let row = if enabled {
-                row
-            } else {
-                row.on_disabled_hover_text(t(Message::new(
-                    "gui-wizard-no-library",
-                    "Open a library first: accounts are kept in it",
-                )))
-            };
-            if row.clicked() && !chosen {
+            let mut clicked = false;
+            ui.horizontal(|ui| {
+                ui.add(icon(&setup.icon, Icon::Circle).size(Size::Toolbar));
+                let row = ui.add_enabled(enabled, egui::Button::selectable(chosen, label));
+                let row = if enabled {
+                    row
+                } else {
+                    row.on_disabled_hover_text(t(Message::new(
+                        "gui-wizard-no-library",
+                        "Open a library first: accounts are kept in it",
+                    )))
+                };
+                clicked = row.clicked();
+            });
+            if clicked && !chosen {
                 // Another kind: its setup starts afresh.
                 wz.connector = Some((manifest.id.clone(), setup));
                 wz.folder.clear();
                 wz.account = None;
                 wz.name.clear();
+                wz.auto = None;
             }
             ui.indent(("helios.import.wizard.about", &manifest.id), |ui| {
                 ui.add(
@@ -633,8 +696,9 @@ impl ImportWindow {
         else {
             return;
         };
-        match setup {
-            Setup::Folder => {
+        let editing = self.wizard.as_ref().is_some_and(|wz| wz.editing.is_some());
+        match setup.asks {
+            SetupAsks::Path => {
                 let Some(wz) = self.wizard.as_mut() else {
                     return;
                 };
@@ -666,21 +730,40 @@ impl ImportWindow {
                     wz.choosing = Some(f.choose(app, request));
                 }
             }
-            Setup::Card if self.wizard.as_ref().is_some_and(|wz| wz.editing.is_some()) => {
+            SetupAsks::Volume if editing => {
                 let folder = self.wizard.as_ref().map(|wz| wz.folder.clone());
                 ui.label(t(Message::new("gui-editor-card", "Card or camera")));
                 ui.weak(folder.unwrap_or_default());
             }
-            Setup::Card => {
-                ui.add(
-                    egui::Label::new(t(Message::new(
-                        "gui-wizard-card",
-                        "Cards and cameras are listed on their own when they are inserted, with the default choices: there is nothing to add.",
-                    )))
-                    .wrap(),
-                );
+            SetupAsks::Volume => {
+                ui.label(t(Message::new("gui-wizard-volume", "Which one?")));
+                let mounted = self.sources.mounted.clone();
+                let Some(wz) = self.wizard.as_mut() else {
+                    return;
+                };
+                if mounted.is_empty() {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(t(Message::new(
+                            "gui-wizard-no-volume",
+                            "Insert a card or plug in a camera: it is listed here as soon as it is mounted.",
+                        )))
+                        .weak())
+                        .wrap(),
+                    );
+                }
+                for card in mounted {
+                    let root = card.root.display().to_string();
+                    let chosen = wz.folder == root;
+                    if ui
+                        .selectable_label(chosen, &card.label)
+                        .on_hover_text(&root)
+                        .clicked()
+                    {
+                        wz.folder.clone_from(&root);
+                    }
+                }
             }
-            Setup::Account => {
+            SetupAsks::Account => {
                 ui.label(t(Message::new("gui-wizard-account", "Account")));
                 let accounts: Vec<_> = self
                     .accounts
@@ -723,70 +806,70 @@ impl ImportWindow {
         }
     }
 
-    /// The Choices column's, on the wizard's choices: what the connector
-    /// cannot honour hidden, copy or add kept among them.
-    fn wizard_choices_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        t: &dyn Fn(Message) -> String,
-        app: &egui_pop::api::app::AppHandle,
-    ) {
-        let Some(wz) = self.wizard.as_mut() else {
+    /// How to import: the import profiles, each said in one line, the
+    /// one picked kept on the source; "Customise…" opens the profile
+    /// editor; then "Import automatically" when the connector offers it.
+    fn how_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
+        let Some(wz) = self.wizard.as_ref() else {
             return;
         };
+        let (honours, copies, picked) = (wz.honours, wz.copies, wz.profile.clone());
         ui.label(t(Message::new(
-            "gui-wizard-choices",
-            "How its photos are imported. You can change these later in the Choices column.",
+            "gui-wizard-how",
+            "How its photos are imported: an import profile. You can change it later in the Detail column.",
         )));
-        // The column's widgets, on the wizard's choices: shown as a saved
-        // source's (copy or add is one of its choices), no card ticked.
-        let mut choices = std::mem::take(&mut wz.choices);
-        let mut custom = wz.custom;
-        let honours = wz.honours;
-        std::mem::swap(&mut self.choices, &mut choices);
-        std::mem::swap(&mut self.custom, &mut custom);
-        let saved = (
-            std::mem::replace(&mut self.sources.honours, honours),
-            self.sources
-                .showing
-                .replace(SourceKey::Folder(PathBuf::new())),
-            self.copy.take(),
-            std::mem::take(&mut self.ticked),
-        );
-        let mut words = self.choice_words(t, None);
-        words.shown_for = None;
-        let asked = import_choices::choices_ui(ui, self, &words, &mut |_| {});
-        std::mem::swap(&mut self.choices, &mut choices);
-        std::mem::swap(&mut self.custom, &mut custom);
-        (
-            self.sources.honours,
-            self.sources.showing,
-            self.copy,
-            self.ticked,
-        ) = saved;
-        if let Some(wz) = self.wizard.as_mut() {
-            wz.choices = choices;
-            wz.custom = custom;
+        ui.add_space(4.0);
+        let mut chosen = None;
+        for p in self.profiles.list() {
+            let copied = !honours.add_in_place || copies || p.choices.copy_folders;
+            if ui.radio(p.id == picked, &p.name).clicked() {
+                chosen = Some(p.id.clone());
+            }
+            ui.indent(("helios.import.wizard.profile", &p.id), |ui| {
+                let line = super::import_profile_store::summary(&p.choices, copied, None, t);
+                ui.add(egui::Label::new(egui::RichText::new(line).weak()).wrap());
+            });
         }
-        if let Some(import_choices::Asked::Into) = asked
-            && let Some(f) = app.service(&FILES)
+        if !honours.add_in_place {
+            ui.add(
+                egui::Label::new(t(Message::new(
+                    "gui-wizard-copied",
+                    "This source's photos are always copied into the Library: it cannot add them where they are.",
+                )))
+                .wrap(),
+            );
+        }
+        let customise = ui
+            .button(t(Message::new("gui-wizard-customise", "Customise…")))
+            .on_hover_text(t(Message::new(
+                "gui-wizard-customise-help",
+                "Opens the import profiles: edit this one, or make a new one; the profile left selected is this source's",
+            )))
+            .clicked();
+        if let Some(id) = chosen
+            && let Some(wz) = self.wizard.as_mut()
         {
-            let request = FileRequest::folder(&words.change).purpose("helios.import.into");
-            self.choose_into(f.choose(app, request));
+            wz.profile = id;
+        }
+        if customise {
+            self.open_manager_on(&picked);
         }
         self.wizard_auto_ui(ui, t);
     }
 
-    /// "Import automatically", for a folder or a card: off, or the
-    /// trigger of its kind.
+    /// "Import automatically", when the connector offers it: off, or the
+    /// trigger it declares.
     fn wizard_auto_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
         let Some(wz) = self.wizard.as_mut() else {
             return;
         };
-        let offered = match wz.connector.as_ref().map(|(_, s)| *s) {
-            Some(Setup::Folder) => Trigger::offered(false),
-            Some(Setup::Card) => Trigger::offered(true),
-            _ => return,
+        let Some(offered) = wz
+            .connector
+            .as_ref()
+            .and_then(|(_, s)| s.auto)
+            .map(Trigger::from)
+        else {
+            return;
         };
         ui.add_space(8.0);
         ui.strong(t(import_auto::title_message()));
@@ -854,11 +937,14 @@ impl ImportWindow {
         let Some(wz) = self.wizard.as_ref() else {
             return;
         };
-        let Some(((connector, Setup::Account), Some(id))) =
+        let Some(((connector, setup), Some(id))) =
             wz.connector.as_ref().map(|c| (c, wz.account.as_ref()))
         else {
             return;
         };
+        if setup.asks != SetupAsks::Account {
+            return;
+        }
         if wz.account_read.as_ref() == Some(id) {
             return;
         }
@@ -1043,7 +1129,129 @@ pub(super) fn refused_ui(
     }
 }
 
+/// The command saving a new import source without the wizard.
+pub const ADD: &str = "import.sources.add";
+
+impl ImportWindow {
+    /// `import.sources.add`: the source the wizard would save, from the
+    /// connector's id and what its setup asks; selected when the window
+    /// is open.
+    fn add_source_command(&mut self, args: &Value) -> Result<Value, String> {
+        let text = |k: &str| {
+            args.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+        let connector = text("connector").ok_or("`connector` is required")?;
+        let setup = self
+            .connectors
+            .provider(&connector)
+            .ok_or_else(|| format!("no connector `{connector}`"))?
+            .manifest()
+            .setup()
+            .ok_or_else(|| format!("the connector `{connector}` sets up no source"))?;
+        let (path, account) = match setup.asks {
+            SetupAsks::Path => {
+                let p = PathBuf::from(text("path").ok_or("`path` is required: the folder")?);
+                if !p.is_absolute() || !p.is_dir() {
+                    return Err(format!("no folder at {}", p.display()));
+                }
+                (Some(p), None)
+            }
+            SetupAsks::Volume => {
+                let (path, volume) = (text("path"), text("volume"));
+                let card = self
+                    .sources
+                    .mounted
+                    .iter()
+                    .find(|m| {
+                        path.as_deref().is_some_and(|p| Path::new(p) == m.root)
+                            || volume
+                                .as_deref()
+                                .is_some_and(|v| v == m.id || v == m.label)
+                    })
+                    .ok_or("no such volume mounted (`path`: its mount point, or `volume`: its id or label)")?;
+                (Some(card.root.clone()), None)
+            }
+            SetupAsks::Account => {
+                let id = text("account").ok_or(
+                    "`account` is required: an account of the connector, as `import.accounts` lists them",
+                )?;
+                let known = self
+                    .accounts
+                    .listed()
+                    .iter()
+                    .any(|a| a.id == id && a.connector == connector);
+                if !known {
+                    return Err(format!("no account `{id}` of `{connector}`"));
+                }
+                (None, Some(id))
+            }
+        };
+        let profile = match text("profile") {
+            Some(id) if self.profiles.get(&id).is_none() => {
+                return Err(format!("no import profile `{id}`"));
+            }
+            Some(id) => id,
+            None => self.default_profile(&connector),
+        };
+        let auto = match args.get("auto") {
+            None | Some(Value::Null | Value::Bool(false)) => None,
+            Some(Value::Bool(true)) => Some(Trigger::from(setup.auto.ok_or_else(|| {
+                format!("the connector `{connector}` offers no automatic import")
+            })?)),
+            Some(other) => return Err(format!("`auto` is true or false, not {other}")),
+        };
+        let (contract, mut params) = self.wizard_params(&connector, &BTreeMap::new());
+        if let Some(given) = args.get("params") {
+            let given = given.as_object().ok_or("`params` is an object")?;
+            for (k, v) in given {
+                if contract.get(k).is_none() {
+                    return Err(format!("`{connector}` has no parameter `{k}`"));
+                }
+                params.insert(k.clone(), v.clone());
+            }
+        }
+        contract.check(&Value::Object(params.clone()))?;
+        let name =
+            text("name").unwrap_or_else(|| self.default_name(path.as_deref(), account.as_deref()));
+        let new = NewSource {
+            connector: connector.clone(),
+            path: path.clone(),
+            account: account.clone(),
+            name: name.clone(),
+            profile: profile.clone(),
+            params: params.into_iter().collect(),
+            auto,
+        };
+        let key = self
+            .add_new_source(new)
+            .ok_or("the source has neither a folder nor an account")?;
+        if self.open {
+            self.select_new(key);
+        }
+        Ok(serde_json::json!({
+            "connector": connector,
+            "name": name,
+            "path": path,
+            "account": account,
+            "profile": profile,
+            "auto": auto,
+        }))
+    }
+}
+
 impl super::Shell {
+    /// `import.sources.add`: saves a new import source of a connector,
+    /// from what its setup declares (`connector`; `path` for a folder;
+    /// `path` or `volume` for a volume; `account`; `name`, `profile`,
+    /// `auto`, `params`), as the "Add…" wizard does.
+    pub fn add_import_source(&mut self, args: &Value) -> Result<Value, String> {
+        self.import.get_mut().add_source_command(args)
+    }
+
     /// Whether the import window's wizard is open.
     pub fn import_wizard_open(&self) -> bool {
         self.import.get().wizard_open()

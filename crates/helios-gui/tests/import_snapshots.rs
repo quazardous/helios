@@ -1,7 +1,8 @@
 //! The import window's snapshots, pop-dark at 1x and 2x: empty (no
 //! source), a card ticked with its photos in the file browser's
 //! thumbnails, and a folder added where it is; at 1x, the card's Contents
-//! in the browser's other modes (details, filmstrip, agenda)
+//! in the browser's other modes (details, filmstrip, agenda), and the
+//! "Add…" wizard's steps
 //! (`tests/snapshots/`, thresholds in the workspace's `kittest.toml`).
 //! Regenerate with `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test
 //! import_snapshots` (the box's `gui-snapshots` job).
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::vec2;
+use egui_kittest::kittest::Queryable as _;
 use egui_kittest::{Harness, SnapshotResults};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -141,5 +143,44 @@ fn the_import_window_snapshots() {
         assert!(h.state().import_profiles_open());
         results.add(h.try_snapshot(name("profiles", scale)));
     }
+    // The "Add…" wizard's steps (1x), on the card connector: its kind,
+    // the volume, how to import and the name.
+    let cards = vec![Volume {
+        label: "EOS_DIGITAL".into(),
+        root: card.clone(),
+        capacity: Some(64_000_000_000),
+    }];
+    let mut h = window(cards, json!(null), 1.0);
+    for (click, state) in [
+        ("Add…", None),
+        ("Cards and cameras", Some("wizard-kind")),
+        ("Next", None),
+        ("EOS_DIGITAL", Some("wizard-volume")),
+        ("Next", Some("wizard-how")),
+        ("Next", Some("wizard-name")),
+    ] {
+        h.query_all_by_label(click)
+            .next()
+            .unwrap_or_else(|| panic!("no {click}"))
+            .click();
+        for _ in 0..4 {
+            h.run();
+        }
+        if let Some(state) = state {
+            assert!(h.state().import_wizard_open(), "{state}");
+            results.add(h.try_snapshot(name(state, 1.0)));
+        }
+    }
+    h.query_all_by_label("Add the source")
+        .next()
+        .unwrap()
+        .click();
+    for _ in 0..4 {
+        h.run();
+    }
+    let sources = h.state().import_sources();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert_eq!(sources[0].connector, "card");
+    assert_eq!(sources[0].name.as_deref(), Some("EOS_DIGITAL"));
     let _ = std::fs::remove_dir_all(&dir);
 }
