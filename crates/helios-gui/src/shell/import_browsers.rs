@@ -11,8 +11,9 @@
 //!   Import takes only those.
 //! - **By date** (`timeline`): the same grid in the browser's agenda, by
 //!   capture day; the mode before comes back when another is chosen.
-//! - **Pick in the service** (`picker`): no grid, the service's own page
-//!   ("Pick photos…", [`super::import_accounts`]).
+//! - **Choose in the service's page** (`picker`): no grid yet, the
+//!   service's own page ("Choose photos in Google Photos…",
+//!   [`super::import_accounts::choose_ui`]).
 //! - **Albums** (`collections`): declared by connectors that will list a
 //!   service's albums; nothing lists an account's photos yet, so it says
 //!   so.
@@ -60,8 +61,6 @@ pub(super) struct BrowseWords {
     collections: String,
     timeline: String,
     picker: String,
-    pub(super) pick_about: String,
-    pub(super) pick: String,
     pub(super) not_listed: String,
     pub(super) every_folder: String,
 }
@@ -76,13 +75,8 @@ impl BrowseWords {
             timeline: t(Message::new("gui-import-browse-timeline", "By date")),
             picker: t(Message::new(
                 "gui-import-browse-picker",
-                "Pick in the service",
+                "Choose in the service's page",
             )),
-            pick_about: t(Message::new(
-                "gui-import-browse-pick-about",
-                "Choose the photos in the service's own page: they are imported once picked.",
-            )),
-            pick: t(Message::new("gui-account-pick", "Pick photos…")),
             not_listed: t(Message::new(
                 "gui-import-browse-not-listed",
                 "Helios does not list this source's photos here yet.",
@@ -208,7 +202,7 @@ impl ImportWindow {
 pub(super) enum Shown {
     /// The grid (all photos, the tree's folder, the timeline).
     Grid,
-    /// The service's picking page.
+    /// The service's page where photos are chosen, for this account.
     Picker(String),
     /// Nothing Helios lists.
     NotListed,

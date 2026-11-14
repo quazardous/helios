@@ -151,6 +151,10 @@ gui-about-description = A client/server, AI-first image processing framework.
 
 gui-account-add = Add account…
 
+gui-account-another = Use another account…
+
+gui-account-choose = Choose photos…
+
 gui-account-connected = connected
 
 gui-account-connecting = connecting…
@@ -171,17 +175,19 @@ gui-account-disconnect-title = Disconnect { $account }?
 
 gui-account-identity-missing = Reconnect to see the account
 
+gui-account-manage = Manage accounts…
+
+gui-account-menu = Account
+
 gui-account-needs-attention = needs attention
+
+gui-account-needs-reconnecting = needs reconnecting
 
 gui-account-never-used = Never
 
 gui-account-not-connected = not connected
 
-gui-account-pick = Pick photos…
-
 gui-account-reconnect = Reconnect
-
-gui-account-sign-out = Sign out
 
 gui-account-status-connecting = Connecting
 
@@ -378,6 +384,58 @@ gui-catalogue-restore-title = Restore the catalogue?
 gui-catalogue-snapshot-now = Snapshot now
 
 gui-catalogue-today = today
+
+gui-choose-about = { $service } opens in your browser. Choose your photos, press Done there, then come back here.
+
+gui-choose-closed = The { $service } page has closed. Open it again to choose your photos.
+
+gui-choose-connect = Connect { $service }
+
+gui-choose-connecting = Sign in in your browser, then come back here.
+
+gui-choose-copy-link = Copy the link
+
+gui-choose-done = { $count } photos imported.
+
+gui-choose-failed = The photos were not imported: { $why }
+
+gui-choose-identity = Reconnect once to show which account this is.
+
+gui-choose-importing = Importing { $count } photos…
+
+gui-choose-into = Choose the folder…
+
+gui-choose-known = { $count } were already in your Library.
+
+gui-choose-more = Choose more photos…
+
+gui-choose-no-into = Choose where the photos are copied first: Into, in the Choices column.
+
+gui-choose-not-connected = This account is not connected.
+
+gui-choose-not-open = The page did not open?
+
+gui-choose-nothing = No photos were chosen.
+
+gui-choose-open-again = Open it again
+
+gui-choose-opening = Opening { $service }…
+
+gui-choose-photos = Choose photos in { $service }…
+
+gui-choose-reconnect = Reconnect { $account }
+
+gui-choose-refused = ▲ { $service } no longer lets Helios read this account.
+
+gui-choose-refused-why = This happens when access was removed in the account's settings at { $service }, or when the access Helios was given ran out.
+
+gui-choose-signed-in = { $service } shows the photos of the account your browser is signed in to: { $account }.
+
+gui-choose-try-again = Try again
+
+gui-choose-unreachable = Could not reach { $service }: { $why }
+
+gui-choose-waiting = Choose your photos in the browser, press Done there, then come back here.
 
 gui-compare-first = Compare shows { $count } photos at most: the first { $count } are compared
 
@@ -767,9 +825,7 @@ gui-import-browse-folder = All photos
 
 gui-import-browse-not-listed = Helios does not list this source's photos here yet.
 
-gui-import-browse-pick-about = Choose the photos in the service's own page: they are imported once picked.
-
-gui-import-browse-picker = Pick in the service
+gui-import-browse-picker = Choose in the service's page
 
 gui-import-browse-timeline = By date
 
@@ -828,8 +884,6 @@ gui-import-remember = Remember for this workspace
 gui-import-remember-help = The workspace's import source: the next import does not ask
 
 gui-import-verb = Import
-
-gui-import-window-accounts = Accounts
 
 gui-import-window-add = Add where they are
 
@@ -982,6 +1036,8 @@ gui-import-window-select-all = all
 gui-import-window-select-day = day
 
 gui-import-window-select-none = none
+
+gui-import-window-services = Services
 
 gui-import-window-sources = Sources
 
@@ -1594,36 +1650,6 @@ gui-params-show-values = Show the values
 gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
-
-gui-pick-account = Your browser must be signed in to the account connected as { $account }; if the page says it cannot open, sign in to that account and start again.
-
-gui-pick-again = Start again
-
-gui-pick-browser = Pick your photos in your browser, press Done, then come back here.
-
-gui-pick-choose-folder = Choose the library folder…
-
-gui-pick-done = { $count } photos imported.
-
-gui-pick-expired = The picking session expired, start again.
-
-gui-pick-failed = Not imported: { $why }
-
-gui-pick-importing = Importing { $count } photos…
-
-gui-pick-known = { $count } already in the library, left as they are.
-
-gui-pick-library-folder = Picked photos are copied into the library folder. Choose it once: it is remembered.
-
-gui-pick-more = Pick more photos…
-
-gui-pick-nothing = Nothing was picked in time.
-
-gui-pick-sign-in = The source refused the sign-in: reconnect the account.
-
-gui-pick-starting = Opening the picking…
-
-gui-pick-title = Pick photos in { $source }
 
 gui-pointer-choice-close = Close the pointer profile notice
 
