@@ -47,6 +47,8 @@ const NAMES: [&str; 4] = [
 ];
 
 /// What an import does with the photos, kept between runs.
+// Each flag is a choice of its own, a checkbox the person ticks.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Choices {
