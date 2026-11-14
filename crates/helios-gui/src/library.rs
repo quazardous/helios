@@ -61,8 +61,14 @@ use crate::head_render::HeadRender;
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 pub use helios_vault::fields::Op;
-use helios_vault::fields::{LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, TAGS};
+use helios_vault::fields::{LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, TAGS, TITLE};
 use serde_json::Value;
+
+mod batch;
+pub use batch::{
+    CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode,
+    SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
+};
 
 /// The library's name in egui-pop's steps and commands (`library` in
 /// their arguments).
@@ -322,6 +328,8 @@ pub struct Entry {
     pub picked: bool,
     pub labels: Vec<String>,
     pub tags: Vec<String>,
+    /// Its title, when it has one.
+    pub title: Option<String>,
     /// The file's size in bytes, when it is on disk.
     pub bytes: Option<u64>,
     /// When the file was last modified, in seconds since 1970 (UTC); shown
@@ -487,6 +495,12 @@ impl Entry {
                     .sort_by_key(|l| LABELS.iter().position(|k| k == l));
             }
             TAGS => self.tags = names(value),
+            TITLE => {
+                self.title = value
+                    .and_then(Value::as_str)
+                    .filter(|t| !t.is_empty())
+                    .map(String::from);
+            }
             CAPTURED => {
                 self.captured = value.and_then(Value::as_f64);
                 self.day = self.captured.map(helios_vault::capture::day_text);
@@ -1621,6 +1635,8 @@ pub struct Library {
     /// The sort the entries must be read again in, once it changed
     /// ([`Library::take_resort`]).
     resort: Option<helios_vault::Order>,
+    /// The marks copied last ([`MARKS_COPY_COMMAND`]), to paste.
+    copied: Option<CopiedMarks>,
 }
 
 /// The library's sort when nothing chose one: by capture time, oldest
@@ -1737,6 +1753,7 @@ impl Default for Library {
             fed: (Vec::new(), Vec::new()),
             sort: DEFAULT_SORT,
             resort: None,
+            copied: None,
         }
     }
 }

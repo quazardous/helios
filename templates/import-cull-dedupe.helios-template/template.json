@@ -28,7 +28,6 @@
     ],
     "default": "vault.flag.pick",
     "keymap": [
-      { "keys": "Mod+I", "command": "library.importSource" },
       { "keys": "0", "command": "vault.rate.0", "when": "focusedPanel == 'helios.viewport'" },
       { "keys": "1", "command": "vault.rate.1", "when": "focusedPanel == 'helios.viewport'" },
       { "keys": "2", "command": "vault.rate.2", "when": "focusedPanel == 'helios.viewport'" },

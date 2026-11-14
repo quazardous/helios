@@ -83,7 +83,7 @@ proposes the next slices.
 
 | Action | State |
 |--------|-------|
-| Select | grid selection (click, Shift, Ctrl, rubber band, Ctrl+A in the grid); no select none, invert, "select same" commands |
+| Select | grid selection (click, Shift, Ctrl, rubber band, Ctrl+A in the grid); select none, invert, same day or stack (L7) |
 | Rate, flag, colour label | built: `vault.rate.N`, `vault.flag.*`, `vault.reject`, `vault.label.*`, on the selection, auto-advance, one undo step each |
 | Tag | built: tag input with completion; tags are flat strings (`places|France|Lyon` kept as one tag from darktable) |
 | Title, description | fields exist in the vault (`fields.rs`), filled by importers; no editor in the window |
@@ -93,7 +93,7 @@ proposes the next slices.
 | Rename, move, copy on disk | none after import (import renames by pattern: `helios_library::rename`) |
 | Delete or trash | none |
 | Rotate | none in the library; EXIF orientation is read for display (`helios-load/src/colour.rs`) |
-| Copy and paste edits, marks | edits: the clipboard design ([clipboard.md](clipboard.md)); marks between photos: none |
+| Copy and paste edits, marks | edits: the clipboard design ([clipboard.md](clipboard.md)); marks between photos: `library.marks.copy` and `.paste`, merge or overwrite (L7) |
 
 ### Metadata
 
@@ -752,6 +752,19 @@ similar (same day, same stack), Ctrl+Shift+A, Ctrl+I; copy and paste
 marks (rating, labels, tags, title) between photos, merge or overwrite,
 as darktable's metadata copy. Test: commands over a fixture; undo.
 Focus: selection is the focus's.
+
+Built (2026-11-13): `library.select.none` (Ctrl+Shift+A),
+`library.select.invert` (Ctrl+I), both on the photos shown and not
+while a text field is typed in, and `library.select.similar` (`by`:
+`day`, the capture day, or `stack`). `library.marks.copy` keeps one
+photo's rating, colour labels, tags and title in the focus;
+`library.marks.paste` writes them on the selection (`marks` to choose
+some; `mode`: `merge` adds labels and tags and sets the stars and title
+the copy has, `overwrite` makes each mark the copy's). Rating, labels
+and tags go through egui-pop's library steps, as a key's mark does, the
+title as a field; all reach the vault through the node's
+`library.fields.set`. Not built yet: the undo of a paste (marks have no
+library undo step yet, see "Library steps" above) and a menu for them.
 
 **L8. Remove and trash.** "Remove from Library" as a command on the
 selection (the flag, undoable: the vault does it already); "Move to
