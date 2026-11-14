@@ -247,8 +247,10 @@ fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
     put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
     let mut h = card_window(&dir, None);
     assert!(h.state().import_window_open());
-    // Listed by its label and capacity, and ticked first.
-    let _ = h.get_by_label("EOS_DIGITAL · 64 GB");
+    // Listed by its label, its capacity on its detail line, and
+    // selected first.
+    let _ = h.get_by_label("EOS_DIGITAL");
+    let _ = h.get_by_label("64 GB");
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&card));
     h.get_by_label("Import 1").click();
     for _ in 0..3 {
@@ -444,6 +446,70 @@ fn the_interface_says_library_never_vault() {
     }
 }
 
+/// The Sources column after Lightroom's: collapsible panels (Favorites,
+/// History, Folders, Cards and cameras, Services) of items of one shape,
+/// and one source at a time: a click selects an item alone, the photos
+/// in the middle follow it; its pin puts it among the Favorites.
+#[test]
+fn the_sources_column_s_panels_select_one_source_at_a_time() {
+    let dir = temp("panels");
+    let (one, two) = (dir.join("Trip"), dir.join("Garden"));
+    photos(&one, 2, 64, 48);
+    photos(&two, 3, 64, 48);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    run(
+        &mut h,
+        "library.importWindow",
+        json!({ "paths": [one, two] }),
+    );
+    for panel in [
+        "Favourites",
+        "History",
+        "Folders",
+        "Cards and cameras",
+        "Services",
+    ] {
+        let _ = h.get_by_label(panel);
+    }
+    // The first given is the source; the other is listed, not ticked.
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&one));
+    let _ = h.get_by_label("Garden");
+    read_through(&mut h);
+    assert_eq!(h.state().import_counts().selected, 2);
+    // A click selects the other alone, highlighted; the middle follows.
+    h.get_by_label("Garden").click();
+    h.run_steps(3);
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&two));
+    assert_eq!(
+        h.get_by_label("Garden").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True)
+    );
+    assert_eq!(
+        h.get_by_label("Trip").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::False)
+    );
+    read_through(&mut h);
+    assert_eq!(h.state().import_counts().selected, 3);
+    // Clicked again, it stays the source: never none.
+    h.get_by_label("Garden").click();
+    h.run_steps(3);
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&two));
+    // Pinned: among the Favorites too, the same item.
+    h.query_all_by_label("Add to favourites")
+        .last()
+        .expect("each item's pin")
+        .click();
+    h.run_steps(3);
+    assert_eq!(
+        h.query_all_by_label("Garden").count(),
+        2,
+        "Favorites and Folders"
+    );
+    // Its pin says so in both.
+    assert_eq!(h.query_all_by_label("Remove from favourites").count(), 2);
+}
+
 #[test]
 fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
     let dir = temp("drop");
@@ -481,6 +547,56 @@ fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
         [json!({
             "paths": [dcim.join("IMG_0002.JPG")],
             "duplicates": "skip",
+            "origin": "user"
+        })]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A library that keeps a camera's default look.
+struct WithCameraLooks;
+
+impl helios_gui::shell::LibraryFolder for WithCameraLooks {
+    fn get(&self) -> Result<Option<PathBuf>, String> {
+        Ok(None)
+    }
+
+    fn set(&self, _: &Path) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn has_camera_looks(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_one() {
+    let dir = temp("camera-look");
+    let (dcim, _) = fake_card(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_import_library_folder(Arc::new(WithCameraLooks));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    drop_on(&mut h, &dcim.join("IMG_0002.JPG"));
+    read_through(&mut h);
+    // On by default; unticked, the import leaves the looks off.
+    assert!(h.state().import_choices().camera_look);
+    h.get_by_role_and_label(
+        egui::accesskit::Role::CheckBox,
+        "Apply the camera's default look",
+    )
+    .click();
+    h.run_steps(3);
+    assert!(!h.state().import_choices().camera_look);
+    h.get_by_label("Import 1").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "paths": [dcim.join("IMG_0002.JPG")],
+            "duplicates": "skip",
+            "camera_look": false,
             "origin": "user"
         })]
     );
@@ -3139,7 +3255,7 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
         // name.
         assert_eq!(h.state().import_ticked(), std::slice::from_ref(&trips));
         let _ = h.get_by_label("trips: its own choices");
-        let _ = h.get_by_label("Saved sources");
+        let _ = h.get_by_label("Folders");
         let text = kept
             .read(helios_gui::shell::IMPORT_SOURCES)
             .unwrap()
@@ -3155,7 +3271,7 @@ fn the_add_a_source_wizard_saves_a_folder_with_its_choices_selected_and_kept_aft
         .run("library.importWindow", Value::Null, Origin::User)
         .unwrap();
     h.run_steps(3);
-    let _ = h.get_by_label("Saved sources");
+    let _ = h.get_by_label("Folders");
     click(&mut h, "trips");
     let _ = h.get_by_label("trips: its own choices");
     assert_eq!(h.state().import_choices().layout.as_str(), "month");
@@ -3186,14 +3302,13 @@ fn cancelling_the_add_a_source_wizard_at_any_step_leaves_no_source() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The menu of the folder row labelled `label` in the Sources column.
+/// The menu of the folder item labelled `label` in the Sources column
+/// (the first panel listing it).
 fn row_menu(h: &mut Harness<'static, Shell>, label: &str) {
-    h.get(
-        egui_kittest::kittest::By::new()
-            .role(egui::accesskit::Role::CheckBox)
-            .label(label),
-    )
-    .click_secondary();
+    h.query_all_by_label(label)
+        .next()
+        .unwrap_or_else(|| panic!("no {label}"))
+        .click_secondary();
     h.run_steps(3);
 }
 
@@ -3242,7 +3357,7 @@ fn edit_source_saves_a_recent_folder_with_its_copy_or_add_and_name_kept_after_a_
         assert_eq!(choices.layout.as_str(), "month");
         // Selected, under its name among the saved sources.
         assert_eq!(h.state().import_ticked(), std::slice::from_ref(&trips));
-        let _ = h.get_by_label("Saved sources");
+        let _ = h.get_by_label("Folders");
         // Edited again: switched back to add where they are.
         row_menu(&mut h, &name);
         click(&mut h, "Edit source…");

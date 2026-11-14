@@ -48,7 +48,38 @@ pub(super) struct History {
     read_at: Option<Instant>,
 }
 
+/// How many folders the Sources column's History lists.
+const RECENT_FOLDERS: usize = 8;
+
 impl History {
+    /// The folders imported from lately, newest first, each once.
+    pub(super) fn recent_folders(&self) -> Vec<std::path::PathBuf> {
+        let mut out: Vec<std::path::PathBuf> = Vec::new();
+        for r in &self.records {
+            if r.importer.is_some() || r.remote.is_some() {
+                continue;
+            }
+            for s in &r.sources {
+                if !out.contains(s) {
+                    out.push(s.clone());
+                }
+            }
+            if out.len() >= RECENT_FOLDERS {
+                break;
+            }
+        }
+        out.truncate(RECENT_FOLDERS);
+        out
+    }
+
+    /// When `folder` was last imported from (seconds since the epoch).
+    pub(super) fn last_import_of(&self, folder: &std::path::Path) -> Option<u64> {
+        self.records
+            .iter()
+            .find(|r| r.error.is_none() && r.sources.iter().any(|s| s == folder))
+            .map(|r| r.when)
+    }
+
     /// Reads the records again when they are older than [`READ_EVERY`].
     pub(super) fn follow(&mut self) {
         let Some(reader) = &self.reader else { return };
@@ -72,7 +103,7 @@ pub(super) struct Words {
 impl Words {
     pub(super) fn new(t: &dyn Fn(Message) -> String) -> Self {
         Words {
-            title: t(Message::new("gui-import-history", "History")),
+            title: t(Message::new("gui-import-history-imports", "Imports")),
             none: t(Message::new("gui-import-history-none", "No import yet")),
             again: t(Message::new("gui-import-history-again", "Import again")),
         }
@@ -135,8 +166,8 @@ pub(super) fn history_ui(
 ) -> Option<String> {
     history.reader.as_ref()?;
     let mut asked = None;
-    ui.separator();
-    ui.strong(&words.title);
+    // Under the Sources column's History panel, which names it.
+    ui.weak(&words.title);
     if history.records.is_empty() {
         ui.weak(&words.none);
     }

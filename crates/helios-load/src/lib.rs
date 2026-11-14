@@ -673,6 +673,32 @@ pub fn sensor(path: &Path) -> Result<Option<(Sensor, u8)>, String> {
     )))
 }
 
+/// A raw's camera, its make and model as [`load`] names them (the
+/// decoder's clean names, trimmed), read without decoding the mosaic:
+/// what keys a camera's defaults before the photo is opened. `None` for
+/// a picture.
+///
+/// # Errors
+/// The file cannot be read, or a raw's format is unknown.
+pub fn raw_camera(path: &Path) -> Result<Option<(String, String)>, String> {
+    if Kind::of(path) == Kind::Picture {
+        return Ok(None);
+    }
+    let bytes =
+        Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?);
+    let named = |e: String| format!("{}: {e}", path.display());
+    let source = RawSource::new_from_shared_vec(bytes);
+    let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
+    // A dummy image: its camera without its photosites.
+    let raw = decoder
+        .raw_image(&source, &RawDecodeParams::default(), true)
+        .map_err(|e| named(e.to_string()))?;
+    Ok(Some((
+        raw.clean_make.trim().to_string(),
+        raw.clean_model.trim().to_string(),
+    )))
+}
+
 fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;

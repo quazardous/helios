@@ -36,13 +36,26 @@ or folders on Helios (the window opens with them as its source).
 └────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Sources** (left):
-  - mounted cards and cameras, listed first: removable volumes holding
-    `DCIM`, named by label and capacity, refreshed when one appears or
-    goes;
-  - then recent folders, favourites, and "Choose a folder…" (egui-pop's
-    folder chooser);
-  - several sources can be ticked for one import.
+- **Sources** (left), after Lightroom's import source panel (owner's
+  design, 2026-11-14): collapsible panels, open at first, each holding
+  the same item for every source (an icon, the name, one detail line:
+  the path, the last import, the card's capacity, the account's address
+  and state), one size for all:
+  - **Favourites**: the folders and accounts the person pinned (the pin
+    at the end of every item);
+  - **History**: the folders imported from lately (from the import
+    history, with their last import), then the imports themselves, each
+    with "Import again";
+  - **Folders**: the folders saved or given, then "Choose a folder…"
+    (egui-pop's folder chooser);
+  - **Cards and cameras**: removable volumes holding `DCIM`, named by
+    label and capacity, refreshed when one appears or goes;
+  - **Services**: the accounts, then "Add a source…".
+
+  **One source at a time**: a click selects an item alone (no
+  checkboxes, no multi-select), highlighted wherever it is listed; the
+  middle and right zones follow it. Several folders given at once (a
+  drop) select the first, the others listed under Folders.
 
   When Helios starts, the window opens on the first card it finds, or
   else on the last source used.
@@ -82,6 +95,9 @@ or folders on Helios (the window opens with them as its source).
     - **Duplicates**: skip (default), keep, or ask.
     - **Read darktable edits** (sidecars as versions), when the
       connector honours them.
+    - **Apply the camera's default look**, when the library keeps a
+      camera's default look: on by default, a raw of that camera starts
+      with it as its first version.
     - **More** (folded): metadata template and time offset, once they
       exist.
   - **The connector's section**, under its name. Each connector fills it
@@ -90,7 +106,13 @@ or folders on Helios (the window opens with them as its source).
     connector draws the column itself.
     - **The account** (an account's connector): its connection, and for
       a connector whose photos are chosen in its service's page (Google
-      Photos), "Choose photos"; the photos chosen show in the middle.
+      Photos), "Choose photos", then "Choose more…" in its header
+      line; the photos chosen show in the middle, in the ordinary grid.
+      Such a connector declares a `download` key in its source contract
+      (Google Photos: `<Pictures>/Google Photos/{account}`): its photos
+      are downloaded there at Import, the folder shown pre-filled and
+      editable in Parameters, never asked during the flow, and Copy,
+      Into and Name are not shown for it (2026-11-14).
     - **Copy into the Library**, or **Add where they are** (references
       in place). Copy is forced for a card unless the person changes it,
       with a note on why; a connector that cannot add in place always

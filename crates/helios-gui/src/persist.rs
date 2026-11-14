@@ -189,6 +189,18 @@ enum Write {
     /// An album or the quick collection changed (`library.albums.edit`),
     /// recorded in the library's history at `f64` (seconds) once done.
     Album(crate::library::AlbumEdit, f64),
+    /// A step of the edit shown (`library.edit.add`).
+    Edit(Box<EditStep>),
+    /// An image's snapshots kept (`library.snapshots.set`).
+    Snapshots(ImageId, Vec<helios_vault::snapshots::Snapshot>),
+}
+
+/// A step of an edit session sent to the node.
+struct EditStep {
+    version: Version,
+    in_progress: bool,
+    /// The session once the step is written.
+    after: EditSession,
 }
 
 impl Write {
@@ -222,6 +234,21 @@ impl Write {
                 json!({ "id": id, "record": record }),
             ),
             Self::Album(edit, _) => ("library.albums.edit", album_params(edit)),
+            Self::Edit(step) => (
+                "library.edit.add",
+                json!({
+                    "version": step.version,
+                    "step": step.after.steps(),
+                    "inProgress": step.in_progress,
+                }),
+            ),
+            Self::Snapshots(image, snapshots) => (
+                "library.snapshots.set",
+                json!({
+                    "image": image.hex(),
+                    "snapshots": snapshots.iter().map(helios_vault::snapshots::Snapshot::to_json).collect::<Vec<_>>(),
+                }),
+            ),
         }
     }
 
@@ -236,7 +263,9 @@ impl Write {
             | Self::Remove(..)
             | Self::Document { .. }
             | Self::Session(..)
-            | Self::Album(..) => &[],
+            | Self::Album(..)
+            | Self::Edit(_)
+            | Self::Snapshots(..) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
     }
@@ -283,7 +312,11 @@ fn change_json(change: &Change) -> Value {
 
 /// The edit of the image shown.
 struct Editing {
+    /// The session as the steps made: some may still be on their way to
+    /// the node.
     session: EditSession,
+    /// The session as the node wrote it: what a refused step goes back to.
+    confirmed: EditSession,
     /// The module each node of the shown network runs, and the
     /// parameters it has, by node name: what an edit saves.
     modules: BTreeMap<String, (String, BTreeSet<String>)>,
@@ -1069,7 +1102,19 @@ impl<S: Store + 'static> Persist<S> {
         write: Write,
         answer: Result<Value, helios_inspect::rpc::Error>,
     ) {
+        let write = match write {
+            Write::Edit(step) => return self.edit_written(shell, *step, answer),
+            other => other,
+        };
         match (&write, answer) {
+            (Write::Snapshots(..), Err(e)) => shell.notify(
+                Level::Error,
+                Message::new(
+                    "gui-snapshots-not-saved",
+                    "The snapshots were not saved: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Remove(_, at), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z puts the
                 // photos back; the Library reads itself again on the
@@ -1130,7 +1175,8 @@ impl<S: Store + 'static> Persist<S> {
                 | Write::Accept(..)
                 | Write::Decline(_)
                 | Write::Document { .. }
-                | Write::Session(..),
+                | Write::Session(..)
+                | Write::Edit(_),
                 Err(e),
             ) => shell.notify(Level::Warning, e.message),
         }
@@ -1386,11 +1432,22 @@ impl<S: Store + 'static> Persist<S> {
         port: &str,
     ) -> Result<Option<Version>, String> {
         // Opened for the first time, a raw gets its camera's default
-        // calibration profile (as its first edit, read just below).
-        if let Some(said) = crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
+        // calibration profile and default camera look (as its first
+        // edit, read just below).
+        for said in crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
             shell.notify(Level::Info, said);
         }
-        let (session, head) = EditSession::open(&self.vault, image)?;
+        // The steps of an image still on their way are written first: its
+        // head is read after them.
+        self.settle_edits(shell);
+        let head = self
+            .reader
+            .read("library.edit.head", json!({ "image": image.hex() }))?;
+        let head: Option<Version> = match &head["head"] {
+            Value::Null => None,
+            row => Some(serde_json::from_value(row.clone()).map_err(|e| e.to_string())?),
+        };
+        let session = EditSession::resume(image, head.as_ref());
         // The image with no edit: what a snapshot pinned to no version
         // restores.
         let unedited = edit::of_graph(&graph);
@@ -1422,6 +1479,7 @@ impl<S: Store + 'static> Persist<S> {
             store.committed()
         };
         self.editing = Some(Editing {
+            confirmed: session.clone(),
             session,
             modules,
             committed,
@@ -1442,7 +1500,10 @@ impl<S: Store + 'static> Persist<S> {
         unedited: &Value,
     ) -> Vec<crate::edit_snapshots::Taken> {
         use crate::edit_snapshots::{Pin, Taken, origin_of, values_of_edit};
-        let kept = match self.vault.snapshots(&image) {
+        let kept = match self
+            .reader
+            .read("library.snapshots.get", json!({ "image": image.hex() }))
+        {
             Ok(k) => k,
             Err(e) => {
                 shell.notify(Level::Warning, e);
@@ -1450,14 +1511,18 @@ impl<S: Store + 'static> Persist<S> {
             }
         };
         let mut out = Vec::new();
-        for s in kept {
-            let edit = match &s.version {
-                None => Ok(unedited.clone()),
-                Some(v) => self
-                    .vault
-                    .version(v)
-                    .and_then(|found| found.ok_or_else(|| format!("no version {}", v.hex())))
-                    .map(|found| found.edit),
+        for row in kept["snapshots"].as_array().into_iter().flatten() {
+            let s = match helios_vault::snapshots::Snapshot::from_json(row) {
+                Ok(s) => s,
+                Err(e) => {
+                    shell.notify(Level::Warning, e);
+                    continue;
+                }
+            };
+            let edit = match (&s.version, row["error"].as_str()) {
+                (_, Some(error)) => Err(error.to_string()),
+                (None, None) => Ok(unedited.clone()),
+                (Some(_), None) => Ok(row["edit"].clone()),
             };
             match edit.and_then(|e| values_of_edit(&e)) {
                 Ok(values) => out.push(Taken {
@@ -1509,16 +1574,27 @@ impl<S: Store + 'static> Persist<S> {
             book.settle(settled.then_some((step, committed, pin)));
             (book.pinned(), book.take_dirty())
         };
-        // Said once: the next change writes the whole list again.
-        if write && let Err(err) = self.vault.set_snapshots(&image, &pinned) {
-            shell.notify(
-                Level::Error,
-                Message::new(
-                    "gui-snapshots-not-saved",
-                    "The snapshots were not saved: { $error }",
-                )
-                .with("error", err),
-            );
+        // Sent after the edit's steps they pin: a refusal is said once,
+        // the next change writes the whole list again.
+        if write {
+            self.writes.push_back(Write::Snapshots(image, pinned));
+        }
+    }
+
+    /// Waits until the node has written the steps of edits and the
+    /// snapshots sent: an image opened is read after them.
+    fn settle_edits(&mut self, shell: &mut Shell) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let edits = |p: &Self| {
+            p.writing
+                .iter()
+                .map(|(w, _)| w)
+                .chain(&p.writes)
+                .any(|w| matches!(w, Write::Edit(_) | Write::Snapshots(..)))
+        };
+        while edits(self) && std::time::Instant::now() < deadline {
+            self.pump(shell);
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 
@@ -1765,7 +1841,7 @@ impl<S: Store + 'static> Persist<S> {
                 current,
             )
         };
-        let saved = if committed == e.committed {
+        let step = if committed == e.committed {
             if let Some((gesture, by)) = gesture {
                 e.gesture = Some((gesture.clone(), by.clone()));
                 let since = *e.flushed_at.get_or_insert(now);
@@ -1773,8 +1849,7 @@ impl<S: Store + 'static> Persist<S> {
                     return;
                 }
                 e.flushed_at = Some(now);
-                e.session
-                    .save_in_progress(&self.vault, current, &gesture, &by, at)
+                e.session.step_in_progress(current, &gesture, &by, at)
             } else {
                 e.flushed_at = None;
                 // A gesture ended with no step: cancelled. If it was
@@ -1785,32 +1860,62 @@ impl<S: Store + 'static> Persist<S> {
                 if !e.session.in_progress() {
                     return;
                 }
-                e.session.save(
-                    &self.vault,
-                    current,
-                    &format!("{gesture} (cancelled)"),
-                    &by,
-                    at,
-                )
+                e.session
+                    .step(current, &format!("{gesture} (cancelled)"), &by, at)
             }
         } else {
             e.committed = committed;
             e.flushed_at = None;
             e.gesture = None;
-            e.session.save(&self.vault, current, &label, &origin, at)
+            e.session.step(current, &label, &origin, at)
         };
-        e.unsaved = saved.is_err();
-        if saved.is_ok() && !e.session.in_progress() {
-            // Renders of the image's head version are made again once a
-            // gesture ends, not at each save while it goes (a drag).
-            shell.library_mut().edit_changed(&e.session.image().hex());
+        // Written by the node in its turn, off the UI thread; its answer
+        // is picked up at a coming frame ([`Persist::written`]).
+        e.unsaved = false;
+        if let Some(version) = step {
+            self.writes.push_back(Write::Edit(Box::new(EditStep {
+                version,
+                in_progress: e.session.in_progress(),
+                after: e.session.clone(),
+            })));
         }
-        if let Err(err) = saved {
-            shell.notify(
-                Level::Error,
-                Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
-                    .with("error", err),
-            );
+    }
+
+    /// A step of an edit answered: the image's renders made again once a
+    /// gesture ended; refused, the session goes back to what the node
+    /// wrote, the steps made after it dropped.
+    fn edit_written(
+        &mut self,
+        shell: &mut Shell,
+        step: EditStep,
+        answer: Result<Value, helios_inspect::rpc::Error>,
+    ) {
+        let image = step.version.image;
+        let editing = self.editing.as_mut().filter(|e| e.session.image() == image);
+        match answer {
+            Ok(_) => {
+                if let Some(e) = editing {
+                    e.confirmed = step.after;
+                }
+                // Renders of the image's head version are made again once
+                // a gesture ends, not at each save while it goes (a drag).
+                if !step.in_progress {
+                    shell.library_mut().edit_changed(&image.hex());
+                }
+            }
+            Err(err) => {
+                if let Some(e) = editing {
+                    e.session = e.confirmed.clone();
+                    e.unsaved = true;
+                }
+                self.writes
+                    .retain(|w| !matches!(w, Write::Edit(s) if s.version.image == image));
+                shell.notify(
+                    Level::Error,
+                    Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
+                        .with("error", err.message),
+                );
+            }
         }
     }
 }

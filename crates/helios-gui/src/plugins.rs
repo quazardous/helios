@@ -112,6 +112,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.compare", "phosphor:square-split-horizontal"),
     ("library.copyFiles", "copy"),
     ("library.export", "phosphor:export"),
+    ("library.fitCameraLook", "phosphor:camera"),
     ("library.folder", "folder"),
     ("library.importFiles", "phosphor:tray-arrow-down"),
     ("library.importSource", "phosphor:tray-arrow-down"),
