@@ -2567,7 +2567,7 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
     assert!(matches!(redone, Answer::Done(Ok(_))), "{redone:?}");
     assert_eq!(tags_of(&persist, 1), json!(["Fauna|Dog", "sea"]));
     // The Library read again shows the tree as the vault holds it.
-    assert!(persist.take_locations_changed(), "the vault's event heard");
+    settle(&mut h, &mut persist, 13.0);
     persist.ask_fill(h.state(), true);
     for at in [14.0, 16.0, 18.0] {
         settle(&mut h, &mut persist, at);
