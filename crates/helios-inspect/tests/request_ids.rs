@@ -35,7 +35,7 @@ impl Counter {
 impl Service for Counter {
     fn call(&self, method: &str, params: Value, _: &Call) -> Result<Value, rpc::Error> {
         match method {
-            "add" => Ok(json!({ "runs": self.apply(params["slow"] == true) })),
+            "add" | "command.run" => Ok(json!({ "runs": self.apply(params["slow"] == true) })),
             "refuse" => {
                 self.apply(false);
                 Err(rpc::Error::new(code::REFUSED, "refused"))
@@ -143,5 +143,28 @@ fn the_older_form_takes_a_key_too() {
     let bad = json!({ "cmd": "add", "_meta": { "request_id": 7 } });
     let error = request_within(&address, &bad, DEADLINE).unwrap();
     assert_eq!(error["ok"], false, "{error}");
+    assert_eq!(counter.runs.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn a_batch_step_sent_again_with_its_key_runs_once() {
+    let (counter, address) = serve("batch");
+    let batch = |steps: Value| {
+        Client::connect(&address)
+            .unwrap()
+            .call("command.batch", json!({ "steps": steps }))
+            .wait_timeout(DEADLINE)
+            .expect("answered before the deadline")
+            .unwrap()
+    };
+    let first = batch(json!([{ "id": "a", "request_id": "s1" }, { "id": "b" }]));
+    assert_eq!(first["ran"], 2, "{first}");
+    assert_eq!(first["steps"][0]["request_id"], "s1");
+    // A later batch, as after an outcome unknown: the keyed step is
+    // applied once, the unkeyed one runs again.
+    let again = batch(json!([{ "id": "a", "request_id": "s1" }, { "id": "b" }]));
+    assert_eq!(again["steps"][0]["already_applied"], true, "{again}");
+    assert_eq!(again["steps"][0]["answer"]["runs"], 1);
+    assert_eq!(again["steps"][1]["answer"]["runs"], 3);
     assert_eq!(counter.runs.load(Ordering::SeqCst), 3);
 }

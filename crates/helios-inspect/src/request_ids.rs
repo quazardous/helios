@@ -274,13 +274,19 @@ pub(crate) struct Keyed {
 
 impl Service for Keyed {
     fn call(&self, method: &str, params: Value, call: &Call) -> Result<Value, Error> {
+        // A batch's steps come back here, each keyed by its own key.
+        let run = |params: Value| {
+            if method == crate::batch::METHOD {
+                crate::batch::run(self, &params, call)
+            } else {
+                self.service.call(method, params, call)
+            }
+        };
         let Some(key) = request_id(&params)? else {
-            return self.service.call(method, params, call);
+            return run(params);
         };
         let fingerprint = crate::cache::key(method, &params);
-        match self.remembered.once(&key, &fingerprint, || {
-            self.service.call(method, params, call)
-        }) {
+        match self.remembered.once(&key, &fingerprint, || run(params)) {
             Once::Ran(outcome) => outcome,
             Once::Applied(answer) => Ok(applied(answer)),
             Once::Other => Err(reused(&key)),
@@ -288,7 +294,7 @@ impl Service for Keyed {
     }
 
     fn cancellable(&self, method: &str) -> bool {
-        self.service.cancellable(method)
+        method == crate::batch::METHOD || self.service.cancellable(method)
     }
 }
 

@@ -67,10 +67,13 @@
 //! own. The hand-written tools stay where they add what the pair cannot:
 //! typed arguments and documentation for the processing node's verbs, and
 //! the server's own (sandbox, AI, workspace files).
+//! `helios_command_batch` (`command.batch`) runs several of those
+//! commands in one call, each step with its own result, stopping at the
+//! first failed one unless `stop_on_error` is false; not atomic.
 //!
 //! Compact mode (`helios-mcp --tools compact`, [`ToolSet::Compact`]): the
-//! server offers only the generic pair and the sandbox pair that starts a
-//! node for it, four tools instead of the whole list, for an agent whose
+//! server offers only the generic tools and the sandbox pair that starts a
+//! node for it, five tools instead of the whole list, for an agent whose
 //! context is short; every command stays reachable through
 //! `helios_command_run`.
 //!
@@ -83,7 +86,7 @@
 //!
 //! Caps and untrusted text (`crate::caps`): a request is at most 1 MiB,
 //! a `limit` at most 1,000 items, a wait's `timeout_ms` at most 10
-//! minutes, a batch at most 256 `items`; an answer's lists and text are
+//! minutes, a batch at most 256 `items` (or `steps`); an answer's lists and text are
 //! cut to their caps with a "truncated, N more" note after the JSON, an
 //! image over 2048 px on its long edge or 5 MiB is left out with a note
 //! saying why, and text from photos' metadata or files (titles, tags,
@@ -234,6 +237,31 @@ fn run_items() -> Value {
                 "params": node_params()
             }, "required": ["path"] }
         ] }
+    })
+}
+
+fn batch_steps() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "maxItems": caps::MAX_BATCH,
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "The command's id, as listed" },
+                "params": { "type": "object", "description": "Its params, as its listed schema accepts" },
+                "window": { "type": "string", "description": "The window it runs in, for a window command" },
+                "scope": { "type": "string", "enum": ["node", "window"] },
+                "request_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": helios_inspect::request_ids::LONGEST,
+                    "description": "This step's key: given again in a later batch, the node applies it once"
+                }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+        }
     })
 }
 
@@ -573,6 +601,33 @@ pub const TOOLS: &[Tool] = &[
                 "scope",
                 optional_string,
                 "node or window, when an id is in both (library.import): the node's wins when left out",
+            ),
+        ],
+    },
+    Tool {
+        name: "helios_command_batch",
+        endpoint: Endpoint::Commands,
+        cmd: "command.batch",
+        description: "Runs several commands of helios_commands_list in one call, in order, as the agent (origin agent:mcp), each step as helios_command_run would run it; the answer holds each step's own result in order: `ok` and its `answer`, or its `error`, or `skipped`. With `stop_on_error` (the default) the first failed step stops the batch and the rest are skipped; without it every step runs. Not atomic: the steps run before a failed one stay applied. At most 256 steps. A step's `request_id` keys that step alone, as helios_command_run's does",
+        params: &[
+            COMMANDS_VAULT,
+            COMMANDS_NODE,
+            Param {
+                name: "steps",
+                schema: batch_steps,
+                description: "The commands, in order: each `{id, params, window, scope, request_id}`, only `id` required",
+                default: None,
+            },
+            Param {
+                name: "stop_on_error",
+                schema: boolean,
+                description: "Stop at the first failed step, the rest skipped; false runs every step",
+                default: Some(yes),
+            },
+            optional(
+                "window",
+                optional_string,
+                "The desktop window the steps' window commands run in, unless a step names its own; main when left out",
             ),
         ],
     },
@@ -2431,7 +2486,7 @@ impl Tool {
     pub fn changes(&self) -> bool {
         match self.endpoint {
             Endpoint::Control => !CONTROL_READS.contains(&self.cmd),
-            Endpoint::Commands => self.cmd == "command.run",
+            Endpoint::Commands => self.cmd == "command.run" || self.cmd == "command.batch",
             Endpoint::Inspect | Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace => false,
         }
     }
@@ -2753,7 +2808,13 @@ fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
                 }
                 continue;
             }
-            "params" if cmd == "command.run" => {
+            // A command run's params, or a batch's steps with theirs.
+            name @ ("params" | "steps")
+                if matches!(
+                    (name, cmd),
+                    ("params", "command.run") | ("steps", "command.batch")
+                ) =>
+            {
                 let mut paths = Vec::new();
                 absolute_paths(value, &mut paths);
                 for path in paths {
@@ -2895,19 +2956,29 @@ pub fn commands_call(client: &helios_inspect::client::Client, request: &Value) -
             .collect();
         Value::Object(picked)
     };
-    let (method, params) = if request["cmd"] == "command.run" {
-        let mut params = pick(&["id", "params", "window", "scope"]);
-        params["origin"] = json!(MCP_ORIGIN);
-        ("command.run", params)
-    } else {
-        ("commands.list", pick(&["window", "filter", "enabled_only"]))
+    let (method, params) = match request["cmd"].as_str() {
+        Some("command.run") => {
+            let mut params = pick(&["id", "params", "window", "scope"]);
+            params["origin"] = json!(MCP_ORIGIN);
+            ("command.run", params)
+        }
+        Some("command.batch") => {
+            let mut params = pick(&["steps", "stop_on_error", "window"]);
+            params["origin"] = json!(MCP_ORIGIN);
+            ("command.batch", params)
+        }
+        _ => ("commands.list", pick(&["window", "filter", "enabled_only"])),
     };
     let pending = match request["_meta"][REQUEST_ID].as_str() {
-        Some(key) if method == "command.run" => client.call_keyed(method, params, key),
+        Some(key) if method != "commands.list" => client.call_keyed(method, params, key),
         _ => client.call(method, params),
     };
     match pending.wait() {
-        Ok(answer) => answer_result(answer, false),
+        // A batch with a failed step is an error, its steps' results in it.
+        Ok(answer) => {
+            let failed = answer["failed"].as_u64().is_some_and(|n| n > 0);
+            answer_result(answer, method == "command.batch" && failed)
+        }
         Err(e) if e.code == helios_inspect::rpc::code::OUTCOME_UNKNOWN => tool_result(
             format!("outcome unknown: {}{}", e.message, resend_hint(request)),
             true,
@@ -4310,6 +4381,84 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_command_batch_runs_its_steps_in_order_as_the_agent() {
+        use helios_core::Bus;
+        use helios_core::jobs::Jobs;
+        use helios_node_core::endpoint::VaultService;
+        use helios_vault::{MemoryStore, Vault};
+
+        let bus = Arc::new(Bus::new());
+        let windows = Arc::new(Windows(std::sync::Mutex::default()));
+        let service = VaultService::new(
+            Arc::new(Vault::new(MemoryStore::default())),
+            bus.clone(),
+            Jobs::new(bus),
+            "mcp-test",
+        )
+        .with_windows(windows.clone());
+        let client = helios_inspect::client::Client::in_process(Arc::new(service));
+        let batch_tool = TOOLS
+            .iter()
+            .find(|t| t.name == "helios_command_batch")
+            .unwrap();
+        assert!(batch_tool.changes());
+        let batch = |arguments: Value| {
+            let result = commands_call(&client, &batch_tool.request(&arguments).unwrap());
+            let text = result["content"][0]["text"].as_str().unwrap().to_string();
+            (
+                result["isError"] == true,
+                serde_json::from_str::<Value>(&text).unwrap(),
+            )
+        };
+        // A window command, a node command, a greyed one, then another:
+        // stopped at the greyed one.
+        let steps = json!([
+            { "id": "theme.select", "params": { "name": "helios-light" } },
+            { "id": "library.stacks.list" },
+            { "id": "edit.undo" },
+            { "id": "theme.select" },
+        ]);
+        let (failed, answer) = batch(json!({ "steps": steps }));
+        assert!(failed, "{answer}");
+        let results = answer["steps"].as_array().unwrap();
+        assert_eq!(results[0]["ok"], true);
+        assert_eq!(results[0]["answer"]["origin"], "agent:mcp");
+        assert_eq!(results[1]["ok"], true);
+        assert_eq!(results[1]["answer"]["command"], "library.stacks.list");
+        assert_eq!(results[2]["ok"], false);
+        assert_eq!(
+            results[2]["error"]["message"],
+            "Does not apply here (canUndo)"
+        );
+        assert_eq!(results[3], json!({ "id": "theme.select", "skipped": true }));
+        assert_eq!(windows.0.lock().unwrap().len(), 1);
+        // Without stop_on_error the last one runs too.
+        let (_, answer) = batch(json!({ "steps": steps, "stop_on_error": false }));
+        assert_eq!(answer["steps"][3]["ok"], true, "{answer}");
+        assert_eq!(windows.0.lock().unwrap().len(), 3);
+        // Over the cap, refused before it is sent.
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
+        };
+        let many = vec![json!({ "id": "library.stacks.list" }); 257];
+        let (is_error, refused) = tool(
+            &mut sockets,
+            "helios_command_batch",
+            json!({ "steps": many }),
+        );
+        assert!(is_error);
+        assert!(
+            refused.as_str().unwrap().contains("over the cap of 256"),
+            "{refused}"
+        );
+    }
+
     /// A node that reads one request, then closes without answering.
     #[cfg(unix)]
     fn drops_after_reading(name: &str) -> (PathBuf, std::thread::JoinHandle<()>) {
@@ -4463,6 +4612,7 @@ mod tests {
             [
                 "helios_commands_list",
                 "helios_command_run",
+                "helios_command_batch",
                 "helios_sandbox_start",
                 "helios_sandbox_stop"
             ]

@@ -490,6 +490,8 @@ each a command a profile or a template may rebind (the whole map is in
 | Ctrl+Shift+K | `library.filter.switch` (the recent filters; not while typing) |
 | Ctrl+Shift+A, Ctrl+I | `library.select.none`, `library.select.invert` (not while typing) |
 | Delete | `library.remove` (Remove from Library; not while typing) |
+| Ctrl+Alt+Shift+Delete | `library.trash` (Move to Trash…; not while typing) |
+| Ctrl+Backspace | `library.deleteRejected` (Delete Rejected…; not while typing) |
 | Left, Right | `vault.previous`, `vault.next` |
 | Backspace, Space (culling only) | `vault.previous`, `vault.next` |
 
@@ -516,8 +518,23 @@ from Catalog": only their Library flag changes; their files, marks,
 edits and stacks' records stay, and an import finds them again by their
 hash. It is one step of the library's history: Ctrl+Z puts them back.
 Nothing is asked first, since nothing is lost. The desktop writes it
-through the node's `library.images.remove` (docs/protocol.md). Moving
-files to the system trash is a later step.
+through the node's `library.images.remove` (docs/protocol.md).
+
+**Move to Trash… and Delete Rejected…** (2026-11-14): the grid's
+context menu, Ctrl+Alt+Shift+Delete (`library.trash`, the selection or
+`images`) and Ctrl+Backspace (`library.deleteRejected`, the rejected
+photos shown), as Lightroom's "Remove and Delete from Disk" and "Delete
+Rejected Photos". Both ask first, since files move: the question names
+how many photos, their files and the folder (or how many folders), and
+the files that stay with why. The files go to the system trash
+(freedesktop.org's on Linux, the Recycle Bin, the Finder's Trash), which
+restores them; the library's Undo does not, and says so. The node runs
+it as a journaled job (`library.images.trash`, docs/protocol.md): each
+file's outcome is kept as it goes, so a job stopped half way can be read
+(`library.trash.jobs`) and resumed. Never on a memory card, a backup or
+an archive volume, nor in a `Helios Backup/` folder: those files stay,
+with the reason. The photos whose files went leave the Library; their
+backup copies stay.
 
 `vault.autoAdvance` (or the Auto-advance box) moves the cursor to the
 next image after each mark, as Lightroom's Caps Lock mode. The grid's

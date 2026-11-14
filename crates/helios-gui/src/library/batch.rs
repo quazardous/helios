@@ -13,6 +13,12 @@
 //! the flag only, no file touched, through the node's
 //! `library.images.remove`; the host records the step it answers in the
 //! library's history, so Ctrl+Z puts the photos back.
+//!
+//! "Move to Trash…" and "Delete rejected…" (L8) send photos' files to the
+//! system trash: asked first (the node plans the job, the host asks with
+//! the count and the place), then run by the node's
+//! `library.images.trash` as a journaled job. Not a step of the library's
+//! history: the system trash is their undo.
 
 use egui_pop::views::library::{Change as Mark, ColorLabel};
 use serde_json::{Value, json};
@@ -38,6 +44,26 @@ pub const MARKS_PASTE_COMMAND: &str = "library.marks.paste";
 /// files untouched (Lightroom's "Remove from Catalog", darktable's
 /// "remove"): one undoable step.
 pub const REMOVE_COMMAND: &str = "library.remove";
+
+/// Moves photos' files to the system trash (`images`, else the
+/// selection), after a question unless `confirmed` (Lightroom's "Remove
+/// and Delete from Disk", darktable's "delete (trash)").
+pub const TRASH_COMMAND: &str = "library.trash";
+
+/// Moves the rejected photos shown to the system trash, after a question
+/// unless `confirmed` (`images`, the rejected photos the question named;
+/// Lightroom's "Delete Rejected Photos").
+pub const DELETE_REJECTED_COMMAND: &str = "library.deleteRejected";
+
+/// Photos whose files the user asked moved to the trash.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrashAsk {
+    pub images: Vec<String>,
+    /// Answered yes already: run it; else ask first.
+    pub confirmed: bool,
+    /// Asked by "Delete rejected…".
+    pub rejected: bool,
+}
 
 /// The marks a copy holds and a paste may take.
 pub const MARK_KINDS: [&str; 4] = ["rating", "labels", "tags", "title"];
@@ -336,6 +362,67 @@ impl Library {
     pub fn take_removals(&mut self) -> Vec<Vec<String>> {
         std::mem::take(&mut self.removals)
     }
+
+    /// Queues `images` (those shown), else the selection, for their files
+    /// to go to the trash ([`Library::take_trash_asks`]); how many.
+    ///
+    /// # Errors
+    /// No photo.
+    pub fn ask_trash(
+        &mut self,
+        images: Option<Vec<String>>,
+        confirmed: bool,
+    ) -> Result<usize, String> {
+        let keys = match images {
+            Some(ids) => {
+                let keys: Vec<String> = ids.into_iter().filter(|i| self.holds(i)).collect();
+                if keys.is_empty() {
+                    return Err("none of the `images` is in the library".into());
+                }
+                keys
+            }
+            None => self.targets()?,
+        };
+        let count = keys.len();
+        self.trash_asks.push(TrashAsk {
+            images: keys,
+            confirmed,
+            rejected: false,
+        });
+        Ok(count)
+    }
+
+    /// Queues the rejected photos shown (or `images`, those of them still
+    /// rejected) for their files to go to the trash; how many.
+    ///
+    /// # Errors
+    /// No rejected photo.
+    pub fn ask_delete_rejected(
+        &mut self,
+        images: Option<Vec<String>>,
+        confirmed: bool,
+    ) -> Result<usize, String> {
+        let rejected = self.shown_where(|e| e.rejected);
+        let keys: Vec<String> = match images {
+            Some(ids) => ids.into_iter().filter(|i| rejected.contains(i)).collect(),
+            None => rejected,
+        };
+        if keys.is_empty() {
+            return Err("no rejected photo shown".into());
+        }
+        let count = keys.len();
+        self.trash_asks.push(TrashAsk {
+            images: keys,
+            confirmed,
+            rejected: true,
+        });
+        Ok(count)
+    }
+
+    /// The trash asks since, in order.
+    pub fn take_trash_asks(&mut self) -> Vec<TrashAsk> {
+        std::mem::take(&mut self.trash_asks)
+    }
 }
 
 #[cfg(test)]
@@ -406,5 +493,39 @@ mod tests {
             [vec!["a".to_string(), "c".into()], vec!["d".to_string()]]
         );
         assert!(lib.take_removals().is_empty());
+    }
+
+    #[test]
+    fn delete_rejected_takes_only_the_rejected_photos_shown() {
+        let mut lib = library();
+        assert!(
+            lib.ask_delete_rejected(None, false).is_err(),
+            "none rejected"
+        );
+        let reject = |mut e: crate::library::Entry| {
+            e.rejected = true;
+            e
+        };
+        lib.set_entries(vec![
+            entry("a", "2024-06-01", None),
+            reject(entry("b", "2024-06-01", Some("s"))),
+            entry("c", "2024-06-02", Some("s")),
+            reject(entry("d", "2024-06-03", None)),
+        ]);
+        lib.select_ids(&["a".into()]);
+        assert_eq!(lib.ask_delete_rejected(None, false), Ok(2));
+        assert_eq!(
+            lib.ask_delete_rejected(Some(vec!["a".into(), "d".into()]), true),
+            Ok(1),
+            "a photo not rejected is left out"
+        );
+        assert_eq!(lib.ask_trash(None, false), Ok(1), "the selection");
+        let asks = lib.take_trash_asks();
+        assert_eq!(asks[0].images, ["b", "d"]);
+        assert!(asks[0].rejected && !asks[0].confirmed);
+        assert_eq!(asks[1].images, ["d"]);
+        assert!(asks[1].confirmed);
+        assert_eq!(asks[2].images, ["a"]);
+        assert!(!asks[2].rejected);
     }
 }

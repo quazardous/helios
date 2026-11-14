@@ -35,7 +35,10 @@
 //!   decided once;
 //! - [`stacks`]: the `stacks.suggest` decision, which proposes stacks over
 //!   a selection through a resolver picked by name, and applies them only
-//!   when accepted.
+//!   when accepted;
+//! - [`trash`]: "Move to Trash…" and "Delete rejected…", photos'
+//!   files to the system trash as a journaled job, refused on cards and
+//!   backup volumes.
 
 pub mod auto_import;
 pub mod backup;
@@ -52,6 +55,7 @@ pub mod rename;
 pub mod signals;
 pub mod stacks;
 pub mod thumb_check;
+pub mod trash;
 
 pub use import::{Duplicates, Options, Placement, Report};
 pub use signals::Signals;

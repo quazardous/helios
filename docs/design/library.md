@@ -91,7 +91,7 @@ proposes the next slices.
 | Export | built (`library.export`, one or many) |
 | Remove from Library | in the vault (`Vault::set_in_library`, used by import undo); **no command** in the window |
 | Rename, move, copy on disk | none after import (import renames by pattern: `helios_library::rename`) |
-| Delete or trash | Remove from Library (L8, the flag, undoable); no trash yet |
+| Delete or trash | Remove from Library (L8, the flag, undoable); Move to Trash… and Delete Rejected… (L8, the system trash, a journaled job) |
 | Rotate | none in the library; EXIF orientation is read for display (`helios-load/src/colour.rs`) |
 | Copy and paste edits, marks | edits: the clipboard design ([clipboard.md](clipboard.md)); marks between photos: `library.marks.copy` and `.paste`, merge or overwrite (L7) |
 
@@ -780,8 +780,19 @@ darktable, and the grid's context menu), through the node's new
 records it in the library's history (Ctrl+Z), and the vault announces
 `vault.library_changed` (also on a library step undone or redone) so
 the read cache and the grid follow. Not asked first: nothing is lost.
-Still to build: "Move to Trash…" and "Delete rejected…" as a journaled
-job with its refusals.
+Built, second part (2026-11-14): "Move to Trash…"
+(`library.trash`, Ctrl+Alt+Shift+Delete) and "Delete Rejected…"
+(`library.deleteRejected`, Ctrl+Backspace, Lightroom's keys; the design's
+Ctrl+Backspace kept), asked first with the count, the place and the
+refusals, then the node's `library.images.trash`: a job kept as a
+library document (`trash/<job>`) before any file moves, each file's
+outcome written as it goes, resumable (`job`) and read with
+`library.trash.jobs`. Refused on cards, backup and archive volumes,
+`Helios Backup/` folders and volumes not plugged in. The system trash
+through the `trash` crate (MIT; freedesktop.org, Windows, macOS),
+wrapped behind a `Bin` so tests use a folder. The trashed locations are
+marked missing, the photos leave the Library (not a history step). Not
+yet: a job resumed on its own at the node's start, cancelling a job.
 
 **L9. Rotate.** An orientation field on the image (or the version, to
 decide in the slice), Ctrl+[ and Ctrl+] (and darktable's equivalents in

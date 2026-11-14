@@ -6,7 +6,9 @@
 //! with `library.edit.add`), its snapshots (`library.snapshots.get`,
 //! `.set`), photos' fields set and
 //! read (`library.fields.set`, `library.fields.get`), photos taken out
-//! of the Library (`library.images.remove`), the facet counts of
+//! of the Library (`library.images.remove`), their files moved to the
+//! system trash as a journaled job (`library.images.trash`, its jobs
+//! read with `library.trash.jobs`), the facet counts of
 //! a query (`library.facets`), the photos changed outside Helios
 //! (`library.changed.list`), the import history listed
 //! (`import.history.list`) and one import run again
@@ -45,6 +47,8 @@ pub const IDS: &[&str] = &[
     "library.snapshots.set",
     "library.fields.set",
     REMOVE,
+    TRASH,
+    TRASH_JOBS,
     "library.fields.get",
     "library.facets",
     "library.changed.list",
@@ -73,6 +77,16 @@ pub const IDS: &[&str] = &[
 /// their flag only, no file touched; answers the step (`changes`), which
 /// the vault's revert undoes.
 pub const REMOVE: &str = "library.images.remove";
+
+/// Moves photos' files to the system trash (Lightroom's "Delete from
+/// Disk", darktable's "delete (trash)") as a journaled job: refused on
+/// cards and backup volumes, the photos taken out of the Library; `plan`
+/// only says what it would do, `job` resumes a job kept
+/// (`helios_library::trash`).
+pub const TRASH: &str = "library.images.trash";
+
+/// Reads the trash jobs kept, or one (`job`), with each file's outcome.
+pub const TRASH_JOBS: &str = "library.trash.jobs";
 
 /// Lists the import history (`helios_library::import_history`).
 pub const HISTORY_LIST: &str = "import.history.list";
@@ -194,6 +208,28 @@ pub fn specs() -> Vec<CommandSpec> {
             "Take photos out of the Library, their files untouched",
         )
         .params(object(&[("images", images(), true)])),
+        library(
+            TRASH,
+            "Move photos' files to the system trash, as a journaled job",
+        )
+        .params(object(&[
+            ("images", images(), false),
+            (
+                "plan",
+                json!({ "type": "boolean",
+                        "description": "only say which files would go and which are refused" }),
+                false,
+            ),
+            (
+                "job",
+                json!({ "type": "string",
+                        "description": "a job kept, to resume: its pending and failed files" }),
+                false,
+            ),
+        ])),
+        library(TRASH_JOBS, "Read the trash jobs and each file's outcome")
+            .params(object(&[("job", string(), false)]))
+            .read_only(),
         library("library.fields.get", "Read photos' fields")
             .params(object(&[
                 ("images", images(), true),
@@ -433,6 +469,65 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// `library.images.trash`: a plan, a new job worked, or a job resumed.
+fn trash<S: Store>(
+    vault: &Vault<S>,
+    bus: &Arc<Bus>,
+    params: &Value,
+    origin: &str,
+) -> Result<Value, String> {
+    use helios_library::trash::{self, Outcome};
+    let volumes = trash::volumes(vault)?;
+    let id = if let Some(job) = params["job"].as_str() {
+        job.to_string()
+    } else {
+        let ids = named(vault, params, "images")?;
+        if ids.is_empty() {
+            return Err("`images` names no photo".into());
+        }
+        if params["plan"].as_bool() == Some(true) {
+            let files = trash::plan(vault, &ids, &volumes)?;
+            let job = trash::Job {
+                id: String::new(),
+                at: now(),
+                by: origin.into(),
+                images: ids.iter().map(ImageId::hex).collect(),
+                files,
+                done: false,
+            };
+            let refused: Vec<_> = job
+                .files
+                .iter()
+                .filter(|f| f.outcome == Outcome::Refused)
+                .collect();
+            return Ok(json!({
+                "images": ids.len(),
+                "files": job.count(Outcome::Pending),
+                "folders": job.folders(),
+                "refused": to_json(&refused),
+            }));
+        }
+        trash::start(vault, &ids, &volumes, origin, now())?.id
+    };
+    let jobs = helios_core::jobs::Jobs::new(Arc::clone(bus));
+    let worked = trash::work(vault, &id, &*trash::bin(), Some(&jobs), now())?;
+    let job = &worked.job;
+    let of = |outcome: Outcome| {
+        job.files
+            .iter()
+            .filter(|f| f.outcome == outcome)
+            .collect::<Vec<_>>()
+    };
+    Ok(json!({
+        "job": job.id,
+        "trashed": job.count(Outcome::Trashed),
+        "missing": job.count(Outcome::Missing),
+        "refused": to_json(&of(Outcome::Refused)),
+        "failed": to_json(&of(Outcome::Failed)),
+        "removed": worked.changes.images.len(),
+    }))
+}
+
 fn to_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("library values serialize")
 }
@@ -582,6 +677,9 @@ pub fn run<S: Store>(
     params: &Value,
     origin: &str,
 ) -> Result<Value, String> {
+    if id == TRASH {
+        return trash(vault, bus, params, origin);
+    }
     let bus = Some(&**bus);
     match id {
         HISTORY_LIST => {
@@ -742,6 +840,14 @@ pub fn run<S: Store>(
                 |changes| json!({ "removed": changes.images.len(), "changes": to_json(&changes) }),
             )
         }
+        TRASH_JOBS => match params["job"].as_str() {
+            Some(job) => helios_library::trash::get(vault, job)?
+                .map(|job| json!({ "job": to_json(&job) }))
+                .ok_or_else(|| format!("no trash job {job}")),
+            None => {
+                helios_library::trash::list(vault).map(|jobs| json!({ "jobs": to_json(&jobs) }))
+            }
+        },
         "library.facets" => {
             let query = crate::cursor::query_of(&params["query"])?;
             let rule = match &params["rule"] {
@@ -903,6 +1009,8 @@ mod tests {
             json!({ "image": "0a", "snapshots": [{ "id": 1, "name": "A", "version": null }] }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
             json!({ "images": ["0a"] }),
+            json!({ "images": ["0a"], "plan": true }),
+            json!({ "job": "trash-1700000000-1" }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
             json!({ "query": {} }),
             json!({}),
