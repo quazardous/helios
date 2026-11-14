@@ -20,7 +20,9 @@
 //! none, the photos of the same day selected; a photo's marks copied and
 //! pasted on others, merged or overwriting, written to the vault.
 //! "Remove from Library" (L8): Delete takes the selection out through the
-//! node, the grid follows, and the step undoes.
+//! node, the grid follows, and the step undoes. "Move to Trash…" asks
+//! first, then the node's journaled job moves the files to a test trash,
+//! a backup's copy refused.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1830,6 +1832,118 @@ fn delete_removes_the_selection_from_the_library_and_undo_puts_it_back() {
     assert_eq!(out["removed"], 1, "{out}");
     refill(&mut h, &mut persist, 60.0);
     assert_eq!(grid(&h), ["a.jpg", "c.nef"]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn move_to_trash_asks_then_trashes_through_a_journaled_job_a_backup_refused() {
+    use egui::Modifiers;
+    use helios_library::trash::{self, Outcome};
+    let root = temp("trash");
+    let backup = root.join("backup");
+    // The first two at the top, the third on a backup volume.
+    let path = vault_with(&root, |n, name| {
+        if n == 3 {
+            Location {
+                volume: Some(VolumeId("uuid:backup".into())),
+                ..Location::seen(backup.join(name), 10, 1, 1)
+            }
+        } else {
+            Location::seen(root.join(name), 10, 1, 1)
+        }
+    });
+    std::fs::create_dir_all(&backup).unwrap();
+    for file in [root.join("a.jpg"), root.join("b.jpg"), backup.join("c.nef")] {
+        std::fs::write(file, b"photo").unwrap();
+    }
+    // Never the desktop's trash: a folder of the test.
+    let bin = root.join("bin");
+    trash::redirect(Some(bin.clone()));
+    let (mut h, mut persist) = window(&root, &path);
+    helios_storage::registry::remember(
+        persist.vault(),
+        &Volume {
+            id: VolumeId("uuid:backup".into()),
+            identified_by: Identity::Uuid,
+            kind: VolumeKind::Removable,
+            roles: [helios_storage::Role::Backup].into(),
+            ..Volume::remote("x", "y", "BACKUP_A")
+        },
+        1,
+    )
+    .unwrap();
+    let refill = |h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at| {
+        settle(h, persist, at);
+        persist.ask_fill(h.state(), true);
+        settle(h, persist, at + 10.0);
+    };
+
+    // Ctrl+Alt+Shift+Delete on the three: the question first, naming the
+    // count, the place and the refusal; nothing moved yet.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(2).hex(), id(3).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press_modifiers(
+        Modifiers::CTRL | Modifiers::ALT | Modifiers::SHIFT,
+        Key::Delete,
+    );
+    settle(&mut h, &mut persist, 1.0);
+    assert_eq!(
+        main_dialog(&h).as_deref(),
+        Some("Move 3 photos to the Trash?")
+    );
+    let detail = answer(&mut h, "dialog.current", json!(null)).to_string();
+    assert!(detail.contains("Their 2 files in"), "{detail}");
+    assert!(
+        detail.contains("BACKUP_A is a backup volume: its copies stay"),
+        "{detail}"
+    );
+    assert!(
+        root.join("a.jpg").exists(),
+        "nothing moved before the answer"
+    );
+
+    // Confirmed: the files in the test trash, the backup's copy kept, the
+    // two photos out of the Library.
+    run(&mut h, "dialog.answer", json!({ "answer": "primary" }));
+    refill(&mut h, &mut persist, 5.0);
+    assert!(!root.join("a.jpg").exists() && bin.join("a.jpg").exists());
+    assert!(!root.join("b.jpg").exists() && bin.join("b.jpg").exists());
+    assert!(backup.join("c.nef").exists(), "a backup copy stays");
+    assert_eq!(grid(&h), ["c.nef"]);
+    let vault = persist.vault();
+    assert!(!vault.in_library(&id(1)).unwrap() && vault.in_library(&id(3)).unwrap());
+    assert_eq!(
+        vault.locations(&id(1)).unwrap()[0].presence,
+        Presence::Missing
+    );
+
+    // The job's journal says each file's outcome.
+    let jobs = trash::list(&**vault).unwrap();
+    assert_eq!(jobs.len(), 1);
+    let outcomes: Vec<_> = jobs[0]
+        .files
+        .iter()
+        .map(|f| {
+            (
+                f.path.file_name().unwrap().to_string_lossy().into_owned(),
+                f.outcome,
+            )
+        })
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("a.jpg".to_string(), Outcome::Trashed),
+            ("b.jpg".to_string(), Outcome::Trashed),
+            ("c.nef".to_string(), Outcome::Refused),
+        ]
+    );
+    assert!(jobs[0].done);
+    trash::redirect(None);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

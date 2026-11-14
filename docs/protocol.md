@@ -238,6 +238,24 @@ many were in it) and `changes`, the step as the vault records it, which
 its revert puts back: the desktop's Ctrl+Z. Announced as
 `vault.library_changed`, as an undo or a redo of a library step is.
 
+`library.images.trash` (`images`, `plan`, `job`) moves photos' files to
+the system trash (Lightroom's "Delete from Disk", darktable's "delete
+(trash)") as a journaled job (`helios_library::trash`). The job is kept
+as the library document `trash/<job>` before any file moves: each file
+with its outcome (`pending`, `trashed`, `refused`, `failed`, `missing`,
+with the `reason`), written as it goes. Files on a memory card, on a
+backup or archive volume, in a `Helios Backup/` or `Helios Archive/`
+folder, or on a volume not plugged in are refused, with the reason. The
+trashed files' locations are marked missing, and a photo with a file
+trashed and none left to do leaves the Library (`vault.library_changed`;
+not a library step: the system trash is the undo). It answers `job`,
+`trashed`, `missing`, `refused` and `failed` (the files, with their
+`reason`) and `removed`. With `plan`, it only says what it would do:
+`images`, `files` (how many would go), `folders` and `refused`. With
+`job`, it resumes a job kept: its pending and failed files.
+`library.trash.jobs` (`job`) reads the jobs kept, newest first (`jobs`),
+or one (`job`).
+
 `library.documents.get` (`ns`, `key`) reads a library document
 (`document`, null when there is none), such as the Library's pinned and
 recent filters; `library.documents.set` (`ns`, `key`, `document`) keeps

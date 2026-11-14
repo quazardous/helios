@@ -141,6 +141,19 @@ pub fn defaults() -> Vec<(String, String, String)> {
         crate::library::REMOVE_COMMAND,
         &format!("{} && !textInputFocus", behind_no_picker(&library)),
     );
+    // Move to Trash… and Delete Rejected…, as Lightroom's "Remove and
+    // Delete from Disk" (Ctrl+Alt+Shift+Delete) and "Delete Rejected
+    // Photos" (Ctrl+Backspace); both ask first.
+    for (k, command) in [
+        ("Ctrl+Alt+Shift+Delete", crate::library::TRASH_COMMAND),
+        ("Ctrl+Backspace", crate::library::DELETE_REJECTED_COMMAND),
+    ] {
+        bind(
+            k,
+            command,
+            &format!("{} && !textInputFocus", behind_no_picker(&library)),
+        );
+    }
     bind("Right", "compare.next", &behind_no_picker(&comparison));
     bind("Left", "compare.previous", &behind_no_picker(&comparison));
     // Next and previous image while culling; in the grid Space selects.

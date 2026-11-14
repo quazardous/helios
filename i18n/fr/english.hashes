@@ -163,6 +163,7 @@ command-library-collection-rules.title 91405fb1560b7c50
 command-library-collection.title 8c4621c0332ae0d9
 command-library-compare.title d0cb5f40dd939879
 command-library-copyFiles.title 47994437a8a0f5ba
+command-library-deleteRejected.title 9b733bf20d4e0707
 command-library-export.title c2dc933564069c87
 command-library-filter-apply.title 19abeee163bd677a
 command-library-filter-pin.title 62e6f0bcdff6f1ec
@@ -189,6 +190,7 @@ command-library-select-none.title cf5dfbd241a5672e
 command-library-select-similar.title 341f6a0f2b867360
 command-library-sort.title ac723c2319de076f
 command-library-storage.title 72ca240c73a1c7aa
+command-library-trash.title 6fb6defb78678f5c
 command-macro-dissolve.title e472cc526f105a70
 command-macro-fold.title 33ae65c670fa307a
 command-macro-interface.title 9339d37c74694ea4
@@ -838,6 +840,7 @@ gui-library-cull-clipped 1052a836d32a2f0e
 gui-library-cull-sharp ba8a092b58423e8f
 gui-library-cull-soft 77664a4fb499c495
 gui-library-cull-unmeasured cc20513cabdb8620
+gui-library-delete-rejected fea035c0029f3686
 gui-library-drop-add bc4b76c3fcf7a86e
 gui-library-drop-set ec3d777987cd5744
 gui-library-drop-smart 2b52bc1534ed5dd4
@@ -905,6 +908,7 @@ gui-library-sort-size da247eb7d8a1f68e
 gui-library-sort-tip fdd935e0be790484
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
+gui-library-trash 6cddaea29caba8b5
 gui-library-volume-offline 5f2b93239dade10c
 gui-log-clear 238f7a82e564b550
 gui-log-empty 204c4ef685556125
@@ -1339,6 +1343,16 @@ gui-template-keys-error 79b6acf6ef87110a
 gui-theme-exported bd511001e8a42de3
 gui-theme-problem 96dfd71611027a04
 gui-theme-unknown 440ee9790a2a4952
+gui-trash-detail 27e673e78166bfb3
+gui-trash-done 03963ee8732cbbc3
+gui-trash-failed c8a458e754dda468
+gui-trash-folders 66015b4bba234453
+gui-trash-nothing 71ceb16196fb5f9a
+gui-trash-refused 4c5e095436eb43c1
+gui-trash-rejected-title dbb4b4f29ba29857
+gui-trash-some-failed bc2872622cbe5f43
+gui-trash-title 74afe5f64d3a84d5
+gui-trash-verb e1b29a9a295e346b
 gui-vault-unreadable f60fd7de770903dc
 gui-window-frame-error 72035247381882d2
 gui-wizard-account 4103a27ff07b58ca

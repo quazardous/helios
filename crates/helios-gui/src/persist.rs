@@ -157,6 +157,9 @@ enum Asked {
     Folders,
     /// The albums and the quick collection (`library.albums.list`).
     Albums,
+    /// What moving photos' files to the trash would do
+    /// (`library.images.trash`, `plan`), to ask first.
+    TrashPlan(crate::library::TrashAsk),
 }
 
 /// A write of the library sent to the node.
@@ -176,6 +179,9 @@ enum Write {
     /// Photos taken out of the Library (`library.images.remove`), asked
     /// at a time (seconds): one step of the library's history.
     Remove(Vec<String>, f64),
+    /// Photos' files moved to the system trash, confirmed
+    /// (`library.images.trash`): a journaled job, not a history step.
+    Trash(Vec<String>),
     /// A library document kept, or removed when none
     /// (`library.documents.set`).
     Document {
@@ -213,6 +219,10 @@ impl Write {
                 helios_node_core::library::REMOVE,
                 json!({ "images": images }),
             ),
+            Self::Trash(images) => (
+                helios_node_core::library::TRASH,
+                json!({ "images": images }),
+            ),
             Self::Document { ns, key, document } => (
                 "library.documents.set",
                 json!({ "ns": ns, "key": key, "document": document }),
@@ -234,6 +244,7 @@ impl Write {
             | Self::Accept(..)
             | Self::Decline(_)
             | Self::Remove(..)
+            | Self::Trash(_)
             | Self::Document { .. }
             | Self::Session(..)
             | Self::Album(..) => &[],
@@ -787,6 +798,7 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
                 // The filters' history is a convenience: a warning.
                 Asked::FilterHistory => shell.notify(Level::Warning, e.message),
                 Asked::Folders | Asked::Albums => unreadable(shell, e.message),
+                Asked::TrashPlan(_) => not_trashed(shell, &e.message),
             }
             return;
         }
@@ -820,7 +832,101 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
             shell.library_mut().set_quick(quick);
             shell.library_mut().set_albums(albums);
         }
+        Asked::TrashPlan(ask) => ask_trash(shell, ask, &answer),
     }
+}
+
+/// Says the files were not moved to the trash, and why.
+fn not_trashed(shell: &mut Shell, error: &str) {
+    shell.notify(
+        Level::Warning,
+        Message::new(
+            "gui-trash-failed",
+            "The files were not moved to the Trash: { $error }",
+        )
+        .with("error", error),
+    );
+}
+
+/// The refusals of a trash plan or job, in one line: how many, and the
+/// first reason.
+fn refusals(answer: &Value) -> Option<Message> {
+    let refused = answer["refused"].as_array().filter(|r| !r.is_empty())?;
+    let reason = refused[0]["reason"].as_str().unwrap_or_default();
+    Some(
+        Message::new(
+            "gui-trash-refused",
+            "{ $count } files stay where they are: { $reason }",
+        )
+        .with("count", refused.len())
+        .with("reason", reason),
+    )
+}
+
+/// Asks before moving files to the trash, naming how many and where;
+/// says so when nothing can go.
+fn ask_trash(shell: &mut Shell, ask: &crate::library::TrashAsk, plan: &Value) {
+    use crate::library::{DELETE_REJECTED_COMMAND, TRASH_COMMAND};
+    let files = plan["files"].as_u64().unwrap_or(0);
+    if files == 0 {
+        let why = refusals(plan).map_or_else(String::new, |m| shell.text(m));
+        shell.notify(
+            Level::Warning,
+            Message::new(
+                "gui-trash-nothing",
+                "No file can be moved to the Trash. { $why }",
+            )
+            .with("why", why),
+        );
+        return;
+    }
+    let folders: Vec<&str> = plan["folders"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let place = match folders.as_slice() {
+        [one] => (*one).to_string(),
+        many => shell.text(
+            Message::new("gui-trash-folders", "{ $count } folders").with("count", many.len()),
+        ),
+    };
+    let count = ask.images.len();
+    let title = if ask.rejected {
+        Message::new(
+            "gui-trash-rejected-title",
+            "Delete { $count } rejected photos?",
+        )
+    } else {
+        Message::new("gui-trash-title", "Move { $count } photos to the Trash?")
+    }
+    .with("count", count);
+    let mut detail = shell.text(
+        Message::new(
+            "gui-trash-detail",
+            "Their { $files } files in { $place } go to the system Trash, which can restore them; Undo cannot, and they leave the Library.",
+        )
+        .with("files", files)
+        .with("place", place),
+    );
+    if let Some(m) = refusals(plan) {
+        detail = format!("{detail} {}", shell.text(m));
+    }
+    let confirm = crate::dialogs::Confirm {
+        title: shell.text(title),
+        detail,
+        verb: shell.text(Message::new("gui-trash-verb", "Move to Trash")),
+        danger: true,
+        command: if ask.rejected {
+            DELETE_REJECTED_COMMAND
+        } else {
+            TRASH_COMMAND
+        }
+        .to_owned(),
+        args: json!({ "images": ask.images, "confirmed": true }),
+    };
+    shell.confirm(confirm);
 }
 
 /// The photos counted by folder, from `library.folders`'s answer.
@@ -1086,6 +1192,38 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
+            (Write::Trash(_), Ok(done)) => {
+                let trashed = done["trashed"].as_u64().unwrap_or(0);
+                let failed = done["failed"].as_array().map_or(0, Vec::len);
+                let mut line = shell.text(
+                    Message::new(
+                        "gui-trash-done",
+                        "{ $count } files moved to the Trash (job { $job })",
+                    )
+                    .with("count", trashed)
+                    .with("job", done["job"].as_str().unwrap_or_default()),
+                );
+                if let Some(m) = refusals(&done) {
+                    line = format!("{line}. {}", shell.text(m));
+                }
+                if failed > 0 {
+                    let first = done["failed"][0]["reason"].as_str().unwrap_or_default();
+                    line = format!(
+                        "{line}. {}",
+                        shell.text(
+                            Message::new("gui-trash-some-failed", "{ $count } failed: { $error }",)
+                                .with("count", failed)
+                                .with("error", first)
+                        )
+                    );
+                }
+                let level = if failed > 0 {
+                    Level::Warning
+                } else {
+                    Level::Info
+                };
+                shell.notify(level, line);
+            }
             (Write::Album(edit, at), Ok(done)) => {
                 match serde_json::from_value::<helios_vault::Changes>(done["changes"].clone()) {
                     Ok(changes) => {
@@ -1108,6 +1246,7 @@ impl<S: Store + 'static> Persist<S> {
                 .with("error", e.message),
             ),
             (_, Ok(_)) => {}
+            (Write::Trash(_), Err(e)) => not_trashed(shell, &e.message),
             (Write::Remove(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1631,6 +1770,19 @@ impl<S: Store + 'static> Persist<S> {
                 .into_iter()
                 .map(|images| Write::Remove(images, now)),
         );
+        for ask in shell.library_mut().take_trash_asks() {
+            if ask.confirmed {
+                self.writes.push_back(Write::Trash(ask.images));
+            } else {
+                // Asked first: the node says which files would go and
+                // which stay, then the question names them.
+                let pending = self.node.call(
+                    helios_node_core::library::TRASH,
+                    json!({ "images": ask.images, "plan": true }),
+                );
+                self.asked.push((Asked::TrashPlan(ask), pending));
+            }
+        }
         let expansions = shell.library_mut().take_expansions();
         self.writes.extend(
             expansions
