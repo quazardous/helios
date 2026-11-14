@@ -238,7 +238,7 @@ impl FolderState {
 }
 
 /// Whether an image is in the Library, since when and by what.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct LibraryFlag {
     pub in_library: bool,
     /// When the flag was last set or cleared.
