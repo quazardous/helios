@@ -30,6 +30,8 @@
 //! - [`signals`]: what an import measures of each image to find near
 //!   duplicates (a perceptual hash, the capture time and exposure, frame
 //!   numbers, a sharpness);
+//! - [`pairs`]: RAW+JPEG pairs (one shot, two files) stacked, the raw on
+//!   top, by an import or on photos imported before;
 //! - [`export`]: a batch export over library images planned as a
 //!   request: each image's file and head version, its output name
 //!   decided once;
@@ -52,6 +54,7 @@ pub mod import_history;
 pub mod import_profile;
 pub mod map;
 pub mod map_job;
+pub mod pairs;
 pub mod rename;
 pub mod signals;
 pub mod stacks;

@@ -3307,6 +3307,10 @@ impl Shell {
                 "Move to Top of Stack: the photo shown for its stack (`image`: an id, else the photo under the cursor); Ctrl+Z puts the former top back",
             ),
             (
+                crate::library::PAIRS_COMMAND,
+                "Stack RAW+JPEG Pairs: each raw and JPEG of one shot among the photos (`images`: ids, else the selection) in a stack of their own, the raw on top; photos in a stack already are left as they are; Ctrl+Z takes it back",
+            ),
+            (
                 crate::library::TRASH_COMMAND,
                 "Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z",
             ),
@@ -5375,6 +5379,7 @@ impl Shell {
             crate::library::STACK_TOP_COMMAND => {
                 Ok(json!({ "stack": lib.top_of_stack(text("image"))? }))
             }
+            crate::library::PAIRS_COMMAND => Ok(json!({ "asked": lib.stack_pairs(images()?)? })),
             TRASH_COMMAND => Ok(json!({ "asked": lib.ask_trash(images()?, confirmed)? })),
             DELETE_REJECTED_COMMAND => Ok(json!({
                 "asked": lib.ask_delete_rejected(images()?, confirmed)?

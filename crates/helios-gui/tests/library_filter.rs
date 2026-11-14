@@ -2304,6 +2304,56 @@ fn photos_are_grouped_topped_and_ungrouped_each_undone_and_redone() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn raw_jpeg_pairs_are_stacked_on_the_selection_the_raw_on_top_and_undone() {
+    use egui_pop::api::history::{Answer, Request};
+    let root = temp("pairs");
+    // The raw beside the first JPEG, under its name: one shot, two files.
+    let path = vault_with(&root, |n, name| {
+        let file = if n == 3 { "a.nef" } else { name };
+        Location::seen(root.join(file), 10, 1, 1)
+    });
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let (a, b, raw) = (id(1).hex(), id(2).hex(), id(3).hex());
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[a.clone(), b.clone(), raw.clone()]);
+    let out = answer(&mut h, "library.stack.pairs", json!({}));
+    assert_eq!(out["asked"], 3, "{out}");
+    for at in [1.0, 5.0, 9.0] {
+        settle(&mut h, &mut persist, at);
+    }
+    let stack = persist.vault().stack_of(&id(1)).unwrap().expect("paired");
+    assert_eq!(stack.top, raw, "the raw on top");
+    assert_eq!(stack.members.len(), 2);
+    assert!(
+        persist.vault().stack_of(&id(2)).unwrap().is_none(),
+        "the lone JPEG"
+    );
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Stack RAW+JPEG pairs"
+    );
+    // One step: Ctrl+Z takes the stack back.
+    let request = Request::new(helios_gui::library_history::LIBRARY);
+    let undone = history.undo(&request, &egui_pop::model::commands::Origin::User);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    assert!(persist.vault().stacks().unwrap().is_empty());
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Whether a command, run as `answer` runs it, failed.
 fn answer_err(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> bool {
     match h.state_mut().run(id, args, Origin::User) {

@@ -200,6 +200,10 @@ pub fn stack_label(ask: &crate::library::StackAsk) -> Label {
             Message::new("gui-history-stack-top", "Move to top of stack"),
             std::collections::BTreeMap::default(),
         ),
+        StackAsk::Pairs { .. } => (
+            Message::new("gui-history-stack-pairs", "Stack RAW+JPEG pairs"),
+            std::collections::BTreeMap::default(),
+        ),
     };
     Label {
         text: m.english.clone(),

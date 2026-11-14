@@ -66,6 +66,7 @@ pub const IDS: &[&str] = &[
     "library.stacks.top",
     STACKS_GROUP,
     STACKS_UNGROUP,
+    STACKS_PAIRS,
     "library.stacks.suggest",
     "library.stacks.accept",
     "library.stacks.decline",
@@ -127,6 +128,11 @@ pub const STACKS_GROUP: &str = "library.stacks.group";
 /// Ungroups the stacks photos are in, the photos untouched; answers the
 /// stacks and the step (`changes`).
 pub const STACKS_UNGROUP: &str = "library.stacks.ungroup";
+
+/// Stacks the RAW+JPEG pairs among photos (one shot written as a raw and
+/// a JPEG), the raw on top, as an import does; answers the stacks and
+/// the step (`changes`) the vault's revert undoes.
+pub const STACKS_PAIRS: &str = "library.stacks.pairs";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -439,6 +445,11 @@ pub fn specs() -> Vec<CommandSpec> {
             "Ungroup the stacks photos are in, the photos untouched; undoable",
         )
         .params(object(&[("images", images(), true)])),
+        library(
+            STACKS_PAIRS,
+            "Stack the RAW+JPEG pairs among photos, the raw on top; undoable",
+        )
+        .params(object(&[("images", images(), true)])),
         library("library.stacks.suggest", "Suggest stacks").params(object(&[
             ("images", images(), false),
             ("resolver", json!({ "type": ["string", "null"] }), false),
@@ -686,6 +697,11 @@ pub fn import_spec() -> CommandSpec {
             ),
             ("filter", helios_library::import_profile::filter_schema(), false),
             ("apply", helios_library::import_profile::apply_schema(), false),
+            (
+                "stack_pairs",
+                helios_library::import_profile::stack_pairs_schema(),
+                false,
+            ),
         ]))
         .needs(Need::Vault)
 }
@@ -1251,6 +1267,17 @@ pub fn run<S: Store>(
                         "changes": to_json(&changes) })
             })
         }
+        STACKS_PAIRS => {
+            let images = named(vault, params, "images")?;
+            let (made, changes) =
+                helios_library::pairs::stack_pairs(vault, &images, origin, now())?;
+            if made.is_empty() {
+                return Err("no RAW+JPEG pair in no stack among the photos".into());
+            }
+            Ok(json!({ "stacked": made.len(),
+                       "stacks": made.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+                       "changes": to_json(&changes) }))
+        }
         "library.stacks.suggest" => {
             let selection = named(vault, params, "images")?;
             let window = params["window"].as_f64();
@@ -1471,6 +1498,7 @@ mod tests {
             json!({ "stack": "s", "image": "/p/a.raf" }),
             json!({ "images": ["/p/a.raf", "0a"], "top": "0a" }),
             json!({ "images": ["0a"] }),
+            json!({ "images": ["/p/a.raf", "0a"] }),
             json!({ "images": [], "resolver": null, "window": 3.0, "distance": 8 }),
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),

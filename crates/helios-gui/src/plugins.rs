@@ -151,6 +151,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.select.similar", "phosphor:selection-plus"),
     ("library.sort", "phosphor:sort-ascending"),
     ("library.stack.group", "phosphor:stack"),
+    ("library.stack.pairs", "phosphor:stack-simple"),
     ("library.stack.top", "phosphor:arrow-line-up"),
     ("library.stack.ungroup", "phosphor:stack-minus"),
     ("library.storage", "phosphor:hard-drives"),

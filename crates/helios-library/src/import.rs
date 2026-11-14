@@ -290,6 +290,9 @@ pub struct Options {
     /// What every photo imported is given: keywords, a rating, a colour
     /// label ([`crate::import_profile::Apply`]).
     pub apply: Option<crate::import_profile::Apply>,
+    /// RAW+JPEG pairs brought in stacked, the raw on top
+    /// ([`crate::pairs`]); on by default.
+    pub stack_pairs: bool,
 }
 
 /// A removable volume mounted now: its mount point and its identity.
@@ -342,6 +345,7 @@ impl Default for Options {
             mounted: None,
             filter: None,
             apply: None,
+            stack_pairs: true,
         }
     }
 }
@@ -400,6 +404,9 @@ pub struct Report {
     pub edits_failed: u64,
     /// Images whose fields took values an importer listed.
     pub metadata: u64,
+    /// RAW+JPEG pairs it stacked ([`Options::stack_pairs`]).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stacked: u64,
     /// Bytes read from the sources: a copied file is read once, hashed
     /// as it is copied.
     pub read: u64,
@@ -1520,6 +1527,9 @@ fn run_import<S: Store>(
         by: id.clone(),
         places: places.to_vec(),
     };
+    // The images brought in, by the file each came from: their pairs are
+    // stacked at the end.
+    let mut brought: Vec<(PathBuf, ImageId)> = Vec::new();
     for (done, (source, path)) in files.iter().enumerate() {
         if run.stopped() {
             break;
@@ -1585,6 +1595,9 @@ fn run_import<S: Store>(
             }
             Status::Skipped | Status::Asked => {}
         }
+        if let Some(id) = crate::pairs::brought(&line, status) {
+            brought.push((path.clone(), id));
+        }
         emit(&line);
     }
     if run.root.is_some() {
@@ -1605,9 +1618,14 @@ fn run_import<S: Store>(
             let _ = std::fs::remove_dir(shared);
         }
     }
+    // The RAW+JPEG pairs it brought in, stacked: in its undo step too.
+    let stacked = options
+        .stack_pairs
+        .then(|| crate::pairs::stack_brought(vault, &brought, now));
     // What a cancelled import added is recorded too: its undo takes it
     // back.
     run.report.changes = run.changes();
+    crate::pairs::said(&job, stacked, &mut run.report);
     if run.stopped() && run.report.files < total {
         run.report.cancelled = true;
         job.log(format!(

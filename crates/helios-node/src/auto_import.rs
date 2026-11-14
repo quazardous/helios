@@ -109,11 +109,13 @@ struct Choices {
     filter: Option<helios_library::import_profile::Filter>,
     /// What every photo imported is given.
     apply: Option<helios_library::import_profile::Apply>,
+    /// RAW+JPEG pairs stacked, the raw on top.
+    stack_pairs: bool,
 }
 
 impl Default for Choices {
     /// The local sources' defaults: added where they are, by day, the
-    /// original names, darktable sidecars read.
+    /// original names, darktable sidecars read, RAW+JPEG pairs stacked.
     fn default() -> Self {
         Self {
             copy_folders: false,
@@ -123,6 +125,7 @@ impl Default for Choices {
             darktable: true,
             filter: None,
             apply: None,
+            stack_pairs: true,
         }
     }
 }
@@ -169,6 +172,7 @@ fn options(
         origin: Some(guard::origin(name)),
         filter: choices.filter.filter(|f| !f.is_all()),
         apply: choices.apply.filter(|a| !a.is_empty()),
+        stack_pairs: choices.stack_pairs,
         ..Options::default()
     };
     if card || choices.copy_folders {

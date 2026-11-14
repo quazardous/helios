@@ -289,6 +289,10 @@ impl Write {
                         "library.stacks.top",
                         json!({ "stack": stack, "image": image }),
                     ),
+                    StackAsk::Pairs { images } => (
+                        helios_node_core::library::STACKS_PAIRS,
+                        json!({ "images": images }),
+                    ),
                 }
             }
             Self::SwitchVersion(image, version, ..) => (
