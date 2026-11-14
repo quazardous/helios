@@ -238,15 +238,15 @@ fn a_user_import_is_a_session_the_library_shows_with_its_photos_selected() {
     s.h.run_steps(2);
     assert_eq!(s.filtered(), first);
     // No session: the whole Library again.
-    let answer =
-        s.h.state_mut()
-            .run(
-                helios_gui::library::IMPORT_SESSION_COMMAND,
-                json!({ "id": null }),
-                Origin::User,
-            )
-            .unwrap();
-    assert_eq!(answer["id"], Value::Null);
+    s.h.state_mut()
+        .run(
+            helios_gui::library::IMPORT_SESSION_COMMAND,
+            json!({ "id": null }),
+            Origin::User,
+        )
+        .unwrap();
+    s.h.run_steps(2);
+    assert_eq!(s.h.state().library().import_session(), None);
     assert_eq!(s.filtered().len(), 5, "the whole library again");
 }
 
@@ -271,13 +271,23 @@ fn with_the_setting_off_or_another_s_import_the_selection_does_not_change() {
 fn run_workshop_on_the_selection_is_refused_while_the_workshops_are_off() {
     let mut s = setup("workshop");
     s.import("roll", 1, "user");
-    let e =
-        s.h.state_mut()
-            .run(
-                helios_gui::library::RUN_WORKSHOP_COMMAND,
-                json!({}),
-                Origin::User,
-            )
-            .unwrap_err();
-    assert!(e.contains("interface.experimental.workshops"), "{e}");
+    s.h.state_mut()
+        .run(
+            helios_gui::library::RUN_WORKSHOP_COMMAND,
+            json!({}),
+            Origin::User,
+        )
+        .unwrap();
+    s.h.run_steps(2);
+    let said: Vec<&str> =
+        s.h.state()
+            .notices()
+            .iter()
+            .map(|n| n.text.as_str())
+            .collect();
+    assert!(
+        said.iter()
+            .any(|t| t.contains("interface.experimental.workshops")),
+        "{said:?}"
+    );
 }
