@@ -87,6 +87,26 @@ struct Saved {
     confirmed: Option<String>,
     #[serde(default)]
     choices: Option<Choices>,
+    /// The import profile it points at: its choices win over `choices`,
+    /// kept as they were when the source was saved.
+    #[serde(default)]
+    profile: Option<String>,
+}
+
+/// `saved` with the choices of the profile it points at, as the node's
+/// import profiles (`profiles`, the document's text) keep them now; as
+/// it is when it points at none the document has.
+fn with_profile(saved: &Saved, profiles: Option<&str>) -> Saved {
+    let mut out = saved.clone();
+    let Some(id) = &saved.profile else { return out };
+    let doc = helios_node_core::import_profiles::Document::of(profiles);
+    if let Some(p) = doc.get(id) {
+        match serde_json::from_value::<Choices>(serde_json::Value::Object(p.choices.clone())) {
+            Ok(c) => out.choices = Some(c),
+            Err(e) => eprintln!("helios-node: automatic imports: profile {id}: {e}"),
+        }
+    }
+    out
 }
 
 /// The document, as the desktop keeps it.
@@ -338,6 +358,14 @@ impl Runner {
             );
             return;
         }
+        let profiles = self
+            .settings
+            .read(helios_node_core::import_profiles::DOCUMENT)
+            .unwrap_or_else(|e| {
+                eprintln!("helios-node: automatic imports: the import profiles: {e}");
+                None
+            });
+        let saved = &with_profile(saved, profiles.as_deref());
         let options = match options(saved, &name, card, &self.stop) {
             Ok(o) => o,
             Err(e) => {
@@ -468,5 +496,23 @@ auto = "plugged"
         assert_eq!(folder.placement, Placement::Reference, "added where it is");
         assert!(folder.darktable);
         assert!(sources("not toml [").is_empty());
+    }
+
+    #[test]
+    fn a_source_pointing_at_a_profile_imports_with_the_profiles_choices() {
+        let saved = Saved {
+            profile: Some("monthly".into()),
+            ..Saved::default()
+        };
+        let doc = r#"{ "profiles": [{ "id": "monthly", "name": "Monthly",
+            "choices": { "copy_folders": true, "layout": "month", "darktable": false } }] }"#;
+        let stop = Arc::new(AtomicBool::new(false));
+        let o = options(&with_profile(&saved, Some(doc)), "hot", false, &stop).unwrap();
+        assert_eq!(o.placement, Placement::Copy { into: None });
+        assert_eq!(o.layout, Layout::Month);
+        assert!(!o.darktable);
+        // A profile the document does not have: the source's own choices.
+        let o = options(&with_profile(&saved, None), "hot", false, &stop).unwrap();
+        assert_eq!(o.placement, Placement::Reference);
     }
 }

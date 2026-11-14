@@ -65,12 +65,6 @@ pub enum Trigger {
 }
 
 impl Trigger {
-    /// The trigger a source of this kind is offered: a card's or a
-    /// folder's.
-    pub fn offered(card: bool) -> Self {
-        if card { Self::Plugged } else { Self::NewFiles }
-    }
-
     /// Its words in a source's menu and in the wizard.
     pub(super) fn message(self) -> Message {
         match self {

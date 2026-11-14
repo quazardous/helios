@@ -532,6 +532,8 @@ impl ConnectorManifest {
             asks: SetupAsks::Account,
             icon: "cloud".into(),
             auto: None,
+            placement: Placement::CopyOnly,
+            naming: Vec::new(),
         })
     }
 
@@ -605,8 +607,11 @@ impl Browser {
 
 /// How a new source of a connector is set up: the steps the import
 /// window's "Add…" wizard draws for it, so the window names no connector
-/// (section 3.7). Whether it adds in place or copies comes from its
-/// [`Caps`] and source contract; its parameters from its source contract.
+/// (section 3.7), and which import options its sources are offered, so
+/// the import window and its profile editor test no connector either:
+/// whether its photos are added in place or copied ([`Placement`]), the
+/// fields a copy's name may use, and its automatic import. Its parameters
+/// come from its source contract.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Setup {
@@ -618,6 +623,54 @@ pub struct Setup {
     /// The automatic import its sources are offered; `None`: none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto: Option<AutoImport>,
+    /// Whether its photos are added where they are or copied.
+    pub placement: Placement,
+    /// The fields a copy's name pattern may use (`stem`, `date`, `time`,
+    /// `camera`…, as [`NAME_FIELDS`] lists them); empty: every one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub naming: Vec<String>,
+}
+
+/// The fields of a copy's name pattern, as `{field}` in it.
+pub const NAME_FIELDS: [&str; 10] = [
+    "stem", "date", "time", "year", "month", "day", "camera", "maker", "frame", "seq",
+];
+
+impl Setup {
+    /// Whether a copy's name may use `field` (`stem`, `date`…).
+    pub fn names_with(&self, field: &str) -> bool {
+        self.naming.is_empty() || self.naming.iter().any(|f| f == field)
+    }
+
+    /// Whether every `{field}` of the name pattern `pattern` is one its
+    /// copies may be named with.
+    pub fn names_pattern(&self, pattern: &str) -> bool {
+        pattern
+            .split('{')
+            .skip(1)
+            .filter_map(|rest| rest.split_once('}'))
+            .all(|(field, _)| self.names_with(field))
+    }
+}
+
+/// Where a connector's photos go at import.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Placement {
+    /// Added where they are unless the profile copies them (a folder).
+    #[default]
+    Add,
+    /// Copied unless the person adds them in place (a card, wiped later).
+    Copy,
+    /// Always copied: they are not files on this machine (a service).
+    CopyOnly,
+}
+
+impl Placement {
+    /// Whether a profile's copy choice is asked for its sources.
+    pub fn asks(self) -> bool {
+        self != Self::CopyOnly
+    }
 }
 
 /// What a new source of a connector is set up from.
@@ -880,5 +933,27 @@ mod tests {
         let again: ConnectorManifest =
             serde_json::from_value(serde_json::to_value(&manifest).unwrap()).unwrap();
         assert_eq!(again, manifest);
+    }
+
+    #[test]
+    fn a_setup_declares_how_its_photos_are_placed_and_named() {
+        let registry = registry();
+        let setup = |id: &str| registry[id].manifest().setup().unwrap();
+        assert_eq!(setup(card::ID).placement, Placement::Copy);
+        assert_eq!(setup(folder::ID).placement, Placement::Add);
+        assert!(setup(folder::ID).names_pattern("{date}_{camera}_{stem}"));
+        let read: Setup = serde_json::from_value(serde_json::json!({
+            "asks": "account", "icon": "cloud", "placement": "copy-only",
+            "naming": ["stem", "date", "seq"]
+        }))
+        .unwrap();
+        assert!(!read.placement.asks());
+        assert!(read.names_pattern("{date}-{seq}"));
+        assert!(!read.names_pattern("{date}_{time}_{camera}"));
+        // A connector that connects an account is copied, as derived.
+        let mut manifest = registry[folder::ID].manifest();
+        manifest.setup = None;
+        manifest.caps.accounts = true;
+        assert_eq!(manifest.setup().unwrap().placement, Placement::CopyOnly);
     }
 }

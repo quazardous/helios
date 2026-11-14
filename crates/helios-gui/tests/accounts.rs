@@ -300,6 +300,79 @@ fn the_profile_follows_the_selected_source_and_a_remote_one_always_copies() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// The fake connector declaring the names its copies can take: a file's
+/// name, its date and a number, no camera.
+struct NamingFake;
+
+impl helios_connect::ConnectorProvider for NamingFake {
+    fn manifest(&self) -> helios_connect::ConnectorManifest {
+        let mut m = FakeProvider.manifest();
+        let mut setup = m.setup().unwrap();
+        setup.naming = vec!["stem".into(), "date".into(), "seq".into()];
+        m.setup = Some(setup);
+        m
+    }
+
+    fn create(
+        &self,
+        settings: &helios_connect::Settings,
+        services: &helios_connect::ConnectorServices,
+    ) -> Result<Box<dyn helios_connect::Connector>, helios_connect::ConnectorError> {
+        FakeProvider.create(settings, services)
+    }
+}
+
+#[test]
+fn the_profile_editor_offers_only_what_the_selected_sources_connector_declares() {
+    let (world, mut h) = world();
+    h.state_mut().add_import_connector(Arc::new(NamingFake));
+    let mut account = helios_connect::account::Account::new(ID, "ann@nas.local", &[]);
+    account.state = AccountState::Connected;
+    world.book.save(&account).unwrap();
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let (read, write) = (kept.clone(), kept.clone());
+    h.state_mut().keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+    let folder =
+        std::env::temp_dir().join(format!("helios-gui-accounts-editor-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    run(
+        &mut h,
+        "library.importWindow",
+        json!({ "source": folder }),
+        Origin::User,
+    )
+    .unwrap();
+    // A folder: every option, copy or add and every name.
+    h.state_mut().open_import_profiles();
+    until(&mut h, "the folder's editor", |h| {
+        shown(h, "Add where they are")
+    });
+    assert!(shown(&h, "Date, time and camera"));
+    h.get_by_label("Done").click();
+    until(&mut h, "the editor closed", |h| {
+        !h.state().import_profiles_open()
+    });
+    // The account: its connector always copies and names no camera.
+    until(&mut h, "the account listed", |h| shown(h, "ann@nas.local"));
+    h.get_by_label("ann@nas.local").click();
+    until(&mut h, "the account's choices", |h| {
+        shown(h, "ann@nas.local: the default choices")
+    });
+    h.state_mut().open_import_profiles();
+    until(&mut h, "the account's editor", |h| {
+        shown(h, "Date and number")
+    });
+    assert!(!shown(&h, "Add where they are"), "never added in place");
+    assert!(!shown(&h, "Date, time and camera"), "no camera to name by");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// A connector signing in through OAuth: the fake's, with an `oauth`
 /// step in place of its form.
 struct OauthProvider;

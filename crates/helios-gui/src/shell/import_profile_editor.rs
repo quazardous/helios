@@ -9,7 +9,10 @@
 //! - **The editor**, on the right: the selected profile's choices grouped
 //!   as Copy, Naming, Filter, Apply and Advanced, with a live example of
 //!   a file's folder and name (the first photo ticked, else a made-up
-//!   one).
+//!   one). It offers only what the selected source's connector declares
+//!   (`helios_connect::Setup`): no copy-or-add choice for one that always
+//!   copies, only the names it can give, darktable edits where sidecars
+//!   can be; with no source selected, everything.
 //!
 //! A change is saved on the profile at once, and every source pointing
 //! at it takes it ([`ImportWindow::link_sources`]). While the editor is
@@ -407,10 +410,14 @@ impl ImportWindow {
             "gui-import-profiles-copy-help",
             "A source that cannot be added where it is, or that is wiped after import, is always copied",
         )));
-        ui.horizontal_wrapped(|ui| {
-            ui.radio_value(&mut self.choices.copy_folders, true, &words.copy);
-            ui.radio_value(&mut self.choices.copy_folders, false, &words.add);
-        });
+        // Only what the selected source's connector declares: one that
+        // cannot add in place is not asked.
+        if self.sources.setup.placement.asks() {
+            ui.horizontal_wrapped(|ui| {
+                ui.radio_value(&mut self.choices.copy_folders, true, &words.copy);
+                ui.radio_value(&mut self.choices.copy_folders, false, &words.add);
+            });
+        }
         ui.separator();
         ui.strong(t(Message::new("gui-import-profiles-naming", "Naming")));
         import_choices::copy_choices_ui(ui, self, words, &mut asked);
@@ -429,8 +436,10 @@ impl ImportWindow {
             ui.radio_value(d, Duplicates::Keep, &words.keep);
             ui.radio_value(d, Duplicates::Ask, &words.ask);
         });
-        ui.checkbox(&mut self.choices.darktable, &words.darktable)
-            .on_hover_text(&words.darktable_help);
+        if self.sources.honours.darktable {
+            ui.checkbox(&mut self.choices.darktable, &words.darktable)
+                .on_hover_text(&words.darktable_help);
+        }
         if self.camera_looks {
             ui.checkbox(&mut self.choices.camera_look, &words.camera_look)
                 .on_hover_text(&words.camera_look_help);

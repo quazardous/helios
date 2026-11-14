@@ -730,10 +730,21 @@ sign-in for a connector with a connection process, else not offered):
 asks = "path"       # "path": a folder; "volume": a mounted card or camera; "account"
 icon = "folder"     # a Phosphor icon's name
 auto = "new-files"  # the automatic import offered: "plugged", "new-files"; absent: none
+placement = "add"   # "add": added in place unless the profile copies; "copy": copied
+                    # unless the person adds in place; "copy-only": always copied
+naming = ["stem", "date", "seq"]  # the fields a copy's name may use; absent: every one
 ```
 
-Built in, `folder` asks a path (`auto = "new-files"`), `card` a volume
-(`auto = "plugged"`); a plugin's connector asks its account.
+Built in, `folder` asks a path (`auto = "new-files"`, `placement =
+"add"`), `card` a volume (`auto = "plugged"`, `placement = "copy"`: a
+card is wiped later); a plugin's connector asks its account and is
+`copy-only`. The same declaration drives the rest of the window, which
+tests no connector: whether an import copies, the source menu's "Import
+automatically", and the profile editor, which offers only what the
+selected source's connector declares (no copy-or-add choice for a
+`copy-only` one, only the names its `naming` fields make). A folder's
+path or a mounted volume finds its connector by what it is set up from
+(`asks`), not by a connector's id.
 
 1. **The kind**, among the connectors installed that declare a setup,
    in the order installed: each with its icon, its label and the one

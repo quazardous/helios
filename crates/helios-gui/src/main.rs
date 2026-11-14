@@ -712,7 +712,7 @@ fn library_commands(
     shell.register(
         CommandSpec::new(
             helios_gui::shell::IMPORT_COMMAND,
-            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out; `camera_look`: false leaves the cameras' default looks off the raws)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `profile`: an import profile's id, under the options given; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out; `camera_look`: false leaves the cameras' default looks off the raws)",
             "Library",
         ),
         move |args, origin| {
@@ -722,7 +722,9 @@ fn library_commands(
             if args.get("origin").is_none() {
                 args["origin"] = json!(helios_gui::persist::who(origin));
             }
-            let args = &args;
+            // A profile named: its choices under the options given, as
+            // the node's `library.import` takes them.
+            let args = &helios_node_core::import_profiles::expand(library.vault(), &args)?;
             let options = helios_gui::importers::options(args)?;
             let through = args.get("importer").is_some().then(|| plugins.clone());
             let mut sources: Vec<std::path::PathBuf> = args
@@ -2368,6 +2370,19 @@ fn main() -> Result<(), String> {
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );
             shell.remember_import_choices_in(import_choices);
+            // The import profiles: one of the person's documents the node
+            // keeps, the one its `import.profiles.*` commands read.
+            if let Some(kept) = node_settings.clone() {
+                let write = kept.clone();
+                let doc = helios_node_core::import_profiles::DOCUMENT;
+                // Written off the interface's thread, as the sources are.
+                shell.keep_import_profiles_with(
+                    Box::new(move || kept.read(doc)),
+                    helios_gui::shell::write_import_sources_in_background(move |text| {
+                        write.write(doc, text)
+                    }),
+                );
+            }
             // The import window's saved sources, with their own choices:
             // one of the person's documents the node keeps.
             if let Some(kept) = node_settings.clone() {
