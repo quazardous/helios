@@ -19,7 +19,10 @@
 //!   a parent.
 //!
 //! A step may also change documents (the Library's collections): each is
-//! set back only where it still holds what the step left.
+//! set back only where it still holds what the step left. An image's row
+//! as a file of a photo ([`ImageRows::file`]) moves the same way, once its
+//! photo is there: rows a step leaves go before the images move, rows it
+//! brings come after, so a photo and its file move together in any order.
 //!
 //! Audit rows stay: they are a record, not state.
 
@@ -28,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Image, ImageId, LibraryFlag, Location, Store, Vault, Version};
+use crate::{Image, ImageId, LibraryFlag, Location, PhotoFile, Store, Vault, Version};
 
 /// The rows of one image.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +45,9 @@ pub struct ImageRows {
     /// Its near-duplicate signals ([`Vault::signals`]).
     pub signals: Option<Value>,
     pub versions: Vec<Version>,
+    /// Its row as a file of a photo ([`crate::files`]), if it is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<PhotoFile>,
 }
 
 impl ImageRows {
@@ -139,13 +145,18 @@ impl<S: Store> Vault<S> {
     fn walk(&self, changes: &Changes, forward: bool) -> Result<Replayed, String> {
         let done = self.transaction(|store| {
             let mut done = Replayed::default();
+            // A photo-file row goes first, comes back last (module doc).
             for c in &changes.images {
-                let (from, to) = if forward {
-                    (c.before.as_ref(), c.after.as_ref())
-                } else {
-                    (c.after.as_ref(), c.before.as_ref())
-                };
+                let (from, to) = ends(c, forward);
+                leave_file(store, &c.image, from, to, &mut done)?;
+            }
+            for c in &changes.images {
+                let (from, to) = ends(c, forward);
                 move_rows(store, &c.image, from, to, &mut done)?;
+            }
+            for c in &changes.images {
+                let (from, to) = ends(c, forward);
+                bring_file(store, &c.image, from, to, &mut done)?;
             }
             // A document is set back only where it still holds the step's.
             for d in &changes.documents {
@@ -208,7 +219,83 @@ pub(crate) fn rows_of<S: Store + ?Sized>(
         fields,
         signals: store.document(crate::stacks::SIGNALS, &id.hex())?,
         versions: store.versions(id)?,
+        file: store.photo_of(id)?,
     }))
+}
+
+/// The rows a walk moves an image from, and to.
+fn ends(c: &Change, forward: bool) -> (Option<&ImageRows>, Option<&ImageRows>) {
+    if forward {
+        (c.before.as_ref(), c.after.as_ref())
+    } else {
+        (c.after.as_ref(), c.before.as_ref())
+    }
+}
+
+/// The file row a step moves an image's from, and to.
+fn file_ends<'a>(
+    from: Option<&'a ImageRows>,
+    to: Option<&'a ImageRows>,
+) -> (Option<&'a PhotoFile>, Option<&'a PhotoFile>) {
+    (
+        from.and_then(|f| f.file.as_ref()),
+        to.and_then(|t| t.file.as_ref()),
+    )
+}
+
+/// Takes out the file row the step leaves, where the image still holds
+/// it.
+fn leave_file<S: Store>(
+    store: &mut S,
+    id: &ImageId,
+    from: Option<&ImageRows>,
+    to: Option<&ImageRows>,
+    done: &mut Replayed,
+) -> Result<(), String> {
+    let (was, will) = file_ends(from, to);
+    let Some(was) = was else {
+        return Ok(());
+    };
+    if will == Some(was) {
+        return Ok(());
+    }
+    if store.photo_of(id)?.as_ref() == Some(was) {
+        store.remove_photo_file(id)?;
+        if will.is_none() {
+            done.changed += 1;
+        }
+    } else {
+        done.kept += 1;
+    }
+    Ok(())
+}
+
+/// Puts back the file row the step brings, where the image holds none
+/// and its photo is there.
+fn bring_file<S: Store>(
+    store: &mut S,
+    id: &ImageId,
+    from: Option<&ImageRows>,
+    to: Option<&ImageRows>,
+    done: &mut Replayed,
+) -> Result<(), String> {
+    let (was, will) = file_ends(from, to);
+    let Some(will) = will else {
+        return Ok(());
+    };
+    if was == Some(will) {
+        return Ok(());
+    }
+    if store.photo_of(id)?.is_none()
+        && store.image(id)?.is_some()
+        && store.image(&will.photo)?.is_some()
+    {
+        store.put_photo_file(will)?;
+        done.changed += 1;
+    } else {
+        done.kept += 1;
+    }
+    Ok(())
 }
 
 /// Moves one image's rows from `from` to `to`, keeping what changed since.
@@ -256,7 +343,14 @@ fn forget<S: Store>(
     let known_path =
         |l: &Location| from.is_some_and(|f| f.locations.iter().any(|k| k.path == l.path));
     let known_version = |v: &Version| from.is_some_and(|f| f.versions.iter().any(|k| k.id == v.id));
-    if !now.locations.iter().all(known_path) || !now.versions.iter().all(known_version) {
+    // A photo that gained files since keeps them, and stays; so does a
+    // file attached to a photo since.
+    let known_file = now.file.is_none() || from.and_then(|f| f.file.as_ref()) == now.file.as_ref();
+    if !now.locations.iter().all(known_path)
+        || !now.versions.iter().all(known_version)
+        || !known_file
+        || !store.photo_files(id)?.is_empty()
+    {
         done.kept += 1;
         return Ok(());
     }
