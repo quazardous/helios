@@ -13,6 +13,7 @@
 pub mod calibrate;
 pub mod commands;
 pub mod cursor;
+pub mod desktop;
 pub mod endpoint;
 pub mod health;
 pub mod import_promise;

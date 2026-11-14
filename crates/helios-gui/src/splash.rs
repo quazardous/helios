@@ -190,6 +190,85 @@ impl Boot {
     }
 }
 
+/// What makes the application once the start's work is done: its
+/// output, the boot splash (to draw until the start's steps left are
+/// done) and the window's context.
+type Make<T, A> = Box<dyn FnOnce(T, Boot, &egui::Context) -> A>;
+
+/// The start before the window's application exists: the window opens at
+/// once on the boot splash while the start's `work` runs off the
+/// interface's thread (its parts tick their steps as they end them), then
+/// the application is made on the interface's thread, in the frame after
+/// one drew the work done. A fast start adds no delay: a frame or two.
+pub struct Starting<T, A> {
+    boot: Option<Boot>,
+    work: Option<std::thread::JoinHandle<T>>,
+    done: Option<T>,
+    make: Option<Make<T, A>>,
+    app: Option<A>,
+}
+
+impl<T: Send + 'static, A> Starting<T, A> {
+    /// The boot splash over `phase` while `work` runs; `make` builds the
+    /// application from what it gave.
+    pub fn new(
+        phase: Phase,
+        work: std::thread::JoinHandle<T>,
+        make: impl FnOnce(T, Boot, &egui::Context) -> A + 'static,
+    ) -> Self {
+        Starting {
+            boot: Some(Boot::new(phase)),
+            work: Some(work),
+            done: None,
+            make: Some(Box::new(make)),
+            app: None,
+        }
+    }
+
+    /// The application, once made.
+    pub fn app(&self) -> Option<&A> {
+        self.app.as_ref()
+    }
+
+    /// The application, once made.
+    pub fn app_mut(&mut self) -> Option<&mut A> {
+        self.app.as_mut()
+    }
+
+    /// One pass: the splash while the work runs, the application made
+    /// once a frame drew it done. The application, once made: it draws
+    /// this pass. A panic of the work goes on here.
+    pub fn pass(&mut self, ui: &mut egui::Ui) -> Option<&mut A> {
+        if self.app.is_none() {
+            if let Some(done) = self.done.take()
+                && let (Some(make), Some(boot)) = (self.make.take(), self.boot.take())
+            {
+                self.app = Some(make(done, boot, ui.ctx()));
+            } else {
+                if self
+                    .work
+                    .as_ref()
+                    .is_some_and(std::thread::JoinHandle::is_finished)
+                    && let Some(work) = self.work.take()
+                {
+                    match work.join() {
+                        Ok(done) => self.done = Some(done),
+                        Err(panic) => std::panic::resume_unwind(panic),
+                    }
+                    // The next frame makes the application.
+                    ui.ctx().request_repaint();
+                }
+                if let Some(boot) = &mut self.boot {
+                    boot.pass(ui);
+                }
+                // The work is looked at again at the next frame.
+                ui.ctx().request_repaint_after(REDRAW);
+            }
+        }
+        self.app.as_mut()
+    }
+}
+
 /// Where the end stands, after a pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ending {
@@ -349,6 +428,76 @@ mod tests {
         h.run_steps(2);
         assert!(h.state().1, "the start is over: the shell takes the window");
         assert!(h.query_by_label("Starting Helios…").is_none());
+    }
+
+    /// The window draws the boot splash while the start's work runs off
+    /// its thread: its step unticked, then ticked, frames coming all
+    /// along; the application is made once the work is done.
+    #[test]
+    fn the_boot_splash_draws_while_the_start_works_off_the_window_thread() {
+        let phase = Phase::new();
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (began, heard) = std::sync::mpsc::channel::<()>();
+        let open = phase.declare(opening());
+        let interface = phase.declare(Message::plain("Building the interface"));
+        let work = std::thread::spawn(move || {
+            wait.recv().unwrap();
+            open.start();
+            began.send(()).unwrap();
+            wait.recv().unwrap();
+            open.done();
+            interface.start();
+            (7, interface)
+        });
+        type App = (u32, Boot);
+        let starting: Starting<(u32, Running), App> =
+            Starting::new(phase.clone(), work, |(n, interface), boot, _| {
+                drop(interface);
+                (n, boot)
+            });
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(640.0, 400.0))
+            .build_ui_state(
+                |ui, (starting, frames): &mut (Starting<(u32, Running), App>, u32)| {
+                    *frames += 1;
+                    if let Some((_, boot)) = starting.pass(ui) {
+                        boot.pass(ui);
+                    }
+                },
+                (starting, 0),
+            );
+        h.run_steps(2);
+        h.get_by_label("Starting Helios…");
+        h.get_by_label("Opening the library");
+        h.get_by_label("Building the interface");
+        assert_eq!(h.query_all_by_label(DONE).count(), 0, "nothing ticked yet");
+        go.send(()).unwrap();
+        heard.recv().unwrap();
+        h.run_steps(3);
+        assert!(h.state().0.app().is_none(), "the work still runs");
+        assert_eq!(h.query_all_by_label(DONE).count(), 0, "running, not ticked");
+        assert!(h.state().1 >= 5, "frames keep coming: {}", h.state().1);
+        go.send(()).unwrap();
+        let mut ticked = false;
+        for _ in 0..200 {
+            h.run_steps(1);
+            ticked |= h.query_all_by_label(DONE).count() >= 1;
+            if h.state().0.app().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(ticked, "the step drawn ticked before the application");
+        assert_eq!(
+            h.state().0.app().map(|a| a.0),
+            Some(7),
+            "made from the work"
+        );
+        h.run_steps(2);
+        assert!(
+            h.query_by_label("Starting Helios…").is_none(),
+            "the start is over"
+        );
     }
 
     #[derive(Default)]
