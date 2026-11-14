@@ -779,7 +779,7 @@ fn a_snapshot_by_hand_waits_for_a_held_catalogue_off_the_frame() {
         .unwrap();
     let (send, taken) = std::sync::mpsc::channel();
     let started = std::time::Instant::now();
-    catalogue::take_by_hand(&node, &lib.file, 3, move |t| {
+    catalogue::take_by_hand(None, &node, &lib.file, 3, move |t| {
         let _ = send.send(t);
     })
     .unwrap();

@@ -134,7 +134,8 @@ proposes the next slices.
   heads of the one image (2026-10-29: plain heads). The grid shows one
   cell per image; heads show only in Compare (`Library::Heads`). No
   "duplicate" (virtual copy) command.
-- **RAW+JPEG pairs:** not decided (ROADMAP 2026-10-13); today two images.
+- **RAW+JPEG pairs:** today two images; decided (2026-11-14): one photo
+  with two files, see [raw-jpeg-pairs.md](raw-jpeg-pairs.md).
 
 ### Storage
 
@@ -461,7 +462,8 @@ Recommended: **B**: an image is the hash of one file, so A breaks the
 identity model; stacks already show collapsed and a filter flattens
 them.
 
-**Decided (2026-11-11): B.**
+**Decided (2026-11-11): B.** Superseded (2026-11-14): A, one photo
+with several files, each with a role; see [raw-jpeg-pairs.md](raw-jpeg-pairs.md).
 
 **L-C7. Keyword hierarchy.**
 - A. Path tags (`places|France|Lyon`, as darktable and as imported
@@ -859,7 +861,8 @@ Grouping photos of a stack with others merges the stack (Lightroom's
 habit); the photo under the cursor goes on top. Each is one step of the
 library history (the stacks' documents before and after), and joins a
 `command.batch`'s step as the other library commands do. Not yet: the
-RAW+JPEG pairs stacked at import.
+RAW+JPEG pairs stacked at import. Part 2 stopped (2026-11-14): pairs
+are one photo with two files, built by [raw-jpeg-pairs.md](raw-jpeg-pairs.md)'s slices.
 
 **L12. Keyword tree.** A Keywords section: the tree from `|` paths with
 counts, click to filter, drag on photos, rename and merge a branch as

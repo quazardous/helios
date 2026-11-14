@@ -19,6 +19,7 @@ pub mod health;
 pub mod import_profiles;
 pub mod import_promise;
 pub mod init;
+pub mod job_promises;
 pub mod jobs;
 pub mod library;
 pub mod map;

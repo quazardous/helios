@@ -1672,6 +1672,7 @@ pub(crate) fn facts_kept(
             fields: BTreeMap::new(),
             signals: after.signals.clone(),
             versions: Vec::new(),
+            file: None,
         },
     })
 }

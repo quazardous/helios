@@ -46,8 +46,8 @@ use helios_vault::rules::{Condition, Match, Rule, RuleKind};
 use helios_vault::storage::VERIFIED;
 use helios_vault::storage::VolumeId;
 use helios_vault::{
-    Folder, FolderState, Image, ImageId, LibraryFlag, Location, Presence, Sighting, Store, ToRead,
-    Version, VersionId, parse_hash,
+    FileRole, Folder, FolderState, Image, ImageId, LibraryFlag, Location, PhotoFile, Presence,
+    Sighting, Store, ToRead, Version, VersionId, parse_hash,
 };
 
 pub mod health;
@@ -532,6 +532,46 @@ impl SqliteStore {
         let value = f(&tx)?;
         tx.commit().map_err(err)?;
         Ok(value)
+    }
+
+    /// The photo-file rows `condition` selects, its parameters `keys`.
+    fn photo_files_where(
+        &self,
+        condition: &str,
+        keys: &[String],
+    ) -> Result<Vec<PhotoFile>, String> {
+        let mut statement = self
+            .db
+            .prepare_cached(&format!(
+                "SELECT image, photo, role, rank, added_at, added_by FROM photo_files WHERE {condition}"
+            ))
+            .map_err(err)?;
+        let rows: Vec<(String, String, String, i64, i64, String)> = statement
+            .query_map(rusqlite::params_from_iter(keys), |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)?;
+        rows.into_iter()
+            .map(|(image, photo, role, rank, added_at, added_by)| {
+                Ok(PhotoFile {
+                    image: ImageId::from_hex(&image)?,
+                    photo: ImageId::from_hex(&photo)?,
+                    role: FileRole::parse(&role)?,
+                    rank: u32::try_from(rank).map_err(|e| format!("file {image}: {e}"))?,
+                    added_at: added_at as u64,
+                    added_by,
+                })
+            })
+            .collect()
     }
 
     fn row_image(id: String, size: i64, partial: String) -> Result<Image, String> {
@@ -1665,11 +1705,79 @@ impl Store for SqliteStore {
             }
             db.execute("DELETE FROM fields WHERE image = ?1", params![id.hex()])
                 .map_err(err)?;
+            db.execute(
+                "DELETE FROM photo_files WHERE image = ?1 OR photo = ?1",
+                params![id.hex()],
+            )
+            .map_err(err)?;
             let removed = db
                 .execute("DELETE FROM images WHERE id = ?1", params![id.hex()])
                 .map_err(err)?;
             Ok(removed == 1)
         })
+    }
+
+    fn put_photo_file(&mut self, file: &PhotoFile) -> Result<(), String> {
+        if file.role == FileRole::Master {
+            return Err("a photo's master has no file row".into());
+        }
+        self.write(|db| {
+            for id in [&file.image, &file.photo] {
+                if image_known(db, id)?.is_none() {
+                    return Err(format!("no image {}", id.hex()));
+                }
+            }
+            db.execute(
+                "INSERT INTO photo_files (image, photo, role, rank, added_at, added_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (image) DO UPDATE SET photo = ?2, role = ?3, rank = ?4,
+                     added_at = ?5, added_by = ?6",
+                params![
+                    file.image.hex(),
+                    file.photo.hex(),
+                    file.role.as_str(),
+                    i64::from(file.rank),
+                    file.added_at as i64,
+                    file.added_by
+                ],
+            )
+            .map_err(err)?;
+            Ok(())
+        })
+    }
+
+    fn remove_photo_file(&mut self, image: &ImageId) -> Result<bool, String> {
+        self.write(|db| {
+            let removed = db
+                .execute(
+                    "DELETE FROM photo_files WHERE image = ?1",
+                    params![image.hex()],
+                )
+                .map_err(err)?;
+            Ok(removed == 1)
+        })
+    }
+
+    fn photo_of(&self, image: &ImageId) -> Result<Option<PhotoFile>, String> {
+        self.photo_files_where("image = ?1", &[image.hex()])
+            .map(|mut rows| rows.pop())
+    }
+
+    fn photo_files(&self, photo: &ImageId) -> Result<Vec<PhotoFile>, String> {
+        self.photo_files_where("photo = ?1", &[photo.hex()])
+    }
+
+    fn photo_files_of(&self, photos: &[ImageId]) -> Result<Vec<PhotoFile>, String> {
+        // One statement per window; a window past SQLite's bound on
+        // parameters is read in parts.
+        let mut all = Vec::new();
+        for part in photos.chunks(900) {
+            let keys: Vec<String> = part.iter().map(ImageId::hex).collect();
+            all.extend(
+                self.photo_files_where(&format!("photo IN ({})", marks(keys.len())), &keys)?,
+            );
+        }
+        Ok(all)
     }
 
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<Value>, String> {
