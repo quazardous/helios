@@ -110,7 +110,7 @@ pub fn version_label(removed: bool) -> Label {
     Label {
         text: m.english.clone(),
         key: Some(m.key),
-        args: Default::default(),
+        args: std::collections::BTreeMap::default(),
     }
 }
 

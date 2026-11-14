@@ -194,10 +194,10 @@ impl Library {
                 }
             }
         });
-        if let Some(version) = picked {
-            if let Err(e) = self.switch_version(image, &version) {
-                self.notes.push(e);
-            }
+        if let Some(version) = picked
+            && let Err(e) = self.switch_version(image, &version)
+        {
+            self.notes.push(e);
         }
     }
 }

@@ -899,9 +899,10 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
             match asked {
                 // The filters' history is a convenience: a warning.
                 Asked::FilterHistory => shell.notify(Level::Warning, e.message),
-                Asked::Folders | Asked::Albums => unreadable(shell, e.message),
+                Asked::Folders | Asked::Albums | Asked::Versions(_) => {
+                    unreadable(shell, e.message);
+                }
                 Asked::TrashPlan(_) => not_trashed(shell, &e.message),
-                Asked::Versions(_) => unreadable(shell, e.message),
             }
             return;
         }

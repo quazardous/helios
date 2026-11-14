@@ -68,10 +68,10 @@ fn own_line(versions: &[Version], head: &VersionId) -> Vec<VersionId> {
         let mut seen = HashSet::new();
         let mut todo = vec![*from];
         while let Some(id) = todo.pop() {
-            if seen.insert(id) {
-                if let Some(v) = by_id.get(&id) {
-                    todo.extend(v.parents.iter().copied());
-                }
+            if seen.insert(id)
+                && let Some(v) = by_id.get(&id)
+            {
+                todo.extend(v.parents.iter().copied());
             }
         }
         seen
