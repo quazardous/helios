@@ -1232,6 +1232,20 @@ runs the probes marked *wbox* on the import window in a headless
 compositor; the others are covered by egui-pop's tests on real viewports
 (`egui-pop-api/tests/app_windows.rs`, `windows.rs`) or read in the code.
 
+### Checks for a new window
+
+Each opened from the new window, never from the main one:
+
+- Native dialogs (file choosers, the portal) are parented to the window.
+- Modals, toasts, confirmations, tooltips, menus and context menus are
+  drawn in the window.
+- Keyboard focus and Escape act in the focused window alone.
+- Closing the window with a modal, a dialog or a background task open
+  leaves nothing behind: nothing moves over the main window, nothing
+  keeps running for it.
+- Size and position are saved per window.
+- The agent socket can target the window (`window` in its requests).
+
 Audit of the import window, 2026-11-13:
 
 | Check | Where it lands | How checked | Status |
