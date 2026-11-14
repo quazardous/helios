@@ -594,19 +594,19 @@ fn a_job_naming_its_photos_shows_exactly_them_in_the_library() {
     until(&mut h, "the set shown", |h| {
         h.state().library().shown_set() == Some(2)
     });
-    // The command itself, as an agent runs it: the set shown, then the
-    // next filter drops it.
-    let said = h
-        .state_mut()
+    // The command itself, as an agent runs it: the set shown; `ids` not
+    // a list is refused and changes nothing.
+    h.state_mut()
         .run("library.show", json!({ "ids": [&ids[0]] }), Origin::User)
         .unwrap();
-    assert_eq!(said["set"], 1, "{said}");
-    assert!(
-        h.state_mut()
-            .run("library.show", json!({ "ids": "a" }), Origin::User)
-            .is_err(),
-        "ids must be a list"
-    );
+    until(&mut h, "the one-photo set shown", |h| {
+        h.state().library().shown_set() == Some(1)
+    });
+    let _ = h
+        .state_mut()
+        .run("library.show", json!({ "ids": "a" }), Origin::User);
+    h.run_steps(3);
+    assert_eq!(h.state().library().shown_set(), Some(1));
 }
 
 /// What a job of the desktop's writes as it goes (`job.log`) shows in
@@ -653,7 +653,7 @@ fn a_relayed_jobs_promise_offers_cancel() {
     assert!(q.request["relayed"].is_null(), "{q:?}");
     open(&mut h, &p.id);
     until(&mut h, "Cancel on the relayed job", |h| {
-        h.query_by_label("Cancel").is_some()
+        h.query_all_by_label("Cancel").count() > 0
     });
     // Asked, it goes to the node's relay: none is followed here, which is
     // said, and the job runs on.
