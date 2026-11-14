@@ -214,9 +214,10 @@ pub fn run<S: Store>(
         SET => {
             let profile: Profile = serde_json::from_value(params["profile"].clone())
                 .map_err(|e| format!("`profile`: {e}"))?;
-            // Its choices are checked as an import would read them.
+            // Its choices are checked as an import would read them, its
+            // copy's folder and name too.
             crate::library::import_options(
-                &Value::Object(params_of(&profile.choices, None)),
+                &Value::Object(params_of(&profile.choices, Some(true))),
                 None,
             )?;
             let id = doc.put(profile);
