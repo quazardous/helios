@@ -264,15 +264,19 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
     );
     assert!(day.join("20240601-0001-1.png.xmp").exists());
     assert!(day.join("20240601-0001-1_01.png.xmp").exists());
-    // The copy is the image; the card is left as it was.
+    // The copy is the image, and the card's file it was read from is
+    // noted where it is; the card is left as it was.
     let id = ImageId::from_hex(lines[0]["id"].as_str().unwrap()).unwrap();
-    let at: Vec<PathBuf> = vault
+    let mut at: Vec<PathBuf> = vault
         .locations(&id)
         .unwrap()
         .into_iter()
         .map(|l| l.path)
         .collect();
-    assert_eq!(at, [first]);
+    at.sort();
+    let mut want = vec![first, dcim.join("IMG_0001.png")];
+    want.sort();
+    assert_eq!(at, want);
     assert!(dcim.join("IMG_0001.png").exists());
     // The library folder is remembered for the next copy.
     assert_eq!(import::library_root(&vault).unwrap(), Some(library.clone()));
@@ -1257,13 +1261,14 @@ fn a_copy_import_run_again_reads_none_of_what_it_copied() {
     );
     assert_eq!(status_of(&lines, &b), "added");
     assert!(changed.read > 0);
+    let held: Vec<ImageId> = first.changes.images.iter().map(|c| c.image).collect();
     let new_b = changed
         .changes
         .images
         .iter()
-        .find(|c| c.before.is_none())
-        .unwrap()
-        .image;
+        .map(|c| c.image)
+        .find(|id| !held.contains(id))
+        .expect("the changed file is a new image");
 
     // An image taken out of the Library is imported again, as an import in
     // place does: its file is read and copied anew.
