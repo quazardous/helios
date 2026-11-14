@@ -58,6 +58,7 @@ pub use health::{
 };
 pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;
+pub use import_profile_store::{EVERYDAY, ImportProfile};
 pub use import_sources::{
     DOCUMENT as IMPORT_SOURCES, Honours, ReadSources, SavedSource, WriteSources,
     write_in_background as write_import_sources_in_background,
@@ -98,6 +99,8 @@ mod import_auto;
 mod import_choices;
 mod import_detail;
 mod import_history;
+mod import_profile_editor;
+mod import_profile_store;
 mod import_profiles;
 mod import_sources;
 mod import_window;

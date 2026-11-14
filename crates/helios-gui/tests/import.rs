@@ -14,8 +14,9 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::api::windows::WindowId;
 use helios_gui::dialogs::Level;
+use helios_gui::shell::{Choices, ImportProfile};
 use helios_gui::{Shell, headless, helios_panels, templates};
-use helios_library::import::{Options, import};
+use helios_library::import::{Duplicates, Layout, Options, import};
 use helios_shell::commands::Origin;
 use helios_storage::Card as Volume;
 use helios_template::workspace::Files;
@@ -358,12 +359,23 @@ fn the_import_choices_show_live_examples_and_reach_the_import() {
     let kept = dir.join("choices.json");
     h.state_mut().remember_import_choices_in(kept.clone());
     h.run_steps(3);
-    // A card is copied, with a note on why.
+    // The Detail column shows the profile in use and what it does; a
+    // card is copied.
     assert!(h.state().import_copies());
-    let _ = h.get_by_label_contains("the card is formatted later");
+    assert_eq!(h.state().import_profile_in_use(), "everyday");
+    let _ = h.get_by_label_contains("Copied into Library/");
+    let _ = h.get_by_label_contains("original names, duplicates skipped");
+    assert!(h.query_by_label("By month").is_none(), "no options there");
+    // "Manage profiles…" opens the editor on it.
+    h.get_by_value("Everyday").click();
+    h.run_steps(3);
+    h.get_by_label("Manage profiles…").click();
+    h.run_steps(3);
+    assert!(h.state().import_profiles_open());
     // The examples come from the first photo ticked, of 2 November.
     let _ = h.get_by_label("e.g. 2026/2026-11-02/");
     let _ = h.get_by_label("e.g. IMG_0001.JPG");
+    let _ = h.get_by_label("Library/2026/2026-11-02/IMG_0001.JPG");
     // Into's layout and the Name change them.
     h.get_by_label("By month").click();
     h.run_steps(3);
@@ -373,24 +385,24 @@ fn the_import_choices_show_live_examples_and_reach_the_import() {
     let _ = h.get_by_label("e.g. 20261102-0001.JPG");
     h.get_by_label("Keep").click();
     h.run_steps(3);
-    assert_eq!(
-        h.state().import_choices().duplicates.as_str(),
-        "keep",
-        "Keep clicked"
-    );
     h.get_by_label("Read darktable edits").click();
     h.run_steps(3);
-    // Added where they are, the photos are neither filed nor renamed:
-    // Into and Name go away.
+    // Folders added where they are: the card is still copied.
     h.get_by_label("Add where they are").click();
     h.run_steps(3);
-    assert!(!h.state().import_copies());
-    assert!(h.query_by_label("Into").is_none());
-    assert!(h.query_by_label_contains("e.g.").is_none());
-    // Back to a copy: Import passes every choice.
+    assert!(!h.state().import_choices().copy_folders);
+    assert!(h.state().import_copies(), "a card is copied");
     h.get_by_label("Copy into the Library").click();
     h.run_steps(3);
-    let _ = h.get_by_label("Into");
+    // Saved on the profile at once.
+    let everyday = &h.state().import_profiles()[0];
+    assert_eq!(everyday.choices.duplicates.as_str(), "keep");
+    assert_eq!(everyday.choices.layout.as_str(), "month");
+    h.get_by_label("Done").click();
+    h.run_steps(3);
+    assert!(!h.state().import_profiles_open());
+    let _ = h.get_by_label_contains("renamed {date}-{seq}, duplicates kept");
+    // Import passes every choice.
     h.get_by_label("Import 2").click();
     h.run_steps(3);
     assert_eq!(
@@ -589,13 +601,22 @@ fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_on
     h.run();
     drop_on(&mut h, &dcim.join("IMG_0002.JPG"));
     read_through(&mut h);
-    // On by default; unticked, the import leaves the looks off.
+    // On by default; unticked in the profile editor, the import leaves
+    // the looks off.
     assert!(h.state().import_choices().camera_look);
-    h.get_by_role_and_label(
+    h.state_mut().open_import_profiles();
+    h.run_steps(3);
+    // At the editor's foot (Advanced): scrolled to first.
+    let (checkbox, look) = (
         egui::accesskit::Role::CheckBox,
         "Apply the camera's default look",
-    )
-    .click();
+    );
+    h.get_by_role_and_label(checkbox, look).scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(checkbox, look).click();
+    h.run_steps(3);
+    assert!(!h.state().import_choices().camera_look);
+    h.get_by_label("Done").click();
     h.run_steps(3);
     assert!(!h.state().import_choices().camera_look);
     h.get_by_label("Import 1").click();
@@ -671,66 +692,53 @@ fn the_footer_totals_the_photos_ticked() {
 }
 
 #[test]
-fn presets_are_named_choices_saved_applied_and_deleted() {
+fn old_presets_and_named_filters_migrate_once_into_profiles() {
     let dir = temp("presets");
     let (_, known) = fake_card(&dir);
-    let mut h = card_window(&dir, Some(known));
-    h.state_mut()
-        .remember_import_choices_in(dir.join("lib/import-choices.json"));
-    h.run_steps(3);
-    let _ = h.get_by_value("Default");
-    // A monthly preset, saved from the menu under a name asked in place.
-    h.get_by_label("By month").click();
-    h.run_steps(3);
-    h.get_by_value("Last used").click();
-    h.run_steps(3);
-    h.get_by_label("Save as preset…").click();
-    h.run_steps(3);
-    // The name field takes the focus (the Library's search is another).
-    h.query_all_by_role(egui::accesskit::Role::TextInput)
-        .find(egui_kittest::Node::is_focused)
-        .expect("the preset name field focused")
-        .type_text("Monthly");
-    h.run_steps(3);
-    h.get_by_label("Save").click();
-    h.run_steps(3);
-    assert_eq!(h.state().import_presets(), ["Monthly"]);
-    let kept: Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("lib/import-presets.json")).unwrap(),
+    let lib = dir.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(
+        lib.join("import-presets.json"),
+        r#"{"Monthly": {"layout": "month"}}"#,
     )
     .unwrap();
-    assert_eq!(kept["Monthly"]["layout"], json!("month"), "{kept}");
-    // Default sets the Choices column back; the preset sets it again.
-    h.get_by_value("Monthly").click();
+    std::fs::write(
+        lib.join("import-filters.json"),
+        r#"{"Raws": {"kinds": ["raw"]}}"#,
+    )
+    .unwrap();
+    let mut h = card_window(&dir, Some(known));
+    h.state_mut()
+        .remember_import_choices_in(lib.join("import-choices.json"));
     h.run_steps(3);
-    h.get_by_label("Default").click();
+    let names: Vec<String> = h
+        .state()
+        .import_profiles()
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(names, ["Everyday", "Monthly"]);
+    assert_eq!(h.state().import_profile_in_use(), "everyday");
+    assert_eq!(h.state().import_filters()[0].0, "Raws");
+    // The profile menu sets the window's choices.
+    h.get_by_value("Everyday").click();
     h.run_steps(3);
+    h.get_by_label("Monthly").click();
+    h.run_steps(3);
+    assert_eq!(h.state().import_choices().layout.as_str(), "month");
+    let _ = h.get_by_label_contains("Copied into Library/2");
+    // Once: the old files are not read again, a profile removed stays so.
+    let monthly = h.state().import_profiles()[1].id.clone();
+    assert!(h.state_mut().remove_import_profile(&monthly));
+    assert!(!h.state_mut().remove_import_profile("everyday"));
+    let mut again = Shell::new(helios_panels(), None);
+    again.remember_import_choices_in(lib.join("import-choices.json"));
+    assert_eq!(again.import_profiles().len(), 1);
     assert_eq!(
-        h.state().import_choices(),
+        again.import_choices(),
         helios_gui::shell::Choices::default()
     );
-    h.state_mut().apply_import_preset(Some("Monthly"));
-    h.run_steps(3);
-    let _ = h.get_by_label("e.g. 2026/2026-11/");
-    // Copy or add for folders is part of a preset; a card is still
-    // copied.
-    let mut add = h.state().import_choices();
-    add.copy_folders = false;
-    h.state_mut().set_import_choices(add);
-    h.state_mut().save_import_preset("Monthly");
-    h.state_mut().apply_import_preset(Some("Monthly"));
-    assert!(h.state().import_copies(), "a card is copied");
-    // Deleted from the menu: the choices stay as they are.
-    h.run_steps(3);
-    h.get_by_value("Monthly").click();
-    h.run_steps(3);
-    h.get_by_label("Delete preset").click();
-    h.run_steps(3);
-    assert!(h.state().import_presets().is_empty());
-    assert_eq!(h.state().import_choices().layout.as_str(), "month");
-    let mut again = Shell::new(helios_panels(), None);
-    again.remember_import_choices_in(dir.join("lib/import-choices.json"));
-    assert!(again.import_presets().is_empty());
+    assert_eq!(again.import_filters()[0].0, "Raws");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -3092,7 +3100,7 @@ fn open_on(h: &mut Harness<'static, Shell>, source: &Path) {
 }
 
 #[test]
-fn a_sources_choices_are_saved_on_it_follow_the_selection_and_come_back_after_a_restart() {
+fn a_source_points_at_its_profile_which_follows_the_selection_and_comes_back_after_a_restart() {
     let dir = temp("sources");
     let (trips, family) = (dir.join("trips"), dir.join("family"));
     for (folder, name) in [(&trips, "a"), (&family, "b")] {
@@ -3105,39 +3113,63 @@ fn a_sources_choices_are_saved_on_it_follow_the_selection_and_come_back_after_a_
         let mut h = shell_keeping(&kept);
         open_on(&mut h, &trips);
         let _ = h.get_by_label("trips: the default choices");
-        // Changing a choice saves it on the selected source.
-        h.get_by_label("Copy into the Library").click();
+        // A profile picked in the profile menu is saved on the selected
+        // source.
+        let trips_profile = h.state_mut().put_import_profile(ImportProfile {
+            id: String::new(),
+            name: "Trips".into(),
+            choices: Choices {
+                copy_folders: true,
+                layout: Layout::Month,
+                duplicates: Duplicates::Keep,
+                ..Choices::default()
+            },
+        });
         h.run_steps(3);
-        h.get_by_label("By month").click();
+        h.get_by_value("Everyday").click();
         h.run_steps(3);
-        h.get_by_label("Keep").click();
+        h.get_by_label("Trips").click();
         h.run_steps(3);
         let _ = h.get_by_label("trips: its own choices");
+        let _ = h.get_by_label_contains("duplicates kept");
         let text = kept
             .read(helios_gui::shell::IMPORT_SOURCES)
             .unwrap()
             .expect("the sources kept by the node");
         assert!(
-            text.contains("trips") && text.contains("keep") && text.contains("month"),
+            text.contains("trips")
+                && text.contains(&format!("profile = \"{trips_profile}\""))
+                && text.contains("keep")
+                && text.contains("month"),
             "{text}"
         );
-        // Another folder shows the default choices.
+        // Another folder shows the default profile.
         open_on(&mut h, &family);
         let _ = h.get_by_label("family: the default choices");
+        assert_eq!(h.state().import_profile_in_use(), "everyday");
         assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
         assert!(!h.state().import_copies());
-        // Back on the first: its own; Reset gives the defaults back, Undo
-        // takes the reset back.
+        // Back on the first: its profile.
         open_on(&mut h, &trips);
+        assert_eq!(h.state().import_profile_in_use(), trips_profile);
         assert_eq!(h.state().import_choices().duplicates.as_str(), "keep");
         assert!(h.state().import_copies());
-        h.get_by_label("Reset to defaults").click();
+        // Editing the profile changes every source using it.
+        h.state_mut()
+            .use_import_profile_on(&family, &trips_profile)
+            .unwrap();
+        let mut edited = h.state().import_profiles()[1].clone();
+        edited.choices.duplicates = Duplicates::Ask;
+        h.state_mut().put_import_profile(edited);
         h.run_steps(3);
-        assert_eq!(h.state().import_choices().duplicates.as_str(), "skip");
-        let _ = h.get_by_label("trips: the default choices");
-        h.get_by_label("Undo").click();
+        for source in h.state().import_sources() {
+            let choices = source.choices.expect("its profile's choices");
+            assert_eq!(choices.duplicates.as_str(), "ask", "{:?}", source.path);
+        }
+        let mut edited = h.state().import_profiles()[1].clone();
+        edited.choices.duplicates = Duplicates::Keep;
+        h.state_mut().put_import_profile(edited);
         h.run_steps(3);
-        assert_eq!(h.state().import_choices().duplicates.as_str(), "keep");
         // Import runs each folder with its own choices.
         h.get_by_label("Import 1").click();
         h.run_steps(3);
@@ -3154,10 +3186,18 @@ fn a_sources_choices_are_saved_on_it_follow_the_selection_and_come_back_after_a_
         drop(h);
         node.stop();
     }
-    // After a restart, the source comes back with its choices.
+    // After a restart, the sources come back with their profile.
     let (node, kept) = node_at(&vault);
     let mut h = shell_keeping(&kept);
-    assert_eq!(h.state().import_sources().len(), 1);
+    assert_eq!(h.state().import_sources().len(), 2);
+    assert!(
+        h.state()
+            .import_sources()
+            .iter()
+            .all(|s| s.profile.as_deref() == Some("trips")),
+        "{:?}",
+        h.state().import_sources()
+    );
     open_on(&mut h, &trips);
     let choices = h.state().import_choices();
     assert_eq!(
@@ -3430,8 +3470,19 @@ fn forget_this_source_takes_a_folder_off_the_column_and_undo_brings_it_back() {
     h.state_mut().undo_import_source_choice();
     h.run_steps(3);
     assert!(h.state().import_recent().contains(&family));
-    // A folder with its own choices: forgotten with them.
-    click(&mut h, "Keep");
+    // A folder with its own profile: forgotten with it.
+    h.state_mut().put_import_profile(ImportProfile {
+        id: String::new(),
+        name: "Keep all".into(),
+        choices: Choices {
+            duplicates: Duplicates::Keep,
+            ..Choices::default()
+        },
+    });
+    h.run_steps(3);
+    h.get_by_value("Everyday").click();
+    h.run_steps(3);
+    click(&mut h, "Keep all");
     assert_eq!(h.state().import_sources().len(), 1);
     row_menu(&mut h, "trips");
     click(&mut h, "Forget this source");

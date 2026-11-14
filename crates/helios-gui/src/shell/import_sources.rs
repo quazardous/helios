@@ -104,7 +104,12 @@ pub struct SavedSource {
     /// An account connector's account id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
-    /// Its own choices; `None`: the window's.
+    /// The import profile it points at (its id,
+    /// [`super::import_profile_store`]); `None`: its kind's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Its choices: its profile's, kept here as resolved for the node's
+    /// automatic imports, which read them; `None`: the window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices: Option<Choices>,
     /// Its connector's own parameters: the keys of its source contract
@@ -147,6 +152,7 @@ impl SavedSource {
             name: None,
             path,
             account,
+            profile: None,
             choices: None,
             params: BTreeMap::new(),
             browser: None,
@@ -556,10 +562,38 @@ impl Sources {
             return;
         }
         if let Some(i) = self.position(key) {
+            // Choices of its own: its profile is found again, or made, by
+            // [`ImportWindow::link_sources`].
+            if self.list[i].choices != choices {
+                self.list[i].profile = None;
+            }
             self.list[i].choices = choices;
         } else {
             let source = self.identified(SavedSource {
                 choices,
+                ..SavedSource::new(connector.to_string(), key)
+            });
+            self.list.push(source);
+        }
+        self.store();
+    }
+
+    /// Points a source at the profile `id`, whose choices are `choices`,
+    /// saving the source when new.
+    pub(super) fn set_profile(
+        &mut self,
+        key: &SourceKey,
+        connector: &str,
+        id: &str,
+        choices: Choices,
+    ) {
+        if let Some(i) = self.position(key) {
+            self.list[i].profile = Some(id.to_string());
+            self.list[i].choices = Some(choices);
+        } else {
+            let source = self.identified(SavedSource {
+                profile: Some(id.to_string()),
+                choices: Some(choices),
                 ..SavedSource::new(connector.to_string(), key)
             });
             self.list.push(source);
@@ -701,13 +735,39 @@ impl ImportWindow {
     /// The choices an import from `path` runs with: the folder's own, else
     /// the window's.
     pub(super) fn choices_for(&self, path: &std::path::Path) -> Choices {
-        if self.is_card(path) && !self.sources.has_own(path) {
-            return self.window_choices().clone();
+        let key = SourceKey::Folder(path.to_path_buf());
+        if let Some(own) = self.sources.own(&key)
+            && (!self.is_card(path) || self.sources.has_own(path))
+        {
+            return own.clone();
         }
-        self.sources
-            .own(&SourceKey::Folder(path.to_path_buf()))
-            .unwrap_or_else(|| self.window_choices())
-            .clone()
+        self.kind_default(&key)
+    }
+
+    /// The connector of the source of `key`, when known without asking
+    /// the accounts: a saved source's, else a mounted volume's or a
+    /// folder's (as [`ImportWindow::connector_of`] tells them apart).
+    pub(super) fn connector_known(&self, key: &SourceKey) -> Option<String> {
+        if let Some(saved) = self.sources.get(key) {
+            return Some(saved.connector.clone());
+        }
+        match key {
+            SourceKey::Folder(p) if self.is_card(p) => Some(helios_connect::card::ID.to_string()),
+            SourceKey::Folder(_) => Some(helios_connect::folder::ID.to_string()),
+            SourceKey::Account(_) => None,
+        }
+    }
+
+    /// The choices of a source of `key` with no profile of its own: its
+    /// connector's default profile's, else the window's.
+    pub(super) fn kind_default(&self, key: &SourceKey) -> Choices {
+        match self
+            .connector_known(key)
+            .and_then(|c| self.profiles.defaults.get(&c))
+        {
+            Some(id) => self.profiles.choices(id),
+            None => self.window_choices().clone(),
+        }
     }
 
     /// An account's name, its id when not read yet.
@@ -733,7 +793,11 @@ impl ImportWindow {
             self.sources.window = self.choices.clone();
         }
         self.choices = match &key {
-            Some(k) => self.sources.own(k).unwrap_or(&self.sources.window).clone(),
+            Some(k) => self
+                .sources
+                .own(k)
+                .cloned()
+                .unwrap_or_else(|| self.kind_default(k)),
             None => self.sources.window.clone(),
         };
         self.sources.honours = match &key {
@@ -923,6 +987,7 @@ impl Shell {
         w.sources.read_kept();
         w.sources.showing = None;
         w.browsing.fresh = false;
+        w.link_sources();
     }
 
     /// The browsers the import window's Contents column offers for the
@@ -980,6 +1045,7 @@ mod tests {
                     name: None,
                     path: Some("/photos/trips".into()),
                     account: None,
+                    profile: None,
                     choices: Some(Choices {
                         copy_folders: true,
                         rename: "{date}-{seq}".into(),
@@ -997,6 +1063,7 @@ mod tests {
                     name: Some("Family".into()),
                     path: None,
                     account: Some("google-photos-1".into()),
+                    profile: None,
                     choices: None,
                     params: [("album".to_owned(), serde_json::json!("Holidays"))].into(),
                     browser: None,
