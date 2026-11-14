@@ -1653,6 +1653,8 @@ gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
 
+gui-pick-choose-folder = Choose the library folder…
+
 gui-pointer-choice-close = Close the pointer profile notice
 
 gui-pointer-choice-darktable = Use darktable's
