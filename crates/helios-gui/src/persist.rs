@@ -210,6 +210,10 @@ enum Write {
     /// (`library.stacks.group`, `.ungroup`, `.top`), asked at a time
     /// (seconds): one step of the library's history.
     Stack(crate::library::StackAsk, f64, crate::library::Batch),
+    /// A keyword branch renamed or merged on every photo
+    /// (`library.keywords.rename`, `.merge`), asked at a time (seconds):
+    /// one step of the library's history.
+    Keyword(crate::library::KeywordAsk, f64, crate::library::Batch),
     /// RAW+JPEG files paired or unpaired (`library.pairs.pair`,
     /// `.unpair`), asked at a time (seconds): one step of the library's
     /// history.
@@ -295,6 +299,19 @@ impl Write {
                     ),
                 }
             }
+            Self::Keyword(ask, ..) => {
+                use crate::library::KeywordAsk;
+                match ask {
+                    KeywordAsk::Rename { from, to } => (
+                        helios_node_core::library::KEYWORDS_RENAME,
+                        json!({ "from": from, "to": to }),
+                    ),
+                    KeywordAsk::Merge { from, into } => (
+                        helios_node_core::library::KEYWORDS_MERGE,
+                        json!({ "from": from, "into": into }),
+                    ),
+                }
+            }
             Self::Pair(ask, ..) => {
                 use crate::library::PairAsk;
                 match ask {
@@ -358,6 +375,7 @@ impl Write {
             | Self::SwitchVersion(..)
             | Self::RemoveVersion(..)
             | Self::Stack(..)
+            | Self::Keyword(..)
             | Self::Pair(..)
             | Self::Document { .. }
             | Self::Session(..)
@@ -1501,6 +1519,31 @@ impl<S: Store + 'static> Persist<S> {
                 )
                 .with("error", e.message),
             ),
+            (Write::Keyword(ask, at, batch), Ok(answer)) => {
+                // The step the node made, recorded so Ctrl+Z moves the
+                // branch back; the vault's events show the photos' tags.
+                match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+                    Ok(changes) if changes.is_empty() => {}
+                    Ok(changes) => {
+                        let label = crate::library_history::keyword_label(ask);
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
+                    }
+                    Err(e) => shell.notify(
+                        Level::Warning,
+                        format!("the keywords cannot be set back with undo: {e}"),
+                    ),
+                }
+            }
+            (Write::Keyword(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-keyword-not-changed",
+                    "The keyword was not changed: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Rotate(_, turn, at, batch), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z turns the
                 // photos back; the vault's events show the turn.
@@ -2217,6 +2260,12 @@ impl<S: Store + 'static> Persist<S> {
             stack_asks
                 .into_iter()
                 .map(|(ask, batch)| Write::Stack(ask, now, batch)),
+        );
+        let keyword_asks = shell.library_mut().take_keyword_asks();
+        self.writes.extend(
+            keyword_asks
+                .into_iter()
+                .map(|(ask, batch)| Write::Keyword(ask, now, batch)),
         );
         let pair_asks = shell.library_mut().take_pair_asks();
         self.writes.extend(

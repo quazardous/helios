@@ -2498,3 +2498,164 @@ fn ctrl_z_walks_the_library_off_the_frame_while_the_vault_is_held() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A photo's tags, as the vault holds them.
+fn tags_of(persist: &Persist<SqliteStore>, n: u8) -> Value {
+    let rows = persist.vault().fields_of(&[id(n)], &["tags"]).unwrap();
+    rows[0].get("tags").cloned().unwrap_or(Value::Null)
+}
+
+#[test]
+fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo() {
+    use egui_pop::api::history::{Answer, Request};
+    use helios_gui::library::DropOn;
+    let root = temp("keywords");
+    let path = vault_file(&root);
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .set_field(&id(1), "tags", Some(&json!(["Animals|Dog", "sea"])))
+            .unwrap();
+        store
+            .set_field(&id(2), "tags", Some(&json!(["Animals|Cat"])))
+            .unwrap();
+    }
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let request = Request::new(helios_gui::library_history::LIBRARY);
+    let user = egui_pop::model::commands::Origin::User;
+    let row = |h: &Harness<'_, Shell>, label: &str| h.get_by_label(label).rect().center();
+
+    // The tree: the top branches with their counts, a photo counted once
+    // under Animals; a branch opens on its own branches.
+    h.get_by_label("Keywords").click();
+    settle(&mut h, &mut persist, 1.0);
+    h.get_by_label("Animals 2");
+    h.get_by_label("sea 1");
+    assert!(h.query_by_label("Dog 1").is_none(), "closed");
+    h.get_by_label("Show or hide the keywords below Animals")
+        .click();
+    settle(&mut h, &mut persist, 2.0);
+    h.get_by_label("Dog 1");
+    h.get_by_label("Cat 1");
+
+    // A click scopes the grid to a branch, with the other filters; again,
+    // to the whole Library.
+    h.get_by_label("Dog 1").click();
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(grid(&h), ["a.jpg"]);
+    assert_eq!(
+        h.state().library().keyword().as_deref(),
+        Some("Animals|Dog")
+    );
+    h.get_by_label("Dog 1").click();
+    settle(&mut h, &mut persist, 4.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    h.get_by_label("Animals 2").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"], "the branch and below");
+    let listed = answer(&mut h, "library.keyword.list", json!({}));
+    assert_eq!(listed["shown"], "Animals", "{listed}");
+    assert_eq!(
+        listed["keywords"][0],
+        json!({ "path": "Animals", "count": 2 })
+    );
+    answer(&mut h, "library.keyword", json!({ "path": null }));
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+
+    // A branch dragged onto a photo tags it; photos dragged onto a
+    // branch take it.
+    let (from, to) = (row(&h, "sea 1"), cell_at(&h, "c.nef"));
+    drag_onto(&mut h, from, to, |h| {
+        h.get_by_label("Tag 1 photos with sea");
+    });
+    settle(&mut h, &mut persist, 7.0);
+    assert_eq!(tags_of(&persist, 3), json!(["sea"]));
+    h.get_by_label("sea 2");
+    let (from, to) = (cell_at(&h, "c.nef"), row(&h, "Cat 1"));
+    drag_onto(&mut h, from, to, |h| {
+        assert_eq!(
+            h.state().library().drop_hover(),
+            Some((DropOn::Keyword("Animals|Cat".into()), true))
+        );
+        h.get_by_label("Tag 1 photos with Animals|Cat");
+    });
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(tags_of(&persist, 3), json!(["Animals|Cat", "sea"]));
+    h.get_by_label("Animals 3");
+    // Taken off through the branch's command (its menu's).
+    let out = answer(
+        &mut h,
+        "library.keyword.remove",
+        json!({ "keyword": "Animals", "images": [id(3).hex()] }),
+    );
+    assert_eq!(out["untagged"], 1, "{out}");
+    settle(&mut h, &mut persist, 9.0);
+    assert_eq!(tags_of(&persist, 3), json!(["sea"]));
+
+    // Renamed, then merged: each one step for every photo, undone and
+    // redone.
+    let before = steps(&h).len();
+    assert!(answer_err(
+        &mut h,
+        "library.keyword.rename",
+        json!({ "from": "Animals", "to": "sea" })
+    ));
+    let out = answer(
+        &mut h,
+        "library.keyword.rename",
+        json!({ "from": "Animals", "to": "Fauna" }),
+    );
+    assert_eq!(out["photos"], 2, "{out}");
+    settle(&mut h, &mut persist, 10.0);
+    assert_eq!(tags_of(&persist, 1), json!(["Fauna|Dog", "sea"]));
+    assert_eq!(tags_of(&persist, 2), json!(["Fauna|Cat"]));
+    assert_eq!(
+        steps(&h).last().map(String::as_str),
+        Some("Rename keyword Animals to Fauna")
+    );
+    h.get_by_label("Fauna 2");
+    let out = answer(
+        &mut h,
+        "library.keyword.merge",
+        json!({ "from": "Fauna|Cat", "into": "sea" }),
+    );
+    assert_eq!(out["photos"], 1, "{out}");
+    settle(&mut h, &mut persist, 12.0);
+    assert_eq!(tags_of(&persist, 2), json!(["sea"]));
+    assert_eq!(steps(&h).len(), before + 2, "{:?}", steps(&h));
+    assert_eq!(
+        steps(&h).last().map(String::as_str),
+        Some("Merge keyword Fauna|Cat into sea")
+    );
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    assert_eq!(tags_of(&persist, 2), json!(["Fauna|Cat"]));
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    assert_eq!(tags_of(&persist, 1), json!(["Animals|Dog", "sea"]));
+    assert_eq!(tags_of(&persist, 2), json!(["Animals|Cat"]));
+    let redone = history.redo(&request, &user);
+    assert!(matches!(redone, Answer::Done(Ok(_))), "{redone:?}");
+    assert_eq!(tags_of(&persist, 1), json!(["Fauna|Dog", "sea"]));
+    // The Library read again shows the tree as the vault holds it.
+    settle(&mut h, &mut persist, 13.0);
+    persist.ask_fill(h.state(), true);
+    for at in [14.0, 16.0, 18.0] {
+        settle(&mut h, &mut persist, at);
+    }
+    h.get_by_label("Fauna 2");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
