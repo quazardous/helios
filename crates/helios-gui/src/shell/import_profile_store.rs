@@ -118,21 +118,20 @@ impl Profiles {
     pub fn load(dir: &Path, last: &Choices) -> Self {
         let file = dir.join(FILE);
         let read = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
-        let mut profiles = match read(FILE).and_then(|t| serde_json::from_str::<Document>(&t).ok())
-        {
-            Some(doc) => Profiles::of(doc),
-            None => {
-                let presets: BTreeMap<String, Choices> = read(PRESETS)
-                    .and_then(|t| serde_json::from_str(&t).ok())
-                    .unwrap_or_default();
-                let filters: BTreeMap<String, Filter> = read(FILTERS)
-                    .and_then(|t| serde_json::from_str(&t).ok())
-                    .unwrap_or_default();
-                let mut p = Profiles::migrated(presets, filters, last);
-                p.file = Some(file.clone());
-                p.save();
-                p
-            }
+        let kept = read(FILE).and_then(|t| serde_json::from_str::<Document>(&t).ok());
+        let mut profiles = if let Some(doc) = kept {
+            Profiles::of(doc)
+        } else {
+            let presets: BTreeMap<String, Choices> = read(PRESETS)
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default();
+            let filters: BTreeMap<String, Filter> = read(FILTERS)
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default();
+            let mut p = Profiles::migrated(presets, filters, last);
+            p.file = Some(file.clone());
+            p.save();
+            p
         };
         profiles.file = Some(file);
         profiles
@@ -288,17 +287,14 @@ impl Profiles {
         if profile.id.trim().is_empty() {
             profile.id = self.fresh_id(&profile.name);
         }
-        match self.list.iter_mut().find(|p| p.id == profile.id) {
-            Some(p) => {
-                p.choices = profile.choices;
-                if !p.built_in() && !profile.name.trim().is_empty() {
-                    p.name = profile.name;
-                }
+        if let Some(p) = self.list.iter_mut().find(|p| p.id == profile.id) {
+            p.choices = profile.choices.clone();
+            if !p.built_in() && !profile.name.trim().is_empty() {
+                p.name.clone_from(&profile.name);
             }
-            None => {
-                profile.name = self.fresh_name(&profile.name);
-                self.list.push(profile.clone());
-            }
+        } else {
+            profile.name = self.fresh_name(&profile.name);
+            self.list.push(profile.clone());
         }
         profile.id
     }
