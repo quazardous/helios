@@ -2289,11 +2289,11 @@ fn main() -> Result<(), String> {
                         .parent()
                         .map(|d| d.join(".helios"))
                 }));
-                shell.set_import_map(helios_gui::image_map::recorder(
+                shell.set_import_map(Arc::new(helios_node_core::map::recorder(
                     vault.clone(),
                     settings.clone(),
                     helios.clone(),
-                ));
+                )));
                 // The map's job: the import window's cells in view first,
                 // then each volume plugged in.
                 let feed = helios_library::map_job::Feed::default();
@@ -2326,18 +2326,29 @@ fn main() -> Result<(), String> {
                         plugged.plugged(m.id.clone());
                     }
                 });
-                if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
-                    helios_gui::image_map::start_thumb_check(
-                        vault.clone(),
-                        &shell.jobs(),
-                        cache,
-                        &settings,
-                        helios.clone(),
-                        feed.clone(),
-                    );
-                }
+                // The map's job and the thumbnail re-check run on the
+                // node's vault, as its jobs: the node stops them before
+                // the vault closes.
+                let thumbs = THUMB_CACHE.get().cloned().flatten().map(|cache| {
+                    let listed = cache.clone();
+                    let before: Box<dyn FnOnce() + Send> = Box::new(move || {
+                        listed.list();
+                    });
+                    let cache: Box<dyn helios_library::thumb_check::Thumbs> = Box::new(cache);
+                    (cache, before)
+                });
                 backfill_captures(vault.clone(), shell.jobs());
-                helios_gui::image_map::start_job(vault, shell.jobs(), settings, helios, feed);
+                let map = helios_node_core::map::ImageMap::start(
+                    vault,
+                    shell.jobs(),
+                    settings,
+                    helios,
+                    feed,
+                    thumbs,
+                );
+                if let Some(link) = &node_link {
+                    link.adopt(map);
+                }
             }
             // The health check (Help > Health check): Helios's checks
             // over this machine's volumes and the vault, a while after
@@ -2481,7 +2492,7 @@ fn main() -> Result<(), String> {
             // the viewport's engine, each one library step.
             if let Some(p) = &persist {
                 let runner = Arc::new(helios_gui::workshop_run::Runner::new(
-                    p.vault().clone(),
+                    p.node().clone(),
                     shell.viewport().engine().clone(),
                     shell.jobs(),
                     shell.library_history(),

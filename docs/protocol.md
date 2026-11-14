@@ -503,6 +503,34 @@ thumbnail of a head version, an import window's scan):
 A thumbnail of a photo's head version reads `library.edit.head` through
 the desktop's read cache.
 
+### Workshop runs
+
+A workshop run (experimental) and its review read and write the library
+through the node, on the run's thread or the command's, never the
+frame's:
+
+| Method | Params | Answers |
+|---|---|---|
+| `workshop.photo` | `image` | `head` (the photo's newest version, null: never edited), `file` (the file read, null: none at hand), `name` (its file name) and `rows` (the photo's rows, as a change holds them) |
+| `workshop.version.add` | `version` (id, image, parents, edit, origin, at, label, meta) | `change`: the photo's rows before and after the version, for the run's library step |
+| `workshop.book.get` | `workshop` (id@version) | `book`: its decision book, null when none |
+| `workshop.book.set` | `workshop`, `book` | `kept` |
+| `workshop.record.get` | `run` | `record`: the run's record, which its review reads, null when none |
+| `workshop.record.set` | `run`, `record` (null drops it) | `kept` |
+
+A review's revert walks its change forward with `library.changes.apply`
+(`forward: true`).
+
+```json
+{"jsonrpc": "2.0", "id": 7, "method": "workshop.book.set", "params": {"workshop": "backlit@1", "book": {"answers": {}, "decided": {}, "runs": 2}}}
+{"jsonrpc": "2.0", "id": 7, "result": {"kept": true}}
+```
+
+The image map's job, the shared thumbnail cache's re-check and the
+recorder of what the import window's scans list run on the node's vault,
+as the node's jobs: the node stops the map's job and the re-check before
+the vault closes, and a quit does not ask about them.
+
 ## Promises
 
 A long piece of work answers at once with a **promise**: a handle to its
