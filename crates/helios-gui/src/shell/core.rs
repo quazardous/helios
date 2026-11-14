@@ -155,6 +155,11 @@ pub(super) struct Core {
     pub(super) jobs: helios_core::jobs::Jobs,
     /// The library's undo steps (imports), shared with the history owner.
     pub(super) library_history: crate::library_history::LibraryHistory,
+    /// The thread walking the library's history off the frame, joined
+    /// when the shell drops.
+    pub(super) _library_walks: crate::library_history::Walks,
+    /// Whether the library's history wakes this shell's window yet.
+    pub(super) library_wakes: bool,
     /// Helios's status line, drawn in egui-pop's status bar.
     pub(super) status: crate::jobs::Status,
     /// The jobs' ends read up to here, for the desktop notification.

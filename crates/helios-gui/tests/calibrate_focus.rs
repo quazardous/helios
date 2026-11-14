@@ -55,9 +55,33 @@ struct Setup {
     history: helios_gui::library_history::LibraryHistory,
 }
 
+/// The node's service behind a writer another one may hold: each call
+/// waits for `held`, as a call waits for a vault another writer holds.
+struct Held {
+    service: Arc<dyn helios_inspect::rpc::Service>,
+    held: Arc<std::sync::Mutex<()>>,
+}
+
+impl helios_inspect::rpc::Service for Held {
+    fn call(
+        &self,
+        method: &str,
+        params: Value,
+        call: &helios_inspect::rpc::Call,
+    ) -> Result<Value, helios_inspect::rpc::Error> {
+        let _writer = self.held.lock().unwrap();
+        self.service.call(method, params, call)
+    }
+}
+
 /// A shell with the calibration commands run by a node over `vault`, as
 /// the desktop wires them.
 fn shell() -> (Shell, Setup) {
+    shell_held(Arc::default())
+}
+
+/// [`shell`], its node's calls waiting for `held`.
+fn shell_held(held: Arc<std::sync::Mutex<()>>) -> (Shell, Setup) {
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let bus = Arc::new(helios_core::Bus::new());
     let mut shell = Shell::new(helios_panels(), None);
@@ -75,14 +99,15 @@ fn shell() -> (Shell, Setup) {
     calibrate::register(
         &mut shell,
         Some(Arc::new(
-            helios_inspect::client::Client::in_process(Arc::new(
-                helios_node_core::endpoint::VaultService::new(
+            helios_inspect::client::Client::in_process(Arc::new(Held {
+                service: Arc::new(helios_node_core::endpoint::VaultService::new(
                     vault.clone(),
                     bus.clone(),
                     helios_core::jobs::Jobs::new(bus.clone()),
                     "test",
-                ),
-            ))
+                )),
+                held,
+            }))
             .with_origin("user"),
         )),
         history.clone(),
@@ -107,6 +132,19 @@ fn field(name: &str) -> egui_kittest::kittest::By<'_> {
 
 fn state(h: &Harness<'_, Shell>) -> Value {
     h.state().calibration_state()
+}
+
+/// Frames until what the focus asked of the node has landed: within a
+/// minute (a deadline, not a count of frames).
+fn settle(h: &mut Harness<'_, Shell>) {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    h.run_steps(2);
+    while state(h)["busy"] == true {
+        assert!(std::time::Instant::now() < end, "still busy: {}", state(h));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.run();
+    }
+    h.run();
 }
 
 /// A drag of the pointer from `from` to `to`, in steps.
@@ -151,7 +189,7 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
     h.state_mut()
         .run(CALIBRATE_COMMAND, json!({ "path": picture }), Origin::User)
         .unwrap();
-    h.run_steps(3);
+    settle(&mut h);
     let s = state(&h);
     assert_eq!(s["open"], true);
     assert_eq!(s["corners"][0], json!([80.0, 52.0]), "{s}");
@@ -202,7 +240,7 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
     h.query(field("Profile name")).unwrap().type_text("Studio");
     h.run();
     h.get_by_label("Save the profile").click();
-    h.run_steps(3);
+    settle(&mut h);
     let profiles = setup.vault.calibration_profiles().unwrap();
     assert_eq!(profiles.len(), 1, "{}", state(&h));
     let (id, doc) = &profiles[0];
@@ -230,11 +268,11 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
 
     // The list's actions: the camera's default, an export, a delete.
     h.get_by_label("Set as default: Studio").click();
-    h.run_steps(3);
+    settle(&mut h);
     let camera = doc["camera"]["key"].as_str().unwrap().to_string();
     assert_eq!(state(&h)["defaults"][&camera], json!([id]), "{}", state(&h));
     h.get_by_label("Export: Studio").click();
-    h.run_steps(3);
+    settle(&mut h);
     let exported: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(Result::ok)
@@ -243,7 +281,7 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
         .collect();
     assert_eq!(exported.len(), 1, "{exported:?}");
     h.get_by_label("Delete: Studio").click();
-    h.run_steps(3);
+    settle(&mut h);
     assert!(setup.vault.calibration_profiles().unwrap().is_empty());
     assert_eq!(state(&h)["profiles"], json!([]));
     let undo = setup.history.line().undo;
@@ -260,7 +298,7 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
         .type_text(&dir.join(&exported[0]).display().to_string());
     h.run();
     h.get_by_label("Import the profile").click();
-    h.run_steps(3);
+    settle(&mut h);
     assert_eq!(setup.vault.calibration_profiles().unwrap().len(), 1);
     assert_eq!(state(&h)["profiles"][0]["name"], "Studio");
     let _ = std::fs::remove_dir_all(&dir);
@@ -301,7 +339,8 @@ fn the_calibration_focus_opens_in_its_own_window() {
         app.window_viewport(&WindowId::new(CALIBRATE_WINDOW)),
         Some(windows[0])
     );
-    // The dry run ran at the main window's pass, on the corners given.
+    // The dry run ran off the main window's pass, on the corners given.
+    settle(&mut h);
     let s = h.state().calibration_state();
     assert!(s["report"]["after"]["mean"].as_f64().unwrap() < 1.0, "{s}");
     // Closed with its command's window: the focus closes, the main stays.
@@ -309,5 +348,76 @@ fn the_calibration_focus_opens_in_its_own_window() {
     h.run_steps(3);
     assert!(declared(&h).is_empty());
     assert_eq!(h.state().calibration_state()["open"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// While another writer holds the vault, the focus's asks wait off the
+/// frame: each frame stays short, the window says it waits, and the dry
+/// run's report and a save land once the vault is released.
+#[test]
+fn the_calibration_focus_waits_off_the_frame_while_the_vault_is_held() {
+    use std::time::{Duration, Instant};
+    let (dir, picture) = chart_picture("calibrate-held");
+    let held = Arc::new(std::sync::Mutex::new(()));
+    let (shell, setup) = shell_held(held.clone());
+    let mut h = headless::harness(shell, vec2(1400.0, 900.0));
+    h.run();
+    let short = |h: &mut Harness<'_, Shell>| {
+        let start = Instant::now();
+        h.run();
+        let took = start.elapsed();
+        assert!(
+            took < Duration::from_millis(500),
+            "a frame waited on the vault: {took:?}"
+        );
+    };
+    let writer = held.lock().unwrap();
+    h.state_mut()
+        .run(
+            CALIBRATE_COMMAND,
+            json!({ "path": picture, "corners": CORNERS }),
+            Origin::User,
+        )
+        .unwrap();
+    for _ in 0..5 {
+        short(&mut h);
+    }
+    let s = state(&h);
+    assert_eq!(
+        (s["open"].clone(), s["busy"].clone()),
+        (json!(true), json!(true)),
+        "{s}"
+    );
+    assert!(s["report"].is_null(), "{s}");
+    assert!(
+        h.query_all_by_label_contains("Waiting for the library")
+            .next()
+            .is_some()
+    );
+    drop(writer);
+    settle(&mut h);
+    let s = state(&h);
+    assert!(s["report"]["after"]["mean"].as_f64().unwrap() < 1.0, "{s}");
+
+    // Saved while held: it lands as the person's step once released.
+    let writer = held.lock().unwrap();
+    h.query(field("Profile name")).unwrap().focus();
+    h.run();
+    h.query(field("Profile name")).unwrap().type_text("Held");
+    h.run();
+    h.get_by_label("Save the profile").click();
+    for _ in 0..5 {
+        short(&mut h);
+    }
+    assert_eq!(state(&h)["busy"], true);
+    assert!(setup.history.line().undo.is_empty());
+    drop(writer);
+    settle(&mut h);
+    assert_eq!(setup.vault.calibration_profiles().unwrap().len(), 1);
+    assert_eq!(state(&h)["profiles"][0]["name"], "Held");
+    assert_eq!(
+        setup.history.line().undo[0].label.text,
+        "Save the calibration profile “Held”"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

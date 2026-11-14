@@ -963,6 +963,8 @@ fn an_import_is_one_undo_step_and_ctrl_z_on_the_library_takes_it_back() {
     for _ in 0..3 {
         h.run();
     }
+    // The walk runs off the frame: it lands once the vault answered.
+    assert!(history.wait_idle(std::time::Duration::from_secs(30)));
     assert!(vault.images().unwrap().is_empty(), "the entries are gone");
     assert!(dir.join("a.png").is_file() && dir.join("b.png").is_file());
     let line = history.line();
@@ -1098,6 +1100,12 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
     assert_eq!(line.undo[0].label.text, "Import 2 photos");
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run_steps(3);
+    // The walk runs off the frame: it lands once the vault answered.
+    assert!(
+        h.state()
+            .library_history()
+            .wait_idle(std::time::Duration::from_secs(30))
+    );
     assert!(vault.images().unwrap().is_empty(), "the entries are gone");
     assert!(dcim.join("IMG_0001.JPG").is_file(), "the card untouched");
     let _ = std::fs::remove_dir_all(&dir);

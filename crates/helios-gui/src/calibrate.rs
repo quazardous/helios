@@ -30,7 +30,12 @@
 //! node's bus with who ran it (`control.command`). What the header asks
 //! (a profile chosen, a camera look fitted or the camera's default put
 //! on) runs off the UI thread when the user asks it; its result lands in
-//! the edit at a coming frame. A save, a deletion, a default set or an apply is
+//! the edit at a coming frame. So does what the Calibration window asks
+//! (a dry run, a save, the profiles listed, deleted, exported, imported
+//! or set as a camera's default): it dispatches the command with a
+//! [`Landing`] ([`with_landing`]), the command answers `pending` at once
+//! and its answer lands there; agents, scripts and the CLI, which give
+//! none, get the answer itself. A save, a deletion, a default set or an apply is
 //! one step of the library's history, so Ctrl+Z takes it back. Without a library, the chart's dry
 //! run is still answered; the profile commands say they need one.
 
@@ -116,9 +121,32 @@ impl Drop for OffFrame {
     }
 }
 
+/// Where the answer of a command run off the frame lands
+/// (`shell::calibrate_focus`).
+pub type Landing = std::sync::mpsc::Sender<Result<Value, String>>;
+
+thread_local! {
+    /// Where the command dispatched now on this thread sends its answer.
+    static LANDING: std::cell::RefCell<Option<Landing>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `dispatch` (a calibration command dispatched on this thread)
+/// with `landing`: the command runs off the frame and answers there.
+/// Whether it took it (else it answered at once, in `dispatch`'s result).
+pub fn with_landing<T>(landing: Landing, dispatch: impl FnOnce() -> T) -> (T, bool) {
+    let before = LANDING.with(|l| l.replace(Some(landing)));
+    let out = dispatch();
+    let left = LANDING.with(|l| l.replace(before));
+    (out, left.is_none())
+}
+
+fn take_landing() -> Option<Landing> {
+    LANDING.with(|l| l.borrow_mut().take())
+}
+
 /// Keeps `ctx` as the window to wake for the shell whose values are
 /// `store`.
-fn drawn_in(ctx: &egui::Context, store: &std::sync::Mutex<helios_values::Store>) {
+pub(crate) fn drawn_in(ctx: &egui::Context, store: &std::sync::Mutex<helios_values::Store>) {
     let found = locked(&SHELLS)
         .iter()
         .filter_map(std::sync::Weak::upgrade)
@@ -326,21 +354,36 @@ pub fn register(
         ),
     ];
     let values = shell.values().clone();
+    let off = OffFrame::new(&values);
     for (id, label, read_only) in specs {
         let mut spec = CommandSpec::new(id, label, "Calibration");
         if read_only {
             spec = spec.read_only();
         }
-        let (node, history, values) = (node.clone(), history.clone(), values.clone());
+        let (node, history, values, off) =
+            (node.clone(), history.clone(), values.clone(), off.clone());
         shell.register(spec, move |args, origin| {
             let who = crate::persist::who(origin);
             match &node {
                 Some(node) => {
-                    let answer = through_node(node, &history, id, args, &who)?;
-                    if matches!(id, CHART | DELETE | IMPORT | LOOK_SET_DEFAULT) {
-                        refresh_offer(node, &values);
+                    let (node, history, values, args) =
+                        (node.clone(), history.clone(), values.clone(), args.clone());
+                    let run = move || {
+                        let answer = through_node(&node, &history, id, &args, &who)?;
+                        if matches!(id, CHART | DELETE | IMPORT | LOOK_SET_DEFAULT) {
+                            refresh_offer(&node, &values);
+                        }
+                        Ok(answer)
+                    };
+                    match take_landing() {
+                        Some(landing) => {
+                            off.spawn(move || {
+                                let _ = landing.send(run());
+                            })?;
+                            Ok(serde_json::json!({ "pending": true }))
+                        }
+                        None => run(),
                     }
-                    Ok(answer)
                 }
                 None => node::run::<helios_vault::MemoryStore>(None, id, args, 0)
                     .map(|done| done.answer)
@@ -348,7 +391,6 @@ pub fn register(
             }
         })?;
     }
-    let off = OffFrame::new(&values);
     let (look_node, look_values, look_off) = (node.clone(), values.clone(), off.clone());
     let (fit_node, fit_history, jobs) = (node.clone(), history.clone(), shell.jobs());
     let spec = CommandSpec::new(
