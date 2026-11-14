@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use crate::Capability;
 use crate::images;
+use crate::limits::{Clock, Limiter, Permit, RealClock, RunCeiling};
 use crate::local::{self, Present, RealSystem, System};
 use crate::prompts::{Library, Prompt, PromptRef};
 use crate::provider::{
@@ -29,6 +30,9 @@ use helios_extract::{Adjust, Answer, ExtractorDef};
 
 /// The scheduler resource model calls take.
 pub const AI_CALLS: &str = "ai_calls";
+/// Model call jobs at once, over every provider (each provider's own
+/// limits apply inside).
+const AI_JOBS: u64 = 8;
 /// One pull at a time.
 const AI_PULL: &str = "ai_pull";
 /// One bench at a time.
@@ -98,6 +102,9 @@ pub struct PromptCall {
     pub extractor: Option<ExtractorDef>,
     /// Who asks, for the call log.
     pub purpose: String,
+    /// The run the call belongs to: its remote calls count against the
+    /// run's ceiling (`limits.run_remote_calls`).
+    pub run: Option<String>,
 }
 
 impl PromptCall {
@@ -109,6 +116,7 @@ impl PromptCall {
             overrides: Overrides::default(),
             extractor: None,
             purpose: "run".into(),
+            run: None,
         }
     }
 }
@@ -189,16 +197,40 @@ impl std::fmt::Display for PromptFailure {
     }
 }
 
-/// A capability (and prompt) a run will call, with its overrides, for
-/// the check before the run ([`Ai::check_needs`]).
+/// A model node of a run (a capability, maybe a prompt, its overrides),
+/// for the check before the run ([`Ai::check_run`]).
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct Need {
+    /// The node's name in the diagram, for the messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
     pub capability: Capability,
     /// `id` or `id@version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     #[serde(default)]
     pub overrides: Overrides,
+}
+
+impl Need {
+    pub fn new(capability: Capability) -> Self {
+        Need {
+            node: None,
+            capability,
+            prompt: None,
+            overrides: Overrides::default(),
+        }
+    }
+
+    /// How the messages name it: its node, else its prompt or capability.
+    pub fn label(&self) -> String {
+        match (&self.node, &self.prompt) {
+            (Some(n), Some(p)) => format!("node `{n}` ({}, {p})", self.capability),
+            (Some(n), None) => format!("node `{n}` ({})", self.capability),
+            (None, Some(p)) => format!("`{p}` ({})", self.capability),
+            (None, None) => self.capability.to_string(),
+        }
+    }
 }
 
 /// What the check found for one [`Need`].
@@ -212,7 +244,71 @@ pub struct NeedCheck {
     pub available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Whether the route's provider is off this machine (unknown when
+    /// there is no route).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote: Option<bool>,
+    /// Images sent per item (the prompt's, else 1 for vision and
+    /// segmentation).
+    pub images_per_item: u32,
 }
+
+/// What leaves the machine for one node, stated before a run.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Leaving {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    /// To whom: the provider's id, its URL, the model.
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub model: String,
+    pub images_per_item: u32,
+    /// Over the run, when its item count is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<u64>,
+    /// The longest side of an image sent (`privacy.remote_image_side`).
+    pub image_side: u32,
+}
+
+/// The check before a run: each model node's route, and whether the run
+/// may start.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct RunCheck {
+    /// Every node can be served: the run may start.
+    pub ok: bool,
+    pub nodes: Vec<NeedCheck>,
+    /// One line per node nothing serves: the node, the reason.
+    pub refused: Vec<String>,
+    /// Where to fix it, when something is refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
+    /// The nodes whose images go off this machine, and to whom.
+    pub leaves: Vec<Leaving>,
+    /// Remote calls the run will make at least (one per item and remote
+    /// node), when its item count is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_calls: Option<u64>,
+    /// The run's ceiling on remote calls (0: none).
+    pub remote_ceiling: u64,
+}
+
+impl RunCheck {
+    /// The refusal of a submission, naming each node nothing serves.
+    pub fn refusal(&self) -> Option<String> {
+        (!self.ok).then(|| {
+            format!(
+                "the run cannot start: {}. {}",
+                self.refused.join("; "),
+                self.fix.as_deref().unwrap_or_default()
+            )
+        })
+    }
+}
+
+/// Where a refused run's routes are fixed.
+const FIX: &str = "Set the routes in the AI settings (ai.toml; helios_ai_routing_set, \
+     helios_ai_providers_add, helios_ai_local_pull), and see helios_ai_doctor";
 
 /// What [`Ai::try_prompt`] found: the raw answer and the validated one,
 /// or why not. Nothing is applied.
@@ -236,6 +332,34 @@ impl TryResult {
     }
 }
 
+/// Who makes a call, for its limits: its job, how it notices a cancel,
+/// the run it belongs to, and where it says it is waiting on a limit.
+#[derive(Clone, Default)]
+struct Slot {
+    job: Option<u64>,
+    token: Option<CancelToken>,
+    run: Option<String>,
+    watch: Option<Watch>,
+}
+
+impl Slot {
+    fn job(job: u64, token: &CancelToken, watch: &Watch) -> Self {
+        Slot {
+            job: Some(job),
+            token: Some(token.clone()),
+            run: None,
+            watch: Some(watch.clone()),
+        }
+    }
+}
+
+/// Since when a job's call has been going (its timeout runs from there);
+/// `None` while it waits on a provider's limit.
+type Watch = Arc<Mutex<Option<Instant>>>;
+
+/// How often a job's waiter looks again while the job waits on a limit.
+const WATCH_POLL: Duration = Duration::from_millis(500);
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -254,6 +378,7 @@ struct Core {
     /// A finished job's result, by job id.
     results: Mutex<BTreeMap<u64, Value>>,
     log: Mutex<()>,
+    limiter: Arc<Limiter>,
 }
 
 /// The AI service.
@@ -295,6 +420,43 @@ impl Core {
         }
     }
 
+    /// A slot for a call of `capability` to `provider`: waits while the
+    /// provider is at its limits; refused past the run's remote ceiling.
+    fn permit(
+        &self,
+        provider: &dyn ModelProvider,
+        capability: Capability,
+        slot: &Slot,
+    ) -> Result<Permit, String> {
+        let (rule, ceiling) = {
+            let config = self.config();
+            (
+                config
+                    .limits
+                    .rule(provider.id(), provider.remote(), capability),
+                config.limits.run_remote_calls,
+            )
+        };
+        let run = slot
+            .run
+            .as_deref()
+            .filter(|_| provider.remote())
+            .map(|run| RunCeiling { run, ceiling });
+        let token = slot.token.clone();
+        let watch = slot.watch.clone();
+        self.limiter.acquire(
+            provider.id(),
+            rule,
+            run,
+            &|| token.as_ref().is_some_and(CancelToken::is_cancelled),
+            &|waiting| {
+                if let Some(w) = &watch {
+                    *w.lock().expect("watch lock") = (!waiting).then(Instant::now);
+                }
+            },
+        )
+    }
+
     fn record(&self, record: &CallRecord) {
         let line = serde_json::to_value(record).expect("records serialize");
         self.bus
@@ -318,7 +480,7 @@ impl Core {
         route: &Route,
         mut request: ChatRequest,
         meta: CallMeta,
-        job: Option<u64>,
+        slot: &Slot,
     ) -> Result<ChatReply, String> {
         let provider = self.provider(&route.provider)?;
         let capability = if request.images.is_empty() {
@@ -343,11 +505,12 @@ impl Core {
             .map(|i| images::prepare(&i.bytes, side))
             .collect::<Result<_, _>>()?;
         request.model.clone_from(&route.model);
+        let _permit = self.permit(provider.as_ref(), capability, slot)?;
         let started = Instant::now();
         let result = provider.chat(&request);
         self.record(&CallRecord {
             at: now(),
-            job,
+            job: slot.job,
             provider: provider.id().to_string(),
             kind: provider.kind(),
             model: route.model.clone(),
@@ -373,14 +536,15 @@ impl Core {
         route: &Route,
         texts: &[String],
         meta: CallMeta,
-        job: Option<u64>,
+        slot: &Slot,
     ) -> Result<Vec<Vec<f32>>, String> {
         let provider = self.provider(&route.provider)?;
+        let _permit = self.permit(provider.as_ref(), Capability::Embeddings, slot)?;
         let started = Instant::now();
         let result = provider.embed(&route.model, texts);
         self.record(&CallRecord {
             at: now(),
-            job,
+            job: slot.job,
             provider: provider.id().to_string(),
             kind: provider.kind(),
             model: route.model.clone(),
@@ -402,16 +566,17 @@ impl Core {
         route: &Route,
         mut request: SegmentRequest,
         meta: CallMeta,
-        job: Option<u64>,
+        slot: &Slot,
     ) -> Result<SegmentReply, String> {
         let provider = self.provider(&route.provider)?;
         request.image = images::prepare(&request.image.bytes, self.image_side(provider.remote()))?;
         request.model.clone_from(&route.model);
+        let _permit = self.permit(provider.as_ref(), Capability::Segmentation, slot)?;
         let started = Instant::now();
         let result = provider.segment(&request);
         self.record(&CallRecord {
             at: now(),
-            job,
+            job: slot.job,
             provider: provider.id().to_string(),
             kind: provider.kind(),
             model: route.model.clone(),
@@ -527,7 +692,7 @@ impl Core {
         prompt: &Prompt,
         call: &PromptCall,
         (route, from): (Route, RouteFrom),
-        job: Option<u64>,
+        slot: &Slot,
     ) -> Result<PromptRun, PromptFailure> {
         let mut failure = PromptFailure {
             prompt: prompt.reference(),
@@ -558,7 +723,7 @@ impl Core {
                 attempt: Some(attempt),
             };
             let request = Self::request(prompt, &route, text, images.clone());
-            let reply = match self.chat(&route, request, meta, job) {
+            let reply = match self.chat(&route, request, meta, slot) {
                 Ok(r) => r,
                 Err(e) => {
                     // Not a misfit: the provider failed, nothing to correct.
@@ -604,7 +769,7 @@ impl Core {
         images: &[Vec<u8>],
         route: Option<Route>,
         purpose: &str,
-        job: Option<u64>,
+        slot: &Slot,
     ) -> TryResult {
         let mut result = TryResult {
             prompt: prompt.reference(),
@@ -639,7 +804,7 @@ impl Core {
             ..CallMeta::default()
         };
         let started = Instant::now();
-        match self.chat(&route, request, meta, job) {
+        match self.chat(&route, request, meta, slot) {
             Ok(reply) => {
                 result.ms = started.elapsed().as_millis() as u64;
                 match prompt.validate(&reply.text) {
@@ -708,9 +873,23 @@ impl Ai {
         secrets: Arc<dyn Secrets>,
         system: Arc<dyn System>,
     ) -> Result<Ai, String> {
+        Ai::with_clock(paths, transport, secrets, system, Arc::new(RealClock))
+    }
+
+    /// The service over given parts and a clock (limits per minute, in
+    /// tests).
+    pub fn with_clock(
+        paths: Paths,
+        transport: Arc<dyn Transport>,
+        secrets: Arc<dyn Secrets>,
+        system: Arc<dyn System>,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Ai, String> {
         let config = AiConfig::load(&paths.config)?;
         let library = Library::load(Some(&paths.prompts));
-        let calls = config.limits.calls.max(1);
+        // Calls at once over every provider; each provider's own limits
+        // ([`crate::limits`]) are kept by the limiter inside the jobs.
+        let calls = AI_JOBS.max(config.limits.calls);
         let bus = Arc::new(Bus::new());
         let workers = usize::try_from(calls).unwrap_or(1) + 2;
         let scheduler = Scheduler::with_resources(
@@ -729,6 +908,7 @@ impl Ai {
                 bus,
                 results: Mutex::default(),
                 log: Mutex::new(()),
+                limiter: Limiter::new(clock),
             }),
             scheduler,
         })
@@ -761,25 +941,39 @@ impl Ai {
         name: &str,
         needs: &[(&str, u64)],
         timeout: Duration,
-        work: impl FnOnce(&CancelToken, u64) -> Result<T, String> + Send + 'static,
+        work: impl FnOnce(&CancelToken, u64, &Watch) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
         let (tx, rx) = mpsc::channel();
+        let watch: Watch = Arc::new(Mutex::new(Some(Instant::now())));
+        let held = watch.clone();
         let id = self.submit(name, needs, move |token, id| {
-            let result = work(token, id);
+            let result = work(token, id, &held);
             let failed = result.as_ref().err().cloned();
             let _ = tx.send(result);
             failed.map_or(Ok(()), Err)
         });
-        match rx.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(RecvTimeoutError::Timeout) => {
+        // The timeout runs while the job is queued or calling, not while it
+        // waits on a provider's limit.
+        loop {
+            let since = *watch.lock().expect("watch lock");
+            let wait = match since {
+                None => WATCH_POLL,
+                Some(t) => timeout.saturating_sub(t.elapsed()),
+            };
+            if wait.is_zero() {
                 self.scheduler.cancel(id);
-                Err(format!("no answer in {} s", timeout.as_secs()))
+                return Err(format!("no answer in {} s", timeout.as_secs()));
             }
-            Err(RecvTimeoutError::Disconnected) => Err(format!(
-                "the job did not run ({:?})",
-                self.scheduler.job(id)
-            )),
+            match rx.recv_timeout(wait) {
+                Ok(result) => return result,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(format!(
+                        "the job did not run ({:?})",
+                        self.scheduler.job(id)
+                    ));
+                }
+            }
         }
     }
 
@@ -828,7 +1022,9 @@ impl Ai {
             &format!("ai chat {}/{}", route.provider, route.model),
             &[(AI_CALLS, 1)],
             self.timeout_of(route),
-            move |_, job| core.chat(&route_owned, request, meta, Some(job)),
+            move |token, job, watch| {
+                core.chat(&route_owned, request, meta, &Slot::job(job, token, watch))
+            },
         )
     }
 
@@ -845,7 +1041,9 @@ impl Ai {
             &format!("ai embed {}/{}", route.provider, route.model),
             &[(AI_CALLS, 1)],
             self.timeout_of(route),
-            move |_, job| core.embed(&route_owned, &texts, meta, Some(job)),
+            move |token, job, watch| {
+                core.embed(&route_owned, &texts, meta, &Slot::job(job, token, watch))
+            },
         )
     }
 
@@ -862,7 +1060,9 @@ impl Ai {
             &format!("ai segment {}/{}", route.provider, route.model),
             &[(AI_CALLS, 1)],
             self.timeout_of(route),
-            move |_, job| core.segment(&route_owned, request, meta, Some(job)),
+            move |token, job, watch| {
+                core.segment(&route_owned, request, meta, &Slot::job(job, token, watch))
+            },
         )
     }
 
@@ -898,6 +1098,7 @@ impl Ai {
                         "command": p.command,
                         "remote": p.remote(),
                         "capabilities": p.capabilities(),
+                        "limits": config.limits.providers.get(&p.id),
                         "key": self.key_state(p.key.as_ref()),
                         "listed": config.listed.iter().any(|l| l.id == p.id),
                     })
@@ -1211,7 +1412,16 @@ impl Ai {
             &format!("ai try {}", prompt.reference()),
             &[(AI_CALLS, 1)],
             timeout + Duration::from_secs(30),
-            move |_, job| Ok(core.try_prompt(&prompt, input, &images, route, "try", Some(job))),
+            move |token, job, watch| {
+                Ok(core.try_prompt(
+                    &prompt,
+                    input,
+                    &images,
+                    route,
+                    "try",
+                    &Slot::job(job, token, watch),
+                ))
+            },
         )
     }
 
@@ -1271,7 +1481,13 @@ impl Ai {
             &name,
             &[(AI_CALLS, 1)],
             self.timeout_of(&route) * 2,
-            move |_, job| Ok(core.run_prompt(&held, &call, resolved, Some(job))),
+            move |token, job, watch| {
+                let slot = Slot {
+                    run: call.run.clone(),
+                    ..Slot::job(job, token, watch)
+                };
+                Ok(core.run_prompt(&held, &call, resolved, &slot))
+            },
         ) {
             Ok(run) => run,
             Err(e) => Err(fail(e, Some(route))),
@@ -1280,51 +1496,134 @@ impl Ai {
 
     /// Before a run: for each capability (and prompt) it will call, with
     /// its overrides, the route it resolves to and whether that route can
-    /// serve (provider configured and answering, its key found, the model
-    /// present and doing the capability). Each provider is asked for its
-    /// models once.
+    /// serve (the prompt known, the provider configured and answering, its
+    /// key found, the model present and doing the capability). Each
+    /// provider is asked for its models once.
     pub fn check_needs(&self, needs: &[Need]) -> Vec<NeedCheck> {
         let mut cache = BTreeMap::new();
+        let library = self.core.library.lock().expect("library lock").clone();
+        let providers = self.core.config().providers();
         needs
             .iter()
             .map(|need| {
-                let id = match need.prompt.as_deref().map(PromptRef::parse) {
-                    Some(Err(e)) => {
-                        return NeedCheck {
-                            need: need.clone(),
-                            route: None,
-                            from: None,
-                            available: false,
-                            reason: Some(e),
-                        };
-                    }
-                    Some(Ok(r)) => Some(r.id),
+                let default_images = u32::from(matches!(
+                    need.capability,
+                    Capability::Vision | Capability::Segmentation
+                ));
+                let failed = |reason: String, images: u32| NeedCheck {
+                    need: need.clone(),
+                    route: None,
+                    from: None,
+                    available: false,
+                    reason: Some(reason),
+                    remote: None,
+                    images_per_item: images,
+                };
+                let prompt = match need.prompt.as_deref().map(PromptRef::parse) {
+                    Some(Err(e)) => return failed(e, default_images),
+                    Some(Ok(r)) => match library.get(&r) {
+                        Ok(p) => Some(p.clone()),
+                        Err(e) => return failed(e, default_images),
+                    },
                     None => None,
                 };
-                match self
-                    .core
-                    .resolve(need.capability, id.as_deref(), &need.overrides)
-                {
-                    Err(e) => NeedCheck {
-                        need: need.clone(),
-                        route: None,
-                        from: None,
-                        available: false,
-                        reason: Some(e),
-                    },
+                let images = prompt.as_ref().map_or(default_images, |p| p.images);
+                match self.core.resolve(
+                    need.capability,
+                    prompt.as_ref().map(|p| p.id.as_str()),
+                    &need.overrides,
+                ) {
+                    Err(e) => failed(e, images),
                     Ok((route, from)) => {
                         let check = self.check_route(need.capability, &route, &mut cache);
                         NeedCheck {
                             need: need.clone(),
+                            remote: providers
+                                .iter()
+                                .find(|p| p.id == route.provider)
+                                .map(ProviderConfig::remote),
                             route: Some(route),
                             from: Some(from),
                             available: check.is_ok(),
                             reason: check.err(),
+                            images_per_item: images,
                         }
                     }
                 }
             })
             .collect()
+    }
+
+    /// The check a run's submission calls before anything runs: every
+    /// model node checked ([`Ai::check_needs`]), the nodes nothing serves
+    /// named with the reason and where to fix it, what leaves the machine
+    /// and to whom, and the run's remote calls against its ceiling.
+    /// `items`: how many images the run takes, when known.
+    pub fn check_run(&self, needs: &[Need], items: Option<u64>) -> RunCheck {
+        let nodes = self.check_needs(needs);
+        let config = self.core.config().clone();
+        let providers = config.providers();
+        let refused: Vec<String> = nodes
+            .iter()
+            .filter(|n| !n.available)
+            .map(|n| {
+                format!(
+                    "{}: {}",
+                    n.need.label(),
+                    n.reason.as_deref().unwrap_or("not available")
+                )
+            })
+            .collect();
+        let leaves: Vec<Leaving> = nodes
+            .iter()
+            .filter(|n| n.remote == Some(true))
+            .filter_map(|n| {
+                let route = n.route.as_ref()?;
+                Some(Leaving {
+                    node: n.need.node.clone(),
+                    provider: route.provider.clone(),
+                    url: providers
+                        .iter()
+                        .find(|p| p.id == route.provider)
+                        .and_then(ProviderConfig::url),
+                    model: route.model.clone(),
+                    images_per_item: n.images_per_item,
+                    images: items.map(|i| i * u64::from(n.images_per_item)),
+                    image_side: config.privacy.remote_image_side,
+                })
+            })
+            .collect();
+        let remote_nodes = nodes.iter().filter(|n| n.remote == Some(true)).count() as u64;
+        RunCheck {
+            ok: refused.is_empty(),
+            fix: (!refused.is_empty()).then(|| FIX.to_string()),
+            refused,
+            nodes,
+            leaves,
+            remote_calls: items.map(|i| i * remote_nodes),
+            remote_ceiling: config.limits.run_remote_calls,
+        }
+    }
+
+    /// [`Ai::check_run`] as a submission calls it: the check, or the
+    /// refusal naming each node nothing serves. Nothing has run either way.
+    pub fn check_submission(&self, needs: &[Need], items: Option<u64>) -> Result<RunCheck, String> {
+        let check = self.check_run(needs, items);
+        match check.refusal() {
+            Some(refusal) => Err(refusal),
+            None => Ok(check),
+        }
+    }
+
+    /// Remote calls `run` has made so far (see `limits.run_remote_calls`).
+    pub fn run_remote_calls(&self, run: &str) -> u64 {
+        self.core.limiter.run_calls(run)
+    }
+
+    /// Forgets a run's remote call count: the run ended, or the user let
+    /// it go on past its ceiling.
+    pub fn forget_run(&self, run: &str) {
+        self.core.limiter.forget_run(run);
     }
 
     // The local runtime.
@@ -1556,7 +1855,12 @@ impl Ai {
                         return Err("cancelled".into());
                     }
                     let shown = std::slice::from_ref(&image);
-                    let t = core.try_prompt(prompt, None, shown, Some((*route).clone()), "bench", Some(job));
+                    let slot = Slot {
+                        job: Some(job),
+                        token: Some(token.clone()),
+                        ..Slot::default()
+                    };
+                    let t = core.try_prompt(prompt, None, shown, Some((*route).clone()), "bench", &slot);
                     done += 1;
                     core.progress(
                         job,

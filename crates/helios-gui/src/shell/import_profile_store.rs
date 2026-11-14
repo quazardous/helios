@@ -20,6 +20,12 @@
 //!   the same file. A named filter only sets which files are taken; folded
 //!   into whole profiles it would invent copy and naming choices nobody
 //!   made, so it stays a preset any profile's filter can be set from.
+//! - **Kept by the node**: with a node, the profiles are the person's
+//!   document `user/import-profiles` (JSON) the node keeps, the one its
+//!   `import.profiles.*` commands, `library.import {profile}` and its
+//!   automatic imports read (`helios_node_core::import_profiles`). The
+//!   first time, the profiles of the file are written there; the file is
+//!   then left as it is ([`Profiles::keep_with`]).
 //! - **Migration, once**: when the file does not exist yet, the old
 //!   presets (`import-presets.json`) become profiles, the named filters
 //!   (`import-filters.json`) filter presets, and the last used choices,
@@ -86,8 +92,12 @@ struct Document {
     filters: BTreeMap<String, Filter>,
 }
 
+/// Reads the node's profiles document: its text, `None` when none is kept.
+pub type ReadProfiles = Box<dyn Fn() -> Result<Option<String>, String>>;
+/// Keeps the node's profiles document's text.
+pub type WriteProfiles = Box<dyn Fn(&str) -> Result<(), String>>;
+
 /// The library's import profiles, Everyday first, and where they are kept.
-#[derive(Debug)]
 pub struct Profiles {
     list: Vec<ImportProfile>,
     /// The profile in use when no source has one.
@@ -97,6 +107,19 @@ pub struct Profiles {
     /// The filter presets, by name.
     pub filters: BTreeMap<String, Filter>,
     file: Option<PathBuf>,
+    /// The node's document, when it keeps them: written in place of the
+    /// file.
+    node: Option<WriteProfiles>,
+}
+
+impl std::fmt::Debug for Profiles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Profiles")
+            .field("list", &self.list)
+            .field("current", &self.current)
+            .field("node", &self.node.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for Profiles {
@@ -107,6 +130,7 @@ impl Default for Profiles {
             defaults: BTreeMap::new(),
             filters: BTreeMap::new(),
             file: None,
+            node: None,
         }
     }
 }
@@ -144,6 +168,7 @@ impl Profiles {
             defaults: doc.defaults,
             filters: doc.filters,
             file: None,
+            node: None,
         };
         // Everyday is always there, first.
         match p.list.iter().position(ImportProfile::built_in) {
@@ -182,6 +207,48 @@ impl Profiles {
             p.current = p.add("Last used", last.clone());
         }
         p
+    }
+
+    /// From now on kept in the node's document, read through `read` and
+    /// written through `write`: the profiles it keeps replace these; when
+    /// it keeps none yet, these (the file's, migrated) are written there,
+    /// once.
+    pub fn keep_with(&mut self, read: &ReadProfiles, write: WriteProfiles) {
+        let kept = match read() {
+            Ok(text) => text.and_then(|t| match serde_json::from_str::<Document>(&t) {
+                Ok(doc) => Some(doc),
+                Err(e) => {
+                    log::warn!("import profiles: the node's document: {e}");
+                    None
+                }
+            }),
+            Err(e) => {
+                log::warn!("import profiles: the node's document: {e}");
+                return;
+            }
+        };
+        let file = self.file.take();
+        let migrate = kept.is_none();
+        if let Some(doc) = kept {
+            *self = Profiles::of(doc);
+        }
+        self.file = file;
+        self.node = Some(write);
+        if migrate {
+            // Migrated once: the file's profiles go to the node.
+            self.save();
+        }
+    }
+
+    /// The document's text, as kept.
+    fn text(&self) -> String {
+        let doc = Document {
+            profiles: self.list.clone(),
+            current: Some(self.current.clone()),
+            defaults: self.defaults.clone(),
+            filters: self.filters.clone(),
+        };
+        serde_json::to_string_pretty(&doc).unwrap_or_default()
     }
 
     /// The profiles, Everyday first.
@@ -314,20 +381,20 @@ impl Profiles {
         before != self.list.len()
     }
 
-    /// Keeps the profiles in their file.
+    /// Keeps the profiles: in the node's document when it keeps them,
+    /// else in their file.
     pub fn save(&self) {
+        if let Some(write) = &self.node {
+            if let Err(e) = write(&self.text()) {
+                log::warn!("import profiles: the node's document: {e}");
+            }
+            return;
+        }
         let Some(file) = &self.file else { return };
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let doc = Document {
-            profiles: self.list.clone(),
-            current: Some(self.current.clone()),
-            defaults: self.defaults.clone(),
-            filters: self.filters.clone(),
-        };
-        let text = serde_json::to_string_pretty(&doc).unwrap_or_default();
-        if let Err(e) = std::fs::write(file, text) {
+        if let Err(e) = std::fs::write(file, self.text()) {
             log::warn!("import profiles: {}: {e}", file.display());
         }
     }
@@ -437,6 +504,37 @@ mod tests {
         let id = p.add("Monthly", Choices::default());
         assert!(p.rename(&id, "By month"));
         assert!(p.remove(&id));
+    }
+
+    #[test]
+    fn the_files_profiles_go_to_the_node_once_then_the_node_keeps_them() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let node = Rc::new(RefCell::new(None::<String>));
+        let (r, w) = (node.clone(), node.clone());
+        let read: ReadProfiles = Box::new(move || Ok(r.borrow().clone()));
+        let write = move || -> WriteProfiles {
+            let w = w.clone();
+            Box::new(move |t: &str| {
+                *w.borrow_mut() = Some(t.to_string());
+                Ok(())
+            })
+        };
+        let mut p = Profiles::of(Document::default());
+        let id = p.add("Monthly", Choices::default());
+        p.keep_with(&read, write());
+        let text = node.borrow().clone().expect("migrated to the node");
+        assert!(text.contains("Monthly"), "{text}");
+        // The node's document is what the commands read.
+        let doc = helios_node_core::import_profiles::Document::of(Some(&text));
+        assert_eq!(doc.get(&id).unwrap().name, "Monthly");
+        // Kept there: another window reads them from the node, not its file.
+        let mut other = Profiles::of(Document::default());
+        other.keep_with(&read, write());
+        assert!(other.get(&id).is_some());
+        assert!(other.rename(&id, "By month"));
+        other.save();
+        assert!(node.borrow().as_deref().unwrap().contains("By month"));
     }
 
     #[test]

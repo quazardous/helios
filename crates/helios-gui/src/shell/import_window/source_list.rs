@@ -371,15 +371,18 @@ fn folder_menu(
 ) {
     let mut asked: Option<MenuAsked> = None;
     let kept = w.sources.kept();
-    let auto = (
-        Trigger::offered(w.is_card(path)),
-        w.sources
-            .get(&SourceKey::Folder(path.to_path_buf()))
-            .and_then(|s| s.auto),
-    );
+    // The automatic import its connector offers, if any.
+    let set = w
+        .sources
+        .get(&SourceKey::Folder(path.to_path_buf()))
+        .and_then(|s| s.auto);
+    let auto = w
+        .path_setup(path)
+        .auto
+        .map(|offered| (Trigger::from(offered), set));
     response.context_menu(|ui| {
         if kept {
-            asked = menu_items(ui, words, Some(auto));
+            asked = menu_items(ui, words, auto);
             ui.separator();
         }
         if ui
@@ -406,8 +409,17 @@ fn account_menu(
     event: &mut Option<Event>,
 ) {
     let Some(texts) = w.texts.clone() else { return };
-    let saved = w.sources.get(&SourceKey::Account(id.to_owned())).is_some();
+    let key = SourceKey::Account(id.to_owned());
+    let saved = w.sources.get(&key).map(|s| s.auto);
     let kept = w.sources.kept();
+    // The automatic import its connector offers, if any.
+    let connector = w.connector_of(&key);
+    let auto = saved.and_then(|set| {
+        w.setup_of(&connector)
+            .auto
+            .map(|offered| (Trigger::from(offered), set))
+    });
+    let saved = saved.is_some();
     let mut item = None;
     let asked = crate::shell::import_accounts::account_menu(
         response,
@@ -417,7 +429,7 @@ fn account_menu(
         &mut |ui: &mut egui::Ui| {
             if kept && saved {
                 ui.separator();
-                item = menu_items(ui, words, None);
+                item = menu_items(ui, words, auto);
             }
         },
         &|m| texts(m),

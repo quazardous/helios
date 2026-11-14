@@ -26,7 +26,8 @@
 //! selection through the node, the thumbnail is shown turned, and the
 //! step undoes. Duplicate (L10): Ctrl+' makes a new head through the
 //! node, the grid's badge counts the versions, an agent duplicates the
-//! original.
+//! original. RAW+JPEG files paired into one cell and unpaired, each
+//! one step undone.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -2300,6 +2301,88 @@ fn photos_are_grouped_topped_and_ungrouped_each_undone_and_redone() {
         assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
     }
     assert!(persist.vault().stacks().unwrap().is_empty(), "ungrouped");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// "Pair RAW+JPEG Files" on two photos: one cell remains, the step
+/// undone shows two again and redone one; "Unpair Files" splits them.
+#[test]
+fn two_photos_are_paired_into_one_cell_and_the_step_undone() {
+    use egui_pop::api::history::{Answer, Request};
+    let root = temp("pairs");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    // a.jpg at the top, c.nef in `raw`: no pair by name, two photos
+    // given are paired as they are, the raw the photo.
+    let (jpeg, raw) = (id(1).hex(), id(3).hex());
+    let request = Request::new(helios_gui::library_history::LIBRARY);
+    let user = egui_pop::model::commands::Origin::User;
+    let mut clock = 1.0;
+    let mut refill = |h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>| {
+        for _ in 0..3 {
+            settle(h, persist, clock);
+            clock += 4.0;
+        }
+        // The vault's event heard, the Library read again.
+        let _ = persist.take_locations_changed();
+        persist.ask_fill(h.state(), true);
+        for _ in 0..3 {
+            settle(h, persist, clock);
+            clock += 4.0;
+        }
+    };
+    let shown =
+        |h: &Harness<'static, Shell>, image: &str| h.state().library().entry(image).is_some();
+
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[jpeg.clone(), raw.clone()]);
+    let out = answer(&mut h, "library.files.pair", json!({}));
+    assert_eq!(out["asked"], 2, "{out}");
+    refill(&mut h, &mut persist);
+    assert_eq!(
+        persist.vault().photo_of(&id(1)).unwrap().map(|f| f.photo),
+        Some(id(3)),
+        "the JPEG is the raw's file"
+    );
+    assert!(shown(&h, &raw) && !shown(&h, &jpeg), "one cell remains");
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Pair 1 RAW+JPEG files"
+    );
+
+    // Undone: two cells; redone: one.
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    refill(&mut h, &mut persist);
+    assert_eq!(persist.vault().photo_of(&id(1)).unwrap(), None);
+    assert!(shown(&h, &raw) && shown(&h, &jpeg), "two cells again");
+    let redone = history.redo(&request, &user);
+    assert!(matches!(redone, Answer::Done(Ok(_))), "{redone:?}");
+    refill(&mut h, &mut persist);
+    assert!(!shown(&h, &jpeg), "one cell again");
+
+    // Unpair Files on the photo: two photos, one step.
+    let out = answer(&mut h, "library.files.unpair", json!({ "images": [raw] }));
+    assert_eq!(out["asked"], 1, "{out}");
+    refill(&mut h, &mut persist);
+    assert!(shown(&h, &raw) && shown(&h, &jpeg), "unpaired");
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Unpair files"
+    );
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

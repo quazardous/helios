@@ -19,7 +19,7 @@ use helios_core::Event;
 
 use crate::{Changes, DocumentChange, ImageId, Store, Vault};
 
-const STACKS: &str = "stacks";
+pub(crate) const STACKS: &str = "stacks";
 pub(crate) const SIGNALS: &str = "signals";
 
 /// A group of images shown as one.
@@ -109,7 +109,7 @@ fn document_change(id: &str, before: Option<Value>, after: Option<Value>) -> Doc
     }
 }
 
-fn all<S: Store>(store: &S) -> Result<Vec<Stack>, String> {
+pub(crate) fn all<S: Store + ?Sized>(store: &S) -> Result<Vec<Stack>, String> {
     store
         .documents(STACKS)?
         .into_iter()

@@ -254,3 +254,42 @@ fn an_import_cut_by_a_stop_is_taken_up_and_finishes_without_duplicates() {
     drop(vault);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_import_by_rule_naming_a_profile_imports_with_its_choices() {
+    let dir = scratch("profile");
+    let roll = roll(&dir, 2);
+    let into = dir.join("library");
+    let bus = Arc::new(Bus::new());
+    let vault = Arc::new(Vault::new(MemoryStore::default()).with_bus(bus.clone()));
+    let service = VaultService::new(vault.clone(), bus.clone(), Jobs::new(bus.clone()), "test");
+    let client = Client::in_process(Arc::new(service)).with_origin("agent:test");
+    let profile = json!({ "id": "flat", "name": "Flat", "choices": {
+        "copy_folders": true, "into": into, "layout": "flat", "rename": "{stem}-kept" } });
+    client
+        .request("import.profiles.set", json!({ "profile": profile }))
+        .unwrap();
+
+    let answer = client
+        .request(
+            "library.import",
+            json!({ "source": roll, "rule": "all", "profile": "flat", "signals": false }),
+        )
+        .unwrap();
+    let settled = wait(&client, &answer["promise"]["id"]);
+    assert_eq!(settled["state"], "done", "{settled}");
+    assert_eq!(settled["result"]["report"]["added"], 2, "{settled}");
+    // Copied into the profile's folder, one folder, named by its pattern.
+    assert!(into.join("p000-kept.raf").is_file(), "{settled}");
+    assert!(into.join("p001-kept.raf").is_file(), "{settled}");
+
+    // A profile the node does not keep is refused, not a failed promise.
+    let refused = client
+        .request(
+            "library.import",
+            json!({ "source": roll, "rule": "all", "profile": "gone" }),
+        )
+        .unwrap_err();
+    assert!(refused.message.contains("gone"), "{refused:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

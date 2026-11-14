@@ -763,6 +763,8 @@ gui-history-library-remove = Remove { $count } photos from the Library
 
 gui-history-library-undoing = Undoing “{ $step }”…
 
+gui-history-pair-files = Pair { $count } RAW+JPEG files
+
 gui-history-preview-applied = applied
 
 gui-history-preview-bypassed = bypassed
@@ -794,6 +796,8 @@ gui-history-stack-top = Move to top of stack
 gui-history-stack-ungroup = Unstack
 
 gui-history-undo = Undo
+
+gui-history-unpair-files = Unpair files
 
 gui-history-user-batch = { $count } commands
 
@@ -1199,6 +1203,8 @@ gui-import-window-own-choices = Its own import choices
 
 gui-import-window-pair = RAW+JPG
 
+gui-import-window-pair-short = R+J
+
 gui-import-window-profile = Import profile
 
 gui-import-window-raw-only = Raw only
@@ -1525,6 +1531,12 @@ gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
 
 gui-library-offline-unknown = On a disk that is not plugged in
 
+gui-library-pair-conflicts = { $pairs } pairs made one photo; { $count } marks set differently kept the RAW's
+
+gui-library-pair-files = Pair RAW+JPEG Files
+
+gui-library-pair-not-changed = The files were not paired or unpaired: { $error }
+
 gui-library-plug-in = Plug in { $volume } to open this photo (last seen { $date } on { $node })
 
 gui-library-quick = Quick collection
@@ -1618,6 +1630,8 @@ gui-library-sync = Sync zoom and pan
 gui-library-tags = Tags
 
 gui-library-trash = Move to Trash…
+
+gui-library-unpair-files = Unpair Files
 
 gui-library-version-copy = Copy
 
@@ -2983,6 +2997,8 @@ health-fix-library-folder = Open the library's folder
 
 health-fix-no-destination = No backup disk is plugged in: open the Storage page
 
+health-fix-pair-files = Pair them
+
 health-fix-plug-in = Plug in { $volume } to back up
 
 health-fix-plugin-disable = Disable it
@@ -3094,6 +3110,12 @@ health-plugin-unsupported = { $plugin } does not suit this Helios
 health-plugin-unsupported-detail = { $problems }. Update it.
 
 health-plugins = Plugins
+
+health-raw-jpeg-pairs = RAW+JPEG pairs
+
+health-raw-jpeg-pairs-detail = Pairing makes each one photo with two files: the RAW keeps its marks where both have one, labels, tags and albums are merged. One undo step.
+
+health-raw-jpeg-pairs-some = { $count } RAW+JPEG pairs are shown as two photos
 
 health-seen = Backup disks seen lately
 

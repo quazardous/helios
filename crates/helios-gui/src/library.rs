@@ -69,6 +69,7 @@ use serde_json::Value;
 mod batch;
 mod grouping;
 mod keywords;
+mod pairing;
 mod versions;
 
 /// The batch a change was asked in, if any
@@ -87,6 +88,7 @@ pub use keywords::{
     DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
     KEYWORD_MERGE_COMMAND, KEYWORD_REMOVE_COMMAND, KEYWORD_RENAME_COMMAND, KeywordAsk,
 };
+pub use pairing::{PAIR_COMMAND, PairAsk, UNPAIR_COMMAND};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
 /// The library's name in egui-pop's steps and commands (`library` in
@@ -1695,6 +1697,9 @@ pub struct Library {
     /// What the commands asked of the keyword branches (rename, merge),
     /// for the host, each with its batch.
     keyword_asks: Vec<(KeywordAsk, Batch)>,
+    /// What the commands asked of RAW+JPEG pairs (pair, unpair), for the
+    /// host, each with its batch.
+    pair_asks: Vec<(PairAsk, Batch)>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1865,6 +1870,7 @@ impl Default for Library {
             stack_asks: Vec::new(),
             keyword_counts: None,
             keyword_asks: Vec::new(),
+            pair_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -4427,6 +4433,17 @@ impl Library {
                             crate::i18n::text(
                                 ui.ctx(),
                                 Message::new("gui-library-stack-top", "Move to Top of Stack"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::Separator,
+                        crate::dialogs::MenuItem::command(PAIR_COMMAND).labeled(crate::i18n::text(
+                            ui.ctx(),
+                            Message::new("gui-library-pair-files", "Pair RAW+JPEG Files"),
+                        )),
+                        crate::dialogs::MenuItem::command(UNPAIR_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-unpair-files", "Unpair Files"),
                             ),
                         ),
                         crate::dialogs::MenuItem::Separator,

@@ -23,6 +23,10 @@
 //! - **One step per manual stack change** (L11): a group, an unstack, a
 //!   new top; the stacks' documents before and after, as the node's
 //!   `library.stacks.group`, `.ungroup` and `.top` answer them.
+//! - **One step per pairing** (RAW+JPEG files paired or unpaired): the
+//!   photos' rows and the albums and stacks they were in, before and
+//!   after, as the node's `library.pairs.pair` and `.unpair` answer
+//!   them.
 //! - **For the session only** (docs/design/undo.md, decided 2026-10-14):
 //!   the steps live in memory; a restart starts with none.
 //! - **Active with the library's panels** (the Library, the Filmstrip,
@@ -294,6 +298,27 @@ pub fn keyword_label(ask: &crate::library::KeywordAsk) -> Label {
             ("to".to_string(), to.to_string()),
         ]
         .into(),
+    }
+}
+
+/// A pairing's step: "Pair 2 RAW+JPEG files", "Unpair files".
+pub fn pair_label(ask: &crate::library::PairAsk, count: usize) -> Label {
+    use crate::library::PairAsk;
+    let (m, args) = match ask {
+        PairAsk::Pair { .. } => (
+            Message::new("gui-history-pair-files", "Pair { $count } RAW+JPEG files")
+                .with("count", count),
+            [("count".to_string(), count.to_string())].into(),
+        ),
+        PairAsk::Unpair { .. } => (
+            Message::new("gui-history-unpair-files", "Unpair files"),
+            std::collections::BTreeMap::default(),
+        ),
+    };
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args,
     }
 }
 

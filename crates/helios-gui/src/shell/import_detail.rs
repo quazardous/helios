@@ -111,10 +111,12 @@ impl ImportWindow {
             .clone()
             .map(SourceKey::Account)
             .or_else(|| self.ticked.last().cloned().map(SourceKey::Folder));
-        let connector = key.as_ref().map_or_else(
-            || helios_connect::folder::ID.to_string(),
-            |k| self.connector_of(k),
-        );
+        let connector = match &key {
+            Some(k) => self.connector_of(k),
+            None => self
+                .connector_asking(helios_connect::SetupAsks::Path)
+                .unwrap_or_default(),
+        };
         let provider = self.connectors.provider(&connector);
         let label = provider.as_ref().map_or_else(
             || connector.clone(),

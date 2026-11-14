@@ -2385,6 +2385,19 @@ fn main() -> Result<(), String> {
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );
             shell.remember_import_choices_in(import_choices);
+            // The import profiles: one of the person's documents the node
+            // keeps, the one its `import.profiles.*` commands read.
+            if let Some(kept) = node_settings.clone() {
+                let write = kept.clone();
+                let doc = helios_node_core::import_profiles::DOCUMENT;
+                // Written off the interface's thread, as the sources are.
+                shell.keep_import_profiles_with(
+                    Box::new(move || kept.read(doc)),
+                    helios_gui::shell::write_import_sources_in_background(move |text| {
+                        write.write(doc, text)
+                    }),
+                );
+            }
             // The import window's saved sources, with their own choices:
             // one of the person's documents the node keeps.
             if let Some(kept) = node_settings.clone() {

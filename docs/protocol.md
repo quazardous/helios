@@ -385,6 +385,35 @@ desktop's Ctrl+Z), and announce each photo as `vault.field_changed`:
 {"id": 15, "result": {"photos": 3, "changes": {…}}}
 ```
 
+RAW+JPEG pairs ([design/raw-jpeg-pairs.md](design/raw-jpeg-pairs.md)): a
+raw and the camera's JPEG or HEIF of one shot are one photo with two
+files. `library.pairs.pair` (`images`, `exact`) finds the pairs among the
+photos given (the whole Library when `images` is absent: the health
+check's offer), by name in one folder, else by capture time and camera;
+with `exact`, or when two photos are given and no pair is found, the two
+are paired as they are (a raw and a JPEG or HEIF). Each pair becomes the
+raw's photo, the JPEG its `camera` file, off the Library on its own. The
+marks are merged: a single-valued mark (rating, flag, rotation, title,
+description) is the raw's when set, else the JPEG's, and two set values
+that differ keep the raw's and are listed in `conflicts`; labels and
+tags are united; the JPEG's place in albums and stacks goes to the raw;
+the JPEG's versions are kept hidden (`hidden_versions`) until Unpair.
+`library.pairs.unpair` (`images`: photos or their files) makes each file
+a photo of its own again, in the Library with a copy of the photo's
+marks, beside it in its albums, its own versions back. Both answer
+`changes`, one step the vault's revert undoes; a pair refused (an image
+twice, one off the Library, a file paired already) writes nothing:
+
+```json
+{"id": 14, "method": "library.pairs.pair", "params": {"images": ["4f1c…", "77b0…"]}}
+{"id": 14, "result": {"paired": 1, "conflicts": 1, "pairs": [{"photo": "4f1c…",
+ "file": "77b0…", "conflicts": [{"mark": "rating", "kept": 2, "dropped": 4}],
+ "hidden_versions": 0}], "changes": {…}}}
+{"id": 15, "method": "library.pairs.unpair", "params": {"images": ["4f1c…"]}}
+{"id": 15, "result": {"unpaired": 1, "files": [{"photo": "4f1c…", "file": "77b0…",
+ "versions": 0}], "changes": {…}}}
+```
+
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to
 the system trash (Lightroom's "Delete from Disk", darktable's "delete
 (trash)") as a journaled job (`helios_library::trash`). The job is kept
@@ -693,6 +722,44 @@ albums' `import` and `imported` rules read; they are listed only with
   "images": ["<id>", "<id>"]}]}
 ```
 
+**Import profiles** (`import.profiles.list`, `.get`, `.set`,
+`.remove`) are named sets of import choices, kept by the node as the
+person's document `user/import-profiles` (JSON): the desktop's import
+window edits them, its saved sources point at one, and the node's
+automatic imports read the profile a source points at. A profile's
+`choices` are `copy_folders`, `into`, `layout`, `rename`, `duplicates`,
+`darktable`, `camera_look`, `filter` and `apply`; a choice missing is the
+local sources' default. `everyday` is built in: always first, never
+removed, its name kept. `library.import` (by rule or with `paths`) takes
+`profile` (an id) beside the choices: the profile's choices are used
+under the ones given, so `{"profile": "cards", "duplicates": "keep"}`
+keeps duplicates whatever the profile says. A profile the node does not
+keep is refused.
+
+```json
+{"id": "import.profiles.set", "params": {"profile": {"id": "", "name": "Monthly",
+  "choices": {"copy_folders": true, "layout": "month", "rename": "{date}_{stem}"}}}}
+{"id": "monthly"}
+{"id": "import.profiles.list", "params": {}}
+{"profiles": [{"id": "everyday", "name": "Everyday", "choices": {}},
+  {"id": "monthly", "name": "Monthly", "choices": {"copy_folders": true, "layout": "month",
+  "rename": "{date}_{stem}"}}], "current": "everyday", "defaults": {"card": "monthly"}}
+{"id": "import.profiles.get", "params": {"id": "monthly"}}
+{"profile": {"id": "monthly", "name": "Monthly", "choices": {"copy_folders": true, "layout": "month",
+  "rename": "{date}_{stem}"}}}
+{"id": "library.import", "params": {"source": "/media/EOS_DIGITAL", "rule": "new", "profile": "monthly"}}
+{"promise": {"id": "…", "kind": "import", "state": "pending"}}
+{"id": "import.profiles.remove", "params": {"id": "monthly"}}
+{"removed": true}
+```
+
+`set` adds the profile, or replaces the one of its id (an empty id is
+made of its name) and answers its id; choices an import would refuse
+(a layout that is not one, a rename pattern that does not parse) are
+refused. `current` is the profile the window uses when no source has
+one, `defaults` each connector's default profile, `filters` the named
+filter presets.
+
 Photos chosen in a service's page (Google Photos) are imported the same
 way by the process that holds their connector: it hands them to its node
 (`import_promise::hand`, in process) and asks `library.import` with
@@ -704,6 +771,29 @@ import by rule does, `failed` naming each `item`. A pick lives in its
 process: a `remote` key the process does not hold is refused, and a
 promise of one taken up after a restart fails, not retryable (the photos
 chosen again skip those already imported, by their item ids).
+
+### Checking a run's models first
+
+A run whose nodes call models (an extractor diagram) is checked before
+its promise is made: every model node's route is resolved and checked,
+and a node nothing serves refuses the submission with the node named,
+the reason and where to fix it; nothing runs halfway. The check is the
+AI service's (`Ai::check_run`), and agents reach it with the MCP tool
+`helios_ai_check` (request `ai.check`), answered by the MCP server
+itself like every `helios_ai_*` tool:
+
+```json
+{"nodes": [{"node": "caption", "capability": "vision", "prompt": "image.describe@1"}, {"node": "vectors", "capability": "embeddings"}], "items": 120}
+```
+
+```json
+{"ok": false, "refused": ["node `vectors` (embeddings): nothing is routed for embeddings: …"], "fix": "Set the routes in the AI settings …", "nodes": [], "leaves": [], "remote_calls": 0, "remote_ceiling": 500}
+```
+
+`leaves` lists the nodes whose images go off the machine, to which
+provider, and how many. The fields, and the per-provider limits a run's
+calls wait on, are in [ai-models.md](ai-models.md) ("The check before a
+run", "Limits").
 
 ## A client cache
 

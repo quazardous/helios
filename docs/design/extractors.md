@@ -68,8 +68,26 @@ derived schemas stay in helios-ai's subset moved to helios-ai).
   `attempt` and `answered`.
 - `Ai::check_needs` is the core of the pre-run check of slice 3: given
   (capability, prompt, overrides), the resolved route and why it cannot
-  serve. Refusing a submission with the node's name waits for runs
-  (slice 3 and 5).
+  serve.
+
+### Slice 3 built (2026-11-14)
+
+- **The check before a run** (`Ai::check_run`, `check_submission`):
+  each model node (`Need` with its `node` name) resolved and checked,
+  the prompt included; a node nothing serves refuses the submission
+  with its name, the reason and a pointer to the AI settings, before
+  anything runs. `leaves` states which nodes send images off the
+  machine, to whom (provider, URL, model), how many and at what side;
+  `remote_calls` against the ceiling. Agents call it as
+  `helios_ai_check` (`ai.check`); the runs layer (slice 5) calls it on
+  submission.
+- **Limits per provider** (`helios_ai::limits`): `parallel` and
+  `per_minute` under `[limits.providers.<id>]`, a call over them waiting
+  (cancellable, its job timeout paused), local vision one at a time by
+  default; `limits.calls` stays as the default `parallel`;
+  `limits.run_remote_calls` (500) refuses a run's remote calls past it,
+  `PromptCall::run` naming the run. "Stops and asks" is the runs
+  layer's, on that refusal.
 
 In a manifest the kind is a table (`[extractors.llm]` or `builtin = {
 compute = "capture" }`), not a `kind = "llm"` field as the sketch in

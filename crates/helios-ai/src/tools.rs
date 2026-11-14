@@ -11,7 +11,7 @@ use crate::prompts::{Prompt, PromptRef};
 use crate::provider::{ProviderConfig, ProviderKind};
 use crate::routing::Route;
 use crate::secrets::KeySource;
-use crate::service::{BenchRequest, read_image};
+use crate::service::{BenchRequest, Need, read_image};
 use crate::{Ai, Capability};
 
 /// Every request this module answers.
@@ -23,6 +23,7 @@ pub const CMDS: &[&str] = &[
     "ai.models.list",
     "ai.routing.get",
     "ai.routing.set",
+    "ai.check",
     "ai.prompts.list",
     "ai.prompts.get",
     "ai.prompts.set",
@@ -108,6 +109,15 @@ pub fn call(ai: &Ai, request: &Value, images: Vec<Vec<u8>>) -> Result<Value, Str
                 _ => return Err("give both `provider` and `model`, or neither to clear".into()),
             };
             ai.routing_set(capability, text(request, "prompt"), route)
+        }
+        "ai.check" => {
+            let needs: Vec<Need> = serde_json::from_value(request["nodes"].clone())
+                .map_err(|e| format!("`nodes`: {e}"))?;
+            if needs.is_empty() {
+                return Err("`nodes` is required: the run's model nodes".into());
+            }
+            let check = ai.check_run(&needs, request["items"].as_u64());
+            Ok(serde_json::to_value(check).expect("checks serialize"))
         }
         "ai.prompts.list" => Ok(ai.prompts_list()),
         "ai.prompts.get" => {

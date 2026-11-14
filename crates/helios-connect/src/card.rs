@@ -61,6 +61,8 @@ impl ConnectorProvider for CardProvider {
                 asks: crate::SetupAsks::Volume,
                 icon: "camera".into(),
                 auto: Some(crate::AutoImport::Plugged),
+                placement: crate::Placement::Copy,
+                naming: Vec::new(),
             }),
         }
     }

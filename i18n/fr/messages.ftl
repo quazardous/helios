@@ -1519,6 +1519,16 @@ gui-library-stack-not-changed = La pile n’a pas été changée : { $error }
 gui-history-stack-group = Grouper { $count } photos en pile
 gui-history-stack-ungroup = Dégrouper
 gui-history-stack-top = Placer en haut de la pile
+gui-library-pair-files = Apparier les fichiers RAW+JPEG
+gui-library-unpair-files = Séparer les fichiers
+gui-library-pair-not-changed = Les fichiers n’ont été ni appariés ni séparés : { $error }
+gui-library-pair-conflicts = { $pairs } paires réunies en une photo ; { $count } marques différentes ont gardé celles du RAW
+gui-history-pair-files = Apparier { $count } fichiers RAW+JPEG
+gui-history-unpair-files = Séparer les fichiers
+health-raw-jpeg-pairs = Paires RAW+JPEG
+health-raw-jpeg-pairs-some = { $count } paires RAW+JPEG sont montrées comme deux photos
+health-raw-jpeg-pairs-detail = Apparier fait de chacune une photo à deux fichiers : le RAW garde ses marques là où les deux en ont, les libellés, mots-clés et albums sont réunis. Une seule étape d’annulation.
+health-fix-pair-files = Les apparier
 gui-library-rotate-right = Rotation à droite
 gui-library-rotate-reset = Réinitialiser la rotation
 gui-library-trash = Mettre à la corbeille…
@@ -1825,6 +1835,8 @@ gui-import-window-offline = hors ligne
 gui-import-window-open = Importer des photos…
 
 gui-import-window-pair = RAW+JPG
+
+gui-import-window-pair-short = R+J
 
 gui-import-window-raw-only = Raw seulement
 

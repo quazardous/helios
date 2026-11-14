@@ -131,6 +131,9 @@ pub struct Context {
     /// How many Library photos are marked changed outside Helios (their
     /// file rewritten by another application); `None` without a vault.
     pub changed_outside: Option<usize>,
+    /// How many RAW+JPEG pairs the Library shows as two photos (imported
+    /// before pairs were one photo); `None` without a vault.
+    pub raw_jpeg_pairs: Option<usize>,
     /// What the node read of the vault's database file (it opens, its
     /// integrity); `None` when not read (the library and integrity
     /// checks then say nothing).

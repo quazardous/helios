@@ -181,6 +181,10 @@ pub fn start<S: Store + Send + 'static>(
     params: &Value,
     origin: &str,
 ) -> Result<helios_vault::promises::Promise, String> {
+    // A profile named: its choices under the options given, kept in the
+    // promise's request so a resumed import runs with the same.
+    let expanded = crate::import_profiles::expand(promises.vault(), params)?;
+    let params = &expanded;
     let rule = Rule::of(params)?;
     if let Some(key) = params["remote"].as_str() {
         return start_remote(promises, params, origin, key, &rule);

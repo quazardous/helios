@@ -89,8 +89,9 @@ use crate::import_scan::{
     Connectors, Contents, Counts, Known, MapRecorder, Recorded, Scan, Scanned, Types,
 };
 use egui_pop::api::files::browser::{
-    DropOrigin, EntryKind, EntryMarks, FileBrowser, SourceEntry, ViewModes,
+    DropOrigin, EntryKind, EntryMarks, FileBrowser, MarkChip, SourceEntry, ViewModes,
 };
+use egui_pop::core::kit::Tone;
 use helios_storage::{Card, Volumes};
 
 use crate::node_volumes::{self, Change, VolumeWatch};
@@ -809,8 +810,11 @@ struct GridWords {
     all: String,
     none: String,
     day: String,
+    /// The marks' names (their tooltips, said after a photo's name).
     in_library: String,
     pair: String,
+    /// The pair's chip: "R+J".
+    pair_short: String,
     offline: String,
     /// The browsers' switch and words.
     browse: super::import_browsers::BrowseWords,
@@ -818,6 +822,11 @@ struct GridWords {
     /// choose them.
     choose_on_the_right: String,
 }
+
+/// The icon over a photo the Library holds already.
+const IN_LIBRARY_ICON: &str = "phosphor:check-circle";
+/// The icon over a photo whose volume is not plugged in.
+const OFFLINE_ICON: &str = "phosphor:plugs";
 
 /// The window's words, in the shell's language.
 struct Words {
@@ -1528,10 +1537,15 @@ impl Shell {
         let (choices, copy, ticked) = {
             let mut w = self.import.get_mut();
             let copy = w.copies();
-            let any_card = w.ticked.iter().any(|p| w.is_card(p));
+            // A source whose connector decides the copy (a card's, a
+            // service's) leaves the window's copy choice as it was.
+            let decided = w
+                .ticked
+                .iter()
+                .any(|p| w.path_setup(p).placement != helios_connect::Placement::Add);
             // The window's choices are kept as the last used; a saved
             // source's are kept on it already.
-            if !any_card && w.sources.showing.is_none() {
+            if !decided && w.sources.showing.is_none() {
                 w.choices.copy_folders = copy;
             }
             if w.sources.showing.is_none() {
@@ -1549,11 +1563,7 @@ impl Shell {
                 // choices; copied or not as it says, unless switched.
                 let own = w.sources.kept().then(|| {
                     let c = w.choices_for(path);
-                    let copy = if w.is_card(path) {
-                        w.copy.unwrap_or(true)
-                    } else {
-                        w.copy.unwrap_or(c.copy_folders)
-                    };
+                    let copy = w.copies_from(path, &c);
                     (c, copy)
                 });
                 (w.contents.selected_files(path), w.is_card(path), own)
@@ -1825,6 +1835,7 @@ impl ImportWindow {
                 "in your Library",
             )),
             pair: t(Message::new("gui-import-window-pair", "RAW+JPG")),
+            pair_short: t(Message::new("gui-import-window-pair-short", "R+J")),
             offline: t(Message::new("gui-import-window-offline", "offline")),
             browse: super::import_browsers::BrowseWords::new(t),
             choose_on_the_right: t(Message::new(
@@ -2637,20 +2648,28 @@ impl ImportWindow {
                 let Some(entry) = entry_of(cell) else {
                     continue;
                 };
-                let mut badges = Vec::new();
+                // States as icons (top right), the pair as a short text
+                // (bottom right); their names are their tooltips.
+                let mut chips = Vec::new();
                 if cell.offline {
-                    badges.push(words.offline.clone());
+                    chips.push(
+                        MarkChip::icon(OFFLINE_ICON, words.offline.clone()).tone(Tone::Warning),
+                    );
                 }
-                if c.new_only && cell.known() {
-                    badges.push(words.in_library.clone());
+                if cell.known() {
+                    chips.push(
+                        MarkChip::icon(IN_LIBRARY_ICON, words.in_library.clone())
+                            .tone(Tone::Success),
+                    );
                 }
                 if cell.is_pair() {
-                    badges.push(words.pair.clone());
+                    chips.push(MarkChip::text(words.pair_short.clone(), words.pair.clone()));
                 }
                 marks.insert(
                     entry.path.clone(),
                     EntryMarks {
-                        badges,
+                        badges: Vec::new(),
+                        chips,
                         dimmed: !c.importable(i),
                     },
                 );
@@ -2744,6 +2763,13 @@ impl ImportWindow {
 #[cfg(test)]
 mod tests {
     use super::shorten_middle;
+
+    #[test]
+    fn the_marks_icons_resolve() {
+        for icon in [super::IN_LIBRARY_ICON, super::OFFLINE_ICON] {
+            assert!(egui_pop::core::icon::registry::is_known(icon), "{icon}");
+        }
+    }
 
     #[test]
     fn a_long_path_is_shortened_in_its_middle_keeping_its_file_name() {
