@@ -111,14 +111,17 @@ fn a_connection_over_the_cap_is_refused_and_a_freed_place_serves_again() {
     drop(held.pop());
     let address = Address::parse(&address, Some(token)).unwrap();
     let start = Instant::now();
+    // Until the freed place is seen, a client is refused: by the refusal
+    // line, or by a reset when the endpoint closes it before reading.
     loop {
-        let answer = request_at(&address, &Request::State).unwrap();
-        if answer["ok"] != false {
-            break;
-        }
+        let last = match request_at(&address, &Request::State) {
+            Ok(answer) if answer["ok"] != false => break,
+            Ok(answer) => answer.to_string(),
+            Err(e) => e.to_string(),
+        };
         assert!(
             start.elapsed() < Duration::from_secs(10),
-            "no place came free: {answer}"
+            "no place came free: {last}"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
