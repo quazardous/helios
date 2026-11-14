@@ -721,7 +721,7 @@ impl Shell {
     /// `path` with its `corners` when given, its profiles listed (of
     /// `camera` when given). Open already, its window comes forward.
     pub(super) fn open_calibration(&mut self, args: &Value) {
-        FRAME.open(self.core.app.handle(), &self.calibration.state);
+        super::focus_window::open(self.core.app.handle(), &self.calibration.state);
         {
             let mut c = self.calibration.state.borrow_mut();
             c.error = None;

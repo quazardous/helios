@@ -700,7 +700,7 @@ impl Shell {
     /// given. Open already, its window comes forward.
     pub(super) fn open_activity(&mut self, args: &Value) {
         self.core.activity.acknowledge();
-        FRAME.open(self.core.app.handle(), &self.activity_focus.state);
+        super::focus_window::open(self.core.app.handle(), &self.activity_focus.state);
         let mut j = self.activity_focus.state.borrow_mut();
         if let Some(id) = args["id"].as_str() {
             j.selected = Some(id.to_string());

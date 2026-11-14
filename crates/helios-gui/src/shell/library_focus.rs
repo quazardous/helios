@@ -110,7 +110,7 @@ impl Shell {
     /// brings it to the front.
     pub(super) fn open_library_window(&mut self) {
         self.library_focus.state.borrow_mut().library = Some(self.focus.library.clone());
-        FRAME.open(self.core.app.handle(), &self.library_focus.state);
+        super::focus_window::open(self.core.app.handle(), &self.library_focus.state);
     }
 
     /// Closes the Library focus, as its window's close button does.

@@ -40,6 +40,15 @@ pub(super) trait WindowFocus: 'static {
     fn asks_main_pass(&self) -> bool;
 }
 
+/// Opens a focus, its window brought to the front when open already.
+pub(super) fn open<T: WindowFocus>(app: &AppHandle, state: &Rc<RefCell<T>>) {
+    let mut s = state.borrow_mut();
+    if let Some(id) = s.shown().as_ref() {
+        app.raise_window(id);
+    }
+    s.set_open(true);
+}
+
 /// One focus's window: its id and sizes.
 pub(super) struct FocusWindow {
     /// The OS window's id, under which egui-pop keeps its size.
@@ -71,16 +80,6 @@ impl FocusWindow {
     /// when the main window was closed while it was open.
     pub(super) fn holds_main_window(&self, app: &AppHandle) -> bool {
         app.window_viewport(&self.id()) == Some(ViewportId::ROOT)
-    }
-
-    /// Opens the focus, its window brought to the front when open
-    /// already.
-    pub(super) fn open<T: WindowFocus>(&self, app: &AppHandle, state: &Rc<RefCell<T>>) {
-        let mut s = state.borrow_mut();
-        if let Some(id) = s.shown().as_ref() {
-            app.raise_window(id);
-        }
-        s.set_open(true);
     }
 
     /// Each frame of the main window: the focus's OS window opened or
