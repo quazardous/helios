@@ -78,7 +78,7 @@ fn field_keys(form: &Value) -> Vec<String> {
 /// shell showing it, and an exporter over it.
 struct Desk {
     h: Harness<'static, Shell>,
-    exporter: Exporter<MemoryStore>,
+    exporter: Exporter,
 }
 
 fn desk(dir: &Path, names: &[&str], workers: usize) -> Desk {
@@ -98,7 +98,7 @@ fn desk(dir: &Path, names: &[&str], workers: usize) -> Desk {
     persist.fill_library(&mut shell).unwrap();
     // On the viewport's engine, as the desktop does.
     let exporter = Exporter::with_engine(
-        persist.vault().clone(),
+        persist.node().clone(),
         shell.jobs(),
         shell.export_sink(),
         || {},
@@ -429,4 +429,76 @@ fn exporting_the_image_open_reads_no_source_again_and_stays_within_the_budget() 
     assert_eq!(since.computed, 0, "computed again: {since:?}");
     let held = engine.describe()["cache"]["bytes"].as_u64().unwrap();
     assert!(held <= budget as u64, "{held} bytes over {budget}");
+}
+
+/// An export is planned through the desktop's node on a thread of its
+/// own: while another writer holds the vault file locked, the frame that
+/// starts it does not wait; once it lets go, the export is written.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_frame_that_starts_an_export() {
+    use helios_vault::Store as _;
+    use helios_vault_sqlite::SqliteStore;
+    let dir = temp("held");
+    let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).unwrap();
+    picture(&photos.join("a.png"), 0.2);
+    let path = dir.join("vault.db");
+    let persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let image = persist
+        .vault()
+        .import_file(&photos.join("a.png"), 1)
+        .unwrap();
+    let shell = Shell::new(helios_panels(), None);
+    let exporter = Arc::new(Exporter::with_engine(
+        persist.node().clone(),
+        shell.jobs(),
+        shell.export_sink(),
+        || {},
+        1,
+        shell.viewport().engine().clone(),
+    ));
+    let out = dir.join("out");
+    let ask = helios_gui::shell::ExportAsk {
+        images: vec![image.hex()],
+        settings: helios_export::batch::Settings {
+            output: Format::Png { bits: 8 }.into(),
+            folder: out.clone(),
+            pattern: "{stem}".into(),
+            clash: helios_export::batch::Clash::default(),
+        },
+        open_label: "Open folder".into(),
+    };
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&path).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&json!(true)))
+        .unwrap();
+    let (said, refused) = std::sync::mpsc::channel();
+    let started = std::time::Instant::now();
+    exporter.start(helios_template::workspace::blank(), ask, move |e| {
+        drop(said.send(e));
+    });
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_millis(500),
+        "the frame waited {took:?} for the vault"
+    );
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Let go: planned and written.
+    other.rollback().unwrap();
+    drop(other);
+    let end = std::time::Instant::now() + LONG;
+    while !out.join("a.png").exists() {
+        if let Ok(e) = refused.try_recv() {
+            panic!("the export did not start: {e}");
+        }
+        assert!(std::time::Instant::now() < end, "the export is written");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(exporter.wait(LONG), "the export ends");
+    drop((exporter, persist));
+    let _ = std::fs::remove_dir_all(&dir);
 }

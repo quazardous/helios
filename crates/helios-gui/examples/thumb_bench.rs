@@ -402,14 +402,15 @@ fn grid(files: &[PathBuf], n: usize, frames: usize, cache_dir: &Path, start_kind
 /// render of its edit at 256 px (the first `renders` raws).
 fn decode(files: &[PathBuf], renders: usize, cache_dir: &Path) -> Vec<Value> {
     use helios_core::{Bus, Engine};
-    use helios_vault::{MemoryStore, Vault};
+    use helios_vault::MemoryStore;
     let mut lines = Vec::new();
     let (mut preview_ms, mut glance_ms, mut jpeg_bytes, mut render_ms) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let (mut fast_ms, mut hit_ms, mut entry_bytes) = (Vec::new(), Vec::new(), Vec::new());
     let _ = std::fs::remove_dir_all(cache_dir);
     let cache = ThumbCache::open(cache_dir, u64::MAX).expect("the thumbnail cache");
-    let vault = Vault::new(MemoryStore::default());
+    let persist = helios_gui::persist::Persist::new(MemoryStore::default(), Arc::new(Bus::new()));
+    let (vault, reader) = (persist.vault().clone(), persist.reader());
     let engine = Engine::new(Arc::new(Bus::new()));
     let bundle = helios_gui::templates::find("helios.develop-preview").expect("the template");
     for (i, path) in files.iter().enumerate() {
@@ -483,7 +484,7 @@ fn decode(files: &[PathBuf], renders: usize, cache_dir: &Path) -> Vec<Value> {
         if i < renders {
             let t = Instant::now();
             let r = vault.import_file(path, 0).and_then(|image| {
-                helios_gui::head_render::render(&vault, &engine, &bundle, path, image, 256)
+                helios_gui::head_render::render(&reader, &engine, &bundle, path, &image.hex(), 256)
             });
             let d = t.elapsed();
             render = Some(match r {

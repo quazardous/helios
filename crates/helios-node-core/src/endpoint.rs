@@ -32,7 +32,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, validate};
-use crate::{calibrate, cursor, init, library, promises};
+use crate::{calibrate, cursor, init, library, promises, reads};
 
 /// Who publishes the endpoint's events on the bus.
 pub const SOURCE: &str = "node";
@@ -125,6 +125,7 @@ pub fn specs() -> Vec<CommandSpec> {
         .chain(promises::specs())
         .chain(calibrate::specs())
         .chain(init::specs())
+        .chain(reads::specs())
         .collect()
 }
 
@@ -178,6 +179,9 @@ fn run_on<S: Store>(
     }
     if init::handles(id) {
         return init::run(vault, id, params).map(|answer| (answer, Changes::default()));
+    }
+    if reads::handles(id) {
+        return reads::run(vault, id, params).map(|answer| (answer, Changes::default()));
     }
     library::run(vault, bus, id, params, origin).map(|answer| (answer, Changes::default()))
 }
@@ -674,6 +678,7 @@ mod tests {
                 + promises::IDS.len()
                 + calibrate::specs().len()
                 + init::specs().len()
+                + reads::IDS.len()
         );
     }
 

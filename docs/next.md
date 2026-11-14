@@ -45,8 +45,8 @@ A pull request is merged only when its tests passed on the box, so
 
    - One job per line, as `cargo xtask bench-remote <job> …` takes it,
      without `branch=` (add it when you run them).
-   - `filter=` names **one** test: two names select none, and the job
-     passes empty.
+   - `filter=` names one test, or several joined with `+`
+     (`filter=a+b`); a comma or a space between names is refused.
    - Never `test`, `test-affected` or `--affected`: the whole suite is
      `next`'s CI.
    - A change with nothing to run says `Tests: none — <why>`.

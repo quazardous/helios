@@ -78,26 +78,47 @@ impl From<Vec<(u64, ContentHash)>> for Holdings {
     }
 }
 
-/// The prefilter's lookup on a vault: the images in the Library (their
-/// flag) and their sightings.
-pub fn known_of<S: helios_vault::Store + 'static>(vault: Arc<helios_vault::Vault<S>>) -> Known {
+/// The prefilter's lookup through the node (`import.known`): the images
+/// in the Library (their flag) and their sightings. A node that does not
+/// answer leaves the prefilter empty, said in the log.
+pub fn known_of(node: Arc<helios_inspect::client::Client>) -> Known {
     Arc::new(move || {
-        let present: Vec<_> = vault
-            .all_locations()
-            .map(|all| all.into_iter().filter(|(_, l)| l.present()).collect())
-            .unwrap_or_default();
+        let read = match node.request("import.known", serde_json::json!({})) {
+            Ok(read) => read,
+            Err(e) => {
+                log::warn!("import: the library's holdings: {}", e.message);
+                return Holdings::default();
+            }
+        };
+        let rows = |key: &str| read[key].as_array().cloned().unwrap_or_default();
+        let partials = rows("partials")
+            .iter()
+            .filter_map(|row| {
+                let size = row.get(0)?.as_u64()?;
+                let partial = helios_vault::parse_hash(row.get(1)?.as_str()?).ok()?;
+                Some((size, partial))
+            })
+            .collect();
+        let present: Vec<(String, PathBuf, u64, u64)> = rows("present")
+            .iter()
+            .filter_map(|row| {
+                Some((
+                    row.get(0)?.as_str()?.to_string(),
+                    PathBuf::from(row.get(1)?.as_str()?),
+                    row.get(2)?.as_u64()?,
+                    row.get(3)?.as_u64()?,
+                ))
+            })
+            .collect();
         Holdings {
-            partials: vault
-                .images()
-                .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
-                .unwrap_or_default(),
+            partials,
             keys: present
                 .iter()
-                .map(|(id, l)| (l.path.clone(), helios_thumbs::Key::preview(id.hex())))
+                .map(|(id, path, ..)| (path.clone(), helios_thumbs::Key::preview(id.clone())))
                 .collect(),
             seen: present
                 .into_iter()
-                .map(|(_, l)| (l.path, l.size, l.modified))
+                .map(|(_, path, size, modified)| (path, size, modified))
                 .collect(),
         }
     })
@@ -228,44 +249,58 @@ pub struct Seen {
 /// the folder's volume is offline. Called on the scan's thread.
 pub type Recorded = Arc<dyn Fn(&Path) -> Vec<Seen> + Send + Sync>;
 
-/// The record of a vault: the sightings under `folder`, on the known
-/// volume last mounted above it, else on no volume.
-pub fn recorded_of<S: helios_vault::Store + 'static>(
-    vault: Arc<helios_vault::Vault<S>>,
-) -> Recorded {
+/// A sighting as the node answers it (`import.recorded`).
+#[derive(serde::Deserialize)]
+struct Sighted {
+    path: PathBuf,
+    rel_path: Option<PathBuf>,
+    size: u64,
+    modified: u64,
+    partial: Option<String>,
+    image: Option<String>,
+    taken: Option<i64>,
+    camera: Option<String>,
+}
+
+/// The record through the node (`import.recorded`): the sightings under
+/// `folder`, on the known volume last mounted above it, else on no
+/// volume. A node that does not answer lists nothing, said in the log.
+pub fn recorded_of(node: Arc<helios_inspect::client::Client>) -> Recorded {
     Arc::new(move |folder: &Path| {
-        let volumes = helios_storage::registry::known(&vault).unwrap_or_default();
-        let on = volumes
-            .iter()
-            .filter_map(|v| {
-                let mount = v.last_seen.as_ref()?.mount.as_ref()?;
-                let rel = folder.strip_prefix(mount).ok()?;
-                Some((v, mount.clone(), rel.to_path_buf()))
-            })
-            .max_by_key(|(_, mount, _)| mount.components().count());
-        let (volume, mount, rel) = match on {
-            Some((v, mount, rel)) => (Some(v.id.clone()), Some(mount), rel),
-            None => (None, None, folder.to_path_buf()),
+        let read = match node.request("import.recorded", serde_json::json!({ "folder": folder })) {
+            Ok(read) => read,
+            Err(e) => {
+                log::warn!(
+                    "import: the map's record of {}: {}",
+                    folder.display(),
+                    e.message
+                );
+                return Vec::new();
+            }
         };
-        vault
-            .sightings_under(volume.as_ref(), &rel)
-            .unwrap_or_default()
+        let mount = read["mount"].as_str().map(PathBuf::from);
+        let sightings: Vec<Sighted> = serde_json::from_value(read["sightings"].clone())
+            .unwrap_or_else(|e| {
+                log::warn!("import: the map's record of {}: {e}", folder.display());
+                Vec::new()
+            });
+        sightings
             .into_iter()
-            .filter(|s| {
-                s.path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| {
-                        helios_vault::IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str())
-                    })
-            })
             .map(|s| {
                 let path = match (&mount, &s.rel_path) {
                     (Some(m), Some(r)) => m.join(r),
                     _ => s.path.clone(),
                 };
+                // The cache's entry: its image's key once linked to one,
+                // else its provisional key once its partial hash is read
+                // (`helios_library::thumb_check::key_of`).
+                let key = match (&s.image, &s.partial) {
+                    (Some(id), _) => Some(helios_thumbs::Key::preview(id.clone())),
+                    (None, Some(partial)) => Some(helios_thumbs::Key::provisional(s.size, partial)),
+                    (None, None) => None,
+                };
                 Seen {
-                    key: helios_library::thumb_check::key_of(&s),
+                    key,
                     imported: s.image.is_some(),
                     bytes: s.size,
                     modified: i64::try_from(s.modified).ok(),

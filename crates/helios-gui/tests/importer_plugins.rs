@@ -136,10 +136,18 @@ fn an_importer_asks_for_its_folder_and_its_photos_land_with_their_ratings() {
     let sink = h.state().import_sink();
     let args = imports[0].clone();
     let mut lines = Vec::new();
-    let report = importers::run(&broker, &vault, &jobs, &args, 1, &mut |line: &Value| {
-        lines.push(line.clone());
-        sink.send((args.clone(), line.clone())).unwrap();
-    })
+    let report = importers::run(
+        &broker,
+        &jobs,
+        &args,
+        &mut |line: &Value| {
+            lines.push(line.clone());
+            sink.send((args.clone(), line.clone())).unwrap();
+        },
+        |files, options, emit| {
+            helios_library::import::import(&vault, &jobs, files, options, 1, emit)
+        },
+    )
     .unwrap();
     sink.send((args.clone(), json!({ "ended": report })))
         .unwrap();
