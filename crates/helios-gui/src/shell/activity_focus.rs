@@ -32,26 +32,29 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use egui::{Context as Egui, Rect, Sense, Vec2, ViewportId};
-use egui_pop::api::windows::{WindowId, WindowSpec};
+use egui::{Context as Egui, Rect, Sense};
+use egui_pop::api::windows::WindowId;
 use egui_pop::core::icon::{IconWidget, Source};
 use helios_core::Message;
 use helios_vault::promises::{Promise, State};
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::focus_window::{FocusWindow, WindowFocus};
 use crate::activity::{LogLine, Logged};
 use crate::promise_line::Action;
 
 /// The focus's OS window: its id, under which egui-pop keeps its size.
 pub const WINDOW: &str = "activity";
 
-/// The id of the window of the main one the focus is drawn in where the
-/// backend has no windows of its own.
-const EMBEDDED_ID: &str = "helios.activity.embedded";
-
-const MIN_SIZE: Vec2 = egui::vec2(640.0, 360.0);
-const MAX_DEFAULT_SIZE: Vec2 = egui::vec2(1100.0, 720.0);
+/// The focus's window (`focus_window`).
+static FRAME: FocusWindow = FocusWindow {
+    window: WINDOW,
+    embedded: "helios.activity.embedded",
+    min_size: egui::vec2(640.0, 360.0),
+    max_default_size: egui::vec2(1100.0, 720.0),
+    share: 0.8,
+};
 /// A row's height in the Jobs list.
 const ROW: f32 = 50.0;
 /// How many failed items the detail lists.
@@ -124,7 +127,7 @@ pub(crate) struct Jobs {
 /// The focus: its state shared with the window's content.
 #[derive(Default)]
 pub(super) struct ActivityFocus {
-    state: Rc<RefCell<Jobs>>,
+    pub(super) state: Rc<RefCell<Jobs>>,
 }
 
 fn now() -> u64 {
@@ -666,15 +669,30 @@ fn window_title() -> Message {
     Message::new("gui-jobs-window", "Activity")
 }
 
-fn default_size(main: Vec2) -> Vec2 {
-    let max = (main - egui::vec2(32.0, 32.0)).max(Vec2::ZERO);
-    (main * 0.8).min(MAX_DEFAULT_SIZE).max(MIN_SIZE).min(max)
-}
+impl WindowFocus for Jobs {
+    fn is_open(&self) -> bool {
+        self.open
+    }
 
-/// Whether the focus's content holds the main window: moved into it when
-/// the main window was closed while it was open.
-fn holds_main_window(app: &egui_pop::api::app::AppHandle) -> bool {
-    app.window_viewport(&WindowId::new(WINDOW)) == Some(ViewportId::ROOT)
+    fn set_open(&mut self, open: bool) {
+        self.open = open;
+    }
+
+    fn shown(&mut self) -> &mut Option<WindowId> {
+        &mut self.shown
+    }
+
+    fn title(&self, ctx: &Egui) -> String {
+        crate::i18n::text(ctx, window_title())
+    }
+
+    fn window_ui(&mut self, ui: &mut egui::Ui) {
+        Jobs::window_ui(self, ui);
+    }
+
+    fn asks_main_pass(&self) -> bool {
+        !self.events.is_empty()
+    }
 }
 
 impl Shell {
@@ -682,11 +700,8 @@ impl Shell {
     /// given. Open already, its window comes forward.
     pub(super) fn open_activity(&mut self, args: &Value) {
         self.core.activity.acknowledge();
-        if let Some(id) = &self.activity_focus.state.borrow().shown {
-            self.core.app.handle().raise_window(id);
-        }
+        FRAME.open(self.core.app.handle(), &self.activity_focus.state);
         let mut j = self.activity_focus.state.borrow_mut();
-        j.open = true;
         if let Some(id) = args["id"].as_str() {
             j.selected = Some(id.to_string());
             // The job asked for shows, whatever the filters said.
@@ -743,102 +758,8 @@ impl Shell {
                 }
             }
         }
-        self.follow_activity_window(ctx);
-    }
-
-    /// The focus's OS window, opened while the focus is open and closed
-    /// with it; closed by itself, the focus closes and the main window
-    /// stays. Where the backend has no windows of its own, a window of
-    /// the main one instead.
-    fn follow_activity_window(&mut self, ctx: &Egui) {
-        if ctx.embed_viewports() {
-            self.embedded_activity(ctx);
-            return;
-        }
         let app = self.core.app.handle().clone();
-        let id = WindowId::new(WINDOW);
-        let there = app.window_viewport(&id).is_some();
-        let mut j = self.activity_focus.state.borrow_mut();
-        match (j.open, there) {
-            (true, false) if j.shown.is_some() => {
-                j.open = false;
-                j.shown = None;
-            }
-            (true, false) => {
-                let title = crate::i18n::text(ctx, window_title());
-                let spec = WindowSpec::new(WINDOW, title)
-                    .size(default_size(ctx.content_rect().size()))
-                    .min_size(MIN_SIZE)
-                    .shell_bars(true);
-                j.shown = Some(id.clone());
-                drop(j);
-                let state = self.activity_focus.state.clone();
-                app.open_window(spec, move |ui, window| {
-                    let Ok(mut j) = state.try_borrow_mut() else {
-                        return;
-                    };
-                    let closing = !j.open || window.close_requested();
-                    if !closing {
-                        egui::CentralPanel::default().show(ui, |ui| j.window_ui(ui));
-                        if !j.events.is_empty() {
-                            ui.ctx().request_repaint_of(ViewportId::ROOT);
-                        }
-                        return;
-                    }
-                    j.open = false;
-                    let app = window.app().clone();
-                    if holds_main_window(&app) {
-                        app.raise_window(&WindowId::main());
-                    } else {
-                        window.close();
-                        super::import_window::hide_closing_window(ui.ctx());
-                    }
-                });
-            }
-            (false, true) if holds_main_window(&app) => {
-                drop(j);
-                app.raise_window(&WindowId::main());
-            }
-            (false, true) => {
-                j.shown = None;
-                drop(j);
-                app.close_window(&id);
-            }
-            (false, false) => j.shown = None,
-            (true, true) => {}
-        }
-    }
-
-    /// The focus in a window of the main one (kittest, the web).
-    fn embedded_activity(&mut self, ctx: &Egui) {
-        let state = self.activity_focus.state.clone();
-        let Ok(mut j) = state.try_borrow_mut() else {
-            return;
-        };
-        if !j.open {
-            return;
-        }
-        let title = crate::i18n::text(ctx, window_title());
-        let main = ctx.content_rect().size();
-        let max = (main - egui::vec2(32.0, 32.0)).max(Vec2::ZERO);
-        let mut open = true;
-        egui::Window::new(&title)
-            .id(egui::Id::unique(EMBEDDED_ID))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(default_size(main))
-            .min_size(MIN_SIZE.min(max))
-            .max_size(max)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
-            .show(ctx, |ui| {
-                ui.set_min_size(default_size(main) - egui::vec2(16.0, 40.0));
-                j.window_ui(ui);
-            });
-        if !open {
-            j.open = false;
-        }
+        FRAME.follow(&app, ctx, &self.activity_focus.state);
     }
 }
 

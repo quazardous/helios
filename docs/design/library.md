@@ -878,6 +878,20 @@ is the browse tree, the grid, the filter bar and the metadata panel;
 two-window kittest scenario (each window its own filter and selection,
 one thumbnail cache).
 
+Part 1 built (2026-11-14): Window › Library (`library.window`,
+Ctrl+Alt+1, Lightroom's key for the Library) opens the Library focus
+in an OS window of its own (`library`), or brings it to the front, as
+the Activity and Calibration foci open (one helper,
+`shell/focus_window.rs`). Decided since (2026-11-14): the window shows
+the main window's Library, not a second one: one selection, one
+collection, one filter, so a command acts on the same photos whichever
+window it came from (export and copying files run from both). The
+foci open at the last quit open again at the start
+(`focus-windows.json`), each at the size and place egui-pop kept. Not
+yet: "Edit in a new window" (an edit focus in its own window needs a
+second viewport focus on the core, `Focus::new`), a layout of its own
+for the window (browse tree and metadata beside the grid).
+
 L1 to L4 are plumbing and could ship as one milestone; L5 and L6 make
 it a library people recognise; L7 to L11 are housekeeping; L12 to L15
 serve the captioning trades and interoperability; L16 waits on the
