@@ -24,7 +24,9 @@
 //! The texts in the answers are in the interface's language.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
+
+use helios_connect::account::Account;
 
 use helios_core::Message;
 use helios_shell::commands::CommandSpec;
@@ -33,6 +35,7 @@ use helios_storage::{Identity, Role, Volume, VolumeId};
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::import_sources::SavedSource;
 use super::storage::{StorageLink, backup_line, day_of, destination_text, kind_of, role_text};
 
 /// Lists the volumes known (read-only).
@@ -194,6 +197,119 @@ pub fn volume_rows(
             "tone": if online > 0 { "success" } else { "info" },
         },
     })
+}
+
+/// A remote volume's owner: the import account it is
+/// ([`Account::volume`]), who that account is ([`Account::identity`]),
+/// and the saved sources using it, by name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Owner {
+    pub volume: String,
+    pub identity: String,
+    pub sources: Vec<String>,
+}
+
+/// The owners of remote volumes: each account, and the saved sources
+/// using it (the name given, else the account's).
+pub fn owners_of(accounts: &[Account], sources: &[SavedSource]) -> Vec<Owner> {
+    accounts
+        .iter()
+        .map(|a| Owner {
+            volume: a.volume.clone(),
+            identity: a.identity(),
+            sources: sources
+                .iter()
+                .filter(|s| s.account.as_deref() == Some(a.id.as_str()))
+                .map(|s| s.name.clone().unwrap_or_else(|| a.shown()))
+                .collect(),
+        })
+        .collect()
+}
+
+/// The volumes as the Storage page lists them ([`by_account`]).
+#[derive(Debug, Default)]
+pub struct Grouped {
+    pub volumes: Vec<Volume>,
+    pub photos: HashMap<VolumeId, usize>,
+    /// The saved sources using each row's account, by row id.
+    pub sources: HashMap<VolumeId, Vec<String>>,
+}
+
+/// One row per account and remote place: the remote volumes of accounts
+/// that are one identity (signed in to twice) become one, in the place
+/// of the first: the volume a source uses (else the one seen last) under
+/// its name, the photos of all, the latest sighting, every source using
+/// any. Other volumes stay as they are. Nothing here knows a connector.
+pub fn by_account(
+    volumes: Vec<Volume>,
+    mut photos: HashMap<VolumeId, usize>,
+    owners: &[Owner],
+) -> Grouped {
+    let owner = |v: &Volume| {
+        (v.kind == helios_storage::VolumeKind::Remote)
+            .then(|| owners.iter().find(|o| o.volume == v.id.as_str()))
+            .flatten()
+    };
+    // Each place in the list: a volume alone, or the members of a group.
+    let mut places: Vec<Vec<Volume>> = Vec::new();
+    let mut groups: HashMap<String, usize> = HashMap::new();
+    for v in volumes {
+        match owner(&v).map(|o| o.identity.clone()) {
+            Some(identity) => match groups.get(&identity) {
+                Some(&i) => places[i].push(v),
+                None => {
+                    groups.insert(identity, places.len());
+                    places.push(vec![v]);
+                }
+            },
+            None => places.push(vec![v]),
+        }
+    }
+    let mut out = Grouped::default();
+    for mut members in places {
+        let used = |v: &Volume| owner(v).is_some_and(|o| !o.sources.is_empty());
+        let seen = |v: &Volume| v.last_seen.as_ref().map_or(0, |l| l.at);
+        let first = (0..members.len())
+            .max_by_key(|&i| (used(&members[i]), seen(&members[i]), usize::MAX - i))
+            .unwrap_or(0);
+        let mut kept = members.swap_remove(first);
+        let mut sources: Vec<String> = owner(&kept).map(|o| o.sources.clone()).unwrap_or_default();
+        let mut n = photos.remove(&kept.id).unwrap_or(0);
+        for other in members {
+            n += photos.remove(&other.id).unwrap_or(0);
+            if seen(&other) > seen(&kept) {
+                kept.last_seen = other.last_seen.clone();
+            }
+            for s in owner(&other).map(|o| o.sources.clone()).unwrap_or_default() {
+                if !sources.contains(&s) {
+                    sources.push(s);
+                }
+            }
+        }
+        if n > 0 {
+            out.photos.insert(kept.id.clone(), n);
+        }
+        if owner(&kept).is_some() {
+            out.sources.insert(kept.id.clone(), sources);
+        }
+        out.volumes.push(kept);
+    }
+    out.photos.extend(photos);
+    out
+}
+
+/// Each row's `sources` (the saved sources using its account) and
+/// `sourcesText` (their names, joined).
+pub fn with_sources(rows: &mut Value, sources: &HashMap<VolumeId, Vec<String>>) {
+    for row in rows["volumes"].as_array_mut().into_iter().flatten() {
+        let used = row["id"]
+            .as_str()
+            .and_then(|id| sources.get(&VolumeId(id.to_string())))
+            .cloned()
+            .unwrap_or_default();
+        row["sourcesText"] = json!(used.join(", "));
+        row["sources"] = json!(used);
+    }
 }
 
 /// The strategy as an answer: `set`, and when set its `name`, `copies`,
@@ -463,6 +579,7 @@ impl Shell {
             return;
         }
         let (l, i18n) = (link.clone(), self.core.i18n.clone());
+        let owned = self.core.storage.owners.clone();
         let volumes = self.register(
             CommandSpec::new(
                 VOLUMES,
@@ -472,10 +589,19 @@ impl Shell {
             .read_only(),
             move |_, _| {
                 let t = |m: Message| helios_i18n::message(&i18n, &m);
-                let volumes = l.volumes()?;
-                let photos = l.photos()?;
+                let owners = match &*owned.lock().unwrap_or_else(PoisonError::into_inner) {
+                    Some((book, saved)) => owners_of(
+                        &book.accounts()?,
+                        &saved.lock().unwrap_or_else(PoisonError::into_inner),
+                    ),
+                    None => Vec::new(),
+                };
+                let grouped = by_account(l.volumes()?, l.photos()?, &owners);
                 let strategy = l.strategy()?;
-                Ok(volume_rows(&t, &volumes, &photos, strategy.as_ref()))
+                let mut rows =
+                    volume_rows(&t, &grouped.volumes, &grouped.photos, strategy.as_ref());
+                with_sources(&mut rows, &grouped.sources);
+                Ok(rows)
             },
         );
         let (l, i18n) = (link.clone(), self.core.i18n.clone());
@@ -592,6 +718,92 @@ mod tests {
             roles: roles.iter().copied().collect(),
             ..detect::weak(id, None)
         }
+    }
+
+    /// Two accounts of one connector signed in as one identity, each
+    /// with a saved source: the case the Storage page showed twice.
+    fn twice_signed_in() -> (Vec<Account>, Vec<SavedSource>) {
+        use super::super::import_sources::SourceKey;
+        let mut a = Account::new("photos", "Photos", &[]);
+        let mut b = Account::new("photos", "Photos", std::slice::from_ref(&a));
+        for x in [&mut a, &mut b] {
+            x.facts.insert(
+                helios_connect::account::EMAIL.into(),
+                "ann@example.com".into(),
+            );
+        }
+        let source = |account: &Account, name: &str| SavedSource {
+            name: Some(name.into()),
+            ..SavedSource::new("photos".into(), &SourceKey::Account(account.id.clone()))
+        };
+        let sources = vec![source(&a, "Holidays"), source(&b, "Family")];
+        (vec![a, b], sources)
+    }
+
+    fn remote(account: &Account, seen: u64) -> Volume {
+        let mut v = Volume::remote(&account.connector, &account.id, &account.label);
+        v.last_seen = Some(helios_storage::LastSeen {
+            at: seen,
+            node: String::new(),
+            mount: None,
+        });
+        v
+    }
+
+    #[test]
+    fn one_identity_in_two_sources_is_one_storage_row_listing_both() {
+        let (accounts, sources) = twice_signed_in();
+        let volumes = vec![
+            disk("backup", 500_000_000, true, &[Role::Backup]),
+            remote(&accounts[0], 100),
+            remote(&accounts[1], 200),
+        ];
+        let photos = HashMap::from([
+            (volumes[1].id.clone(), 3),
+            (volumes[2].id.clone(), 4),
+            (volumes[0].id.clone(), 9),
+        ]);
+        let owners = owners_of(&accounts, &sources);
+        let grouped = by_account(volumes.clone(), photos, &owners);
+        let mut rows = volume_rows(&english, &grouped.volumes, &grouped.photos, None);
+        with_sources(&mut rows, &grouped.sources);
+        let rows = rows["volumes"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "one row per account and place: {rows:?}");
+        assert_eq!(rows[0]["id"], "backup");
+        assert_eq!(rows[0]["photos"], 9);
+        assert_eq!(rows[0]["sourcesText"], "");
+        let row = &rows[1];
+        assert_eq!(row["photos"], 7, "the photos of both");
+        assert_eq!(row["sources"], json!(["Family", "Holidays"]));
+        // The one seen last, its sighting kept.
+        assert_eq!(row["id"], volumes[2].id.as_str());
+        assert_eq!(grouped.volumes[1].last_seen.as_ref().unwrap().at, 200);
+    }
+
+    #[test]
+    fn remote_volumes_of_other_identities_or_without_an_account_stay_apart() {
+        let (mut accounts, sources) = twice_signed_in();
+        accounts[1].facts.insert(
+            helios_connect::account::EMAIL.into(),
+            "bob@example.com".into(),
+        );
+        let stray = Volume::remote("photos", "gone", "Photos");
+        let volumes = vec![remote(&accounts[0], 1), remote(&accounts[1], 1), stray];
+        let grouped = by_account(volumes, HashMap::new(), &owners_of(&accounts, &sources));
+        assert_eq!(grouped.volumes.len(), 3);
+        assert_eq!(grouped.sources[&grouped.volumes[0].id], ["Holidays"]);
+        assert!(!grouped.sources.contains_key(&grouped.volumes[2].id));
+    }
+
+    #[test]
+    fn a_used_account_s_volume_names_the_row_over_one_seen_later() {
+        let (accounts, mut sources) = twice_signed_in();
+        sources.retain(|s| s.account.as_deref() == Some(accounts[0].id.as_str()));
+        let volumes = vec![remote(&accounts[1], 500), remote(&accounts[0], 100)];
+        let grouped = by_account(volumes, HashMap::new(), &owners_of(&accounts, &sources));
+        assert_eq!(grouped.volumes.len(), 1);
+        assert_eq!(grouped.volumes[0].id.as_str(), accounts[0].volume);
+        assert_eq!(grouped.volumes[0].last_seen.as_ref().unwrap().at, 500);
     }
 
     #[test]

@@ -118,6 +118,18 @@ impl Account {
             .filter(|e| !e.is_empty())
     }
 
+    /// Who it is on its connector: the connector and the identity it
+    /// signed in as (its address) once known, else its own id. Two
+    /// accounts with one identity (signed in to twice) are one account
+    /// for what reads them (the Storage page's remote rows, a second
+    /// source on it).
+    pub fn identity(&self) -> String {
+        match self.email() {
+            Some(email) => format!("{}:{}", self.connector, email.to_lowercase()),
+            None => format!("{}:#{}", self.connector, self.id),
+        }
+    }
+
     /// Its name as shown: "Google Photos — name@example.com" once the
     /// identity is known, so several accounts of one connector stay
     /// apart; its label alone otherwise (or when the label already says
@@ -400,6 +412,19 @@ mod tests {
         assert!(!a.identity_missing(true));
         a.label = "ann@example.com".into();
         assert_eq!(a.shown(), "ann@example.com");
+    }
+
+    #[test]
+    fn two_accounts_signed_in_as_one_identity_are_one_identity() {
+        let mut a = Account::new("photos", "Photos", &[]);
+        let mut b = Account::new("photos", "Photos", std::slice::from_ref(&a));
+        assert_ne!(a.identity(), b.identity(), "unknown yet: each its own");
+        a.facts.insert(EMAIL.into(), "Ann@example.com".into());
+        b.facts.insert(EMAIL.into(), "ann@example.com".into());
+        assert_eq!(a.identity(), b.identity());
+        let mut other = Account::new("albums", "Albums", &[]);
+        other.facts.insert(EMAIL.into(), "ann@example.com".into());
+        assert_ne!(other.identity(), a.identity(), "another connector");
     }
 
     #[test]
