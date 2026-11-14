@@ -137,6 +137,13 @@ fn text(ui: &egui::Ui, m: Message) -> String {
     crate::i18n::text(ui.ctx(), m)
 }
 
+/// Gives widget `r` its accessible name (a combo box has none).
+fn name(ui: &egui::Ui, r: &egui::Response, m: Message) {
+    let name = text(ui, m);
+    ui.ctx()
+        .accesskit_node_builder(r.id, |node| node.set_label(name));
+}
+
 /// A duration in seconds, short: "42 s", "3 min 05 s", "1 h 02 min".
 fn span(seconds: u64) -> String {
     match seconds {
@@ -282,15 +289,17 @@ impl Jobs {
             kinds.sort();
             kinds.dedup();
             let all = text(ui, Message::new("gui-jobs-kind-all", "Every kind"));
-            egui::ComboBox::from_id_salt("helios.activity.kind")
+            let r = egui::ComboBox::from_id_salt("helios.activity.kind")
                 .selected_text(self.kind.clone().unwrap_or_else(|| all.clone()))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.kind, None, all);
                     for k in kinds {
                         ui.selectable_value(&mut self.kind, Some(k.clone()), k);
                     }
-                });
-            egui::ComboBox::from_id_salt("helios.activity.state")
+                })
+                .response;
+            name(ui, &r, Message::new("gui-jobs-filter-kind", "Kind shown"));
+            let r = egui::ComboBox::from_id_salt("helios.activity.state")
                 .selected_text(text(ui, self.state.message()))
                 .show_ui(ui, |ui| {
                     for s in [
@@ -302,7 +311,9 @@ impl Jobs {
                         let label = text(ui, s.message());
                         ui.selectable_value(&mut self.state, s, label);
                     }
-                });
+                })
+                .response;
+            name(ui, &r, Message::new("gui-jobs-filter-state", "State shown"));
             let finished: Vec<String> = self
                 .promises
                 .iter()
@@ -345,6 +356,9 @@ impl Jobs {
         let selected = self.selected.as_ref() == Some(&p.id);
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::Button, true, selected, &p.label)
+        });
         if response.clicked() {
             self.selected = Some(p.id.clone());
         }
