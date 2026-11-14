@@ -332,6 +332,24 @@ undo) or again (`forward` true: a redo), all or nothing, and answers
 what it did: images `removed`, `restored`, `changed`, and `kept` as they
 are (changed since, or gone).
 
+`library.storage.get` reads the library's backup strategy (`strategy`,
+null when none is set) and the volumes it knows (`volumes`, by name):
+the desktop copies a catalogue snapshot to the strategy's disks plugged
+in with them.
+
+`calibrate.offer` (`camera`, and `image` when a photo is open) reads
+what a photo's calibration header offers: the camera's `profiles` as
+`calibrate.profiles.list` lists them, its default camera look's
+`look_default` (`preview`, null without one) and the file the image is
+read from (`path`, null when none is at hand). `calibrate.open`
+(`image`, `camera`, `light`: the as-shot light in CIE xy, or null) is
+what the desktop calls as a photo opens: a raw never edited gets its
+camera's default profile, saved as its first edit by the call's origin.
+It answers the `offer` and the `default`: its `outcome`, `applied`
+(with the `profile` and its `name`), `refused` (with the `reason` and
+its `key`: no as-shot light, the nearest light too far), `edited` (the
+photo has an edit already) or `none` (no default for the camera).
+
 `library.edit.head` (`image`) reads an image's newest edit: `head`, the
 whole version (`id`, also as `version`, `image`, `parents`, `edit`,
 `origin`, `at`, `label`, `meta`), null for an image never edited.

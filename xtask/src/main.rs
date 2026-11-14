@@ -795,6 +795,7 @@ fn main() -> ExitCode {
             }
             problems.extend(version_problems(&root));
             problems.extend(vault_access::problems(&root));
+            problems.extend(vault_access::gui_problems(&root));
             if problems.is_empty() {
                 println!("Changelog fragments, plugin ranges, Cargo.lock and vault access OK.");
                 ExitCode::SUCCESS

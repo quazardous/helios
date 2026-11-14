@@ -197,6 +197,20 @@ fn the_shell_answers_a_chart_dry_run() {
 
 /// A profile document of camera "Test Bayer" under light `xy`, its
 /// matrix bent by `bend`.
+/// A client of a node owning `vault`, as the desktop's.
+fn client_of<S: helios_vault::Store + 'static>(
+    vault: &Arc<helios_vault::Vault<S>>,
+) -> helios_inspect::client::Client {
+    let bus = Arc::new(helios_core::Bus::new());
+    let service = helios_node_core::endpoint::VaultService::new(
+        vault.clone(),
+        bus.clone(),
+        helios_core::jobs::Jobs::new(bus),
+        "test",
+    );
+    helios_inspect::client::Client::in_process(Arc::new(service)).with_origin("user")
+}
+
 fn profile(name: &str, xy: [f64; 2], bend: f64) -> serde_json::Value {
     let summary = json!({ "mean": 1.0, "max": 2.0, "worst": [] });
     json!({
@@ -284,7 +298,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
     // As an image of the library opens: the header is offered its camera's
     // profiles (no default rule: nothing is applied).
     let image = helios_vault::ImageId::from_hex(&"cd".repeat(32)).unwrap();
-    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_empty());
+    assert!(calibrate::on_open(&client_of(&vault), image, &g, shell.values()).is_empty());
     shell.set_view_source(g, node, "output").unwrap();
     let offer = calibrate::read_offer(&shell.values().lock().unwrap()).unwrap();
     let ids: Vec<&str> = offer["profiles"]
@@ -500,7 +514,7 @@ fn look_shell(
         history.clone(),
     )
     .unwrap();
-    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_empty());
+    assert!(calibrate::on_open(&client_of(&vault), image, &g, shell.values()).is_empty());
     shell.set_view_source(g, sigmoid, "output").unwrap();
 
     (shell, history, dir)
