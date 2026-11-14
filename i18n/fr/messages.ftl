@@ -610,6 +610,7 @@ gui-library-badge-backup-unverified = non vérifiée
 gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
+gui-library-not-duplicated = Les photos n’ont pas été dupliquées : { $error }
 gui-library-not-rotated = Les photos n’ont pas été tournées : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
@@ -1359,6 +1360,9 @@ gui-library-quick-tip = B ajoute les photos sélectionnées ou les retire
 gui-library-quick-toggle = Ajouter ou retirer les photos sélectionnées
 gui-library-remove = Retirer de la bibliothèque
 gui-library-rotate-left = Rotation à gauche
+gui-library-duplicate = Dupliquer
+gui-library-duplicate-original = Dupliquer l’original
+gui-library-badge-versions = versions
 gui-library-rotate-right = Rotation à droite
 gui-library-rotate-reset = Réinitialiser la rotation
 gui-library-trash = Mettre à la corbeille…

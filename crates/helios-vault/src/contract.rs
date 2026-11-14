@@ -61,6 +61,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
     a_rotation_turns_resets_and_undoes(make());
+    a_duplicate_is_a_new_head_beside_its_source(make());
     promises_are_created_progressed_settled_and_listed(make());
 }
 
@@ -2946,6 +2947,47 @@ fn a_rotation_turns_resets_and_undoes<S: Store>(s: S) {
     let audit = v.audit(&b).unwrap();
     assert!(audit.iter().any(|e| e.field == ROTATION && e.who == "user"));
     assert!(v.rotate(&[image(9).id], Turn::Right, "user", 11).is_err());
+}
+
+/// "Duplicate" (L10): a copy of the newest head's edit, or of no edit,
+/// kept as a new head beside the others; the counts follow.
+fn a_duplicate_is_a_new_head_beside_its_source<S: Store>(s: S) {
+    use crate::versions::{DUPLICATE_KEY, DuplicateFrom, Version};
+    let v = Vault::new(with_images(s, 2));
+    let (a, b) = (image(1).id, image(2).id);
+    // A never edited photo: its copy is a first edit with no modules.
+    let first = v.duplicate(&b, DuplicateFrom::Current, "user", 1).unwrap();
+    assert!(first.parents.is_empty());
+    assert_eq!(first.edit[DUPLICATE_KEY], 1);
+    let base = Version::new(a, Vec::new(), json!({ "exposure": 1 }), "user", 2);
+    v.add_version(&base).unwrap();
+    let step = Version::new(a, vec![base.id], json!({ "exposure": 2 }), "user", 3);
+    v.add_version(&step).unwrap();
+    let copy = v.duplicate(&a, DuplicateFrom::Current, "user", 4).unwrap();
+    assert_eq!(
+        copy.parents,
+        vec![base.id],
+        "beside its source, same history"
+    );
+    assert_eq!(copy.edit["exposure"], 2);
+    assert_eq!(copy.label.as_deref(), Some("Duplicate"));
+    let heads: Vec<_> = v.heads(&a).unwrap().iter().map(|h| h.id).collect();
+    assert_eq!(heads, vec![step.id, copy.id], "the source stays a head");
+    // The copy is now the newest head: a copy of it is a third head.
+    let again = v.duplicate(&a, DuplicateFrom::Current, "user", 5).unwrap();
+    assert_ne!(again.id, copy.id);
+    assert_eq!(again.edit["exposure"], 2);
+    let virgin = v.duplicate(&a, DuplicateFrom::Original, "user", 6).unwrap();
+    assert!(virgin.parents.is_empty());
+    assert!(virgin.edit.get("exposure").is_none(), "no edit");
+    assert_eq!(v.heads(&a).unwrap().len(), 4);
+    let counts = v.head_counts().unwrap();
+    assert_eq!(counts.get(&a), Some(&4));
+    assert_eq!(counts.get(&b), Some(&1));
+    assert!(
+        v.duplicate(&image(9).id, DuplicateFrom::Current, "user", 7)
+            .is_err()
+    );
 }
 
 fn promises_are_created_progressed_settled_and_listed<S: Store>(store: S) {

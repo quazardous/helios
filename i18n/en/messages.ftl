@@ -1165,6 +1165,8 @@ gui-library-badge-quick = quick
 
 gui-library-badge-soft = soft focus
 
+gui-library-badge-versions = versions
+
 gui-library-cannot-open = The library cannot be opened: { $error }
 
 gui-library-compare = Compare
@@ -1190,6 +1192,10 @@ gui-library-drop-add = Add { $count } photos
 gui-library-drop-set = Not here: drop the photos on one of the set's albums
 
 gui-library-drop-smart = Not here: a smart album's rules choose its photos
+
+gui-library-duplicate = Duplicate
+
+gui-library-duplicate-original = Duplicate Original
 
 gui-library-empty = No photos yet: import a card or a folder, or drop photos on the window
 
@@ -1236,6 +1242,8 @@ gui-library-missing-note = Missing: its file is not where it was, and no other c
 gui-library-no-cursor = No image under the cursor
 
 gui-library-none = No images
+
+gui-library-not-duplicated = The photos were not duplicated: { $error }
 
 gui-library-not-removed = The photos were not removed from the Library: { $error }
 

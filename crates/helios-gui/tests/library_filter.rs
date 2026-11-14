@@ -24,7 +24,9 @@
 //! first, then the node's journaled job moves the files to a test trash,
 //! a backup's copy refused. Rotate (L9): Ctrl+] and Ctrl+[ turn the
 //! selection through the node, the thumbnail is shown turned, and the
-//! step undoes.
+//! step undoes. Duplicate (L10): Ctrl+' makes a new head through the
+//! node, the grid's badge counts the versions, an agent duplicates the
+//! original.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -2051,6 +2053,53 @@ fn ctrl_brackets_rotate_the_selection_and_undo_turns_it_back() {
     );
     settle(&mut h, &mut persist, 60.0);
     assert_eq!(turns(&persist, 2), 0);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn ctrl_quote_duplicates_the_selection_and_the_grid_counts_versions() {
+    let root = temp("duplicate");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let heads = |persist: &Persist<SqliteStore>, n| persist.vault().heads(&id(n)).unwrap().len();
+    let badge = |h: &Harness<'static, Shell>, n: u8| {
+        h.state()
+            .library()
+            .badges_of(&h.ctx, &id(n).hex())
+            .into_iter()
+            .find(|b| b.ends_with("versions"))
+    };
+    assert_eq!(badge(&h, 1), None, "one cell, no versions yet");
+
+    // Ctrl+' in the grid, on the first photo.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::CTRL, Key::Quote);
+    settle(&mut h, &mut persist, 1.0);
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(heads(&persist, 1), 1, "a photo never edited: its copy");
+    h.key_press_modifiers(egui::Modifiers::CTRL, Key::Quote);
+    settle(&mut h, &mut persist, 10.0);
+    assert_eq!((heads(&persist, 1), heads(&persist, 2)), (2, 0));
+    assert_eq!(badge(&h, 1).as_deref(), Some("2 versions"));
+
+    // By an agent, from the original, naming a photo.
+    let out = answer(
+        &mut h,
+        "library.duplicateOriginal",
+        json!({ "images": [id(1).hex()] }),
+    );
+    assert_eq!(out["duplicated"], 1, "{out}");
+    settle(&mut h, &mut persist, 20.0);
+    assert_eq!(heads(&persist, 1), 3);
+    assert_eq!(badge(&h, 1).as_deref(), Some("3 versions"));
+
+    // The Library read again counts them the same.
+    persist.ask_fill(h.state(), true);
+    settle(&mut h, &mut persist, 30.0);
+    assert_eq!(badge(&h, 1).as_deref(), Some("3 versions"));
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
