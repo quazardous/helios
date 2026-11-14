@@ -767,6 +767,28 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-apply = Apply During Import
+
+gui-import-apply-blue = Blue
+
+gui-import-apply-green = Green
+
+gui-import-apply-keywords = Keywords
+
+gui-import-apply-keywords-help = Added to every photo imported, comma-separated
+
+gui-import-apply-label = Label
+
+gui-import-apply-none = None
+
+gui-import-apply-purple = Purple
+
+gui-import-apply-rating = Rating
+
+gui-import-apply-red = Red
+
+gui-import-apply-yellow = Yellow
+
 gui-import-auto = Import automatically
 
 gui-import-auto-ask = { $files } new photos ({ $size }) on { $source }: more than an automatic import takes without asking
@@ -874,6 +896,42 @@ gui-import-history-failed = failed
 gui-import-history-imports = Imports
 
 gui-import-history-none = No import yet
+
+gui-import-include = Include
+
+gui-import-include-all = All photos
+
+gui-import-include-at-least = At least
+
+gui-import-include-at-most = At most
+
+gui-import-include-day-help = A day as YYYY-MM-DD, by the file's date
+
+gui-import-include-delete = Delete filter
+
+gui-import-include-filter = Filter
+
+gui-import-include-from = From
+
+gui-import-include-jpeg = JPEG
+
+gui-import-include-names = Names
+
+gui-import-include-names-help = File name patterns, comma-separated: * any text, ? one character
+
+gui-import-include-new-only = New photos only
+
+gui-import-include-other = Other
+
+gui-import-include-raw = Raw
+
+gui-import-include-save = Save
+
+gui-import-include-save-as = Save filter as…
+
+gui-import-include-to = To
+
+gui-import-include-video = Video
 
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
 

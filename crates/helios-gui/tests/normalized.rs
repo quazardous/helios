@@ -26,6 +26,9 @@ const SHELL: &[&str] = &[
     "crates/helios-gui/src/plugins.rs",
     // The import window, the shell's own (`library.importWindow`).
     "crates/helios-gui/src/shell/import_window.rs",
+    // Its Sources list (a folder's, a card's and an account's menus), drawn
+    // in the import window's own viewport like its accounts below.
+    "crates/helios-gui/src/shell/import_window/source_list.rs",
     // The import window's accounts: its Sources column's account rows
     // and the connection dialog over the window. They
     // are drawn in the import window's own viewport, where the shell's

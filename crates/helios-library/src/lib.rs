@@ -49,6 +49,7 @@ pub mod export;
 pub mod fetch;
 pub mod import;
 pub mod import_history;
+pub mod import_profile;
 pub mod map;
 pub mod map_job;
 pub mod rename;
