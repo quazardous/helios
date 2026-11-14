@@ -484,6 +484,8 @@ pub fn import_spec() -> CommandSpec {
                         "description": "the cameras' default looks put on the raws brought in (on when absent)" }),
                 false,
             ),
+            ("filter", helios_library::import_profile::filter_schema(), false),
+            ("apply", helios_library::import_profile::apply_schema(), false),
         ]))
         .needs(Need::Vault)
 }
@@ -512,6 +514,7 @@ pub fn import_options(
     if let Some(signals) = params["signals"].as_bool() {
         options.signals = signals;
     }
+    helios_library::import_profile::read(params, &mut options)?;
     options.cancel = cancel;
     Ok(options)
 }

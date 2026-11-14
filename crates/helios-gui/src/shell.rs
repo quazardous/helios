@@ -95,6 +95,7 @@ mod import_auto;
 mod import_choices;
 mod import_detail;
 mod import_history;
+mod import_profiles;
 mod import_sources;
 mod import_window;
 mod import_wizard;

@@ -356,6 +356,12 @@ pub(crate) struct ImportWindow {
     /// The presets, by name, and where they are kept.
     pub(super) presets: BTreeMap<String, Choices>,
     pub(super) presets_file: Option<PathBuf>,
+    /// The named filter profiles, and where they are kept
+    /// ([`super::import_profiles`]).
+    pub(super) filters: BTreeMap<String, helios_library::import_profile::Filter>,
+    pub(super) filters_file: Option<PathBuf>,
+    /// The Include and Apply During Import sections' typing.
+    pub(super) profile_edit: super::import_profiles::Editing,
     /// The library keeps a camera's default look: the Choices offer to
     /// apply it. Read when the window opens.
     pub(super) camera_looks: bool,

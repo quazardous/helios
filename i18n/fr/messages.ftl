@@ -515,6 +515,28 @@ gui-history-snapshot-restored = « { $name } » restauré
 
 gui-history-undo = Annuler
 
+gui-import-apply = Appliquer pendant l’importation
+
+gui-import-apply-blue = Bleu
+
+gui-import-apply-green = Vert
+
+gui-import-apply-keywords = Mots-clés
+
+gui-import-apply-keywords-help = Ajoutés à chaque photo importée, séparés par des virgules
+
+gui-import-apply-label = Étiquette
+
+gui-import-apply-none = Aucune
+
+gui-import-apply-purple = Violet
+
+gui-import-apply-rating = Note
+
+gui-import-apply-red = Rouge
+
+gui-import-apply-yellow = Jaune
+
 gui-import-backup-copies = { $copies } copies : { $disks }
 
 gui-import-backup-days = { $disk } (pas vu depuis { $days } jours)
@@ -552,6 +574,42 @@ gui-import-browse-picker = Choisir dans la page du service
 gui-import-browse-timeline = Par date
 
 gui-import-browse-tree = Arborescence
+
+gui-import-include = Inclure
+
+gui-import-include-all = Toutes les photos
+
+gui-import-include-at-least = Au moins
+
+gui-import-include-at-most = Au plus
+
+gui-import-include-day-help = Un jour au format AAAA-MM-JJ, d’après la date du fichier
+
+gui-import-include-delete = Supprimer le filtre
+
+gui-import-include-filter = Filtre
+
+gui-import-include-from = Du
+
+gui-import-include-jpeg = JPEG
+
+gui-import-include-names = Noms
+
+gui-import-include-names-help = Motifs de noms de fichiers, séparés par des virgules : * n’importe quel texte, ? un caractère
+
+gui-import-include-new-only = Nouvelles photos seulement
+
+gui-import-include-other = Autres
+
+gui-import-include-raw = Raw
+
+gui-import-include-save = Enregistrer
+
+gui-import-include-save-as = Enregistrer le filtre sous…
+
+gui-import-include-to = Au
+
+gui-import-include-video = Vidéo
 
 gui-import-window-edit-source = Modifier la source…
 
