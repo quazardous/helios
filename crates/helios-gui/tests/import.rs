@@ -3362,17 +3362,15 @@ fn import_sources_add_saves_the_source_the_wizard_saves() {
     // The wizard, every step left as it starts.
     wizard_at(&mut h, 3, &trips);
     click(&mut h, "Add the source");
-    // The command, with the folder connector's one parameter.
-    let answer = h
-        .state_mut()
+    // The command (its work runs at the next frame), with the folder
+    // connector's one parameter.
+    h.state_mut()
         .run(
             "import.sources.add",
             json!({ "connector": "folder", "path": family }),
             Origin::User,
         )
         .unwrap();
-    assert_eq!(answer["profile"], "everyday", "{answer}");
-    assert_eq!(answer["name"], "family", "{answer}");
     h.run_steps(3);
     let sources = h.state().import_sources();
     assert_eq!(sources.len(), 2, "{sources:?}");
@@ -3398,7 +3396,14 @@ fn import_sources_add_saves_the_source_the_wizard_saves() {
     );
     // Selected in the window, open.
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&family));
-    // What the connector's setup does not take is refused.
+    // What it answers; what the connector's setup does not take is
+    // refused.
+    let answer = h
+        .state_mut()
+        .add_import_source(&json!({ "connector": "folder", "path": trips, "name": "Trips" }))
+        .unwrap();
+    assert_eq!(answer["profile"], "everyday", "{answer}");
+    assert_eq!(answer["name"], "Trips", "{answer}");
     for (args, why) in [
         (json!({ "connector": "nothing" }), "no connector"),
         (json!({ "connector": "folder" }), "`path` is required"),
@@ -3415,10 +3420,7 @@ fn import_sources_add_saves_the_source_the_wizard_saves() {
             "no such volume",
         ),
     ] {
-        let e = h
-            .state_mut()
-            .run("import.sources.add", args.clone(), Origin::User)
-            .unwrap_err();
+        let e = h.state_mut().add_import_source(&args).unwrap_err();
         assert!(e.contains(why), "{args}: {e}");
     }
     assert_eq!(h.state().import_sources().len(), 2);

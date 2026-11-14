@@ -1248,7 +1248,7 @@ impl super::Shell {
     /// from what its setup declares (`connector`; `path` for a folder;
     /// `path` or `volume` for a volume; `account`; `name`, `profile`,
     /// `auto`, `params`), as the "Add…" wizard does.
-    pub(super) fn add_import_source(&mut self, args: &Value) -> Result<Value, String> {
+    pub fn add_import_source(&mut self, args: &Value) -> Result<Value, String> {
         self.import.get_mut().add_source_command(args)
     }
 
