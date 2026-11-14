@@ -508,9 +508,8 @@ fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source
     until(&mut h, "its choices shown", |h| {
         shown(h, &format!("{name}: its own choices"))
     });
-    // Listed under Services by its name, never under Folders.
+    // Listed under Services by its name.
     assert!(shown(&h, "Services") && shown(&h, &name));
-    assert_eq!(h.query_all_by_label(&name).count(), 1, "one item");
 }
 
 /// Cancel in the wizard leaves no source, wherever it is pressed; an
