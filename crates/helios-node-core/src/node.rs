@@ -276,6 +276,16 @@ impl<S: Store + 'static> LocalNode<S> {
     /// from now on, and starts the node as [`LocalNode::open`] does.
     pub fn own(vault: Vault<S>, bus: Arc<Bus>, every: Duration) -> Self {
         let vault = Arc::new(vault.with_bus(bus.clone()));
+        // The promises a stop or a crash left unsettled: none has a
+        // runner yet, so each is failed `interrupted` (the kinds that
+        // resume register on the node's promises, crate::promises).
+        let promises = crate::promises::Promises::new(
+            vault.clone(),
+            helios_core::jobs::Jobs::new(bus.clone()),
+        );
+        if let Err(e) = promises.recover() {
+            log::warn!(target: "helios::node", "promises not recovered: {e}");
+        }
         let link = Link(Arc::default());
         let runner = {
             let (vault, life) = (vault.clone(), link.0.clone());

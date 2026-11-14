@@ -1745,6 +1745,24 @@ gui-profile-layout-error = profile { $name }: layout: { $error }
 
 gui-profile-variants = profile { $name }: { $count } values from variants: { $variants }
 
+gui-promise-cancel = Cancel
+
+gui-promise-cancelled = Cancelled
+
+gui-promise-cancelling = Cancelling…
+
+gui-promise-counts = { $done } of { $total }
+
+gui-promise-done = Done
+
+gui-promise-failed = Failed: { $reason }
+
+gui-promise-pending = Waiting to start
+
+gui-promise-retry = Retry
+
+gui-promise-so-far = { $done } so far
+
 gui-queue-cancel = Cancel
 
 gui-queue-column-attempts = Attempts

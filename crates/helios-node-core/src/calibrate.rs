@@ -65,6 +65,12 @@ pub const IMPORT: &str = "calibrate.profiles.import";
 pub const LOOK_FIT: &str = look::FIT;
 /// Keeps or clears a camera's default camera look ([`look::defaults`]).
 pub const LOOK_SET_DEFAULT: &str = look::SET_DEFAULT;
+/// What a photo's calibration header offers: its camera's profiles and
+/// default look, and the file the photo is read from ([`offer`]).
+pub const OFFER: &str = "calibrate.offer";
+/// A photo opened: its camera's default profile put on it the first time
+/// ([`default_on_open`]), and the header's offer.
+pub const OPEN: &str = "calibrate.open";
 
 pub mod look;
 
@@ -80,6 +86,8 @@ pub const PROFILE_IDS: &[&str] = &[
     IMPORT,
     LOOK_FIT,
     LOOK_SET_DEFAULT,
+    OFFER,
+    OPEN,
 ];
 
 /// Whether `id` is one of the commands run here.
@@ -211,6 +219,29 @@ pub fn profile_specs() -> Vec<CommandSpec> {
         ])),
         look::spec(),
         look::defaults::spec(),
+        calibration(OFFER, "What a photo's calibration header offers")
+            .params(object(&[
+                ("camera", string(), true),
+                (
+                    "image",
+                    json!({ "type": ["string", "null"], "description": "the photo's image id" }),
+                    false,
+                ),
+            ]))
+            .read_only(),
+        calibration(OPEN, "Open a photo: its camera's default profile the first time").params(
+            object(&[
+                ("image", string(), true),
+                ("camera", string(), true),
+                (
+                    "light",
+                    json!({ "type": ["array", "null"], "minItems": 2, "maxItems": 2,
+                            "items": { "type": "number" },
+                            "description": "the as-shot light, CIE xy" }),
+                    false,
+                ),
+            ]),
+        ),
     ]
 }
 
@@ -291,6 +322,12 @@ pub fn run_as<S: Store>(
     }
     if id == CHART {
         return chart(vault, params, now);
+    }
+    if id == OFFER {
+        return offer(vault.ok_or_else(needs_vault)?, params).map(Done::read);
+    }
+    if id == OPEN {
+        return open(vault.ok_or_else(needs_vault)?, params, origin, now);
     }
     if id == EXPORT {
         return export(vault.ok_or_else(needs_vault)?, params);
@@ -798,6 +835,82 @@ pub fn default_on_open<S: Store>(
             .to_string(),
         profile: picked,
         changes: done.changes,
+    })
+}
+
+/// [`OFFER`]: the profiles of `camera` (as [`LIST`] lists them), its
+/// default look's preview (`look_default`, null without one) and, for
+/// `image`, the file it is read from (`path`, null when none is at hand).
+///
+/// # Errors
+/// The vault cannot be read, or `image` is no image id.
+pub fn offer<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, Message> {
+    let camera = params["camera"].as_str().unwrap_or_default();
+    let mut listed = run(Some(vault), LIST, &json!({ "camera": camera }), 0)?;
+    let look_default = vault
+        .look_default(camera)
+        .map_err(store_error)?
+        .and_then(|d| look::defaults::preview_of(&d))
+        .map_or(Value::Null, |preview| json!({ "preview": preview }));
+    let path = match params["image"].as_str() {
+        Some(named) => {
+            let id = ImageId::from_hex(named).map_err(|_| unknown_image(named))?;
+            // No file at hand, or none to read: the header compares
+            // nothing.
+            vault
+                .file_to_read(&id)
+                .ok()
+                .flatten()
+                .map_or(Value::Null, |l| json!(l.path.to_string_lossy()))
+        }
+        None => Value::Null,
+    };
+    Ok(json!({
+        "camera": camera,
+        "profiles": listed.answer["profiles"].take(),
+        "look_default": look_default,
+        "path": path,
+    }))
+}
+
+/// [`OPEN`]: the camera's default profile put on `image` opened for the
+/// first time ([`default_on_open`]), then its [`offer`]. Answers `offer`
+/// and `default`: its `outcome` (`applied` with the `profile` and its
+/// `name`, `refused` with the `reason`, `edited` or `none`).
+fn open<S: Store>(
+    vault: &Vault<S>,
+    params: &Value,
+    origin: &str,
+    now: u64,
+) -> Result<Done, Message> {
+    let named = params["image"].as_str().unwrap_or_default();
+    let image = ImageId::from_hex(named).map_err(|_| unknown_image(named))?;
+    let light = params["light"]
+        .as_array()
+        .and_then(|l| Some([l.first()?.as_f64()?, l.get(1)?.as_f64()?]));
+    let photo = Photo {
+        camera: params["camera"].as_str().unwrap_or_default().to_string(),
+        light,
+    };
+    let (default, changes) = match default_on_open(vault, image, &photo, origin, now)? {
+        OnOpen::Applied {
+            profile,
+            name,
+            changes,
+        } => (
+            json!({ "outcome": "applied", "profile": profile, "name": name }),
+            changes,
+        ),
+        OnOpen::Refused(reason) => (
+            json!({ "outcome": "refused", "reason": reason.english, "key": reason.key }),
+            Changes::default(),
+        ),
+        OnOpen::Edited => (json!({ "outcome": "edited" }), Changes::default()),
+        OnOpen::NoDefault => (json!({ "outcome": "none" }), Changes::default()),
+    };
+    Ok(Done {
+        answer: json!({ "offer": offer(vault, params)?, "default": default }),
+        changes,
     })
 }
 

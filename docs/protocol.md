@@ -332,6 +332,24 @@ undo) or again (`forward` true: a redo), all or nothing, and answers
 what it did: images `removed`, `restored`, `changed`, and `kept` as they
 are (changed since, or gone).
 
+`library.storage.get` reads the library's backup strategy (`strategy`,
+null when none is set) and the volumes it knows (`volumes`, by name):
+the desktop copies a catalogue snapshot to the strategy's disks plugged
+in with them.
+
+`calibrate.offer` (`camera`, and `image` when a photo is open) reads
+what a photo's calibration header offers: the camera's `profiles` as
+`calibrate.profiles.list` lists them, its default camera look's
+`look_default` (`preview`, null without one) and the file the image is
+read from (`path`, null when none is at hand). `calibrate.open`
+(`image`, `camera`, `light`: the as-shot light in CIE xy, or null) is
+what the desktop calls as a photo opens: a raw never edited gets its
+camera's default profile, saved as its first edit by the call's origin.
+It answers the `offer` and the `default`: its `outcome`, `applied`
+(with the `profile` and its `name`), `refused` (with the `reason` and
+its `key`: no as-shot light, the nearest light too far), `edited` (the
+photo has an edit already) or `none` (no default for the camera).
+
 `library.edit.head` (`image`) reads an image's newest edit: `head`, the
 whole version (`id`, also as `version`, `image`, `parents`, `edit`,
 `origin`, `at`, `label`, `meta`), null for an image never edited.
@@ -365,6 +383,54 @@ counts through `library.facets`, each read on a thread of its own and
 shown at a coming frame, through a `ReadCache` fed by the bus's events.
 The Folders section's counts and the filter history are read through
 the node too, and shown at the frame their answer comes.
+
+## Promises
+
+A long piece of work answers at once with a **promise**: a handle to its
+result to come, not the result. The caller (a window, the CLI, an agent
+over MCP) keeps the id, may go away, and reads the result once the
+promise is settled. Promises are durable and shared: the vault keeps
+them (they survive a restart), and every client of the node sees them.
+
+```json
+{"id": "promise-7", "owner": "import-promise-7", "kind": "import", "label": "Import 2,000 photos", "request": {}, "state": "running", "done": 120, "total": 2000, "note": "IMG_0120.CR3", "cancel_asked": false, "attempts": 1, "created": 1763000000, "updated": 1763000042}
+```
+
+- **States:** `pending`, then `running` (`done`, `total`, null while not
+  known, and a short `note`), then settled once: `done` (`result`, the
+  work's own answer), `failed` (`reason`, and `retryable`: running it
+  again may work) or `cancelled`. A settled promise never changes again,
+  except a failed one retried, which goes back to `pending`.
+- **Its owner** is the job its work reports under (`job.*`, the jobs
+  centre); `kind` names the work, so a node knows how to run it again.
+
+| Method | Params | Answers |
+|---|---|---|
+| `promises.get` | `id` | `promise` |
+| `promises.list` | `states`, `owner`, `kind`, `limit` (at most 1,000) | `promises`, newest first, and `total` |
+| `promises.wait` | `id`, `timeout_ms` (at most 600,000) | `promise`, `settled`: answers when it settles or at the timeout, whichever comes first |
+| `promises.cancel` | `id` | `promise`: its work is asked to stop (its job is cancelled too), and settles it `cancelled`; one with no runner on the node is settled `cancelled` at once |
+| `promises.retry` | `id` | `promise`, pending again with one more `attempts`; refused unless it failed `retryable` and this node runs its kind |
+
+- **One way to wait on anything long.** `promises.wait` answers at the
+  timeout with `settled: false`: wait again. It is cancellable
+  (`$/cancel`) and stops at once. An agent reaches it through
+  `helios_command_run`; the 10-minute cap is the MCP wait cap.
+- **Events.** `promise.progress` (created, progressing, retried) and
+  `promise.done` (settled, once), each with the promise as its payload,
+  on the node's bus.
+- **After a stop or a crash.** As the node starts, a promise left
+  `pending` or `running` with no runner is taken up again when its kind
+  can resume (its work skips what it already did), with one more
+  `attempts`; any other is settled `failed` with the reason
+  `interrupted`, `retryable` when the node knows its kind. No promise
+  stays running with nobody working on it.
+- The desktop shows a promise as one line (`helios_gui::promise_line`):
+  what it stands for, its progress, then its outcome, with Cancel while
+  it runs and Retry when it failed and may be retried.
+
+No command answers with a promise yet; the library's import will be the
+first ([design/import-slow-sources.md](design/import-slow-sources.md)).
 
 ## A client cache
 
