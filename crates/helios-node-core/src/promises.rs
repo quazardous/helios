@@ -195,6 +195,9 @@ impl<S: Store> Handle<S> {
 pub struct Promises<S: Store> {
     vault: Arc<Vault<S>>,
     jobs: Jobs,
+    /// Other jobs a promise's job may run on (the desktop's, mirrored by
+    /// [`crate::job_promises`]): a cancel reaches them too.
+    through: std::sync::Mutex<Vec<Jobs>>,
     kinds: BTreeMap<String, Kind<S>>,
 }
 
@@ -205,8 +208,18 @@ impl<S: Store> Promises<S> {
         Self {
             vault,
             jobs,
+            through: std::sync::Mutex::default(),
             kinds: BTreeMap::new(),
         }
+    }
+
+    /// A cancel of a promise whose job runs on `jobs` reaches it: the
+    /// jobs [`crate::job_promises`] mirrors.
+    pub fn cancel_through(&self, jobs: Jobs) {
+        self.through
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(jobs);
     }
 
     /// Runs the promises of kind `name` with `run`; `resumable`: one cut
@@ -359,8 +372,15 @@ impl<S: Store + Send + 'static> Promises<S> {
         let p = self.vault.ask_cancel_promise(id, now())?;
         // Its job may have ended or never started: the runner reads the
         // cancel all the same.
-        if self.jobs.cancellable().contains(&p.owner) {
-            let _ = self.jobs.cancel(&p.owner);
+        let through = self
+            .through
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for jobs in std::iter::once(&self.jobs).chain(&through) {
+            if jobs.cancellable().contains(&p.owner) {
+                let _ = jobs.cancel(&p.owner);
+            }
         }
         Ok(p)
     }

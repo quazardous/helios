@@ -455,6 +455,9 @@ fn catalogue_commands(
 
     let settings = shell.app().handle().store();
     let (node, at, store) = (persist.node().clone(), file.clone(), settings.clone());
+    // Each snapshot is a job: the node's promise of it shows in Activity.
+    let jobs = shell.jobs();
+    let by_hand = jobs.clone();
     shell.register(
         CommandSpec::new(
             catalogue::SNAPSHOT_COMMAND,
@@ -464,7 +467,7 @@ fn catalogue_commands(
         move |_, _| {
             // Taken off the frame: the copy waits for a writer holding
             // the catalogue.
-            catalogue::take_by_hand(&node, &at, catalogue::kept(&store), |taken| {
+            catalogue::take_by_hand(Some(by_hand.clone()), &node, &at, catalogue::kept(&store), |taken| {
                 if let Err(e) = taken {
                     warn(&format!("catalogue snapshot: {e}"));
                 }
@@ -517,9 +520,14 @@ fn catalogue_commands(
                 if helios_vault_sqlite::snapshot::due(&file, catalogue::every(&settings), seconds())
                 {
                     let mounted = helios_storage::system().volumes();
-                    if let Err(e) =
-                        catalogue::take(&node, &mounted, &file, "daily", catalogue::kept(&settings))
-                    {
+                    if let Err(e) = catalogue::take_reported(
+                        Some(&jobs),
+                        &node,
+                        &mounted,
+                        &file,
+                        "daily",
+                        catalogue::kept(&settings),
+                    ) {
                         warn(&format!("catalogue snapshot: {e}"));
                     }
                 }
@@ -2140,6 +2148,10 @@ fn main() -> Result<(), String> {
             if let Some(link) = node_link.clone() {
                 shell.attach_node(link);
             }
+            // Every job of the desktop's (exports, the trash, backups,
+            // snapshots…) is mirrored as a promise of the node's: the
+            // Activity focus and agents see them. Adopted last, below.
+            let job_promises = persist.as_ref().map(|p| p.library().mirror_jobs(&shell.jobs()));
             // The node runs the backups (its jobs): they go on when the
             // window that started them closes.
             let backups = persist.as_ref().zip(node_link.as_ref()).map(|(p, link)| {
@@ -2512,6 +2524,11 @@ fn main() -> Result<(), String> {
                 )
                 .adopted_by(link)
             });
+            // Last: the node's stop waits for the jobs above first, so
+            // their ends reach their promises.
+            if let (Some(mirror), Some(link)) = (job_promises, node_link.as_ref()) {
+                link.adopt(mirror);
+            }
             let mut app = App {
                 node: node_client,
                 exporter,

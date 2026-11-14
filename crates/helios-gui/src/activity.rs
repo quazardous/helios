@@ -6,6 +6,11 @@
 //!   desktop's node: often while one runs, seldom when none does. Every
 //!   client of the node starts them (the import window, the CLI, an
 //!   agent), so they all show here.
+//! - **Every kind of job**: the node mirrors the desktop's jobs (exports,
+//!   the trash, backups, snapshots…) as promises
+//!   (`helios_node_core::job_promises`), so they show here beside the
+//!   imports; work with no end (the image map, the thumbnail re-check)
+//!   shows in the focus without counting as running ([`runs`]).
 //! - **The indicator** ([`indicator`]): while promises run, a spinner,
 //!   their count and the main one's progress ("Importing 120/412"); a
 //!   promise that failed during this run, a warning badge until it is
@@ -39,7 +44,7 @@ pub const MARK: &str = "helios.status.activity";
 pub const FAILED_MARK: &str = "helios.status.activity.failed";
 
 /// How many of the newest promises are followed.
-const FOLLOWED: usize = 20;
+const FOLLOWED: usize = 50;
 /// How often they are read while one runs.
 const BUSY_EVERY: Duration = Duration::from_millis(150);
 /// How often they are read when none runs.
@@ -277,7 +282,7 @@ impl Activity {
         let mut running: Vec<Promise> = shared
             .promises
             .iter()
-            .filter(|p| !p.state.is_settled())
+            .filter(|p| runs(p))
             .cloned()
             .collect();
         running.reverse();
@@ -315,6 +320,13 @@ impl Activity {
     }
 }
 
+/// Whether `p` runs, as the status bar counts it: work with no end (the
+/// image map, the thumbnail re-check) shows in the Activity focus, but is
+/// not a task under way.
+pub fn runs(p: &Promise) -> bool {
+    !p.state.is_settled() && !helios_node_core::job_promises::is_standing(&p.request)
+}
+
 /// Reads the promises of `node` until the activity is gone.
 fn follow(node: &Client, shared: &Weak<Mutex<Shared>>, kick: &AtomicBool) {
     loop {
@@ -331,7 +343,7 @@ fn follow(node: &Client, shared: &Weak<Mutex<Shared>>, kick: &AtomicBool) {
         let busy = match read {
             Ok(promises) => {
                 let mut shared = lock(&held);
-                let busy = promises.iter().any(|p| !p.state.is_settled());
+                let busy = promises.iter().any(runs);
                 if shared.promises != promises {
                     shared.log(&promises, now());
                     shared.promises = promises;
