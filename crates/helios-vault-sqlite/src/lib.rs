@@ -1118,6 +1118,33 @@ fn condition_sql(c: &Condition, args: &mut Vec<Sql>) -> String {
             "EXISTS (SELECT 1 FROM sightings s WHERE s.image = i.id AND s.path >= ? AND s.path < ?)"
                 .to_string()
         }
+        RuleKind::Import => {
+            args.push(Sql::Text(c.text().to_string()));
+            format!(
+                "EXISTS (SELECT 1 FROM documents d, json_each(d.value, '$.images') j
+                         WHERE d.ns = '{}' AND d.key = ? AND j.value = i.id)",
+                helios_vault::rules::IMPORT_HISTORY
+            )
+        }
+        RuleKind::Imported => {
+            // Any session holding the photo, at its time.
+            let test = if c.op == "between" {
+                let (low, high) = c.bounds();
+                args.push(Sql::Real(low));
+                args.push(Sql::Real(high));
+                "BETWEEN ? AND ?".to_string()
+            } else {
+                args.push(Sql::Real(c.number()));
+                let op = if c.op == "=" { "==" } else { c.op };
+                format!("{op} ?")
+            };
+            return format!(
+                "EXISTS (SELECT 1 FROM documents d, json_each(d.value, '$.images') j
+                         WHERE d.ns = '{}' AND j.value = i.id
+                         AND json_extract(d.value, '$.when') {test})",
+                helios_vault::rules::IMPORT_HISTORY
+            );
+        }
         RuleKind::Album => {
             args.push(Sql::Text(c.text().to_string()));
             format!(

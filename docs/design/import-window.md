@@ -92,8 +92,41 @@ or folders on Helios (the window opens with them as its source).
     (`IMAGE_EXTENSIONS`), subfolders included.
 - **Detail** (right): the selected source's connector in detail
   (owner's design, 2026-11-14: three zones, sources left, photos in the
-  middle, the connector's detail right). Top to bottom, each with a live
-  example:
+  middle, the connector's detail right). Top to bottom:
+  - **The import profile** (owner's design, 2026-11-14): a menu of the
+    profiles (Everyday, the person's own, then "Manage profiles…") and
+    one line saying what the profile in use does ("Copied into
+    Library/2026/2026-11-14, original names, duplicates skipped"). The
+    detailed choices are not laid out here: with a virtual library the
+    way files sit on disk matters little, so they are not put forward.
+    A source points at its profile; picking one in the menu points the
+    selected source at it.
+  - **The profile editor** ("Manage profiles…", in the window's body as
+    the "Add a source…" wizard): the profiles on the left (New,
+    Duplicate, Rename, Delete; the connectors whose default profile it
+    is), the selected profile's choices on the right, grouped as Copy,
+    Naming, Filter, Apply and Advanced, with a live example of a file's
+    path and name. A change is saved at once and every source using the
+    profile takes it.
+  - **Everyday**, built in (not renamed nor deleted): what can stay where
+    it is is added there, what must be copied (a connector that cannot
+    add in place, a card wiped after import) is copied into the Library
+    by date with its original names; duplicates skipped; the Contents'
+    "New only" leaves out what is in the Library already.
+  - Profiles are kept per library in `import-profiles.json`; the old
+    presets (`import-presets.json`) became profiles and the named
+    filters (`import-filters.json`) filter presets inside the editor's
+    Filter group, once (2026-11-14). A named filter only says which
+    files are taken: folded into whole profiles it would invent copy and
+    naming choices nobody made.
+  - The window knows no source kinds (owner, 2026-11-14): what a
+    profile's choices mean for a source comes from what its connector
+    declares. Left: the editor still offers every choice whatever the
+    connector, and "a card is copied" is still the card connector's id
+    tested in the window (`ImportWindow::copies`); both move behind the
+    connector contract next.
+
+  The choices a profile holds, each with a live example in the editor:
   - **The choices every source shares:**
     - **Duplicates**: skip (default), keep, or ask.
     - **Read darktable edits** (sidecars as versions), when the
@@ -104,8 +137,8 @@ or folders on Helios (the window opens with them as its source).
     - **Include** (folded unless set): which files of the source are
       imported (raw, JPEG, video, other; name patterns; a day range by
       the file's date; a size range; new photos only). A filter is
-      saved by name ("Save filter as…", kept in `import-filters.json`
-      beside the presets) and picked again on any source (2026-11-14).
+      saved by name ("Save filter as…", a filter preset kept with the
+      profiles) and picked again in any profile (2026-11-14).
     - **Apply During Import** (folded unless set): keywords, a rating
       and a colour label every photo imported is given, as Lightroom's
       metadata presets (2026-11-14).
@@ -143,19 +176,11 @@ or folders on Helios (the window opens with them as its source).
   Built (2026-11-07): the choices reach the import as
   `library.importFiles`'s arguments (`copy`, `into`, `layout`, `rename`,
   `duplicates`, `darktable`) and are kept, as the last used, per library.
-- **Footer:**
-  - a preset menu, which replaces the "remember for this workspace" box
-    (Default, plus any the person saved; "Save as preset…");
-  - the totals;
-  - Cancel, and the main button, which states its count ("Import 2,980").
-
-  Built (2026-11-07): a preset is a named set of choices, kept beside the
-  per-library choices (`import-presets.json`); applying one sets the
-  Choices column, copy or add for folders included (a card is still
-  copied unless switched). "Save as preset…" asks a name in place;
-  "Delete preset" deletes the one the choices are. The totals count the
-  photos ticked and their size. Sources and Detail keep fixed widths
-  (at most a quarter of the window each); Contents takes the rest.
+- **Footer:** the totals, Cancel, and the main button, which states its
+  count ("Import 2,980"). The preset menu it had became the import
+  profile menu at the top of the Detail column (2026-11-14). Sources and
+  Detail keep fixed widths (at most a quarter of the window each);
+  Contents takes the rest.
 
 ## After pressing Import
 

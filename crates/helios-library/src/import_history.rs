@@ -139,6 +139,27 @@ pub struct Record {
     /// Why it could not start (a source that cannot be listed), if so.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The photos it brought into the Library or found again (their ids,
+    /// hex): the import session the Library shows as a collection, which
+    /// smart albums' `import` and `imported` rules read in the vault
+    /// (`helios_vault::rules`). Nothing is copied or moved for it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+}
+
+/// The photos an import's `report` brought into the Library or changed
+/// there (added or located), by id.
+fn images_of(report: &Report) -> Vec<String> {
+    let mut out: Vec<String> = report
+        .changes
+        .images
+        .iter()
+        .filter(|c| c.changed() && c.after.as_ref().is_some_and(|rows| rows.library.in_library))
+        .map(|c| c.image.hex())
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 impl Record {
@@ -278,6 +299,7 @@ pub fn record_on<S: Store>(
         choices: choices(options),
         counts: outcome.map(Counts::from).unwrap_or_default(),
         error: outcome.err().map(String::from),
+        images: outcome.map(images_of).unwrap_or_default(),
     };
     write(vault, record)
 }
@@ -307,6 +329,7 @@ pub fn record_remote<S: Store>(
         choices: c,
         counts: outcome.map(Counts::from).unwrap_or_default(),
         error: outcome.err().map(String::from),
+        images: outcome.map(images_of).unwrap_or_default(),
         ..Record::default()
     };
     write(vault, record)

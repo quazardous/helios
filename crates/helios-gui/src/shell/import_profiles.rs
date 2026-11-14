@@ -6,13 +6,15 @@
 //! - **Include**: which files of the source are imported, its kinds
 //!   (raw, JPEG, video, other), name patterns, a day range, a size range
 //!   and "New photos only". A filter can be saved under a name ("Save
-//!   filter as…") and picked again on any source; the named filters are
-//!   kept beside the presets (`import-filters.json`).
+//!   filter as…") and picked again on any profile: the named filters
+//!   are filter presets kept with the import profiles
+//!   ([`super::import_profile_store`]).
 //! - **Apply During Import**: keywords, a rating and a colour label every
 //!   photo imported is given.
 //!
-//! Both are part of the source's [`Choices`], so they are kept on a saved
-//! source (a card by its volume), reach every import of it as
+//! Both are part of an import profile's [`Choices`] (shown in the profile
+//! editor, [`super::import_profile_editor`]), so they follow a saved
+//! source (a card by its volume) through its profile, reach every import of it as
 //! `library.importFiles`'s `filter` and `apply`, manual or automatic, and
 //! are recorded in the import history with the other choices.
 
@@ -24,9 +26,6 @@ use helios_library::import_profile::{Apply, Filter, Kind, LABELS};
 use super::Shell;
 use super::import_sources::SourceKey;
 use super::import_window::ImportWindow;
-
-/// The named filters' file, beside the presets'.
-pub(super) const FILE: &str = "import-filters.json";
 
 /// What is being typed in the sections: the name patterns and keywords
 /// as one line each (kept while their parse is the choices'), and the
@@ -154,11 +153,12 @@ pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Profil
                     w.choices.filter = Filter::default();
                 }
                 let picked = w
+                    .profiles
                     .filters
                     .iter()
                     .find(|(_, f)| **f == w.choices.filter)
                     .map(|(n, _)| n.clone());
-                let names: Vec<String> = w.filters.keys().cloned().collect();
+                let names: Vec<String> = w.profiles.filters.keys().cloned().collect();
                 for name in names {
                     if ui
                         .selectable_label(picked.as_ref() == Some(&name), &name)
@@ -240,6 +240,7 @@ pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Profil
 /// named one.
 fn save_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
     let named = w
+        .profiles
         .filters
         .iter()
         .find(|(_, f)| **f == w.choices.filter)
@@ -307,7 +308,7 @@ pub(super) fn apply_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileW
 impl ImportWindow {
     /// The selected source takes the named filter `name`.
     pub(super) fn use_filter(&mut self, name: &str) {
-        if let Some(filter) = self.filters.get(name) {
+        if let Some(filter) = self.profiles.filters.get(name) {
             self.choices.filter = filter.clone();
         }
     }
@@ -315,29 +316,21 @@ impl ImportWindow {
     /// Saves the selected source's filter as `name`, replacing one of
     /// that name.
     pub(super) fn save_filter(&mut self, name: &str) {
-        self.filters
+        self.profiles
+            .filters
             .insert(name.to_string(), self.choices.filter.clone());
         self.save_filters();
     }
 
     /// Deletes the named filter `name`; the sources keep theirs.
     pub(super) fn delete_filter(&mut self, name: &str) {
-        if self.filters.remove(name).is_some() {
+        if self.profiles.filters.remove(name).is_some() {
             self.save_filters();
         }
     }
 
     fn save_filters(&self) {
-        let Some(file) = &self.filters_file else {
-            return;
-        };
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let text = serde_json::to_string_pretty(&self.filters).unwrap_or_default();
-        if let Err(e) = std::fs::write(file, text) {
-            log::warn!("import filters: {}: {e}", file.display());
-        }
+        self.profiles.save();
     }
 }
 
@@ -346,6 +339,7 @@ impl Shell {
     pub fn import_filters(&self) -> Vec<(String, Filter)> {
         self.import
             .get()
+            .profiles
             .filters
             .iter()
             .map(|(n, f)| (n.clone(), f.clone()))
@@ -356,7 +350,7 @@ impl Shell {
     /// as…" does.
     pub fn save_import_filter(&mut self, name: &str, filter: Filter) {
         let mut w = self.import.get_mut();
-        w.filters.insert(name.to_string(), filter);
+        w.profiles.filters.insert(name.to_string(), filter);
         w.save_filters();
     }
 
@@ -370,6 +364,7 @@ impl Shell {
         let mut guard = self.import.get_mut();
         let w = &mut *guard;
         let filter = w
+            .profiles
             .filters
             .get(name)
             .cloned()
@@ -401,4 +396,5 @@ fn set_source_choices(
     if w.sources.showing.as_ref() == Some(&key) {
         w.choices = choices;
     }
+    w.link_sources();
 }

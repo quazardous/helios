@@ -78,6 +78,19 @@ proposes the next slices.
   `QueryDesc` (rating, labels, flags, tags: `helios-template`), the only
   saved filter. No folder tree, no albums, no recent collections.
 - **Saved searches:** none beyond the template's query.
+- **Imports** (2026-11-14): each import of the import history keeps the
+  photos it brought in (`helios_library::import_history`, `images`). The
+  Library's Imports section lists them, newest first (when, source,
+  count); a click scopes the grid to one (an `import:<id>` term, the
+  vault's `import` rule), with the other filters, nothing copied or
+  moved. Smart albums take `import` (`in`, `not_in` a session) and
+  `imported` (a time, `within` a period). After an import the user
+  started, the Library shows its session with its photos selected
+  (`import.show_in_library`, on by default; never an automatic import's,
+  and while the user edits a photo its notice offers it). The import
+  window's History entries have "Show in Library"
+  (`library.importSession`), and "Run Workshop…" (`library.runWorkshop`,
+  grid menu and Edit menu) runs `workshop.run` on the selection.
 
 ### Act on many photos
 

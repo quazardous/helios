@@ -56,6 +56,8 @@ impl Words {
                 "folder" => Message::new("gui-rule-field-folder", "folder"),
                 "album" => Message::new("gui-rule-field-album", "album"),
                 "captured" => Message::new("gui-rule-field-captured", "capture date"),
+                "import" => Message::new("gui-rule-field-import", "import session"),
+                "imported" => Message::new("gui-rule-field-imported", "import date"),
                 "camera" => Message::new("gui-rule-field-camera", "camera"),
                 "make" => Message::new("gui-rule-field-make", "camera make"),
                 "lens" => Message::new("gui-rule-field-lens", "lens"),
@@ -391,7 +393,7 @@ fn value(
         }
     };
     match (kind, d.op.as_str()) {
-        (RuleKind::Date, "within") => {
+        (RuleKind::Date | RuleKind::Imported, "within") => {
             let periods: Vec<(String, String)> = PERIODS
                 .iter()
                 .map(|p| (p.to_string(), Words::of(&words.periods, p).to_string()))
@@ -415,7 +417,7 @@ fn value(
                 Words::name(ui, &r, &words.unit_name);
             }
         }
-        (RuleKind::Number | RuleKind::Date, "between") => {
+        (RuleKind::Number | RuleKind::Date | RuleKind::Imported, "between") => {
             ask(typed(ui, &d.value, "value", 96.0));
             ui.label(&words.and);
             ask(typed(ui, &d.high, "high", 96.0));

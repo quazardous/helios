@@ -509,6 +509,8 @@ impl ImportWindow {
             name: Some(wz.name.trim().to_string()),
             path,
             account,
+            // Found again among the profiles, or made, by `link_sources`.
+            profile: None,
             choices: Some(choices),
             params: wz.params.into_iter().collect(),
             browser,

@@ -86,6 +86,11 @@ pub(super) struct Focus {
     /// one brought, to select once the Library shows them.
     pub(super) imported_ids: Vec<String>,
     pub(super) select_imported: Vec<String>,
+    /// The Library's import sessions, as last read.
+    pub(super) import_sessions: super::library_imports::Sessions,
+    /// The imports the user started here and handed to the node, by
+    /// their requests, until they end.
+    pub(super) user_imports: Vec<serde_json::Value>,
     /// A menu of commands asked for, open at a point.
     pub(super) menu: Option<(egui::Pos2, Vec<MenuItem>)>,
     pub(super) viewport: Rc<RefCell<crate::viewport::Viewport>>,
@@ -174,6 +179,8 @@ impl Focus {
             import_source: None,
             imported_ids: Vec::new(),
             select_imported: Vec::new(),
+            import_sessions: super::library_imports::Sessions::default(),
+            user_imports: Vec::new(),
             menu: None,
             viewport: seed.viewport,
             opening: None,
