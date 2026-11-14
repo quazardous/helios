@@ -2,7 +2,7 @@
 //! `docs/protocol.md`, "Finding a node").
 //!
 //! [`VaultService`] answers the library's commands ([`crate::library`]),
-//! the calibration's ([`crate::calibrate`]) and `library.import` over
+//! the calibration's ([`crate::calibrate`]), the init steps' ([`crate::init`]) and `library.import` over
 //! JSON-RPC 2.0, each checked against its
 //! schema, run by the origin its call names and announced on the node's
 //! bus ([`CommandRan`]). [`advertise`] serves it on a socket of its own
@@ -32,7 +32,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, validate};
-use crate::{calibrate, cursor, library};
+use crate::{calibrate, cursor, init, library};
 
 /// Who publishes the endpoint's events on the bus.
 pub const SOURCE: &str = "node";
@@ -123,6 +123,7 @@ pub fn specs() -> Vec<CommandSpec> {
         .chain(library::specs())
         .chain(cursor::specs())
         .chain(calibrate::specs())
+        .chain(init::specs())
         .collect()
 }
 
@@ -172,6 +173,9 @@ fn run_on<S: Store>(
         return calibrate::run_as(Some(vault), id, params, origin, now())
             .map(|done| (done.answer, done.changes))
             .map_err(|m| m.english);
+    }
+    if init::handles(id) {
+        return init::run(vault, id, params).map(|answer| (answer, Changes::default()));
     }
     library::run(vault, bus, id, params, origin).map(|answer| (answer, Changes::default()))
 }
