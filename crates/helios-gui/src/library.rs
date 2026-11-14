@@ -1094,6 +1094,10 @@ fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
 /// with `select: true`.
 pub const IMPORT_SESSION_COMMAND: &str = "library.importSession";
 
+/// The command showing exactly a set of photos in the Library (`ids`),
+/// all of them selected: a job's photos (an export, the trash, a batch).
+pub const SHOW_COMMAND: &str = "library.show";
+
 /// The command running the workshop applied on the Library's selection
 /// ("Run Workshop…": `workshop.run` on the selection).
 pub const RUN_WORKSHOP_COMMAND: &str = "library.runWorkshop";
@@ -1616,6 +1620,9 @@ pub struct Library {
     /// The images the vault matched for the filter, once the host ran its
     /// query.
     matches: Option<HashSet<String>>,
+    /// The set of photos shown alone ([`Library::show_ids`]: a job's
+    /// photos), whatever the filter; the next filter set drops it.
+    only: Option<HashSet<String>>,
     /// A query for the host to run.
     query: Option<Query>,
     /// What a backup state is measured against (`backup:` terms, the
@@ -1819,6 +1826,7 @@ impl Default for Library {
             search: SearchState::new(),
             filter: Filter::default(),
             matches: None,
+            only: None,
             backup_rule: helios_vault::Backups::default(),
             facets: None,
             folders: FolderCounts::Unread,
@@ -2714,13 +2722,14 @@ impl Library {
     /// term runs in the vault's query). Until the vault answers a new
     /// filter, the last answer stands.
     fn passes(&self, e: &Entry) -> bool {
-        self.filter.is_empty() || self.matches.as_ref().is_none_or(|m| m.contains(&e.id))
+        self.only.as_ref().is_none_or(|o| o.contains(&e.id))
+            && (self.filter.is_empty() || self.matches.as_ref().is_none_or(|m| m.contains(&e.id)))
     }
 
     /// What the views show, in order: a stack's top image first, its
     /// other members right after it.
     fn reorder(&mut self) {
-        let stacks = self.filter.is_empty();
+        let stacks = self.filter.is_empty() && self.only.is_none();
         let mut order = Vec::new();
         let mut placed: HashSet<&str> = HashSet::new();
         for (i, e) in self.entries.iter().enumerate() {
@@ -2790,6 +2799,7 @@ impl Library {
     }
 
     fn filtered(&mut self, filter: Filter) {
+        self.only = None;
         self.query = (!filter.is_empty()).then(|| self.query_for(&filter));
         if filter.is_empty() {
             self.matches = None;
@@ -3293,6 +3303,30 @@ impl Library {
     /// Whether the Library holds the image `id`.
     pub fn holds(&self, id: &str) -> bool {
         self.index.contains_key(id)
+    }
+
+    /// Shows exactly the photos `ids` (what a job worked on: an export,
+    /// the trash, a batch), the filter cleared, all of them selected; an
+    /// id the Library does not hold is left out. The next filter set
+    /// (cleared included) shows by it again.
+    pub fn show_ids(&mut self, ids: &[String]) {
+        self.set_filter(Filter::default());
+        self.only = Some(ids.iter().cloned().collect());
+        self.reorder();
+        self.select_ids(ids);
+    }
+
+    /// How many photos the set shown alone holds ([`Library::show_ids`]),
+    /// while one is.
+    pub fn shown_set(&self) -> Option<usize> {
+        self.only.as_ref().map(HashSet::len)
+    }
+
+    /// Drops the set shown alone: the Library shows by its filter again.
+    pub fn clear_shown_set(&mut self) {
+        if self.only.take().is_some() {
+            self.reorder();
+        }
     }
 
     /// Selects images by id, the cursor on the last.

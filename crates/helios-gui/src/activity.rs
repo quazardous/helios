@@ -127,6 +127,18 @@ impl Shared {
     }
 }
 
+/// The promises as last read, shared with readers off the shell (the
+/// agents' `helios.jobs` snapshot).
+#[derive(Clone)]
+pub struct Followed(Arc<Mutex<Shared>>);
+
+impl Followed {
+    /// The promises last read, newest first.
+    pub fn promises(&self) -> Vec<Promise> {
+        lock(&self.0).promises.clone()
+    }
+}
+
 /// The promises the desktop follows.
 pub struct Activity {
     node: Option<Arc<Client>>,
@@ -201,6 +213,11 @@ impl Activity {
     /// The promises last read, newest first.
     pub fn promises(&self) -> Vec<Promise> {
         lock(&self.shared).promises.clone()
+    }
+
+    /// A reader of the promises last read, for elsewhere.
+    pub fn followed(&self) -> Followed {
+        Followed(self.shared.clone())
     }
 
     /// Shows `promises` as if the node had answered them, their log

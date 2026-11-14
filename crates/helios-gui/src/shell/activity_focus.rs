@@ -11,11 +11,15 @@
 //!   its own); its start, elapsed time and time left; its progress and
 //!   current step; the per-item outcome when it has items (an import's
 //!   added, skipped and failed files, with the reasons); its log (the
-//!   notes and states followed, [`crate::activity::LogLine`]); Cancel
-//!   (unless the job says it cannot stop), Retry when the failure may be
+//!   notes and states followed, [`crate::activity::LogLine`]); its
+//!   console (the lines the job wrote, `job.log`, heard in the journal);
+//!   Cancel
+//!   (unless the job says it cannot stop; a connected node's job is
+//!   cancelled on that node, through its relay), Retry when the failure may be
 //!   retried, and once done its result links: "Open folder" (an export, a
 //!   backup, a snapshot), "Show in Library" (an import's photos, its
-//!   session in the Library) and "Import history" (the import window,
+//!   session in the Library; a job naming its photos, a batch's or the
+//!   trash's, exactly those: `library.show`) and "Import history" (the import window,
 //!   whose History lists the record), and what the job offered (a batch's
 //!   actions).
 //!
@@ -63,6 +67,10 @@ static FRAME: FocusWindow = FocusWindow {
 const ROW: f32 = 50.0;
 /// How many failed items the detail lists.
 const FAILED_SHOWN: usize = 20;
+/// How many lines of its console a job keeps.
+const CONSOLE_LINES: usize = 500;
+/// How many jobs' consoles are kept (the oldest forgotten).
+const CONSOLES: usize = 100;
 
 /// What the window asked of the shell, run at the main window's pass.
 #[derive(Clone, Debug, PartialEq)]
@@ -78,6 +86,11 @@ enum Event {
 /// shown in the Library (`id`: the import history's record), the main
 /// window brought forward.
 const SHOW_IMPORT: &str = "activity.showImport";
+
+/// The pseudo-command of "Show in Library" on a job naming its photos
+/// (`ids`): exactly those shown in the Library ([`crate::library::SHOW_COMMAND`]),
+/// the main window brought forward.
+const SHOW_PHOTOS: &str = "activity.showPhotos";
 
 /// A finished job's result links: what it says it made (its label, or
 /// the words the job said it in; the command it runs and its arguments).
@@ -98,6 +111,18 @@ fn links(p: &Promise) -> Vec<(Message, Option<String>, String, Value)> {
             None,
             super::import_window::COMMAND.to_string(),
             json!({}),
+        ));
+    }
+    // The photos the job named (a batch's, the trash's): exactly those
+    // in the Library.
+    if result["history"].is_null()
+        && let Some(images) = result["images"].as_array().filter(|i| !i.is_empty())
+    {
+        links.push((
+            Message::new("gui-jobs-show-library", "Show in Library"),
+            None,
+            SHOW_PHOTOS.to_string(),
+            json!({ "ids": images }),
         ));
     }
     if let Some(folder) = result["folder"].as_str() {
@@ -126,7 +151,18 @@ fn links(p: &Promise) -> Vec<(Message, Option<String>, String, Value)> {
 /// Whether a job may be cancelled: its request says when it may not (a
 /// snapshot, a job of another node, work with no end).
 fn cancellable(p: &Promise) -> bool {
-    !p.state.is_settled() && !p.cancel_asked && p.request["cancellable"].as_bool() != Some(false)
+    !p.state.is_settled()
+        && !p.cancel_asked
+        && (p.request["cancellable"].as_bool() != Some(false) || relayed(p).is_some())
+}
+
+/// The job of a connected node a promise mirrors, when it can be
+/// cancelled there (`relayed`): its id, `node:<name>/<id>`.
+fn relayed(p: &Promise) -> Option<&str> {
+    p.request[helios_node_core::job_promises::RELAYED]
+        .as_bool()
+        .filter(|r| *r)
+        .and(p.request[helios_node_core::job_promises::JOB].as_str())
 }
 
 /// Which jobs the list shows, by state.
@@ -169,6 +205,13 @@ pub(crate) struct Jobs {
     promises: Vec<Promise>,
     /// The selected job's log.
     log: Vec<LogLine>,
+    /// Each job's console, by job id: the lines it wrote (`job.log`),
+    /// heard in the journal since the shell started.
+    consoles: std::collections::BTreeMap<String, Vec<String>>,
+    /// The jobs in the order their console started, oldest first.
+    console_order: std::collections::VecDeque<String>,
+    /// The journal read so far.
+    console_seen: egui_pop::api::host::Seq,
     selected: Option<String>,
     /// The row under the pointer last frame.
     hovered: Option<String>,
@@ -506,6 +549,46 @@ impl Jobs {
         }
     }
 
+    /// Folds the journal's `job.log` lines since the last call into the
+    /// jobs' consoles.
+    fn hear_consoles(&mut self, app: &egui_pop::api::AppHandle) {
+        for e in app.events_since(self.console_seen) {
+            self.console_seen = e.seq;
+            if e.name != helios_core::jobs::LOG {
+                continue;
+            }
+            let (Some(id), Some(line)) = (e.data["id"].as_str(), e.data["text"].as_str()) else {
+                continue;
+            };
+            self.console_line(id, line);
+        }
+    }
+
+    /// Adds `line` to job `id`'s console.
+    fn console_line(&mut self, id: &str, line: &str) {
+        if !self.consoles.contains_key(id) {
+            self.console_order.push_back(id.to_string());
+            while self.console_order.len() > CONSOLES {
+                if let Some(old) = self.console_order.pop_front() {
+                    self.consoles.remove(&old);
+                }
+            }
+        }
+        let lines = self.consoles.entry(id.to_string()).or_default();
+        lines.push(line.to_string());
+        if lines.len() > CONSOLE_LINES {
+            lines.remove(0);
+        }
+    }
+
+    /// The console of the job promise `p` mirrors (`job` in its request).
+    fn console(&self, p: &Promise) -> &[String] {
+        p.request[helios_node_core::job_promises::JOB]
+            .as_str()
+            .and_then(|job| self.consoles.get(job))
+            .map_or(&[], Vec::as_slice)
+    }
+
     /// The Job detail panel, for the job selected.
     #[allow(
         clippy::too_many_lines,
@@ -680,6 +763,25 @@ impl Jobs {
                 });
             }
         });
+        // What the job wrote as it went (its `job.log` lines): its
+        // console, newest at the bottom.
+        let console = self.console(&p);
+        if !console.is_empty() {
+            ui.add_space(6.0);
+            ui.label(text(ui, Message::new("gui-jobs-console", "Console")));
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.activity.console")
+                    .max_height(160.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        for line in console {
+                            ui.monospace(line);
+                        }
+                    });
+            });
+        }
     }
 }
 
@@ -807,16 +909,49 @@ impl Shell {
         }
     }
 
+    /// Cancel or Retry asked on promise `id`: of the node's promises; a job
+    /// relayed from a connected node is cancelled there, through its relay
+    /// (`job.cancel` to its control endpoint).
+    fn ask_activity(&mut self, action: Action, id: &str) {
+        let relayed = {
+            let j = self.activity_focus.state.borrow();
+            j.promises
+                .iter()
+                .find(|p| p.id == id)
+                .and_then(relayed)
+                .map(String::from)
+        };
+        match (action, relayed) {
+            (Action::Cancel, Some(job)) => {
+                let cancelled = crate::relay::split_node_job(&job)
+                    .ok_or_else(|| format!("`{job}` is not a node's job"))
+                    .and_then(|(node, own)| {
+                        self.core
+                            .relays
+                            .borrow()
+                            .get(node)
+                            .ok_or_else(|| format!("node `{node}` is not followed any more"))?
+                            .cancel(own)
+                    });
+                if let Err(e) = cancelled {
+                    self.warn(format!("{job}: {e}"));
+                }
+            }
+            _ => self.core.activity.ask(action, id),
+        }
+    }
+
     /// Runs a result link of the detail: the import's session shown in
     /// the Library, the main window brought forward; or the link's
     /// command.
     fn run_link(&mut self, command: &str, args: &Value) {
-        let ran = if command == SHOW_IMPORT {
-            let ran = self.run(
-                crate::library::IMPORT_SESSION_COMMAND,
-                args.clone(),
-                helios_shell::commands::Origin::User,
-            );
+        let shown = match command {
+            SHOW_IMPORT => Some(crate::library::IMPORT_SESSION_COMMAND),
+            SHOW_PHOTOS => Some(crate::library::SHOW_COMMAND),
+            _ => None,
+        };
+        let ran = if let Some(shown) = shown {
+            let ran = self.run(shown, args.clone(), helios_shell::commands::Origin::User);
             self.core.app.handle().raise_window(&WindowId::main());
             ran
         } else {
@@ -855,7 +990,12 @@ impl Shell {
             .into_iter()
             .map(|(_, _, command, args)| json!({ "command": command, "args": args }))
             .collect();
+        let console = j
+            .selected()
+            .map(|p| j.console(p).to_vec())
+            .unwrap_or_default();
         json!({ "open": j.open, "selected": j.selected, "rows": rows, "links": links,
+                "console": console,
                 "linked": j.linked.iter().map(|(c, a)| json!({ "command": c, "args": a }))
                     .collect::<Vec<_>>() })
     }
@@ -865,6 +1005,7 @@ impl Shell {
     pub(super) fn activity_frame(&mut self, ctx: &Egui) {
         let events = {
             let mut j = self.activity_focus.state.borrow_mut();
+            j.hear_consoles(self.core.app.handle());
             if j.open {
                 j.promises = self.core.activity.promises();
                 j.now = j.frozen.unwrap_or_else(now);
@@ -881,7 +1022,7 @@ impl Shell {
         };
         for event in events {
             match event {
-                Event::Ask(action, id) => self.core.activity.ask(action, &id),
+                Event::Ask(action, id) => self.ask_activity(action, &id),
                 Event::Link(command, args) => self.run_link(&command, &args),
             }
         }

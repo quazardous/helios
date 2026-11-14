@@ -13,13 +13,17 @@
 //!   their own, [`Standing`]).
 //! - **Its progress** (`done` of `total`, the item at hand as `note`) is
 //!   written at most every [`EVERY`]; its end settles it: finished, `done`
-//!   with `{job, done, total, failed: [{path, error}], skipped}` and what
+//!   with `{job, done, total, failed: [{path, error}], skipped}`, the
+//!   photos it named as it started (`images`, at most [`IMAGES_KEPT`]: a
+//!   batch's, the trash's) and what
 //!   the job finished with (its `result`: `folder`, `images`; its
 //!   `actions`); failed, not retryable (the job is not a kind the node runs
 //!   again); cancelled.
 //! - **Cancel**: `promises.cancel` reaches the job through the jobs it was
 //!   started on ([`crate::promises::Promises::cancel_through`]). A job that
-//!   cannot be cancelled says so in its request (`cancellable: false`).
+//!   cannot be cancelled says so in its request (`cancellable: false`); a
+//!   job relayed from another node that can be says `relayed: true`: the
+//!   desktop following that node sends the cancel there.
 //! - **Kept**: the newest [`KEPT`] settled mirrored promises; older ones
 //!   are forgotten. A job still running when the node stops settles
 //!   `failed` ([`INTERRUPTED`]).
@@ -57,6 +61,15 @@ pub const KEPT: usize = 100;
 /// The key of a mirrored promise's request naming its job.
 pub const JOB: &str = "job";
 
+/// How many photos a job's settled promise names at most (`images`: what
+/// "Show in Library" shows); a job on more names none.
+pub const IMAGES_KEPT: usize = 500;
+
+/// The key of a mirrored promise's request saying its job runs on
+/// another node (`node:<name>/<id>`) and is cancelled there, through the
+/// relay of the desktop following it.
+pub const RELAYED: &str = "relayed";
+
 /// The key of a standing promise's request.
 pub const STANDING: &str = "standing";
 
@@ -84,6 +97,9 @@ struct Mirrored {
     note: Option<String>,
     failed: Vec<Value>,
     skipped: u64,
+    /// The photos it works on, when it named them (at most
+    /// [`IMAGES_KEPT`]).
+    images: Option<Value>,
     /// Progress heard and not written yet.
     dirty: bool,
     written: Instant,
@@ -140,6 +156,9 @@ impl<S: Store> Mirror<S> {
                     result.insert("total".into(), json!(m.total));
                     result.insert("failed".into(), json!(m.failed));
                     result.insert("skipped".into(), json!(m.skipped));
+                    if let Some(images) = m.images {
+                        result.insert("images".into(), images);
+                    }
                     if let Value::Object(made) = &d["result"] {
                         result.extend(made.clone());
                     }
@@ -196,9 +215,14 @@ impl<S: Store> Mirror<S> {
             return;
         }
         let title = d["title"].as_str().unwrap_or(id);
-        // A job relayed from another node is cancelled on it, not here.
-        let cancellable = d["cancellable"].as_bool().unwrap_or(true) && !id.starts_with("node:");
-        let request = json!({ JOB: id, "cancellable": cancellable });
+        // A job relayed from another node is cancelled on it, not here:
+        // `relayed`, its desktop sends the cancel to that node.
+        let stoppable = d["cancellable"].as_bool().unwrap_or(true);
+        let relayed = id.starts_with("node:");
+        let mut request = json!({ JOB: id, "cancellable": stoppable && !relayed });
+        if relayed && stoppable {
+            request[RELAYED] = json!(true);
+        }
         let total = d["total"].as_u64();
         let created = self
             .vault
@@ -218,6 +242,10 @@ impl<S: Store> Mirror<S> {
                         note: None,
                         failed: Vec::new(),
                         skipped: 0,
+                        images: d["images"]
+                            .as_array()
+                            .filter(|i| !i.is_empty() && i.len() <= IMAGES_KEPT)
+                            .map(|i| Value::Array(i.clone())),
                         dirty: false,
                         written: Instant::now(),
                     },
@@ -543,13 +571,20 @@ mod tests {
     }
 
     #[test]
-    fn a_job_a_promise_stands_for_is_not_mirrored_twice() {
+    fn a_job_a_promise_stands_for_is_not_mirrored_twice_and_a_job_names_its_photos() {
         let (vault, jobs, mirror) = mirrored();
         let by_rule = jobs.start(Start::new("import-7", "Import a card", "import").promise("p-1"));
-        let export = jobs.start(Start::new("export-2", "Export b", "export"));
+        let export = jobs.start(
+            Start::new("export-2", "Export 2 photos", "batch").images(["a".into(), "b".into()]),
+        );
         by_rule.finished();
         export.finished();
-        until(&vault, "export-2", |p| p.state.is_settled());
+        let p = until(&vault, "export-2", |p| p.state.is_settled());
+        let State::Done { result } = p.state else {
+            panic!("{p:?}")
+        };
+        // The photos it named: what "Show in Library" shows.
+        assert_eq!(result["images"], json!(["a", "b"]));
         mirror.stop();
         let all = vault.promises(&Filter::default()).unwrap();
         assert_eq!(all.len(), 1, "{all:?}");

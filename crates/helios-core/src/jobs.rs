@@ -10,7 +10,7 @@
 //!
 //! | Event | Data |
 //! |---|---|
-//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node`, `promise` |
+//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node`, `promise`, `images` |
 //! | `job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
 //! | `job.item_failed` | `id`, `item`, `error` |
 //! | `job.log` | `id`, `text` |
@@ -183,6 +183,9 @@ pub struct Start {
     /// the promise already stands for it, so it is not mirrored as one
     /// more ([`Start::promise`]).
     pub promise: Option<String>,
+    /// The photos it works on (their library ids: a batch's, the
+    /// trash's), when it knows them ([`Start::images`]).
+    pub images: Vec<String>,
 }
 
 impl Start {
@@ -198,6 +201,7 @@ impl Start {
             pausable: false,
             node: None,
             promise: None,
+            images: Vec::new(),
         }
     }
 
@@ -226,6 +230,13 @@ impl Start {
     /// it out, the promise already standing for it.
     pub fn promise(mut self, promise: &str) -> Self {
         self.promise = Some(promise.into());
+        self
+    }
+
+    /// The photos it works on, by library id: what its result shows in
+    /// the Library ("Show in Library").
+    pub fn images(mut self, images: impl IntoIterator<Item = String>) -> Self {
+        self.images = images.into_iter().collect();
         self
     }
 
@@ -270,6 +281,9 @@ impl Start {
         }
         if let Some(promise) = &self.promise {
             d["promise"] = json!(promise);
+        }
+        if !self.images.is_empty() {
+            d["images"] = json!(self.images);
         }
         d
     }

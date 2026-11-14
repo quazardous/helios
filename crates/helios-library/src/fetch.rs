@@ -50,7 +50,7 @@ use helios_connect::land::{Check, Landed, Landing};
 use helios_connect::{
     Access, Cancel, Caps, Connector, ConnectorError, HashAlgo, Item, ItemRef, Originals, SourceRef,
 };
-use helios_core::jobs::{Jobs, Progress, Start};
+use helios_core::jobs::{Jobs, Progress};
 use helios_storage::{Volume, registry};
 use helios_vault::{
     Capture, Changes, ImageId, ImageRows, Location, Presence, Sighting, Store, Vault,
@@ -58,7 +58,7 @@ use helios_vault::{
 use serde_json::{Value, json};
 
 use crate::import::{
-    Duplicates, KIND, NEXT, Options, Placement, Report, Status, facts_kept, library_root, place,
+    Duplicates, NEXT, Options, Placement, Report, Status, facts_kept, library_root, place,
     set_library_root,
 };
 use crate::rename::Naming;
