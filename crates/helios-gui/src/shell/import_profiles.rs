@@ -244,8 +244,8 @@ fn save_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
         .iter()
         .find(|(_, f)| **f == w.choices.filter)
         .map(|(n, _)| n.clone());
-    ui.horizontal_wrapped(|ui| match w.profile_edit.saving.take() {
-        Some(mut name) => {
+    ui.horizontal_wrapped(|ui| {
+        if let Some(mut name) = w.profile_edit.saving.take() {
             let typed = ui.add(egui::TextEdit::singleline(&mut name).desired_width(140.0));
             let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (ui.button(&words.save).clicked() || enter) && !name.trim().is_empty() {
@@ -253,8 +253,7 @@ fn save_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
             } else if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 w.profile_edit.saving = Some(name);
             }
-        }
-        None => {
+        } else {
             if !w.choices.filter.is_all() && ui.small_button(&words.save_as).clicked() {
                 w.profile_edit.saving = Some(named.clone().unwrap_or_default());
             }
