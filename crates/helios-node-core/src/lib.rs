@@ -21,5 +21,6 @@ pub mod library;
 pub mod node;
 pub mod promises;
 pub mod quit;
+pub mod reads;
 pub mod settings;
 pub mod volumes;

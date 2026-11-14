@@ -384,6 +384,35 @@ shown at a coming frame, through a `ReadCache` fed by the bus's events.
 The Folders section's counts and the filter history are read through
 the node too, and shown at the frame their answer comes.
 
+### Worker reads
+
+The desktop's worker threads read through the node too, never the vault,
+each call made on the thread that needs it (an export's render, a
+thumbnail of a head version, an import window's scan):
+
+- `library.version.get` (`version`) reads one version, in the form
+  `library.edit.head` answers it, null when there is none of that id:
+  an export renders each photo's version so.
+- `export.plan` (`images`, `settings`: the export's format, folder,
+  pattern and clash rule; `node`, the graph node rendered) plans an
+  export over the library and answers its `request`: each image's file,
+  its head version and its output name, decided now.
+- `import.known` reads what an import's prefilter compares a card with:
+  the library's images as `partials` (`[size, partial hash]`) and their
+  present copies as `present` (`[image, path, size, modified]`).
+- `import.recorded` (`folder`) reads what the image map saw under a
+  folder whose volume is offline: the image files' `sightings`, on the
+  known volume last mounted above it, and that `mount` (null when the
+  folder is on no known volume).
+
+```json
+{"jsonrpc": "2.0", "id": 6, "method": "import.recorded", "params": {"folder": "/media/card/DCIM"}}
+{"jsonrpc": "2.0", "id": 6, "result": {"mount": "/media/card", "sightings": [{"volume": "uuid:a", "rel_path": "DCIM/IMG_0001.CR3", "path": "/media/card/DCIM/IMG_0001.CR3", "size": 24000000, "modified": 1700000000, "partial": "5e…", "image": null, "taken": 1699990000, "camera": "Canon EOS R6", "presence": "present", "seen_by": "import"}]}}
+```
+
+A thumbnail of a photo's head version reads `library.edit.head` through
+the desktop's read cache.
+
 ## Promises
 
 A long piece of work answers at once with a **promise**: a handle to its

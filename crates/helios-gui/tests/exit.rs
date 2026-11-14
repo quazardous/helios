@@ -179,7 +179,7 @@ fn quitting_during_an_export_asks_then_the_node_cancels_it() {
     let link = d.node.link();
     let jobs = h.state().jobs();
     let exporter = Exporter::with_engine(
-        d.node.vault().clone(),
+        d.persist.node().clone(),
         jobs.clone(),
         h.state().export_sink(),
         || {},

@@ -360,8 +360,9 @@ pub struct Reader {
 }
 
 impl Reader {
-    /// Reads `method` from the cache, else from the node (waiting for it).
-    fn read(&self, method: &str, params: Value) -> Result<Value, String> {
+    /// Reads `method` from the cache, else from the node (waiting for it):
+    /// on a thread of its own, never the UI's.
+    pub fn read(&self, method: &str, params: Value) -> Result<Value, String> {
         self.cache
             .read(&self.node, method, params)
             .map_err(|e| e.message)

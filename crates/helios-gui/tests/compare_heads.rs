@@ -14,8 +14,9 @@ use std::sync::Arc;
 use helios_core::{Bus, Engine, Image, Region};
 use helios_gui::head_render::{self, HeadRender};
 use helios_gui::library::{Entry, Library};
+use helios_gui::persist::Persist;
 use helios_gui::templates;
-use helios_vault::{EditSession, MemoryStore, Vault, edit};
+use helios_vault::{EditSession, MemoryStore, edit};
 use serde_json::json;
 
 fn mire() -> Option<PathBuf> {
@@ -65,14 +66,23 @@ fn mean(image: &Image) -> f64 {
 #[test]
 fn a_raw_s_head_version_renders_developed_pixels_not_its_preview() {
     let Some(path) = mire() else { return };
-    let vault = Vault::new(MemoryStore::default());
+    let bus = Arc::new(Bus::new());
+    let persist = Persist::new(MemoryStore::default(), bus.clone());
+    let vault = persist.vault().clone();
     let image = vault.import_file(&path, 0).unwrap();
     let engine = Engine::new(Arc::new(Bus::new()));
     let bundle = templates::find("helios.develop-preview").unwrap();
 
     // Never edited: the network's own development, at the size asked.
-    let (version, developed) =
-        head_render::render(&vault, &engine, &bundle, &path, image, 256).unwrap();
+    let (version, developed) = head_render::render(
+        &persist.reader(),
+        &engine,
+        &bundle,
+        &path,
+        &image.hex(),
+        256,
+    )
+    .unwrap();
     assert_eq!(version, None);
     let r = developed.region();
     assert!((255..=257).contains(&r.width.max(r.height)), "{r:?}");
@@ -93,8 +103,11 @@ fn a_raw_s_head_version_renders_developed_pixels_not_its_preview() {
         .save(&vault, edited, "Exposure", "test", 1)
         .unwrap()
         .expect("a version");
+    // A reader of its own: the first one's cache may not have heard of
+    // the save yet.
+    let fresh = Persist::on(vault.clone(), bus);
     let (version, brighter) =
-        head_render::render(&vault, &engine, &bundle, &path, image, 256).unwrap();
+        head_render::render(&fresh.reader(), &engine, &bundle, &path, &image.hex(), 256).unwrap();
     assert_eq!(version, Some(saved.id.hex()));
     assert!(mean(&brighter) > mean(&developed) * 1.1);
 }
