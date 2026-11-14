@@ -1203,6 +1203,70 @@ gui-job-other-done = Job finished
 
 gui-job-other-failed = Job failed
 
+gui-jobs-added = Added
+
+gui-jobs-attempts = Attempts
+
+gui-jobs-by-agent = An agent
+
+gui-jobs-by-cli = The command line
+
+gui-jobs-by-node = Automatic
+
+gui-jobs-by-user = You
+
+gui-jobs-clear = Clear finished
+
+gui-jobs-detail = Job detail
+
+gui-jobs-elapsed = Elapsed
+
+gui-jobs-filter-kind = Kind shown
+
+gui-jobs-filter-state = State shown
+
+gui-jobs-items-failed = Failed
+
+gui-jobs-kind = Kind
+
+gui-jobs-kind-all = Every kind
+
+gui-jobs-left = Time left
+
+gui-jobs-log = Log
+
+gui-jobs-none = No background jobs
+
+gui-jobs-none-selected = No job selected
+
+gui-jobs-show-library = Show in Library
+
+gui-jobs-skipped = Skipped
+
+gui-jobs-source = Source
+
+gui-jobs-started = Started
+
+gui-jobs-started-by = Started by
+
+gui-jobs-state = State
+
+gui-jobs-state-all = Every state
+
+gui-jobs-state-done = Done
+
+gui-jobs-state-failed = Failed or cancelled
+
+gui-jobs-state-running = Running
+
+gui-jobs-step = Now
+
+gui-jobs-title = Jobs
+
+gui-jobs-unchanged = Already there
+
+gui-jobs-window = Activity
+
 gui-keys-from-template = template
 
 gui-layout-not-saved = The layout was not saved: { $error }

@@ -9,15 +9,17 @@
 //! - **The indicator** ([`indicator`]): while promises run, a spinner,
 //!   their count and the main one's progress ("Importing 120/412"); a
 //!   promise that failed during this run, a warning badge until it is
-//!   seen. A click runs [`COMMAND`], which marks the failures seen and
-//!   opens the import window, whose footer lists the imports with their
-//!   progress, outcome, Cancel and Retry. The Activity window, every kind
-//!   of task in one place, will open from it instead.
+//!   seen. A click runs [`COMMAND`] with the job clicked (the main one,
+//!   or the newest failure): the failures are marked seen and the
+//!   Activity focus opens with that job selected (`crate::shell`'s
+//!   `activity_focus`: every kind of task in one place).
+//! - **Each job's log**: the notes its progress gave (the file at hand)
+//!   and the states it went through, as followed here ([`LogLine`]).
 //! - **Started here.** [`Activity::start`] asks the node for an import by
 //!   rule and answers with its promise at once: the window does not wait
 //!   for the import, and may close while it runs.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
@@ -28,8 +30,8 @@ use helios_inspect::client::Client;
 use helios_vault::promises::{Promise, State};
 use serde_json::{Value, json};
 
-/// The command the indicator runs: the background tasks shown, their
-/// failures marked seen.
+/// The command the indicator runs: the Activity focus shown (`id`: the
+/// job selected), the failures marked seen.
 pub const COMMAND: &str = "activity.show";
 /// The indicator of the running tasks, for tests and agents.
 pub const MARK: &str = "helios.status.activity";
@@ -47,10 +49,77 @@ const TICK: Duration = Duration::from_millis(50);
 /// How many imports the import window lists.
 const IMPORTS_SHOWN: usize = 4;
 
+/// How many log lines a job keeps.
+const LOG_LINES: usize = 200;
+
+/// A line of a job's log, as followed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogLine {
+    /// When it was heard, in seconds since the epoch.
+    pub at: u64,
+    pub what: Logged,
+}
+
+/// What a log line says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Logged {
+    /// The job went into this state (`State::name`), with its failure's
+    /// reason.
+    State(&'static str, Option<String>),
+    /// Its progress's note: the file at hand.
+    Note(String),
+}
+
 #[derive(Default)]
 struct Shared {
     promises: Vec<Promise>,
+    /// Each job's log, by promise id.
+    logs: BTreeMap<String, Vec<LogLine>>,
     ctx: Option<egui::Context>,
+}
+
+impl Shared {
+    /// The log lines `promises` add to what was heard, at `at`.
+    fn log(&mut self, promises: &[Promise], at: u64) {
+        for p in promises {
+            let log = self.logs.entry(p.id.clone()).or_default();
+            let name = p.state.name();
+            let last_state = log.iter().rev().find_map(|l| match &l.what {
+                Logged::State(s, _) => Some(*s),
+                Logged::Note(_) => None,
+            });
+            if last_state != Some(name) {
+                let reason = match &p.state {
+                    State::Failed { reason, .. } => Some(reason.clone()),
+                    _ => None,
+                };
+                log.push(LogLine {
+                    at,
+                    what: Logged::State(name, reason),
+                });
+            }
+            if let State::Running {
+                note: Some(note), ..
+            } = &p.state
+            {
+                let last_note = log.iter().rev().find_map(|l| match &l.what {
+                    Logged::Note(n) => Some(n.as_str()),
+                    Logged::State(..) => None,
+                });
+                if last_note != Some(note.as_str()) {
+                    log.push(LogLine {
+                        at,
+                        what: Logged::Note(note.clone()),
+                    });
+                }
+            }
+            if log.len() > LOG_LINES {
+                log.drain(..log.len() - LOG_LINES);
+            }
+        }
+        self.logs
+            .retain(|id, _| promises.iter().any(|p| &p.id == id));
+    }
 }
 
 /// The promises the desktop follows.
@@ -83,6 +152,8 @@ pub struct Summary {
     pub running: Vec<Promise>,
     /// The failures of this run not seen yet.
     pub failed: usize,
+    /// The newest of them, which the badge's click selects.
+    pub newest_failed: Option<String>,
 }
 
 fn now() -> u64 {
@@ -127,6 +198,20 @@ impl Activity {
         lock(&self.shared).promises.clone()
     }
 
+    /// Shows `promises` as if the node had answered them, their log
+    /// lines heard at `at`: for pictures of the screens that show them,
+    /// on promises of known times.
+    pub fn show_promises(&self, promises: Vec<Promise>, at: u64) {
+        let mut shared = lock(&self.shared);
+        shared.log(&promises, at);
+        shared.promises = promises;
+    }
+
+    /// The log of promise `id`, as followed, oldest line first.
+    pub fn log(&self, id: &str) -> Vec<LogLine> {
+        lock(&self.shared).logs.get(id).cloned().unwrap_or_default()
+    }
+
     /// Asks the node for an import by rule (`library.import`'s params,
     /// `source` and `rule`): its promise, answered at once.
     ///
@@ -147,6 +232,8 @@ impl Activity {
             let mut shared = lock(&self.shared);
             shared.promises.retain(|p| p.id != promise.id);
             shared.promises.insert(0, promise.clone());
+            let promises = shared.promises.clone();
+            shared.log(&promises, now());
         }
         self.kick.store(true, Ordering::SeqCst);
         Ok(promise)
@@ -194,12 +281,14 @@ impl Activity {
             .cloned()
             .collect();
         running.reverse();
-        let failed = shared
-            .promises
-            .iter()
-            .filter(|p| self.unseen_failure(p))
-            .count();
-        (!running.is_empty() || failed > 0).then_some(Summary { running, failed })
+        let mut unseen = shared.promises.iter().filter(|p| self.unseen_failure(p));
+        let newest_failed = unseen.next().map(|p| p.id.clone());
+        let failed = usize::from(newest_failed.is_some()) + unseen.count();
+        (!running.is_empty() || failed > 0).then_some(Summary {
+            running,
+            failed,
+            newest_failed,
+        })
     }
 
     /// Marks the failures shown so far seen: the badge goes.
@@ -244,6 +333,7 @@ fn follow(node: &Client, shared: &Weak<Mutex<Shared>>, kick: &AtomicBool) {
                 let mut shared = lock(&held);
                 let busy = promises.iter().any(|p| !p.state.is_settled());
                 if shared.promises != promises {
+                    shared.log(&promises, now());
                     shared.promises = promises;
                     if let Some(ctx) = &shared.ctx {
                         ctx.request_repaint();
@@ -295,7 +385,8 @@ pub fn progress_text(ctx: &egui::Context, p: &Promise) -> String {
 
 /// The status bar's indicator of `summary`: a spinner, the count of the
 /// tasks running and the main one's progress; the failures' badge. A
-/// click on either runs [`COMMAND`].
+/// click runs [`COMMAND`] on the job clicked: the main one, or the
+/// newest failure for the badge.
 pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: &Summary) {
     use egui_pop::core::indicator::{Indicator, Tone};
     let ctx = ui.ctx().clone();
@@ -304,7 +395,7 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: &Summary) {
         "gui-activity-show",
         "Show the background tasks",
     ));
-    let mut clicked = false;
+    let mut clicked = None;
     if let Some(main) = summary.running.first() {
         ui.spinner();
         let list = summary
@@ -328,11 +419,12 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: &Summary) {
                 .tooltip(format!("{meaning}\n{list}"))
                 .interactive(action.clone()),
         );
-        clicked |= r.clicked();
-        let r = ui
+        let label = ui
             .add(egui::Label::new(progress_text(&ctx, main)).sense(egui::Sense::click()))
             .on_hover_text(list);
-        clicked |= r.clicked();
+        if r.clicked() || label.clicked() {
+            clicked = Some(main.id.clone());
+        }
     }
     if summary.failed > 0 {
         if !summary.running.is_empty() {
@@ -351,12 +443,14 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: &Summary) {
                 .tooltip(meaning)
                 .interactive(action),
         );
-        clicked |= r.clicked();
+        if r.clicked() {
+            clicked.clone_from(&summary.newest_failed);
+        }
     }
-    if clicked {
+    if let Some(id) = clicked {
         app.run(
             egui_pop::model::ids::CommandId::from_static(COMMAND),
-            Value::Null,
+            json!({ "id": id }),
         );
     }
 }

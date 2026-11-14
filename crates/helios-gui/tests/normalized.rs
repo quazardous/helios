@@ -40,6 +40,9 @@ const SHELL: &[&str] = &[
     // The Calibration focus, the shell's own (`calibrate.open`): where the
     // backend has no OS windows, it is a window of the main one.
     "crates/helios-gui/src/shell/calibrate_focus.rs",
+    // The Activity focus, the shell's own (`activity.show`): the same,
+    // a window of the main one where the backend has no OS windows.
+    "crates/helios-gui/src/shell/activity_focus.rs",
     // The rule editor's dialog, which only the shell shows (the tree does
     // not fit the declarative forms).
     "crates/helios-gui/src/rule_editor_ui.rs",
