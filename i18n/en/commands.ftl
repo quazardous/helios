@@ -316,6 +316,12 @@ command-library-copyFiles =
 command-library-deleteRejected =
     .title = Delete Rejected…: the rejected photos shown to the system trash (`images`: of them, those named), asked first unless `confirmed`
 
+command-library-duplicate =
+    .title = Duplicate: a new version of each photo from its current edit, beside the others (`images`: ids, else the selection); the grid counts the versions
+
+command-library-duplicateOriginal =
+    .title = Duplicate Original: a new version of each photo with no edit, beside the others (`images`: ids, else the selection)
+
 command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 
@@ -375,6 +381,15 @@ command-library-quick-toggle =
 
 command-library-remove =
     .title = Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back
+
+command-library-resetRotation =
+    .title = Reset Rotation: turn the photos back to their file's orientation (`images`: ids, else the selection)
+
+command-library-rotateLeft =
+    .title = Rotate Left: turn the photos a quarter counter-clockwise (`images`: ids, else the selection); Ctrl+Z turns them back
+
+command-library-rotateRight =
+    .title = Rotate Right: turn the photos a quarter clockwise (`images`: ids, else the selection); Ctrl+Z turns them back
 
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume

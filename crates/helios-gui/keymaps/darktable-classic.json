@@ -9,7 +9,9 @@
     { "keys": "Ctrl+Shift+L", "command": "view.side_bar.toggle" },
     { "keys": "Ctrl+Shift+R", "command": "view.endSideBar.toggle" },
     { "keys": "Ctrl+Shift+B", "command": "view.bottomPanel.toggle" },
-    { "keys": "Ctrl+E", "command": "library.export" }
+    { "keys": "Ctrl+E", "command": "library.export" },
+    { "keys": "Ctrl+D", "command": "library.duplicate", "when": "${library}" },
+    { "keys": "Ctrl+Shift+D", "command": "library.duplicateOriginal", "when": "${library}" }
   ],
   "left_out": [
     { "keys": "x", "what": "culling mode", "reason": "X rejects, as in Lightroom; culling is view.culling in the palette" },
@@ -32,6 +34,6 @@
     { "keys": "Ctrl+B", "what": "colour assessment", "reason": "Ctrl+B folds the side bar" },
     { "keys": "Ctrl+G", "what": "gamut check, group images", "reason": "Ctrl+G is kept for one meaning everywhere (group); no such command yet" },
     { "keys": "Ctrl+Shift+T", "what": "top panel", "reason": "Helios has no top panel" },
-    { "keys": "Ctrl+D, Ctrl+T, Ctrl+C, Ctrl+V", "what": "duplicate, tag, copy and paste edits", "reason": "no such commands yet" }
+    { "keys": "Ctrl+T, Ctrl+C, Ctrl+V", "what": "tag, copy and paste edits", "reason": "no such commands yet" }
   ]
 }
