@@ -381,13 +381,13 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.removals.push(keys);
+        self.removals.push((keys, self.batch.clone()));
         Ok(count)
     }
 
     /// The photos asked taken out of the Library since, one list per
-    /// command.
-    pub fn take_removals(&mut self) -> Vec<Vec<String>> {
+    /// command, with its batch.
+    pub fn take_removals(&mut self) -> Vec<(Vec<String>, super::Batch)> {
         std::mem::take(&mut self.removals)
     }
 
@@ -408,13 +408,13 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.rotations.push((keys, turn));
+        self.rotations.push((keys, turn, self.batch.clone()));
         Ok(count)
     }
 
     /// The photos asked turned since, one list per command, with the
-    /// turn.
-    pub fn take_rotations(&mut self) -> Vec<(Vec<String>, Turn)> {
+    /// turn and its batch.
+    pub fn take_rotations(&mut self) -> Vec<(Vec<String>, Turn, super::Batch)> {
         std::mem::take(&mut self.rotations)
     }
 
@@ -600,8 +600,8 @@ mod tests {
         assert_eq!(
             lib.take_rotations(),
             [
-                (vec!["a".to_string(), "c".into()], Turn::Left),
-                (vec!["d".to_string()], Turn::Reset)
+                (vec!["a".to_string(), "c".into()], Turn::Left, None),
+                (vec!["d".to_string()], Turn::Reset, None)
             ]
         );
         assert!(lib.take_rotations().is_empty());
@@ -622,7 +622,10 @@ mod tests {
         assert!(lib.remove_from_library(Some(vec!["zz".into()])).is_err());
         assert_eq!(
             lib.take_removals(),
-            [vec!["a".to_string(), "c".into()], vec!["d".to_string()]]
+            [
+                (vec!["a".to_string(), "c".into()], None),
+                (vec!["d".to_string()], None)
+            ]
         );
         assert!(lib.take_removals().is_empty());
     }

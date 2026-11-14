@@ -24,6 +24,12 @@
 //!   the library's and the edit's, by time.
 //! - **An agent's lane**, as for the edit: an agent walks only its own
 //!   steps; an import's step is the user's.
+//! - **A batch is one step** ([`Group`]): the library changes of the
+//!   window commands a `command.batch` ran are one step, "Agent: 3
+//!   commands", by the batch's origin (an agent's, the CLI's), each set
+//!   of changes undone in reverse order and redone in order, all or
+//!   nothing. A batch that changed nothing undoable leaves no step; the
+//!   user's own actions between two batches stay steps of their own.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -49,9 +55,21 @@ const FIRST_ID: u64 = 1 << 48;
 /// the vault's revert or replay, then the Library filled again.
 pub type Apply = Arc<dyn Fn(&Changes, bool) -> Result<Replayed, String> + Send + Sync>;
 
+/// A `command.batch`'s group: its library changes are one step, made
+/// by `origin` (`crate::window_commands`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group {
+    /// The batch's, unique in the process.
+    pub id: u64,
+    pub origin: PopOrigin,
+}
+
 struct Entry {
     info: StepInfo,
-    changes: Changes,
+    /// The sets of changes, in the order made: undone in reverse.
+    changes: Vec<Changes>,
+    /// The batch it holds the changes of.
+    group: Option<u64>,
 }
 
 #[derive(Default)]
@@ -84,6 +102,43 @@ pub fn import_label(photos: u64) -> Label {
         key: Some(m.key),
         args: [("count".to_string(), photos.to_string())].into(),
     }
+}
+
+/// A batch's label: "Agent: 3 commands" (by an agent, a script, the
+/// CLI), "3 commands" (by the user); `count`: the commands that changed
+/// the library.
+pub fn batch_label(origin: &PopOrigin, count: usize) -> Label {
+    let m = if *origin == PopOrigin::User {
+        Message::new("gui-history-user-batch", "{ $count } commands")
+    } else {
+        Message::new("gui-history-agent-batch", "Agent: { $count } commands")
+    }
+    .with("count", count);
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [("count".to_string(), count.to_string())].into(),
+    }
+}
+
+/// Takes `entry`'s sets of changes back (`forward` false: the last
+/// first) or puts them again (in order), all or nothing: on a failure,
+/// those already walked are walked back.
+fn apply_entry(apply: &Apply, entry: &Entry, forward: bool) -> Result<(), String> {
+    let sets: Vec<&Changes> = if forward {
+        entry.changes.iter().collect()
+    } else {
+        entry.changes.iter().rev().collect()
+    };
+    for (done, changes) in sets.iter().enumerate() {
+        if let Err(e) = apply(changes, forward) {
+            for back in sets[..done].iter().rev() {
+                let _ = apply(back, !forward);
+            }
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 /// "Remove from Library"'s label: "Remove 3 photos from the Library".
@@ -193,19 +248,50 @@ impl LibraryHistory {
     }
 
     /// Records a step: `changes` made at `at` (seconds since the epoch),
-    /// labelled `label`. Nothing changed, no step. Its id.
+    /// labelled `label`, by the user. Nothing changed, no step. Its id.
     pub fn record(&self, label: Label, changes: Changes, at: f64) -> Option<u64> {
+        self.record_in(None, label, changes, at)
+    }
+
+    /// Records `changes` as [`LibraryHistory::record`] does, or, made by
+    /// batch `group`, into the batch's step: the newest step when it is
+    /// the batch's, else a new one by the batch's origin, labelled
+    /// [`batch_label`]. Nothing changed, nothing recorded. The step's id.
+    pub fn record_in(
+        &self,
+        group: Option<&Group>,
+        label: Label,
+        changes: Changes,
+        at: f64,
+    ) -> Option<u64> {
         if changes.is_empty() {
             return None;
         }
         let mut inner = self.lock();
-        inner.next += 1;
-        let id = FIRST_ID + inner.next;
-        let mut info = StepInfo::new(id, LIBRARY, label, PopOrigin::User);
-        info.at = at;
-        inner.undo.push(Entry { info, changes });
         inner.redo.clear();
         inner.rev += 1;
+        if let Some(g) = group
+            && let Some(top) = inner.undo.last_mut()
+            && top.group == Some(g.id)
+        {
+            top.changes.push(changes);
+            top.info.label = batch_label(&g.origin, top.changes.len());
+            top.info.at = at;
+            return Some(top.info.id);
+        }
+        inner.next += 1;
+        let id = FIRST_ID + inner.next;
+        let (label, origin) = match group {
+            Some(g) => (batch_label(&g.origin, 1), g.origin.clone()),
+            None => (label, PopOrigin::User),
+        };
+        let mut info = StepInfo::new(id, LIBRARY, label, origin);
+        info.at = at;
+        inner.undo.push(Entry {
+            info,
+            changes: vec![changes],
+            group: group.map(|g| g.id),
+        });
         Some(id)
     }
 
@@ -269,7 +355,7 @@ impl LibraryHistory {
                     inner.undo.pop()
                 }
                 .expect("counted");
-                if let Err(e) = apply(&entry.changes, redo) {
+                if let Err(e) = apply_entry(&apply, &entry, redo) {
                     // Put back what was walked: all or nothing.
                     let mut walked = vec![entry];
                     for _ in 0..done {
@@ -279,7 +365,7 @@ impl LibraryHistory {
                             inner.redo.pop()
                         }
                         .expect("walked");
-                        let _ = apply(&back.changes, !redo);
+                        let _ = apply_entry(&apply, &back, !redo);
                         walked.push(back);
                     }
                     for w in walked {
@@ -376,5 +462,83 @@ mod tests {
             panic!("jumped");
         };
         assert_eq!(undone.load(Ordering::SeqCst), 2);
+    }
+
+    fn changes_of(n: u8) -> Changes {
+        Changes {
+            images: vec![Change {
+                image: helios_vault::ImageId(helios_core::ContentHash([n; 32])),
+                before: None,
+                after: None,
+            }],
+            ..Changes::default()
+        }
+    }
+
+    #[test]
+    fn a_batch_s_changes_are_one_step_undone_in_reverse_all_or_nothing() {
+        let h = LibraryHistory::default();
+        let walked = Arc::new(Mutex::new(Vec::new()));
+        let fail_on = Arc::new(AtomicU64::new(0));
+        let (w, f) = (walked.clone(), fail_on.clone());
+        h.set_apply(Arc::new(move |changes, forward| {
+            let n = changes.images[0].image.0.0[0];
+            if u64::from(n) == f.load(Ordering::SeqCst) {
+                return Err(format!("{n} refused"));
+            }
+            w.lock().unwrap().push((n, forward));
+            Ok(Replayed::default())
+        }));
+        let agent = PopOrigin::Agent("mcp".into());
+        let batch = Group {
+            id: 7,
+            origin: agent.clone(),
+        };
+        for n in 1..=3 {
+            h.record_in(Some(&batch), import_label(1), changes_of(n), f64::from(n));
+        }
+        // The user's step after it is its own.
+        h.record(import_label(1), changes_of(9), 4.0);
+        let line = h.line();
+        assert_eq!(line.undo.len(), 2);
+        assert_eq!(line.undo[0].label.text, "Agent: 3 commands");
+        assert_eq!(line.undo[0].origin, agent);
+        assert_eq!(line.undo[1].origin, PopOrigin::User);
+        let Answer::Done(Ok(_)) = h.undo(&Request::new(LIBRARY), &PopOrigin::User) else {
+            panic!("the user's step undone");
+        };
+        walked.lock().unwrap().clear();
+        // A set refused midway: those taken back are put again.
+        fail_on.store(1, Ordering::SeqCst);
+        assert!(matches!(
+            h.undo(&Request::new(LIBRARY), &agent),
+            Answer::Done(Err(_))
+        ));
+        assert_eq!(
+            *walked.lock().unwrap(),
+            [(3, false), (2, false), (2, true), (3, true)]
+        );
+        assert_eq!(h.line().undo.len(), 1, "still there");
+        walked.lock().unwrap().clear();
+        fail_on.store(0, Ordering::SeqCst);
+        let Answer::Done(Ok(_)) = h.undo(&Request::new(LIBRARY), &agent) else {
+            panic!("the batch undone");
+        };
+        let Answer::Done(Ok(_)) = h.redo(&Request::new(LIBRARY), &agent) else {
+            panic!("the batch redone");
+        };
+        assert_eq!(
+            *walked.lock().unwrap(),
+            [
+                (3, false),
+                (2, false),
+                (1, false),
+                (1, true),
+                (2, true),
+                (3, true)
+            ]
+        );
+        // A user's batch is labelled without "Agent".
+        assert_eq!(batch_label(&PopOrigin::User, 2).text, "2 commands");
     }
 }

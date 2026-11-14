@@ -16,7 +16,9 @@
 //! lists the node's (`scope: "node"`) and a window's (`scope: "window"`)
 //! in one list, each saying whether it can run there and why not, and
 //! `command.run` runs either by its id, a window's on the window's own
-//! thread, refused with its reason where it does not apply.
+//! thread, refused with its reason where it does not apply. A
+//! `command.batch`'s window commands run in one group
+//! ([`WindowCommands::group`]): the desktop makes them one undo step.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -115,6 +117,14 @@ pub trait WindowCommands: Send + Sync {
     /// An unknown command, one that does not apply there (its reason),
     /// no such window open, or the command's refusal.
     fn run(&self, id: &str, params: Value, origin: &str, window: &str) -> Result<Value, String>;
+
+    /// Opens a group for a command batch run as `origin`: the window
+    /// commands run on this thread until the guard drops are one undo
+    /// step of the desktop's library. None by default.
+    fn group(&self, origin: &str) -> Option<rpc::Group> {
+        let _ = origin;
+        None
+    }
 }
 
 /// The commands a [`VaultService`] runs.
@@ -499,6 +509,14 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
             || method == library::AGAIN
             || method == "cursor.window"
             || method == "promises.wait"
+    }
+
+    /// A batch's steps run in the windows' group, by the batch's origin.
+    fn group(&self, params: &Value) -> Option<rpc::Group> {
+        let origin = params["origin"]
+            .as_str()
+            .unwrap_or_else(|| origin_of(params));
+        self.windows.as_ref()?.group(origin)
     }
 }
 

@@ -221,6 +221,29 @@ next step saves the whole network.
 - Not built: field batches, stack decisions and a Keep in the
   Duplicates panel as library steps.
 
+### Built: a command batch as one library step (2026-11-14)
+
+- **The group.** `command.batch` opens a group around its steps
+  (`rpc::Service::group`, closed when the batch returns, after a failed
+  step or a cancel alike). On the desktop's endpoint it is the window
+  commands' (`WindowCommands::group`): the endpoint thread's while the
+  batch runs, a batch within a batch staying in the outer one. Each
+  window command run in it carries the group to the window's thread,
+  and what it asks of the library (a rotation, a removal, an album
+  change) is stamped with it when asked, so a user's click meanwhile is
+  never taken in.
+- **The step.** The writes are recorded when the node answers them, as
+  before; a stamped one goes into its batch's step while that step is
+  the newest, else starts one. The step holds each command's changes in
+  order, undone last first and redone in order, all or nothing (a set
+  refused puts back those already walked). It is labelled "Agent: 3
+  commands" and made by the batch's origin (`agent:mcp`, the CLI's
+  `cli`); a batch by the user is "3 commands". An agent walks only its
+  own batches; the user walks every step.
+- A batch whose steps change nothing undoable (an export, a theme)
+  leaves no step. Node commands run in a batch (not the window's) are
+  not the desktop's history, as when run alone.
+
 ## The workspace's scope
 
 One history per workspace, written to its undo records (the files the

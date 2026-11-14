@@ -685,6 +685,8 @@ gui-health-summary-warnings = Warnings: { $count }
 
 gui-health-undo-ignore = Show again
 
+gui-history-agent-batch = Agent: { $count } commands
+
 gui-history-album-add = Add { $count } photos to “{ $name }”
 
 gui-history-album-delete = Delete album “{ $name }”
@@ -750,6 +752,8 @@ gui-history-set-new = New album set “{ $name }”
 gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo
+
+gui-history-user-batch = { $count } commands
 
 gui-history-workshop-accept = Workshop “{ $name }”: a photo accepted
 

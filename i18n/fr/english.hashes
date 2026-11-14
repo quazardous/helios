@@ -608,6 +608,7 @@ gui-health-summary-ok 0c936b2e0fd0d0d9
 gui-health-summary-problems e497b20956952fd7
 gui-health-summary-warnings bd449020dd0eead1
 gui-health-undo-ignore 64733d962538833e
+gui-history-agent-batch 976d0d829f8ed54b
 gui-history-album-add 22eb25e8d77638c1
 gui-history-album-delete 1dc55096cd3e33fd
 gui-history-album-move 86e68f39e0e1c335
@@ -641,6 +642,7 @@ gui-history-rotate-right 9a5e9a3be34a7d6a
 gui-history-set-new 438a574de74bd810
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-undo cc7022a2d9050a57
+gui-history-user-batch d8f126e521da2cde
 gui-history-workshop-accept c0b6bc35024979b8
 gui-history-workshop-decide 1e84185053f3310f
 gui-history-workshop-fix 9034a6482256e8c3
