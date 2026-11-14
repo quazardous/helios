@@ -8,12 +8,22 @@
 //! window: a form's fields, a spinner while a step works, the page the
 //! browser was opened on, the reason a step failed.
 //!
-//! A page for the browser (an OAuth consent, a picking) is opened the
-//! moment the step asks for it, from the step's own thread, through the
-//! platform's opener ([`system_opener`]) on a thread of its own: never
-//! at the end of a frame, so it does not wait for the window's next
-//! frame or hold the window while the opener runs. The dialog shows the
-//! link, to copy, and "Open again".
+//! A page for the browser (an OAuth consent, the service's page where
+//! photos are chosen) is opened the moment the step asks for it, from the
+//! step's own thread, through the platform's opener ([`system_opener`])
+//! on a thread of its own: never at the end of a frame, so it does not
+//! wait for the window's next frame or hold the window while the opener
+//! runs. The link is shown, to copy, and to open again.
+//!
+//! An account whose connector lets the person choose photos in the
+//! service's own page (Google Photos) is shown once in the Sources column,
+//! under Services, and the Contents column shows it with one header line
+//! and its menu, then the one primary action of where it stands
+//! ([`choose_ui`]): connect, choose photos, the wait for the service's
+//! page as a status line with Cancel (never a dialog), what came back, or
+//! one plain sentence and one action when something went wrong. The
+//! connector never asks for a folder: the Choices column's Into decides
+//! where the photos are copied, as for any source.
 //!
 //! Settings > Accounts lists the same accounts through the commands of
 //! [`super::accounts_admin`].
@@ -25,11 +35,12 @@
 //! allow (nothing runs).
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use egui_pop::core::icon::Icon;
 use helios_connect::Text;
 use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
 use helios_connect::connect::{Context, FieldKind, Session, Status, WebSteps};
@@ -68,14 +79,15 @@ pub(crate) struct Accounts {
     /// scope): their accounts are shown with their address, and one signed
     /// in before has "Reconnect to see the account".
     pub(crate) identity: IdentityConnectors,
-    /// The picking running ("Pick photos…"), shown in the window's dialog.
+    /// The photos being chosen in the service's page ("Choose photos
+    /// in Google Photos…"), shown in the Contents column.
     pub(crate) picking: Option<Picking>,
-    /// How picked items are imported: `helios_library::fetch::import_remote`
-    /// over the library, set by the desktop; none: "Pick photos…" is not
-    /// offered.
+    /// How the chosen items are imported:
+    /// `helios_library::fetch::import_remote` over the library, set by
+    /// the desktop; none: choosing photos is not offered.
     pub(crate) import: Option<ImportRemote>,
-    /// The library folder fetched copies go to, read and remembered off
-    /// the interface's thread; none: never asked.
+    /// The library folder copies go to when Into names none, read off the
+    /// interface's thread; none: never looked at.
     pub(crate) library: Option<Arc<dyn LibraryFolder>>,
     /// The plugins installed: a connector of theirs asks for the
     /// capabilities its plugin lacks before it runs.
@@ -280,32 +292,31 @@ pub type ImportRemote = Arc<
         + Sync,
 >;
 
-/// What a picking's import did: `added` photos new to the library,
-/// `known` already in it (picked before), left as they are.
+/// What the import of the chosen photos did: `added` photos new to the
+/// library, `known` already in it (chosen before), left as they are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Imported {
     pub added: u64,
     pub known: u64,
 }
 
-/// The library folder a fetched item is copied into: the library's
-/// (`helios_library::import::library_root`) on the desktop. A picking
-/// with no folder of its own and no library folder asks for one before
-/// the service's picking page opens.
+/// The library folder a fetched item is copied into when the Choices
+/// column's Into names none: the library's
+/// (`helios_library::import::library_root`) on the desktop. With neither,
+/// the service's page is not opened: Into is asked for, in the Choices
+/// column, as for any copy.
 pub trait LibraryFolder: Send + Sync {
     /// The library folder, if one is known.
     fn get(&self) -> Result<Option<PathBuf>, String>;
-    /// Remembers `dir` as the library folder.
-    fn set(&self, dir: &Path) -> Result<(), String>;
 }
 
-/// How long a picking waits for the person at most.
+/// How long the service's page is waited for at most.
 const PICK_WAIT: std::time::Duration = std::time::Duration::from_mins(30);
 
-/// Where a picking stands.
+/// Where choosing photos stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PickStatus {
-    /// Starting the picking at the service.
+    /// Opening the service's page.
     Starting,
     /// Waiting for the person, in the browser opened on `url`.
     Browser {
@@ -320,16 +331,19 @@ pub(crate) enum PickStatus {
         added: u64,
         known: u64,
     },
-    /// Nothing picked before the deadline.
+    /// Nothing chosen before the deadline.
     Nothing,
-    /// The picking session expired (or the service forgot it) before
-    /// the person was done: a new one is needed.
+    /// The service's page closed or ran out (or the service forgot it)
+    /// before the person was done: it is opened again.
     Expired,
     /// The service refused the sign-in: the account needs a reconnection.
     SignIn,
-    /// No folder to copy the photos into: the library folder is asked
-    /// for, before any picking page opens.
-    NeedsFolder,
+    /// No folder to copy the photos into: the Choices column's Into is
+    /// asked for, before the service's page opens.
+    NoInto,
+    /// The service could not be reached, or answered an error.
+    Unreachable(String),
+    /// The photos came back but their import failed.
     Failed(String),
     Cancelled,
 }
@@ -349,20 +363,22 @@ impl PickStatus {
                 log::warn!("picking from {kind}: the session expired before it was done");
             }
             PickStatus::SignIn => log::warn!("picking from {kind}: the source refused the sign-in"),
+            PickStatus::Unreachable(why) => {
+                log::warn!("picking from {kind}: the source could not be reached: {why}");
+            }
             PickStatus::Failed(why) => log::warn!("picking from {kind}: not imported: {why}"),
             PickStatus::Starting
             | PickStatus::Browser { .. }
             | PickStatus::Importing { .. }
-            | PickStatus::NeedsFolder => {}
+            | PickStatus::NoInto => {}
         }
     }
 }
 
-/// A picking running.
+/// Photos being chosen in the service's page.
 pub(crate) struct Picking {
-    /// The account picked from.
+    /// The account the photos are chosen from.
     account: String,
-    label: String,
     status: Arc<Mutex<PickStatus>>,
     cancel: helios_connect::Cancel,
 }
@@ -428,8 +444,8 @@ impl Accounts {
         self.listed.iter().find(|a| a.id == id).map(Account::shown)
     }
 
-    /// Whether "Pick photos…" is offered on the account `id`: connected,
-    /// its connector picks, and picked photos have a library to go to.
+    /// Whether choosing photos is offered on the account `id`: connected,
+    /// its connector picks, and the photos have a library to go to.
     pub(crate) fn picks(&self, id: &str, connectors: &Connectors) -> bool {
         self.import.is_some()
             && self.listed.iter().any(|a| {
@@ -534,22 +550,20 @@ impl Accounts {
         Ok(())
     }
 
-    /// Starts picking under the account `id` ("Pick photos…"): the
-    /// connector's picking page opened in the system browser by the
-    /// dialog, the person waited for (cancellable), what was picked
-    /// imported. A sign-in the service refuses leaves the account needing
-    /// attention, its Reconnect offered.
+    /// Starts choosing photos under the account `id` ("Choose photos in
+    /// Google Photos…"): the service's page opened in the system browser,
+    /// the person waited for (cancellable), what was chosen imported. A
+    /// sign-in the service refuses leaves the account needing attention,
+    /// its Reconnect offered.
     ///
-    /// The photos are copied `into` that folder, else into the library
-    /// folder; with neither, the picking stops at
-    /// [`PickStatus::NeedsFolder`] before the service is asked. A folder
-    /// chosen as the library's (`library`) is remembered first.
+    /// The photos are copied `into` that folder (the Choices column's
+    /// Into), else into the library folder; with neither, it stops at
+    /// [`PickStatus::NoInto`] before the service is asked.
     pub(crate) fn pick(
         &mut self,
         connectors: &Connectors,
         id: &str,
         into: Option<PathBuf>,
-        library: bool,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Result<(), String> {
         let book = self.book.clone().ok_or("accounts need a library open")?;
@@ -580,15 +594,14 @@ impl Accounts {
         std::thread::spawn(move || {
             use helios_connect::ConnectorError;
             // Where the photos go is settled before the service is asked:
-            // a picking session waits for nobody.
+            // its page waits for nobody.
             let known = match (&into, &folder) {
-                (Some(dir), Some(f)) if library => f.set(dir).map(|()| true),
                 (Some(_), _) | (None, None) => Ok(true),
                 (None, Some(f)) => f.get().map(|d| d.is_some()),
             };
             match known {
                 Ok(true) => {}
-                Ok(false) => return set(PickStatus::NeedsFolder),
+                Ok(false) => return set(PickStatus::NoInto),
                 Err(e) => {
                     let end = PickStatus::Failed(e);
                     end.log(&kind);
@@ -596,8 +609,8 @@ impl Accounts {
                 }
             }
             let deadline = std::time::Instant::now() + PICK_WAIT;
-            // Every picking is a session of its own, its page opened at
-            // once: a session waits for nobody, it expires.
+            // Each time a page of its own, opened at once: it waits for
+            // nobody, it runs out.
             let opened = |url: &str| {
                 opener(url);
                 set(PickStatus::Browser {
@@ -635,14 +648,13 @@ impl Accounts {
                     }
                     PickStatus::SignIn
                 }
-                Err(e) => PickStatus::Failed(helios_connect::connect::said(&e)),
+                Err(e) => PickStatus::Unreachable(helios_connect::connect::said(&e)),
             };
             end.log(&kind);
             set(end);
         });
         self.picking = Some(Picking {
             account: account.id,
-            label: account.label,
             status,
             cancel,
         });
@@ -658,7 +670,7 @@ impl Accounts {
                 .iter()
                 .find(|a| &a.id == id)
                 .map(|a| a.connector.clone()),
-            Asked::SignOut(_) | Asked::Select(_) => None,
+            Asked::Manage | Asked::Select(_) => None,
         }
     }
 
@@ -896,36 +908,61 @@ pub(crate) fn state_text(state: &AccountState) -> Message {
     }
 }
 
-/// What the picking's dialog asked.
+/// What the Contents column asked of an account whose photos are chosen
+/// in the service's page.
 #[derive(Clone, Debug)]
-pub(crate) enum PickAsked {
-    /// A new picking.
-    Again(Asked),
-    /// The library folder chosen, then a picking under this account.
-    LibraryFolder(String),
+pub(crate) enum ChooseAsked {
+    /// An account's action: choose photos, reconnect, another account,
+    /// Settings > Accounts.
+    Account(Asked),
+    /// The Choices column's Into chooser: where the photos are copied.
+    Into,
 }
 
-/// What the accounts' part of the Sources column asked.
+/// What the accounts' part of the Sources column, or an account's menu,
+/// asked.
 #[derive(Clone, Debug)]
 pub(crate) enum Asked {
     /// The account clicked: its source selected, the Choices column
     /// showing its choices.
     Select(String),
+    /// A new account of this connector ("Use another account…").
     Add(String),
+    /// Choose photos in the service's page under this account.
     Pick(String),
     Reconnect(String),
-    SignOut(String),
+    /// Settings > Accounts, where accounts are renamed and disconnected.
+    Manage,
 }
 
-/// The accounts under their heading, each with its state and, in its
-/// menu, "Reconnect" and "Sign out". An account is added through the
-/// "Add a source…" wizard ([`super::import_wizard`]). Nothing without a
-/// library, or when no account exists.
+/// The name an account is shown by: its saved source's name, else its
+/// own; with its address after it, once known ("Google Photos ·
+/// me@example.com").
+pub(crate) fn header_of(account: &Account, name: Option<&str>) -> String {
+    let name = name.unwrap_or(&account.label);
+    match account.email() {
+        Some(email) if !name.contains(email) => format!("{name} · {email}"),
+        _ => name.to_owned(),
+    }
+}
+
+/// The accounts under "Services", each once: a mark (connected, or
+/// needing a reconnection), its name (its saved source's, from `saved`,
+/// else its own), and under it its address and, when it is not
+/// connected, why in a word. No buttons: a click selects it (the
+/// Contents column then shows its one action), and its menu offers
+/// "Choose photos…", "Reconnect", "Manage accounts…", then what `items`
+/// adds (a saved source's own items, given the account's id). An account
+/// is added through the "Add a source…" wizard
+/// ([`super::import_wizard`]). Nothing without a library, or when no
+/// account exists.
 pub(crate) fn accounts_ui(
     ui: &mut egui::Ui,
     accounts: &mut Accounts,
     connectors: &Connectors,
     selected: Option<&str>,
+    saved: &BTreeMap<String, String>,
+    items: &mut dyn FnMut(&mut egui::Ui, &str),
     t: &dyn Fn(Message) -> String,
 ) -> Option<Asked> {
     accounts.book.as_ref()?;
@@ -935,35 +972,60 @@ pub(crate) fn accounts_ui(
     }
     let mut asked = None;
     ui.separator();
-    ui.strong(t(Message::new("gui-import-window-accounts", "Accounts")));
+    ui.strong(t(Message::new("gui-import-window-services", "Services")));
     for account in &listed {
-        let state = t(state_text(&account.state));
-        let colour = match account.state {
-            AccountState::Connected => ui.visuals().text_color(),
-            AccountState::NeedsAttention { .. } => ui.visuals().warn_fg_color,
-            _ => ui.visuals().weak_text_color(),
+        let attention = matches!(account.state, AccountState::NeedsAttention { .. })
+            || accounts.identity_missing(account);
+        let (mark, colour) = match account.state {
+            _ if attention => ("▲", ui.visuals().warn_fg_color),
+            AccountState::Connected => ("●", ui.visuals().text_color()),
+            _ => ("○", ui.visuals().weak_text_color()),
         };
-        let why = match &account.state {
-            AccountState::NeedsAttention { why, .. } => Some(why.clone()),
-            _ => None,
-        };
+        let name = saved
+            .get(&account.id)
+            .cloned()
+            .unwrap_or_else(|| account.label.clone());
         let row = ui
             .horizontal(|ui| {
-                if ui
-                    .selectable_label(selected == Some(account.id.as_str()), account.shown())
-                    .clicked()
-                {
+                ui.label(egui::RichText::new(mark).color(colour));
+                let row = ui.selectable_label(selected == Some(account.id.as_str()), &name);
+                if row.clicked() {
                     asked = Some(Asked::Select(account.id.clone()));
                 }
-                ui.label(egui::RichText::new(&state).color(colour).small());
+                row
             })
-            .response;
-        let row = row.interact(egui::Sense::click());
-        let row = match why {
-            Some(why) => row.on_hover_text(why),
-            None => row,
+            .inner;
+        // Why in a word, on the row itself: never in a tooltip only.
+        let word = match &account.state {
+            _ if attention => Some(Message::new(
+                "gui-account-needs-reconnecting",
+                "needs reconnecting",
+            )),
+            AccountState::Connected => None,
+            state => Some(state_text(state)),
         };
+        let address = account.email().filter(|e| !name.contains(e));
+        if address.is_some() || word.is_some() {
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                if let Some(email) = address {
+                    ui.weak(email);
+                }
+                if let Some(word) = word {
+                    ui.label(egui::RichText::new(t(word)).color(colour).small());
+                }
+            });
+        }
+        let picks = accounts.picks(&account.id, connectors);
         row.context_menu(|ui| {
+            if picks
+                && ui
+                    .button(t(Message::new("gui-account-choose", "Choose photos…")))
+                    .clicked()
+            {
+                asked = Some(Asked::Pick(account.id.clone()));
+                ui.close();
+            }
             if ui
                 .button(t(Message::new("gui-account-reconnect", "Reconnect")))
                 .clicked()
@@ -972,42 +1034,17 @@ pub(crate) fn accounts_ui(
                 ui.close();
             }
             if ui
-                .button(t(Message::new("gui-account-sign-out", "Sign out")))
+                .button(t(Message::new("gui-account-manage", "Manage accounts…")))
                 .clicked()
             {
-                asked = Some(Asked::SignOut(account.id.clone()));
+                asked = Some(Asked::Manage);
                 ui.close();
             }
+            items(ui, &account.id);
         });
-        let unknown = accounts.identity_missing(account);
-        if unknown {
-            ui.weak(t(Message::new(
-                "gui-account-identity-missing",
-                "Reconnect to see the account",
-            )));
-        }
-        if (unknown || matches!(account.state, AccountState::NeedsAttention { .. }))
-            && ui
-                .small_button(t(Message::new("gui-account-reconnect", "Reconnect")))
-                .clicked()
-        {
-            asked = Some(Asked::Reconnect(account.id.clone()));
-        }
-        if matches!(account.state, AccountState::Connected)
-            && accounts.import.is_some()
-            && connectors
-                .provider(&account.connector)
-                .is_some_and(|p| p.manifest().caps.picks)
-            && ui
-                .small_button(t(Message::new("gui-account-pick", "Pick photos…")))
-                .clicked()
-        {
-            asked = Some(Asked::Pick(account.id.clone()));
-        }
     }
     asked
 }
-
 /// The consent dialog, while a plugin's capabilities are asked for: the
 /// plugin's name and id, each capability it lacks with the reason its
 /// manifest gives, Allow and Don't allow. Allow grants them all off the
@@ -1236,188 +1273,364 @@ pub(crate) fn connect_dialog(
     }
 }
 
-/// The picking's dialog, while one runs or until its end is seen: the
-/// account picked from (the browser must be signed in to it), the
-/// picking page (opened by the picking itself, never in a web view) to
-/// open again or copy, a spinner while the person picks or the photos
-/// come in, then what was imported, or why not. Cancel stops the wait;
-/// "Start again" (a session expired, or a page the browser refused)
-/// asks for a new picking, given back to run. Without a folder to copy
-/// the photos into, the library folder is asked for first.
-pub(crate) fn pick_dialog(
-    ctx: &egui::Context,
+/// The Contents column for an account whose photos are chosen in the
+/// service's own page (`service`, "Google Photos"): one header line, the
+/// account with its menu ("Reconnect", "Use another account…", "Manage
+/// accounts…"), then where it stands, each state with its one primary
+/// action:
+///
+/// - connected, nothing chosen: "Choose photos in Google Photos…";
+/// - the service's page open in the browser: a status line, the account
+///   the browser must be signed in to, the page to open again or copy,
+///   and Cancel; the rest of the window stays usable;
+/// - the photos imported: how many, and "Choose more photos…";
+/// - nothing chosen, the page closed: said, and choose again;
+/// - access refused, or an account signed in before Helios asked who it
+///   is: "Reconnect";
+/// - no folder to copy into: the Choices column's Into asked for;
+/// - the service unreachable, or the import failed: why, "Try again".
+pub(crate) fn choose_ui(
+    ui: &mut egui::Ui,
     accounts: &mut Accounts,
+    connectors: &Connectors,
+    id: &str,
+    header: &str,
+    service: &str,
     t: &dyn Fn(Message) -> String,
-) -> Option<PickAsked> {
-    let opener = accounts.opener.clone();
-    let picking = accounts.picking.as_mut()?;
-    let status = picking.status();
-    let (mut close, mut again, mut folder) = (false, false, false);
-    egui::Modal::new(egui::Id::unique("helios.import.pick")).show(ctx, |ui| {
-        ui.set_width(360.0);
-        ui.heading(t(Message::new(
-            "gui-pick-title",
-            "Pick photos in { $source }",
-        )
-        .with("source", picking.label.clone())));
-        ui.add_space(4.0);
-        let working = |ui: &mut egui::Ui, text: String| {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(text);
-            });
-        };
-        let ended = |ui: &mut egui::Ui, text: String, warn: bool| {
-            if warn {
-                ui.colored_label(ui.visuals().warn_fg_color, text);
-            } else {
-                ui.label(text);
-            }
-        };
-        match &status {
-            PickStatus::Starting => working(
-                ui,
-                t(Message::new("gui-pick-starting", "Opening the picking…")),
-            ),
-            PickStatus::Browser { url } => {
-                working(
-                    ui,
-                    t(Message::new(
-                        "gui-pick-browser",
-                        "Pick your photos in your browser, press Done, then come back here.",
-                    )),
-                );
-                ui.weak(t(Message::new(
-                    "gui-pick-account",
-                    "Your browser must be signed in to the account connected as { $account }; if the page says it cannot open, sign in to that account and start again.",
-                )
-                .with("account", picking.label.clone())));
-                browser_link(ui, url, &opener, t);
-            }
-            PickStatus::Importing { items } => working(
-                ui,
-                t(
-                    Message::new("gui-pick-importing", "Importing { $count } photos…")
-                        .with("count", *items as i64),
-                ),
-            ),
-            PickStatus::Done { added, known } => {
-                ended(
-                    ui,
-                    t(Message::new("gui-pick-done", "{ $count } photos imported.")
-                        .with("count", *added as i64)),
-                    false,
-                );
-                if *known > 0 {
-                    ui.weak(t(Message::new(
-                        "gui-pick-known",
-                        "{ $count } already in the library, left as they are.",
-                    )
-                    .with("count", *known as i64)));
+) -> Option<ChooseAsked> {
+    let mut asked = None;
+    let account = accounts.listed().iter().find(|a| a.id == id).cloned();
+    let Some(account) = account else {
+        ui.weak(header);
+        return None;
+    };
+    // The header: the account once, its menu at the end of the line.
+    ui.horizontal(|ui| {
+        ui.strong(header);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // The menu's button: a drawn icon (the fonts have no "⋯"),
+            // named for screen readers and tests.
+            let name = t(Message::new("gui-account-menu", "Account"));
+            let button = ui.add(Icon::More.label(&name).sense_click());
+            egui::Popup::menu(&button).show(|ui| {
+                if ui
+                    .button(t(Message::new("gui-account-reconnect", "Reconnect")))
+                    .clicked()
+                {
+                    asked = Some(Asked::Reconnect(id.to_owned()));
+                    ui.close();
                 }
-            }
-            PickStatus::Nothing => ended(
-                ui,
-                t(Message::new(
-                    "gui-pick-nothing",
-                    "Nothing was picked in time.",
-                )),
-                false,
-            ),
-            PickStatus::Expired => ended(
-                ui,
-                t(Message::new(
-                    "gui-pick-expired",
-                    "The picking session expired, start again.",
-                )),
-                true,
-            ),
-            PickStatus::SignIn => ended(
-                ui,
-                t(Message::new(
-                    "gui-pick-sign-in",
-                    "The source refused the sign-in: reconnect the account.",
-                )),
-                true,
-            ),
-            PickStatus::Failed(why) => ended(
-                ui,
-                t(Message::new("gui-pick-failed", "Not imported: { $why }")
-                    .with("why", why.clone())),
-                true,
-            ),
-            PickStatus::NeedsFolder => {
-                ui.label(t(Message::new(
-                    "gui-pick-library-folder",
-                    "Picked photos are copied into the library folder. Choose it once: it is remembered.",
-                )));
                 if ui
                     .button(t(Message::new(
-                        "gui-pick-choose-folder",
-                        "Choose the library folder…",
+                        "gui-account-another",
+                        "Use another account…",
                     )))
                     .clicked()
                 {
-                    folder = true;
+                    asked = Some(Asked::Add(account.connector.clone()));
+                    ui.close();
                 }
-            }
-            PickStatus::Cancelled => close = true,
-        }
-        let running = matches!(
-            status,
-            PickStatus::Starting | PickStatus::Browser { .. } | PickStatus::Importing { .. }
-        );
-        let restart = matches!(
-            status,
-            PickStatus::Browser { .. } | PickStatus::Expired | PickStatus::Nothing
-        );
-        ui.horizontal(|ui| {
-            if restart
-                && ui
-                    .button(t(Message::new("gui-pick-again", "Start again")))
-                    .clicked()
-            {
-                again = true;
-            }
-            // Picking again, whenever wanted: a new session, its photos
-            // added to the same source, those already in left as they are.
-            if matches!(status, PickStatus::Done { .. })
-                && ui
-                    .button(t(Message::new("gui-pick-more", "Pick more photos…")))
-                    .clicked()
-            {
-                again = true;
-            }
-            if running {
                 if ui
-                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                    .button(t(Message::new("gui-account-manage", "Manage accounts…")))
                     .clicked()
                 {
-                    picking.cancel.cancel();
+                    asked = Some(Asked::Manage);
+                    ui.close();
                 }
-            } else if ui
-                .button(t(Message::new("gui-connect-close", "Close")))
-                .clicked()
-            {
-                close = true;
-            }
+            });
         });
     });
-    if again {
-        // A new session, never the old one: the picking running gives up.
-        let account = picking.account.clone();
-        picking.cancel.cancel();
-        accounts.picking = None;
-        ctx.request_repaint();
-        return Some(PickAsked::Again(Asked::Pick(account)));
+    ui.separator();
+    ui.add_space(8.0);
+    let who = account.email().unwrap_or(&account.label).to_owned();
+    let primary = |ui: &mut egui::Ui, text: String| -> bool {
+        ui.vertical_centered(|ui| {
+            ui.add(egui::Button::new(egui::RichText::new(text).strong()))
+                .clicked()
+        })
+        .inner
+    };
+    let choose = t(
+        Message::new("gui-choose-photos", "Choose photos in { $service }…")
+            .with("service", service.to_owned()),
+    );
+    let reconnect_who = t(
+        Message::new("gui-choose-reconnect", "Reconnect { $account }").with("account", who.clone()),
+    );
+    let refused = |ui: &mut egui::Ui| {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            t(Message::new(
+                "gui-choose-refused",
+                "▲ { $service } no longer lets Helios read this account.",
+            )
+            .with("service", service.to_owned())),
+        );
+        ui.weak(t(Message::new(
+            "gui-choose-refused-why",
+            "This happens when access was removed in the account's settings at { $service }, or when the access Helios was given ran out.",
+        )
+        .with("service", service.to_owned())));
+        ui.add_space(8.0);
+    };
+    let reconnect = Some(Asked::Reconnect(id.to_owned()));
+    let pick = Some(Asked::Pick(id.to_owned()));
+    // Where the account stands comes first: nothing is chosen from an
+    // account Helios cannot read.
+    match &account.state {
+        AccountState::NeedsAttention { .. } => {
+            refused(ui);
+            if primary(ui, reconnect_who) {
+                asked = reconnect;
+            }
+            return finish(asked);
+        }
+        AccountState::NotConnected => {
+            ui.label(t(Message::new(
+                "gui-choose-not-connected",
+                "This account is not connected.",
+            )));
+            ui.add_space(8.0);
+            let connect = t(Message::new("gui-choose-connect", "Connect { $service }")
+                .with("service", service.to_owned()));
+            if primary(ui, connect) {
+                asked = reconnect;
+            }
+            return finish(asked);
+        }
+        AccountState::Connecting { .. } => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(t(Message::new(
+                    "gui-choose-connecting",
+                    "Sign in in your browser, then come back here.",
+                )));
+            });
+            return finish(asked);
+        }
+        AccountState::Connected => {}
     }
-    if folder {
-        let account = picking.account.clone();
-        accounts.picking = None;
-        return Some(PickAsked::LibraryFolder(account));
+    if accounts.identity_missing(&account) {
+        ui.label(t(Message::new(
+            "gui-choose-identity",
+            "Reconnect once to show which account this is.",
+        )));
+        ui.add_space(8.0);
+        if primary(ui, t(Message::new("gui-account-reconnect", "Reconnect"))) {
+            asked = reconnect;
+        }
+        return finish(asked);
     }
-    if close {
-        accounts.picking = None;
+    if !accounts.picks(id, connectors) {
+        ui.weak(t(Message::new(
+            "gui-import-browse-not-listed",
+            "Helios does not list this source's photos here yet.",
+        )));
+        return finish(asked);
     }
-    None
+    let opener = accounts.opener.clone();
+    let status = accounts
+        .picking
+        .as_ref()
+        .filter(|p| p.account == id)
+        .map(Picking::status);
+    let spinning = |ui: &mut egui::Ui, text: String| {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(text);
+        });
+    };
+    let warned = |ui: &mut egui::Ui, text: String| {
+        ui.colored_label(ui.visuals().warn_fg_color, text);
+        ui.add_space(8.0);
+    };
+    let mut cancel = false;
+    match status {
+        None | Some(PickStatus::Cancelled) => {
+            if primary(ui, choose) {
+                asked = pick;
+            }
+            ui.add_space(4.0);
+            ui.vertical_centered(|ui| {
+                ui.weak(t(Message::new(
+                    "gui-choose-about",
+                    "{ $service } opens in your browser. Choose your photos, press Done there, then come back here.",
+                )
+                .with("service", service.to_owned())));
+            });
+        }
+        Some(PickStatus::Starting) => {
+            spinning(
+                ui,
+                t(Message::new("gui-choose-opening", "Opening { $service }…")
+                    .with("service", service.to_owned())),
+            );
+            cancel = ui
+                .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                .clicked();
+        }
+        Some(PickStatus::Browser { url }) => {
+            spinning(
+                ui,
+                t(Message::new(
+                    "gui-choose-waiting",
+                    "Choose your photos in the browser, press Done there, then come back here.",
+                )),
+            );
+            ui.weak(t(Message::new(
+                "gui-choose-signed-in",
+                "{ $service } shows the photos of the account your browser is signed in to: { $account }.",
+            )
+            .with("service", service.to_owned())
+            .with("account", who)));
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(t(Message::new(
+                    "gui-choose-not-open",
+                    "The page did not open?",
+                )));
+                if ui
+                    .link(t(Message::new("gui-choose-open-again", "Open it again")))
+                    .clicked()
+                {
+                    opener(&url);
+                }
+                ui.weak("·");
+                if ui
+                    .link(t(Message::new("gui-choose-copy-link", "Copy the link")))
+                    .on_hover_text(url.clone())
+                    .clicked()
+                {
+                    ui.ctx().copy_text(url.clone());
+                }
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                cancel = ui
+                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                    .clicked();
+            });
+        }
+        Some(PickStatus::Importing { items }) => spinning(
+            ui,
+            t(
+                Message::new("gui-choose-importing", "Importing { $count } photos…")
+                    .with("count", items as i64),
+            ),
+        ),
+        Some(PickStatus::Done { added, known }) => {
+            ui.label(t(Message::new(
+                "gui-choose-done",
+                "{ $count } photos imported.",
+            )
+            .with("count", added as i64)));
+            if known > 0 {
+                ui.weak(t(Message::new(
+                    "gui-choose-known",
+                    "{ $count } were already in your Library.",
+                )
+                .with("count", known as i64)));
+            }
+            ui.add_space(8.0);
+            if primary(
+                ui,
+                t(Message::new("gui-choose-more", "Choose more photos…")),
+            ) {
+                asked = pick;
+            }
+        }
+        Some(PickStatus::Nothing) => {
+            ui.label(t(Message::new(
+                "gui-choose-nothing",
+                "No photos were chosen.",
+            )));
+            ui.add_space(8.0);
+            if primary(ui, choose) {
+                asked = pick;
+            }
+        }
+        Some(PickStatus::Expired) => {
+            warned(
+                ui,
+                t(Message::new(
+                    "gui-choose-closed",
+                    "The { $service } page has closed. Open it again to choose your photos.",
+                )
+                .with("service", service.to_owned())),
+            );
+            if primary(ui, choose) {
+                asked = pick;
+            }
+        }
+        Some(PickStatus::SignIn) => {
+            refused(ui);
+            if primary(ui, reconnect_who) {
+                asked = reconnect;
+            }
+        }
+        Some(PickStatus::NoInto) => {
+            ui.label(t(Message::new(
+                "gui-choose-no-into",
+                "Choose where the photos are copied first: Into, in the Choices column.",
+            )));
+            ui.add_space(8.0);
+            if primary(ui, t(Message::new("gui-choose-into", "Choose the folder…"))) {
+                return Some(ChooseAsked::Into);
+            }
+        }
+        Some(PickStatus::Unreachable(why)) => {
+            warned(
+                ui,
+                t(Message::new(
+                    "gui-choose-unreachable",
+                    "Could not reach { $service }: { $why }",
+                )
+                .with("service", service.to_owned())
+                .with("why", why)),
+            );
+            if primary(ui, t(Message::new("gui-choose-try-again", "Try again"))) {
+                asked = pick;
+            }
+        }
+        Some(PickStatus::Failed(why)) => {
+            warned(
+                ui,
+                t(Message::new(
+                    "gui-choose-failed",
+                    "The photos were not imported: { $why }",
+                )
+                .with("why", why)),
+            );
+            if primary(ui, t(Message::new("gui-choose-try-again", "Try again"))) {
+                asked = pick;
+            }
+        }
+    }
+    if let Some(p) = accounts.picking.as_ref().filter(|p| p.account == id) {
+        if cancel {
+            p.cancel.cancel();
+        }
+        // Cancelled: back to the account's primary action.
+        if p.status() == PickStatus::Cancelled {
+            accounts.picking = None;
+            ui.ctx().request_repaint();
+        }
+    }
+    finish(asked)
+}
+
+fn finish(asked: Option<Asked>) -> Option<ChooseAsked> {
+    asked.map(ChooseAsked::Account)
+}
+
+impl Accounts {
+    /// Into was chosen while it was asked for: back to the account's
+    /// primary action, the photos chosen with it.
+    pub(crate) fn on_into_chosen(&mut self) {
+        if self
+            .picking
+            .as_ref()
+            .is_some_and(|p| p.status() == PickStatus::NoInto)
+        {
+            self.picking = None;
+        }
+    }
 }

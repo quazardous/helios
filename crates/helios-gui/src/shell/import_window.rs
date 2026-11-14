@@ -74,7 +74,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
-use super::import_accounts::PickAsked;
 use super::import_auto::Trigger;
 use super::import_browsers::Shown;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
@@ -216,8 +215,6 @@ pub(crate) struct ImportWindow {
     /// The folder chooser, while it is open: for a source, or for Into.
     choosing: Option<Pending>,
     choosing_into: Option<Pending>,
-    /// The library folder asked for a picking under this account.
-    choosing_library: Option<(String, Pending)>,
     /// What the vault holds, for the "in your Library" prefilter.
     known: Option<Known>,
     /// The image map's recorder: what the sources list is kept.
@@ -615,11 +612,61 @@ enum Event {
     Storage,
     /// Folders or cards dropped on the window: its new sources.
     Dropped(Vec<PathBuf>),
-    /// An account asked of the Sources column: added, reconnected or
-    /// signed out.
+    /// An account asked of the Sources column or of its Contents: added,
+    /// reconnected, photos chosen.
     Account(super::import_accounts::Asked),
+    /// "Manage accounts…": Settings > Accounts.
+    ManageAccounts,
     /// "Import again" on an import of the history (its id).
     Again(String),
+}
+
+/// The window's event for an account's action: Settings > Accounts is
+/// the shell's.
+fn account_event(asked: super::import_accounts::Asked) -> Event {
+    match asked {
+        super::import_accounts::Asked::Manage => Event::ManageAccounts,
+        asked => Event::Account(asked),
+    }
+}
+
+/// The Contents column for an account whose photos are chosen in its
+/// service's page ([`super::import_accounts::choose_ui`]).
+fn choose_contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, account: &str) -> Option<Event> {
+    use super::import_accounts::{ChooseAsked, translated};
+    let texts = w.texts.clone()?;
+    let connector = w.connector_of(&SourceKey::Account(account.to_owned()));
+    let service = w.connectors.provider(&connector).map_or_else(
+        || connector.clone(),
+        |p| translated(Some(&texts), &p.manifest().label),
+    );
+    let saved = w
+        .sources
+        .named()
+        .into_iter()
+        .find(|(k, _)| matches!(k, SourceKey::Account(id) if id == account))
+        .map(|(_, name)| name);
+    let header = w
+        .accounts
+        .listed()
+        .iter()
+        .find(|a| a.id == account)
+        .map_or_else(
+            || account.to_owned(),
+            |a| super::import_accounts::header_of(a, saved.as_deref()),
+        );
+    match super::import_accounts::choose_ui(
+        ui,
+        &mut w.accounts,
+        &w.connectors,
+        account,
+        &header,
+        &service,
+        &|m| texts(m),
+    )? {
+        ChooseAsked::Account(asked) => Some(account_event(asked)),
+        ChooseAsked::Into => Some(Event::ChooseInto),
+    }
 }
 
 /// The Contents column's and the status bar's words.
@@ -1244,6 +1291,13 @@ impl Shell {
                     self.warn(format!("storage: {e}"));
                 }
             }
+            Event::ManageAccounts => {
+                let open = egui_pop::api::admin::CMD_OPEN;
+                let path = json!({ "path": "accounts/list" });
+                if let Err(e) = self.run(open.as_str(), path, Origin::User) {
+                    self.warn(format!("accounts: {e}"));
+                }
+            }
             // Handled in the window's own pass.
             Event::Cancel
             | Event::Choose
@@ -1379,23 +1433,6 @@ impl ImportWindow {
     /// copies go; or the library folder a picking asked for, the picking
     /// then started.
     fn receive_chosen_folder(&mut self) {
-        if let Some((account, pending)) = &self.choosing_library
-            && let Some(result) = pending.take()
-        {
-            let account = account.clone();
-            self.choosing_library = None;
-            if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
-                && let Some(p) = paths.into_iter().next()
-            {
-                let wake = self.waker();
-                if let Err(e) = self
-                    .accounts
-                    .pick(&self.connectors, &account, Some(p), true, wake)
-                {
-                    log::warn!("import accounts: {e}");
-                }
-            }
-        }
         if let Some(result) = self.choosing_into.as_ref().and_then(Pending::take) {
             self.choosing_into = None;
             if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
@@ -1405,6 +1442,8 @@ impl ImportWindow {
                 let wizard = self.wizard.as_mut();
                 if !wizard.is_some_and(|wz| wz.take_into(p.clone())) {
                     self.choices.into = Some(p);
+                    // Asked for by an account's Contents: settled.
+                    self.accounts.on_into_chosen();
                 }
             }
         }
@@ -1667,6 +1706,7 @@ impl ImportWindow {
                 e @ (Event::Import
                 | Event::Forget(_)
                 | Event::Storage
+                | Event::ManageAccounts
                 | Event::Dropped(_)
                 | Event::Again(_)),
             ) => {
@@ -1684,20 +1724,6 @@ impl ImportWindow {
                 self.account_run(again);
             }
             super::import_accounts::connect_dialog(&ctx, &mut self.accounts, &|m| texts(m));
-            match super::import_accounts::pick_dialog(&ctx, &mut self.accounts, &|m| texts(m)) {
-                Some(PickAsked::Again(again)) => self.account_asked(again),
-                Some(PickAsked::LibraryFolder(account)) => {
-                    if let Some(f) = app.service(&FILES) {
-                        let title = texts(Message::new(
-                            "gui-pick-choose-folder",
-                            "Choose the library folder…",
-                        ));
-                        let request = FileRequest::folder(&title).purpose("helios.library.folder");
-                        self.choosing_library = Some((account, f.choose(&app, request)));
-                    }
-                }
-                None => {}
-            }
         }
         // The chooser's answer comes in this window too.
         self.receive_chosen_folder();
@@ -1735,17 +1761,23 @@ impl ImportWindow {
                     None => Err(format!("no account {id}")),
                 }
             }
-            Asked::SignOut(id) => self.accounts.sign_out(&id),
+            // Turned into the shell's event where it is asked.
+            Asked::Manage => Ok(()),
             Asked::Pick(id) => {
-                // The source's own Into, else the window's.
-                let into = self
-                    .sources
-                    .own(&SourceKey::Account(id.clone()))
-                    .unwrap_or_else(|| self.window_choices())
-                    .into
-                    .clone();
+                // The Choices column's Into while it shows the account's
+                // choices; else the source's own, else the window's.
+                let key = SourceKey::Account(id.clone());
+                let into = if self.sources.showing.as_ref() == Some(&key) {
+                    self.choices.into.clone()
+                } else {
+                    self.sources
+                        .own(&key)
+                        .unwrap_or_else(|| self.window_choices())
+                        .into
+                        .clone()
+                };
                 let wake = self.waker();
-                self.accounts.pick(&self.connectors, &id, into, false, wake)
+                self.accounts.pick(&self.connectors, &id, into, wake)
             }
         };
         if let Err(e) = done {
@@ -1849,11 +1881,8 @@ impl ImportWindow {
                 }
                 Shown::Picker(account) => {
                     ui.separator();
-                    // The source's header: which account it picks from.
-                    ui.strong(w.account_label(&account));
-                    ui.label(&browse.pick_about);
-                    if ui.button(&browse.pick).clicked() {
-                        event = Some(Event::Account(super::import_accounts::Asked::Pick(account)));
+                    if let Some(e) = choose_contents_ui(ui, w, &account) {
+                        event = Some(e);
                     }
                 }
                 Shown::NotListed => {
@@ -2019,34 +2048,19 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                     SourceKey::Account(_) => None,
                 })
                 .collect();
-            if !named.is_empty() {
+            if named.iter().any(|(k, _)| matches!(k, SourceKey::Folder(_))) {
                 ui.separator();
                 ui.strong(&words.saved);
             }
-            for (key, name) in named {
+            for (key, name) in named.clone() {
                 match key {
                     SourceKey::Folder(path) => {
                         if let Some(e) = source_row(ui, w, words, &path, name, None) {
                             *event = Some(e);
                         }
                     }
-                    SourceKey::Account(id) => {
-                        let selected = w.sources.account.as_deref() == Some(id.as_str());
-                        let row = ui
-                            .selectable_label(selected, &name)
-                            .on_hover_text(w.account_label(&id));
-                        let key = SourceKey::Account(id.clone());
-                        if let Some(asked) = source_menu(&row, w, words, Some(&id)) {
-                            if let MenuAsked::Pick = asked {
-                                *event =
-                                    Some(Event::Account(super::import_accounts::Asked::Pick(id)));
-                            } else {
-                                w.source_menu_asked(asked, key);
-                            }
-                        } else if row.clicked() {
-                            w.select_account(id);
-                        }
-                    }
+                    // Shown once, under Services, by this name.
+                    SourceKey::Account(_) => {}
                 }
             }
             ui.separator();
@@ -2096,15 +2110,40 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             }
             if let Some(texts) = w.texts.clone() {
                 let selected = w.sources.account.clone().filter(|_| w.sources.kept());
-                match super::import_accounts::accounts_ui(
+                // An account saved as a source: shown by its name, its
+                // source's own items in its menu.
+                let saved: std::collections::BTreeMap<String, String> = named
+                    .iter()
+                    .filter_map(|(k, name)| match k {
+                        SourceKey::Account(id) => Some((id.clone(), name.clone())),
+                        SourceKey::Folder(_) => None,
+                    })
+                    .collect();
+                let kept = w.sources.kept();
+                let mut item = None;
+                let mut items = |ui: &mut egui::Ui, id: &str| {
+                    if kept && saved.contains_key(id) {
+                        ui.separator();
+                        if let Some(a) = menu_items(ui, words, None) {
+                            item = Some((a, id.to_owned()));
+                        }
+                    }
+                };
+                let asked = super::import_accounts::accounts_ui(
                     ui,
                     &mut w.accounts,
                     &w.connectors,
                     selected.as_deref(),
+                    &saved,
+                    &mut items,
                     &|m| texts(m),
-                ) {
+                );
+                if let Some((a, id)) = item {
+                    w.source_menu_asked(a, SourceKey::Account(id));
+                }
+                match asked {
                     Some(super::import_accounts::Asked::Select(id)) => w.select_account(id),
-                    Some(asked) => *event = Some(Event::Account(asked)),
+                    Some(asked) => *event = Some(account_event(asked)),
                     None => {}
                 }
                 // The imports done, each to run again.
@@ -2180,8 +2219,6 @@ fn source_row(
 /// What a source's menu asked.
 pub(super) enum MenuAsked {
     Edit,
-    /// "Pick photos…" on an account's source that picks.
-    Pick,
     Forget,
     /// "Import automatically": off, or this trigger.
     Auto(Option<Trigger>),
@@ -2226,40 +2263,11 @@ fn menu_items(
     asked
 }
 
-/// A saved account's row's menu: "Pick photos…" first when its account
-/// picks (any time, a new picking each time), then the source's items
-/// while the sources are kept.
-fn source_menu(
-    row: &egui::Response,
-    w: &ImportWindow,
-    words: &Words,
-    account: Option<&str>,
-) -> Option<MenuAsked> {
-    let picks = account.is_some_and(|id| w.account_picks(id));
-    if !w.sources.kept() && !picks {
-        return None;
-    }
-    let mut asked = None;
-    row.context_menu(|ui| {
-        if picks && ui.button(&words.grid.browse.pick).clicked() {
-            asked = Some(MenuAsked::Pick);
-            ui.close();
-        }
-        if w.sources.kept()
-            && let Some(a) = menu_items(ui, words, None)
-        {
-            asked = Some(a);
-        }
-    });
-    asked
-}
-
 impl ImportWindow {
     /// What a source's menu asked: its editor opened, or it forgotten.
     fn source_menu_asked(&mut self, asked: MenuAsked, key: SourceKey) {
         match asked {
             MenuAsked::Edit => self.open_editor(key),
-            MenuAsked::Pick => {}
             MenuAsked::Forget => self.forget_source(&key),
             MenuAsked::Auto(auto) => self.set_auto(&key, auto),
         }
