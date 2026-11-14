@@ -81,6 +81,8 @@ pub use accounts_admin::{
     RENAME as RENAME_COMMAND, SET_OAUTH_CLIENT as SET_OAUTH_CLIENT_COMMAND,
     SIGN_OUT as SIGN_OUT_COMMAND,
 };
+mod activity_focus;
+pub use activity_focus::WINDOW as ACTIVITY_WINDOW;
 mod calibrate_focus;
 mod camera_look;
 pub use calibrate_focus::{COMMAND as CALIBRATE_COMMAND, WINDOW as CALIBRATE_WINDOW};
@@ -246,8 +248,8 @@ enum Action {
     /// Run an import of the history again (`import.history.again`'s
     /// arguments), as whom.
     ImportAgain(Value, Origin),
-    /// Show the background tasks (`activity.show`).
-    Activity,
+    /// Open the Activity focus (`activity.show`'s arguments).
+    Activity(Value),
     /// Export photos (`library.export`'s arguments), as whom.
     Export(Value, Origin),
     /// Show a folder in the file manager (`library.openFolder`'s
@@ -661,6 +663,8 @@ pub struct Shell {
     import: import_window::ImportFocus,
     /// The Calibration focus, in an OS window of its own.
     calibration: calibrate_focus::CalibrationFocus,
+    /// The Activity focus, in an OS window of its own.
+    activity_focus: activity_focus::ActivityFocus,
     /// The application's life, apart from its windows'.
     lifetime: lifetime::Lifetime,
     /// What the node's endpoint asks of the windows' commands.
@@ -1048,6 +1052,7 @@ impl Shell {
             focus,
             import: import_window::ImportFocus::new(),
             calibration: calibrate_focus::CalibrationFocus::default(),
+            activity_focus: activity_focus::ActivityFocus::default(),
             lifetime: lifetime::Lifetime::default(),
             window_asks: None,
             toasts_in: None,
@@ -3350,8 +3355,12 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::ImportAgain(a.clone(), origin.clone()))),
         );
         add(
-            CommandSpec::new(crate::activity::COMMAND, "Background tasks…", "View"),
-            Box::new(|_, _| Ok(Action::Activity)),
+            CommandSpec::new(
+                crate::activity::COMMAND,
+                "Activity… (`id`: the job selected, a promise of `promises.list`)",
+                "View",
+            ),
+            Box::new(|a, _| Ok(Action::Activity(a.clone()))),
         );
         // The main window's commands, greyed in the other windows' menus
         // (docs/design/windows.md, section 7).
@@ -6259,9 +6268,8 @@ impl Shell {
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::ImportHistory(args) => return self.import_history_list(&args),
             Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
-            Action::Activity => {
-                self.core.activity.acknowledge();
-                self.show_import_activity();
+            Action::Activity(args) => {
+                self.open_activity(&args);
                 return Ok(Value::Null);
             }
             Action::Export(args, origin) => return self.export(&args, &origin),
@@ -6746,6 +6754,7 @@ impl Shell {
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
         self.calibration_frame(&ctx);
+        self.activity_frame(&ctx);
         self.workshop_frame(&ctx);
         let refused = std::mem::take(&mut self.focus.library.borrow_mut().notes);
         for n in refused {
