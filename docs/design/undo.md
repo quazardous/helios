@@ -247,6 +247,23 @@ next step saves the whole network.
   leaves no step. Node commands run in a batch (not the window's) are
   not the desktop's history, as when run alone.
 
+### Built: the library's walks off the frame (2026-11-14)
+
+- **The user's walk.** Ctrl+Z, Redo and a jump in the library's scope
+  never wait on the node from the frame: the steps move in the line at
+  once (an undone step marked in progress), and a thread of the
+  history's asks the node to walk them. Walks asked meanwhile queue
+  behind it and are applied in the order asked; the status bar says
+  "Undoing “…”…" while one is in flight. The history's shell joins that
+  thread when it drops.
+- **A refusal.** A walk the node refuses (all or nothing, a batch's sets
+  included) is put back where it was, with every walk queued behind it,
+  since they were asked of a line that is no more; a toast says why. A
+  redo refused after a new step cleared the redo list is dropped, as
+  the list was.
+- **Others' walks.** An agent's or a script's walk waits for the walks in
+  flight, then for its own answer, so what it reads is what was done.
+
 ## The workspace's scope
 
 One history per workspace, written to its undo records (the files the

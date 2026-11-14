@@ -2320,3 +2320,98 @@ fn answer_err(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> bool {
         }
     }
 }
+
+/// Ctrl+Z walks the library's history off the frame: while another
+/// writer holds the vault, each frame stays short, the step shows undone
+/// and in progress, a second Ctrl+Z queues behind the first, and both land
+/// in order once the vault is released. A walk the vault refuses is put
+/// back, said in a toast.
+#[test]
+fn ctrl_z_walks_the_library_off_the_frame_while_the_vault_is_held() {
+    use helios_vault::rotation::{ROTATION, quarter_turns};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    let root = temp("held-undo");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    // As the desktop wires it, through a writer another one may hold.
+    let history = h.state().library_history();
+    let held = Arc::new(Mutex::new(()));
+    let refuse = Arc::new(AtomicBool::new(false));
+    {
+        let (vault, held, refuse) = (persist.vault().clone(), held.clone(), refuse.clone());
+        history.set_apply(Arc::new(move |changes, forward| {
+            let _writer = held.lock().unwrap();
+            if refuse.load(Ordering::SeqCst) {
+                return Err("the vault is read-only".into());
+            }
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let turns = |persist: &Persist<SqliteStore>| {
+        let rows = persist.vault().fields_of(&[id(1)], &[ROTATION]).unwrap();
+        quarter_turns(rows[0].get(ROTATION))
+    };
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    for at in [1.0, 5.0] {
+        h.key_press_modifiers(egui::Modifiers::CTRL, Key::CloseBracket);
+        settle(&mut h, &mut persist, at);
+    }
+    assert_eq!(turns(&persist), 2);
+    assert_eq!(history.line().undo.len(), 2);
+
+    // Held: two Ctrl+Z, each frame short; the line moves at once.
+    let writer = held.lock().unwrap();
+    for _ in 0..2 {
+        let start = Instant::now();
+        h.key_press_modifiers(egui::Modifiers::CTRL, Key::Z);
+        h.run();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "a frame waited on the vault: {:?}",
+            start.elapsed()
+        );
+    }
+    let line = history.line();
+    assert_eq!((line.undo.len(), line.redo.len()), (0, 2), "{line:?}");
+    assert!(line.redo.iter().all(|s| s.in_progress), "{line:?}");
+    assert_eq!(history.in_flight().len(), 2);
+    assert!(
+        h.state()
+            .status_text()
+            .is_some_and(|t| t.starts_with("Undoing")),
+        "{:?}",
+        h.state().status_text()
+    );
+    assert_eq!(turns(&persist), 2, "nothing written while held");
+    drop(writer);
+    assert!(history.wait_idle(Duration::from_secs(30)));
+    settle(&mut h, &mut persist, 10.0);
+    assert_eq!(turns(&persist), 0, "both undone, in order");
+    assert!(history.line().redo.iter().all(|s| !s.in_progress));
+
+    // Redone, refused: the step goes back where it was, with a toast.
+    refuse.store(true, Ordering::SeqCst);
+    run(&mut h, "edit.redo", json!(null));
+    h.run();
+    assert!(history.wait_idle(Duration::from_secs(30)));
+    settle(&mut h, &mut persist, 20.0);
+    let line = history.line();
+    assert_eq!((line.undo.len(), line.redo.len()), (0, 2), "{line:?}");
+    assert!(
+        h.query_all_by_label_contains("Undo refused: the vault is read-only")
+            .next()
+            .is_some(),
+        "the refusal toasted"
+    );
+    assert_eq!(turns(&persist), 0);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
