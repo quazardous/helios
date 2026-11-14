@@ -331,6 +331,12 @@ command-library-duplicateOriginal =
 command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 
+command-library-files-pair =
+    .title = Pair RAW+JPEG Files: each raw and JPEG of one shot among the photos (`images`: ids, else the selection; `all`: the whole Library) made one photo, the JPEG its camera file, the raw's marks kept where both have one, labels, tags and albums merged; `exact`: the two photos paired as they are; Ctrl+Z takes it back
+
+command-library-files-unpair =
+    .title = Unpair Files: each file of the photos (`images`: ids, else the selection) a photo of its own again, with a copy of the photo's marks and its own versions; Ctrl+Z pairs them again
+
 command-library-filter-apply =
     .title = Apply a filter to the library (`query`, typed as in the search field, or `filter` as listed); it becomes the first recent filter
 

@@ -66,6 +66,8 @@ pub const IDS: &[&str] = &[
     "library.stacks.top",
     STACKS_GROUP,
     STACKS_UNGROUP,
+    PAIRS_PAIR,
+    PAIRS_UNPAIR,
     "library.stacks.suggest",
     "library.stacks.accept",
     "library.stacks.decline",
@@ -131,6 +133,18 @@ pub const STACKS_GROUP: &str = "library.stacks.group";
 /// Ungroups the stacks photos are in, the photos untouched; answers the
 /// stacks and the step (`changes`).
 pub const STACKS_UNGROUP: &str = "library.stacks.ungroup";
+
+/// Pairs RAW+JPEG files (`docs/design/raw-jpeg-pairs.md`): the pairs
+/// found among photos (the whole Library when `images` is absent), or two
+/// photos as they are (`exact`), each made one photo with the JPEG its
+/// camera file, marks merged; answers the pairs with the conflicts kept
+/// and the step (`changes`) the vault's revert undoes.
+pub const PAIRS_PAIR: &str = "library.pairs.pair";
+
+/// Unpairs photos (or files): each file a photo of its own again, with a
+/// copy of the photo's marks and its own versions; answers the files and
+/// the step (`changes`).
+pub const PAIRS_UNPAIR: &str = "library.pairs.unpair";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -441,6 +455,29 @@ pub fn specs() -> Vec<CommandSpec> {
         library(
             STACKS_UNGROUP,
             "Ungroup the stacks photos are in, the photos untouched; undoable",
+        )
+        .params(object(&[("images", images(), true)])),
+        library(
+            PAIRS_PAIR,
+            "Pair RAW+JPEG files: one photo each, the JPEG its camera file, marks merged; undoable",
+        )
+        .params(object(&[
+            (
+                "images",
+                json!({ "type": ["array", "null"], "items": { "type": "string" },
+                        "description": "photos (ids or paths) to find pairs among; the whole Library when absent" }),
+                false,
+            ),
+            (
+                "exact",
+                json!({ "type": ["boolean", "null"],
+                        "description": "pair the two photos given as they are (a raw and a JPEG or HEIF), whatever their names" }),
+                false,
+            ),
+        ])),
+        library(
+            PAIRS_UNPAIR,
+            "Unpair photos: each file a photo of its own again; undoable",
         )
         .params(object(&[("images", images(), true)])),
         library("library.stacks.suggest", "Suggest stacks").params(object(&[
@@ -1293,6 +1330,29 @@ pub fn run<S: Store>(
                         "changes": to_json(&changes) })
             })
         }
+        PAIRS_PAIR => {
+            let images = match params["images"] {
+                Value::Array(_) => Some(named(vault, params, "images")?),
+                _ => None,
+            };
+            let exact = params["exact"].as_bool().unwrap_or(false);
+            helios_library::pairs::pair(vault, images.as_deref(), exact, origin, now()).map(
+                |(made, changes)| {
+                    json!({ "paired": made.len(), "pairs": to_json(&made),
+                            "conflicts": made.iter().map(|p| p.conflicts.len()).sum::<usize>(),
+                            "changes": to_json(&changes) })
+                },
+            )
+        }
+        PAIRS_UNPAIR => {
+            let images = named(vault, params, "images")?;
+            vault
+                .unpair(&images, origin, now())
+                .map(|(files, changes)| {
+                    json!({ "unpaired": files.len(), "files": to_json(&files),
+                        "changes": to_json(&changes) })
+                })
+        }
         "library.stacks.suggest" => {
             let selection = named(vault, params, "images")?;
             let window = params["window"].as_f64();
@@ -1513,6 +1573,8 @@ mod tests {
             json!({ "stack": "s", "image": "/p/a.raf" }),
             json!({ "images": ["/p/a.raf", "0a"], "top": "0a" }),
             json!({ "images": ["0a"] }),
+            json!({ "images": ["/p/a.cr3", "/p/a.jpg"], "exact": true }),
+            json!({ "images": ["/p/a.cr3"] }),
             json!({ "images": [], "resolver": null, "window": 3.0, "distance": 8 }),
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
@@ -1860,6 +1922,73 @@ mod tests {
         undo(&ungrouped);
         assert_eq!(stacks()[0]["id"], json!(stack), "undone");
         assert!(call(STACKS_GROUP, json!({ "images": [ids[2]] })).is_err());
+    }
+
+    #[test]
+    fn raw_and_jpeg_files_are_paired_and_unpaired_each_step_undone() {
+        use helios_vault::fields::RATING;
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let dir = std::env::temp_dir().join(format!("helios-pairs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ids: Vec<String> = ["IMG_1.CR3", "IMG_1.JPG", "other.jpg"]
+            .iter()
+            .map(|name| {
+                let path = dir.join(name);
+                std::fs::write(&path, format!("photo {name}")).unwrap();
+                vault.import_file(&path, 1).unwrap().hex()
+            })
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user");
+        let set = |n: usize, stars: i64| {
+            call(
+                "library.fields.set",
+                json!({ "changes": [{ "image": ids[n], "field": RATING, "value": stars }] }),
+            )
+            .unwrap();
+        };
+        set(0, 2);
+        set(1, 4);
+        let shown = |vault: &Vault<helios_vault::MemoryStore>| {
+            helios_library::pairs::library_photos(vault).unwrap().len()
+        };
+        assert_eq!(shown(&vault), 3);
+        // The whole Library: the one pair found by name.
+        let paired = call(PAIRS_PAIR, json!({})).unwrap();
+        assert_eq!(paired["paired"], 1, "{paired}");
+        assert_eq!(paired["pairs"][0]["photo"], json!(ids[0]));
+        assert_eq!(paired["conflicts"], 1, "two ratings");
+        assert_eq!(shown(&vault), 2, "one photo for the pair");
+        assert!(call(PAIRS_PAIR, json!({})).is_err(), "no pair left");
+        let changes: helios_vault::Changes =
+            serde_json::from_value(paired["changes"].clone()).unwrap();
+        // Unpair through the node: two photos again.
+        let unpaired = call(PAIRS_UNPAIR, json!({ "images": [ids[0]] })).unwrap();
+        assert_eq!(unpaired["unpaired"], 1, "{unpaired}");
+        assert_eq!(unpaired["files"][0]["file"], json!(ids[1]));
+        assert_eq!(shown(&vault), 3);
+        assert!(call(PAIRS_UNPAIR, json!({ "images": [ids[0]] })).is_err());
+        let undo: helios_vault::Changes =
+            serde_json::from_value(unpaired["changes"].clone()).unwrap();
+        vault.revert(&undo).unwrap();
+        assert_eq!(shown(&vault), 2, "the unpair undone");
+        vault.revert(&changes).unwrap();
+        assert_eq!(shown(&vault), 3, "the pair undone");
+        // Two photos as they are: a JPEG of another name; two JPEGs refused.
+        let exact = call(
+            PAIRS_PAIR,
+            json!({ "images": [ids[2], ids[0]], "exact": true }),
+        )
+        .unwrap();
+        assert_eq!(exact["pairs"][0]["file"], json!(ids[2]), "{exact}");
+        assert!(
+            call(
+                PAIRS_PAIR,
+                json!({ "images": [ids[1], ids[2]], "exact": true })
+            )
+            .is_err()
+        );
     }
 
     #[test]
