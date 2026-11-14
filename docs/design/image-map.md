@@ -102,8 +102,8 @@ it and opening it again lists, glances and prefilters everything again.
 
 ### Volumes and locations (#4830)
 
-`helios-storage` lists the machine's volumes (`detect`, Linux only for
-now), identifies each (`Identity`: marker file `.helios/volume.json`,
+`helios-storage` lists the machine's volumes (`detect` on Linux, `macos`
+through `diskutil`, `windows` through the Win32 volume API), identifies each (`Identity`: marker file `.helios/volume.json`,
 filesystem UUID, share address, else weak label and size), and keeps them
 in the vault (`registry`, documents `storage/volumes`), offline ones
 included. `scan::Scanner` runs at start, when `Watch` sees a volume come

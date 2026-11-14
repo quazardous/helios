@@ -327,8 +327,8 @@ pub fn free_space(dir: &Path) -> Option<u64> {
 }
 
 /// Free and total bytes of the filesystem holding `dir`.
-#[cfg(target_os = "linux")]
-fn space(dir: &Path) -> Option<(u64, u64)> {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn space(dir: &Path) -> Option<(u64, u64)> {
     let s = rustix::fs::statvfs(dir).ok()?;
     let unit = if s.f_frsize > 0 {
         s.f_frsize
@@ -338,13 +338,18 @@ fn space(dir: &Path) -> Option<(u64, u64)> {
     Some((s.f_bavail * unit, s.f_blocks * unit))
 }
 
-#[cfg(not(target_os = "linux"))]
-fn space(_dir: &Path) -> Option<(u64, u64)> {
+#[cfg(windows)]
+pub(crate) fn space(dir: &Path) -> Option<(u64, u64)> {
+    crate::windows::space(dir)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) fn space(_dir: &Path) -> Option<(u64, u64)> {
     None
 }
 
 /// The folder a volume is mounted on, as a name.
-fn label_of(dir: &Path) -> String {
+pub(crate) fn label_of(dir: &Path) -> String {
     dir.file_name().map_or_else(
         || dir.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
@@ -387,7 +392,7 @@ fn media_dir(dir: &Path, user: &str) -> bool {
 
 /// Applies the strongest identity: the marker at the volume's root, if
 /// there is one, wins over what the filesystem says.
-fn with_marker(mut volume: Volume, root: &Path) -> Volume {
+pub(crate) fn with_marker(mut volume: Volume, root: &Path) -> Volume {
     if let Some(m) = marker::read(root) {
         volume.id = m.id;
         volume.identified_by = Identity::Marker;

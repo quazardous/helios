@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BusProtocol</key>
+	<string>USB</string>
+	<key>Content</key>
+	<string>Microsoft Basic Data</string>
+	<key>DeviceIdentifier</key>
+	<string>disk6s2</string>
+	<key>DeviceNode</key>
+	<string>/dev/disk6s2</string>
+	<key>Ejectable</key>
+	<true/>
+	<key>FilesystemName</key>
+	<string>ExFAT</string>
+	<key>FilesystemType</key>
+	<string>exfat</string>
+	<key>FreeSpace</key>
+	<integer>1890412347392</integer>
+	<key>Internal</key>
+	<false/>
+	<key>MediaName</key>
+	<string>WD Elements 25A2 Media</string>
+	<key>MountPoint</key>
+	<string>/Volumes/Untitled</string>
+	<key>ParentWholeDisk</key>
+	<string>disk6</string>
+	<key>Removable</key>
+	<false/>
+	<key>RemovableMedia</key>
+	<false/>
+	<key>RemovableMediaOrExternalDevice</key>
+	<true/>
+	<key>Size</key>
+	<integer>2000263577600</integer>
+	<key>SolidState</key>
+	<false/>
+	<key>TotalSize</key>
+	<integer>2000263577600</integer>
+	<key>VolumeName</key>
+	<string></string>
+	<key>VolumeUUID</key>
+	<string>9F1B6C2A-3D4E-3A5B-8C7D-6E5F4A3B2C1D</string>
+	<key>WholeDisk</key>
+	<false/>
+	<key>Writable</key>
+	<true/>
+</dict>
+</plist>
