@@ -465,6 +465,22 @@ It answers the `offer` and the `default`: its `outcome`, `applied`
 its `key`: no as-shot light, the nearest light too far), `edited` (the
 photo has an edit already) or `none` (no default for the camera).
 
+`look.camera.default` (`camera`) reads a camera's default camera look,
+as the "Camera look" preset puts it on a photo: `look`, the two nodes'
+parameters (`cameracolour`, `cameratone`), null when the camera has
+none.
+
+```json
+{"jsonrpc": "2.0", "id": 6, "method": "look.camera.default", "params": {"camera": "test bayer"}}
+{"jsonrpc": "2.0", "id": 6, "result": {"camera": "test bayer", "look": {"cameracolour": {"matrix": [1, 0, 0, 0, 1, 0, 0, 0, 1]}, "cameratone": {"tone": [0, 0, 1, 1]}}}}
+```
+
+A calibration command that writes (a profile saved, deleted, imported or
+applied, a default set, a camera look fitted or kept) answers what it
+changed in the library as `changes`, in the form `library.changes.apply`
+takes, so a client's history can undo it. `look.camera.fit` can be
+cancelled: it stops before its next photo and writes nothing.
+
 `library.edit.head` (`image`) reads an image's newest edit: `head`, the
 whole version (`id`, also as `version`, `image`, `parents`, `edit`,
 `origin`, `at`, `label`, `meta`), null for an image never edited.
