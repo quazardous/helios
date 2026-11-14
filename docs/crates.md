@@ -54,6 +54,10 @@ A Cargo workspace (Rust):
 - `crates/helios-decision`: decision nodes: resolution modes (full AI,
   AI-assisted, human), recorded and versioned answers (who decided, which
   model, on which inputs), replayed offline into a network.
+- `crates/helios-extract`: the extractor contract: keys an extractor
+  declares, reusable definitions and their uses on carrier nodes, the
+  answer schema derived from the keys, answer validation and the cache
+  key (see `docs/design/extractors.md`).
 - `crates/helios-journal`: the workflow level: a journal per item and node
   (claims, leases, joins, choices, retries), after grampy, with a contract
   every storage must pass.

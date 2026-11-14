@@ -8,6 +8,52 @@ but a prompt plus declared keys; modules may ship ready-made ones and the
 LLM core module has an editor). The slices at the end wait for the
 owner's go.
 
+**Owner amendments of the same evening** (the latest word wins over
+the text below where they differ): extractors are **blocks, not
+nodes**. They have no ports; they snap onto **carrier nodes** (router,
+filter, update-metadata alter), which read their declared keys while
+the diagram is designed and hand them each image at run time. A
+reusable **definition** (prompt or built-in, keys, capability, version)
+is made in the extractor editor; a diagram holds **uses** of it
+attached to carriers, each pinned to a version with optional
+parameters, all sharing one cache per image. Keys may also be
+**semi-finite**: a declared list plus whatever values runs see.
+
+### Slice 1 built (2026-11-14)
+
+The `helios-extract` crate holds the contract, with no computation and
+no model call. It depends on no other Helios crate, so carriers, the
+editor, module manifests and helios-ai's call path can all read it
+without pulling an HTTP client.
+
+- `decl`: `KeyDecl` (name, type `text | label | number | integer |
+  bool`, values `Finite | SemiFinite | Open`, multi, confidence for
+  labels, `other` for finite keys, bounds and unit for numbers),
+  `ExtractorDef` (id, version, title, keep, confidence floor, kind
+  `Llm { capability, prompt or prompt_id, context, provider, model }`
+  or `Builtin { compute }`, keys), `ExtractorUse` (definition id,
+  pinned version, parameters), `Manifest` (`[[extractors]]`, TOML or
+  JSON) and `Catalog`. Unsound declarations are refused with their
+  reasons (reserved values `none` and `other`, duplicates, a prompt
+  variable not in its context...).
+- `schema`: the answer schema derived from the keys (table in section
+  2; a single non-finite key may be `null`; semi-finite lists go as
+  `examples`), checked to stay in helios-ai's subset, and one sentence
+  per key for the prompt.
+- `answer`: lenient parsing, validation into typed values; out-of-list
+  values dropped or mapped to `other`, confidences below the floor
+  dropped, new semi-finite values kept, each counted; errors named by
+  path, and the note for the one corrective retry.
+- `cache`: the key of section 7, BLAKE3 over canonical JSON of the
+  image and its source, `id@version` and the hash of what the
+  definition computes (not its title), the model, the use's parameters
+  and the context inputs; pinned by a golden test.
+- Built-ins declared only: `exif`, `cull`, and the `animals` LLM preset.
+
+In a manifest the kind is a table (`[extractors.llm]` or `builtin = {
+compute = "capture" }`), not a `kind = "llm"` field as the sketch in
+section 2 shows.
+
 It builds on [ai-models.md](../ai-models.md) (providers, routing,
 versioned prompts, the call log), [workflow-level.md](../workflow-level.md)
 (runs, journal rows per item and graph node, choices),
