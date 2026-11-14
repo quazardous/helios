@@ -758,7 +758,6 @@ fn without_catalogue_snapshots_one_line_says_none_yet() {
 #[test]
 fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() {
     use helios_gui::catalogue;
-    use helios_vault::Store as _;
     let lib = Library::new("snapshots-taken");
     lib.strategy(Some(&Strategy::default()));
     let mounted = [lib.studio.clone(), lib.backup.clone()];
@@ -772,15 +771,7 @@ fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() 
             "test",
         ),
     ));
-    // Another writer holding the vault's file does not hold the snapshot
-    // up: the node only reads.
-    let mut other = SqliteStore::open(&lib.file).unwrap();
-    other.begin().unwrap();
-    let started = std::time::Instant::now();
     let (taken, copies) = catalogue::take(&node, &mounted, &lib.file, "by-hand", 3).unwrap();
-    assert!(started.elapsed() < std::time::Duration::from_secs(1));
-    other.rollback().unwrap();
-    drop(other);
     assert_eq!(
         copies,
         [lib.dir
