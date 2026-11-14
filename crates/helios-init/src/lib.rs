@@ -565,8 +565,14 @@ mod tests {
 
     use super::*;
 
+    /// A text for a test step, kept out of the catalogue: the extractor
+    /// reads `Message::new` with literal texts only.
+    fn text(english: &str) -> Message {
+        Message::new(&format!("test-{english}"), english)
+    }
+
     fn step(id: &str, after: &[&str]) -> Step {
-        Step::new(id, Message::new("t", id), Message::new("w", "why"))
+        Step::new(id, text(id), text("why"))
             .fills(&[id])
             .after(after)
     }
@@ -616,7 +622,7 @@ mod tests {
     #[test]
     fn an_unsound_step_is_refused() {
         let mut r = Registry::default();
-        let bad = Step::new("Bad Id", Message::new("t", ""), Message::new("w", ""));
+        let bad = Step::new("Bad Id", text(""), text(""));
         let problems = r.add("Owner", bad).unwrap_err();
         assert_eq!(problems.len(), 6, "{problems:?}");
         assert!(r.ordered().unwrap().is_empty());
