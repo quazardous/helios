@@ -36,8 +36,10 @@ use helios_core::Message;
 use helios_gui::contexts::{self, Opened};
 use helios_gui::platform::{self, Open};
 use helios_gui::shell::Closing;
+use helios_gui::splash::{self, Ending};
 use helios_gui::{Shell, headless, helios_panels, helios_panels_with};
 use helios_gui::{quit, start};
+use helios_node_core::phases;
 
 /// Where a workspace's own files are kept (the profile it uses): in the
 /// user's configuration, not in the workspace. Its layout is egui-pop's
@@ -78,9 +80,11 @@ type LibraryReading = std::sync::mpsc::Receiver<Result<helios_gui::persist::Libr
 fn read_library(reader: helios_gui::persist::Reader) -> LibraryReading {
     let (tx, reading) = std::sync::mpsc::channel();
     let sender = tx.clone();
+    let step = phases::boot().begin(Message::new("gui-boot-library-read", "Reading the library"));
     let spawned = std::thread::Builder::new()
         .name("helios-library-read".into())
         .spawn(move || {
+            let _step = step;
             // In the default sort: a workspace sorted otherwise reads it
             // again once shown.
             let rows =
@@ -399,6 +403,13 @@ fn seconds() -> u64 {
 /// Set by a catalogue restore: Helios starts again once its window has
 /// closed and its vault is released, the restore applied at the opening.
 static RESTART: AtomicBool = AtomicBool::new(false);
+
+/// The person chose "Quit now" on the end splash: the node's stop is left.
+static QUIT_NOW: AtomicBool = AtomicBool::new(false);
+
+/// The end splash saw the end's steps done (or left): eframe's return is
+/// waited for a short grace only.
+static ENDED: AtomicBool = AtomicBool::new(false);
 
 /// The window's context, once it is open: a request to end from the
 /// system (`helios_gui::ending`) closes it as Ctrl+Q does.
@@ -1210,6 +1221,12 @@ struct App {
     /// macOS's global menu bar.
     #[cfg(target_os = "macos")]
     menu_bar: helios_gui::macos::MenuBar,
+    /// The boot splash, drawn until the start's steps are done.
+    boot: splash::Boot,
+    /// The end splash and its steps, from the frame that saw the quit.
+    end: Option<splash::End<App>>,
+    /// The interface's settings were saved by the end's step.
+    shell_exited: bool,
     _rest_dropped: quit::MarkOnDrop,
 }
 
@@ -1499,26 +1516,99 @@ impl App {
     }
 }
 
+/// How long the end may last before Helios quits anyway, as if "Quit
+/// now" was chosen: a step that never ends does not hold the window.
+const END_LIMIT: std::time::Duration = std::time::Duration::from_mins(1);
+
 impl App {
-    /// The main window closes after this pass and Helios with it: nothing
-    /// to draw (work waiting for a frame, thumbnails or tiles, would hold
-    /// the window up), only what the user changed to send to the node's
-    /// vault. The node saves and closes it once the GUI is gone.
-    fn closing(&mut self) {
+    /// Helios quits: the window stays and shows the end splash, its steps
+    /// run (the shell draws no more: work waiting for a frame, thumbnails
+    /// or tiles, is left), and the window closes once they are done.
+    fn closing(&mut self, ctx: &egui::Context) {
         quit::requested();
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        let node = self.node.as_ref().map(|c| c.link().clone());
+        let mut end = splash::End::new(phases::end().clone())
+            .give_up_after(END_LIMIT)
+            .then(
+                Message::new("gui-end-changes", "Saving your changes"),
+                App::save_changes,
+            )
+            .then(
+                Message::new("gui-end-interface", "Saving the interface settings"),
+                App::exit_shell,
+            );
+        // The node closes the library once the GUI is gone (its own
+        // steps: the background jobs stopped, the library closed).
+        if let Some(link) = node {
+            end = end.waiting_for(move || link.stopped());
+        }
+        self.end = Some(end);
+        quit::mark("end splash begun");
+        ctx.request_repaint();
+    }
+
+    /// What the user changed, sent to the node's vault: the node's
+    /// answers waited for, nothing changed is left unwritten.
+    fn save_changes(&mut self) {
         if let Some(persist) = &mut self.persist {
             let _stall = helios_gui::stall::section("vault written (closing frame)");
-            // The node's answers waited for: nothing changed is left
-            // unwritten as Helios closes.
             persist.frame_settled(&mut self.shell, seconds_f64());
             quit::mark("vault written (closing frame)");
         }
+    }
+
+    /// egui-pop's exit (the workspace saved, `save_workspace`, then the
+    /// `app.exit` step saves the interface's settings and keys); then the
+    /// GUI client disconnects: the node, asked to quit, closes the vault
+    /// once its last client is gone.
+    fn exit_shell(&mut self) {
+        if !std::mem::replace(&mut self.shell_exited, true) {
+            if let Err(e) = self.shell.exit() {
+                warn(&format!("cannot save the interface's settings: {e}"));
+            }
+            quit::mark("interface settings, keys and layout saved");
+        }
+        if self.node.take().is_some() {
+            quit::mark("GUI client disconnected from the node");
+        }
+    }
+
+    /// The end splash's pass: whether the window may close.
+    fn ending(&mut self, ui: &mut egui::Ui) {
+        let Some(mut end) = self.end.take() else {
+            return;
+        };
+        let was = end.outcome();
+        let outcome = end.pass(ui, self);
+        let ctx = ui.ctx().clone();
+        if outcome == Ending::Running {
+            // A close asked again while the end runs waits for it.
+            if ctx.input(|i| i.viewport().close_requested()) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        } else if was == Ending::Running {
+            if outcome == Ending::QuitNow {
+                QUIT_NOW.store(true, Ordering::SeqCst);
+                quit::mark("end splash: quit now");
+            } else {
+                quit::mark("end splash done");
+            }
+            ENDED.store(true, Ordering::SeqCst);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        self.end = Some(end);
     }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let _stall = helios_gui::stall::frame("the main window's pass");
+        if self.end.is_some() {
+            start::trace_frame("end splash drawn");
+            self.ending(ui);
+            return;
+        }
         if ui.ctx().input(|i| i.viewport().close_requested()) {
             // The application's life is the shell's policy, not the main
             // window's: closed while another window is open, that window
@@ -1537,10 +1627,15 @@ impl eframe::App for App {
                 // (hidden, Helios goes on): nothing drawn in this pass.
                 Closing::Kept | Closing::Hidden => return,
                 Closing::Quit => {
-                    self.closing();
+                    self.closing(ui.ctx());
+                    self.ending(ui);
                     return;
                 }
             }
+        }
+        if !self.boot.pass(ui) {
+            start::trace_frame("boot splash drawn");
+            return;
         }
         start::mark_in_first_frame("egui's pass begun (fonts ready)");
 
@@ -1690,17 +1785,8 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         quit::mark("on_exit");
-        // egui-pop's exit: the workspace saved (`save_workspace`), then
-        // the `app.exit` step saves the interface's settings and keys.
-        if let Err(e) = self.shell.exit() {
-            warn(&format!("cannot save the interface's settings: {e}"));
-        }
-        quit::mark("interface settings, keys and layout saved");
-        // The GUI client disconnects: the node, asked to quit, closes
-        // the vault once its last client is gone.
-        if self.node.take().is_some() {
-            quit::mark("GUI client disconnected from the node");
-        }
+        // Done by the end splash's step, unless eframe ended otherwise.
+        self.exit_shell();
     }
 }
 
@@ -1856,6 +1942,8 @@ fn main() -> Result<(), String> {
     let gpu_opening = std::thread::Builder::new()
         .name("helios-gpu-open".into())
         .spawn(|| {
+            let _step =
+                phases::boot().begin(Message::new("gui-boot-gpu", "Opening the graphics device"));
             let gpu = helios_gpu::shared::gpu();
             start::mark("GPU device opened (its thread)");
             gpu
@@ -2078,6 +2166,7 @@ fn main() -> Result<(), String> {
     // executable, the user's), read before anything of them runs: their
     // importers are File > Import from's entries.
     let plugins = {
+        let _step = phases::boot().begin(Message::new("gui-boot-plugins", "Reading the plugins"));
         let mut broker = helios_plugin::Broker::new(helios_plugin::Policy::default());
         let mut dirs = helios_plugin::default_dirs(None);
         if let (Some(root), Some(programs)) = (
@@ -2132,6 +2221,10 @@ fn main() -> Result<(), String> {
         }
         Arc::new(broker)
     };
+    // From the interface's declaration to the application ready (its
+    // modules, its commands, the window).
+    let interface =
+        phases::boot().begin(Message::new("gui-boot-interface", "Building the interface"));
     let known_vault = vault.clone();
     let health_vault = vault.clone();
     let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
@@ -2214,7 +2307,13 @@ fn main() -> Result<(), String> {
             drop(vault);
             let mut finisher = quit::Finisher::default();
             if let Some(node) = node {
-                finisher.spawn("node stopped", quit::VAULT_DEADLINE, move || node.stop());
+                if QUIT_NOW.load(Ordering::SeqCst) {
+                    // "Quit now": what the node still does is left.
+                    quit::mark("node left (quit now)");
+                    drop(node);
+                } else {
+                    finisher.spawn("node stopped", quit::VAULT_DEADLINE, move || node.stop());
+                }
             }
             for left in finisher.finish() {
                 warn(&format!("quit: {left} was left unfinished"));
@@ -2641,6 +2740,9 @@ fn main() -> Result<(), String> {
                 preparing: preparing.into_iter().collect(),
                 #[cfg(target_os = "macos")]
                 menu_bar: helios_gui::macos::MenuBar::new(),
+                boot: splash::Boot::new(phases::boot().clone()),
+                end: None,
+                shell_exited: false,
                 _rest_dropped: quit::MarkOnDrop(
                     "images, library readers and exporter dropped",
                 ),
@@ -2652,11 +2754,18 @@ fn main() -> Result<(), String> {
                 app.restore_darkroom();
             }
             start::mark("application ready");
+            drop(interface);
             // eframe let go of the application: the quit's work is done
             // but for the node's stop; past the grace, it goes on without
             // eframe, whose window would stay up until an event came.
             Box::new(quit::Released::new(app, move || {
-                watched.watch(quit::GRACE, || {
+                // The end splash saw the node stop: little is left to wait for.
+                let grace = if ENDED.load(Ordering::SeqCst) {
+                    quit::GRACE_AFTER_SPLASH
+                } else {
+                    quit::GRACE
+                };
+                watched.watch(grace, || {
                     quit::mark("eframe did not return: the process ends");
                     if let Some(dir) = platform::crash_dir() {
                         helios_gui::ending::mark_clean(&dir);
