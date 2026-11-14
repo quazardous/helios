@@ -50,6 +50,27 @@ without pulling an HTTP client.
   and the context inputs; pinned by a golden test.
 - Built-ins declared only: `exif`, `cull`, and the `animals` LLM preset.
 
+### Slice 2 built (2026-11-14)
+
+helios-ai now depends on helios-extract (not the reverse; the test that
+derived schemas stay in helios-ai's subset moved to helios-ai).
+
+- `routing::Overrides` (run, node, diagram, each a `RouteOverride`:
+  provider and/or model) and `Routing::resolve`, field by field, highest
+  level first, then the map ([ai-models.md](../ai-models.md),
+  "Overrides, the route that answered, one retry"). A capability-level
+  map as an override is not built: one route per level so far.
+- `Ai::run_prompt_with(PromptCall)` returns `PromptRun` (route, where it
+  came from, the answering model, prompt `id@version` and hash,
+  attempts, the extractor's typed answer and `counts` of adjusted
+  values) or `PromptFailure` (each try's raw reply and errors). One
+  corrective retry with `retry_note`; the call log gains `route_from`,
+  `attempt` and `answered`.
+- `Ai::check_needs` is the core of the pre-run check of slice 3: given
+  (capability, prompt, overrides), the resolved route and why it cannot
+  serve. Refusing a submission with the node's name waits for runs
+  (slice 3 and 5).
+
 In a manifest the kind is a table (`[extractors.llm]` or `builtin = {
 compute = "capture" }`), not a `kind = "llm"` field as the sketch in
 section 2 shows.

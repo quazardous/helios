@@ -73,6 +73,40 @@ none when the network has no default, goes through the routing map
 (`vision` for a decision, and `segmentation` for a mask). A network opts
 in with `"resolver": "routing"`.
 
+### Overrides, the route that answered, one retry
+
+A feature or a diagram runs a prompt with `Ai::run_prompt_with` and a
+`PromptCall`, which may carry **overrides** of the map at three levels:
+the run, the node (or an extractor use on it), and the diagram. Each
+field is taken from the highest level that gives it: run, then node, then
+diagram, then the map (the prompt's route, then the capability's). A
+level may give a provider and a model, or a model alone (another model of
+whichever provider is chosen). A model given below the level that chose
+the provider is ignored, since it was meant for another provider; a
+provider override with no model takes the map's model when the map names
+that provider, and is refused otherwise.
+
+The result (`PromptRun`) says which route answered and where it came from
+(`override: run|node|diagram`, `prompt`, `capability`), the model as the
+runtime named it in its answer (its exact version when it gives one),
+the prompt's `id@version` and hash, and how many tries it took. The call
+log records the same per call: `route_from`, `attempt` and `answered`.
+
+An answer that does not fit the prompt's output schema (or, when the call
+names an extractor, its declared keys) is **sent back once** with the
+errors appended to the prompt (helios-extract's `retry_note`). A second
+misfit fails with both tries, their raw replies and errors
+(`PromptFailure`); a provider error is not retried. With an extractor,
+values outside a finite list are dropped or mapped to `other`, and the
+counts come back with the result (`counts`). `run_prompt` is the same
+call with no overrides, returning the value alone.
+
+**Before a run,** `Ai::check_needs` takes the capabilities (and prompts)
+a run will call, each with its overrides, and says for each the route it
+resolves to and whether it can serve: a provider configured and
+answering, its key found, the model present and doing the capability.
+Each provider is asked for its models once.
+
 ## Prompts as versioned assets
 
 A prompt is a file: its id, its version, its capability, the model it was
@@ -190,6 +224,8 @@ as stable as the runtime allows:
   version: renders replay it, nothing is asked again;
 - a prompt is pinned by `id@version`, and its content hash goes in the call
   log, so a changed prompt is never mistaken for the old one;
+- a call's result and its log line name the route that answered and the
+  model as the runtime named it, for cache keys and results;
 - prompts declare their `temperature` (0 by default) and a `seed`, passed
   to runtimes that take one (Ollama, OpenAI-compatible servers);
 - the model runtime's own version is in `helios_ai_local_status`.

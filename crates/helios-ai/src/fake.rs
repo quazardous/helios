@@ -21,6 +21,8 @@ pub struct FakeRuntime {
     /// Installed models, with what `/api/show` says they do.
     models: Mutex<BTreeMap<String, Vec<String>>>,
     replies: Mutex<BTreeMap<String, String>>,
+    /// Replies given once each, in order, before `replies`.
+    queued: Mutex<BTreeMap<String, Vec<String>>>,
     calls: Mutex<Vec<HttpCall>>,
     down: AtomicBool,
     /// How many progress lines a pull streams before `success`.
@@ -52,6 +54,16 @@ impl FakeRuntime {
             .lock()
             .expect("fake lock")
             .insert(model.into(), text.into());
+        self
+    }
+
+    /// What the next chats with `model` answer, once each and in order,
+    /// before the reply set by [`FakeRuntime::reply`].
+    pub fn replies(self, model: &str, texts: &[&str]) -> Self {
+        self.queued.lock().expect("fake lock").insert(
+            model.into(),
+            texts.iter().rev().map(|t| (*t).to_string()).collect(),
+        );
         self
     }
 
@@ -92,6 +104,15 @@ impl FakeRuntime {
         let model = body["model"].as_str().unwrap_or_default().to_string();
         let models = self.models.lock().expect("fake lock").clone();
         let reply = || {
+            if let Some(next) = self
+                .queued
+                .lock()
+                .expect("fake lock")
+                .get_mut(&model)
+                .and_then(Vec::pop)
+            {
+                return next;
+            }
             self.replies
                 .lock()
                 .expect("fake lock")

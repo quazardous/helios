@@ -45,7 +45,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-pub use service::{AI_CALLS, Ai, BenchRequest, CallMeta, CallRecord, TryResult, read_image};
+pub use service::{
+    AI_CALLS, Ai, AnswerCounts, Attempt, BenchRequest, CallMeta, CallRecord, Need, NeedCheck,
+    PromptCall, PromptFailure, PromptRun, TryResult, read_image,
+};
 
 /// What a provider (or a model) can do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

@@ -12,10 +12,11 @@ use helios_ai::fake::{FakeRuntime, FakeSystem};
 use helios_ai::local::System;
 use helios_ai::prompts::PromptRef;
 use helios_ai::provider::{ProviderConfig, ProviderKind};
-use helios_ai::routing::Route;
+use helios_ai::routing::{Level, Overrides, Route, RouteFrom, RouteOverride};
 use helios_ai::secrets::{MemorySecrets, Secrets};
 use helios_ai::store::Paths;
-use helios_ai::{Ai, Capability, images};
+use helios_ai::{Ai, Capability, Need, PromptCall, images};
+use helios_extract::{ExtractorDef, KeyDecl, KeyType};
 use serde_json::{Value, json};
 
 const CAPTION: &str =
@@ -670,4 +671,248 @@ fn an_absurd_pull_size_is_refused() {
         s.runtime.calls().is_empty(),
         "nothing was asked of the runtime"
     );
+}
+
+fn describe_call(overrides: Overrides) -> PromptCall {
+    let mut call = PromptCall::new(describe(), json!({ "language": "English", "keywords": 3 }));
+    call.images = vec![images::test_card(64)];
+    call.overrides = overrides;
+    call
+}
+
+fn log_lines(s: &Setup) -> Vec<Value> {
+    std::fs::read_to_string(&s.ai.paths().log)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_run_override_wins_and_the_answering_route_is_returned_and_logged() {
+    let s = setup("run-override", vision_runtime(), machine());
+    s.ai.routing_set(
+        Some(Capability::Vision),
+        None,
+        Some(Route::new("ollama", "gemma3:4b")),
+    )
+    .unwrap();
+    let overrides = Overrides {
+        run: Some(RouteOverride::model("qwen2.5vl:7b")),
+        node: Some(RouteOverride::model("qwen3:8b")),
+        diagram: None,
+    };
+    let run = s.ai.run_prompt_with(describe_call(overrides)).unwrap();
+    assert_eq!(run.route, Route::new("ollama", "qwen2.5vl:7b"));
+    assert_eq!(run.from, RouteFrom::Override(Level::Run));
+    assert_eq!(run.answered, "qwen2.5vl:7b");
+    assert_eq!(run.prompt, "image.describe@1");
+    assert_eq!(run.attempts, 1);
+    assert_eq!(run.value["keywords"][0], "disc");
+    assert_eq!(last_chat_model(&s.runtime), "qwen2.5vl:7b");
+
+    let log = log_lines(&s);
+    let line = log.last().unwrap();
+    assert_eq!(line["model"], "qwen2.5vl:7b");
+    assert_eq!(line["answered"], "qwen2.5vl:7b");
+    assert_eq!(line["prompt"], "image.describe@1");
+    assert_eq!(line["attempt"], 1);
+    assert_eq!(line["route_from"], json!({ "override": "run" }));
+}
+
+#[test]
+fn a_bad_answer_is_retried_once_with_its_errors_then_fits() {
+    let runtime = vision_runtime().replies("qwen2.5vl:7b", &["not json at all"]);
+    let s = setup("run-retry", runtime, machine());
+    s.ai.routing_set(
+        Some(Capability::Vision),
+        None,
+        Some(Route::new("ollama", "qwen2.5vl:7b")),
+    )
+    .unwrap();
+    let run =
+        s.ai.run_prompt_with(describe_call(Overrides::default()))
+            .unwrap();
+    assert_eq!(run.attempts, 2);
+    assert_eq!(run.from, RouteFrom::Capability(Capability::Vision));
+    let chats: Vec<_> = s
+        .runtime
+        .calls()
+        .into_iter()
+        .filter(|c| c.path().ends_with("/chat"))
+        .collect();
+    assert_eq!(chats.len(), 2);
+    let second = chats[1].body.as_ref().unwrap()["messages"][1]["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(second.contains("Your answer did not fit:\n- "), "{second}");
+    assert!(second.contains("Answer again with one JSON object"));
+    let attempts: Vec<_> = log_lines(&s).iter().map(|l| l["attempt"].clone()).collect();
+    assert_eq!(attempts, vec![json!(1), json!(2)]);
+}
+
+#[test]
+fn two_bad_answers_report_both_tries() {
+    let s = setup("run-fail", vision_runtime(), machine());
+    let overrides = Overrides {
+        diagram: Some(RouteOverride::route("ollama", "gemma3:4b")),
+        ..Overrides::default()
+    };
+    let failure = s.ai.run_prompt_with(describe_call(overrides)).unwrap_err();
+    assert_eq!(failure.route, Some(Route::new("ollama", "gemma3:4b")));
+    assert_eq!(failure.attempts.len(), 2);
+    for a in &failure.attempts {
+        assert_eq!(a.raw.as_deref(), Some("I think it is a disc."));
+        assert!(!a.errors.is_empty());
+    }
+    assert!(failure.to_string().contains("after the retry"), "{failure}");
+    // `run_prompt` says the same, as text.
+    s.ai.routing_set(
+        Some(Capability::Vision),
+        None,
+        Some(Route::new("ollama", "gemma3:4b")),
+    )
+    .unwrap();
+    let err =
+        s.ai.run_prompt(
+            &describe(),
+            json!({ "language": "English", "keywords": 3 }),
+            vec![images::test_card(64)],
+        )
+        .unwrap_err();
+    assert!(err.starts_with("image.describe@1: "), "{err}");
+}
+
+fn caption_extractor() -> ExtractorDef {
+    let mut def: ExtractorDef = toml::from_str(
+        r#"
+id = "caption"
+version = 1
+title = "Caption"
+keys = []
+[llm]
+capability = "vision"
+prompt_id = "image.describe@1"
+"#,
+    )
+    .unwrap();
+    def.keys = vec![
+        KeyDecl::new("caption", KeyType::Text),
+        KeyDecl::new("keywords", KeyType::Label)
+            .finite(&["disc", "sky"])
+            .multi(),
+    ];
+    def
+}
+
+#[test]
+fn an_extractor_check_counts_the_values_it_dropped() {
+    let s = setup("run-extract", vision_runtime(), machine());
+    let mut call = describe_call(Overrides {
+        node: Some(RouteOverride::route("ollama", "qwen2.5vl:7b")),
+        ..Overrides::default()
+    });
+    call.extractor = Some(caption_extractor());
+    let run = s.ai.run_prompt_with(call).unwrap();
+    assert_eq!(run.from, RouteFrom::Override(Level::Node));
+    let answer = run.answer.unwrap();
+    assert_eq!(answer.get("keywords").len(), 1, "{answer:?}");
+    assert_eq!(run.counts.dropped, 1, "`gradient` is not in the list");
+    assert_eq!(run.attempts, 1);
+}
+
+#[test]
+fn the_check_before_a_run_names_what_nothing_can_answer() {
+    let s = setup("needs", vision_runtime(), machine());
+    s.ai.routing_set(
+        Some(Capability::Vision),
+        None,
+        Some(Route::new("ollama", "qwen2.5vl:7b")),
+    )
+    .unwrap();
+    let needs = [
+        Need {
+            capability: Capability::Vision,
+            prompt: Some("image.describe@1".into()),
+            overrides: Overrides::default(),
+        },
+        Need {
+            capability: Capability::Vision,
+            prompt: None,
+            overrides: Overrides {
+                node: Some(RouteOverride::model("llava:missing")),
+                ..Overrides::default()
+            },
+        },
+        Need {
+            capability: Capability::Embeddings,
+            prompt: None,
+            overrides: Overrides::default(),
+        },
+        Need {
+            capability: Capability::Vision,
+            prompt: None,
+            overrides: Overrides {
+                run: Some(RouteOverride::route("nobody", "m")),
+                ..Overrides::default()
+            },
+        },
+    ];
+    let checks = s.ai.check_needs(&needs);
+    assert!(checks[0].available, "{:?}", checks[0]);
+    assert_eq!(checks[0].route, Some(Route::new("ollama", "qwen2.5vl:7b")));
+    assert!(!checks[1].available);
+    assert!(
+        checks[1]
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("has no model `llava:missing`"),
+        "{:?}",
+        checks[1]
+    );
+    assert!(
+        checks[2]
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("nothing is routed for embeddings")
+    );
+    assert!(
+        checks[3]
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("no provider `nobody`")
+    );
+    let tags = s
+        .runtime
+        .calls()
+        .iter()
+        .filter(|c| c.path() == "/api/tags")
+        .count();
+    assert_eq!(tags, 1, "each provider is asked for its models once");
+}
+
+#[test]
+fn derived_extractor_schemas_stay_in_the_schema_subset() {
+    let mut defs = helios_extract::builtins().extractors;
+    let mut d = caption_extractor();
+    d.keys.push(
+        KeyDecl::new("mood", KeyType::Label)
+            .semi_finite(&["calm"])
+            .with_confidence(),
+    );
+    defs.push(d);
+    for d in &defs {
+        let s = helios_extract::answer_schema(d);
+        assert!(helios_ai::schema::lint(&s).is_empty(), "{}", d.pinned());
+    }
+    // A fitting answer passes both the generic check and the extractor's.
+    let d = defs.last().unwrap();
+    let good =
+        json!({ "caption": "a disc", "keywords": ["disc"], "mood": { "value": "calm", "p": 0.8 } });
+    assert!(helios_ai::schema::validate(&helios_extract::answer_schema(d), &good).is_empty());
+    assert!(helios_extract::validate(d, &good).is_ok());
 }

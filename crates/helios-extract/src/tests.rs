@@ -213,27 +213,6 @@ fn open_and_typed_keys() {
 }
 
 #[test]
-fn derived_schemas_stay_in_helios_ai_subset() {
-    let mut defs = builtins().extractors;
-    defs.push(def_with(vec![
-        scene(),
-        KeyDecl::new("mood", KeyType::Label)
-            .semi_finite(&["calm"])
-            .with_confidence(),
-        KeyDecl::new("caption", KeyType::Text),
-    ]));
-    for d in &defs {
-        let s = answer_schema(d);
-        assert!(helios_ai::schema::lint(&s).is_empty(), "{}", d.pinned());
-    }
-    // A fitting answer passes both helios-ai's generic check and ours.
-    let d = defs.last().unwrap();
-    let good = json!({ "scene": "beach", "mood": { "value": "calm", "p": 0.8 }, "caption": null });
-    assert!(helios_ai::schema::validate(&answer_schema(d), &good).is_empty());
-    assert!(validate(d, &good).is_ok());
-}
-
-#[test]
 fn key_instructions_name_every_key() {
     let text = key_instructions(&animals());
     assert!(
