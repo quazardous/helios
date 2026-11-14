@@ -29,6 +29,17 @@ type = "string"
 default = "https://photospicker.googleapis.com/v1"
 about = "The Photos Picker API's base address"
 
+# Where the photos picked are downloaded at Import: never asked during
+# the flow, shown pre-filled in the import window's Parameters.
+# `<Pictures>` is the person's pictures folder, `{account}` the account's
+# address.
+[source.settings.download]
+type = "path"
+path = "folder"
+default = "<Pictures>/Google Photos/{account}"
+label = "Download into"
+help = "The folder the photos you pick are downloaded into; {account} stands for the account's address"
+
 # The connection process Helios drives (docs/design/import-connectors.md,
 # 2.4.1): Google's sign-in for desktop applications, then a call proving
 # the token works. The OAuth client is the person's own (Settings), the

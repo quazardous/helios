@@ -93,7 +93,13 @@ or folders on Helios (the window opens with them as its source).
     connector draws the column itself.
     - **The account** (an account's connector): its connection, and for
       a connector whose photos are chosen in its service's page (Google
-      Photos), "Choose photos"; the photos chosen show in the middle.
+      Photos), "Choose photos", then "Choose more…" in its header
+      line; the photos chosen show in the middle, in the ordinary grid.
+      Such a connector declares a `download` key in its source contract
+      (Google Photos: `<Pictures>/Google Photos/{account}`): its photos
+      are downloaded there at Import, the folder shown pre-filled and
+      editable in Parameters, never asked during the flow, and Copy,
+      Into and Name are not shown for it (2026-11-14).
     - **Copy into the Library**, or **Add where they are** (references
       in place). Copy is forced for a card unless the person changes it,
       with a note on why; a connector that cannot add in place always

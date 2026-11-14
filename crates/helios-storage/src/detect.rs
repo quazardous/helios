@@ -320,6 +320,12 @@ fn read_trim(path: &Path) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Free bytes of the filesystem holding `dir`, `None` where it cannot be
+/// read.
+pub fn free_space(dir: &Path) -> Option<u64> {
+    space(dir).map(|(free, _)| free)
+}
+
 /// Free and total bytes of the filesystem holding `dir`.
 #[cfg(target_os = "linux")]
 fn space(dir: &Path) -> Option<(u64, u64)> {

@@ -199,6 +199,9 @@ command-helios-scopes-float =
 command-helios-scopes-moveTo =
     .title = Move Scopes to an area (`area`)
 
+command-helios-setUp =
+    .title = Set up Helios…
+
 command-helios-stacks-detach =
     .title = Move Stacks to a new window
 
@@ -255,6 +258,15 @@ command-import-history-list =
 
 command-import-reconnect =
     .title = Connect an import account again, from the step that failed (`account`)
+
+command-init-apply =
+    .title = Write the setup's settings (`library.folder`: the library folder)
+
+command-init-chooseFolder =
+    .title = Choose the library folder for the setup
+
+command-init-libraryFolder =
+    .title = Choose the library folder in the setup (`path`: set at once)
 
 command-keymap-package =
     .title = Add a keymap package's keys over the defaults (`name`: darktable-classic)
