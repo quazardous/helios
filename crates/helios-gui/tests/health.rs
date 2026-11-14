@@ -755,6 +755,48 @@ fn without_catalogue_snapshots_one_line_says_none_yet() {
     assert_eq!(f.fix.unwrap().command, "library.openFolder");
 }
 
+/// A snapshot taken by hand waits for a writer holding the catalogue on
+/// a thread of its own, never on the frame that asked; taken once it
+/// lets go.
+#[test]
+fn a_snapshot_by_hand_waits_for_a_held_catalogue_off_the_frame() {
+    use helios_gui::catalogue;
+    use helios_vault::Store as _;
+    let lib = Library::new("snapshot-held");
+    let bus = Arc::new(helios_core::Bus::new());
+    let node = Arc::new(helios_inspect::client::Client::in_process(Arc::new(
+        helios_node_core::endpoint::VaultService::new(
+            lib.vault.clone(),
+            bus.clone(),
+            helios_core::jobs::Jobs::new(bus),
+            "test",
+        ),
+    )));
+    let mut other = helios_vault_sqlite::SqliteStore::open(&lib.file).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&serde_json::json!(true)))
+        .unwrap();
+    let (send, taken) = std::sync::mpsc::channel();
+    let started = std::time::Instant::now();
+    catalogue::take_by_hand(&node, &lib.file, 3, move |t| {
+        let _ = send.send(t);
+    })
+    .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "the caller waited {:?}",
+        started.elapsed()
+    );
+    other.rollback().unwrap();
+    drop(other);
+    let (file, _) = taken
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .unwrap()
+        .unwrap();
+    assert!(file.is_file(), "{file:?}");
+}
+
 #[test]
 fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() {
     use helios_gui::catalogue;

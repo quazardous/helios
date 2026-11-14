@@ -64,7 +64,7 @@ pub use import_sources::{
 };
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use storage::{
-    BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage,
+    BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, NodeStorage, StorageLink,
     role_text,
 };
 pub use workshop_generalise::{Generalised, choice_word};
@@ -87,6 +87,7 @@ pub use calibrate_focus::{COMMAND as CALIBRATE_COMMAND, WINDOW as CALIBRATE_WIND
 mod health;
 mod import;
 mod import_accounts;
+mod import_albums;
 mod import_browsers;
 mod import_chosen;
 pub use import_accounts::LibraryFolder;
@@ -6986,6 +6987,7 @@ impl Shell {
         if self.core.ended.take_backups() {
             self.backup_ended();
         }
+        self.storage_frame();
         self.core.forgotten.take(self.core.app.handle());
     }
 

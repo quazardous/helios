@@ -44,6 +44,9 @@ const RATE_WAIT: Duration = Duration::from_secs(5);
 /// The photos chosen under one account, as the grid shows them.
 pub(super) struct ChosenContents {
     pub(super) account: String,
+    /// The album shown, its source's id, when the photos are an album's
+    /// ([`super::import_albums`]) rather than chosen in the page.
+    pub(super) album: Option<String>,
     /// The place their cells are under: no folder, the account's own.
     pub(super) root: PathBuf,
     /// The visits to the page taken in, in order.
@@ -66,11 +69,16 @@ impl Drop for ChosenContents {
 }
 
 impl ChosenContents {
-    fn new(account: &str) -> Self {
+    fn new(account: &str, album: Option<&str>) -> Self {
         let (sender, glances) = channel();
+        let root = match album {
+            Some(a) => PathBuf::from(format!("{NOWHERE}{account}/{a}")),
+            None => PathBuf::from(format!("{NOWHERE}{account}")),
+        };
         Self {
             account: account.to_owned(),
-            root: PathBuf::from(format!("{NOWHERE}{account}")),
+            album: album.map(str::to_owned),
+            root,
             batches: Vec::new(),
             items: HashMap::new(),
             names: HashSet::new(),
@@ -206,22 +214,37 @@ impl ImportWindow {
     /// (their cells, then their previews). Otherwise the grid goes back
     /// to the sources ticked, read again.
     pub(super) fn follow_chosen(&mut self) -> bool {
-        let account = self
-            .sources
-            .account
-            .clone()
-            .filter(|id| self.accounts.shows_chosen(id));
-        let Some(account) = account else {
+        // An album selected: its photos once listed.
+        let shown = if let Some((account, source, photos)) = self.album_shown() {
+            let batches = match photos {
+                super::import_albums::Photos::Listed(b) => vec![b],
+                _ => Vec::new(),
+            };
+            Some((account, Some(source.id), batches))
+        } else {
+            self.sources
+                .account
+                .clone()
+                .filter(|id| self.accounts.shows_chosen(id))
+                .map(|account| {
+                    let batches = self.accounts.chosen(&account);
+                    (account, None, batches)
+                })
+        };
+        let Some((account, album, batches)) = shown else {
             if self.chosen.is_some() {
                 self.clear_contents();
             }
             return false;
         };
-        if self.chosen.as_ref().is_none_or(|c| c.account != account) {
+        if self
+            .chosen
+            .as_ref()
+            .is_none_or(|c| c.account != account || c.album != album)
+        {
             self.clear_contents();
-            self.chosen = Some(ChosenContents::new(&account));
+            self.chosen = Some(ChosenContents::new(&account, album.as_deref()));
         }
-        let batches = self.accounts.chosen(&account);
         let thumbs = self.thumbnails();
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(self.waker());
         let Some(chosen) = self.chosen.as_mut() else {
@@ -271,7 +294,14 @@ impl ImportWindow {
 
     /// Whether the grid shows the photos chosen under `account`.
     pub(super) fn shows_chosen_of(&self, account: &str) -> bool {
-        self.chosen.as_ref().is_some_and(|c| c.account == account)
+        self.chosen
+            .as_ref()
+            .is_some_and(|c| c.account == account && c.album.is_none())
+    }
+
+    /// Whether the grid shows the photos of the album selected.
+    pub(super) fn shows_album(&self) -> bool {
+        self.chosen.as_ref().is_some_and(|c| c.album.is_some())
     }
 }
 
@@ -314,12 +344,12 @@ impl Shell {
     /// ended, the window closed. Nothing is fetched before.
     pub(super) fn import_chosen(&mut self) {
         let sink = self.import_sink();
-        let (hook, jobs, args, ctx) = {
+        let (hook, jobs, args, ctx, album) = {
             let mut w = self.import.get_mut();
-            let Some((root, account)) = w
+            let Some((root, account, album)) = w
                 .chosen
                 .as_ref()
-                .map(|c| (c.root.clone(), c.account.clone()))
+                .map(|c| (c.root.clone(), c.account.clone(), c.album.is_some()))
             else {
                 return;
             };
@@ -347,9 +377,13 @@ impl Shell {
             }
             // Each visit's photos with the connector that listed them; a
             // visit taken in since this pass imports none.
-            let jobs: Vec<(Arc<Batch>, Vec<helios_connect::Item>)> = w
-                .accounts
-                .take_chosen(&account)
+            // An album's photos as listed; else the pages' chosen.
+            let batches = if album {
+                listed.clone()
+            } else {
+                w.accounts.take_chosen(&account)
+            };
+            let jobs: Vec<(Arc<Batch>, Vec<helios_connect::Item>)> = batches
                 .into_iter()
                 .map(|batch| {
                     let items = listed
@@ -360,7 +394,7 @@ impl Shell {
                     (batch, items)
                 })
                 .collect();
-            (hook, jobs, args, w.ctx.clone())
+            (hook, jobs, args, w.ctx.clone(), album)
         };
         let spawned = std::thread::Builder::new()
             .name("import-chosen".into())
@@ -383,7 +417,11 @@ impl Shell {
                             Err(e) => failed = Some(e),
                         }
                     }
-                    // Imported or given up: the service forgets the page.
+                    // Imported or given up: the service forgets the page
+                    // (an album has none).
+                    if album {
+                        continue;
+                    }
                     if let Err(e) = batch.connector.end_pick() {
                         log::debug!("import chosen: end of a picking: {e:?}");
                     }
@@ -402,6 +440,9 @@ impl Shell {
             return;
         }
         let mut w = self.import.get_mut();
+        if album {
+            w.albums.close();
+        }
         w.close_after_import();
     }
 }
@@ -428,7 +469,7 @@ mod tests {
 
     #[test]
     fn two_items_of_one_name_get_a_cell_each() {
-        let mut c = ChosenContents::new("acc");
+        let mut c = ChosenContents::new("acc", None);
         assert_eq!(c.name_for(&item("IMG_1.JPG")), "IMG_1.JPG");
         assert_eq!(c.name_for(&item("a/img_1.jpg")), "img_1 (2).jpg");
         assert_eq!(c.name_for(&item("IMG_1.JPG")), "IMG_1 (3).JPG");

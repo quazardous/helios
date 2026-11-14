@@ -767,6 +767,20 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-album-choose = Choose an album under the account, in Sources.
+
+gui-import-album-failed = Could not read the album:
+
+gui-import-album-reading = Reading the album…
+
+gui-import-albums-failed = Could not read the albums:
+
+gui-import-albums-more = More albums
+
+gui-import-albums-none = No albums
+
+gui-import-albums-reading = Reading the albums…
+
 gui-import-apply = Apply During Import
 
 gui-import-apply-blue = Blue

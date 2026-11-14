@@ -175,6 +175,29 @@ pub fn take(
     Ok((taken, copies))
 }
 
+/// Takes a snapshot by hand ([`take`]) on a thread of its own: the copy
+/// of the catalogue waits for any writer holding it, so the frame that
+/// asked does not. `done` hears the snapshot and its copies, or why not.
+///
+/// # Errors
+/// No thread to take it on.
+pub fn take_by_hand(
+    node: &std::sync::Arc<Client>,
+    file: &Path,
+    keep: usize,
+    done: impl FnOnce(Result<(PathBuf, Vec<PathBuf>), String>) + Send + 'static,
+) -> Result<(), String> {
+    let (node, file) = (node.clone(), file.to_path_buf());
+    std::thread::Builder::new()
+        .name("catalogue-snapshot".into())
+        .spawn(move || {
+            let mounted = helios_storage::system().volumes();
+            done(take(&node, &mounted, &file, "by-hand", keep));
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// The health check's view of the snapshots of the catalogue at `file`
 /// (next to it and on the mounted `volumes`): each one there was verified
 /// when it was written; the newest is read back again now, to say

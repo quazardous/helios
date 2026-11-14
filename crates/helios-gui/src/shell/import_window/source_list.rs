@@ -190,8 +190,10 @@ impl ImportWindow {
     }
 
     /// Selects `key` alone: the middle and right zones follow it.
-    pub(super) fn select(&mut self, key: SourceKey) {
+    pub(in crate::shell) fn select(&mut self, key: SourceKey) {
         self.touched = true;
+        // An album selected is left for the source clicked.
+        self.albums.close();
         match key {
             SourceKey::Folder(path) => {
                 self.sources.account = None;
@@ -334,7 +336,9 @@ fn show_item(
     item: &Item,
     event: &mut Option<Event>,
 ) {
-    let selected = w.selected_key().as_ref() == Some(&item.key);
+    // An account is not highlighted while one of its albums is.
+    let selected = w.selected_key().as_ref() == Some(&item.key)
+        && !matches!(&item.key, SourceKey::Account(id) if w.albums.selected(id).is_some());
     let pinned = w.pinned(&item.key);
     let asked = item_ui(ui, item, selected, pinned, words);
     if asked.response.clicked() && !selected {
@@ -419,6 +423,62 @@ fn account_menu(
     }
     if let Some(asked) = asked {
         *event = Some(account_event(asked));
+    }
+}
+
+/// The albums of the account `id` under its item, when it is selected and
+/// its connector lists them ([`crate::shell::import_albums`]): each a
+/// source of its own, selected alone on a click; "More albums" reads the
+/// next page.
+fn albums_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, id: &str) {
+    if w.sources.account.as_deref() != Some(id) || !w.lists_albums(id) {
+        return;
+    }
+    w.start_albums(id);
+    let Some(listed) = w.albums.of(id) else {
+        return;
+    };
+    let b = &words.grid.browse;
+    let selected = w.albums.selected(id).map(|s| s.id.clone());
+    let indent = 28.0;
+    let mut chosen = None;
+    let mut more = false;
+    for album in &listed.albums {
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            ui.add(icon("images", Icon::Folder).size(Size::Inline));
+            let on = selected.as_deref() == Some(album.source.id.as_str());
+            if ui.selectable_label(on, &album.source.label).clicked() && !on {
+                chosen = Some(album.source.clone());
+            }
+            if let Some(n) = album.count {
+                ui.weak(n.to_string());
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        ui.add_space(indent);
+        if listed.reading {
+            ui.weak(&b.albums_reading);
+        } else if let Some(why) = &listed.failed {
+            ui.weak(format!("{} {why}", b.albums_failed));
+        } else if listed.albums.is_empty() {
+            ui.weak(&b.albums_none);
+        }
+    });
+    if listed.more() {
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            if ui.button(&b.albums_more).clicked() {
+                more = true;
+            }
+        });
+    }
+    if let Some(source) = chosen {
+        w.select_album(id, source);
+    }
+    if more {
+        w.more_albums(id);
     }
 }
 
@@ -564,6 +624,9 @@ pub(super) fn sources_ui(
             panel(ui, &words.services, |ui| {
                 for item in &account_items {
                     show_item(ui, w, words, item, event);
+                    if let SourceKey::Account(id) = &item.key {
+                        albums_ui(ui, w, words, id);
+                    }
                 }
                 if ui.button(&words.add_source).clicked() {
                     w.open_wizard();
