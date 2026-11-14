@@ -116,7 +116,10 @@ pub const GRACE: Duration = Duration::from_millis(200);
 /// The work left for after the window: run once, by whoever comes first
 /// (the host as eframe returns, or the watch past [`GRACE`]).
 #[derive(Clone)]
-pub struct AfterWindow(Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>);
+pub struct AfterWindow(Arc<Mutex<Option<Work>>>);
+
+/// A piece of work run once, on any thread.
+type Work = Box<dyn FnOnce() + Send>;
 
 impl AfterWindow {
     pub fn new(work: impl FnOnce() + Send + 'static) -> Self {
@@ -259,7 +262,7 @@ mod tests {
         let after = AfterWindow::new(move || tx.send("work").unwrap());
         let (ended_tx, ended) = mpsc::channel();
         after.watch(Duration::from_millis(100), move || {
-            ended_tx.send(()).unwrap()
+            ended_tx.send(()).unwrap();
         });
         assert!(after.run(), "the host runs it");
         assert!(!after.run(), "once");
@@ -277,7 +280,7 @@ mod tests {
         let (ended_tx, ended) = mpsc::channel();
         let started = Instant::now();
         after.watch(Duration::from_millis(50), move || {
-            ended_tx.send(()).unwrap()
+            ended_tx.send(()).unwrap();
         });
         assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), "work");
         ended.recv_timeout(Duration::from_secs(10)).unwrap();
