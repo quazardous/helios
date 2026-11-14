@@ -377,6 +377,9 @@ helios run ID [--vault library.db | --node ADDRESS] [--param KEY=VALUE]... [--js
               [--window W] [--scope node|window] [--request-id KEY]
 helios batch-run [--vault library.db | --node ADDRESS] --json '{"steps": [...]}'
               [--window W] [--request-id KEY]
+helios run [--vault library.db | --node ADDRESS] 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...]
+              [--keep-going] [--json] [--window W] [--request-id KEY]
+helios run [--vault library.db | --node ADDRESS] --file SCRIPT|- [--keep-going] [--json] ...
 ```
 
 `commands` lists every command of the vault's node (`commands.list`),
@@ -418,6 +421,40 @@ At most 256 steps.
 ```bash
 helios batch-run --vault library.db --json '{"steps":[{"id":"theme.select","params":{"name":"helios-light"}},{"id":"library.stacks.list"}]}'
 ```
+
+### Chains
+
+`run` with steps between `--`, or with a script (`--file SCRIPT`, `-`
+for the standard input), chains several commands, for scripts and agents
+without MCP. The steps run in order as one `command.batch`, so on the
+same node and as the CLI (origin `cli`). A step is a command id and its
+params: `KEY=VALUE` words (the value read as JSON, else as text) or one
+JSON object. Written as one word, or as a script's line, a step is split
+as a shell would split it (`'…'`, `"…"`, `\`). A script holds one step
+per line; blank lines and lines starting with `#` are skipped.
+
+```bash
+helios run --vault library.db 'library.import {"paths": ["/photos/2026"]}' -- library.select.all -- 'export.run preset=web'
+helios run --vault library.db --file steps.txt
+printf 'theme.select name=helios-light\nlibrary.stacks.list\n' | helios run --vault library.db --file -
+```
+
+It prints one line per step, in order: `ok`, `failed` (with the error)
+or `skipped`, its number and id, then the answer cut to one line, and a
+last line counting them. With `--json`, one JSON object per step
+instead (`step`, `id`, `ok`, `answer` or `error`, `skipped`,
+`already_applied`), and no count. The first failed step stops the rest
+(they are `skipped`); `--keep-going` runs every step whatever the others
+did. Exit codes are those of `batch-run`: 0 every step ran, 1 a step
+failed, 2 wrong usage, 3 no node, 4 the outcome is unknown, 130
+interrupted (Ctrl-C skips the steps not run yet).
+
+Each step carries its own key, the chain's (`--request-id KEY`, else a
+new one) followed by `.` and its number. After an exit code 4, the key
+is printed: run the same steps again with `--request-id KEY`, and the
+steps that ran answer `already_applied` (the node applied them once),
+the others run. After a failed step, the same goes once it is fixed.
+A step changed since its key was used is refused: use a new key.
 
 `helios-mcp` offers the same to agents (`helios_commands_list`,
 `helios_command_run`, `helios_command_batch`, origin `agent:mcp`).

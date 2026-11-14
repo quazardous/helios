@@ -144,9 +144,17 @@ fn a_darktable_library_imports_with_its_marks() {
         "copy": false,
     });
     let mut lines = Vec::new();
-    let report = importers::run(&broker, &vault, &jobs, &args, 1, &mut |line: &Value| {
-        lines.push(line.clone());
-    })
+    let report = importers::run(
+        &broker,
+        &jobs,
+        &args,
+        &mut |line: &Value| {
+            lines.push(line.clone());
+        },
+        |files, options, emit| {
+            helios_library::import::import(&vault, &jobs, files, options, 1, emit)
+        },
+    )
     .unwrap();
     assert_eq!((report.added, report.metadata), (3, 3), "{lines:?}");
     let scanned = &lines[0]["scanned"];

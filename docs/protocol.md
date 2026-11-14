@@ -371,6 +371,35 @@ null when none is set) and the volumes it knows (`volumes`, by name):
 the desktop copies a catalogue snapshot to the strategy's disks plugged
 in with them.
 
+The Storage page reads and writes through `storage.*`, each on the
+node's vault:
+
+- `storage.volumes` reads the volumes the library knows (`volumes`, by
+  name) and how many copies of photos each holds (`photos`, by volume
+  id): `{"volumes": [{"id": "uuid:a", "name": "Backup", …}], "photos":
+  {"uuid:a": 120}}`.
+- `storage.statuses` reads every photo's backup status against the
+  library's strategy, by image id: `{"statuses": {"0a…": {"have": 1,
+  "want": 1, "off_site_ok": true, "unverified": 0}}}`.
+- `storage.volume.save` (`volume`, as read) keeps its name, roles, off
+  site and RAID flags and answers the volume kept;
+  `{"volume": {"id": "uuid:a", "name": "Backup"}}`.
+- `storage.volume.mark` (`volume`, `mount`, `library`) writes the
+  identity file on a volume plugged in at `mount` and moves its record to
+  the marker's id: `{"volume": {"id": "label:B"}, "mount": "/media/b",
+  "library": "/photos"}`.
+- `storage.strategy.set` (`strategy`, null removes it) keeps the
+  library's backup strategy and answers `{"set": true}`.
+- `storage.card.safety` (`root`, `path`, `label`, `files`: `[path, image
+  id or null]` for each file read on the card) answers the card with
+  `safe_to_format` computed now: `{"root": "/photos", "path":
+  "/media/card", "label": "EOS_DIGITAL", "files":
+  [["/media/card/DCIM/a.cr3", null]]}`.
+
+The desktop sends the writes from a thread of their own, in the order
+made, then reads `library.storage.get`, `storage.volumes` and
+`storage.statuses` again; a frame shows what was last read.
+
 `calibrate.offer` (`camera`, and `image` when a photo is open) reads
 what a photo's calibration header offers: the camera's `profiles` as
 `calibrate.profiles.list` lists them, its default camera look's
@@ -417,6 +446,35 @@ counts through `library.facets`, each read on a thread of its own and
 shown at a coming frame, through a `ReadCache` fed by the bus's events.
 The Folders section's counts and the filter history are read through
 the node too, and shown at the frame their answer comes.
+
+### Worker reads
+
+The desktop's worker threads read through the node too, never the vault,
+each call made on the thread that needs it (an export's render, a
+thumbnail of a head version, an import window's scan):
+
+- `library.version.get` (`version`) reads one version, in the form
+  `library.edit.head` answers it, null when there is none of that id:
+  an export renders each photo's version so.
+- `export.plan` (`images`, `settings`: the export's format, folder,
+  pattern and clash rule; `node`, the graph node rendered) plans an
+  export over the library and answers its `request`: each image's file,
+  its head version and its output name, decided now.
+- `import.known` reads what an import's prefilter compares a card with:
+  the library's images as `partials` (`[size, partial hash]`) and their
+  present copies as `present` (`[image, path, size, modified]`).
+- `import.recorded` (`folder`) reads what the image map saw under a
+  folder whose volume is offline: the image files' `sightings`, on the
+  known volume last mounted above it, and that `mount` (null when the
+  folder is on no known volume).
+
+```json
+{"jsonrpc": "2.0", "id": 6, "method": "import.recorded", "params": {"folder": "/media/card/DCIM"}}
+{"jsonrpc": "2.0", "id": 6, "result": {"mount": "/media/card", "sightings": [{"volume": "uuid:a", "rel_path": "DCIM/IMG_0001.CR3", "path": "/media/card/DCIM/IMG_0001.CR3", "size": 24000000, "modified": 1700000000, "partial": "5e…", "image": null, "taken": 1699990000, "camera": "Canon EOS R6", "presence": "present", "seen_by": "import"}]}}
+```
+
+A thumbnail of a photo's head version reads `library.edit.head` through
+the desktop's read cache.
 
 ## Promises
 
