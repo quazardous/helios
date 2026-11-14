@@ -762,6 +762,7 @@ fn the_cli_imports_through_the_node_holding_the_vault() {
     let (code, out, err) = helios_cli(
         &[
             "import",
+            "--wait",
             "--vault",
             file.to_str().unwrap(),
             roll.to_str().unwrap(),
@@ -827,6 +828,7 @@ fn with_no_node_the_cli_starts_one_shared_and_it_exits_when_idle() {
                 helios_cli(
                     &[
                         "import",
+                        "--wait",
                         "--vault",
                         file.to_str().unwrap(),
                         roll.to_str().unwrap(),
@@ -910,6 +912,7 @@ fn the_cli_reaches_the_desktops_node_through_its_rendezvous() {
     let (code, out, err) = helios_cli(
         &[
             "import",
+            "--wait",
             "--vault",
             file.to_str().unwrap(),
             roll.to_str().unwrap(),

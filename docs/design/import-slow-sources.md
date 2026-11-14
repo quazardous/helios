@@ -287,6 +287,15 @@ token bucket per account.
    rule}`; the job lists through the connector and imports page by page;
    "Import all" / "Import new" enabled at once; the window shows the job's
    progress and may close. Local sources first.
+   Node part done: `library.import {source, rule}` (`all`, `new`,
+   `{items}`) answers a promise of kind `import` (resumable), on the
+   desktop's endpoint and the headless node; `helios import` prints the
+   promise, `--wait` waits. A local source is listed through the folder
+   connector (the count so far as progress), then imported file by file
+   in one run (one history record, the card's safe-to-format check);
+   interleaving pages of listing and import comes with paged connectors
+   (slice 4). Left: the import window hands off to it (the promise line,
+   Cancel, closable) and the Library shows running import promises.
 4. **Google Photos on the same job.** The pick's pages stream to the grid
    and the job; downloads go through the per-account bucket, two at a
    time; quota and refused-refresh pauses.
