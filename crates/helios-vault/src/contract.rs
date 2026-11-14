@@ -68,6 +68,8 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     photo_files_are_one_photo_s_rows_read_by_photo_file_and_window(make());
     removing_an_image_drops_its_photo_file_rows(make());
     files_attach_detach_hold_and_undo(make());
+    two_photos_are_paired_unpaired_and_undone(make());
+    pairing_refuses_what_is_no_pair(make());
 }
 
 /// For a store with read handles ([`Store::reader`]): a read that is not
@@ -3500,4 +3502,158 @@ fn files_attach_detach_hold_and_undo<S: Store>(mut s: S) {
     let kept = v.revert(&attached).unwrap();
     assert_eq!(kept.kept, 1, "{kept:?}");
     assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().photo, other);
+}
+
+/// Pair (`docs/design/raw-jpeg-pairs.md`): the RAW stays the photo, its
+/// marks merged with the JPEG's, the JPEG its `camera` file off the
+/// Library, its album place and stack place taken by the RAW; one step
+/// undone and redone. Unpair makes the JPEG a photo again, with the
+/// photo's marks and its own versions.
+fn two_photos_are_paired_unpaired_and_undone<S: Store>(mut s: S) {
+    use crate::versions::Version;
+    for i in 1..=4 {
+        s.add_to_library(&image(i)).unwrap();
+    }
+    let (raw, jpeg, other, fourth) = (image(1).id, image(2).id, image(3).id, image(4).id);
+    // Marks set by an import, never audited: an undo sets them back too.
+    s.set_field(&raw, RATING, Some(&json!(3))).unwrap();
+    s.set_field(&raw, LABELS, Some(&json!(["red"]))).unwrap();
+    s.set_field(&jpeg, RATING, Some(&json!(5))).unwrap();
+    s.set_field(&jpeg, TAGS, Some(&json!(["sea"]))).unwrap();
+    s.set_field(&jpeg, PICKED, Some(&json!(true))).unwrap();
+    let v = Vault::new(s);
+    let edit = Version::new(jpeg, Vec::new(), json!({ "exposure": 1 }), "user", 2);
+    v.add_version(&edit).unwrap();
+    let (_, _) = v
+        .create_album(Some("trip"), "Trip", &[other, jpeg])
+        .unwrap();
+    let burst = v
+        .create_stack(&[jpeg, other, fourth], Some(jpeg), "user", 3)
+        .unwrap();
+
+    let (paired, step) = v.pair(&[(raw, jpeg)], "user", 10).unwrap();
+    assert_eq!(paired.len(), 1);
+    assert_eq!(paired[0].photo, raw.hex());
+    assert_eq!(paired[0].hidden_versions, 1);
+    assert_eq!(paired[0].conflicts.len(), 1, "two ratings: {paired:?}");
+    assert_eq!(paired[0].conflicts[0].mark, RATING);
+    // One photo: the RAW's marks with the JPEG's merged in.
+    let field =
+        |id: &ImageId, name: &str| v.fields_of(&[*id], &[name]).unwrap()[0].get(name).cloned();
+    assert_eq!(field(&raw, RATING), Some(json!(3)));
+    assert_eq!(field(&raw, TAGS), Some(json!(["sea"])));
+    assert_eq!(field(&raw, PICKED), Some(json!(true)));
+    assert_eq!(field(&raw, LABELS), Some(json!(["red"])));
+    assert!(!v.in_library(&jpeg).unwrap(), "the JPEG off the Library");
+    assert!(v.holds(&jpeg).unwrap(), "held as the photo's file");
+    assert_eq!(
+        v.photo_of(&jpeg).unwrap().unwrap().role,
+        crate::FileRole::Camera
+    );
+    assert_eq!(
+        v.album("trip").unwrap().unwrap().images,
+        vec![other.hex(), raw.hex()]
+    );
+    let stack = v.stack(&burst.id).unwrap().unwrap();
+    assert_eq!(stack.top, raw.hex(), "the RAW took the JPEG's place on top");
+    assert!(stack.contains(&raw) && !stack.contains(&jpeg));
+    // Audited on both.
+    let last = |id: &ImageId| v.audit(id).unwrap().last().unwrap().field.clone();
+    assert_eq!(last(&jpeg), crate::files::PHOTO_FILE);
+    assert_eq!(last(&raw), crate::files::PHOTO_FILE);
+
+    // Undone: two photos again, each with its own marks, album and stack.
+    v.revert(&step).unwrap();
+    assert!(v.in_library(&jpeg).unwrap());
+    assert_eq!(v.photo_of(&jpeg).unwrap(), None);
+    assert_eq!(field(&raw, TAGS), None);
+    assert_eq!(field(&raw, PICKED), None);
+    assert_eq!(field(&raw, RATING), Some(json!(3)));
+    assert_eq!(
+        v.album("trip").unwrap().unwrap().images,
+        vec![other.hex(), jpeg.hex()]
+    );
+    assert_eq!(v.stack(&burst.id).unwrap().unwrap().top, jpeg.hex());
+    // Redone: one photo again.
+    v.replay(&step).unwrap();
+    assert!(!v.in_library(&jpeg).unwrap());
+    assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+    assert_eq!(field(&raw, TAGS), Some(json!(["sea"])));
+
+    // Unpair (by the photo): the JPEG is a photo again, with a copy of
+    // the photo's marks, beside it in its album, its version back.
+    v.apply(
+        &[Command::set(raw, TITLE_FIELD, json!("Harbour"))],
+        "user",
+        None,
+        11,
+    )
+    .unwrap();
+    let (unpaired, undo) = v.unpair(&[raw], "user", 12).unwrap();
+    assert_eq!(unpaired.len(), 1);
+    assert_eq!(
+        (unpaired[0].file.clone(), unpaired[0].versions),
+        (jpeg.hex(), 1)
+    );
+    assert!(v.in_library(&jpeg).unwrap());
+    assert_eq!(v.photo_of(&jpeg).unwrap(), None);
+    assert_eq!(field(&jpeg, TITLE_FIELD), Some(json!("Harbour")));
+    assert_eq!(field(&jpeg, LABELS), Some(json!(["red"])));
+    assert_eq!(v.heads(&jpeg).unwrap().len(), 1, "its own version");
+    assert_eq!(
+        v.album("trip").unwrap().unwrap().images,
+        vec![other.hex(), raw.hex(), jpeg.hex()]
+    );
+    assert!(
+        v.unpair(&[raw], "user", 13).is_err(),
+        "nothing left to unpair"
+    );
+    // Unpair undone: the pair again; redone: two photos.
+    v.revert(&undo).unwrap();
+    assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+    assert!(!v.in_library(&jpeg).unwrap());
+    assert_eq!(field(&jpeg, TITLE_FIELD), None);
+    v.replay(&undo).unwrap();
+    assert!(v.in_library(&jpeg).unwrap());
+    // Unpair by the file works the same.
+    v.revert(&undo).unwrap();
+    let (by_file, _) = v.unpair(&[jpeg], "user", 14).unwrap();
+    assert_eq!(by_file[0].photo, raw.hex());
+}
+
+const TITLE_FIELD: &str = crate::fields::TITLE;
+
+/// Pairing refuses the same image twice, images off the Library, a file
+/// already paired and a RAW that has its camera file; nothing is written.
+fn pairing_refuses_what_is_no_pair<S: Store>(mut s: S) {
+    for i in 1..=5 {
+        s.add_to_library(&image(i)).unwrap();
+    }
+    s.set_library_flag(&image(5).id, &crate::LibraryFlag::default())
+        .unwrap();
+    let v = Vault::new(s);
+    let (a, b, c, d, off) = (
+        image(1).id,
+        image(2).id,
+        image(3).id,
+        image(4).id,
+        image(5).id,
+    );
+    let refused = |pairs: &[(ImageId, ImageId)], what: &str| {
+        assert!(v.pair(pairs, "user", 1).is_err(), "{what} is refused");
+    };
+    refused(&[], "nothing");
+    refused(&[(a, a)], "a photo with itself");
+    refused(&[(a, b), (c, b)], "an image in two pairs");
+    refused(&[(a, off)], "a photo off the Library");
+    refused(&[(a, image(9).id)], "an unknown image");
+    v.pair(&[(a, b)], "user", 2).unwrap();
+    refused(&[(c, b)], "a file already paired");
+    refused(&[(b, c)], "a file made a photo");
+    refused(&[(a, c)], "a RAW with a camera file");
+    // All or nothing: a good pair beside a refused one is not made.
+    refused(&[(c, d), (a, off)], "a batch with one refused");
+    assert_eq!(v.photo_of(&d).unwrap(), None);
+    assert!(v.in_library(&d).unwrap());
+    assert!(v.unpair(&[c], "user", 3).is_err(), "no file to unpair");
 }

@@ -362,6 +362,35 @@ Ctrl+Z); each change is announced as `vault.stack_changed`:
 {"id": 13, "result": {"ungrouped": 1, "stacks": ["c3d9…"], "changes": {…}}}
 ```
 
+RAW+JPEG pairs ([design/raw-jpeg-pairs.md](design/raw-jpeg-pairs.md)): a
+raw and the camera's JPEG or HEIF of one shot are one photo with two
+files. `library.pairs.pair` (`images`, `exact`) finds the pairs among the
+photos given (the whole Library when `images` is absent: the health
+check's offer), by name in one folder, else by capture time and camera;
+with `exact`, or when two photos are given and no pair is found, the two
+are paired as they are (a raw and a JPEG or HEIF). Each pair becomes the
+raw's photo, the JPEG its `camera` file, off the Library on its own. The
+marks are merged: a single-valued mark (rating, flag, rotation, title,
+description) is the raw's when set, else the JPEG's, and two set values
+that differ keep the raw's and are listed in `conflicts`; labels and
+tags are united; the JPEG's place in albums and stacks goes to the raw;
+the JPEG's versions are kept hidden (`hidden_versions`) until Unpair.
+`library.pairs.unpair` (`images`: photos or their files) makes each file
+a photo of its own again, in the Library with a copy of the photo's
+marks, beside it in its albums, its own versions back. Both answer
+`changes`, one step the vault's revert undoes; a pair refused (an image
+twice, one off the Library, a file paired already) writes nothing:
+
+```json
+{"id": 14, "method": "library.pairs.pair", "params": {"images": ["4f1c…", "77b0…"]}}
+{"id": 14, "result": {"paired": 1, "conflicts": 1, "pairs": [{"photo": "4f1c…",
+ "file": "77b0…", "conflicts": [{"mark": "rating", "kept": 2, "dropped": 4}],
+ "hidden_versions": 0}], "changes": {…}}}
+{"id": 15, "method": "library.pairs.unpair", "params": {"images": ["4f1c…"]}}
+{"id": 15, "result": {"unpaired": 1, "files": [{"photo": "4f1c…", "file": "77b0…",
+ "versions": 0}], "changes": {…}}}
+```
+
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to
 the system trash (Lightroom's "Delete from Disk", darktable's "delete
 (trash)") as a journaled job (`helios_library::trash`). The job is kept
