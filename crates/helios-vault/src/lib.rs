@@ -1686,6 +1686,27 @@ impl<S: Store> Vault<S> {
         Ok(new)
     }
 
+    /// Records the file at `path`, with the `size` and modification time
+    /// it had when read, as holding the known image `id`: a location seen
+    /// at `now`, the Library flag left as it is. What a copy import notes
+    /// of its source, read whole while copied, so a later import of the
+    /// same file unchanged knows it without a read.
+    pub fn record_read(
+        &self,
+        path: &Path,
+        id: ImageId,
+        size: u64,
+        modified: u64,
+        now: u64,
+    ) -> Result<(), String> {
+        let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        self.transaction(|store| {
+            store.put_location(&id, &Location::seen(path, size, modified, now))
+        })?;
+        self.placed([id]);
+        Ok(())
+    }
+
     /// Every location, with its image.
     pub fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
         self.read(Store::all_locations)
