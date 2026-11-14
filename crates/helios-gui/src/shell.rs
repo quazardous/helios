@@ -242,6 +242,8 @@ enum Action {
     /// Show a folder in the file manager (`library.openFolder`'s
     /// arguments).
     OpenFolder(Value),
+    /// Choose the library folder (`library.chooseFolder`'s arguments).
+    ChooseLibraryFolder(Value),
     Fullscreen,
     Minimize,
     Maximize,
@@ -3250,6 +3252,14 @@ impl Shell {
             Box::new(|a, _| Ok(Action::OpenFolder(a.clone()))),
         );
         add(
+            CommandSpec::new(
+                helios_health::checks::CHOOSE_LIBRARY_FOLDER,
+                "Choose the library folder imports copy photos into (`path`; asked through the folder chooser when absent)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::ChooseLibraryFolder(a.clone()))),
+        );
+        add(
             CommandSpec::new("vault.next", "Select the next image", "Library"),
             Box::new(|_, _| Ok(Action::Step(1))),
         );
@@ -6013,6 +6023,7 @@ impl Shell {
             Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
+            Action::ChooseLibraryFolder(args) => return self.choose_library_folder(&args),
             Action::ToggleStack => self
                 .focus
                 .library
