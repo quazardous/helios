@@ -15,6 +15,9 @@
 //! - `health.ignore` (`{"id", "on"}`): ignores a finding, or shows it
 //!   again.
 //! - `health.checkNow`: runs the checks again.
+//! - `library.chooseFolder` (`{"path"}`, asked through the folder chooser
+//!   without it): sets the library folder, then runs the checks again;
+//!   the fix of "No library folder chosen".
 //!
 //! The checks run as background jobs ([`helios_health::runner`]): all a
 //! while after start, then each as often as it declares (daily by
@@ -26,11 +29,14 @@
 //! node keeps its schedule with or without a window, and the shell holds
 //! a handle on the same runner to show its findings.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use egui::Context as Egui;
+use egui_pop::api::files::{self, FILES, FileRequest};
+use egui_pop::api::host::Pending;
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
 use helios_health::runner::Runner;
@@ -89,6 +95,8 @@ pub(crate) struct HealthPage {
     plugins: crate::config::plugins::Shared,
     /// The context keys set on, for the groups with findings.
     keys: Vec<String>,
+    /// The folder chooser asked for the library folder.
+    choosing_folder: Option<Pending>,
 }
 
 impl HealthPage {
@@ -331,6 +339,67 @@ impl Shell {
         Ok(json!({ "id": id, "ignored": on }))
     }
 
+    /// `library.chooseFolder`: sets the library folder to `path`, or asks
+    /// for it through the folder chooser (set once chosen); the checks
+    /// then run again.
+    pub(super) fn choose_library_folder(&mut self, args: &Value) -> Result<Value, String> {
+        if let Some(path) = args["path"].as_str().filter(|p| !p.is_empty()) {
+            self.set_library_folder(Path::new(path))?;
+            return Ok(json!({ "path": path }));
+        }
+        let app = self.core.app.handle();
+        let f = app.service(&FILES).ok_or("no folder chooser")?;
+        let title = Message::new("gui-pick-choose-folder", "Choose the library folder…");
+        let title = self
+            .core
+            .health
+            .ctx
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or_else(
+                || title.english.clone(),
+                |c| crate::i18n::text(c, title.clone()),
+            );
+        let request = FileRequest::folder(&title).purpose("helios.library.folder");
+        self.core.health.choosing_folder = Some(f.choose(app, request));
+        Ok(json!({ "asked": true }))
+    }
+
+    /// Remembers `dir` as the library folder, and runs the checks again.
+    fn set_library_folder(&mut self, dir: &Path) -> Result<(), String> {
+        let library = self
+            .import
+            .get_mut()
+            .accounts
+            .library
+            .clone()
+            .ok_or("no library to choose a folder for")?;
+        library.set(dir)?;
+        self.health_check_now();
+        Ok(())
+    }
+
+    /// The folder the chooser gave for the library, set.
+    fn receive_library_folder(&mut self) {
+        let Some(result) = self
+            .core
+            .health
+            .choosing_folder
+            .as_ref()
+            .and_then(Pending::take)
+        else {
+            return;
+        };
+        self.core.health.choosing_folder = None;
+        if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
+            && let Some(p) = paths.into_iter().next()
+            && let Err(e) = self.set_library_folder(&p)
+        {
+            log::warn!("library folder: {e}");
+        }
+    }
+
     /// Before the bar is drawn: a run when one is due, and the badge's
     /// worst finding; the page read again when a run starts or ends.
     pub(super) fn health_tick(&mut self, ctx: &Egui) {
@@ -357,6 +426,7 @@ impl Shell {
             });
             self.core.health.listening = true;
         }
+        self.receive_library_folder();
         let generation = self
             .core
             .health
