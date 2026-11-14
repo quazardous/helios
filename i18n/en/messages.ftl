@@ -2721,6 +2721,10 @@ health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
 
+init-library-folder = Library folder
+
+init-library-folder-why = Imports copy photos into it, and picked photos go there.
+
 look-load-failed = cannot read the photo: { $error }
 
 look-render-failed = cannot render the raw: { $error }

@@ -55,6 +55,7 @@ helios-colour = { path = "crates/helios-colour" }
 helios-storage = { path = "crates/helios-storage" }
 helios-connect = { path = "crates/helios-connect" }
 helios-health = { path = "crates/helios-health" }
+helios-init = { path = "crates/helios-init" }
 helios-node-core = { path = "crates/helios-node-core" }
 helios-cache = { path = "crates/helios-cache" }
 helios-controls = { path = "crates/helios-controls" }
