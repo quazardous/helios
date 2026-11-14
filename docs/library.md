@@ -489,6 +489,7 @@ each a command a profile or a template may rebind (the whole map is in
 | B | `library.quick.toggle` (the quick collection) |
 | Ctrl+Shift+K | `library.filter.switch` (the recent filters; not while typing) |
 | Ctrl+Shift+A, Ctrl+I | `library.select.none`, `library.select.invert` (not while typing) |
+| Delete | `library.remove` (Remove from Library; not while typing) |
 | Left, Right | `vault.previous`, `vault.next` |
 | Backspace, Space (culling only) | `vault.previous`, `vault.next` |
 
@@ -507,6 +508,16 @@ selection, replacing theirs:
 ```bash
 helios run library.marks.paste --json '{"marks":["tags","title"],"mode":"overwrite"}'
 ```
+
+**Remove from Library** (2026-11-14): Delete in the grid, or the
+grid's context menu, takes the selected photos out of the Library
+(`library.remove`, `images` else the selection), as Lightroom's "Remove
+from Catalog": only their Library flag changes; their files, marks,
+edits and stacks' records stay, and an import finds them again by their
+hash. It is one step of the library's history: Ctrl+Z puts them back.
+Nothing is asked first, since nothing is lost. The desktop writes it
+through the node's `library.images.remove` (docs/protocol.md). Moving
+files to the system trash is a later step.
 
 `vault.autoAdvance` (or the Auto-advance box) moves the cursor to the
 next image after each mark, as Lightroom's Caps Lock mode. The grid's

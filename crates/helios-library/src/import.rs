@@ -525,6 +525,103 @@ pub fn set_library_root<S: Store>(vault: &Vault<S>, root: &Path) -> Result<(), S
     vault.set_library_document(SETTINGS, ROOT, Some(&json!({ "path": root })))
 }
 
+/// The room a library folder needs at least to be offered: 1 GiB.
+pub const LIBRARY_FOLDER_ROOM: u64 = 1 << 30;
+
+/// What is wrong with a folder chosen as the library folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FolderProblem {
+    /// Not a full path (`Photos`, `~/Photos`).
+    NotAbsolute,
+    /// It cannot be made, or written in (the system's reason).
+    NotWritable(String),
+    /// Less than [`LIBRARY_FOLDER_ROOM`] free on its disk.
+    NoRoom { free: u64 },
+}
+
+impl FolderProblem {
+    /// For people.
+    pub fn message(&self) -> helios_core::Message {
+        use helios_core::Message;
+        match self {
+            FolderProblem::NotAbsolute => Message::new(
+                "library-folder-not-absolute",
+                "Give the folder's full path.",
+            ),
+            FolderProblem::NotWritable(why) => Message::new(
+                "library-folder-not-writable",
+                "Helios cannot write in this folder: { $why }",
+            )
+            .with("why", why.clone()),
+            FolderProblem::NoRoom { free } => Message::new(
+                "library-folder-no-room",
+                "This disk has { $free } MiB free: choose a folder with room for photos.",
+            )
+            .with("free", (free >> 20).to_string()),
+        }
+    }
+}
+
+/// Checks `dir` can be the library folder: a full path, made if missing,
+/// written in (a file written and removed), with room left on its disk
+/// (where the disk says how much).
+///
+/// # Errors
+/// What is wrong with it.
+pub fn check_library_folder(dir: &Path) -> Result<(), FolderProblem> {
+    if !dir.is_absolute() {
+        return Err(FolderProblem::NotAbsolute);
+    }
+    std::fs::create_dir_all(dir).map_err(|e| FolderProblem::NotWritable(e.to_string()))?;
+    let probe = dir.join(format!(".helios-write-test-{}", std::process::id()));
+    std::fs::write(&probe, b"helios").map_err(|e| FolderProblem::NotWritable(e.to_string()))?;
+    let _ = std::fs::remove_file(&probe);
+    match helios_storage::detect::free_space(dir) {
+        Some(free) if free < LIBRARY_FOLDER_ROOM => Err(FolderProblem::NoRoom { free }),
+        _ => Ok(()),
+    }
+}
+
+/// What is wrong with `dir` as the library folder, read without writing
+/// anything (as it is typed): a full path whose nearest folder that
+/// exists is a folder not read-only, with room left on its disk.
+/// [`check_library_folder`] makes it and writes in it.
+pub fn library_folder_problem(dir: &Path) -> Option<FolderProblem> {
+    if !dir.is_absolute() {
+        return Some(FolderProblem::NotAbsolute);
+    }
+    let existing = dir.ancestors().find(|a| a.exists())?;
+    match std::fs::metadata(existing) {
+        Ok(m) if !m.is_dir() => {
+            return Some(FolderProblem::NotWritable(format!(
+                "{} is a file",
+                existing.display()
+            )));
+        }
+        Ok(m) if m.permissions().readonly() => {
+            return Some(FolderProblem::NotWritable(format!(
+                "{} is read-only",
+                existing.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(e) => return Some(FolderProblem::NotWritable(e.to_string())),
+    }
+    match helios_storage::detect::free_space(existing) {
+        Some(free) if free < LIBRARY_FOLDER_ROOM => Some(FolderProblem::NoRoom { free }),
+        _ => None,
+    }
+}
+
+/// The library folder offered first: the platform's Pictures folder's
+/// `Helios` (`~/Pictures/Helios`), `None` without a home folder.
+pub fn suggested_library_folder() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())?;
+    Some(PathBuf::from(home).join("Pictures").join("Helios"))
+}
+
 // What a source is and the image files it holds: the folder and card
 // connectors' walk (`helios_connect::local`), so the import reads what the
 // import window listed.

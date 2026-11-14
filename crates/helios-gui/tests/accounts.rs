@@ -1090,7 +1090,9 @@ fn picking_world_with(
     let sessions = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let (opened, folder, imported) = (
         Opened::default(),
-        Arc::new(Folder::default()),
+        // Helios's first-run setup done: the library has its folder, so
+        // the import window opens at once.
+        Arc::new(Folder(std::sync::Mutex::new(Some(std::env::temp_dir())))),
         Imported::default(),
     );
     let mut shell = Shell::new(helios_panels(), None);
@@ -1139,8 +1141,8 @@ fn picking_world_with(
     (h, opened, folder, imported, sessions)
 }
 
-/// The whole flow from a fresh profile (no saved source, no Into, no
-/// library folder), the account not connected yet: connect it in the
+/// The whole flow from a fresh profile past Helios's first-run setup (no
+/// saved source, no Into), the account not connected yet: connect it in the
 /// Detail column, choose photos, see them in the middle, import them.
 /// No folder is ever asked: they go to the connector's `download`
 /// folder, shown pre-filled in the Parameters.
@@ -1152,7 +1154,7 @@ fn from_a_fresh_profile_connect_choose_and_import_into_the_download_folder() {
     until(&mut h, connect, |h| shown(h, connect));
     // Pre-filled, editable; no Into nor Name for a download.
     assert!(shown(&h, "Download into"));
-    let _ = h.get_by_value(DOWNLOAD);
+    assert!(h.query_all_by_value(DOWNLOAD).next().is_some(), "pre-filled");
     assert!(!shown(&h, "Copy into the Library"));
     h.get_by_label(connect).click();
     until(&mut h, "the form", |h| connection(h)["state"] == "form");
@@ -1193,7 +1195,7 @@ fn from_a_fresh_profile_connect_choose_and_import_into_the_download_folder() {
         .service(&egui_pop::api::files::FILES)
         .expect("the files service");
     assert!(files.open_ids().is_empty(), "no folder chooser");
-    assert_eq!(*folder.0.lock().unwrap(), None);
+    assert_eq!(*folder.0.lock().unwrap(), Some(std::env::temp_dir()));
 }
 
 /// A saved source of the account, its own download folder set.
@@ -1218,7 +1220,7 @@ fn a_source_s_own_download_folder_takes_the_picked_photos_without_asking() {
     assert_eq!(opened.urls().len(), 1);
     // Nothing asked, nothing remembered as the library's.
     assert!(!shown(&h, "Choose the folder…"));
-    assert_eq!(*folder.0.lock().unwrap(), None);
+    assert_eq!(*folder.0.lock().unwrap(), Some(std::env::temp_dir()));
 }
 
 /// A connector declaring three browsers: the Contents column offers

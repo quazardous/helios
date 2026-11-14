@@ -347,12 +347,12 @@ impl Check for Library {
 pub const FOLDER_CHOSEN: &str = "library.folder";
 
 /// Where "Choose a folder…" leads when no library folder is chosen: the
-/// one place to change when the first-run setup gets its folder step.
-pub const CHOOSE_LIBRARY_FOLDER: &str = "library.chooseFolder";
+/// first-run setup's library folder step.
+pub const CHOOSE_LIBRARY_FOLDER: &str = "init.libraryFolder";
 
 /// A library folder is chosen: the folder imports copy photos into. None
-/// chosen (unset, or an empty path) is a warning; a folder chosen but
-/// gone is not this check's (the scan and the backups see it).
+/// chosen (unset, or an empty path) is a warning; so is a folder chosen
+/// but gone, or read-only, with the same fix.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FolderChosen;
 
@@ -375,7 +375,29 @@ impl Check for FolderChosen {
         let Some(folder) = &ctx.library_folder else {
             return Vec::new();
         };
+        let fix = || Fix {
+            command: CHOOSE_LIBRARY_FOLDER.into(),
+            args: json!({}),
+            label: Message::new("health-fix-choose-library-folder", "Choose a folder…"),
+        };
         match folder.as_deref().filter(|p| !p.as_os_str().is_empty()) {
+            Some(path) if !writable_dir(path) => vec![
+                Finding::new(
+                    FOLDER_CHOSEN,
+                    "",
+                    Level::Warning,
+                    Message::new(
+                        "health-library-folder-unwritable",
+                        "The library folder cannot be written",
+                    ),
+                    Message::new(
+                        "health-library-folder-unwritable-detail",
+                        "{ $folder } is missing or read-only: imports cannot copy photos into it.",
+                    )
+                    .with("folder", path.display().to_string()),
+                )
+                .fix(fix()),
+            ],
             Some(path) => vec![Finding::new(
                 FOLDER_CHOSEN,
                 "",
@@ -395,14 +417,15 @@ impl Check for FolderChosen {
                         "Imports that copy photos and picked photos have nowhere to go: they ask for a folder first.",
                     ),
                 )
-                .fix(Fix {
-                    command: CHOOSE_LIBRARY_FOLDER.into(),
-                    args: json!({}),
-                    label: Message::new("health-fix-choose-library-folder", "Choose a folder…"),
-                }),
+                .fix(fix()),
             ],
         }
     }
+}
+
+/// `path` is a folder, not marked read-only.
+fn writable_dir(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_dir() && !m.permissions().readonly())
 }
 
 pub const CHANGED_OUTSIDE: &str = "library.changed-outside";
@@ -554,7 +577,8 @@ mod tests {
             })
         };
         assert!(run(None).is_empty(), "no vault read: nothing to say");
-        for unset in [None, Some(PathBuf::new())] {
+        let gone = PathBuf::from("/nowhere/helios-test/Pictures/Helios");
+        for unset in [None, Some(PathBuf::new()), Some(gone)] {
             let found = run(Some(unset));
             assert_eq!(found.len(), 1);
             assert_eq!(found[0].level, Level::Warning);
@@ -562,7 +586,7 @@ mod tests {
             let fix = found[0].fix.as_ref().unwrap();
             assert_eq!(fix.command, CHOOSE_LIBRARY_FOLDER);
         }
-        let found = run(Some(Some(PathBuf::from("/home/me/Pictures/Helios"))));
+        let found = run(Some(Some(std::env::temp_dir())));
         assert_eq!(found[0].level, Level::Ok);
         assert!(found[0].fix.is_none());
     }

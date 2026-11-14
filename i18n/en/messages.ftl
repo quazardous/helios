@@ -399,15 +399,9 @@ gui-choose-copy-link = Copy the link
 
 gui-choose-identity = Reconnect once to show which account this is.
 
-gui-choose-into = Choose the folder…
-
-gui-choose-library-unread = Could not read the library folder: { $why }
-
 gui-choose-more-hint = Opens the page again: the photos chosen there are added to these
 
 gui-choose-more-short = Choose more…
-
-gui-choose-no-into = Choose where the photos are copied first: Into, in the Choices column.
 
 gui-choose-not-connected = This account is not connected.
 
@@ -727,6 +721,8 @@ gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
 
+gui-history-library-remove = Remove { $count } photos from the Library
+
 gui-history-preview-applied = applied
 
 gui-history-preview-bypassed = bypassed
@@ -876,6 +872,8 @@ gui-import-metadata = { $photos } photos took their ratings, labels or tags from
 gui-import-no-library = No library is open: start Helios with one (--vault FILE) to import photos
 
 gui-import-no-library-error = No library is open: { $error }
+
+gui-import-no-library-folder = Choose a library folder first: imports copy photos into it (Helios menu › Set up Helios…).
 
 gui-import-path = card or folder
 
@@ -1065,6 +1063,16 @@ gui-importer-scanned = { $importer }: { $found } photos found in { $source }, { 
 
 gui-importer-warning = { $importer }: { $warning }
 
+gui-init-library-folder-choose = Choose…
+
+gui-init-library-folder-help = A folder on a disk with room for your photos; it is made if missing.
+
+gui-init-wizard = Set up Helios
+
+gui-init-wizard-about = A few choices before the first photos: each can be changed later.
+
+gui-init-wizard-finish = Finish
+
 gui-job-backup-done = Backup finished
 
 gui-job-backup-failed = Backup failed
@@ -1219,6 +1227,8 @@ gui-library-no-cursor = No image under the cursor
 
 gui-library-none = No images
 
+gui-library-not-removed = The photos were not removed from the Library: { $error }
+
 gui-library-not-saved = Not saved, the library shows what was saved last: { $error }
 
 gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
@@ -1246,6 +1256,8 @@ gui-library-quick-toggle = Add or remove the selected photos
 gui-library-read = { $count } images in the library
 
 gui-library-reading = Reading the library…
+
+gui-library-remove = Remove from Library
 
 gui-library-search = Search images
 
@@ -2631,6 +2643,10 @@ health-library-folder-ok = A library folder is chosen
 
 health-library-folder-ok-detail = { $folder }
 
+health-library-folder-unwritable = The library folder cannot be written
+
+health-library-folder-unwritable-detail = { $folder } is missing or read-only: imports cannot copy photos into it.
+
 health-library-no-room = The library's disk is almost full
 
 health-library-no-room-detail = { $free } free of { $capacity } on { $volume }: the library needs room to grow.
@@ -2732,6 +2748,12 @@ health-vault-unreadable-detail = { $file }: { $error }
 init-library-folder = Library folder
 
 init-library-folder-why = Imports copy photos into it, and picked photos go there.
+
+library-folder-no-room = This disk has { $free } MiB free: choose a folder with room for photos.
+
+library-folder-not-absolute = Give the folder's full path.
+
+library-folder-not-writable = Helios cannot write in this folder: { $why }
 
 look-load-failed = cannot read the photo: { $error }
 

@@ -25,13 +25,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{Image, ImageId, LibraryFlag, Location, Store, Vault, Version};
 
 /// The rows of one image.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageRows {
     pub image: Image,
     /// Whether it is in the Library.
@@ -59,7 +59,7 @@ impl ImageRows {
 }
 
 /// One image's rows before and after a step (`None`: not in the vault).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Change {
     pub image: ImageId,
     pub before: Option<ImageRows>,
@@ -75,7 +75,7 @@ impl Change {
 
 /// A document before and after a step (`None`: not there), as the
 /// Library's collections change ([`crate::collections`]).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentChange {
     pub ns: String,
     pub key: String,
@@ -84,7 +84,7 @@ pub struct DocumentChange {
 }
 
 /// What a step changed, image by image, and the documents it changed.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Changes {
     pub images: Vec<Change>,
     pub documents: Vec<DocumentChange>,
@@ -163,10 +163,24 @@ impl<S: Store> Vault<S> {
             }
             Ok(done)
         })?;
-        if done.removed + done.restored + done.changed > 0 {
+        let moved = done.removed + done.restored + done.changed;
+        if moved > 0 {
             self.placed(changes.images.iter().map(|c| c.image));
+            self.library_changed(usize::try_from(moved).unwrap_or(usize::MAX));
         }
         Ok(done)
+    }
+
+    /// Announces [`crate::LIBRARY_CHANGED`]: `count` photos moved.
+    pub(crate) fn library_changed(&self, count: usize) {
+        if let Some(bus) = &self.bus {
+            bus.publish_value(
+                "vault",
+                None,
+                crate::LIBRARY_CHANGED,
+                serde_json::json!({ "count": count }),
+            );
+        }
     }
 }
 
