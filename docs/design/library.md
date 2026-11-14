@@ -798,11 +798,31 @@ yet: a job resumed on its own at the node's start, cancelling a job.
 decide in the slice), Ctrl+[ and Ctrl+] (and darktable's equivalents in
 its profile), thumbnails and the loupe rotated without decoding again.
 Test: field commands, a snapshot of a rotated cell.
+Built (2026-11-14): the field is the image's (`rotation`, quarter
+turns clockwise over the EXIF orientation), not a version's: a turn is
+a library mark, as in Lightroom's catalogue, not an edit step.
+`library.rotateLeft` (Ctrl+[), `library.rotateRight` (Ctrl+]) and
+`library.resetRotation` on the selection, through the node's
+`library.images.rotate`, one library history step; the grid, the
+filmstrip and Compare turn their pictures at upload (a thumbnail read
+again from the cache, a head render made again). Not yet: the
+darkroom's image turned, a test snapshot of a turned cell, and the turn
+written to XMP sidecars (L14).
 
 **L10. Versions in the grid.** "Duplicate" makes a new head from the
 current or the original edit; the grid shows heads per L-C5 (badge and
 strip, cells as an option). Test: vault heads; a snapshot of both
 views. Focus: the view option is the focus's.
+
+Part 1 built (2026-11-14): `library.duplicate` (Ctrl+', darktable's
+Ctrl+D) and `library.duplicateOriginal` (darktable's Ctrl+Shift+D)
+through the node's `library.images.duplicate`. A copy of the current
+edit continues the same parents as its source (a sibling, so both stay
+heads and share the history before), a copy of the original is a first
+edit; the edit carries a `duplicate` number so equal edits stay apart.
+The grid's badge counts heads (`library.versions.heads`, one scan of the
+versions' links). Not yet: the version strip, the cells option, undo
+and removal of a copy, the snapshots.
 
 **L11. Manual stacks and pairs.** Group the selection (Ctrl+G), ungroup
 (Ctrl+Shift+G), set the top; RAW+JPEG pairs stacked at import (L-C6).
