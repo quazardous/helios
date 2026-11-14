@@ -96,11 +96,15 @@ fn item_ui(
     let pin_size = body + 4.0;
     let inner = rect.shrink2(egui::vec2(6.0, 5.0));
     let mut pin = false;
-    ui.scope_builder(
+    // A child in the item's rect, never allocating past it.
+    let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(inner)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| {
+    );
+    {
+        let ui = &mut child;
+        {
             ui.set_clip_rect(rect.intersect(ui.clip_rect()));
             ui.add(item.icon.size(Size::Toolbar));
             let text_width = (ui.available_width() - pin_size - 4.0).max(0.0);
@@ -158,8 +162,8 @@ fn item_ui(
             if button.on_hover_text(text).clicked() {
                 pin = true;
             }
-        },
-    );
+        }
+    }
     let response = match &item.hover {
         Some(h) => response.on_hover_text(h),
         None => response,

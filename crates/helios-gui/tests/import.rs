@@ -479,8 +479,15 @@ fn the_sources_column_s_panels_select_one_source_at_a_time() {
     h.get_by_label("Garden").click();
     h.run_steps(3);
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&two));
-    assert!(h.get_by_label("Garden").accesskit_node().is_selected() == Some(true));
-    assert!(h.get_by_label("Trip").accesskit_node().is_selected() == Some(false));
+    use egui::accesskit::Toggled;
+    assert_eq!(
+        h.get_by_label("Garden").accesskit_node().toggled(),
+        Some(Toggled::True)
+    );
+    assert_eq!(
+        h.get_by_label("Trip").accesskit_node().toggled(),
+        Some(Toggled::False)
+    );
     read_through(&mut h);
     assert_eq!(h.state().import_counts().selected, 3);
     // Clicked again, it stays the source: never none.
@@ -498,7 +505,8 @@ fn the_sources_column_s_panels_select_one_source_at_a_time() {
         2,
         "Favorites and Folders"
     );
-    let _ = h.get_by_label("Remove from favourites");
+    // Its pin says so in both.
+    assert_eq!(h.query_all_by_label("Remove from favourites").count(), 2);
 }
 
 #[test]
