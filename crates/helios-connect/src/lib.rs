@@ -513,9 +513,28 @@ pub struct ConnectorManifest {
     /// (section 3.9); empty: [`ConnectorManifest::browsers`] derives them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub browsers: Vec<Browser>,
+    /// What the import window's "Add…" wizard asks to set a new source
+    /// of it up (section 3.7); `None`: [`ConnectorManifest::setup`]
+    /// derives it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<Setup>,
 }
 
 impl ConnectorManifest {
+    /// What setting a new source of it up asks: the declared setup, else
+    /// an account's sign-in for a connector that connects one, else
+    /// nothing (the "Add…" wizard does not offer it).
+    pub fn setup(&self) -> Option<Setup> {
+        if let Some(setup) = &self.setup {
+            return Some(setup.clone());
+        }
+        (self.caps.accounts || !self.connect.is_empty()).then(|| Setup {
+            asks: SetupAsks::Account,
+            icon: "cloud".into(),
+            auto: None,
+        })
+    }
+
     /// The browsers its sources are shown in: the ones declared, else
     /// the picker for a connector whose items are picked in the service's
     /// own page, else its albums for one that lists them, else one flat
@@ -582,6 +601,58 @@ impl Browser {
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|b| b.name() == name)
     }
+}
+
+/// How a new source of a connector is set up: the steps the import
+/// window's "Add…" wizard draws for it, so the window names no connector
+/// (section 3.7). Whether it adds in place or copies comes from its
+/// [`Caps`] and source contract; its parameters from its source contract.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Setup {
+    /// What a new source is: the one thing the wizard asks for it.
+    pub asks: SetupAsks,
+    /// Its icon in the wizard and the Sources column: a Phosphor icon's
+    /// name (`folder`, `camera`, `cloud`).
+    pub icon: String,
+    /// The automatic import its sources are offered; `None`: none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto: Option<AutoImport>,
+}
+
+/// What a new source of a connector is set up from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SetupAsks {
+    /// A folder on this machine, typed or chosen.
+    Path,
+    /// A removable volume among those mounted (a card, a camera).
+    Volume,
+    /// An account of the connector, picked or signed in to.
+    #[default]
+    Account,
+}
+
+impl SetupAsks {
+    /// Its name, as the `import.sources.add` command's documentation
+    /// and errors say it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Volume => "volume",
+            Self::Account => "account",
+        }
+    }
+}
+
+/// When a source imports on its own, as its connector offers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoImport {
+    /// When its volume is plugged in.
+    Plugged,
+    /// When new files appear in it.
+    NewFiles,
 }
 
 /// What a connector needs.

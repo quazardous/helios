@@ -69,6 +69,7 @@ impl ConnectorProvider for AlbumsProvider {
                 kind: StepKind::Test,
             }],
             browsers: Vec::new(),
+            setup: None,
         }
     }
 

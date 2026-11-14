@@ -7,9 +7,13 @@
 //! - **History**: the folders imported from lately, newest first, from
 //!   the import history; then the imports themselves, each with "Import
 //!   again".
-//! - **Folders**: the folders saved or given, and "Choose a folder…".
+//! - **Folders**: the folders saved or given.
 //! - **Cards and cameras**: the cards mounted.
-//! - **Services**: the accounts, and "Add a source…".
+//! - **Services**: the accounts.
+//!
+//! One "Add…" button under the title opens the wizard creating a source
+//! of any connector installed ([`crate::shell::import_wizard`]); the
+//! panels only list what exists, an empty one saying so.
 //!
 //! Every item is one size and one shape: an icon, the name, one detail
 //! line (the path, the account's address and state, the last import).
@@ -482,14 +486,25 @@ fn albums_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, id: &str) {
     }
 }
 
-/// The Sources column: its panels, then nothing else.
+/// The Sources column: its title and "Add…", then its panels.
 pub(super) fn sources_ui(
     ui: &mut egui::Ui,
     w: &mut ImportWindow,
     words: &Words,
     event: &mut Option<Event>,
 ) {
-    ui.heading(&words.sources);
+    ui.horizontal(|ui| {
+        ui.heading(&words.sources);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .button(&words.add)
+                .on_hover_text(&words.add_hint)
+                .clicked()
+            {
+                w.open_wizard();
+            }
+        });
+    });
     egui::ScrollArea::vertical()
         .id_salt("helios.import.sources")
         .auto_shrink([false, false])
@@ -609,8 +624,8 @@ pub(super) fn sources_ui(
                     show_item(ui, w, words, &item, event);
                     shown.push(path);
                 }
-                if ui.button(&words.choose).clicked() {
-                    *event = Some(Event::Choose);
+                if shown.is_empty() {
+                    ui.weak(&words.no_folders);
                 }
             });
             panel(ui, &words.cards, |ui| {
@@ -628,8 +643,8 @@ pub(super) fn sources_ui(
                         albums_ui(ui, w, words, id);
                     }
                 }
-                if ui.button(&words.add_source).clicked() {
-                    w.open_wizard();
+                if account_items.is_empty() {
+                    ui.weak(&words.no_services);
                 }
             });
         });

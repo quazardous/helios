@@ -80,6 +80,16 @@ impl Trigger {
     }
 }
 
+impl From<helios_connect::AutoImport> for Trigger {
+    /// The trigger a connector declares in its setup.
+    fn from(auto: helios_connect::AutoImport) -> Self {
+        match auto {
+            helios_connect::AutoImport::Plugged => Self::Plugged,
+            helios_connect::AutoImport::NewFiles => Self::NewFiles,
+        }
+    }
+}
+
 /// "Off", in the same menus.
 pub(super) fn off_message() -> Message {
     Message::new("gui-import-auto-off", "Off")

@@ -332,7 +332,7 @@ the same screens, the same states and the same tests:
   or `not trusted` error from `list` or `fetch` moves the account to
   *needs attention* and the import window offers "Reconnect", which
   replays only the steps that failed.
-- **Where**: "Add a source…" in the import window runs the process for
+- **Where**: "Add…" in the import window (its wizard's account step) runs the process for
   a new account; Settings > Accounts lists every account with its
   status (OK, needs reconnecting, access refused), the saved sources
   using it and its last use, renames it, and offers "Reconnect",
@@ -716,35 +716,69 @@ Automatic imports hung on a source: section 3.10.
 
 ### 3.7 Adding a source: the wizard (as built)
 
-"Add a source…", under the Sources column, opens a wizard in the import
-window: its body shows the steps, Back, Next and Cancel under them.
+One "Add…" button, beside the Sources column's title, opens a wizard in
+the import window (owner, 2026-11-14): its body shows the steps, Back,
+Next and Cancel under them; Cancel or Esc, at any step, leaves
+everything as it was. The panels below only list what exists, an empty
+one saying so. The window knows no connector: every step comes from what
+the connector chosen declares in its manifest's `setup`
+(`helios_connect::Setup`), derived when it declares none (an account's
+sign-in for a connector with a connection process, else not offered):
 
-1. **The kind**, among the connectors installed: Folder, Cards and
-   cameras, then those that sign in to an account (a plugin's, such as
-   Google Photos), each with the one line its manifest gives
-   (`description`). Those needing an account wait for a library open,
-   where accounts are kept.
-2. **Its setup.** A folder is typed or chosen (Next waits for one that
-   exists). An account is picked among the connector's, or signed in to
-   with "Sign in to an account…": the connection dialog runs over the
-   wizard (section 2.4.1), after the plugin's consent when it lacks
-   capabilities, and the account connected there is picked. Cards need
-   nothing: they are listed on their own when inserted, so the wizard
-   says so and stops there.
-3. **The choices**: the Choices column's widgets, started from the
-   window's choices, without those the connector cannot honour (section
-   3.6); for a remote connector, copy is set and darktable edits are off,
-   so a source never keeps a choice it cannot follow.
-4. **A name**, the folder's or the account's to start with.
+```toml
+[setup]
+asks = "path"       # "path": a folder; "volume": a mounted card or camera; "account"
+icon = "folder"     # a Phosphor icon's name
+auto = "new-files"  # the automatic import offered: "plugged", "new-files"; absent: none
+```
+
+Built in, `folder` asks a path (`auto = "new-files"`), `card` a volume
+(`auto = "plugged"`); a plugin's connector asks its account.
+
+1. **The kind**, among the connectors installed that declare a setup,
+   in the order installed: each with its icon, its label and the one
+   line its manifest gives (`description`). Those asking an account
+   wait for a library open, where accounts are kept.
+2. **Its setup**, what `asks` says. A path is typed or chosen (Next
+   waits for a folder that exists). A volume is picked among those
+   mounted ("Insert a card or plug in a camera" when there is none). An
+   account is picked among the connector's, or signed in to with "Sign
+   in to an account…": the connection dialog runs over the wizard
+   (section 2.4.1), after the plugin's consent when it lacks
+   capabilities, and the account connected there is picked. Then the
+   connector's own parameters (its source contract's keys that are not
+   choices).
+3. **How to import**: an import profile (docs/design/import-window.md),
+   the connector's default profile, else Everyday, preselected; each
+   profile said in one line. "Customise…" opens the profile editor in
+   the window; the wizard comes back with the profile left selected
+   there. A connector that cannot add in place (its caps and source
+   contract, section 3.6) says its photos are always copied. "Import
+   automatically" is offered when the connector declares `auto`.
+4. **A name**, the folder's, the volume's label or the account's to
+   start with.
 
 "Add the source" saves it (`Sources::add`, in place of a source of the
-same folder or account) and selects it: a folder is ticked, an account
-clicked, and the column shows its choices under its name. The sources
-saved under a name have their own rows, under "Saved sources": a
-folder's row ticks it, an account's selects it; a named folder is not
-listed again under Recent or Favourites. Cancel, at any step, saves
-nothing; an account signed in to on the way stays an account (Settings >
-Accounts lists it).
+same folder, card or account), pointing at its profile, and selects it:
+the middle zone lists it. An account signed in to on the way and
+cancelled stays an account (Settings > Accounts lists it).
+
+The account's connection and "Choose photos" for a service whose
+photos are chosen in its own page stay in the Detail column: they are
+the account's state and each import's choice, not the source's setup.
+
+**For agents**, `import.sources.add` saves the same source without the
+wizard: `connector` and what its setup asks (`path`; `path` or `volume`,
+a mounted volume's id or label; `account`), then `name`, `profile`,
+`auto` (true: the trigger the connector offers) and `params` (its own
+parameters, checked against its source contract). It answers what it
+saved:
+
+```json
+{"id": "import.sources.add", "params": {"connector": "folder", "path": "/home/ann/Pictures/Trips"}}
+{"connector": "folder", "name": "Trips", "path": "/home/ann/Pictures/Trips", "account": null,
+ "profile": "everyday", "auto": null}
+```
 
 ### 3.8 Editing a source (as built)
 
@@ -1452,13 +1486,14 @@ static registry, as `helios_node::registry()` lists image modules.
 `ConnectorManifest`: id, version, label and description (text keys),
 `caps` (2.2), what it needs (an account and its OAuth endpoints and
 scopes, a USB device, the network), its settings schema, the platforms
-it runs on, and the interface version.
+it runs on, the interface version, and its `setup`: what the import
+window's "Add…" wizard asks to set a new source of it up (section 3.7).
 
 ### 8.2 In the import window
 
 The Sources column lists the registry, not a fixed set: detected
 sources (`caps.detect`) under Devices, signed-in accounts under their
-connector, and "Add a source…" for connectors that need setting up (as
+connector, and one "Add…" for every connector declaring a setup (as
 built, a wizard: section 3.7)
 ("Connect Google Photos…", "Add an S3 bucket…", with the settings form
 built from the manifest's schema). The folder and card connectors are

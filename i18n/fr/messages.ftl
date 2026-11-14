@@ -1131,11 +1131,27 @@ gui-wizard-add = Ajouter la source
 
 gui-wizard-back = Retour
 
-gui-wizard-card = Les cartes et appareils photo apparaissent d’eux-mêmes dans la liste quand ils sont insérés, avec les choix par défaut : il n’y a rien à ajouter.
-
-gui-wizard-choices = Comment ses photos sont importées. Vous pourrez les changer plus tard dans la colonne Choix.
-
 gui-wizard-choose = Choisir…
+
+gui-import-window-add-button = Ajouter…
+
+gui-import-window-add-hint = Ajouter une source : un dossier, une carte, un compte…
+
+gui-import-window-no-folders = Aucun dossier pour l’instant
+
+gui-import-window-no-services = Aucun compte pour l’instant
+
+gui-wizard-copied = Les photos de cette source sont toujours copiées dans la Bibliothèque : elle ne peut pas les ajouter là où elles sont.
+
+gui-wizard-customise = Personnaliser…
+
+gui-wizard-customise-help = Ouvre les profils d’import : modifiez celui-ci ou créez-en un ; le profil laissé sélectionné est celui de cette source
+
+gui-wizard-how = Comment ses photos sont importées : un profil d’import. Vous pourrez le changer plus tard dans la colonne Détail.
+
+gui-wizard-no-volume = Insérez une carte ou branchez un appareil photo : il apparaît ici dès qu’il est monté.
+
+gui-wizard-volume = Laquelle ?
 
 gui-wizard-folder = Dossier
 
@@ -1706,8 +1722,6 @@ gui-import-window-add-favourite = Ajouter aux favoris
 
 gui-import-window-all-types = Tous les types
 
-gui-import-window-add-source = Ajouter une source…
-
 gui-import-window-camera-look = Appliquer le rendu par défaut du boîtier
 
 gui-import-window-camera-look-help = Les raws d’un boîtier qui a un rendu boîtier par défaut partent de lui, comme première version
@@ -1715,8 +1729,6 @@ gui-import-window-camera-look-help = Les raws d’un boîtier qui a un rendu bo�
 gui-import-window-cancel = Annuler
 
 gui-import-window-card-inserted = { $card } insérée
-
-gui-import-window-card-note = Les photos d’une carte sont copiées : la carte sera formatée, les copies restent.
 
 gui-import-window-cards = Cartes et appareils
 
@@ -1774,21 +1786,11 @@ gui-import-window-layout-year = Par année
 
 gui-import-window-library-folder = Le dossier de la bibliothèque
 
-gui-import-window-more = Plus
-
-gui-import-window-more-note = Les modèles de métadonnées et les décalages horaires viendront plus tard.
-
 gui-import-window-choices-own = { $source } : ses propres choix
 
 gui-import-window-choices-default = { $source } : les choix par défaut
 
 gui-import-window-own-choices = Ses propres choix d’import
-
-gui-import-window-choices-reset = Revenir aux choix par défaut
-
-gui-import-window-choices-reset-help = Cette source reprend les choix par défaut
-
-gui-import-window-choices-undo = Annuler
 
 gui-import-window-name = Nom
 

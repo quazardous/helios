@@ -2227,7 +2227,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helios-ai"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "helios-bricks"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-testkit",
@@ -2251,7 +2251,7 @@ dependencies = [
 
 [[package]]
 name = "helios-cache"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "serde_json",
@@ -2259,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "helios-calibrate"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-bricks",
@@ -2284,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "helios-colour"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "moxcms",
  "serde",
@@ -2293,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "helios-compute"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-gpu",
@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "helios-config"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "serde_json",
@@ -2319,7 +2319,7 @@ dependencies = [
 
 [[package]]
 name = "helios-connect"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "helios-controls"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "egui_fit",
  "egui_hud",
@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "helios-controls-gallery"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "eframe",
  "egui-pop",
@@ -2366,7 +2366,7 @@ dependencies = [
 
 [[package]]
 name = "helios-core"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-cache",
@@ -2376,7 +2376,7 @@ dependencies = [
 
 [[package]]
 name = "helios-corpus"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-load",
@@ -2388,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "helios-decision"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-config",
  "helios-core",
@@ -2398,7 +2398,7 @@ dependencies = [
 
 [[package]]
 name = "helios-declarations"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "egui-pop",
  "helios-gui",
@@ -2409,7 +2409,7 @@ dependencies = [
 
 [[package]]
 name = "helios-display"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2419,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "helios-export"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-colour",
  "helios-core",
@@ -2433,8 +2433,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-extract"
+version = "0.89.0"
+dependencies = [
+ "blake3",
+ "helios-ai",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "helios-gpu"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "bytemuck",
  "helios-bricks",
@@ -2452,7 +2463,7 @@ dependencies = [
 
 [[package]]
 name = "helios-gui"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2525,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "helios-health"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-storage",
@@ -2537,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "helios-i18n"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "egui-pop-i18n",
  "helios-core",
@@ -2547,7 +2558,7 @@ dependencies = [
 
 [[package]]
 name = "helios-init"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2556,7 +2567,7 @@ dependencies = [
 
 [[package]]
 name = "helios-inspect"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2565,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "helios-journal"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2574,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "helios-library"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "egui-pop-model",
@@ -2597,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "helios-load"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-colour",
@@ -2612,7 +2623,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-blur"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-testkit",
@@ -2620,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-cameracolour"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-bricks",
  "helios-core",
@@ -2629,7 +2640,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-cameratone"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-bricks",
  "helios-core",
@@ -2638,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-channelmixerrgb"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-colour",
  "helios-core",
@@ -2649,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-chartprofile"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-bricks",
  "helios-core",
@@ -2659,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-colorin"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2668,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-demosaic"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2677,7 +2688,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-exposure"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-bricks",
  "helios-controls",
@@ -2688,7 +2699,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-flip"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2697,7 +2708,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-highlights"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2706,7 +2717,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-masks"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "base64 0.22.1",
  "helios-core",
@@ -2718,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-rawprepare"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2727,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-sigmoid"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-testkit",
@@ -2735,7 +2746,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-vkdt"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2744,7 +2755,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-whitebalance"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -2753,7 +2764,7 @@ dependencies = [
 
 [[package]]
 name = "helios-node"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "egui-pop-model",
@@ -2805,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "helios-node-core"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-calibrate",
@@ -2831,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "helios-parity"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-export",
@@ -2855,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "helios-photo"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -2863,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-connect",
  "helios-core",
@@ -2877,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-darktable-library"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-plugin",
  "helios-plugin-darktable-library",
@@ -2888,7 +2899,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-google-photos"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-connect",
  "helios-core",
@@ -2902,7 +2913,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-gphoto2-camera"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-plugin",
  "serde_json",
@@ -2910,7 +2921,7 @@ dependencies = [
 
 [[package]]
 name = "helios-plugin-lightroom-catalog"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-plugin",
  "helios-plugin-darktable-library",
@@ -2920,7 +2931,7 @@ dependencies = [
 
 [[package]]
 name = "helios-profile"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2929,7 +2940,7 @@ dependencies = [
 
 [[package]]
 name = "helios-resolve"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "base64 0.22.1",
  "helios-ai",
@@ -2943,14 +2954,14 @@ dependencies = [
 
 [[package]]
 name = "helios-scopes"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
 ]
 
 [[package]]
 name = "helios-shell"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2958,7 +2969,7 @@ dependencies = [
 
 [[package]]
 name = "helios-storage"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-vault",
@@ -2972,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "helios-template"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "egui-pop-model",
  "helios-core",
@@ -2997,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "helios-testkit"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-photo",
@@ -3005,7 +3016,7 @@ dependencies = [
 
 [[package]]
 name = "helios-thumbs"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-cache",
@@ -3018,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "helios-values"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-module-exposure",
@@ -3030,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vault"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "blake3",
  "helios-core",
@@ -3041,7 +3052,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vault-sqlite"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "helios-journal",
@@ -3053,7 +3064,7 @@ dependencies = [
 
 [[package]]
 name = "helios-vkdt"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "helios-core",
  "serde",
@@ -3061,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "helios-xmp"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -6967,7 +6978,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.88.0"
+version = "0.89.0"
 dependencies = [
  "egui-pop-i18n",
  "helios-i18n",

@@ -93,6 +93,11 @@ impl ImportWindow {
     /// again.
     fn close_manager(&mut self) {
         self.keep_profile_edits();
+        // Opened from the "Add…" wizard's "Customise…": the wizard comes
+        // back with the profile left selected.
+        if let (Some(m), Some(wz)) = (&self.manager, self.wizard.as_mut()) {
+            wz.take_profile(&m.selected);
+        }
         self.manager = None;
         self.sources.window = self.profiles.choices(&self.profiles.current);
         self.choices = match self.sources.showing.clone() {
@@ -359,7 +364,7 @@ impl ImportWindow {
     }
 
     /// Opens the editor on the profile `id`.
-    fn open_manager_on(&mut self, id: &str) {
+    pub(super) fn open_manager_on(&mut self, id: &str) {
         self.choices = self.profiles.choices(id);
         self.custom = false;
         self.manager = Some(Manager {
