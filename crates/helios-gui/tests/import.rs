@@ -601,13 +601,19 @@ fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_on
     h.run();
     drop_on(&mut h, &dcim.join("IMG_0002.JPG"));
     read_through(&mut h);
-    // On by default; unticked, the import leaves the looks off.
+    // On by default; unticked in the profile editor, the import leaves
+    // the looks off.
     assert!(h.state().import_choices().camera_look);
+    h.state_mut().open_import_profiles();
+    h.run_steps(3);
     h.get_by_role_and_label(
         egui::accesskit::Role::CheckBox,
         "Apply the camera's default look",
     )
     .click();
+    h.run_steps(3);
+    assert!(!h.state().import_choices().camera_look);
+    h.get_by_label("Done").click();
     h.run_steps(3);
     assert!(!h.state().import_choices().camera_look);
     h.get_by_label("Import 1").click();
