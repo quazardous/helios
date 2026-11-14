@@ -717,6 +717,8 @@ gui-history-calibration-off = Turn the calibration profile off
 
 gui-history-calibration-save = Save the calibration profile “{ $name }”
 
+gui-history-camera-look-default = Change the default camera look of { $name }
+
 gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
@@ -1309,6 +1311,14 @@ gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet
 
+gui-look-default-applied = Camera look applied: the default of { $camera }
+
+gui-look-fit-selection-done = Camera look of { $camera } fitted from { $fitted } of { $photos } photos: Delta E { $held } (default { $baseline })
+
+gui-look-fit-selection-job = Fit a camera look from { $count } photos
+
+gui-look-fit-selection-none = No camera look fitted: { $reasons }
+
 gui-look-header-chart = Colour half off: the chart profile rules the colours
 
 gui-look-header-compare = Compare with the camera's JPEG
@@ -1318,6 +1328,16 @@ gui-look-header-compare-about = Shows the camera's embedded JPEG left of the spl
 gui-look-header-compare-no-jpeg = No camera JPEG to compare: the raw carries none
 
 gui-look-header-compare-not-raw = No camera JPEG to compare: the photo is not a raw
+
+gui-look-header-default-clear = Clear the default
+
+gui-look-header-default-in-use = The default look of { $camera }: its new photos open with it
+
+gui-look-header-default-other = { $camera } has another default look: its new photos open with that one
+
+gui-look-header-default-save = Save as the camera's default
+
+gui-look-header-default-save-about = New photos of { $camera } open with this camera look; photos already edited keep theirs
 
 gui-look-header-fit = Fit to the camera's JPEG
 
@@ -2749,7 +2769,19 @@ library-folder-not-absolute = Give the folder's full path.
 
 library-folder-not-writable = Helios cannot write in this folder: { $why }
 
+look-default-bad-params = the look's { $node } parameters: { $error }
+
+look-default-no-camera = a camera's default look needs `camera`
+
+look-default-not-fitted = no fitted camera look to keep: fit one to the camera's JPEG first
+
+look-default-what = give one of `look`, `image` or `clear`
+
+look-fit-cancelled = the camera look's fit was cancelled: nothing was written
+
 look-load-failed = cannot read the photo: { $error }
+
+look-mixed-cameras = the photos are of { $count } cameras ({ $cameras }): a camera look is fitted from photos of one camera; select one camera's photos
 
 look-render-failed = cannot render the raw: { $error }
 

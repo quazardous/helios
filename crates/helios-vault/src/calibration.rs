@@ -3,7 +3,9 @@
 //! A camera's default (which profiles its photos may get) is one document
 //! in [`DEFAULTS`], keyed by the camera's key. The vault keeps them as
 //! JSON; their shape is the calibration's (`helios_calibrate::profile`,
-//! `helios_calibrate::apply::Rule`).
+//! `helios_calibrate::apply::Rule`). A camera's default camera look (the
+//! look a new photo of it opens with) is one document in
+//! [`LOOK_DEFAULTS`], keyed by the camera's key too.
 //!
 //! A save or a removal answers its [`Changes`] (the document before and
 //! after), so it is undone and redone as the Library's albums are
@@ -19,6 +21,9 @@ pub const PROFILES: &str = "calibration/profiles";
 
 /// The camera defaults' namespace.
 pub const DEFAULTS: &str = "calibration/defaults";
+
+/// The cameras' default camera looks' namespace.
+pub const LOOK_DEFAULTS: &str = "look/defaults";
 
 impl<S: Store> Vault<S> {
     /// Every calibration profile, by id.
@@ -59,6 +64,29 @@ impl<S: Store> Vault<S> {
         rule: Option<&Value>,
     ) -> Result<Changes, String> {
         self.set_calibration_document(DEFAULTS, camera, rule)
+    }
+
+    /// A camera's default camera look, by the camera's key.
+    pub fn look_default(&self, camera: &str) -> Result<Option<Value>, String> {
+        self.store
+            .lock()
+            .expect("store lock")
+            .document(LOOK_DEFAULTS, camera)
+    }
+
+    /// Every camera's default camera look, by camera key.
+    pub fn look_defaults(&self) -> Result<Vec<(String, Value)>, String> {
+        self.store
+            .lock()
+            .expect("store lock")
+            .documents(LOOK_DEFAULTS)
+    }
+
+    /// Keeps `look` as the default camera look of camera `camera` (or
+    /// with `None` clears it), answering the change: none when it held
+    /// the same.
+    pub fn set_look_default(&self, camera: &str, look: Option<&Value>) -> Result<Changes, String> {
+        self.set_calibration_document(LOOK_DEFAULTS, camera, look)
     }
 
     fn set_calibration_document(
@@ -119,6 +147,25 @@ mod tests {
         assert_eq!(vault.calibration_profile("ab").unwrap(), None);
         vault.replay(&saved).unwrap();
         assert!(vault.calibration_profile("ab").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_camera_s_default_look_is_kept_apart_from_its_profiles_and_undone() {
+        let vault = Vault::new(MemoryStore::default());
+        let look = json!({ "format": 1, "cameratone": { "amount": 1.0 } });
+        let set = vault.set_look_default("nikon z 6", Some(&look)).unwrap();
+        assert_eq!(set.documents[0].ns, super::LOOK_DEFAULTS);
+        assert_eq!(vault.look_default("nikon z 6").unwrap(), Some(look.clone()));
+        assert_eq!(vault.calibration_default("nikon z 6").unwrap(), None);
+        let cleared = vault.set_look_default("nikon z 6", None).unwrap();
+        assert!(vault.look_defaults().unwrap().is_empty());
+        vault.revert(&cleared).unwrap();
+        assert_eq!(
+            vault.look_defaults().unwrap(),
+            vec![("nikon z 6".into(), look)]
+        );
+        vault.revert(&set).unwrap();
+        assert_eq!(vault.look_default("nikon z 6").unwrap(), None);
     }
 
     #[test]

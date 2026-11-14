@@ -189,6 +189,8 @@ command-library-importFiles =
 command-library-export =
     .title = Exporter… (`images` : des identifiants, sinon `scope` : `selected` ou `shown`, la sélection par défaut, sinon toutes les images montrées ; `format` : jpeg, png ou tiff ; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash` : number, overwrite ou skip ; `remember` ; demandé si `folder` manque ou si `ask` vaut true)
 
+command-library-fitCameraLook =
+    .title = Ajuster un rendu boîtier sur la sélection : un rendu à partir de photos d’un seul boîtier, ajusté à leurs JPEG intégrés et écrit dans chacune (`images` : des identifiants, sinon la sélection ; `default` : le garder aussi comme défaut du boîtier)
 command-library-chooseFolder =
     .title = Choisir le dossier de la bibliothèque où les imports copient les photos (`path` ; demandé par le sélecteur de dossiers s'il manque)
 

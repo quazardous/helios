@@ -284,7 +284,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
     // As an image of the library opens: the header is offered its camera's
     // profiles (no default rule: nothing is applied).
     let image = helios_vault::ImageId::from_hex(&"cd".repeat(32)).unwrap();
-    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_none());
+    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_empty());
     shell.set_view_source(g, node, "output").unwrap();
     let offer = calibrate::read_offer(&shell.values().lock().unwrap()).unwrap();
     let ids: Vec<&str> = offer["profiles"]
@@ -500,7 +500,7 @@ fn look_shell(
         history.clone(),
     )
     .unwrap();
-    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_none());
+    assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_empty());
     shell.set_view_source(g, sigmoid, "output").unwrap();
 
     (shell, history, dir)
@@ -623,6 +623,77 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
         )
         .unwrap();
     assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
+    use egui_kittest::kittest::Queryable;
+    use helios_core::Value;
+
+    let (shell, history, dir) = look_shell("look-default");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    // A look fitted (its numbers set as a fit sets them), turned on.
+    {
+        let values = h.state().values().clone();
+        let mut s = values.lock().unwrap();
+        for (path, value) in [
+            (
+                "node/cameratone/tone",
+                Value::List(vec![0.0, 0.0, 1.0, 1.0]),
+            ),
+            ("node/cameratone/preview", Value::Text("fitted-to".into())),
+            ("node/cameratone/held_out", Value::Float(2.4)),
+            ("node/cameratone/baseline", Value::Float(9.8)),
+        ] {
+            s.set(helios_values::Set::new(
+                path,
+                helios_values::Change::To(value),
+                Origin::User,
+            ))
+            .unwrap();
+        }
+    }
+    h.state_mut()
+        .run(
+            calibrate::LOOK_CHOOSE,
+            json!({ "look": "on" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let offered = |h: &egui_kittest::Harness<'_, Shell>| {
+        calibrate::read_offer(&h.state().values().lock().unwrap()).unwrap()["look_default"].clone()
+    };
+    assert_eq!(offered(&h), serde_json::Value::Null);
+
+    // Saved as the camera's default: one step of the library, and the
+    // header says the open photo's look is it.
+    h.get_by_role_and_label(
+        egui::accesskit::Role::Button,
+        "Save as the camera's default",
+    )
+    .click();
+    h.run();
+    h.run();
+    assert_eq!(offered(&h)["preview"], "fitted-to");
+    assert_eq!(history.line().undo.len(), 1);
+    h.get_by_label("The default look of Test Bayer: its new photos open with it");
+
+    // Cleared: another step, and the header says no more.
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Clear the default")
+        .click();
+    h.run();
+    h.run();
+    assert_eq!(offered(&h), serde_json::Value::Null);
+    assert_eq!(history.line().undo.len(), 2);
+    assert!(
+        h.query_by_label("The default look of Test Bayer: its new photos open with it")
+            .is_none()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

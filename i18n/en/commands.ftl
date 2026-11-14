@@ -328,6 +328,9 @@ command-library-filter-recent =
 command-library-filter-switch =
     .title = Show the recent and pinned filters and the smart albums, to apply one to the library
 
+command-library-fitCameraLook =
+    .title = Fit a camera look from the selection: one look from photos of one camera, fitted to their embedded JPEGs and written into each (`images`: ids, else the selection; `default`: keep it as the camera's default too)
+
 command-library-folder =
     .title = Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder
 

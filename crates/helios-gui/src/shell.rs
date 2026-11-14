@@ -82,6 +82,7 @@ pub use accounts_admin::{
     SIGN_OUT as SIGN_OUT_COMMAND,
 };
 mod calibrate_focus;
+mod camera_look;
 pub use calibrate_focus::{COMMAND as CALIBRATE_COMMAND, WINDOW as CALIBRATE_WINDOW};
 mod health;
 mod import;
@@ -324,6 +325,9 @@ enum Action {
     CopyParam(String, crate::clipboard::param::Text, Origin),
     /// The clipboard pasted onto a parameter (or only said, a dry run).
     PasteParam(String, bool, Origin),
+    /// One camera look fitted from the Library's selection (photos of one
+    /// camera), as a job: `look.camera.fitSelection` on its images.
+    FitCameraLook(Value, Origin),
     /// The files of the images the library acts on, copied for other
     /// applications, as whom (the user only).
     CopyFiles(Origin),
@@ -3344,6 +3348,15 @@ impl Shell {
         // applications (`crate::clipboard::system`).
         add(
             CommandSpec::new(
+                "library.fitCameraLook",
+                "Fit a camera look from the selection: one look from photos of one camera, fitted to their embedded JPEGs and written into each (`images`: ids, else the selection; `default`: keep it as the camera's default too)",
+                "Library",
+            )
+            .when(IN_MAIN_WINDOW),
+            Box::new(|a, origin| Ok(Action::FitCameraLook(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 "library.copyFiles",
                 "Copy files: the selected images' files, for a file manager or another application",
                 "Library",
@@ -6273,6 +6286,7 @@ impl Shell {
                 }
                 return Ok(out);
             }
+            Action::FitCameraLook(args, origin) => return self.fit_camera_look(&args, origin),
             Action::CopyFiles(origin) => {
                 user_only(&origin)?;
                 let out = crate::clipboard::copy_files(&self.core.clip.images, &self.core.system)?;

@@ -63,6 +63,8 @@ pub const EXPORT: &str = "calibrate.profiles.export";
 pub const IMPORT: &str = "calibrate.profiles.import";
 /// Fits a camera look to photos' embedded JPEG ([`look`]).
 pub const LOOK_FIT: &str = look::FIT;
+/// Keeps or clears a camera's default camera look ([`look::defaults`]).
+pub const LOOK_SET_DEFAULT: &str = look::SET_DEFAULT;
 
 pub mod look;
 
@@ -77,6 +79,7 @@ pub const PROFILE_IDS: &[&str] = &[
     EXPORT,
     IMPORT,
     LOOK_FIT,
+    LOOK_SET_DEFAULT,
 ];
 
 /// Whether `id` is one of the commands run here.
@@ -207,6 +210,7 @@ pub fn profile_specs() -> Vec<CommandSpec> {
             ("dry_run", json!({ "type": "boolean" }), false),
         ])),
         look::spec(),
+        look::defaults::spec(),
     ]
 }
 
@@ -281,6 +285,9 @@ pub fn run_as<S: Store>(
     if id == LOOK_FIT {
         let vault = vault.ok_or_else(needs_vault)?;
         return look::fit_with(vault, params, origin, now, &look::shot);
+    }
+    if id == LOOK_SET_DEFAULT {
+        return look::set_default(vault.ok_or_else(needs_vault)?, params, now);
     }
     if id == CHART {
         return chart(vault, params, now);
