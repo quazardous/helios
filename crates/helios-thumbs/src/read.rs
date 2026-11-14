@@ -13,17 +13,25 @@ use rawler::rawsource::RawSource;
 
 use crate::Rgb8;
 
-/// An embedded JPEG stream: where it starts and its size in pixels.
+/// An embedded JPEG stream: where it starts, its size in pixels and its
+/// colour components (1 for a grey stream, 3 or 4 for a colour one).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Embedded {
     pub offset: usize,
     pub width: u32,
     pub height: u32,
+    pub components: u8,
 }
 
 impl Embedded {
     fn long(&self) -> u32 {
         self.width.max(self.height)
+    }
+
+    /// A one-component stream: a grey picture, or no picture at all (a
+    /// phone's HDR gain map, a depth map).
+    pub fn grey(&self) -> bool {
+        self.components == 1
     }
 }
 
@@ -34,7 +42,7 @@ impl Embedded {
 pub fn embedded_jpegs(bytes: &[u8]) -> Vec<Embedded> {
     let mut found = Vec::new();
     for offset in memchr::memmem::find_iter(bytes, b"\xFF\xD8\xFF") {
-        if let Some((width, height)) = frame_size(&bytes[offset..])
+        if let Some((width, height, components)) = frame_size(&bytes[offset..])
             && width > 0
             && height > 0
         {
@@ -42,15 +50,17 @@ pub fn embedded_jpegs(bytes: &[u8]) -> Vec<Embedded> {
                 offset,
                 width,
                 height,
+                components,
             });
         }
     }
     found
 }
 
-/// A JPEG stream's size from its baseline, extended or progressive frame
-/// header; `None` when its markers do not read as a JPEG's.
-fn frame_size(jpeg: &[u8]) -> Option<(u32, u32)> {
+/// A JPEG stream's size and component count from its baseline, extended
+/// or progressive frame header; `None` when its markers do not read as a
+/// JPEG's.
+fn frame_size(jpeg: &[u8]) -> Option<(u32, u32, u8)> {
     let mut at = 2;
     for _ in 0..64 {
         if *jpeg.get(at)? != 0xFF {
@@ -66,7 +76,8 @@ fn frame_size(jpeg: &[u8]) -> Option<(u32, u32)> {
             0xC0..=0xC2 => {
                 let h = u16::from_be_bytes([*jpeg.get(at + 5)?, *jpeg.get(at + 6)?]);
                 let w = u16::from_be_bytes([*jpeg.get(at + 7)?, *jpeg.get(at + 8)?]);
-                return Some((u32::from(w), u32::from(h)));
+                let components = *jpeg.get(at + 9)?;
+                return Some((u32::from(w), u32::from(h), components));
             }
             0x01 | 0xD0..=0xD7 => at += 2,
             // Lossless, arithmetic or hierarchical frames (a raw's
@@ -84,19 +95,32 @@ fn frame_size(jpeg: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-/// The stream to read for a thumbnail `long` pixels on its long side: the
-/// smallest at least that large, else the largest there is.
+/// The streams to read for a thumbnail `long` pixels on its long side, in
+/// order: the colour ones before the grey ones, and among each the
+/// smallest at least that large, else the largest there is. A phone's
+/// JPEG carries grey streams beside its picture (an Ultra HDR gain map, a
+/// depth map), smaller than the picture and large enough: taken first,
+/// they would show a colour photo grey. A grey picture's only stream is
+/// still read.
 pub fn choose(found: &[Embedded], long: u32) -> Vec<Embedded> {
     let mut order: Vec<Embedded> = found.to_vec();
     // Large enough first, smallest first; then the rest, largest first.
     order.sort_by_key(|e| {
-        if e.long() >= long {
+        let (rank, size) = if e.long() >= long {
             (0, e.long())
         } else {
             (1, u32::MAX - e.long())
-        }
+        };
+        (e.grey(), rank, size)
     });
     order
+}
+
+/// Whether a file holds a grey JPEG stream beside a colour one: what
+/// [`choose`] took first before it put colour streams first.
+pub fn has_grey_beside_colour(bytes: &[u8]) -> bool {
+    let found = embedded_jpegs(bytes);
+    found.iter().any(Embedded::grey) && found.iter().any(|e| !e.grey())
 }
 
 /// Decodes a JPEG stream at the smallest DCT scale that keeps its long
