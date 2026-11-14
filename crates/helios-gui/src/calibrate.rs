@@ -26,22 +26,25 @@
 //! status bar and leaves the photo as it is. A camera's default look is
 //! put on its raws at import (`library.import`'s `camera_look`).
 //!
-//! Each run is announced on the node's bus with who ran it
-//! (`control.command`). A save, a deletion, a default set or an apply is
+//! Each run goes through the node's client and is announced on the
+//! node's bus with who ran it (`control.command`). What the header asks
+//! (a profile chosen, a camera look fitted or the camera's default put
+//! on) runs off the UI thread when the user asks it; its result lands in
+//! the edit at a coming frame. A save, a deletion, a default set or an apply is
 //! one step of the library's history, so Ctrl+Z takes it back. Without a library, the chart's dry
 //! run is still answered; the profile commands say they need one.
 
 use std::sync::Arc;
 
 use egui_pop::api::history::Label;
-use helios_core::{Bus, Message};
-use helios_inspect::client::Client;
+use helios_core::Message;
+use helios_inspect::client::{CallMeta, Client};
 use helios_node_core::calibrate::{
-    self as node, APPLY, CHART, DELETE, EXPORT, GET, IMPORT, LIST, LOOK_FIT, LOOK_SET_DEFAULT,
-    SET_DEFAULT,
+    self as node, APPLY, CHART, DELETE, EXPORT, GET, IMPORT, LIST, LOOK_DEFAULT, LOOK_FIT,
+    LOOK_SET_DEFAULT, SET_DEFAULT,
 };
-use helios_shell::commands::CommandSpec;
-use helios_vault::{Changes, Store, Vault};
+use helios_shell::commands::{CommandSpec, Origin};
+use helios_vault::Changes;
 use serde_json::Value;
 
 use crate::library_history::LibraryHistory;
@@ -50,10 +53,59 @@ use crate::shell::Shell;
 /// Measures a chart shot and answers the report; saves it when asked.
 pub const CHART_COMMAND: &str = CHART;
 
-/// The vault the desktop's node owns and its bus.
-pub struct Node<S: Store> {
-    pub vault: Arc<Vault<S>>,
-    pub bus: Arc<Bus>,
+/// The window to wake once a result run off the UI thread has landed:
+/// the one the headers were last drawn in.
+static WAKE: std::sync::Mutex<Option<egui::Context>> = std::sync::Mutex::new(None);
+
+/// Asks a frame of the window the headers are drawn in.
+fn wake() {
+    if let Some(ctx) = WAKE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        ctx.request_repaint();
+    }
+}
+
+/// Keeps `ctx` as the window to wake.
+fn drawn_in(ctx: &egui::Context) {
+    *WAKE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ctx.clone());
+}
+
+/// Runs `work` off the UI thread when the user asked it (a click, a menu:
+/// the frame never waits on the node), its error kept for the status
+/// bar's log; others' asks wait for its answer. Answers `pending` at
+/// once for the first.
+fn off_frame(
+    origin: &Origin,
+    mut pending: Value,
+    work: impl FnOnce() -> Result<Value, String> + Send + 'static,
+) -> Result<Value, String> {
+    if *origin != Origin::User {
+        return work();
+    }
+    std::thread::Builder::new()
+        .name("helios-calibrate".into())
+        .spawn(move || {
+            if let Err(e) = work() {
+                eprintln!("calibration: {e}");
+            }
+            wake();
+        })
+        .map_err(|e| e.to_string())?;
+    pending["pending"] = Value::Bool(true);
+    Ok(pending)
+}
+
+/// Asks the node `id` with `args` as `who`.
+fn ask(client: &Client, id: &str, args: Value, who: &str) -> Result<Value, String> {
+    client
+        .call_with(id, args, CallMeta::origin(who))
+        .wait()
+        .map_err(|e| e.message)
 }
 
 fn seconds() -> f64 {
@@ -134,34 +186,46 @@ fn named(id: &str, answer: &Value) -> String {
     profile["name"].as_str().unwrap_or_default().to_string()
 }
 
-/// Runs command `id` through the node holding `vault`, by `who`; the
-/// change it made recorded in `history`.
-fn through_node<S: Store>(
-    node: &Node<S>,
+/// Runs command `id` through the node's client, by `who`; the change it
+/// made (its answer's `changes`) recorded in `history`.
+fn through_node(
+    client: &Client,
     history: &LibraryHistory,
     id: &str,
     args: &Value,
     who: &str,
 ) -> Result<Value, String> {
-    let (answer, changes): (Value, Changes) =
-        helios_node_core::endpoint::command(&node.vault, &node.bus, id, args, who)?;
-    if !changes.is_empty() {
-        history.record(label(id, &named(id, &answer)), changes, seconds());
-    }
+    let mut answer = ask(client, id, args.clone(), who)?;
+    record(history, id, &mut answer);
     Ok(answer)
 }
 
-/// Registers the calibration commands on the shell, run through `node`
-/// (none without a library), their changes recorded in `history`.
+/// The changes an answer of `id` carries, taken out of it and recorded
+/// in `history` as one step.
+fn record(history: &LibraryHistory, id: &str, answer: &mut Value) {
+    let Some(changes) = answer.as_object_mut().and_then(|a| a.remove("changes")) else {
+        return;
+    };
+    match serde_json::from_value::<Changes>(changes) {
+        Ok(changes) if !changes.is_empty() => {
+            history.record(label(id, &named(id, answer)), changes, seconds());
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("calibration: the changes of `{id}`: {e}"),
+    }
+}
+
+/// Registers the calibration commands on the shell, run through the
+/// node's client `node` (none without a library), their changes recorded
+/// in `history`.
 ///
 /// # Errors
 /// A command cannot be registered.
-pub fn register<S: Store + Send + 'static>(
+pub fn register(
     shell: &mut Shell,
-    node: Option<Node<S>>,
+    node: Option<Arc<Client>>,
     history: LibraryHistory,
 ) -> Result<(), String> {
-    let node = node.map(Arc::new);
     let specs = [
         (
             CHART,
@@ -223,11 +287,11 @@ pub fn register<S: Store + Send + 'static>(
                 Some(node) => {
                     let answer = through_node(node, &history, id, args, &who)?;
                     if matches!(id, CHART | DELETE | IMPORT | LOOK_SET_DEFAULT) {
-                        refresh_offer(&node.vault, &values);
+                        refresh_offer(node, &values);
                     }
                     Ok(answer)
                 }
-                None => node::run(None::<&Vault<S>>, id, args, 0)
+                None => node::run::<helios_vault::MemoryStore>(None, id, args, 0)
                     .map(|done| done.answer)
                     .map_err(|m| m.english),
             }
@@ -250,7 +314,7 @@ pub fn register<S: Store + Send + 'static>(
         "Calibration",
     );
     shell.register(spec, move |args, origin| match &node {
-        Some(node) => choose(&node.vault, &values, args, origin),
+        Some(node) => choose(node, &values, args, origin),
         None => Err("no library open: calibration profiles live in one".into()),
     })?;
     let spec = CommandSpec::new(
@@ -372,13 +436,6 @@ pub fn photo_of(graph: &helios_core::Graph) -> Option<(node::Photo, String, Stri
     ))
 }
 
-/// The offer for a camera: its profiles, as listed.
-fn offer<S: Store>(vault: &Vault<S>, camera: &str, make: &str, model: &str, light: Value) -> Value {
-    let read = node::offer(vault, &serde_json::json!({ "camera": camera }))
-        .unwrap_or_else(|_| serde_json::json!({ "camera": camera, "profiles": [] }));
-    header(read, make, model, light)
-}
-
 /// The header's offer: the node's ([`node::offer`]) with the photo's
 /// make, model and as-shot light.
 fn header(mut offered: Value, make: &str, model: &str, light: Value) -> Value {
@@ -413,19 +470,20 @@ pub fn read_offer(store: &helios_values::Store) -> Option<Value> {
 }
 
 /// Lists the offered camera's profiles again (after a save, a deletion,
-/// an import).
-fn refresh_offer<S: Store>(vault: &Vault<S>, store: &std::sync::Mutex<helios_values::Store>) {
+/// an import), through the node ([`node::OFFER`]).
+fn refresh_offer(client: &Client, store: &std::sync::Mutex<helios_values::Store>) {
     let Some(old) = read_offer(&store.lock().expect("value store lock")) else {
         return;
     };
     let text = |k: &str| old[k].as_str().unwrap_or_default().to_string();
-    let mut new = offer(
-        vault,
-        &text("camera"),
-        &text("make"),
-        &text("model"),
-        old["light"].clone(),
-    );
+    let camera = text("camera");
+    let read = client
+        .request(
+            node::OFFER,
+            serde_json::json!({ "camera": camera, "image": old["image"].as_str() }),
+        )
+        .unwrap_or_else(|_| serde_json::json!({ "camera": camera, "profiles": [] }));
+    let mut new = header(read, &text("make"), &text("model"), old["light"].clone());
     new["image"] = old["image"].clone();
     set_offer(store, Some(&new));
 }
@@ -497,33 +555,49 @@ pub fn on_open(
 }
 
 /// [`CHOOSE`]: the profile set on the open photo's `chartprofile` node,
-/// one step of the edit's history, by `origin`.
-fn choose<S: Store>(
-    vault: &Vault<S>,
-    store: &std::sync::Mutex<helios_values::Store>,
+/// one step of the edit's history, by `origin`. The profile is read
+/// through the node, off the UI thread when the user asks.
+fn choose(
+    client: &Arc<Client>,
+    store: &Arc<std::sync::Mutex<helios_values::Store>>,
     args: &Value,
-    origin: &helios_shell::commands::Origin,
+    origin: &Origin,
 ) -> Result<Value, String> {
-    use helios_values::{Change, Set, bypass_path, node_path};
-    let asked = args["profile"].as_str().unwrap_or_default();
-    let mut s = store.lock().expect("value store lock");
-    let target = chart_node(&s).ok_or("the photo shown has no chart profile module")?;
-    let camera = read_offer(&s).map(|o| o["camera"].clone());
-    let (label, writes) = if asked == "none" {
-        (
-            "Calibration profile off".to_string(),
-            vec![(bypass_path(&target), helios_core::Value::Bool(true))],
-        )
-    } else {
-        let done = node::run(
-            Some(vault),
-            GET,
-            &serde_json::json!({ "profile": asked }),
-            0,
-        )
-        .map_err(|m| m.english)?;
+    use helios_values::bypass_path;
+    let asked = args["profile"].as_str().unwrap_or_default().to_string();
+    let (target, offer) = {
+        let s = store.lock().expect("value store lock");
+        let target = chart_node(&s).ok_or("the photo shown has no chart profile module")?;
+        (target, read_offer(&s))
+    };
+    let answer = serde_json::json!({ "node": target, "profile": asked });
+    if asked == "none" {
+        let writes = vec![(bypass_path(&target), helios_core::Value::Bool(true))];
+        write_group(store, origin, "Calibration profile off", writes)?;
+        return Ok(answer);
+    }
+    // A profile the header does not offer is another camera's: refused
+    // at once, before the node is asked.
+    if let Some(offer) = &offer
+        && !offer["profiles"]
+            .as_array()
+            .is_some_and(|p| p.iter().any(|p| p["id"] == asked.as_str()))
+    {
+        return Err(format!(
+            "the profile {asked} is not one of the photo's camera's"
+        ));
+    }
+    let camera = offer.map(|o| o["camera"].clone());
+    let (client, store, by, who) = (
+        client.clone(),
+        store.clone(),
+        origin.clone(),
+        crate::persist::who(origin),
+    );
+    off_frame(origin, answer.clone(), move || {
+        let read = ask(&client, GET, serde_json::json!({ "profile": asked }), &who)?;
         let profile: helios_calibrate::Profile =
-            serde_json::from_value(done.answer["profile"].clone()).map_err(|e| e.to_string())?;
+            serde_json::from_value(read["profile"].clone()).map_err(|e| e.to_string())?;
         if let Some(camera) = camera
             && camera != profile.camera.key.as_str()
         {
@@ -532,28 +606,53 @@ fn choose<S: Store>(
                 profile.camera.key
             ));
         }
+        let label = format!("Calibration profile “{}”", profile.name);
+        write_group(
+            &store,
+            &by,
+            &label,
+            profile_writes(&target, &asked, &profile),
+        )?;
+        Ok(answer)
+    })
+}
+
+/// The writes putting `profile` (its id `id`) on the `chartprofile` node
+/// `target`, turned on.
+fn profile_writes(
+    target: &str,
+    id: &str,
+    profile: &helios_calibrate::Profile,
+) -> Vec<(String, helios_core::Value)> {
+    use helios_values::{bypass_path, node_path};
+    vec![
         (
-            format!("Calibration profile “{}”", profile.name),
-            vec![
-                (
-                    node_path(&target, "matrix"),
-                    helios_core::Value::List(profile.matrix.iter().flatten().copied().collect()),
-                ),
-                (
-                    node_path(&target, "lut"),
-                    helios_core::Value::List(helios_calibrate::apply::lut_param(
-                        profile.lut.as_ref(),
-                    )),
-                ),
-                (
-                    node_path(&target, "profile"),
-                    helios_core::Value::Text(asked.to_string()),
-                ),
-                (bypass_path(&target), helios_core::Value::Bool(false)),
-            ],
-        )
-    };
-    let group = s.begin_group(origin.clone(), &label);
+            node_path(target, "matrix"),
+            helios_core::Value::List(profile.matrix.iter().flatten().copied().collect()),
+        ),
+        (
+            node_path(target, "lut"),
+            helios_core::Value::List(helios_calibrate::apply::lut_param(profile.lut.as_ref())),
+        ),
+        (
+            node_path(target, "profile"),
+            helios_core::Value::Text(id.to_string()),
+        ),
+        (bypass_path(target), helios_core::Value::Bool(false)),
+    ]
+}
+
+/// `writes` set in the store as one step of the edit, `label`, by
+/// `origin`.
+fn write_group(
+    store: &std::sync::Mutex<helios_values::Store>,
+    origin: &Origin,
+    label: &str,
+    writes: Vec<(String, helios_core::Value)>,
+) -> Result<(), String> {
+    use helios_values::{Change, Set};
+    let mut s = store.lock().expect("value store lock");
+    let group = s.begin_group(origin.clone(), label);
     let mut failed = None;
     for (path, value) in writes {
         if let Err(e) = s.set(Set::new(&path, Change::To(value), origin.clone()).gesture(group)) {
@@ -561,10 +660,7 @@ fn choose<S: Store>(
         }
     }
     s.end(group);
-    match failed {
-        Some(e) => Err(e),
-        None => Ok(serde_json::json!({ "node": target, "profile": asked })),
-    }
+    failed.map_or(Ok(()), Err)
 }
 
 /// The `chartprofile` module's header in the Parameters panel, under the
@@ -597,6 +693,7 @@ pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Stor
         return;
     };
     let ctx = ui.ctx().clone();
+    drawn_in(&ctx);
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let profiles: Vec<Value> = offer["profiles"].as_array().cloned().unwrap_or_default();
     let on = !bypassed && !current.is_empty();
@@ -805,23 +902,68 @@ fn is_fitted(store: &helios_values::Store, tone: &str) -> bool {
     )
 }
 
+/// The nodes [`LOOK_CHOOSE`] writes, and what the store knew as it was
+/// asked.
+struct LookNodes {
+    tone: String,
+    colour: Option<String>,
+    display: Option<String>,
+    /// A chart profile is on: the colour half stays off.
+    charted: bool,
+}
+
+impl LookNodes {
+    /// The switches turning the look on: the tone half in sigmoid's
+    /// place, the colour half unless a chart profile rules the colours.
+    fn on(&self, writes: &mut Vec<(String, helios_core::Value)>) {
+        use helios_values::bypass_path;
+        writes.push((bypass_path(&self.tone), helios_core::Value::Bool(false)));
+        if let Some(c) = &self.colour {
+            writes.push((bypass_path(c), helios_core::Value::Bool(self.charted)));
+        }
+        if let Some(d) = &self.display {
+            writes.push((bypass_path(d), helios_core::Value::Bool(true)));
+        }
+    }
+
+    /// The writes of a look's two halves' parameters (`colour`, `tone`),
+    /// then the switches turning it on.
+    fn look(
+        &self,
+        colour: &helios_core::Params,
+        tone: &helios_core::Params,
+    ) -> Vec<(String, helios_core::Value)> {
+        use helios_values::node_path;
+        let mut writes = Vec::new();
+        for (params, name) in [(colour, self.colour.as_ref()), (tone, Some(&self.tone))] {
+            let Some(name) = name else { continue };
+            for (param, value) in params.iter() {
+                writes.push((node_path(name, param), value.clone()));
+            }
+        }
+        self.on(&mut writes);
+        writes
+    }
+}
+
 /// [`LOOK_CHOOSE`]: the open photo's camera look fitted through the node
 /// (`look.camera.fit`, a dry run: the numbers come back and are written
 /// here, into the edit), turned on or off; `camera`, the "Camera look"
-/// preset, puts the camera's default look on (fits one when the camera
-/// has none). One step of the edit's history, by `origin`. A refused fit
-/// writes nothing and is kept, in words, for the header
-/// ([`LOOK_REFUSAL`]).
-fn look_choose<S: Store>(
-    node: &Node<S>,
-    store: &std::sync::Mutex<helios_values::Store>,
+/// preset, puts the camera's default look on (read through the node,
+/// `look.camera.default`; fits one when the camera has none). One step of
+/// the edit's history, by `origin`. A refused fit writes nothing and is
+/// kept, in words, for the header ([`LOOK_REFUSAL`]). What asks the node
+/// runs off the UI thread when the user asks it.
+fn look_choose(
+    client: &Arc<Client>,
+    store: &Arc<std::sync::Mutex<helios_values::Store>>,
     args: &Value,
-    origin: &helios_shell::commands::Origin,
+    origin: &Origin,
 ) -> Result<Value, String> {
-    use helios_calibrate::look::edit::{COLOUR, DISPLAY, TONE};
-    use helios_values::{Change, Set, bypass_path, node_path};
-    let asked = args["look"].as_str().unwrap_or_default();
-    let (tone, colour, display, charted, fitted, image, camera) = {
+    use helios_calibrate::look::edit::{COLOUR, DISPLAY};
+    use helios_values::bypass_path;
+    let asked = args["look"].as_str().unwrap_or_default().to_string();
+    let (nodes, fitted, image, camera) = {
         let s = store.lock().expect("value store lock");
         let tone = look_node(&s).ok_or("the photo shown has no camera look module")?;
         let charted = chart_node(&s).is_some_and(|c| !is_bypassed(&s, &c));
@@ -832,136 +974,143 @@ fn look_choose<S: Store>(
                 .as_ref()
                 .and_then(|o| o[key].as_str().map(String::from))
         };
-        (
+        let nodes = LookNodes {
+            colour: module_node(&s, COLOUR),
+            display: module_node(&s, DISPLAY),
             tone,
-            module_node(&s, COLOUR),
-            module_node(&s, DISPLAY),
             charted,
-            fitted,
-            text("image"),
-            text("camera"),
-        )
+        };
+        (nodes, fitted, text("image"), text("camera"))
     };
-    // The "Camera look" preset: the camera's default look when it has
-    // one, else a fit, as "fit" does.
-    let kept = match (asked, &camera) {
-        ("camera", Some(camera)) => {
-            node::look::look_of_camera(&node.vault, camera).map_err(|m| m.english)?
-        }
-        _ => None,
-    };
-    // The switches turning the look on: the tone half in sigmoid's place,
-    // the colour half unless a chart profile rules the colours.
-    let on = |writes: &mut Vec<(String, helios_core::Value)>| {
-        writes.push((bypass_path(&tone), helios_core::Value::Bool(false)));
-        if let Some(c) = &colour {
-            writes.push((bypass_path(c), helios_core::Value::Bool(charted)));
-        }
-        if let Some(d) = &display {
-            writes.push((bypass_path(d), helios_core::Value::Bool(true)));
-        }
-    };
-    let mut writes = Vec::new();
-    let mut answer = serde_json::json!({ "node": tone, "look": asked });
-    let label = match (asked, kept) {
-        ("off", _) => {
-            writes.push((bypass_path(&tone), helios_core::Value::Bool(true)));
-            if let Some(c) = &colour {
+    let answer = serde_json::json!({ "node": nodes.tone, "look": asked });
+    match asked.as_str() {
+        "off" => {
+            let mut writes = vec![(bypass_path(&nodes.tone), helios_core::Value::Bool(true))];
+            if let Some(c) = &nodes.colour {
                 writes.push((bypass_path(c), helios_core::Value::Bool(true)));
             }
-            if let Some(d) = &display {
+            if let Some(d) = &nodes.display {
                 writes.push((bypass_path(d), helios_core::Value::Bool(false)));
             }
-            "Camera look off"
+            write_group(store, origin, "Camera look off", writes)?;
+            Ok(answer)
         }
-        ("on", _) if !fitted => {
-            return Err("the camera look is not fitted yet: fit it to the camera's JPEG".into());
+        "on" if !fitted => {
+            Err("the camera look is not fitted yet: fit it to the camera's JPEG".into())
         }
-        ("on", _) => {
-            on(&mut writes);
-            "Camera look on"
+        "on" => {
+            let mut writes = Vec::new();
+            nodes.on(&mut writes);
+            write_group(store, origin, "Camera look on", writes)?;
+            Ok(answer)
         }
-        ("camera", Some((c, t))) => {
-            for (params, name) in [(&c, colour.as_ref()), (&t, Some(&tone))] {
-                let Some(name) = name else { continue };
-                for (param, value) in params.iter() {
-                    writes.push((node_path(name, param), value.clone()));
-                }
+        "fit" | "camera" => {
+            if asked == "fit" && image.is_none() {
+                return Err("the photo shown is not one of the library's".into());
             }
-            on(&mut writes);
-            set_refusal(store, "");
-            answer["default"] = Value::Bool(true);
-            "Camera look: the camera's default"
+            let (client, store, by, who) = (
+                client.clone(),
+                store.clone(),
+                origin.clone(),
+                crate::persist::who(origin),
+            );
+            off_frame(origin, answer.clone(), move || {
+                look_from_node(&client, &store, &nodes, &by, &who, answer, image, camera)
+            })
         }
-        ("fit" | "camera", _) => {
-            let image = image.ok_or("the photo shown is not one of the library's")?;
-            let who = crate::persist::who(origin);
-            let (fit, _) = helios_node_core::endpoint::command(
-                &node.vault,
-                &node.bus,
-                LOOK_FIT,
-                &serde_json::json!({ "images": [image], "dry_run": true }),
-                &who,
-            )?;
-            let done = fit["images"][0].clone();
-            answer["fit"] = done.clone();
-            if let Some(words) = done["refused"]["words"].as_str() {
-                set_refusal(store, words);
-                return Ok(answer);
-            }
-            for (module, name) in [(COLOUR, colour.as_ref()), (TONE, Some(&tone))] {
-                let Some(name) = name else { continue };
-                let params: helios_core::Params =
-                    serde_json::from_value(done["params"][module].clone())
-                        .map_err(|e| format!("the fit's {module} parameters: {e}"))?;
-                for (param, value) in params.iter() {
-                    writes.push((node_path(name, param), value.clone()));
-                }
-            }
-            on(&mut writes);
-            set_refusal(store, "");
-            "Camera look fitted to the camera's JPEG"
-        }
-        (other, _) => {
-            return Err(format!(
-                "`look` is `fit`, `camera`, `on` or `off`, not `{other}`"
-            ));
-        }
-    };
-    let mut s = store.lock().expect("value store lock");
-    let group = s.begin_group(origin.clone(), label);
-    let mut failed = None;
-    for (path, value) in writes {
-        if let Err(e) = s.set(Set::new(&path, Change::To(value), origin.clone()).gesture(group)) {
-            failed = Some(e.to_string());
-        }
-    }
-    s.end(group);
-    match failed {
-        Some(e) => Err(e),
-        None => Ok(answer),
+        other => Err(format!(
+            "`look` is `fit`, `camera`, `on` or `off`, not `{other}`"
+        )),
     }
 }
 
+/// [`LOOK_CHOOSE`]'s `fit` and `camera`: the camera's default look
+/// (`camera`, when it has one) or a fit of `image`, asked of the node,
+/// then written as one step of the edit.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "what the frame read, handed to the thread that asks the node"
+)]
+fn look_from_node(
+    client: &Client,
+    store: &std::sync::Mutex<helios_values::Store>,
+    nodes: &LookNodes,
+    origin: &Origin,
+    who: &str,
+    mut answer: Value,
+    image: Option<String>,
+    camera: Option<String>,
+) -> Result<Value, String> {
+    use helios_calibrate::look::edit::{COLOUR, TONE};
+    let params = |v: &Value, module: &str| -> Result<helios_core::Params, String> {
+        serde_json::from_value(v[module].clone())
+            .map_err(|e| format!("the look's {module} parameters: {e}"))
+    };
+    // The "Camera look" preset: the camera's default look when it has
+    // one, else a fit, as "fit" does.
+    if answer["look"] == "camera"
+        && let Some(camera) = camera
+    {
+        let kept = ask(
+            client,
+            LOOK_DEFAULT,
+            serde_json::json!({ "camera": camera }),
+            who,
+        )?;
+        let look = &kept["look"];
+        if !look.is_null() {
+            let writes = nodes.look(&params(look, COLOUR)?, &params(look, TONE)?);
+            write_group(store, origin, "Camera look: the camera's default", writes)?;
+            set_refusal(store, "");
+            answer["default"] = Value::Bool(true);
+            return Ok(answer);
+        }
+    }
+    let image = image.ok_or("the photo shown is not one of the library's")?;
+    let fit = ask(
+        client,
+        LOOK_FIT,
+        serde_json::json!({ "images": [image], "dry_run": true }),
+        who,
+    )?;
+    let done = fit["images"][0].clone();
+    answer["fit"] = done.clone();
+    if let Some(words) = done["refused"]["words"].as_str() {
+        set_refusal(store, words);
+        return Ok(answer);
+    }
+    let writes = nodes.look(
+        &params(&done["params"], COLOUR)?,
+        &params(&done["params"], TONE)?,
+    );
+    write_group(
+        store,
+        origin,
+        "Camera look fitted to the camera's JPEG",
+        writes,
+    )?;
+    set_refusal(store, "");
+    Ok(answer)
+}
+
 /// [`LOOK_FIT_SELECTION`]: one camera look fitted from the photos `images`
-/// names (refused at once when the library knows them to be of several
-/// cameras), run on a thread of the node's as a `calibration` job: its
-/// progress counts the photos read, the jobs centre cancels it before
-/// the next photo. The look written into every photo (and with
-/// `default`, kept as the camera's default) is one step of the library's
-/// history; a fit that finds no look writes nothing and says why in the
-/// job's log. Answers the job's id at once.
-fn fit_selection<S: Store + Send + 'static>(
-    node: &Arc<Node<S>>,
+/// names, asked of the node (`look.camera.fit` with `together`, which
+/// refuses photos of several cameras) from a thread of its own as a
+/// `calibration` job; the jobs centre's Cancel cancels the call, which
+/// stops before the next photo. The look written into every photo (and
+/// with `default`, kept as the camera's default) is one step of the
+/// library's history; a fit that finds no look writes nothing and says
+/// why in the job's log. Answers the job's id at once.
+fn fit_selection(
+    client: &Arc<Client>,
     history: &LibraryHistory,
     jobs: &helios_core::jobs::Jobs,
     args: &Value,
-    origin: &helios_shell::commands::Origin,
+    origin: &Origin,
 ) -> Result<Value, String> {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use helios_core::jobs::{Progress, Start};
-    use node::look::together;
+    use helios_core::jobs::Start;
 
     let images: Vec<String> = args["images"]
         .as_array()
@@ -972,12 +1121,9 @@ fn fit_selection<S: Store + Send + 'static>(
     if images.is_empty() {
         return Err("no photo to fit: select photos of one camera in the Library".into());
     }
-    let ids = images
-        .iter()
-        .map(|h| helios_vault::ImageId::from_hex(h))
-        .collect::<Result<Vec<_>, _>>()?;
-    let cameras = together::cameras(&node.vault, &ids).map_err(|m| m.english)?;
-    together::one_camera(&cameras).map_err(|m| m.english)?;
+    for named in &images {
+        helios_vault::ImageId::from_hex(named)?;
+    }
     let count = images.len();
     let id = format!(
         "camera-look-{}",
@@ -1003,34 +1149,29 @@ fn fit_selection<S: Store + Send + 'static>(
         "default": args["default"] == true,
         "dry_run": args["dry_run"] == true,
     });
-    let (node, history, who) = (node.clone(), history.clone(), crate::persist::who(origin));
+    let (client, history, who) = (client.clone(), history.clone(), crate::persist::who(origin));
     std::thread::Builder::new()
         .name("helios-camera-look".into())
         .spawn(move || {
-            let step = |done: usize, total: usize| {
-                report.progress(Progress::new().counts(done as u64, total as u64));
-                !cancel.load(Ordering::SeqCst)
+            let pending = client.call_with(LOOK_FIT, params, CallMeta::origin(&who));
+            let mut asked_to_stop = false;
+            let outcome = loop {
+                if let Some(outcome) = pending.wait_timeout(std::time::Duration::from_millis(100)) {
+                    break outcome;
+                }
+                if cancel.load(Ordering::SeqCst) && !asked_to_stop {
+                    client.cancel(&pending);
+                    asked_to_stop = true;
+                }
             };
-            let now = seconds() as u64;
-            match node::look::fit_with_progress(
-                &node.vault,
-                &params,
-                &who,
-                now,
-                &node::look::shot,
-                &step,
-            ) {
-                Ok(done) => {
-                    let a = &done.answer;
-                    report.log(fit_summary(a).english);
-                    if !done.changes.is_empty() {
-                        let name = a["camera"].as_str().unwrap_or_default();
-                        history.record(label(LOOK_FIT, name), done.changes, seconds());
-                    }
+            match outcome {
+                Ok(mut answer) => {
+                    report.log(fit_summary(&answer).english);
+                    record(&history, LOOK_FIT, &mut answer);
                     report.finished();
                 }
-                Err(m) if m.key == "look-fit-cancelled" => report.cancelled(),
-                Err(m) => report.failed(&m.english),
+                Err(_) if cancel.load(Ordering::SeqCst) => report.cancelled(),
+                Err(e) => report.failed(&e.message),
             }
         })
         .map_err(|e| e.to_string())?;
@@ -1111,6 +1252,7 @@ pub fn look_header_ui(
         )
     };
     let ctx = ui.ctx().clone();
+    drawn_in(&ctx);
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let score = |v: Option<f64>| v.map_or_else(|| "?".to_string(), |v| format!("{v:.1}"));
     let status = if !refusal.is_empty() {

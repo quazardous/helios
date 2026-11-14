@@ -4,8 +4,14 @@
 //! workspace, the photos) and hands it to the host's runner
 //! ([`crate::workshop_run::Runner`]), which holds the library: a dry run
 //! answers at once, a run is a job and one library step.
+//!
+//! The runner asks the node, which may wait on a writer holding the
+//! library: a dry run and a review the user asks (the Workshops panel,
+//! the palette) run on a thread of their own, and the frame that picks
+//! their answer up shows it. Others' asks wait for the answer.
 
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use helios_shell::commands::Origin;
 use helios_template::format::OnBreach;
@@ -23,6 +29,27 @@ pub type RunFn = Arc<dyn Fn(RunAsk, bool) -> Result<Value, String> + Send + Sync
 pub type ReviewFn =
     Arc<dyn Fn(&Value, &str, Option<RunAsk>) -> Result<Value, String> + Send + Sync>;
 
+/// A dry run or a review action running off the frame.
+pub struct Waiting {
+    /// A review's arguments; none: a dry run.
+    review: Option<Value>,
+    answer: Receiver<Result<Value, String>>,
+}
+
+/// Runs `work` on a thread of its own; its answer comes on the receiver.
+fn spawn(
+    work: impl FnOnce() -> Result<Value, String> + Send + 'static,
+) -> Result<Receiver<Result<Value, String>>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("helios-workshop-ask".into())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rx)
+}
+
 impl Shell {
     /// Where `workshop.run` hands its runs (the host, once the library is
     /// open).
@@ -38,6 +65,50 @@ impl Shell {
     /// The run the Workshops panel reviews, if any.
     pub fn workshop_review(&self) -> Option<Value> {
         self.focus.workshops.borrow().review.clone()
+    }
+
+    /// The last dry run the user asked, once answered.
+    pub fn workshop_plan(&self) -> Option<Value> {
+        self.focus.workshops.borrow().plan.clone()
+    }
+
+    /// Whether a dry run or a review the user asked is still running.
+    pub fn workshop_waiting(&self) -> bool {
+        !self.core.workshop_waiting.is_empty()
+    }
+
+    /// Each frame: the dry runs' and reviews' answers come in, shown in
+    /// the Workshops panel; a frame comes again while one runs.
+    pub(super) fn workshop_frame(&mut self, ctx: &egui::Context) {
+        let mut left = Vec::new();
+        for waiting in std::mem::take(&mut self.core.workshop_waiting) {
+            match waiting.answer.try_recv() {
+                Err(TryRecvError::Empty) => left.push(waiting),
+                Err(TryRecvError::Disconnected) => {
+                    self.warn("workshop: the call ended without an answer".to_string());
+                }
+                Ok(Err(e)) => self.warn(format!("workshop: {e}")),
+                Ok(Ok(answer)) => match &waiting.review {
+                    Some(args) => self.show_review(args, &answer),
+                    None => self.focus.workshops.borrow_mut().plan = Some(answer),
+                },
+            }
+        }
+        self.core.workshop_waiting = left;
+        if !self.core.workshop_waiting.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// A review's answer to `args`, shown in the Workshops panel.
+    fn show_review(&self, args: &Value, answer: &Value) {
+        let mut panel = self.focus.workshops.borrow_mut();
+        panel.last_run = answer["run"].as_str().map(String::from);
+        panel.review = if args["action"] == "rerun" {
+            None
+        } else {
+            Some(answer.clone())
+        };
     }
 
     /// The workshop applied as `node` (the selected one by default) as a
@@ -84,15 +155,17 @@ impl Shell {
         let node = args["node"].as_str().map(String::from);
         let ask = self.workshop_ask(node.as_deref(), origin).ok();
         let who = crate::persist::who(origin);
-        let answer = reviewer(&args, &who, ask)?;
-        let mut panel = self.focus.workshops.borrow_mut();
-        if args["action"] == "rerun" {
-            panel.last_run = answer["run"].as_str().map(String::from);
-            panel.review = None;
-        } else {
-            panel.last_run = answer["run"].as_str().map(String::from);
-            panel.review = Some(answer.clone());
+        if *origin == Origin::User {
+            let asked = args.clone();
+            let answer = spawn(move || reviewer(&asked, &who, ask))?;
+            self.core.workshop_waiting.push(Waiting {
+                review: Some(args.clone()),
+                answer,
+            });
+            return Ok(serde_json::json!({ "run": args["run"], "pending": true }));
         }
+        let answer = reviewer(&args, &who, ask)?;
+        self.show_review(&args, &answer);
         Ok(answer)
     }
 
@@ -150,6 +223,14 @@ impl Shell {
         };
         ask.images = images;
         ask.on_breach = on_breach;
+        if dry && *origin == Origin::User {
+            let answer = spawn(move || runner(ask, true))?;
+            self.core.workshop_waiting.push(Waiting {
+                review: None,
+                answer,
+            });
+            return Ok(serde_json::json!({ "dry_run": true, "pending": true }));
+        }
         let answer = runner(ask, dry)?;
         if !dry {
             self.focus.workshops.borrow_mut().last_run = answer["run"].as_str().map(String::from);
