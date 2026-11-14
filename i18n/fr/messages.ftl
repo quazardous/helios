@@ -2822,3 +2822,6 @@ gui-rule-field-import = importation
 gui-rule-field-imported = date d’importation
 
 gui-settings-imports = Importations
+
+gui-library-window = Bibliothèque
+gui-library-window-elsewhere = La bibliothèque est ouverte dans sa propre fenêtre

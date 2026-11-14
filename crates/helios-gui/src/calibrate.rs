@@ -53,26 +53,80 @@ use crate::shell::Shell;
 /// Measures a chart shot and answers the report; saves it when asked.
 pub const CHART_COMMAND: &str = CHART;
 
-/// The window to wake once a result run off the UI thread has landed:
-/// the one the headers were last drawn in.
-static WAKE: std::sync::Mutex<Option<egui::Context>> = std::sync::Mutex::new(None);
+/// What runs off the UI thread for one shell's calibration commands:
+/// the threads still running and the window to wake as each lands.
+/// The commands registered on the shell own it: dropped with them, it
+/// waits for those threads, so none outlives the shell, its node client
+/// or the process's exit.
+struct OffFrame {
+    /// The values store the shell's headers are drawn from: how a header
+    /// finds its shell's [`OffFrame`].
+    values: std::sync::Weak<std::sync::Mutex<helios_values::Store>>,
+    /// The window the headers were last drawn in.
+    window: Arc<std::sync::Mutex<Option<egui::Context>>>,
+    running: std::sync::Mutex<Vec<std::thread::JoinHandle<()>>>,
+}
 
-/// Asks a frame of the window the headers are drawn in.
-fn wake() {
-    if let Some(ctx) = WAKE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .as_ref()
-    {
-        ctx.request_repaint();
+/// The live shells' [`OffFrame`]s, for their headers to say which window
+/// they are drawn in. Weak: it keeps none of them alive.
+static SHELLS: std::sync::Mutex<Vec<std::sync::Weak<OffFrame>>> = std::sync::Mutex::new(Vec::new());
+
+fn locked<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl OffFrame {
+    /// The [`OffFrame`] of the shell whose values are `values`.
+    fn new(values: &Arc<std::sync::Mutex<helios_values::Store>>) -> Arc<Self> {
+        let off = Arc::new(Self {
+            values: Arc::downgrade(values),
+            window: Arc::default(),
+            running: std::sync::Mutex::default(),
+        });
+        let mut shells = locked(&SHELLS);
+        shells.retain(|s| s.strong_count() > 0);
+        shells.push(Arc::downgrade(&off));
+        off
+    }
+
+    /// Runs `work` on a thread of its own, the window woken once it ends.
+    fn spawn(&self, work: impl FnOnce() + Send + 'static) -> Result<(), String> {
+        let window = self.window.clone();
+        let handle = std::thread::Builder::new()
+            .name("helios-calibrate".into())
+            .spawn(move || {
+                work();
+                if let Some(ctx) = locked(&window).as_ref() {
+                    ctx.request_repaint();
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        let mut running = locked(&self.running);
+        running.retain(|h| !h.is_finished());
+        running.push(handle);
+        Ok(())
     }
 }
 
-/// Keeps `ctx` as the window to wake.
-fn drawn_in(ctx: &egui::Context) {
-    *WAKE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ctx.clone());
+impl Drop for OffFrame {
+    fn drop(&mut self) {
+        for handle in std::mem::take(&mut *locked(&self.running)) {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Keeps `ctx` as the window to wake for the shell whose values are
+/// `store`.
+fn drawn_in(ctx: &egui::Context, store: &std::sync::Mutex<helios_values::Store>) {
+    let found = locked(&SHELLS)
+        .iter()
+        .filter_map(std::sync::Weak::upgrade)
+        .filter(|off| std::ptr::eq(off.values.as_ptr(), store))
+        .collect::<Vec<_>>();
+    for off in found {
+        *locked(&off.window) = Some(ctx.clone());
+    }
 }
 
 /// Runs `work` off the UI thread when the user asked it (a click, a menu:
@@ -80,6 +134,7 @@ fn drawn_in(ctx: &egui::Context) {
 /// bar's log; others' asks wait for its answer. Answers `pending` at
 /// once for the first.
 fn off_frame(
+    off: &OffFrame,
     origin: &Origin,
     mut pending: Value,
     work: impl FnOnce() -> Result<Value, String> + Send + 'static,
@@ -87,15 +142,11 @@ fn off_frame(
     if *origin != Origin::User {
         return work();
     }
-    std::thread::Builder::new()
-        .name("helios-calibrate".into())
-        .spawn(move || {
-            if let Err(e) = work() {
-                eprintln!("calibration: {e}");
-            }
-            wake();
-        })
-        .map_err(|e| e.to_string())?;
+    off.spawn(move || {
+        if let Err(e) = work() {
+            eprintln!("calibration: {e}");
+        }
+    })?;
     pending["pending"] = Value::Bool(true);
     Ok(pending)
 }
@@ -297,7 +348,8 @@ pub fn register(
             }
         })?;
     }
-    let (look_node, look_values) = (node.clone(), values.clone());
+    let off = OffFrame::new(&values);
+    let (look_node, look_values, look_off) = (node.clone(), values.clone(), off.clone());
     let (fit_node, fit_history, jobs) = (node.clone(), history.clone(), shell.jobs());
     let spec = CommandSpec::new(
         LOOK_FIT_SELECTION,
@@ -314,7 +366,7 @@ pub fn register(
         "Calibration",
     );
     shell.register(spec, move |args, origin| match &node {
-        Some(node) => choose(node, &values, args, origin),
+        Some(node) => choose(node, &off, &values, args, origin),
         None => Err("no library open: calibration profiles live in one".into()),
     })?;
     let spec = CommandSpec::new(
@@ -323,7 +375,7 @@ pub fn register(
         "Calibration",
     );
     shell.register(spec, move |args, origin| match &look_node {
-        Some(node) => look_choose(node, &look_values, args, origin),
+        Some(node) => look_choose(node, &look_off, &look_values, args, origin),
         None => Err("no library open: the camera look fits a photo of it".into()),
     })?;
     Ok(())
@@ -559,6 +611,7 @@ pub fn on_open(
 /// through the node, off the UI thread when the user asks.
 fn choose(
     client: &Arc<Client>,
+    off: &OffFrame,
     store: &Arc<std::sync::Mutex<helios_values::Store>>,
     args: &Value,
     origin: &Origin,
@@ -594,7 +647,7 @@ fn choose(
         origin.clone(),
         crate::persist::who(origin),
     );
-    off_frame(origin, answer.clone(), move || {
+    off_frame(off, origin, answer.clone(), move || {
         let read = ask(&client, GET, serde_json::json!({ "profile": asked }), &who)?;
         let profile: helios_calibrate::Profile =
             serde_json::from_value(read["profile"].clone()).map_err(|e| e.to_string())?;
@@ -693,7 +746,7 @@ pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Stor
         return;
     };
     let ctx = ui.ctx().clone();
-    drawn_in(&ctx);
+    drawn_in(&ctx, store);
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let profiles: Vec<Value> = offer["profiles"].as_array().cloned().unwrap_or_default();
     let on = !bypassed && !current.is_empty();
@@ -956,6 +1009,7 @@ impl LookNodes {
 /// runs off the UI thread when the user asks it.
 fn look_choose(
     client: &Arc<Client>,
+    off: &OffFrame,
     store: &Arc<std::sync::Mutex<helios_values::Store>>,
     args: &Value,
     origin: &Origin,
@@ -1014,7 +1068,7 @@ fn look_choose(
                 origin.clone(),
                 crate::persist::who(origin),
             );
-            off_frame(origin, answer.clone(), move || {
+            off_frame(off, origin, answer.clone(), move || {
                 look_from_node(&client, &store, &nodes, &by, &who, answer, image, camera)
             })
         }
@@ -1252,7 +1306,7 @@ pub fn look_header_ui(
         )
     };
     let ctx = ui.ctx().clone();
-    drawn_in(&ctx);
+    drawn_in(&ctx, store);
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let score = |v: Option<f64>| v.map_or_else(|| "?".to_string(), |v| format!("{v:.1}"));
     let status = if !refusal.is_empty() {

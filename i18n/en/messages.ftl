@@ -1579,6 +1579,10 @@ gui-library-versions-strip = Versions
 
 gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 
+gui-library-window = Library
+
+gui-library-window-elsewhere = The Library is open in its own window
+
 gui-log-clear = Clear
 
 gui-log-empty = Nothing to report yet

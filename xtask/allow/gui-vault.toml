@@ -2,11 +2,3 @@
 # instead of going through the node's client (see `cargo xtask check` and
 # xtask/src/vault_access.rs). The list only shrinks: an entry whose file no
 # longer does it is reported, and removed with the code that needed it.
-
-[[allow]]
-path = "crates/helios-gui/src/main.rs"
-reason = "builds the desktop's node and hands its vault to the modules below, the backups, the accounts and the import window's prefilter"
-
-[[allow]]
-path = "crates/helios-gui/src/persist.rs"
-reason = "builds the in-process node's client on the vault it is given; the vault() accessor still feeds main.rs"

@@ -734,7 +734,13 @@ remote store through a plugin. Each volume has:
 
 On Linux the volumes are read from `/proc/mounts`, `/dev/disk/by-uuid`,
 `/dev/disk/by-label`, `/dev/disk/by-id` and `/sys/block`, with free space
-from `statvfs`; Windows and macOS list none yet. The import window's cards
+from `statvfs`. On macOS, `diskutil info -plist` gives each mounted
+folder's volume UUID, name and whether it is removable media, external or
+internal (system volumes under `/System/Volumes` are skipped). On Windows,
+each drive letter's type (removable or fixed), filesystem serial number
+(written as Linux lists a FAT or exFAT UUID, so a card keeps its id
+between the two), label and volume GUID come from the Win32 volume API;
+network and optical drives are not listed yet. The import window's cards
 are the removable volumes holding `DCIM`.
 
 The volumes Helios has seen are kept in the vault (documents

@@ -771,3 +771,6 @@ command-library-importSession =
 
 command-library-runWorkshop =
     .title = Lancer l’atelier… sur la sélection de la bibliothèque (l’atelier appliqué, sur les photos sélectionnées, d’où que vienne la sélection : une importation, un album, un filtre)
+
+command-library-window =
+    .title = Bibliothèque
