@@ -357,6 +357,8 @@ gui-calibrate-shot = Chart shot
 
 gui-calibrate-title = Calibrate camera colour
 
+gui-calibrate-working = Waiting for the library…
+
 gui-calibrate-worst = Worst patches: { $patches }
 
 gui-calibration-default-applied = Calibration profile “{ $name }” applied: the default of { $camera }
@@ -749,7 +751,13 @@ gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
 
+gui-history-library-redoing = Redoing “{ $step }”…
+
+gui-history-library-refused = Undo refused: { $reason }
+
 gui-history-library-remove = Remove { $count } photos from the Library
+
+gui-history-library-undoing = Undoing “{ $step }”…
 
 gui-history-preview-applied = applied
 
