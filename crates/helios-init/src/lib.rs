@@ -34,9 +34,10 @@ pub const LIBRARY_FOLDER: &str = "library.folder";
 /// The setting the library folder step fills: the library folder's path.
 pub const LIBRARY_FOLDER_SETTING: &str = "library.folder";
 
-/// The command that fills the library folder step (its `path`, or the
-/// folder chooser): the health warning's fix too.
-pub const CHOOSE_LIBRARY_FOLDER: &str = "library.chooseFolder";
+/// The command that fills the library folder step on a desktop (its
+/// `path`, or the setup opened on the step): the health warning's fix
+/// too.
+pub const CHOOSE_LIBRARY_FOLDER: &str = "init.libraryFolder";
 
 /// The library module, owner of the library folder step.
 pub const LIBRARY_OWNER: &str = "library";

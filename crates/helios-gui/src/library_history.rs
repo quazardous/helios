@@ -11,6 +11,9 @@
 //! - **One step per album change** (`docs/design/library.md`, L6): a
 //!   new album, a rename, a deletion, photos added or removed; its
 //!   changes are the album's document before and after.
+//! - **One step per "Remove from Library"** (L8): the photos' flags
+//!   before and after, as the node's `library.images.remove` answers
+//!   them.
 //! - **For the session only** (docs/design/undo.md, decided 2026-10-14):
 //!   the steps live in memory; a restart starts with none.
 //! - **Active with the library's panels** (the Library, the Filmstrip,
@@ -73,6 +76,20 @@ impl std::fmt::Debug for LibraryHistory {
 /// An import's label: "Import 124 photos".
 pub fn import_label(photos: u64) -> Label {
     let m = Message::new("gui-history-import", "Import { $count } photos").with("count", photos);
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [("count".to_string(), photos.to_string())].into(),
+    }
+}
+
+/// "Remove from Library"'s label: "Remove 3 photos from the Library".
+pub fn remove_label(photos: usize) -> Label {
+    let m = Message::new(
+        "gui-history-library-remove",
+        "Remove { $count } photos from the Library",
+    )
+    .with("count", photos);
     Label {
         text: m.english.clone(),
         key: Some(m.key),

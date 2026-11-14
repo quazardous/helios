@@ -56,6 +56,8 @@ helios-calibrate.workspace = true
 helios-vault-sqlite.workspace = true
 # Import and stack suggestions, as commands.
 helios-library.workspace = true
+# The setup steps modules declare, drawn by the first-run wizard.
+helios-init.workspace = true
 # Importer plugins, under File > Import from.
 helios-plugin.workspace = true
 # The demo image chain of `helios-gui --image`.

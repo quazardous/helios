@@ -367,7 +367,7 @@ impl Shell {
     }
 
     /// Remembers `dir` as the library folder, and runs the checks again.
-    fn set_library_folder(&mut self, dir: &Path) -> Result<(), String> {
+    pub(super) fn set_library_folder(&mut self, dir: &Path) -> Result<(), String> {
         let library = self
             .import
             .get_mut()

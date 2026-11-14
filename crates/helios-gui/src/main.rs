@@ -641,6 +641,8 @@ fn library_commands(
         }));
     }
     shell.set_import_library_folder(Arc::new(LibraryFolder(vault.clone())));
+    // The first-run setup opens when a required step is not done.
+    shell.set_first_run(true);
     let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(
