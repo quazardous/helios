@@ -103,22 +103,28 @@ fn node(gate: &Arc<Gate>) -> (Arc<Client>, Arc<Promises<MemoryStore>>) {
 }
 
 /// The desktop's node as [`node`] makes it, with the desktop's jobs
-/// mirrored as its promises (`job_promises`): the jobs and the mirror.
-fn node_with_jobs(
-    gate: &Arc<Gate>,
-) -> (
-    Arc<Client>,
-    Arc<Promises<MemoryStore>>,
-    Jobs,
-    JobPromises,
-    Arc<Vault<MemoryStore>>,
-) {
+/// mirrored as its promises (`job_promises`).
+struct Desktop {
+    client: Arc<Client>,
+    promises: Arc<Promises<MemoryStore>>,
+    jobs: Jobs,
+    vault: Arc<Vault<MemoryStore>>,
+    _mirror: JobPromises,
+}
+
+fn node_with_jobs(gate: &Arc<Gate>) -> Desktop {
     let (client, promises) = node(gate);
-    let desktop = Jobs::new(Arc::new(helios_core::Bus::new()));
-    promises.cancel_through(desktop.clone());
+    let jobs = Jobs::new(Arc::new(helios_core::Bus::new()));
+    promises.cancel_through(jobs.clone());
     let vault = promises.vault().clone();
-    let mirror = JobPromises::start(vault.clone(), desktop.bus().subscribe());
-    (client, promises, desktop, mirror, vault)
+    let mirror = JobPromises::start(vault.clone(), jobs.bus().subscribe());
+    Desktop {
+        client,
+        promises,
+        jobs,
+        vault,
+        _mirror: mirror,
+    }
 }
 
 /// The promise of job `job`, once the mirror made it.
@@ -452,7 +458,13 @@ fn activity_snapshots() {
 #[test]
 fn the_desktops_jobs_show_as_promises_with_or_without_their_bar() {
     let gate = Arc::new(Gate::default());
-    let (client, _promises, jobs, _mirror, vault) = node_with_jobs(&gate);
+    let Desktop {
+        client,
+        jobs,
+        vault,
+        _mirror,
+        ..
+    } = node_with_jobs(&gate);
     let trash = jobs.start(Start::new("trash-1", "Move 3 files to the trash", "trash").total(3));
     trash.progress(Progress::new().counts(1, 3).item("b.raw"));
     let backup =
@@ -517,7 +529,13 @@ fn the_desktops_jobs_show_as_promises_with_or_without_their_bar() {
 #[test]
 fn result_links_open_the_folder_the_library_and_the_import_history() {
     let gate = Arc::new(Gate::default());
-    let (client, promises, jobs, _mirror, vault) = node_with_jobs(&gate);
+    let Desktop {
+        client,
+        promises,
+        jobs,
+        vault,
+        _mirror,
+    } = node_with_jobs(&gate);
     let export = jobs.start(Start::new("export-1", "Export a.jpg", "export").total(1));
     export.finished_result(json!({ "path": "/out/a.jpg", "folder": "/out" }));
     let import = start(&promises, "import", "Import 412 photos", "fail");

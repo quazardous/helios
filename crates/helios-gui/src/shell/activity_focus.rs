@@ -223,13 +223,12 @@ fn span(seconds: u64) -> String {
 fn kind_icon(kind: &str) -> &'static str {
     match kind {
         "import" => "phosphor:tray-arrow-down",
-        "export" => "phosphor:export",
+        "export" | "batch" => "phosphor:export",
         "trash" => "phosphor:trash",
         "backup" => "phosphor:hard-drives",
         "snapshot" => "phosphor:floppy-disk",
         "render" => "phosphor:image",
-        "batch" => "phosphor:export",
-        "calibration" => "phosphor:gauge",
+        "calibration" => "phosphor:crosshair",
         "health" => "phosphor:heartbeat",
         "map" => "phosphor:map-trifold",
         "thumbs" => "phosphor:images",
