@@ -310,10 +310,10 @@ impl<S: crate::Store> crate::Vault<S> {
         };
         let (parents, mut edit) = match source {
             Some(v) => (v.parents, v.edit),
-            None => (Vec::new(), Value::Object(Default::default())),
+            None => (Vec::new(), Value::Object(serde_json::Map::default())),
         };
         if !edit.is_object() {
-            edit = Value::Object(Default::default());
+            edit = Value::Object(serde_json::Map::default());
         }
         let known: HashSet<VersionId> = all.iter().map(|v| v.id).collect();
         for n in 1u64.. {
@@ -332,7 +332,7 @@ impl<S: crate::Store> crate::Vault<S> {
     /// How many heads each image with versions has: more than one, the
     /// image has copies (or diverged edits) the grid counts.
     pub fn head_counts(&self) -> Result<std::collections::BTreeMap<ImageId, usize>, String> {
-        self.read(|s| s.head_counts())
+        self.read(crate::Store::head_counts)
     }
 
     /// An image's heads: its current edit, or its diverged edits.
