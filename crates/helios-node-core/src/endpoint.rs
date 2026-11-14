@@ -376,7 +376,7 @@ impl<S: Store + Send + 'static> VaultService<S> {
     fn run(&self, id: &str, params: &Value, call: &Call) -> Result<Value, String> {
         let origin = origin_of(params).to_string();
         // An import of the history run again is that import, as asked now.
-        let again;
+        let (again, expanded);
         let params = if id == library::AGAIN {
             again = library::again_params(&self.vault, params)?;
             &again
@@ -408,7 +408,9 @@ impl<S: Store + Send + 'static> VaultService<S> {
             let promise = crate::import_promise::start(&self.promises, params, &origin)?;
             return Ok(json!({ "promise": promise }));
         } else {
-            params
+            // A profile named: its choices under the options given.
+            expanded = crate::import_profiles::expand(&self.vault, params)?;
+            &expanded
         };
         let paths: Vec<PathBuf> = params["paths"]
             .as_array()
@@ -718,6 +720,24 @@ mod tests {
         let ran = heard.try_recv().unwrap();
         assert_eq!(ran.kind, "control.command");
         assert_eq!(ran.payload["origin"], "cli");
+        // An import profile round-trips through the node's commands.
+        let profile = json!({ "id": "", "name": "Monthly",
+                              "choices": { "copy_folders": true, "layout": "month" } });
+        let set = client
+            .request("import.profiles.set", json!({ "profile": profile }))
+            .unwrap();
+        assert_eq!(set["id"], "monthly");
+        let got = client
+            .request("import.profiles.get", json!({ "id": "monthly" }))
+            .unwrap();
+        assert_eq!(got["profile"]["choices"]["layout"], "month");
+        let listed = client.request("import.profiles.list", json!({})).unwrap();
+        assert_eq!(listed["profiles"][0]["id"], "everyday");
+        assert_eq!(listed["profiles"][1]["name"], "Monthly");
+        let removed = client
+            .request("import.profiles.remove", json!({ "id": "monthly" }))
+            .unwrap();
+        assert_eq!(removed["removed"], true);
         let refused = client
             .request("library.edit.head", json!({ "image": 3 }))
             .unwrap_err();

@@ -341,6 +341,12 @@ pub(crate) struct Sources {
     /// and what it honours.
     pub(crate) showing: Option<SourceKey>,
     pub(crate) honours: Honours,
+    /// What the connector of the source selected (the account clicked,
+    /// else the folder or card ticked last) declares of its import
+    /// options, and for which source: the editor and the column offer
+    /// only those ([`ImportWindow::follow_selection`]).
+    pub(crate) setup: helios_connect::Setup,
+    setup_for: Option<SourceKey>,
     /// The window's choices while a source's are shown.
     pub(crate) window: Choices,
     /// The cards mounted now, by volume ([`Sources::identify`]).
@@ -745,10 +751,66 @@ impl ImportWindow {
             return Some(saved.connector.clone());
         }
         match key {
-            SourceKey::Folder(p) if self.is_card(p) => Some(helios_connect::card::ID.to_string()),
-            SourceKey::Folder(_) => Some(helios_connect::folder::ID.to_string()),
+            SourceKey::Folder(p) => self.connector_asking(self.asks_of(p)),
             SourceKey::Account(_) => None,
         }
+    }
+
+    /// What a folder's path is set up from: a mounted volume (a card),
+    /// else a folder.
+    fn asks_of(&self, path: &std::path::Path) -> helios_connect::SetupAsks {
+        if self.is_card(path) {
+            helios_connect::SetupAsks::Volume
+        } else {
+            helios_connect::SetupAsks::Path
+        }
+    }
+
+    /// The connector whose new sources are set up from `asks` (a folder's
+    /// path, a mounted volume): the first one installed declaring it.
+    pub(super) fn connector_asking(&self, asks: helios_connect::SetupAsks) -> Option<String> {
+        self.connectors
+            .manifests()
+            .into_iter()
+            .find(|m| m.setup().is_some_and(|s| s.asks == asks))
+            .map(|m| m.id)
+    }
+
+    /// What the connector `id` declares of its sources' setup and import
+    /// options; a connector declaring none offers every option.
+    pub(super) fn setup_of(&self, id: &str) -> helios_connect::Setup {
+        self.connectors
+            .provider(id)
+            .and_then(|p| p.manifest().setup())
+            .unwrap_or_default()
+    }
+
+    /// What the connector of the folder or card at `path` declares.
+    pub(super) fn path_setup(&self, path: &std::path::Path) -> helios_connect::Setup {
+        self.connector_known(&SourceKey::Folder(path.to_path_buf()))
+            .map_or_else(helios_connect::Setup::default, |c| self.setup_of(&c))
+    }
+
+    /// The import options the source selected is offered, kept in
+    /// [`Sources::setup`] when the selection changed.
+    fn follow_setup(&mut self) {
+        let key = self
+            .sources
+            .account
+            .clone()
+            .map(SourceKey::Account)
+            .or_else(|| self.ticked.last().cloned().map(SourceKey::Folder));
+        if key == self.sources.setup_for {
+            return;
+        }
+        self.sources.setup = match &key {
+            Some(k) => {
+                let connector = self.connector_of(k);
+                self.setup_of(&connector)
+            }
+            None => helios_connect::Setup::default(),
+        };
+        self.sources.setup_for = key;
     }
 
     /// The choices of a source of `key` with no profile of its own: its
@@ -778,6 +840,7 @@ impl ImportWindow {
     /// choices (its own, else the window's), and what its connector
     /// honours.
     pub(super) fn follow_selection(&mut self) {
+        self.follow_setup();
         let key = self.selected_source();
         if key == self.sources.showing {
             return;
@@ -839,8 +902,7 @@ impl ImportWindow {
             return saved.connector.clone();
         }
         match key {
-            SourceKey::Folder(p) if self.is_card(p) => helios_connect::card::ID.to_string(),
-            SourceKey::Folder(_) => helios_connect::folder::ID.to_string(),
+            SourceKey::Folder(p) => self.connector_asking(self.asks_of(p)).unwrap_or_default(),
             SourceKey::Account(id) => self
                 .accounts
                 .listed()

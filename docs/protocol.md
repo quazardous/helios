@@ -699,6 +699,44 @@ albums' `import` and `imported` rules read; they are listed only with
   "images": ["<id>", "<id>"]}]}
 ```
 
+**Import profiles** (`import.profiles.list`, `.get`, `.set`,
+`.remove`) are named sets of import choices, kept by the node as the
+person's document `user/import-profiles` (JSON): the desktop's import
+window edits them, its saved sources point at one, and the node's
+automatic imports read the profile a source points at. A profile's
+`choices` are `copy_folders`, `into`, `layout`, `rename`, `duplicates`,
+`darktable`, `camera_look`, `filter` and `apply`; a choice missing is the
+local sources' default. `everyday` is built in: always first, never
+removed, its name kept. `library.import` (by rule or with `paths`) takes
+`profile` (an id) beside the choices: the profile's choices are used
+under the ones given, so `{"profile": "cards", "duplicates": "keep"}`
+keeps duplicates whatever the profile says. A profile the node does not
+keep is refused.
+
+```json
+{"id": "import.profiles.set", "params": {"profile": {"id": "", "name": "Monthly",
+  "choices": {"copy_folders": true, "layout": "month", "rename": "{date}_{stem}"}}}}
+{"id": "monthly"}
+{"id": "import.profiles.list", "params": {}}
+{"profiles": [{"id": "everyday", "name": "Everyday", "choices": {}},
+  {"id": "monthly", "name": "Monthly", "choices": {"copy_folders": true, "layout": "month",
+  "rename": "{date}_{stem}"}}], "current": "everyday", "defaults": {"card": "monthly"}}
+{"id": "import.profiles.get", "params": {"id": "monthly"}}
+{"profile": {"id": "monthly", "name": "Monthly", "choices": {"copy_folders": true, "layout": "month",
+  "rename": "{date}_{stem}"}}}
+{"id": "library.import", "params": {"source": "/media/EOS_DIGITAL", "rule": "new", "profile": "monthly"}}
+{"promise": {"id": "…", "kind": "import", "state": "pending"}}
+{"id": "import.profiles.remove", "params": {"id": "monthly"}}
+{"removed": true}
+```
+
+`set` adds the profile, or replaces the one of its id (an empty id is
+made of its name) and answers its id; choices an import would refuse
+(a layout that is not one, a rename pattern that does not parse) are
+refused. `current` is the profile the window uses when no source has
+one, `defaults` each connector's default profile, `filters` the named
+filter presets.
+
 Photos chosen in a service's page (Google Photos) are imported the same
 way by the process that holds their connector: it hands them to its node
 (`import_promise::hand`, in process) and asks `library.import` with

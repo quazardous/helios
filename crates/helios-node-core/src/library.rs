@@ -89,6 +89,10 @@ pub const IDS: &[&str] = &[
     STORAGE_MARK,
     STORAGE_STRATEGY_SET,
     STORAGE_CARD,
+    crate::import_profiles::LIST,
+    crate::import_profiles::GET,
+    crate::import_profiles::SET,
+    crate::import_profiles::REMOVE,
 ];
 
 /// Takes photos out of the Library (Lightroom's "Remove from Catalog"):
@@ -653,7 +657,36 @@ pub fn specs() -> Vec<CommandSpec> {
                 ),
             ]))
             .read_only(),
+        CommandSpec::new(crate::import_profiles::LIST, "List the import profiles", "Library")
+            .needs(Need::Vault)
+            .read_only(),
+        CommandSpec::new(crate::import_profiles::GET, "Read an import profile", "Library")
+            .needs(Need::Vault)
+            .params(object(&[("id", profile_id(), true)]))
+            .read_only(),
+        CommandSpec::new(crate::import_profiles::SET, "Keep an import profile", "Library")
+            .needs(Need::Vault)
+            .params(object(&[(
+                "profile",
+                json!({ "type": "object",
+                        "description": "added, or the one of its id replaced (an empty id is made of its name)",
+                        "properties": {
+                            "id": string(),
+                            "name": string(),
+                            "choices": { "type": "object",
+                                         "description": "copy_folders, into, layout, rename, duplicates, darktable, camera_look, filter, apply; a choice missing is the local sources' default" }
+                        },
+                        "required": ["id", "name", "choices"] }),
+                true,
+            )])),
+        CommandSpec::new(crate::import_profiles::REMOVE, "Remove an import profile", "Library")
+            .needs(Need::Vault)
+            .params(object(&[("id", profile_id(), true)])),
     ]
+}
+
+fn profile_id() -> Value {
+    json!({ "type": "string", "description": "a profile's id, from import.profiles.list" })
 }
 
 /// The id of the import command, run by the node's importer.
@@ -723,6 +756,12 @@ pub fn import_spec() -> CommandSpec {
             ),
             ("filter", helios_library::import_profile::filter_schema(), false),
             ("apply", helios_library::import_profile::apply_schema(), false),
+            (
+                "profile",
+                json!({ "type": "string",
+                        "description": "an import profile's id (import.profiles.list): its choices, under the options given beside it" }),
+                false,
+            ),
         ]))
         .needs(Need::Vault)
 }
@@ -975,6 +1014,9 @@ pub fn run<S: Store>(
 ) -> Result<Value, String> {
     if id == TRASH {
         return trash(vault, bus, params, origin);
+    }
+    if crate::import_profiles::handles(id) {
+        return crate::import_profiles::run(vault, bus, id, params);
     }
     let bus = Some(&**bus);
     match id {
@@ -1555,6 +1597,11 @@ mod tests {
             json!({ "strategy": null }),
             json!({ "root": "/photos", "path": "/media/card", "label": "EOS_DIGITAL",
                     "files": [["/media/card/DCIM/a.cr3", null]] }),
+            json!({}),
+            json!({ "id": "everyday" }),
+            json!({ "profile": { "id": "", "name": "Monthly",
+                                 "choices": { "copy_folders": true, "layout": "month" } } }),
+            json!({ "id": "monthly" }),
         ];
         assert_eq!(examples.len(), IDS.len(), "one example per command");
         for (spec, example) in specs().iter().zip(examples) {
