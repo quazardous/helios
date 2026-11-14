@@ -137,7 +137,7 @@ fn state(h: &Harness<'_, Shell>) -> Value {
 /// Frames until what the focus asked of the node has landed: within a
 /// minute (a deadline, not a count of frames).
 fn settle(h: &mut Harness<'_, Shell>) {
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let end = std::time::Instant::now() + std::time::Duration::from_mins(1);
     h.run_steps(2);
     while state(h)["busy"] == true {
         assert!(std::time::Instant::now() < end, "still busy: {}", state(h));

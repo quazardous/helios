@@ -390,6 +390,11 @@ impl LibraryHistory {
         self.lock().wake = Some(wake);
     }
 
+    /// Whether a window is woken when a walk lands.
+    pub fn wakes(&self) -> bool {
+        self.lock().wake.is_some()
+    }
+
     /// Why walks sent off the frame were refused since the last call
     /// (their steps put back), for the shell to say.
     pub fn take_refusals(&self) -> Vec<String> {

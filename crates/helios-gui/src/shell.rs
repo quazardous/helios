@@ -1100,7 +1100,6 @@ impl Shell {
             about_generation: None,
             jobs,
             _library_walks: library_history.walks(),
-            library_wakes: false,
             library_history,
             status,
             ended: crate::jobs::Ended::default(),
@@ -7180,12 +7179,11 @@ impl Shell {
     /// The library's walks off the frame: the window woken as each lands,
     /// a refused one said in a toast (its steps are back in the line).
     fn library_walks_frame(&mut self, ctx: &egui::Context) {
-        if !self.core.library_wakes {
+        if !self.core.library_history.wakes() {
             let ctx = ctx.clone();
             self.core
                 .library_history
                 .set_wake(Arc::new(move || ctx.request_repaint()));
-            self.core.library_wakes = true;
         }
         for reason in self.core.library_history.take_refusals() {
             let m = Message::new("gui-history-library-refused", "Undo refused: { $reason }")
