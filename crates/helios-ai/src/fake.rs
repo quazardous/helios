@@ -5,8 +5,9 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -29,6 +30,12 @@ pub struct FakeRuntime {
     pull_steps: Mutex<u64>,
     /// A pull of this model fails with this error.
     pull_errors: Mutex<BTreeMap<String, String>>,
+    /// While true, chats wait (at most 10 s) before answering.
+    held: Mutex<bool>,
+    released: Condvar,
+    /// Chats answering now, and the most at once.
+    chatting: AtomicUsize,
+    peak: AtomicUsize,
 }
 
 impl FakeRuntime {
@@ -83,6 +90,39 @@ impl FakeRuntime {
     /// Stops answering, as a runtime that is not running.
     pub fn set_down(&self, down: bool) {
         self.down.store(down, Ordering::SeqCst);
+    }
+
+    /// Holds chats (they wait until released, at most 10 s), to see how
+    /// many run at once.
+    pub fn hold(&self, held: bool) {
+        *self.held.lock().expect("fake lock") = held;
+        self.released.notify_all();
+    }
+
+    /// Chats answering now (held ones included).
+    pub fn chatting(&self) -> usize {
+        self.chatting.load(Ordering::SeqCst)
+    }
+
+    /// The most chats that were answering at once.
+    pub fn peak(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+
+    fn chat_gate(&self) {
+        let now = self.chatting.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut held = self.held.lock().expect("fake lock");
+        while *held {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            held = self.released.wait_timeout(held, left).expect("fake lock").0;
+        }
+        drop(held);
+        self.chatting.fetch_sub(1, Ordering::SeqCst);
     }
 
     /// Every call received, in order.
@@ -166,6 +206,9 @@ impl Transport for FakeRuntime {
         self.calls.lock().expect("fake lock").push(call.clone());
         if self.down.load(Ordering::SeqCst) {
             return Err(format!("{}: connection refused", call.url));
+        }
+        if call.path().ends_with("/chat") || call.path().ends_with("/completions") {
+            self.chat_gate();
         }
         let (status, body) = self.answer(call);
         Ok((status, body.to_string()))

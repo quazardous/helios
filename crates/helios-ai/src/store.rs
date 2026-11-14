@@ -14,6 +14,11 @@
 //!
 //! [limits]
 //! calls = 2
+//! run_remote_calls = 500
+//!
+//! [limits.providers.lan]
+//! parallel = 1
+//! per_minute = 30
 //! ```
 //!
 //! With no provider listed, Helios knows one: Ollama on loopback
@@ -23,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::limits::Limits;
 use crate::provider::{ProviderConfig, ProviderKind};
 use crate::routing::Routing;
 
@@ -103,23 +109,6 @@ impl Default for Privacy {
             remote_image_side: remote_side(),
             local_image_side: local_side(),
         }
-    }
-}
-
-/// How many calls at once.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Limits {
-    #[serde(default = "two")]
-    pub calls: u64,
-}
-
-fn two() -> u64 {
-    2
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Limits { calls: two() }
     }
 }
 
