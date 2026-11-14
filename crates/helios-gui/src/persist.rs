@@ -199,10 +199,14 @@ enum Write {
     /// One of a photo's heads made its current version
     /// (`library.versions.switch`), asked at a time (seconds): one step of
     /// the library's history.
-    SwitchVersion(String, String, f64),
+    SwitchVersion(String, String, f64, crate::library::Batch),
     /// A copy removed (`library.versions.remove`), asked at a time
     /// (seconds): one step of the library's history.
-    RemoveVersion(String, String, f64),
+    RemoveVersion(String, String, f64, crate::library::Batch),
+    /// Photos grouped, ungrouped or a stack's top set
+    /// (`library.stacks.group`, `.ungroup`, `.top`), asked at a time
+    /// (seconds): one step of the library's history.
+    Stack(crate::library::StackAsk, f64, crate::library::Batch),
     /// A library document kept, or removed when none
     /// (`library.documents.set`).
     Document {
@@ -267,11 +271,28 @@ impl Write {
                 helios_node_core::library::TRASH,
                 json!({ "images": images }),
             ),
-            Self::SwitchVersion(image, version, _) => (
+            Self::Stack(ask, ..) => {
+                use crate::library::StackAsk;
+                match ask {
+                    StackAsk::Group { images, top } => (
+                        helios_node_core::library::STACKS_GROUP,
+                        json!({ "images": images, "top": top }),
+                    ),
+                    StackAsk::Ungroup { images } => (
+                        helios_node_core::library::STACKS_UNGROUP,
+                        json!({ "images": images }),
+                    ),
+                    StackAsk::Top { stack, image } => (
+                        "library.stacks.top",
+                        json!({ "stack": stack, "image": image }),
+                    ),
+                }
+            }
+            Self::SwitchVersion(image, version, ..) => (
                 helios_node_core::library::VERSIONS_SWITCH,
                 json!({ "image": image, "version": version }),
             ),
-            Self::RemoveVersion(image, version, _) => (
+            Self::RemoveVersion(image, version, ..) => (
                 helios_node_core::library::VERSIONS_REMOVE,
                 json!({ "image": image, "version": version }),
             ),
@@ -316,6 +337,7 @@ impl Write {
             | Self::Trash(_)
             | Self::SwitchVersion(..)
             | Self::RemoveVersion(..)
+            | Self::Stack(..)
             | Self::Document { .. }
             | Self::Session(..)
             | Self::Album(..)
@@ -965,12 +987,20 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
 
 /// Records a step of a photo's versions (`library.versions.switch` or
 /// `remove`) in the library's history, so Ctrl+Z takes it back.
-fn record_versions_step(shell: &mut Shell, answer: &Value, at: f64, removed: bool) {
+fn record_versions_step(
+    shell: &mut Shell,
+    answer: &Value,
+    at: f64,
+    removed: bool,
+    batch: &crate::library::Batch,
+) {
     match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
         Ok(changes) if changes.is_empty() => {}
         Ok(changes) => {
             let label = crate::library_history::version_label(removed);
-            shell.library_history().record(label, changes, at);
+            shell
+                .library_history()
+                .record_in(batch.as_ref(), label, changes, at);
         }
         Err(e) => shell.notify(
             Level::Warning,
@@ -1387,21 +1417,46 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
-            (Write::SwitchVersion(image, _, at), Ok(answer)) => {
+            (Write::SwitchVersion(image, _, at, batch), Ok(answer)) => {
                 // Recorded so Ctrl+Z picks the version before; the strip
                 // and the photo's picture follow.
-                record_versions_step(shell, &answer, *at, false);
+                record_versions_step(shell, &answer, *at, false, batch);
                 shell.library_mut().versions_changed();
                 shell.library_mut().edit_changed(image);
             }
-            (Write::RemoveVersion(image, _, at), Ok(answer)) => {
-                record_versions_step(shell, &answer, *at, true);
+            (Write::RemoveVersion(image, _, at, batch), Ok(answer)) => {
+                record_versions_step(shell, &answer, *at, true, batch);
                 let heads = to_usize(&answer["heads"]);
                 let mut lib = shell.library_mut();
                 lib.set_heads_of(image, heads);
                 lib.versions_changed();
                 lib.edit_changed(image);
             }
+            (Write::Stack(ask, at, batch), Ok(answer)) => {
+                // The step the node made, recorded so Ctrl+Z takes it
+                // back; the stacks are read again below.
+                match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+                    Ok(changes) if changes.is_empty() => {}
+                    Ok(changes) => {
+                        let label = crate::library_history::stack_label(ask);
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
+                    }
+                    Err(e) => shell.notify(
+                        Level::Warning,
+                        format!("the stack cannot be set back with undo: {e}"),
+                    ),
+                }
+            }
+            (Write::Stack(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-stack-not-changed",
+                    "The stack was not changed: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Rotate(_, turn, at, batch), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z turns the
                 // photos back; the vault's events show the turn.
@@ -1541,7 +1596,7 @@ impl<S: Store + 'static> Persist<S> {
         }
         if matches!(
             write,
-            Write::Suggest(_) | Write::Accept(..) | Write::Decline(_)
+            Write::Suggest(_) | Write::Accept(..) | Write::Decline(_) | Write::Stack(..)
         ) {
             self.ask_stacks();
         }
@@ -1783,18 +1838,18 @@ impl<S: Store + 'static> Persist<S> {
             self.asked.push((Asked::Versions(image), pending));
         }
         let asks = shell.library_mut().take_version_asks();
-        for ask in asks {
+        for (ask, batch) in asks {
             match ask {
                 VersionAsk::Switch { image, version } => self
                     .writes
-                    .push_back(Write::SwitchVersion(image, version, now)),
+                    .push_back(Write::SwitchVersion(image, version, now, batch)),
                 VersionAsk::Remove {
                     image,
                     version,
                     confirmed: true,
                 } => self
                     .writes
-                    .push_back(Write::RemoveVersion(image, version, now)),
+                    .push_back(Write::RemoveVersion(image, version, now, batch)),
                 VersionAsk::Remove { image, version, .. } => {
                     ask_remove_version(shell, &image, &version);
                 }
@@ -2108,6 +2163,12 @@ impl<S: Store + 'static> Persist<S> {
                 .map(|(images, turn, batch)| Write::Rotate(images, turn, now, batch)),
         );
         self.ask_versions(shell, now);
+        let stack_asks = shell.library_mut().take_stack_asks();
+        self.writes.extend(
+            stack_asks
+                .into_iter()
+                .map(|(ask, batch)| Write::Stack(ask, now, batch)),
+        );
         let duplicates = shell.library_mut().take_duplicates();
         self.writes.extend(
             duplicates

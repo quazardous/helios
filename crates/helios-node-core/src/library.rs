@@ -64,6 +64,8 @@ pub const IDS: &[&str] = &[
     "library.stacks.dissolve",
     "library.stacks.expand",
     "library.stacks.top",
+    STACKS_GROUP,
+    STACKS_UNGROUP,
     "library.stacks.suggest",
     "library.stacks.accept",
     "library.stacks.decline",
@@ -116,6 +118,15 @@ pub const VERSIONS_SWITCH: &str = "library.versions.switch";
 /// Removes a copy: one of a photo's heads with the versions only it
 /// leads to, never the last. Answers the step (`changes`).
 pub const VERSIONS_REMOVE: &str = "library.versions.remove";
+
+/// Groups photos into one stack (Lightroom's "Group into Stack"), the
+/// stacks they are in merged into it; answers the stack and the step
+/// (`changes`) the vault's revert undoes.
+pub const STACKS_GROUP: &str = "library.stacks.group";
+
+/// Ungroups the stacks photos are in, the photos untouched; answers the
+/// stacks and the step (`changes`).
+pub const STACKS_UNGROUP: &str = "library.stacks.ungroup";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -410,6 +421,24 @@ pub fn specs() -> Vec<CommandSpec> {
         ])),
         library("library.stacks.top", "Put an image on top of its stack")
             .params(object(&[stack(), ("image", string(), true)])),
+        library(
+            STACKS_GROUP,
+            "Group photos into one stack, the stacks they are in merged; undoable",
+        )
+        .params(object(&[
+            ("images", images(), true),
+            (
+                "top",
+                json!({ "type": ["string", "null"],
+                        "description": "the photo on top, else the first merged stack's top, else the first photo" }),
+                false,
+            ),
+        ])),
+        library(
+            STACKS_UNGROUP,
+            "Ungroup the stacks photos are in, the photos untouched; undoable",
+        )
+        .params(object(&[("images", images(), true)])),
         library("library.stacks.suggest", "Suggest stacks").params(object(&[
             ("images", images(), false),
             ("resolver", json!({ "type": ["string", "null"] }), false),
@@ -1183,8 +1212,29 @@ pub fn run<S: Store>(
         "library.stacks.top" => {
             let top = image(vault, text(params, "image"))?;
             vault
-                .set_stack_top(text(params, "stack"), &top)
-                .map(|s| json!({ "stack": to_json(&s) }))
+                .set_stack_top_step(text(params, "stack"), &top)
+                .map(|(s, changes)| json!({ "stack": to_json(&s), "changes": to_json(&changes) }))
+        }
+        STACKS_GROUP => {
+            let members = named(vault, params, "images")?;
+            let top = params["top"]
+                .as_str()
+                .map(|t| image(vault, t))
+                .transpose()?;
+            vault
+                .group_stack(&members, top, origin, now())
+                .map(|(s, changes, merged)| {
+                    json!({ "stack": to_json(&s), "merged": merged.len(),
+                            "changes": to_json(&changes) })
+                })
+        }
+        STACKS_UNGROUP => {
+            let members = named(vault, params, "images")?;
+            vault.ungroup_stacks(&members).map(|(gone, changes)| {
+                json!({ "ungrouped": gone.len(),
+                        "stacks": gone.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+                        "changes": to_json(&changes) })
+            })
         }
         "library.stacks.suggest" => {
             let selection = named(vault, params, "images")?;
@@ -1404,6 +1454,8 @@ mod tests {
             json!({ "stack": "s" }),
             json!({ "stack": "s", "expanded": false }),
             json!({ "stack": "s", "image": "/p/a.raf" }),
+            json!({ "images": ["/p/a.raf", "0a"], "top": "0a" }),
+            json!({ "images": ["0a"] }),
             json!({ "images": [], "resolver": null, "window": 3.0, "distance": 8 }),
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
@@ -1695,6 +1747,57 @@ mod tests {
         vault.revert(&undo).unwrap();
         assert_eq!(call(HEADS, json!({})).unwrap()["heads"][&hex], 2);
         assert!(call(VERSIONS_SWITCH, json!({ "image": hex, "version": "zz" })).is_err());
+    }
+
+    #[test]
+    fn photos_are_grouped_topped_and_ungrouped_each_step_undone() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let dir = std::env::temp_dir().join(format!("helios-group-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ids: Vec<String> = (0..3)
+            .map(|i| {
+                let path = dir.join(format!("shot{i}.raw"));
+                std::fs::write(&path, format!("photo {i}")).unwrap();
+                vault.import_file(&path, 1).unwrap().hex()
+            })
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user");
+        let undo = |answer: &Value| {
+            let changes: helios_vault::Changes =
+                serde_json::from_value(answer["changes"].clone()).unwrap();
+            vault.revert(&changes).unwrap();
+        };
+        let stacks = || call("library.stacks.list", json!({})).unwrap()["stacks"].clone();
+        let grouped = call(STACKS_GROUP, json!({ "images": [ids[0], ids[1]] })).unwrap();
+        let stack = grouped["stack"]["id"].as_str().unwrap().to_string();
+        assert_eq!(grouped["stack"]["top"], json!(ids[0]), "{grouped}");
+        // The third joins: the stack is merged into a new one.
+        let merged = call(
+            STACKS_GROUP,
+            json!({ "images": [ids[2], ids[1]], "top": ids[2] }),
+        )
+        .unwrap();
+        assert_eq!(merged["merged"], 1, "{merged}");
+        assert_eq!(stacks()[0]["members"].as_array().unwrap().len(), 3);
+        undo(&merged);
+        assert_eq!(stacks()[0]["id"], json!(stack), "undone: {}", stacks());
+        let topped = call(
+            "library.stacks.top",
+            json!({ "stack": stack, "image": ids[1] }),
+        )
+        .unwrap();
+        assert_eq!(stacks()[0]["top"], json!(ids[1]));
+        undo(&topped);
+        assert_eq!(stacks()[0]["top"], json!(ids[0]), "undone");
+        let ungrouped = call(STACKS_UNGROUP, json!({ "images": [ids[1]] })).unwrap();
+        assert_eq!(ungrouped["ungrouped"], 1, "{ungrouped}");
+        assert_eq!(stacks(), json!([]));
+        assert!(call(STACKS_UNGROUP, json!({ "images": [ids[1]] })).is_err());
+        undo(&ungrouped);
+        assert_eq!(stacks()[0]["id"], json!(stack), "undone");
+        assert!(call(STACKS_GROUP, json!({ "images": [ids[2]] })).is_err());
     }
 
     #[test]

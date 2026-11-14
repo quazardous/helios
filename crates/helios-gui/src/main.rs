@@ -2535,10 +2535,7 @@ fn main() -> Result<(), String> {
             if let Err(e) = helios_gui::caches::register(&mut shell) {
                 shell.notes.push(format!("cache commands: {e}"));
             }
-            let calibration_node = persist.as_ref().map(|p| helios_gui::calibrate::Node {
-                vault: p.vault().clone(),
-                bus: p.bus().clone(),
-            });
+            let calibration_node = persist.as_ref().map(|p| p.node().clone());
             let library_history = shell.library_history();
             if let Err(e) =
                 helios_gui::calibrate::register(&mut shell, calibration_node, library_history)
