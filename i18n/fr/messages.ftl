@@ -818,6 +818,8 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
+gui-pick-choose-folder = Choisir le dossier de la bibliothèque…
+
 gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 
 gui-pointer-choice-darktable = Utiliser ceux de darktable
