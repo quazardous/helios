@@ -164,6 +164,8 @@ command-library-collection.title 8c4621c0332ae0d9
 command-library-compare.title d0cb5f40dd939879
 command-library-copyFiles.title 47994437a8a0f5ba
 command-library-deleteRejected.title 9b733bf20d4e0707
+command-library-duplicate.title e9d68fb1434cdb15
+command-library-duplicateOriginal.title 972872e3c27751da
 command-library-export.title c2dc933564069c87
 command-library-filter-apply.title 19abeee163bd677a
 command-library-filter-pin.title 62e6f0bcdff6f1ec
@@ -867,6 +869,7 @@ gui-library-badge-no-backup 2b3f93f60c5b31be
 gui-library-badge-offline 01064de9e41d67ce
 gui-library-badge-quick d3602fbd519917ca
 gui-library-badge-soft a3be16c56c2993f9
+gui-library-badge-versions e6e739b5295225ba
 gui-library-cannot-open 2702ccb4eb8511ba
 gui-library-compare 0b2cb0ac030421c2
 gui-library-compare-hint ef5d43662fafd120
@@ -880,6 +883,8 @@ gui-library-delete-rejected fea035c0029f3686
 gui-library-drop-add bc4b76c3fcf7a86e
 gui-library-drop-set ec3d777987cd5744
 gui-library-drop-smart 2b52bc1534ed5dd4
+gui-library-duplicate 18bc4e7991234d1c
+gui-library-duplicate-original 1320e6326debf321
 gui-library-empty d1a64591ca82b2f8
 gui-library-facet-backup 20d776af0fba6d57
 gui-library-facet-camera 2084bc593dd90bf4
@@ -903,6 +908,7 @@ gui-library-keep-best be4edb21d1e2e2fa
 gui-library-missing-note 02e4f67d1be418c9
 gui-library-no-cursor 581a49943aeb231e
 gui-library-none d2ff532108cdfbd6
+gui-library-not-duplicated 9a03a5f17f940d90
 gui-library-not-removed 6b58bff8c497ba91
 gui-library-not-rotated 6d65e48b0bc4c9cc
 gui-library-not-saved 48d930d6f5a75dc9

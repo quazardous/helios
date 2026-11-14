@@ -153,6 +153,13 @@ pub fn defaults() -> Vec<(String, String, String)> {
             &format!("{} && !textInputFocus", behind_no_picker(&library)),
         );
     }
+    // Duplicate, as Lightroom's "Create Virtual Copy" (Ctrl+'); the
+    // darktable package adds its Ctrl+D and Ctrl+Shift+D.
+    bind(
+        "Ctrl+Quote",
+        crate::library::DUPLICATE_COMMAND,
+        &format!("{} && !textInputFocus", behind_no_picker(&library)),
+    );
     // Move to Trash… and Delete Rejected…, as Lightroom's "Remove and
     // Delete from Disk" (Ctrl+Alt+Shift+Delete) and "Delete Rejected
     // Photos" (Ctrl+Backspace); both ask first.

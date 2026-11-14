@@ -73,6 +73,7 @@ pub use batch::{
     SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar, TRASH_COMMAND,
     TrashAsk, Turn,
 };
+pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
 
 /// The library's name in egui-pop's steps and commands (`library` in
 /// their arguments).
@@ -1578,6 +1579,10 @@ pub struct Library {
     quick: Vec<String>,
     /// The same, for the grid's badge.
     quick_set: HashSet<String>,
+    /// How many heads each photo with more than one has (its versions:
+    /// copies made with [`DUPLICATE_COMMAND`], darktable duplicates), for
+    /// the grid's badge.
+    head_counts: HashMap<String, usize>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1652,6 +1657,9 @@ pub struct Library {
     /// The photos asked turned ([`ROTATE_LEFT_COMMAND`] and the others),
     /// for the host.
     rotations: Vec<(Vec<String>, Turn)>,
+    /// The photos asked duplicated ([`DUPLICATE_COMMAND`],
+    /// [`DUPLICATE_ORIGINAL_COMMAND`]), for the host.
+    duplicates: Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)>,
     /// The photos whose files were asked moved to the trash
     /// ([`TRASH_COMMAND`], [`DELETE_REJECTED_COMMAND`]), for the host.
     trash_asks: Vec<TrashAsk>,
@@ -1735,6 +1743,7 @@ impl Default for Library {
             album_edits: Vec::new(),
             quick: Vec::new(),
             quick_set: HashSet::new(),
+            head_counts: HashMap::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -1774,6 +1783,7 @@ impl Default for Library {
             copied: None,
             removals: Vec::new(),
             rotations: Vec::new(),
+            duplicates: Vec::new(),
             trash_asks: Vec::new(),
         }
     }
@@ -1877,6 +1887,7 @@ struct PresenceWords {
     blown: String,
     crushed: String,
     quick: String,
+    versions: String,
 }
 
 impl PresenceWords {
@@ -1914,6 +1925,10 @@ impl PresenceWords {
                 Message::new("gui-library-badge-crushed", "crushed shadows"),
             ),
             quick: crate::i18n::text(ctx, Message::new("gui-library-badge-quick", "quick")),
+            versions: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-versions", "versions"),
+            ),
         }
     }
 }
@@ -1930,6 +1945,8 @@ struct Items<'a> {
     backups: Option<&'a HashMap<String, BackupMark>>,
     /// The photos in the quick collection.
     quick: &'a HashSet<String>,
+    /// How many heads the photos with more than one have.
+    heads: &'a HashMap<String, usize>,
 }
 
 impl Items<'_> {
@@ -1986,6 +2003,11 @@ impl LibraryItems<String> for Items<'_> {
         }
         if self.quick.contains(&entry.id) {
             badges.push(Badge::new(self.words.quick.clone()).tone(BadgeTone::Info));
+        }
+        // Its versions (L10, L-C5 B): copies and darktable duplicates,
+        // counted, one cell for the photo.
+        if let Some(&n) = self.heads.get(&entry.id).filter(|n| **n > 1) {
+            badges.push(Badge::new(format!("{n} {}", self.words.versions)).tone(BadgeTone::Info));
         }
         if let Some(mark) = self.backups.and_then(|b| b.get(&entry.id)) {
             let w = self.words;
@@ -2276,6 +2298,33 @@ impl Library {
             .count()
     }
 
+    /// How many heads the photos with more than one have, as the node
+    /// counts them (`library.versions.heads`): the grid's badge follows.
+    pub fn set_heads(&mut self, heads: HashMap<String, usize>) {
+        if self.head_counts == heads {
+            return;
+        }
+        self.head_counts = heads;
+        self.revision += 1;
+    }
+
+    /// Sets one photo's head count, as a duplicate's answer gives it.
+    pub fn set_heads_of(&mut self, image: &str, heads: usize) {
+        let before = if heads > 1 {
+            self.head_counts.insert(image.to_string(), heads)
+        } else {
+            self.head_counts.remove(image)
+        };
+        if before != Some(heads).filter(|n| *n > 1) {
+            self.revision += 1;
+        }
+    }
+
+    /// How many heads a photo has, when more than one.
+    pub fn heads_of(&self, image: &str) -> Option<usize> {
+        self.head_counts.get(image).copied()
+    }
+
     /// The quick collection as the vault holds it: the grid's badges
     /// follow, and its photos are asked again when it is shown.
     pub fn set_quick(&mut self, images: Vec<String>) {
@@ -2407,7 +2456,7 @@ impl Library {
 
     /// The badges an image shows in the grid, in the interface's
     /// language: RAW, offline, missing, changed outside Helios, in the
-    /// quick collection, its backups when the library has a strategy,
+    /// quick collection, its versions counted, its backups when the library has a strategy,
     /// and its culling measures (soft focus, blown highlights, crushed
     /// shadows) once measured.
     pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
@@ -2424,6 +2473,7 @@ impl Library {
             words: &words,
             backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
             quick: &self.quick_set,
+            heads: &self.head_counts,
         };
         items.badges(0).into_iter().map(|b| b.text).collect()
     }
@@ -4052,6 +4102,7 @@ impl Library {
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
                 quick: &self.quick_set,
+                heads: &self.head_counts,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -4107,6 +4158,22 @@ impl Library {
                             crate::i18n::text(
                                 ui.ctx(),
                                 Message::new("gui-library-rotate-reset", "Reset Rotation"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::Separator,
+                        crate::dialogs::MenuItem::command(DUPLICATE_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-duplicate", "Duplicate"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(DUPLICATE_ORIGINAL_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new(
+                                    "gui-library-duplicate-original",
+                                    "Duplicate Original",
+                                ),
                             ),
                         ),
                         crate::dialogs::MenuItem::Separator,
@@ -4184,6 +4251,7 @@ impl Library {
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
                 quick: &self.quick_set,
+                heads: &self.head_counts,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,

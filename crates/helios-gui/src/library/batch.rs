@@ -64,6 +64,15 @@ pub const ROTATE_RIGHT_COMMAND: &str = "library.rotateRight";
 /// selection; darktable's "reset rotation").
 pub const RESET_ROTATION_COMMAND: &str = "library.resetRotation";
 
+/// Makes a new version of photos from their current edit (`images`,
+/// else the selection; Lightroom's "Create Virtual Copy", Ctrl+',
+/// darktable's "duplicate", Ctrl+D).
+pub const DUPLICATE_COMMAND: &str = "library.duplicate";
+
+/// Makes a new version of photos with no edit (`images`, else the
+/// selection; darktable's "duplicate virgin", Ctrl+Shift+D).
+pub const DUPLICATE_ORIGINAL_COMMAND: &str = "library.duplicateOriginal";
+
 /// Moves photos' files to the system trash (`images`, else the
 /// selection), after a question unless `confirmed` (Lightroom's "Remove
 /// and Delete from Disk", darktable's "delete (trash)").
@@ -409,6 +418,37 @@ impl Library {
         std::mem::take(&mut self.rotations)
     }
 
+    /// Queues `images` (those shown), else the selection, to be
+    /// duplicated by the host ([`Library::take_duplicates`]); how many.
+    ///
+    /// # Errors
+    /// No photo to duplicate.
+    pub fn duplicate(
+        &mut self,
+        images: Option<Vec<String>>,
+        from: helios_vault::versions::DuplicateFrom,
+    ) -> Result<usize, String> {
+        let keys = match images {
+            Some(ids) => {
+                let keys: Vec<String> = ids.into_iter().filter(|i| self.holds(i)).collect();
+                if keys.is_empty() {
+                    return Err("none of the `images` is in the library".into());
+                }
+                keys
+            }
+            None => self.targets()?,
+        };
+        let count = keys.len();
+        self.duplicates.push((keys, from));
+        Ok(count)
+    }
+
+    /// The photos asked duplicated since, one list per command, with
+    /// where each copy's edit comes from.
+    pub fn take_duplicates(&mut self) -> Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)> {
+        std::mem::take(&mut self.duplicates)
+    }
+
     /// Queues `images` (those shown), else the selection, for their files
     /// to go to the trash ([`Library::take_trash_asks`]); how many.
     ///
@@ -519,6 +559,31 @@ mod tests {
         assert!(lib.targets().is_err(), "no cursor left either");
         assert_eq!(lib.invert_selection(), 4);
         assert!(Similar::parse("week").is_err());
+    }
+
+    #[test]
+    fn duplicate_queues_the_selection_or_the_photos_named() {
+        use helios_vault::versions::DuplicateFrom;
+        let mut lib = library();
+        lib.select_none();
+        assert!(lib.duplicate(None, DuplicateFrom::Current).is_err());
+        lib.select_ids(&["b".into()]);
+        assert_eq!(lib.duplicate(None, DuplicateFrom::Current), Ok(1));
+        assert_eq!(
+            lib.duplicate(Some(vec!["c".into()]), DuplicateFrom::Original),
+            Ok(1)
+        );
+        assert_eq!(
+            lib.take_duplicates(),
+            [
+                (vec!["b".to_string()], DuplicateFrom::Current),
+                (vec!["c".to_string()], DuplicateFrom::Original)
+            ]
+        );
+        lib.set_heads_of("b", 2);
+        assert_eq!(lib.heads_of("b"), Some(2));
+        lib.set_heads_of("b", 1);
+        assert_eq!(lib.heads_of("b"), None, "one head: no badge");
     }
 
     #[test]

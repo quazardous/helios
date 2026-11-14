@@ -3165,6 +3165,14 @@ impl Shell {
                 "Reset Rotation: turn the photos back to their file's orientation (`images`: ids, else the selection)",
             ),
             (
+                crate::library::DUPLICATE_COMMAND,
+                "Duplicate: a new version of each photo from its current edit, beside the others (`images`: ids, else the selection); the grid counts the versions",
+            ),
+            (
+                crate::library::DUPLICATE_ORIGINAL_COMMAND,
+                "Duplicate Original: a new version of each photo with no edit, beside the others (`images`: ids, else the selection)",
+            ),
+            (
                 crate::library::TRASH_COMMAND,
                 "Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z",
             ),
@@ -5144,10 +5152,11 @@ impl Shell {
     /// marks copied.
     fn library_batch(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
         use crate::library::{
-            CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND,
-            MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND, RESET_ROTATION_COMMAND,
-            ROTATE_LEFT_COMMAND, ROTATE_RIGHT_COMMAND, SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND,
-            SELECT_SIMILAR_COMMAND, Similar, TRASH_COMMAND, Turn,
+            CopiedMarks, DELETE_REJECTED_COMMAND, DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND,
+            MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND,
+            RESET_ROTATION_COMMAND, ROTATE_LEFT_COMMAND, ROTATE_RIGHT_COMMAND,
+            SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
+            TRASH_COMMAND, Turn,
         };
         let confirmed = args.get("confirmed").and_then(Value::as_bool) == Some(true);
         let text = |key: &str| args.get(key).and_then(Value::as_str);
@@ -5190,6 +5199,12 @@ impl Shell {
             ROTATE_LEFT_COMMAND => Ok(json!({ "rotated": lib.rotate(images()?, Turn::Left)? })),
             ROTATE_RIGHT_COMMAND => Ok(json!({ "rotated": lib.rotate(images()?, Turn::Right)? })),
             RESET_ROTATION_COMMAND => Ok(json!({ "rotated": lib.rotate(images()?, Turn::Reset)? })),
+            DUPLICATE_COMMAND => Ok(json!({
+                "duplicated": lib.duplicate(images()?, helios_vault::versions::DuplicateFrom::Current)?
+            })),
+            DUPLICATE_ORIGINAL_COMMAND => Ok(json!({
+                "duplicated": lib.duplicate(images()?, helios_vault::versions::DuplicateFrom::Original)?
+            })),
             TRASH_COMMAND => Ok(json!({ "asked": lib.ask_trash(images()?, confirmed)? })),
             DELETE_REJECTED_COMMAND => Ok(json!({
                 "asked": lib.ask_delete_rejected(images()?, confirmed)?

@@ -316,6 +316,12 @@ command-library-copyFiles =
 command-library-deleteRejected =
     .title = Delete Rejected…: the rejected photos shown to the system trash (`images`: of them, those named), asked first unless `confirmed`
 
+command-library-duplicate =
+    .title = Duplicate: a new version of each photo from its current edit, beside the others (`images`: ids, else the selection); the grid counts the versions
+
+command-library-duplicateOriginal =
+    .title = Duplicate Original: a new version of each photo with no edit, beside the others (`images`: ids, else the selection)
+
 command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 

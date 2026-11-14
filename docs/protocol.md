@@ -286,6 +286,30 @@ named twice turns once, and a reset leaves an unturned photo out. It
 answers `rotated` and `changes`, the step its revert undoes (the
 desktop's Ctrl+Z), and announces each turn as `vault.field_changed`.
 
+`library.images.duplicate` (`images`, `from`: `current`, the default,
+or `original`) makes a new version of each photo, a new head beside the
+others (Lightroom's "Create Virtual Copy", darktable's "duplicate" and
+"duplicate virgin"): a copy of its newest head's edit, continuing the
+same versions (it shares their history), or a first edit with no
+modules. The copy's edit carries a number under `duplicate`, so two
+copies of one edit stay two versions; it is labelled `Duplicate`, made
+by the call's origin, and, being the newest head, is the one an edit
+opens next. A photo named twice is copied once. It answers `duplicated`,
+the new version of each photo (`versions`) and each photo's head count
+(`heads`), and announces each copy as `vault.version_added`. Removing a
+copy is not built yet. `library.versions.heads` (no params, read-only)
+answers the head count of every photo with more than one, for the
+grid's versions badge:
+
+```json
+{"id": 7, "method": "library.images.duplicate",
+ "params": {"images": ["4f1c…"], "from": "current"}}
+{"id": 7, "result": {"duplicated": 1, "versions": {"4f1c…": "9a02…"},
+ "heads": {"4f1c…": 2}}}
+{"id": 8, "method": "library.versions.heads", "params": {}}
+{"id": 8, "result": {"heads": {"4f1c…": 2}}}
+```
+
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to
 the system trash (Lightroom's "Delete from Disk", darktable's "delete
 (trash)") as a journaled job (`helios_library::trash`). The job is kept

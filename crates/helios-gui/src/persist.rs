@@ -183,6 +183,9 @@ enum Write {
     /// Photos turned (`library.images.rotate`), asked at a time
     /// (seconds): one step of the library's history.
     Rotate(Vec<String>, crate::library::Turn, f64),
+    /// Photos duplicated (`library.images.duplicate`): a new version of
+    /// each, from its current edit or the original.
+    Duplicate(Vec<String>, helios_vault::versions::DuplicateFrom),
     /// Photos' files moved to the system trash, confirmed
     /// (`library.images.trash`): a journaled job, not a history step.
     Trash(Vec<String>),
@@ -239,6 +242,13 @@ impl Write {
                 helios_node_core::library::ROTATE,
                 json!({ "images": images, "turn": turn_word(*turn) }),
             ),
+            Self::Duplicate(images, from) => (
+                helios_node_core::library::DUPLICATE,
+                json!({ "images": images, "from": match from {
+                    helios_vault::versions::DuplicateFrom::Current => "current",
+                    helios_vault::versions::DuplicateFrom::Original => "original",
+                } }),
+            ),
             Self::Trash(images) => (
                 helios_node_core::library::TRASH,
                 json!({ "images": images }),
@@ -280,6 +290,7 @@ impl Write {
             | Self::Decline(_)
             | Self::Remove(..)
             | Self::Rotate(..)
+            | Self::Duplicate(..)
             | Self::Trash(_)
             | Self::Document { .. }
             | Self::Session(..)
@@ -411,6 +422,8 @@ pub struct LibraryRows {
     order: Order,
     /// Its stacks and the proposals waiting.
     stacked: Stacked,
+    /// How many heads the photos with more than one have.
+    heads: HashMap<String, usize>,
 }
 
 impl LibraryRows {
@@ -455,17 +468,34 @@ pub fn read_library(reader: &Reader, order: Order) -> Result<LibraryRows, String
     let count = to_usize(&opened["count"]);
     let read = read_cursor(reader, cursor, count);
     let read = read.and_then(|read| Ok((read, read_stacked(reader)?)));
+    let read = read.and_then(|read| Ok((read, read_heads(reader)?)));
     if read.is_err() {
         reader.close(cursor);
     }
-    let ((entries, files), stacked) = read?;
+    let (((entries, files), stacked), heads) = read?;
     Ok(LibraryRows {
         entries,
         files,
         cursor: Some(cursor),
         order,
         stacked,
+        heads,
     })
+}
+
+/// How many heads the photos with more than one have, as the node
+/// counts them (`library.versions.heads`). Waits for the node.
+fn read_heads(reader: &Reader) -> Result<HashMap<String, usize>, String> {
+    let read = reader.read(helios_node_core::library::HEADS, json!({}))?;
+    Ok(read["heads"]
+        .as_object()
+        .map(|heads| {
+            heads
+                .iter()
+                .map(|(id, n)| (id.clone(), to_usize(n)))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 /// The library's stacks and the `stacks.suggest` proposals, as the node
@@ -1273,6 +1303,14 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
+            (Write::Duplicate(..), Ok(done)) => {
+                // The grid's badge counts the photos' versions now.
+                if let Some(heads) = done["heads"].as_object() {
+                    for (id, n) in heads {
+                        shell.library_mut().set_heads_of(id, to_usize(n));
+                    }
+                }
+            }
             (Write::Trash(_), Ok(done)) => {
                 let trashed = done["trashed"].as_u64().unwrap_or(0);
                 let failed = done["failed"].as_array().map_or(0, Vec::len);
@@ -1328,6 +1366,14 @@ impl<S: Store + 'static> Persist<S> {
             ),
             (_, Ok(_)) => {}
             (Write::Trash(_), Err(e)) => not_trashed(shell, &e.message),
+            (Write::Duplicate(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-not-duplicated",
+                    "The photos were not duplicated: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Rotate(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1522,6 +1568,7 @@ impl<S: Store + 'static> Persist<S> {
             self.reader.close(old.cursor);
         }
         show_stacked(shell, rows.stacked);
+        shell.library_mut().set_heads(rows.heads);
         Ok(rows.files)
     }
 
@@ -1894,6 +1941,12 @@ impl<S: Store + 'static> Persist<S> {
             rotations
                 .into_iter()
                 .map(|(images, turn)| Write::Rotate(images, turn, now)),
+        );
+        let duplicates = shell.library_mut().take_duplicates();
+        self.writes.extend(
+            duplicates
+                .into_iter()
+                .map(|(images, from)| Write::Duplicate(images, from)),
         );
         for ask in shell.library_mut().take_trash_asks() {
             if ask.confirmed {
