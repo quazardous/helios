@@ -262,6 +262,9 @@ command-keymap-package =
 command-keymap-package-remove =
     .title = Take a keymap package's keys away (`name`)
 
+command-library-chooseFolder =
+    .title = Choose the library folder imports copy photos into (`path`; asked through the folder chooser when absent)
+
 command-library-collection =
     .title = Scope the library to an album (`id`; null: the whole library); kept with the workspace. Without `id`, says the album
 

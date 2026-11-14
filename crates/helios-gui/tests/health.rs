@@ -9,7 +9,7 @@
 //! opening with room; each finding's fix runs its command. Then the GPU
 //! in use (fake adapters), its kernels (a compile failure injected), the
 //! plugins (fake ones: fine, of a wrong version, crashing) and the
-//! catalogue snapshots.
+//! catalogue snapshots. And no library folder chosen, until one is.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -878,4 +878,59 @@ fn the_page_groups_the_findings_by_their_owner() {
     assert_eq!(read["others"][0]["id"], "test.broken");
     // A module without findings has no rows, so no group.
     assert!(read["owners"].get("catalogue").is_none());
+}
+
+/// The library folder, kept in memory for the test.
+struct Folder(Arc<std::sync::Mutex<Option<PathBuf>>>);
+
+impl helios_gui::shell::LibraryFolder for Folder {
+    fn get(&self) -> Result<Option<PathBuf>, String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+
+    fn set(&self, dir: &Path) -> Result<(), String> {
+        *self.0.lock().unwrap() = Some(dir.to_path_buf());
+        Ok(())
+    }
+}
+
+#[test]
+fn no_library_folder_is_a_warning_until_one_is_chosen() {
+    let folder = Arc::new(std::sync::Mutex::new(None));
+    let read = folder.clone();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_import_library_folder(Arc::new(Folder(folder.clone())));
+    shell.set_health(Runner::new(
+        Registry::builtin(),
+        move || Context {
+            library_folder: Some(read.lock().unwrap().clone()),
+            ..Context::default()
+        },
+        Findings::default(),
+        Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
+    ));
+    let mut h = headless::harness(shell, vec2(1280.0, 900.0));
+    until(&mut h, "the warning", |h| {
+        finding(h, "library.folder").is_some_and(|f| f.level == Level::Warning)
+    });
+    let x = finding(&h, "library.folder").unwrap().fix.unwrap();
+    assert_eq!(x.command, helios_health::checks::CHOOSE_LIBRARY_FOLDER);
+
+    // Chosen (as the chooser's answer or an agent's `path`): the checks
+    // run again and the warning clears.
+    h.state_mut()
+        .run(
+            &x.command,
+            json!({ "path": "/photos/Helios" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    assert_eq!(
+        folder.lock().unwrap().as_deref(),
+        Some(Path::new("/photos/Helios"))
+    );
+    until(&mut h, "the folder chosen", |h| {
+        finding(h, "library.folder").is_some_and(|f| f.level == Level::Ok)
+    });
 }

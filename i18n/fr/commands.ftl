@@ -189,6 +189,9 @@ command-library-importFiles =
 command-library-export =
     .title = Exporter… (`images` : des identifiants, sinon `scope` : `selected` ou `shown`, la sélection par défaut, sinon toutes les images montrées ; `format` : jpeg, png ou tiff ; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash` : number, overwrite ou skip ; `remember` ; demandé si `folder` manque ou si `ask` vaut true)
 
+command-library-chooseFolder =
+    .title = Choisir le dossier de la bibliothèque où les imports copient les photos (`path` ; demandé par le sélecteur de dossiers s'il manque)
+
 command-library-openFolder =
     .title = Ouvrir un dossier dans le gestionnaire de fichiers (`path`)
 

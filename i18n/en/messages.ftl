@@ -2521,6 +2521,8 @@ health-fix-acknowledge-changed = Acknowledge
 
 health-fix-back-up-now = Back up now
 
+health-fix-choose-library-folder = Choose a folder…
+
 health-fix-gpu-docs = How to choose the GPU
 
 health-fix-library-folder = Open the library's folder
@@ -2584,6 +2586,16 @@ health-library = The library
 health-library-closed = The library cannot be opened
 
 health-library-closed-detail = { $file }: { $error }
+
+health-library-folder = Library folder
+
+health-library-folder-none = No library folder chosen
+
+health-library-folder-none-detail = Imports that copy photos and picked photos have nowhere to go: they ask for a folder first.
+
+health-library-folder-ok = A library folder is chosen
+
+health-library-folder-ok-detail = { $folder }
 
 health-library-no-room = The library's disk is almost full
 

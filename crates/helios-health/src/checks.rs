@@ -1,6 +1,6 @@
 //! Helios's own checks: the free space where Helios writes, the vault's
-//! database integrity, the library opening with room to grow, and its
-//! photos changed outside Helios (the backup checks are in
+//! database integrity, the library opening with room to grow, a library
+//! folder chosen, and its photos changed outside Helios (the backup checks are in
 //! [`crate::backup`]).
 
 use std::collections::BTreeSet;
@@ -24,11 +24,13 @@ pub fn storage() -> Vec<Arc<dyn Check>> {
 }
 
 /// The library module's checks: the vault's integrity, the library
-/// opening with room, its photos changed outside Helios.
+/// opening with room, a library folder chosen, its photos changed
+/// outside Helios.
 pub fn library() -> Vec<Arc<dyn Check>> {
     vec![
         Arc::new(VaultIntegrity),
         Arc::new(Library::default()),
+        Arc::new(FolderChosen),
         Arc::new(ChangedOutside),
     ]
 }
@@ -342,6 +344,67 @@ impl Check for Library {
     }
 }
 
+pub const FOLDER_CHOSEN: &str = "library.folder";
+
+/// Where "Choose a folder…" leads when no library folder is chosen: the
+/// one place to change when the first-run setup gets its folder step.
+pub const CHOOSE_LIBRARY_FOLDER: &str = "library.chooseFolder";
+
+/// A library folder is chosen: the folder imports copy photos into. None
+/// chosen (unset, or an empty path) is a warning; a folder chosen but
+/// gone is not this check's (the scan and the backups see it).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FolderChosen;
+
+impl Check for FolderChosen {
+    fn id(&self) -> &str {
+        FOLDER_CHOSEN
+    }
+
+    fn title(&self) -> Message {
+        Message::new("health-library-folder", "Library folder")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("A library folder is chosen, for imports to copy photos into")
+            .levels(&[Level::Ok, Level::Warning])
+            .fixes(&[CHOOSE_LIBRARY_FOLDER])
+    }
+
+    fn run(&self, ctx: &Context) -> Vec<Finding> {
+        let Some(folder) = &ctx.library_folder else {
+            return Vec::new();
+        };
+        match folder.as_deref().filter(|p| !p.as_os_str().is_empty()) {
+            Some(path) => vec![Finding::new(
+                FOLDER_CHOSEN,
+                "",
+                Level::Ok,
+                Message::new("health-library-folder-ok", "A library folder is chosen"),
+                Message::new("health-library-folder-ok-detail", "{ $folder }")
+                    .with("folder", path.display().to_string()),
+            )],
+            None => vec![
+                Finding::new(
+                    FOLDER_CHOSEN,
+                    "",
+                    Level::Warning,
+                    Message::new("health-library-folder-none", "No library folder chosen"),
+                    Message::new(
+                        "health-library-folder-none-detail",
+                        "Imports that copy photos and picked photos have nowhere to go: they ask for a folder first.",
+                    ),
+                )
+                .fix(Fix {
+                    command: CHOOSE_LIBRARY_FOLDER.into(),
+                    args: json!({}),
+                    label: Message::new("health-fix-choose-library-folder", "Choose a folder…"),
+                }),
+            ],
+        }
+    }
+}
+
 pub const CHANGED_OUTSIDE: &str = "library.changed-outside";
 
 /// The command that clears the mark "changed outside Helios" (every
@@ -480,6 +543,28 @@ mod tests {
         assert_eq!(found[0].level, Level::Warning);
         assert_eq!(found[0].id, CHANGED_OUTSIDE);
         assert_eq!(found[0].fix.as_ref().unwrap().command, ACKNOWLEDGE_CHANGED);
+    }
+
+    #[test]
+    fn no_library_folder_is_a_warning_whose_fix_chooses_one() {
+        let run = |folder: Option<Option<PathBuf>>| {
+            FolderChosen.run(&Context {
+                library_folder: folder,
+                ..Context::default()
+            })
+        };
+        assert!(run(None).is_empty(), "no vault read: nothing to say");
+        for unset in [None, Some(PathBuf::new())] {
+            let found = run(Some(unset));
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].level, Level::Warning);
+            assert_eq!(found[0].id, FOLDER_CHOSEN);
+            let fix = found[0].fix.as_ref().unwrap();
+            assert_eq!(fix.command, CHOOSE_LIBRARY_FOLDER);
+        }
+        let found = run(Some(Some(PathBuf::from("/home/me/Pictures/Helios"))));
+        assert_eq!(found[0].level, Level::Ok);
+        assert!(found[0].fix.is_none());
     }
 
     #[test]

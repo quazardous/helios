@@ -131,6 +131,11 @@ impl<S: Store + 'static> HealthInputs<S> {
             snapshots: file
                 .zip(self.snapshots.as_ref())
                 .map(|(f, snapshots)| snapshots(f, &mounted, now)),
+            library_folder: self.vault.as_deref().and_then(|v| {
+                helios_library::import::library_root(v)
+                    .inspect_err(|e| log::warn!("health: library folder: {e}"))
+                    .ok()
+            }),
             changed_outside: self.vault.as_deref().and_then(|v| {
                 v.changed_outside_images()
                     .inspect_err(|e| log::warn!("health: changed outside: {e}"))
@@ -200,6 +205,42 @@ mod tests {
         assert!(runner.run_now(), "a run starts");
         assert!(runner.wait(Duration::from_secs(30)), "the run ends in 30 s");
         assert!(runner.findings().ran(), "the run's findings are in");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A fresh library has no library folder chosen: a warning whose fix
+    /// chooses one; once a folder is set, the next run says it is chosen.
+    #[test]
+    fn a_fresh_library_warns_until_a_folder_is_chosen() {
+        use helios_health::Check as _;
+        use helios_health::Level;
+        use helios_health::checks::{CHOOSE_LIBRARY_FOLDER, FOLDER_CHOSEN, FolderChosen};
+
+        let dir =
+            std::env::temp_dir().join(format!("helios-node-health-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("vault.db");
+        let vault = Arc::new(Vault::new(SqliteStore::open(&file).unwrap()));
+        let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
+        let inputs = HealthInputs::new(volumes, Some(vault.clone()), Some(file));
+        let check = |inputs: &HealthInputs<SqliteStore>| FolderChosen.run(&inputs.context());
+
+        let found = check(&inputs);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].id, FOLDER_CHOSEN);
+        assert_eq!(found[0].level, Level::Warning);
+        assert_eq!(
+            found[0].fix.as_ref().map(|f| f.command.as_str()),
+            Some(CHOOSE_LIBRARY_FOLDER)
+        );
+
+        let photos = dir.join("Photos");
+        helios_library::import::set_library_root(&vault, &photos).unwrap();
+        let found = check(&inputs);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].level, Level::Ok);
+        assert!(found[0].fix.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

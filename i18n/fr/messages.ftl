@@ -2139,6 +2139,18 @@ health-library-ok = La bibliothèque s'ouvre et a de la place
 
 health-library-ok-detail = { $file }
 
+health-library-folder = Dossier de la bibliothèque
+
+health-library-folder-none = Aucun dossier de bibliothèque choisi
+
+health-library-folder-none-detail = Les imports qui copient les photos et les photos choisies n'ont nulle part où aller : ils demandent d'abord un dossier.
+
+health-library-folder-ok = Un dossier de bibliothèque est choisi
+
+health-library-folder-ok-detail = { $folder }
+
+health-fix-choose-library-folder = Choisir un dossier…
+
 health-met = Photos sauvegardées
 
 health-met-ok = Chaque photo a ses sauvegardes
