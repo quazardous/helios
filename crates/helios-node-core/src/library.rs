@@ -125,12 +125,8 @@ pub fn again_params<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value,
     let id = params["id"]
         .as_str()
         .ok_or("`id` is missing: an import of `import.history.list`")?;
-    let mut again = helios_library::import_history::again(vault, id)?;
-    if let Some(fields) = again.as_object_mut() {
-        // The node's `library.import` takes no darktable choice.
-        fields.remove("darktable");
-    }
-    Ok(again)
+    // Its darktable choice too: `library.import` takes it.
+    helios_library::import_history::again(vault, id)
 }
 
 /// Whether `id` is one of the commands run here.
@@ -502,6 +498,12 @@ pub fn import_spec() -> CommandSpec {
             ),
             ("signals", or_null("boolean"), false),
             (
+                "darktable",
+                json!({ "type": ["boolean", "null"],
+                        "description": "each photo's darktable sidecars kept as its versions (off when absent)" }),
+                false,
+            ),
+            (
                 "camera_look",
                 json!({ "type": ["boolean", "null"],
                         "description": "the cameras' default looks put on the raws brought in (on when absent)" }),
@@ -536,6 +538,9 @@ pub fn import_options(
     }
     if let Some(signals) = params["signals"].as_bool() {
         options.signals = signals;
+    }
+    if let Some(darktable) = params["darktable"].as_bool() {
+        options.darktable = darktable;
     }
     helios_library::import_profile::read(params, &mut options)?;
     options.cancel = cancel;

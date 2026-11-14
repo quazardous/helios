@@ -5,7 +5,9 @@
 //!
 //! - `import.history.list` (`limit`): the records, newest first.
 //! - `import.history.again` (`id`): the import run again with its
-//!   sources and choices, queued as `library.import` is, as whoever asks.
+//!   sources and choices, as whoever asks: the person's handed to the
+//!   node, answered with its promise; another's queued as
+//!   `library.import` is.
 //!   An importer plugin's import is run again from its menu entry, an
 //!   import from a connector's source (a Google Photos pick) from that
 //!   source in the window.
@@ -290,10 +292,15 @@ impl Shell {
             })
             .collect();
         params["paths"] = json!(paths);
-        params["origin"] = json!(crate::persist::who(origin));
-        self.core.imports.push(params.clone());
+        let who = crate::persist::who(origin);
+        params["origin"] = json!(who);
         // The window lists the new record once it is written.
         self.import.get_mut().history.read_at = None;
+        // The person's goes to the node, answered with its promise.
+        if self.core.activity.has_node() && who == crate::persist::WHO {
+            return self.import_by_rule(params);
+        }
+        self.core.imports.push(params.clone());
         Ok(json!({ "queued": params }))
     }
 }

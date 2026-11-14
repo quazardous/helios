@@ -294,8 +294,16 @@ token bucket per account.
    connector (the count so far as progress), then imported file by file
    in one run (one history record, the card's safe-to-format check);
    interleaving pages of listing and import comes with paged connectors
-   (slice 4). Left: the import window hands off to it (the promise line,
-   Cancel, closable) and the Library shows running import promises.
+   (slice 4). Desktop part done: the import window's Import and Import
+   again hand the person's imports to the node as imports by rule and
+   get their promise at once; the window shows each import's line
+   (progress, outcome, Cancel, Retry) and may close while it runs; the
+   main window's status bar shows the running tasks (a spinner, their
+   count, "Importing 120/412") and a failure's badge until clicked
+   (`helios_gui::activity`, the first form of the Activity window's
+   indicator). The desktop still hears each import in its process (undo
+   step, Duplicates and Log panels, backups after it) through the
+   node's import watch.
 4. **Google Photos on the same job.** The pick's pages stream to the grid
    and the job; downloads go through the per-account bucket, two at a
    time; quota and refused-refresh pauses.

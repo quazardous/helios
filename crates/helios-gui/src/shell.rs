@@ -246,6 +246,8 @@ enum Action {
     /// Run an import of the history again (`import.history.again`'s
     /// arguments), as whom.
     ImportAgain(Value, Origin),
+    /// Show the background tasks (`activity.show`).
+    Activity,
     /// Export photos (`library.export`'s arguments), as whom.
     Export(Value, Origin),
     /// Show a folder in the file manager (`library.openFolder`'s
@@ -991,6 +993,7 @@ impl Shell {
             stack_review: Rc::default(),
             duplicates: Rc::default(),
             imports: Vec::new(),
+            activity: crate::activity::Activity::default(),
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
             init: init_wizard::InitState::default(),
@@ -3310,6 +3313,14 @@ impl Shell {
                 "Library",
             ),
             Box::new(|a, origin| Ok(Action::ImportAgain(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                crate::activity::COMMAND,
+                "Background tasks…",
+                "View",
+            ),
+            Box::new(|_, _| Ok(Action::Activity)),
         );
         // The main window's commands, greyed in the other windows' menus
         // (docs/design/windows.md, section 7).
@@ -6212,6 +6223,11 @@ impl Shell {
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::ImportHistory(args) => return self.import_history_list(&args),
             Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
+            Action::Activity => {
+                self.core.activity.acknowledge();
+                self.show_import_activity();
+                return Ok(Value::Null);
+            }
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ChooseLibraryFolder(args) => return self.choose_library_folder(&args),
@@ -6952,6 +6968,8 @@ impl Shell {
             line.decisions_for_a_person = decisions.for_a_person();
         }
         line.profile.clone_from(&self.core.profile_name);
+        self.core.activity.set_context(ctx);
+        line.activity = self.core.activity.summary();
     }
 
     /// What the status line says now: the hovered mask handle's

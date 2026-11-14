@@ -634,6 +634,9 @@ command-workshop-suggest =
 command-help-health =
     .title = Bilan de santé…
 
+command-activity-show =
+    .title = Tâches de fond…
+
 command-health-fix =
     .title = Lancer la correction d’un constat de santé, puis les vérifications à nouveau (`id`)
 

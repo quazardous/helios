@@ -537,6 +537,54 @@ fn catalogue_commands(
     Ok(())
 }
 
+/// What the desktop keeps of an import its node runs as a promise: each
+/// file's line for its Duplicates and Log panels, the import's undo step,
+/// the strategy's "after each import", the Library filled again and the
+/// end said.
+struct ImportHeard {
+    lines: std::sync::mpsc::Sender<(serde_json::Value, serde_json::Value)>,
+    history: helios_gui::library_history::LibraryHistory,
+    backups: Option<Arc<Backups>>,
+    done: Arc<AtomicBool>,
+    ctx: egui::Context,
+}
+
+impl helios_node_core::import_promise::ImportWatch for ImportHeard {
+    fn line(&self, request: &serde_json::Value, line: &serde_json::Value) {
+        let _ = self.lines.send((request.clone(), line.clone()));
+    }
+
+    fn ended(
+        &self,
+        request: &serde_json::Value,
+        report: &mut helios_library::import::Report,
+        camera_looks: usize,
+    ) {
+        let label = helios_gui::library_history::import_label(report.added + report.located);
+        self.history
+            .record(label, std::mem::take(&mut report.changes), seconds_f64());
+        if let Some(backups) = &self.backups {
+            backups.start(
+                helios_storage::strategy::Trigger::OnImport,
+                Some(report.clone()),
+            );
+        }
+        let end = serde_json::json!({ "ended": report, "camera_looks": camera_looks });
+        let _ = self.lines.send((request.clone(), end));
+        self.done.store(true, Ordering::Relaxed);
+        self.ctx.request_repaint();
+    }
+
+    fn failed(&self, request: &serde_json::Value, error: &str) {
+        warn(&format!("import: {error}"));
+        let _ = self
+            .lines
+            .send((request.clone(), serde_json::json!({ "failed": error })));
+        self.done.store(true, Ordering::Relaxed);
+        self.ctx.request_repaint();
+    }
+}
+
 /// The library operations as commands (see `helios_library`): an import
 /// runs as a job on the shell's jobs (`job.*`, in the jobs centre, where
 /// it is cancelled), the library filled again when it ends, its
@@ -547,6 +595,7 @@ fn catalogue_commands(
 fn library_commands(
     shell: &mut Shell,
     persist: &Persist,
+    import_watch: Option<&helios_node_core::import_promise::Watch>,
     backups: Option<&Arc<Backups>>,
     plugins: &Arc<helios_plugin::Broker>,
     refill: &Arc<AtomicBool>,
@@ -653,6 +702,22 @@ fn library_commands(
         }));
     }
     shell.set_import_library_folder(Arc::new(LibraryFolder(vault.clone())));
+    // The person's imports run as the node's promises: the desktop hears
+    // each, for its undo step, its panels and the backups after it, and
+    // follows the promises in its status bar.
+    if let Some(watch) = import_watch {
+        let heard: Arc<dyn helios_node_core::import_promise::ImportWatch> = Arc::new(ImportHeard {
+            lines: lines.clone(),
+            history: history.clone(),
+            backups: after_import.clone(),
+            done: done.clone(),
+            ctx: ctx.clone(),
+        });
+        *watch
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(heard);
+        shell.follow_activity(persist.node().clone());
+    }
     // The first-run setup opens when a required step is not done.
     shell.set_first_run(true);
     let plugins = plugins.clone();
@@ -1929,7 +1994,13 @@ fn main() -> Result<(), String> {
                 }
             }
         });
-    let persist = node.as_ref().map(|n| Persist::on(n.vault().clone(), bus));
+    // The node's promises answer the desktop's imports by rule; what the
+    // desktop keeps of each (its undo step, its panels) is heard through
+    // the node's import watch (`library_commands`).
+    let import_watch = node.as_ref().map(LocalNode::import_watch);
+    let persist = node
+        .as_ref()
+        .map(|n| Persist::on_promises(n.vault().clone(), bus, Some(n.promises().clone())));
     start::mark("vault opened (and migrated)");
     // Workshop sessions a former run left unkept are dropped (C6), through
     // the node on a thread of its own: the window does not wait for it.
@@ -2423,6 +2494,7 @@ fn main() -> Result<(), String> {
                 && let Err(e) = library_commands(
                     &mut shell,
                     p,
+                    import_watch.as_ref(),
                     backups.as_ref(),
                     &plugins,
                     &refill,

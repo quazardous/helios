@@ -263,6 +263,7 @@ pub struct LocalNode<S: Store + 'static> {
     link: Link,
     runner: Option<JoinHandle<()>>,
     promises: Arc<crate::promises::Promises<S>>,
+    import_watch: crate::import_promise::Watch,
 }
 
 impl<S: Store + 'static> LocalNode<S> {
@@ -280,12 +281,14 @@ impl<S: Store + 'static> LocalNode<S> {
         // The node's promises, with the kinds it runs (imports by rule);
         // those a stop or a crash left unsettled are taken up again when
         // their kind resumes, else failed `interrupted` (crate::promises).
-        let promises = Arc::new(crate::import_promise::register(
+        let import_watch = crate::import_promise::Watch::default();
+        let promises = Arc::new(crate::import_promise::register_watched(
             crate::promises::Promises::new(
                 vault.clone(),
                 helios_core::jobs::Jobs::new(bus.clone()),
             ),
             bus.clone(),
+            import_watch.clone(),
         ));
         if let Err(e) = promises.recover() {
             log::warn!(target: "helios::node", "promises not recovered: {e}");
@@ -305,7 +308,15 @@ impl<S: Store + 'static> LocalNode<S> {
             link,
             runner,
             promises,
+            import_watch,
         }
+    }
+
+    /// Where the watch of the node's imports by rule is set: what it
+    /// holds from then on hears them (the desktop's undo step, its
+    /// panels). An import resumed as the node started is not heard.
+    pub fn import_watch(&self) -> crate::import_promise::Watch {
+        self.import_watch.clone()
     }
 
     /// The node's promises: what its endpoints answer `promises.*` and
