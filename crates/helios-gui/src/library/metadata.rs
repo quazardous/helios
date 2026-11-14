@@ -279,7 +279,7 @@ impl Library {
 
     /// Whether the host is to read the templates (once).
     pub fn take_templates_wanted(&mut self) -> bool {
-        std::mem::take(&mut self.templates_wanted)
+        std::mem::replace(&mut self.templates_wanted, super::Wanted::No) == super::Wanted::Yes
     }
 
     /// The templates to write back, once changed.
@@ -307,9 +307,10 @@ impl Library {
         if name.is_empty() {
             return Err("a template needs a name".into());
         }
-        let (fields, keywords) = match given {
-            Some(g) => g,
-            None => {
+        let (fields, keywords) = if let Some(g) = given {
+            g
+        } else {
+            {
                 let now = self.meta_of_selection()?;
                 let fields: Map<String, Value> = TEMPLATE_FIELDS
                     .iter()
@@ -416,7 +417,7 @@ impl Library {
             return;
         };
         if keys != self.meta_panel.keys {
-            self.meta_panel.keys = keys.clone();
+            self.meta_panel.keys.clone_from(&keys);
             self.meta_panel.drafts.clear();
         }
         let entries: Vec<Entry> = keys.iter().filter_map(|k| self.entry(k).cloned()).collect();
@@ -638,6 +639,7 @@ impl Library {
 
     /// The capture details of `image`: asked once, shown once read.
     fn exif_rows(&mut self, ui: &mut Ui, image: &str) {
+        use helios_vault::capture as c;
         let held = self.meta_panel.exif.as_ref().filter(|(id, _)| id == image);
         let Some((_, f)) = held else {
             if self.meta_panel.exif.as_ref().map(|(id, _)| id.as_str()) != Some(image)
@@ -649,7 +651,6 @@ impl Library {
             }
             return;
         };
-        use helios_vault::capture as c;
         let text = |k: &str| f.get(k).and_then(Value::as_str).map(String::from);
         let num = |k: &str| f.get(k).and_then(Value::as_f64);
         let camera = [text(c::CAMERA_MAKE), text(c::CAMERA_MODEL)]
@@ -851,7 +852,7 @@ mod tests {
             keywords: vec!["Wedding|2026".into()],
         };
         assert_eq!(
-            Template::list_of(Some(&Template::document(&[t.clone()]))),
+            Template::list_of(Some(&Template::document(std::slice::from_ref(&t)))),
             vec![t]
         );
     }

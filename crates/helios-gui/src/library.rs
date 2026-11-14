@@ -1721,7 +1721,7 @@ pub struct Library {
     /// The metadata templates, once read from the library.
     templates: Option<Vec<Template>>,
     /// Whether the host is to read the templates.
-    templates_wanted: bool,
+    templates_wanted: Wanted,
     /// The templates to write back, once changed.
     templates_write: Option<Vec<Template>>,
     /// The Metadata section's state.
@@ -1901,7 +1901,7 @@ impl Default for Library {
             keyword_asks: Vec::new(),
             meta_edits: Vec::new(),
             templates: None,
-            templates_wanted: true,
+            templates_wanted: Wanted::Yes,
             templates_write: None,
             meta_panel: metadata::MetaPanel::default(),
             pair_asks: Vec::new(),
