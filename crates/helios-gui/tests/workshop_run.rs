@@ -643,18 +643,17 @@ fn the_panel_shows_the_review_and_accepts_a_held_photo() {
     h.state_mut()
         .run("workshop.review", json!({ "run": "run" }), Origin::User)
         .unwrap();
-    for _ in 0..3 {
-        h.run();
-    }
+    // Asked off the frame: a coming frame shows it.
+    settle(&mut h);
+    h.run();
     assert!(
         h.query_by_label_contains("Review: Backlit, run 1")
             .is_some()
     );
     assert!(h.query_all_by_label_contains("held").next().is_some());
     h.get_all_by_label("Accept").next().unwrap().click();
-    for _ in 0..4 {
-        h.run();
-    }
+    h.run();
+    settle(&mut h);
     let review = h.state().workshop_review().unwrap();
     let accepted = review["photos"]
         .as_array()
@@ -663,6 +662,96 @@ fn the_panel_shows_the_review_and_accepts_a_held_photo() {
         .filter(|p| p["state"] == "accepted")
         .count();
     assert_eq!(accepted, 1, "{review}");
+}
+
+/// Frames until the dry runs and reviews the user asked are answered,
+/// within a minute.
+fn settle(h: &mut egui_kittest::Harness<'_, helios_gui::Shell>) {
+    let end = std::time::Instant::now() + std::time::Duration::from_mins(1);
+    h.run();
+    while h.state().workshop_waiting() {
+        assert!(std::time::Instant::now() < end, "the workshop call answers");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        h.run();
+    }
+}
+
+/// A review the user asks reads the library through the node off the
+/// frame: while another writer holds the vault file locked, the frame
+/// that asks it does not wait; once it lets go, a coming frame shows it
+/// in the Workshops panel.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_frame_that_asks_a_review() {
+    use helios_gui::{Experimental, Shell, headless, helios_panels_with};
+    use helios_shell::commands::Origin;
+    use helios_vault::Store as _;
+    use helios_vault_sqlite::SqliteStore;
+    use std::time::{Duration, Instant};
+    let dir = temp("held-review");
+    let path = dir.join("vault.db");
+    let bus = Arc::new(Bus::new());
+    let persist = helios_gui::persist::Persist::new(SqliteStore::open(&path).unwrap(), bus.clone());
+    let mut images = Vec::new();
+    for i in 0..2 {
+        let file = dir.join(format!("p{i}.bin"));
+        std::fs::write(&file, format!("photo {i}")).unwrap();
+        images.push(persist.vault().import_file(&file, 1).unwrap());
+    }
+    let history = LibraryHistory::default();
+    let calls = Arc::new(Mutex::new(0));
+    let runner = Arc::new(runner_on(persist.node().clone(), &bus, &history, &calls));
+    let ask = RunAsk {
+        node: NODE.into(),
+        workshop: WORKSHOP.into(),
+        name: "Backlit".into(),
+        catalogue: catalogue(),
+        bundle: helios_template::workspace::blank(),
+        images,
+        on_breach: None,
+        who: "user".into(),
+    };
+    runner
+        .run(&ask, "run", &AtomicBool::new(false), None)
+        .unwrap();
+
+    let panels = helios_panels_with(Experimental { workshops: true });
+    let mut shell = Shell::builder(panels, Some(dir.join("ui"))).build();
+    shell.load_layout().unwrap();
+    let reviewer = runner.clone();
+    shell.set_workshop_reviewer(Arc::new(move |args, who, _| {
+        reviewer.review(args, who, Some(ask.clone()))
+    }));
+    let mut h = headless::harness(shell, egui::vec2(1280.0, 900.0));
+    h.run();
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&path).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&json!(true)))
+        .unwrap();
+    let started = Instant::now();
+    // Queued by the shell, run by the frame below, which hands the
+    // review to a thread of its own.
+    h.state_mut()
+        .run("workshop.review", json!({ "run": "run" }), Origin::User)
+        .unwrap();
+    h.run();
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_millis(500),
+        "the frame waited {took:?} for the vault"
+    );
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Let go: a coming frame shows the review.
+    other.rollback().unwrap();
+    drop(other);
+    settle(&mut h);
+    let review = h.state().workshop_review().expect("the review is shown");
+    assert_eq!(review["photos"].as_array().unwrap().len(), 2, "{review}");
+    drop((h, runner, persist));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A run reads and writes the library through the node, on its own

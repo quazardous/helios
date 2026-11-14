@@ -1013,6 +1013,7 @@ impl Shell {
             exports: Vec::new(),
             workshop_runner: None,
             workshop_reviewer: None,
+            workshop_waiting: Vec::new(),
             export_lines: std::sync::mpsc::channel(),
             log: Rc::default(),
             image_files: BTreeMap::new(),
@@ -6745,6 +6746,7 @@ impl Shell {
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
         self.calibration_frame(&ctx);
+        self.workshop_frame(&ctx);
         let refused = std::mem::take(&mut self.focus.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);
