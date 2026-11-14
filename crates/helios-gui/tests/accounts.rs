@@ -2011,3 +2011,64 @@ fn settings_accounts_manages_the_accounts_with_their_sources_and_never_shows_a_t
         assert!(!docs.contains(token), "not in the accounts' documents");
     }
 }
+
+/// The desktop's node on a library in memory, its imports by rule run by
+/// a stand-in that keeps each request and ends at once.
+fn picking_node(
+    requests: Arc<std::sync::Mutex<Vec<Value>>>,
+) -> Arc<helios_inspect::client::Client> {
+    let bus = Arc::new(helios_core::Bus::new());
+    let vault = Arc::new(helios_vault::Vault::new(
+        helios_vault::MemoryStore::default(),
+    ));
+    let jobs = helios_core::jobs::Jobs::new(bus.clone());
+    let promises = helios_node_core::promises::Promises::new(vault.clone(), jobs.clone()).kind(
+        "import",
+        true,
+        move |handle| {
+            requests.lock().unwrap().push(handle.request().clone());
+            handle.progress(1, Some(1), Some("IMG_0002.JPG"));
+            handle.done(json!({ "report": { "added": 1 } }));
+        },
+    );
+    let service = helios_node_core::endpoint::VaultService::new(vault, bus, jobs, "test")
+        .with_promises(Arc::new(promises));
+    Arc::new(helios_inspect::client::Client::in_process(Arc::new(service)).with_origin("user"))
+}
+
+/// On the desktop, whose imports run as its node's promises, the photos
+/// chosen are handed to the node: Import answers at once with the
+/// promise of their download (`library.import {remote}`, the choices
+/// with it), the desktop's own download never runs, and the window stays
+/// open showing the import's line.
+#[test]
+fn photos_chosen_are_imported_as_the_node_s_promise() {
+    let (mut h, _opened, _folder, imported, _) = picking_world(None);
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    h.state_mut()
+        .follow_activity(picking_node(requests.clone()));
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the chosen photos in the grid", |h| {
+        h.state().import_cells().len() == 2
+    });
+    click(&mut h, "Import 1");
+    until(&mut h, "the node's import asked", |_| {
+        !requests.lock().unwrap().is_empty()
+    });
+    let request = requests.lock().unwrap()[0].clone();
+    assert!(
+        request["remote"]
+            .as_str()
+            .is_some_and(|k| k.starts_with("pick-")),
+        "{request}"
+    );
+    assert_eq!(request["rule"], "all", "{request}");
+    assert_eq!(request["into"], "/photos/ann@example.org", "{request}");
+    assert!(request.get("paths").is_none(), "{request}");
+    h.run_steps(4);
+    assert!(
+        imported.lock().unwrap().is_empty(),
+        "the desktop's own download never ran"
+    );
+    assert!(h.state().import_window_open(), "the window stays");
+}
