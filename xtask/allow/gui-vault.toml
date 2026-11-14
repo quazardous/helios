@@ -16,24 +16,8 @@ path = "crates/helios-gui/src/calibrate.rs"
 reason = "the calibration commands run through endpoint::command on the node's vault, and the camera look's fit reads it; to move to the client"
 
 [[allow]]
-path = "crates/helios-gui/src/export.rs"
-reason = "the export plan and its render read the vault; to move to the client"
-
-[[allow]]
-path = "crates/helios-gui/src/head_render.rs"
-reason = "a thumbnail rendered from an image's newest edit opens its edit session on the vault; to move to library.edit.head"
-
-[[allow]]
 path = "crates/helios-gui/src/image_map.rs"
 reason = "the image map's scan writes sightings and reads the known volumes from the vault; to move to the node"
-
-[[allow]]
-path = "crates/helios-gui/src/importers.rs"
-reason = "a foreign catalog's import runs helios_library::import on the vault; to move to the node's importer"
-
-[[allow]]
-path = "crates/helios-gui/src/import_scan.rs"
-reason = "the import window's prefilter reads the vault's known files and volumes; to move to the client"
 
 [[allow]]
 path = "crates/helios-gui/src/workshop_run.rs"

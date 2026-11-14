@@ -29,6 +29,14 @@ fn temp(name: &str) -> PathBuf {
     dir
 }
 
+/// The node's client over `vault`, as the desktop's import window reads
+/// it.
+fn client_of(vault: Arc<Vault<MemoryStore>>) -> Arc<helios_inspect::client::Client> {
+    helios_gui::persist::Persist::on(vault, Arc::new(helios_core::Bus::new()))
+        .node()
+        .clone()
+}
+
 fn run(h: &mut Harness<'static, Shell>, id: &str, args: Value) {
     h.state_mut().run(id, args, Origin::User).unwrap();
     for _ in 0..3 {
@@ -234,7 +242,7 @@ fn fake_card(dir: &Path) -> (PathBuf, helios_gui::import_scan::Known) {
     std::fs::copy(jpeg("b"), library.join("b.jpg")).unwrap();
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     vault.import_file(&library.join("b.jpg"), 0).unwrap();
-    let known = helios_gui::import_scan::known_of(vault);
+    let known = helios_gui::import_scan::known_of(client_of(vault));
     (dcim, known)
 }
 
@@ -1664,7 +1672,7 @@ fn an_offline_folder_lists_what_the_image_map_recorded_with_cached_thumbnails() 
         )
         .unwrap();
     let mut shell = Shell::new(helios_panels(), None);
-    shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+    shell.set_import_recorded(helios_gui::import_scan::recorded_of(client_of(vault)));
     shell.set_import_thumbnail_cache(cache);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -1904,7 +1912,7 @@ fn a_disk_cached_thumbnail_paints_with_its_cell() {
         )
         .unwrap();
     let mut shell = Shell::new(helios_panels(), None);
-    shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+    shell.set_import_recorded(helios_gui::import_scan::recorded_of(client_of(vault)));
     shell.set_import_thumbnail_cache(cache);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -2974,7 +2982,7 @@ fn an_export_keeps_running_when_its_window_closes() {
     // The window's handle; the node holds the exporter too. Held until
     // the window closed.
     let exporter = Exporter::with_engine(
-        node.vault().clone(),
+        persist.node().clone(),
         h.state().jobs(),
         h.state().export_sink(),
         || {},

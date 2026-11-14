@@ -4,7 +4,7 @@
 //! The shell asks for an export ([`crate::shell::ExportAsk`]: images and
 //! settings); the host hands it to an [`Exporter`], which
 //!
-//! 1. plans it over the library (`helios_library::export::plan`): each
+//! 1. plans it over the library through the node (`export.plan`): each
 //!    image's file and head version, its output name decided now, into a
 //!    serialisable [`BatchRequest`];
 //! 2. runs that request on its own scheduler
@@ -32,9 +32,10 @@ use std::sync::mpsc::Sender;
 use helios_core::jobs::Jobs;
 use helios_core::{Bus, Engine, Image, Scheduler};
 use helios_export::batch::{self, BatchRequest, Item, Line};
+use helios_inspect::client::Client;
 use helios_template::Bundle;
-use helios_vault::{ImageId, Store, Vault, VersionId, edit};
-use serde_json::json;
+use helios_vault::{Version, edit};
+use serde_json::{Value, json};
 
 use crate::shell::{ExportAsk, OPEN_FOLDER};
 
@@ -47,19 +48,24 @@ pub fn parallelism() -> usize {
 /// Renders an item as the darkroom shows it: its file through `bundle`'s
 /// network, its version's edit applied. A raw goes through its sensor
 /// data, never its embedded preview: a network that cannot develop it
-/// fails the item, saying why.
-pub fn render_item<S: Store>(
-    vault: &Vault<S>,
+/// fails the item, saying why. Its version is read through the node
+/// (`library.version.get`), on the render's thread.
+pub fn render_item(
+    node_client: &Client,
     engine: &Engine,
     bundle: &Bundle,
     item: &Item,
 ) -> Result<Image, String> {
     let (mut graph, node) = crate::templates::develop_file(&item.source, bundle)?;
     if let Some(version) = &item.version {
-        let id = VersionId::from_hex(version)?;
-        let version = vault
-            .version(&id)?
-            .ok_or_else(|| format!("no version {} of the image", &item.image))?;
+        let read = node_client
+            .request("library.version.get", json!({ "version": version }))
+            .map_err(|e| e.message)?;
+        let version: Version = match &read["version"] {
+            Value::Null => None,
+            row => Some(serde_json::from_value(row.clone()).map_err(|e| e.to_string())?),
+        }
+        .ok_or_else(|| format!("no version {} of the image", &item.image))?;
         // A part of the edit this network has no place for is left out,
         // as the darkroom does.
         edit::apply_to_graph(&mut graph, &version.edit)?;
@@ -73,9 +79,9 @@ pub fn render_item<S: Store>(
         .map_err(|e| e.to_string())
 }
 
-/// Runs the desktop's exports over a library.
-pub struct Exporter<S: Store> {
-    vault: Arc<Vault<S>>,
+/// Runs the desktop's exports over a library, read through its node.
+pub struct Exporter {
+    node: Arc<Client>,
     /// Taken when the exporter drops (see its `Drop`).
     scheduler: Option<Scheduler>,
     engine: Arc<Engine>,
@@ -86,25 +92,25 @@ pub struct Exporter<S: Store> {
     batches: std::sync::Mutex<Vec<String>>,
 }
 
-impl<S: Store + Send + 'static> Exporter<S> {
-    /// Exports from `vault`, reported to `jobs`, what they say sent to
+impl Exporter {
+    /// Exports from the library `node` reads, reported to `jobs`, what they say sent to
     /// `lines` (the shell's `export_sink`), `wake` asking the window for a
     /// frame after each; rendered on `engine`, the desktop's (the
     /// viewport's: its cache and its budget).
     pub fn new(
-        vault: Arc<Vault<S>>,
+        node: Arc<Client>,
         jobs: Jobs,
         lines: Sender<Line>,
         wake: impl Fn() + Send + Sync + 'static,
         engine: Arc<Engine>,
     ) -> Self {
-        Self::with_engine(vault, jobs, lines, wake, parallelism(), engine)
+        Self::with_engine(node, jobs, lines, wake, parallelism(), engine)
     }
 
     /// An exporter rendering `workers` images side by side on an engine of
     /// its own, within the cache service's RAM budget.
     pub fn with_workers(
-        vault: Arc<Vault<S>>,
+        node: Arc<Client>,
         jobs: Jobs,
         lines: Sender<Line>,
         wake: impl Fn() + Send + Sync + 'static,
@@ -114,12 +120,12 @@ impl<S: Store + Send + 'static> Exporter<S> {
             .budget(helios_cache::Tier::Ram)
             .map(|b| b as usize);
         let engine = Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget));
-        Self::with_engine(vault, jobs, lines, wake, workers, engine)
+        Self::with_engine(node, jobs, lines, wake, workers, engine)
     }
 
     /// An exporter rendering `workers` images side by side on `engine`.
     pub fn with_engine(
-        vault: Arc<Vault<S>>,
+        node: Arc<Client>,
         jobs: Jobs,
         lines: Sender<Line>,
         wake: impl Fn() + Send + Sync + 'static,
@@ -130,7 +136,7 @@ impl<S: Store + Send + 'static> Exporter<S> {
         // desktop; the jobs' go to the shell's.
         let own = Arc::new(Bus::new());
         Exporter {
-            vault,
+            node,
             scheduler: Some(Scheduler::new(own, workers.max(1))),
             engine,
             jobs,
@@ -157,21 +163,49 @@ impl<S: Store + Send + 'static> Exporter<S> {
         &self.engine
     }
 
-    /// Plans an export over the library: the request it runs.
+    /// Plans an export over the library through the node
+    /// (`export.plan`): the request it runs.
     pub fn plan(&self, bundle: &Bundle, ask: &ExportAsk) -> Result<BatchRequest, String> {
-        let images = ask
-            .images
-            .iter()
-            .map(|i| ImageId::from_hex(i))
-            .collect::<Result<Vec<_>, _>>()?;
-        let node = Some(bundle.template.network.view.node.clone());
-        helios_library::export::plan(&self.vault, &images, ask.settings.clone(), node)
+        let params = json!({
+            "images": ask.images,
+            "settings": ask.settings,
+            "node": bundle.template.network.view.node,
+        });
+        let planned = self
+            .node
+            .request("export.plan", params)
+            .map_err(|e| e.message)?;
+        serde_json::from_value(planned["request"].clone()).map_err(|e| e.to_string())
     }
 
     /// Plans and runs an export: its batch job's id.
     pub fn run(&self, bundle: &Bundle, ask: &ExportAsk) -> Result<String, String> {
         let request = self.plan(bundle, ask)?;
         self.run_request(bundle, &request, &ask.open_label)
+    }
+
+    /// Plans and runs an export on a thread of its own, so the frame that
+    /// asked never waits for the node: `refused` hears why one did not
+    /// start (its plan refused, its folder not made).
+    pub fn start(
+        self: &Arc<Self>,
+        bundle: Bundle,
+        ask: ExportAsk,
+        refused: impl FnOnce(String) + Send + 'static,
+    ) where
+        Self: Send + Sync,
+    {
+        let exporter = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("helios-export-plan".into())
+            .spawn(move || {
+                if let Err(e) = exporter.run(&bundle, &ask) {
+                    refused(e);
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("export: no thread to plan it: {e}");
+        }
     }
 
     /// Runs a planned request: its batch job's id.
@@ -183,8 +217,8 @@ impl<S: Store + Send + 'static> Exporter<S> {
     ) -> Result<String, String> {
         batch::make_folder(&request.settings.folder).map_err(|m| m.english)?;
         let render: batch::Render = {
-            let (vault, engine, bundle) = (self.vault.clone(), self.engine.clone(), bundle.clone());
-            Arc::new(move |item: &Item| render_item(&vault, &engine, &bundle, item))
+            let (node, engine, bundle) = (self.node.clone(), self.engine.clone(), bundle.clone());
+            Arc::new(move |item: &Item| render_item(&node, &engine, &bundle, item))
         };
         let (lines, wake) = (self.lines.clone(), self.wake.clone());
         let said = move |line: Line| {
@@ -225,10 +259,7 @@ impl<S: Store + Send + 'static> Exporter<S> {
     }
 }
 
-impl<S: Store + Send + 'static> crate::node::NodeJobs for Exporter<S>
-where
-    Self: Send + Sync,
-{
+impl crate::node::NodeJobs for Exporter {
     fn running(&self) -> Vec<String> {
         let running = self.jobs.cancellable();
         let mut batches = self.batches.lock().expect("batches lock");
@@ -250,7 +281,7 @@ where
     }
 }
 
-impl<S: Store> Drop for Exporter<S> {
+impl Drop for Exporter {
     /// The last holder lets go (the node, as it stops): the scheduler,
     /// which waits for the renders under way (a cancelled batch's), goes
     /// on a thread of its own so the quit does not wait for them. Nothing
