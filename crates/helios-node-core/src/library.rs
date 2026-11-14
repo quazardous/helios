@@ -616,6 +616,12 @@ pub fn import_spec() -> CommandSpec {
                         ] }),
                 false,
             ),
+            (
+                "remote",
+                json!({ "type": "string",
+                        "description": "photos chosen in a service's page (Google Photos), handed to the node by the process holding their connector: downloaded and imported by `rule` (`all` or `new`); the answer is a promise" }),
+                false,
+            ),
             ("copy", json!({ "type": "boolean" }), false),
             ("into", json!({ "type": ["string", "null"], "description": "an absolute path" }), false),
             ("rename", json!({ "type": ["string", "null"], "description": "a rename pattern" }), false),

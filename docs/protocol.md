@@ -604,6 +604,18 @@ follows the promises in its status bar; an agent's, a script's or an
 automatic import there, and an importer plugin's, still run on the
 desktop's own `library.import` command.
 
+Photos chosen in a service's page (Google Photos) are imported the same
+way by the process that holds their connector: it hands them to its node
+(`import_promise::hand`, in process) and asks `library.import` with
+`remote` (the key it got) and a `rule` (`all` or `new`). The promise
+downloads them one by one (`done` of `total`, the item's name as
+`note`), each a verified copy in `into` or the library folder; a rate
+limit or an expired download address is waited out, and it settles as an
+import by rule does, `failed` naming each `item`. A pick lives in its
+process: a `remote` key the process does not hold is refused, and a
+promise of one taken up after a restart fails, not retryable (the photos
+chosen again skip those already imported, by their item ids).
+
 ## A client cache
 
 Every answer of the vault's endpoint carries `seq`: the bus's sequence
