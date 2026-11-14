@@ -152,7 +152,14 @@ fn a_name_of_symbols_alone_says_nothing() {
 /// Hovers the node named `name` until a tooltip holding `tip` shows.
 #[track_caller]
 fn tooltip_of(h: &mut Harness<'_, Shell>, role: Role, name: &str, tip: &str) {
-    let at = h.get_by_role_and_label(role, name).rect().center();
+    let at = h
+        .get_by_role_and_label(Role::Window, "Library")
+        .get_by_role_and_label(role, name)
+        .rect()
+        .center();
+    // Away first: the tooltip shown before goes.
+    h.hover_at(egui::pos2(1.0, 999.0));
+    h.run_steps(30);
     h.hover_at(at);
     for _ in 0..60 {
         h.step();
@@ -168,10 +175,66 @@ fn tooltip_of(h: &mut Harness<'_, Shell>, role: Role, name: &str, tip: &str) {
 
 #[test]
 fn the_marks_bar_s_buttons_say_what_they_do_and_their_keys() {
+    // In the Library window, wide enough for the whole marks bar (the
+    // main window's panel may cut its end).
     let mut h = headless::harness(shell(), vec2(1600.0, 1000.0));
-    h.run_steps(4);
+    h.run_steps(2);
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
     tooltip_of(&mut h, Role::CheckBox, "Red label", "Red label (6)");
     tooltip_of(&mut h, Role::CheckBox, "Purple label", "Purple label (F5)");
     tooltip_of(&mut h, Role::CheckBox, "Pick", "Flag as pick (P)");
     tooltip_of(&mut h, Role::CheckBox, "Reject", "Reject (X)");
+}
+
+/// The longest menu entry a reader takes in at a glance.
+const MENU_TITLE_MAX: usize = 60;
+
+/// Every command title of the menus in `items`, submenus walked.
+fn menu_titles(items: &Value, out: &mut Vec<String>) {
+    for item in items.as_array().into_iter().flatten() {
+        if let Some(title) = item["title"].as_str() {
+            out.push(title.to_string());
+        }
+        if item.is_array() {
+            menu_titles(item, out);
+        }
+        menu_titles(&item["items"], out);
+    }
+}
+
+/// The menu titles of `h` that read as a developer's notes: brackets,
+/// backticks, or longer than [`MENU_TITLE_MAX`].
+fn unclear_titles(h: &mut Harness<'_, Shell>) -> Vec<String> {
+    let mut titles = Vec::new();
+    for menu in [
+        egui_pop::api::app::MENU_MAIN,
+        egui_pop::api::app::MENU_FILE,
+        egui_pop::api::app::MENU_EDIT,
+        egui_pop::api::app::MENU_VIEW,
+        egui_pop::api::app::MENU_HELP,
+    ] {
+        menu_titles(&h.state_mut().menu_items(menu.as_str()), &mut titles);
+    }
+    titles.sort();
+    titles.dedup();
+    titles
+        .into_iter()
+        .filter(|t| t.contains(['(', '`']) || t.chars().count() > MENU_TITLE_MAX)
+        .collect()
+}
+
+#[test]
+fn menu_entries_are_titles_not_notes_in_english_and_french() {
+    let mut h = headless::harness(shell(), vec2(1600.0, 1000.0));
+    h.run_steps(2);
+    let english = unclear_titles(&mut h);
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    h.run_steps(2);
+    let french = unclear_titles(&mut h);
+    assert!(
+        english.is_empty() && french.is_empty(),
+        "menu entries with brackets, backticks or over {MENU_TITLE_MAX} characters:\n  \
+         English: {english:#?}\n  French: {french:#?}"
+    );
 }

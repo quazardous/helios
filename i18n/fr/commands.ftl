@@ -181,7 +181,7 @@ command-keymap-package-remove =
     .title = Retirer les touches d'un paquet de raccourcis (`name`)
 
 command-library-copyFiles =
-    .title = Copier les fichiers : ceux des images sélectionnées, pour un gestionnaire de fichiers ou une autre application
+    .title = Copier les fichiers
 
 command-library-importFiles =
     .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non, `into`, `layout`, `rename` ; `duplicates` ; `ask` : demandé sans source d’import ; `darktable` ; `camera_look` : false laisse les rendus par défaut des boîtiers hors des raws)
@@ -203,7 +203,7 @@ command-library-importWindow =
     .title = Importer des photos… (`source` : la carte ou le dossier sur lequel la fenêtre d’import s’ouvre)
 
 command-library-storage =
-    .title = Stockage… (l’app Réglages sur Stockage › Volumes ; `volume` : le volume à marquer et à faire défiler jusqu’à lui)
+    .title = Stockage… (`volume` : le volume à marquer et à faire défiler jusqu’à lui)
 
 command-library-filter-switch =
     .title = Afficher les filtres récents et épinglés et les albums dynamiques, pour en appliquer un à la bibliothèque
@@ -224,7 +224,7 @@ command-library-importSource =
     .title = Importer des photos… (`path` : une carte ou un dossier, demandé en son absence ; `copy`, `darktable`, `remember` quand l’espace de travail n’a pas de source d’import)
 
 command-library-pasteFiles =
-    .title = Coller dans la bibliothèque des fichiers ou une image copiés par une autre application, importés une fois confirmé (`dry_run` : dire seulement ce qui serait importé)
+    .title = Coller des fichiers ou une image (`dry_run` : dire seulement ce qui serait importé)
 
 command-mask-add-circle =
     .title = Masques : ajouter un cercle au centre de la vue
@@ -476,7 +476,7 @@ command-viewport-compare =
     .title = Image : avant et après côte à côte
 
 command-viewport-copyImage =
-    .title = Copier l’image : l’image retouchée rendue en entier, pour une autre application (en PNG)
+    .title = Copier l’image en PNG
 
 command-viewport-mask-display =
     .title = Image : afficher le masque (alterne superposition, gris, désactivé ; ou `mode`)
@@ -774,7 +774,7 @@ command-library-importSession =
     .title = Montrer une importation dans la bibliothèque (`id` : une importation de `import.history.list` ; null : toute la bibliothèque), toutes ses photos sélectionnées avec `select: true` ; elle se combine aux autres filtres, rien n’est copié ni déplacé. Sans `id`, dit l’importation montrée
 
 command-library-runWorkshop =
-    .title = Lancer l’atelier… sur la sélection de la bibliothèque (l’atelier appliqué, sur les photos sélectionnées, d’où que vienne la sélection : une importation, un album, un filtre)
+    .title = Lancer l’atelier sur la sélection…
 
 command-library-window =
     .title = Bibliothèque
