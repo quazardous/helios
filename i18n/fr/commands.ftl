@@ -748,6 +748,9 @@ command-helios-quit-confirmed =
 command-helios-window-main =
     .title = Fenêtre principale
 
+command-import-sources-add =
+    .title = Ajouter une source d’import, comme le fait l’assistant « Ajouter… » de la fenêtre d’import : `connector` (son identifiant) et ce que demande sa configuration (`path` : un dossier, ou le point de montage d’un volume ; `volume` : l’identifiant ou le nom d’un volume monté ; `account` : un compte du connecteur), puis `name` (sinon celui du dossier, du volume ou du compte), `profile` (l’identifiant d’un profil d’import ; sinon celui par défaut du connecteur, sinon `everyday`), `auto` (true : l’import automatique que propose le connecteur) et `params` (les paramètres propres du connecteur) ; sélectionnée dans la fenêtre d’import quand elle est ouverte
+
 command-library-importAutomatic-pause =
     .title = Suspendre les imports automatiques, ou les reprendre (`on` : true suspend, false reprend ; sans lui, bascule)
 

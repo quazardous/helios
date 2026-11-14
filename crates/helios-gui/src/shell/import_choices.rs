@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
-use super::import_sources::{SourceAsked, SourceKey};
+use super::import_sources::SourceKey;
 use super::import_window::ImportWindow;
 
 /// The rename presets' patterns, in the order shown.
@@ -223,7 +223,6 @@ pub(super) struct ChoiceWords {
     pub heading: String,
     pub copy: String,
     pub add: String,
-    pub card_note: String,
     pub into: String,
     pub library_folder: String,
     pub change: String,
@@ -243,16 +242,11 @@ pub(super) struct ChoiceWords {
     pub darktable_help: String,
     pub camera_look: String,
     pub camera_look_help: String,
-    pub more: String,
-    pub more_note: String,
     /// The Include and Apply During Import sections' words.
     pub profile: super::import_profiles::ProfileWords,
     /// Whose choices the column shows: a source's, or the window's.
     pub shown_for: Option<String>,
     pub own_choices: String,
-    pub reset: String,
-    pub reset_help: String,
-    pub undo: String,
 }
 
 impl ImportWindow {
@@ -362,10 +356,6 @@ impl ImportWindow {
                 "Copy into the Library",
             )),
             add: t(Message::new("gui-import-window-add", "Add where they are")),
-            card_note: t(Message::new(
-                "gui-import-window-card-note",
-                "A card's photos are copied: the card is formatted later, the copies stay.",
-            )),
             into: t(Message::new("gui-import-window-into", "Into")),
             library_folder: t(Message::new(
                 "gui-import-window-library-folder",
@@ -432,12 +422,7 @@ impl ImportWindow {
                 "gui-import-window-camera-look-help",
                 "Raws of a camera with a default camera look start with it, as their first version",
             )),
-            more: t(Message::new("gui-import-window-more", "More")),
             profile: super::import_profiles::ProfileWords::new(t),
-            more_note: t(Message::new(
-                "gui-import-window-more-note",
-                "Metadata templates and time offsets come later.",
-            )),
             shown_for: w.sources.showing.as_ref().map(|key| {
                 let mut source = match (w.sources.name_of(key), key) {
                     (Some(name), _) => name.to_string(),
@@ -474,15 +459,6 @@ impl ImportWindow {
                 "gui-import-window-own-choices",
                 "Its own import choices",
             )),
-            reset: t(Message::new(
-                "gui-import-window-choices-reset",
-                "Reset to defaults",
-            )),
-            reset_help: t(Message::new(
-                "gui-import-window-choices-reset-help",
-                "This source takes the default choices again",
-            )),
-            undo: t(Message::new("gui-import-window-choices-undo", "Undo")),
         }
     }
 }
@@ -492,118 +468,6 @@ fn folder_name(p: &Path) -> String {
         || p.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     )
-}
-
-/// The choices in one column, as the "Add a source…" wizard shows
-/// them: whose they are, then the source's own ([`copy_ui`]) and those
-/// every source shares ([`shared_ui`]), `end` last.
-pub(super) fn choices_ui(
-    ui: &mut egui::Ui,
-    w: &mut ImportWindow,
-    words: &ChoiceWords,
-    end: &mut dyn FnMut(&mut egui::Ui),
-) -> Option<Asked> {
-    let mut asked = None;
-    header_ui(ui, w, words);
-    egui::ScrollArea::vertical()
-        .id_salt("helios.import.choices")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            copy_ui(ui, w, words, &mut asked);
-            ui.separator();
-            shared_ui(ui, w, words);
-            end(ui);
-        });
-    asked
-}
-
-/// The choices' heading, and whose they are, with Reset and Undo.
-pub(super) fn header_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceWords) {
-    ui.heading(&words.heading);
-    if let Some(shown_for) = &words.shown_for {
-        ui.horizontal_wrapped(|ui| {
-            ui.weak(shown_for);
-            let own = w
-                .sources
-                .showing
-                .as_ref()
-                .is_some_and(|k| w.sources.own(k).is_some());
-            if own
-                && ui
-                    .small_button(&words.reset)
-                    .on_hover_text(&words.reset_help)
-                    .clicked()
-            {
-                w.sources.asked = Some(SourceAsked::Reset);
-            }
-            if w.can_undo_source() && ui.small_button(&words.undo).clicked() {
-                w.sources.asked = Some(SourceAsked::Undo);
-            }
-        });
-    }
-}
-
-/// The choices every source shares: duplicates, darktable edits (when
-/// the connector honours them), the camera's default look (when the
-/// library keeps one), More.
-pub(super) fn shared_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceWords) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(&words.duplicates);
-        let d = &mut w.choices.duplicates;
-        ui.radio_value(d, Duplicates::Skip, &words.skip);
-        ui.radio_value(d, Duplicates::Keep, &words.keep);
-        ui.radio_value(d, Duplicates::Ask, &words.ask);
-    });
-    if w.sources.honours.darktable {
-        ui.checkbox(&mut w.choices.darktable, &words.darktable)
-            .on_hover_text(&words.darktable_help);
-    }
-    // Only when the library keeps a camera's default look.
-    if w.camera_looks {
-        ui.checkbox(&mut w.choices.camera_look, &words.camera_look)
-            .on_hover_text(&words.camera_look_help);
-    }
-    super::import_profiles::include_ui(ui, w, &words.profile);
-    super::import_profiles::apply_ui(ui, w, &words.profile);
-    egui::CollapsingHeader::new(&words.more)
-        .id_salt("helios.import.more")
-        .default_open(false)
-        .show(ui, |ui| {
-            ui.add(egui::Label::new(egui::RichText::new(&words.more_note).weak()).wrap());
-        });
-}
-
-/// A source's copy choices: copy or add where they are (a connector
-/// that cannot add in place always copies), then Into and Name for a
-/// copy.
-pub(super) fn copy_ui(
-    ui: &mut egui::Ui,
-    w: &mut ImportWindow,
-    words: &ChoiceWords,
-    asked: &mut Option<Asked>,
-) {
-    let mut copy = w.copies();
-    let before = copy;
-    ui.radio_value(&mut copy, true, &words.copy);
-    if w.sources.honours.add_in_place {
-        ui.radio_value(&mut copy, false, &words.add);
-    }
-    if copy != before {
-        // A saved source keeps it among its choices.
-        if w.sources.showing.is_some() {
-            w.choices.copy_folders = copy;
-            w.copy = None;
-        } else {
-            w.copy = Some(copy);
-        }
-    }
-    if w.ticked.iter().any(|p| w.is_card(p)) {
-        ui.add(egui::Label::new(egui::RichText::new(&words.card_note).weak()).wrap());
-    }
-    if copy {
-        ui.separator();
-        copy_choices_ui(ui, w, words, asked);
-    }
 }
 
 /// Into and Name: a copy's.
