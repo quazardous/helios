@@ -758,6 +758,7 @@ fn without_catalogue_snapshots_one_line_says_none_yet() {
 #[test]
 fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() {
     use helios_gui::catalogue;
+    use helios_vault::Store as _;
     let lib = Library::new("snapshots-taken");
     lib.strategy(Some(&Strategy::default()));
     let mounted = [lib.studio.clone(), lib.backup.clone()];
@@ -771,7 +772,6 @@ fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() 
             "test",
         ),
     ));
-    use helios_vault::Store as _;
     // Another writer holding the vault's file does not hold the snapshot
     // up: the node only reads.
     let mut other = SqliteStore::open(&lib.file).unwrap();
