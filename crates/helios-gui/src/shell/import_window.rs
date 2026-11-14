@@ -172,6 +172,9 @@ struct ShellWords {
 
 /// The import window's state: shared by the shell and the window's
 /// content (see the module's docs).
+// Its flags (open, touched, custom, camera_looks) are independent states of
+// the window, not one mode spread over several bools.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 pub(crate) struct ImportWindow {
     open: bool,
