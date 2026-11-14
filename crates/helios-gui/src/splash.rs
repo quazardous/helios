@@ -430,6 +430,10 @@ mod tests {
         assert!(h.query_by_label("Starting Helios…").is_none());
     }
 
+    /// The application a test's start makes: what the work gave, the
+    /// splash handed over.
+    type App = (u32, Boot);
+
     /// The window draws the boot splash while the start's work runs off
     /// its thread: its step unticked, then ticked, frames coming all
     /// along; the application is made once the work is done.
@@ -449,7 +453,6 @@ mod tests {
             interface.start();
             (7, interface)
         });
-        type App = (u32, Boot);
         let starting: Starting<(u32, Running), App> =
             Starting::new(phase.clone(), work, |(n, interface), boot, _| {
                 drop(interface);
