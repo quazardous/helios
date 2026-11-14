@@ -109,8 +109,71 @@ pub(super) struct Memory {
     /// The accounts pinned among the Favorites, by id.
     #[serde(default)]
     pub(super) pinned: Vec<String>,
+    /// The favourites that are cards, by path: the card's volume id. A
+    /// card pinned is the same favourite wherever it is mounted, and
+    /// another card mounted where it was is not pinned.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) cards: BTreeMap<PathBuf, String>,
     #[serde(default)]
     last: Option<PathBuf>,
+}
+
+impl Memory {
+    /// The favourites follow the cards `mounted` now: a pinned card takes
+    /// where it is mounted; a favourite at a card's root, pinned before
+    /// cards were known by their volume, takes that card's. Whether any
+    /// changed.
+    pub(super) fn follow_cards(&mut self, mounted: &[super::import_sources::MountedCard]) -> bool {
+        let mut changed = false;
+        for m in mounted {
+            let moved: Vec<PathBuf> = self
+                .cards
+                .iter()
+                .filter(|(p, v)| **v == m.id && **p != m.root)
+                .map(|(p, _)| p.clone())
+                .collect();
+            for old in moved {
+                self.cards.remove(&old);
+                self.cards.insert(m.root.clone(), m.id.clone());
+                let had = self.favourites.contains(&m.root);
+                self.favourites
+                    .iter_mut()
+                    .filter(|p| **p == old)
+                    .for_each(|p| p.clone_from(&m.root));
+                if had {
+                    // Already listed at its new place: once.
+                    let mut seen = false;
+                    self.favourites.retain(|p| {
+                        let first = *p != m.root || !seen;
+                        seen |= *p == m.root;
+                        first
+                    });
+                }
+                changed = true;
+            }
+            if self.favourites.contains(&m.root) && !self.cards.contains_key(&m.root) {
+                self.cards.insert(m.root.clone(), m.id.clone());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// Whether `path` is a favourite: for a card's, the card pinned is the
+    /// one mounted there now (if any is).
+    pub(super) fn favourite(
+        &self,
+        path: &Path,
+        mounted: &[super::import_sources::MountedCard],
+    ) -> bool {
+        self.favourites.iter().any(|p| p == path)
+            && self.cards.get(path).is_none_or(|v| {
+                mounted
+                    .iter()
+                    .find(|m| m.root == path)
+                    .is_none_or(|m| &m.id == v)
+            })
+    }
 }
 
 /// The command that forgets a folder in the image map (registered by
@@ -543,6 +606,9 @@ impl ImportWindow {
         }
         // The sources saved on a card follow it by its volume.
         if mounted != self.sources.mounted {
+            if self.memory.follow_cards(&mounted) {
+                self.save();
+            }
             self.sources.see_cards(mounted);
         }
         self.connectors.set_cards(&self.cards);
@@ -807,7 +873,10 @@ impl Shell {
                     label: card.label,
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+        if w.memory.follow_cards(&mounted) {
+            w.save();
+        }
         w.sources.see_cards(mounted);
         watch.on_change(move |_| {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
@@ -846,6 +915,55 @@ impl Shell {
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
         w.file = Some(file);
+        let mounted = w.sources.mounted.clone();
+        if w.memory.follow_cards(&mounted) {
+            w.save();
+        }
+    }
+
+    /// The import window's favourite folders and cards, as kept.
+    pub fn import_favourites(&self) -> Vec<PathBuf> {
+        self.import.get().memory.favourites.clone()
+    }
+
+    /// Pins or unpins `path` among the import window's favourites, as the
+    /// pin on its item does.
+    pub fn set_import_favourite(&mut self, path: &Path, on: bool) {
+        let mut w = self.import.get_mut();
+        w.memory.favourites.retain(|p| p != path);
+        w.memory.cards.remove(path);
+        if on {
+            if let Some(m) = w.sources.card_at(path) {
+                let id = m.id.clone();
+                w.memory.cards.insert(path.to_path_buf(), id);
+            }
+            w.memory.favourites.push(path.to_path_buf());
+        }
+        w.save();
+    }
+
+    /// Whether `path` shows as pinned in the import window's Favorites
+    /// (for a card: the card pinned is the one mounted there).
+    pub fn import_favourite(&self, path: &Path) -> bool {
+        let w = self.import.get();
+        w.memory.favourite(path, &w.sources.mounted)
+    }
+
+    /// The folders and cards the import window's History lists, newest
+    /// first: a card once, where it is mounted now.
+    pub fn import_history_folders(&mut self) -> Vec<PathBuf> {
+        let mut w = self.import.get_mut();
+        w.history.follow();
+        w.history.recent_folders(&w.sources.mounted)
+    }
+
+    /// When the import window's History says `path` was last imported
+    /// from (seconds since the epoch): a card's imports wherever it was
+    /// mounted.
+    pub fn import_last_import_of(&mut self, path: &Path) -> Option<u64> {
+        let mut w = self.import.get_mut();
+        w.history.follow();
+        w.history.last_import_of(path, &w.sources.mounted)
     }
 
     /// Closes the import window as the system's close button does (its
@@ -1762,7 +1880,12 @@ impl ImportWindow {
             }
             Some(Event::Favourite(path, on)) => {
                 self.memory.favourites.retain(|p| p != &path);
+                self.memory.cards.remove(&path);
                 if on {
+                    // A card is pinned by its volume.
+                    if let Some(m) = self.sources.card_at(&path) {
+                        self.memory.cards.insert(path.clone(), m.id.clone());
+                    }
                     self.memory.favourites.push(path);
                 }
                 self.save();

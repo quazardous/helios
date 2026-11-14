@@ -206,7 +206,7 @@ impl ImportWindow {
 
     fn pinned(&self, key: &SourceKey) -> bool {
         match key {
-            SourceKey::Folder(p) => self.memory.favourites.contains(p),
+            SourceKey::Folder(p) => self.memory.favourite(p, &self.sources.mounted),
             SourceKey::Account(id) => self.memory.pinned.contains(id),
         }
     }
@@ -251,7 +251,7 @@ impl ImportWindow {
 
     /// When the folder was last imported from, as the history says.
     fn last_import_of(&self, path: &Path) -> Option<String> {
-        let when = self.history.last_import_of(path)?;
+        let when = self.history.last_import_of(path, &self.sources.mounted)?;
         let texts = self.texts.as_ref()?;
         let when = chrono::DateTime::from_timestamp(i64::try_from(when).ok()?, 0)?
             .with_timezone(&chrono::Local)
@@ -494,6 +494,11 @@ pub(super) fn sources_ui(
             panel(ui, &words.favourites, |ui| {
                 let mut any = false;
                 for path in w.memory.favourites.clone() {
+                    // Another card mounted where a pinned card was is not
+                    // the favourite.
+                    if !w.memory.favourite(&path, &w.sources.mounted) {
+                        continue;
+                    }
                     let item = w.folder_item(&path, label_of(&path), words);
                     show_item(ui, w, words, &item, event);
                     any = true;
@@ -511,7 +516,7 @@ pub(super) fn sources_ui(
             // History: the folders imported from lately, then the imports.
             let history_title = words.history.clone();
             panel(ui, &history_title, |ui| {
-                for path in w.history.recent_folders() {
+                for path in w.history.recent_folders(&w.sources.mounted) {
                     let item = w.folder_item(&path, label_of(&path), words);
                     show_item(ui, w, words, &item, event);
                 }
