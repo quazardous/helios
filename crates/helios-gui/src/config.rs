@@ -698,6 +698,11 @@ pub fn init_wizard(registry: &helios_init::Registry, t: &dyn Fn(Message) -> Stri
                 }
             }
         });
+        // Hidden out of a partial run (`init_wizard::skip_key`).
+        w = w.when(&format!(
+            "!form.{}",
+            crate::shell::init_wizard::skip_key(&step.id)
+        ));
         if !step.required {
             w = w.optional();
         }
@@ -1808,6 +1813,32 @@ fn reattach(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A partial run lists its own steps: a step out of it is hidden by
+    /// its skip value, the others stay; with none, every step shows.
+    #[test]
+    fn the_setup_shows_the_steps_of_its_run_alone() {
+        use egui_pop::api::admin::model::Flow;
+        use egui_pop::model::when::WhenContext;
+        use helios_init::{Registry, Step};
+        let mut r = Registry::default();
+        for id in ["a.one", "a.two"] {
+            let step = Step::new(id, Message::plain(id), Message::plain(id)).fills(&[id]);
+            r.add("a", step).unwrap();
+        }
+        let w = init_wizard(&r, &|m| m.english);
+        let base = WhenContext::new();
+        let shown = |values| {
+            Flow::start(&w, &base, values)
+                .shown(&w, &base)
+                .iter()
+                .map(|s| s.meta.id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown(Default::default()), ["a.one", "a.two"]);
+        let skip = crate::shell::init_wizard::skip_key("a.one");
+        assert_eq!(shown([(skip, serde_json::json!(true))].into()), ["a.two"]);
+    }
 
     fn sources(user: &str) -> Sources {
         Sources {
