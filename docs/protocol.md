@@ -749,6 +749,29 @@ process: a `remote` key the process does not hold is refused, and a
 promise of one taken up after a restart fails, not retryable (the photos
 chosen again skip those already imported, by their item ids).
 
+### Checking a run's models first
+
+A run whose nodes call models (an extractor diagram) is checked before
+its promise is made: every model node's route is resolved and checked,
+and a node nothing serves refuses the submission with the node named,
+the reason and where to fix it; nothing runs halfway. The check is the
+AI service's (`Ai::check_run`), and agents reach it with the MCP tool
+`helios_ai_check` (request `ai.check`), answered by the MCP server
+itself like every `helios_ai_*` tool:
+
+```json
+{"nodes": [{"node": "caption", "capability": "vision", "prompt": "image.describe@1"}, {"node": "vectors", "capability": "embeddings"}], "items": 120}
+```
+
+```json
+{"ok": false, "refused": ["node `vectors` (embeddings): nothing is routed for embeddings: …"], "fix": "Set the routes in the AI settings …", "nodes": [], "leaves": [], "remote_calls": 0, "remote_ceiling": 500}
+```
+
+`leaves` lists the nodes whose images go off the machine, to which
+provider, and how many. The fields, and the per-provider limits a run's
+calls wait on, are in [ai-models.md](ai-models.md) ("The check before a
+run", "Limits").
+
 ## A client cache
 
 Every answer of the vault's endpoint carries `seq`: the bus's sequence

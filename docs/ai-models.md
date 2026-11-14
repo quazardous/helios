@@ -101,11 +101,82 @@ values outside a finite list are dropped or mapped to `other`, and the
 counts come back with the result (`counts`). `run_prompt` is the same
 call with no overrides, returning the value alone.
 
-**Before a run,** `Ai::check_needs` takes the capabilities (and prompts)
-a run will call, each with its overrides, and says for each the route it
-resolves to and whether it can serve: a provider configured and
-answering, its key found, the model present and doing the capability.
-Each provider is asked for its models once.
+### The check before a run
+
+A run's submission calls `Ai::check_run` (or `check_submission`, which
+turns a failed check into the refusal) **before anything runs**. Each
+model node is given as a `Need`: its name in the diagram, its capability,
+its prompt (`id` or `id@version`) and its overrides. For each, the check
+resolves the route (overrides, then the map) and checks it: the prompt
+known, the provider configured and answering, its key found, the model
+present and doing the capability. Each provider is asked for its models
+once, and no model is called.
+
+A node nothing serves fails the whole submission, never halfway through
+a run: the refusal names each such node and why
+(`node `vectors` (embeddings): nothing is routed for embeddings`), and
+points to the AI settings (`ai.toml`, `helios_ai_routing_set`,
+`helios_ai_providers_add`, `helios_ai_local_pull`, `helios_ai_doctor`).
+
+The check also says **what leaves the machine**: each node routed to a
+remote provider is listed in `leaves` with the provider, its URL, the
+model, the images sent per item and over the run (when the run's item
+count is given), and the side they are downscaled to. `remote_calls`
+counts the run's remote calls at least (one per item and remote node,
+before any corrective retry), beside the run's ceiling.
+
+Agents run the same check with `helios_ai_check`:
+
+```json
+{ "nodes": [
+    { "node": "caption", "capability": "vision", "prompt": "image.describe@1" },
+    { "node": "tags", "capability": "vision",
+      "overrides": { "node": { "provider": "cloud", "model": "gpt-4o-mini" } } },
+    { "node": "vectors", "capability": "embeddings" } ],
+  "items": 120 }
+```
+
+```json
+{ "ok": false,
+  "refused": ["node `vectors` (embeddings): nothing is routed for embeddings: set a route …"],
+  "fix": "Set the routes in the AI settings (ai.toml; helios_ai_routing_set, …)",
+  "nodes": [ { "need": { "node": "caption", … }, "route": { "provider": "ollama", "model": "qwen2.5vl:7b" },
+               "from": { "capability": "vision" }, "available": true, "remote": false,
+               "images_per_item": 1 }, … ],
+  "leaves": [ { "node": "tags", "provider": "cloud", "url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini", "images_per_item": 1, "images": 120, "image_side": 1024 } ],
+  "remote_calls": 120,
+  "remote_ceiling": 500 }
+```
+
+### Limits
+
+Each provider has its own limits, in `ai.toml`:
+
+```toml
+[limits]
+calls = 2                # parallel calls of a provider that sets none
+run_remote_calls = 500   # remote calls one run may make (0: no ceiling)
+
+[limits.providers.cloud]
+parallel = 4             # calls at once
+per_minute = 50          # calls started in any 60 seconds
+```
+
+- A call over its provider's `parallel` or `per_minute` **waits** for a
+  slot, or for the minute to roll on, then goes; it does not fail. A
+  cancelled job stops waiting. The job's timeout does not run while it
+  waits on a limit.
+- A local provider runs **one vision call at a time** unless it sets
+  `parallel`: most machines hold one vision model at once.
+- A run's remote calls (each try, the corrective retry included) count
+  against `run_remote_calls`. Past it, a call is **refused** without
+  leaving the machine (`the run `…` reached its ceiling of N remote
+  calls`): the run stops there and asks. `PromptCall::run` names the run;
+  `Ai::run_remote_calls` reads its count and `Ai::forget_run` clears it
+  (the run ended, or the user let it go on). Local calls do not count.
+- Every provider's calls share one pool of eight jobs at once (or
+  `calls`, when higher); each provider's limits apply within it.
 
 ## Prompts as versioned assets
 
@@ -208,7 +279,8 @@ photographer, in steps it can inspect:
   `privacy.local_image_side` (2048 px) for a local one, and re-encoded,
   which drops their metadata (GPS position included).
 - **Every call is logged and published as a job.** Each call runs as a
-  scheduler job (`scheduler.job_*` events, limited by `limits.calls`), is
+  scheduler job (`scheduler.job_*` events, limited per provider, see
+  "Limits"), is
   published as an `ai.call` event, and is appended to `calls.jsonl`: when,
   the provider, the model, the prompt and its content hash, local or remote,
   how many images and bytes left, how long, and the error if any. Never the
@@ -259,6 +331,7 @@ among them) accept only `[a-zA-Z0-9_-]` in a tool name.
 | `helios_ai_models_list` | `ai.models.list` | each provider's models and their capabilities |
 | `helios_ai_routing_get` | `ai.routing.get` | the routing map, each route checked |
 | `helios_ai_routing_set` | `ai.routing.set` | sets or clears a capability's or a prompt's route |
+| `helios_ai_check` | `ai.check` | the check before a run: each node's route, what is refused, what leaves |
 | `helios_ai_prompts_list` | `ai.prompts.list` | every prompt and its versions |
 | `helios_ai_prompts_get` | `ai.prompts.get` | one prompt version, whole |
 | `helios_ai_prompts_set` | `ai.prompts.set` | writes a new user version |

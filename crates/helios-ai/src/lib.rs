@@ -13,6 +13,8 @@
 //! - **The local runtime** ([`local`]): probe the machine, recommend
 //!   models, set up Ollama step by step (only confirmed steps run, never as
 //!   root), pull models as jobs.
+//! - **Limits** ([`limits`]): per provider, calls at once and per minute
+//!   (a call over them waits), and a ceiling on a run's remote calls.
 //! - **The service** ([`Ai`]): every call runs as a scheduler job, is
 //!   published on the AI bus and appended to the call log; images are
 //!   downscaled and re-encoded before they leave the process.
@@ -28,6 +30,7 @@ pub mod anthropic;
 pub mod command;
 pub mod fake;
 pub mod images;
+pub mod limits;
 pub mod local;
 pub mod ollama;
 pub mod openai;
@@ -46,8 +49,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 pub use service::{
-    AI_CALLS, Ai, AnswerCounts, Attempt, BenchRequest, CallMeta, CallRecord, Need, NeedCheck,
-    PromptCall, PromptFailure, PromptRun, TryResult, read_image,
+    AI_CALLS, Ai, AnswerCounts, Attempt, BenchRequest, CallMeta, CallRecord, Leaving, Need,
+    NeedCheck, PromptCall, PromptFailure, PromptRun, RunCheck, TryResult, read_image,
 };
 
 /// What a provider (or a model) can do.
