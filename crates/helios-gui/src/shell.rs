@@ -87,6 +87,7 @@ pub use calibrate_focus::{COMMAND as CALIBRATE_COMMAND, WINDOW as CALIBRATE_WIND
 mod health;
 mod import;
 mod import_accounts;
+mod import_albums;
 mod import_browsers;
 mod import_chosen;
 pub use import_accounts::LibraryFolder;

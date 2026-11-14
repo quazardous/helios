@@ -432,6 +432,12 @@ pub struct Manifest {
     /// (`source.thumbnail`): the import window's glances.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub thumbnails: bool,
+    /// Its source lists an account's albums (the `collections` caps).
+    /// The plugin protocol has no method for it yet, so only `false` is
+    /// taken: a service whose API keeps the albums to itself (Google
+    /// Photos' Picker) says so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub collections: bool,
     /// What its service lets Helios ask (`[limits]`: `per_minute`,
     /// `per_day`): the read-ahead of glances pauses there.
     #[serde(default, skip_serializing_if = "no_limits")]
@@ -643,6 +649,12 @@ impl Manifest {
         }
         if (self.thumbnails || !no_limits(&self.limits)) && !source {
             p.push("`thumbnails` or `[limits]` without the service `import.source`".into());
+        }
+        if self.collections {
+            p.push(
+                "`collections = true`: the plugin protocol cannot list albums yet (no `source.collections`)"
+                    .into(),
+            );
         }
         if self.limits.per_minute == Some(0) || self.limits.per_day == Some(0) {
             p.push("a limit of 0 requests: leave it out for no limit".into());
@@ -920,6 +932,11 @@ kind = "form"
         );
         refused(
             "services = [\"import.source\"]",
+            "services = [\"import.source\"]\ncollections = true",
+            "the plugin protocol cannot list albums yet",
+        );
+        refused(
+            "services = [\"import.source\"]",
             "services = [\"import.source\"]\nlimits = { per_minute = 0 }",
             "a limit of 0 requests",
         );
@@ -941,6 +958,9 @@ kind = "form"
         let text = include_str!("../../../plugins/sources/google-photos/helios-plugin.toml");
         let m = Manifest::parse(text).unwrap();
         assert_eq!(m.browsers, ["picker"]);
+        // Google's API keeps a library's albums to itself: none listed.
+        assert!(!m.collections);
+        assert!(text.contains("collections = false"), "said in its manifest");
         // Its glances come from Google's previews, read ahead within its
         // declared limits.
         assert!(m.thumbnails);

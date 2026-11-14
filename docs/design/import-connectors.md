@@ -797,13 +797,17 @@ offered (`ConnectorManifest::browsers`, `helios_connect::Browser`):
 | `folder` | Every photo of the source in one flat grid ("All photos") |
 | `tree` | The folders holding photos beside the grid ("Folder tree"); a folder clicked shows its photos and its subfolders' alone, and Import takes only those |
 | `timeline` | The grid in its agenda, by capture day ("By date"); the grid's mode before comes back when another browser is chosen |
-| `collections` | A service's albums ("Albums"); declared, nothing lists an account's photos yet |
+| `collections` | A service's albums ("Albums"), for a connector declaring `caps.collections`: listed under the account in the Sources column's Services panel, page by page (`Connector::collections`, "More albums"); the album clicked is the source, its photos in the grid, imported as chosen photos are, the history naming the album |
 | `picker` | The service's own page where photos are chosen: "Choose photos in Google Photos…", the flow of 2.4.2 |
 
 The local folder offers `folder`, `tree` and `timeline`; a card `folder`
 and `timeline`; Google Photos `picker` alone, since Google's API no
 longer lets an application read a library (4.1). A connector declaring
-none gets `picker` when it picks (`caps.picks`), else `folder`. Built-in
+none gets `picker` when it picks (`caps.picks`), else `collections` when
+it lists albums (`caps.collections`), else `folder`. Google Photos
+declares no albums (`collections = false` in its manifest): its API keeps
+a library's albums to itself. The plugin protocol has no
+`source.collections` yet, so a plugin's `collections = true` is refused. Built-in
 connectors declare theirs in code; a plugin in its manifest, beside
 `[[connect]]`: `browsers = ["picker"]` (an unknown name, or `browsers`
 without the `import.source` service, refuses the plugin).
