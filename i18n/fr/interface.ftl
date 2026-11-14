@@ -151,3 +151,7 @@ setting-import-automatic-paused =
     .label = Suspendre les imports automatiques
 
 category-helios = Helios
+
+setting-import-show-in-library =
+    .description = Quand une importation que vous avez lancée se termine, la bibliothèque montre ses photos, toutes sélectionnées. Jamais pour les importations automatiques ; pendant que vous retouchez une photo, sa notification le propose plutôt.
+    .label = Après une importation, la montrer dans la bibliothèque

@@ -2758,3 +2758,21 @@ gui-import-album-reading = Lecture de l’album…
 gui-import-album-failed = Impossible de lire l’album :
 
 gui-import-album-choose = Choisissez un album sous le compte, dans Sources.
+
+gui-import-history-show = Montrer dans la bibliothèque
+
+gui-import-session-ended = L’importation est terminée : ses photos sont dans la bibliothèque
+
+gui-import-session-show = Montrer dans la bibliothèque
+
+gui-library-imports = Importations
+
+gui-library-imports-none = Aucune importation pour l’instant
+
+gui-library-run-workshop = Lancer l’atelier…
+
+gui-rule-field-import = importation
+
+gui-rule-field-imported = date d’importation
+
+gui-settings-imports = Importations

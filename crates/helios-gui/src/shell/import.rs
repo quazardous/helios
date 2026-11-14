@@ -459,6 +459,8 @@ impl Shell {
         }
         params["rule"] = json!({ "items": paths });
         let promise = self.core.activity.start(params)?;
+        // Its end is shown in the Library, as the user's.
+        self.user_import_started(promise.request.clone());
         Ok(json!({ "promise": promise }))
     }
 
@@ -469,10 +471,11 @@ impl Shell {
         let mut asked = self.core.duplicates.borrow_mut().receive();
         while let Ok((import, line)) = self.core.import_lines.1.try_recv() {
             if line.get("ended").is_some() || line.get("failed").is_some() {
-                // The photos it brought are selected once the Library
-                // shows them.
+                // The import the user started: its session shown in the
+                // Library, the photos it brought selected once it shows
+                // them (unless the user turned it off). Never another's.
                 let ids = std::mem::take(&mut self.focus.imported_ids);
-                if line.get("ended").is_some() && !ids.is_empty() {
+                if self.import_session_ended(&import, &line) && !ids.is_empty() {
                     self.focus.select_imported = ids;
                 }
                 self.import_ended(&line);

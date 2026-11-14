@@ -434,6 +434,17 @@ pub const SETTINGS: &[Setting] = &[
         },
     },
     Setting {
+        key: "import.show_in_library",
+        concern: Concern::User,
+        label: "After an import, show it in the Library",
+        about: "When an import you started ends, the Library shows its photos, all of them selected. Never for automatic imports; while you edit a photo, its notice offers it instead.",
+        kind: Kind::Toggle {
+            default: true,
+            on: "on",
+            off: "off",
+        },
+    },
+    Setting {
         key: "interface.experimental.workshops",
         concern: Concern::User,
         label: "Workshops",

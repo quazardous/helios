@@ -178,6 +178,10 @@ setting-import-automatic-paused =
     .description = While on, no source imports on its own: cards plugged in and new files in watched folders wait until it is off again.
     .label = Pause automatic imports
 
+setting-import-show-in-library =
+    .description = When an import you started ends, the Library shows its photos, all of them selected. Never for automatic imports; while you edit a photo, its notice offers it instead.
+    .label = After an import, show it in the Library
+
 setting-interface-experimental-workshops =
     .description = Experimental: the Workshops panel and commands, to find, apply and aim macros by what they are for. May change; what it saves stays a macro. Takes effect at the next start.
     .label = Workshops

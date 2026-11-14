@@ -57,6 +57,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     the_quick_collection_toggles_clears_and_saves(make());
     smart_album_rules_select_in_one_query(make());
     relative_dates_follow_the_query_s_clock(make());
+    import_sessions_select_their_photos_in_one_query(make());
     smart_albums_scope_count_and_undo(make());
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
@@ -2395,6 +2396,72 @@ fn folders_count_their_photos_and_those_below_in_one_query<S: Store>(s: S) {
     assert_eq!(lib.get(&key(&p.join("shots"))), Some(&2));
     assert_eq!(lib.get(&key(&p.join("other"))), None);
     assert_eq!(some.get(&on("uuid:b2")), None);
+}
+
+/// An import session of the import history (`docs/design/library.md`,
+/// the Imports section): `import` selects the photos it brought in,
+/// `imported` those of sessions in a time range or a relative period, in
+/// the one query a cursor opens with.
+fn import_sessions_select_their_photos_in_one_query<S: Store>(s: S) {
+    use crate::capture::day_start;
+    use crate::rules::Rule;
+    let v = Vault::new(with_images(s, 5));
+    let ids: Vec<ImageId> = (1..=5).map(|i| image(i).id).collect();
+    let at = |day: &str, hour: i64| day_start(day).unwrap() + hour * 3600;
+    let session = |key: &str, when: i64, n: &[usize]| {
+        let images: Vec<String> = n.iter().map(|&i| ids[i].hex()).collect();
+        v.set_library_document(
+            "import/history",
+            key,
+            Some(&json!({ "when": when, "images": images })),
+        )
+        .unwrap();
+    };
+    session("a", at("2024-06-15", 10), &[0, 1]);
+    session("b", at("2024-06-01", 10), &[2]);
+    let pick = |n: &[usize]| {
+        let mut out: Vec<ImageId> = n.iter().map(|&i| ids[i]).collect();
+        out.sort();
+        out
+    };
+    let run = |rule: serde_json::Value| {
+        let rules = Rule::parse(&json!({"match": "all", "rules": [rule]})).unwrap();
+        let q0 = v.reads().queries;
+        let cursor = v
+            .open_cursor(Query {
+                rules: Some(rules),
+                now: Some(at("2024-06-15", 15)),
+                ..Query::default()
+            })
+            .unwrap();
+        assert_eq!(v.reads().queries - q0, 1, "one query");
+        let mut got = v.cursor_ids(cursor.id, 0, 99).unwrap();
+        v.close_cursor(cursor.id);
+        got.sort();
+        got
+    };
+    let import = |op: &str, id: &str| run(json!({"field": "import", "op": op, "value": id}));
+    assert_eq!(import("in", "a"), pick(&[0, 1]));
+    assert_eq!(import("in", "b"), pick(&[2]));
+    assert_eq!(import("not_in", "a"), pick(&[2, 3, 4]));
+    assert_eq!(import("in", "gone"), pick(&[]));
+    let imported = |op: &str, value: serde_json::Value| {
+        run(json!({"field": "imported", "op": op, "value": value}))
+    };
+    assert_eq!(imported(">=", json!(at("2024-06-10", 0))), pick(&[0, 1]));
+    assert_eq!(
+        imported("<", json!(at("2024-06-10", 0))),
+        pick(&[2]),
+        "a photo in no session never matches"
+    );
+    assert_eq!(
+        imported("within", json!({"last": 7, "unit": "days"})),
+        pick(&[0, 1])
+    );
+    assert_eq!(
+        imported("within", json!({"last": 1, "unit": "months"})),
+        pick(&[0, 1, 2])
+    );
 }
 
 /// The photos of an album, as a query selects them.

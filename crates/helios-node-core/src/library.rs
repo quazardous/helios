@@ -550,11 +550,18 @@ pub fn specs() -> Vec<CommandSpec> {
         .read_only(),
         CommandSpec::new(HISTORY_LIST, "List the import history", "Library")
             .needs(Need::Vault)
-            .params(object(&[(
-                "limit",
-                json!({ "type": ["integer", "null"], "minimum": 1 }),
-                false,
-            )]))
+            .params(object(&[
+                (
+                    "limit",
+                    json!({ "type": ["integer", "null"], "minimum": 1 }),
+                    false,
+                ),
+                (
+                    "images",
+                    json!({ "type": "boolean", "description": "each import's photos (ids) too" }),
+                    false,
+                ),
+            ]))
             .read_only(),
         CommandSpec::new(AGAIN, "Import again", "Library")
             .needs(Need::Vault)
@@ -936,8 +943,16 @@ pub fn run<S: Store>(
     match id {
         HISTORY_LIST => {
             let limit = params["limit"].as_u64().map(|n| n as usize);
-            helios_library::import_history::list(vault, limit)
-                .map(|records| json!({ "imports": to_json(&records) }))
+            helios_library::import_history::list(vault, limit).map(|mut records| {
+                // Each import's photos only when asked: a long history
+                // of large imports is many ids.
+                if params["images"] != true {
+                    for r in &mut records {
+                        r.images.clear();
+                    }
+                }
+                json!({ "imports": to_json(&records) })
+            })
         }
         AGAIN => Err(format!(
             "`{AGAIN}` runs as `{IMPORT}`, by the node's importer"
@@ -1469,7 +1484,7 @@ mod tests {
             json!({ "op": "quickToggle", "images": [] }),
             json!({ "changes": { "images": [], "documents": [] }, "forward": false }),
             json!({}),
-            json!({ "limit": 10 }),
+            json!({ "limit": 10, "images": true }),
             json!({ "id": "1700000000000-42-0" }),
             json!({}),
             json!({}),

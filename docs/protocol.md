@@ -640,6 +640,20 @@ follows the promises in its status bar; an agent's, a script's or an
 automatic import there, and an importer plugin's, still run on the
 desktop's own `library.import` command.
 
+**The import history** (`import.history.list`, `limit`) lists each
+import's record, newest first: its sources, choices, counts, when and who
+asked. Each record keeps the photos it brought into the Library or found
+again, the import session the Library shows as a collection and smart
+albums' `import` and `imported` rules read; they are listed only with
+`images: true`:
+
+```json
+{"id": "import.history.list", "params": {"limit": 1, "images": true}}
+{"imports": [{"id": "01763130000-0004242-000000001", "when": 1763130000, "origin": "user",
+  "sources": ["/media/EOS_DIGITAL"], "choices": {"copy": true}, "counts": {"added": 2},
+  "images": ["<id>", "<id>"]}]}
+```
+
 Photos chosen in a service's page (Google Photos) are imported the same
 way by the process that holds their connector: it hands them to its node
 (`import_promise::hand`, in process) and asks `library.import` with

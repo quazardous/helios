@@ -176,6 +176,7 @@ command-library-fitCameraLook.title d44b8305bbedeaeb
 command-library-folder.title 401442b888a6ce54
 command-library-importAutomatic-pause.title 28b2808bc7f059d3
 command-library-importFiles.title 6ec67e45346c8e41
+command-library-importSession.title 11b96190b7917ddd
 command-library-importSource.title b212d23cfe694c9e
 command-library-importWindow.title 5cf073c01aa7d73f
 command-library-importWith.title 8da42d005844e0c1
@@ -191,6 +192,7 @@ command-library-removeVersion.title f43c144a3b82ca2b
 command-library-resetRotation.title fb146b4741145076
 command-library-rotateLeft.title c67b09b3051e86a1
 command-library-rotateRight.title f7027caee8e98de5
+command-library-runWorkshop.title 6fff6de48c6a92df
 command-library-scanFolder.title 65e0df53774b720b
 command-library-select-invert.title 9fabaf6253c7fd7d
 command-library-select-none.title cf5dfbd241a5672e
@@ -738,6 +740,7 @@ gui-import-ended-reported 4a72175477f43d3b
 gui-import-failed dbdb6ddf097d8f5c
 gui-import-form-title 1bab6c9d205270b1
 gui-import-history-imports cfdb4501fe960455
+gui-import-history-show 7c528fb6f4bb611a
 gui-import-include fbf30e31dac7668f
 gui-import-include-all 50a56f492c631ea1
 gui-import-include-at-least eed858b0907c8da1
@@ -763,6 +766,8 @@ gui-import-no-library-folder 44f14e63119f12da
 gui-import-path 54572ccc6f105c66
 gui-import-remember 75f1f4460d6a89ec
 gui-import-remember-help e20b1b9d5a401bc1
+gui-import-session-ended 2b6695242531ba05
+gui-import-session-show 7c528fb6f4bb611a
 gui-import-verb 809bb223e747d022
 gui-import-window-add 591b3b0a661f3885
 gui-import-window-add-favourite 363b65204285c6cb
@@ -967,6 +972,8 @@ gui-library-folders-elsewhere defbb19ac5e1997e
 gui-library-images f081af80bddd910b
 gui-library-import 4f18fde2a41db156
 gui-library-import-photos 36112b331ee04a37
+gui-library-imports cfdb4501fe960455
+gui-library-imports-none 951c0ebf5ea8bc49
 gui-library-keep-best be4edb21d1e2e2fa
 gui-library-missing-note 02e4f67d1be418c9
 gui-library-no-cursor 581a49943aeb231e
@@ -993,6 +1000,7 @@ gui-library-remove-version 05f6c6d90bd65e27
 gui-library-rotate-left 8b862d06602996bb
 gui-library-rotate-reset 3ec2f5c2dd0b5c1c
 gui-library-rotate-right 077a60d3d82ca7a2
+gui-library-run-workshop 858f2bdd5bedc811
 gui-library-search fddceff6dbd31d81
 gui-library-set-delete 40f1e74389fd36cc
 gui-library-set-delete-all ef418a379bdaeaa0
@@ -1291,6 +1299,8 @@ gui-rule-field-flag 92541aede106e4ef
 gui-rule-field-focal-length c35ba50bebceaa14
 gui-rule-field-focus 66eeec89c5794da3
 gui-rule-field-folder c1be81aa1156c7cd
+gui-rule-field-import 8617c8091dad0b6e
+gui-rule-field-imported 3b10436ce6937c4e
 gui-rule-field-iso b3ad656d0ec905f4
 gui-rule-field-label 81f370016b248557
 gui-rule-field-lens aa156bf8f144e67d
@@ -1368,6 +1378,7 @@ gui-settings-for-workspace fd397a7452b7fe8e
 gui-settings-for-workspace-about 74fc5dad0d4c8b3b
 gui-settings-health 7633e8a1583e45e7
 gui-settings-health-check c1e913ce62823067
+gui-settings-imports cfdb4501fe960455
 gui-settings-plugin-granted 2c8c84258a75df83
 gui-settings-plugin-no-capability f2a2f96d1902f843
 gui-settings-plugin-reason b548901a66fbd4b1
@@ -2080,6 +2091,8 @@ setting-import-automatic-ask-gb.description f23eba19648975b8
 setting-import-automatic-ask-gb.label 63832bc77169d8dc
 setting-import-automatic-paused.description 04eea34f2bc27769
 setting-import-automatic-paused.label d90bcc5f739bd75e
+setting-import-show-in-library.description 257e44970cb61d73
+setting-import-show-in-library.label c8ae3bc98cda42e6
 setting-notifications-jobs.description 6cba8e76fe09f324
 setting-notifications-jobs.label fffc31760e483d40
 tip-helios-decisions.text 0eb2bf98ebacbe5d

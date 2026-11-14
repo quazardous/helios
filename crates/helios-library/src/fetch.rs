@@ -689,12 +689,18 @@ pub fn import_remote<S: Store>(
     // As a local import's: a record that cannot be written does not undo
     // the import, it is said.
     let outcome = ended.as_ref().map_err(String::as_str);
-    if let Err(e) =
-        crate::import_history::record_remote(vault, &remote.source, options, now, outcome)
-    {
-        eprintln!("import history: {e}");
-    }
-    ended
+    let record =
+        match crate::import_history::record_remote(vault, &remote.source, options, now, outcome) {
+            Ok(record) => Some(record.id),
+            Err(e) => {
+                eprintln!("import history: {e}");
+                None
+            }
+        };
+    ended.map(|mut report| {
+        report.history = record;
+        report
+    })
 }
 
 /// [`import_remote`], before its record.

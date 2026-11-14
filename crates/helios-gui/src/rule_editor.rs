@@ -37,6 +37,11 @@ pub enum Node {
     Condition(Draft),
 }
 
+/// Whether a field of `kind` is a time its boxes write as days.
+fn is_date(kind: RuleKind) -> bool {
+    matches!(kind, RuleKind::Date | RuleKind::Imported)
+}
+
 impl Draft {
     /// A new condition: at least one star.
     pub fn new() -> Draft {
@@ -58,12 +63,11 @@ impl Draft {
     /// `within`.
     pub fn value_json(&self) -> Result<Value, String> {
         let kind = self.kind().ok_or_else(|| self.field_error())?;
+        let is_date = is_date(kind);
         let field = &self.field;
         let number = |t: &str, end: bool| -> Result<Value, String> {
             let t = t.trim();
-            if kind == RuleKind::Date
-                && let Some(day) = day_start(t)
-            {
+            if is_date && let Some(day) = day_start(t) {
                 // The last bound of a range of days takes the day whole.
                 return Ok(json!(if end { day + 86_399 } else { day }));
             }
@@ -72,14 +76,12 @@ impl Draft {
             }
             match t.parse::<f64>() {
                 Ok(n) if n.is_finite() => Ok(json!(n)),
-                _ if kind == RuleKind::Date => {
-                    Err(format!("`{field}`: `{t}` is not a day (YYYY-MM-DD)"))
-                }
+                _ if is_date => Err(format!("`{field}`: `{t}` is not a day (YYYY-MM-DD)")),
                 _ => Err(format!("`{field}`: `{t}` is not a number")),
             }
         };
         Ok(match (kind, self.op.as_str()) {
-            (RuleKind::Date, "within") => match self.value.as_str() {
+            (RuleKind::Date | RuleKind::Imported, "within") => match self.value.as_str() {
                 "last" => {
                     let n =
                         self.high.trim().parse::<u64>().map_err(|_| {
@@ -89,10 +91,12 @@ impl Draft {
                 }
                 period => json!(period),
             },
-            (RuleKind::Number | RuleKind::Date, "between") => {
+            (RuleKind::Number | RuleKind::Date | RuleKind::Imported, "between") => {
                 json!([number(&self.value, false)?, number(&self.high, true)?])
             }
-            (RuleKind::Number | RuleKind::Date, _) => number(&self.value, false)?,
+            (RuleKind::Number | RuleKind::Date | RuleKind::Imported, _) => {
+                number(&self.value, false)?
+            }
             _ => json!(self.value),
         })
     }
@@ -115,7 +119,7 @@ impl Draft {
             high: String::new(),
             unit: Unit::Days.name().into(),
         };
-        let date = c.field.kind == RuleKind::Date;
+        let date = is_date(c.field.kind);
         let shown = |v: &Value, end: bool| -> String {
             match v.as_f64() {
                 Some(n) if date => {
