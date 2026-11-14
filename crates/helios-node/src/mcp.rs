@@ -77,6 +77,12 @@
 //! context is short; every command stays reachable through
 //! `helios_command_run`.
 //!
+//! Generated mode (`helios-mcp --tools generated`, [`ToolSet::Generated`]):
+//! the compact set, and one tool per command of the registry, generated
+//! from it (`helios_cmd_<id>`, its params schema as the input schema), run
+//! as `helios_command_run` would ([`generated`]). `full`, the hand-written
+//! tools, stays the default.
+//!
 //! Outcome unknown, never resend: when the connection to the node closes
 //! after a request was sent and before its answer came, the tool's error
 //! starts with "outcome unknown" (`-32008` on the generic pair). The
@@ -102,6 +108,8 @@ use helios_inspect::{Address, request_at};
 
 use crate::caps;
 use crate::roots::{Access, Roots};
+
+pub mod generated;
 
 use serde_json::{Map, Value, json};
 
@@ -2570,7 +2578,8 @@ pub struct Sockets {
     pub ai: Option<Arc<Ai>>,
     /// The folders the agent may read and write (`crate::roots`).
     pub roots: Roots,
-    /// The tools offered: all of them, or the compact set.
+    /// The tools offered: the hand-written ones, the compact set, or the
+    /// generated ones.
     pub tools: ToolSet,
 }
 
@@ -2583,16 +2592,30 @@ pub enum ToolSet {
     /// The generic pair over the command registry, and the sandbox pair
     /// that starts a node for it: a short list for a short context.
     Compact,
+    /// The compact set, and one tool per command of the registry
+    /// ([`generated`]).
+    Generated,
 }
 
 impl ToolSet {
-    /// `full` or `compact`, as `--tools` takes it.
+    /// `full`, `compact` or `generated`, as `--tools` takes it.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "full" => Some(Self::Full),
             "compact" => Some(Self::Compact),
+            "generated" => Some(Self::Generated),
             _ => None,
+        }
+    }
+
+    /// Its name, as `--tools` takes it.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Compact => "compact",
+            Self::Generated => "generated",
         }
     }
 
@@ -2600,6 +2623,25 @@ impl ToolSet {
     #[must_use]
     pub fn offers(self, tool: &Tool) -> bool {
         self == Self::Full || matches!(tool.endpoint, Endpoint::Commands | Endpoint::Sandbox)
+    }
+
+    /// Every tool it offers, as `tools/list` gives them: the hand-written
+    /// ones in their order, then the generated ones by name.
+    #[must_use]
+    pub fn listed(self) -> Vec<Value> {
+        let mut listed: Vec<Value> = TOOLS
+            .iter()
+            .filter(|t| self.offers(t))
+            .map(|t| {
+                json!({
+                    "name": t.name, "description": t.description, "inputSchema": t.input_schema(),
+                })
+            })
+            .collect();
+        if self == Self::Generated {
+            listed.extend(generated::tools().iter().map(generated::Generated::listed));
+        }
+        listed
     }
 }
 
@@ -2853,16 +2895,40 @@ fn absolute_paths<'a>(value: &'a Value, into: &mut Vec<&'a str>) {
 
 fn call(sockets: &mut Sockets, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or_default();
+    if let Some(made) = generated::find(name) {
+        if sockets.tools != ToolSet::Generated {
+            return tool_result(
+                format!(
+                    "no tool `{name}` in {} mode: start helios-mcp with --tools generated, or run `{}` with helios_command_run",
+                    sockets.tools.name(),
+                    made.spec.id
+                ),
+                true,
+            );
+        }
+        return match made.run_arguments(&params["arguments"]) {
+            Ok(arguments) => call_tool(sockets, generated::run_tool(), &arguments),
+            Err(e) => tool_result(e, true),
+        };
+    }
     let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
         return tool_result(format!("no tool `{name}`"), true);
     };
     if !sockets.tools.offers(tool) {
         return tool_result(
-            format!("no tool `{name}` in compact mode: run its command with helios_command_run"),
+            format!(
+                "no tool `{name}` in {} mode: run its command with helios_command_run",
+                sockets.tools.name()
+            ),
             true,
         );
     }
-    let request = match tool.request(&params["arguments"]) {
+    call_tool(sockets, tool, &params["arguments"])
+}
+
+/// Calls `tool` with `arguments`: the caps, the roots, then its endpoint.
+fn call_tool(sockets: &mut Sockets, tool: &Tool, arguments: &Value) -> Value {
+    let request = match tool.request(arguments) {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
     };
@@ -3264,11 +3330,7 @@ pub fn handle(sockets: &mut Sockets, message: &Value) -> Option<Value> {
             "serverInfo": { "name": "helios", "version": env!("CARGO_PKG_VERSION") },
         })),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({
-            "tools": TOOLS.iter().filter(|t| sockets.tools.offers(t)).map(|t| json!({
-                "name": t.name, "description": t.description, "inputSchema": t.input_schema(),
-            })).collect::<Vec<_>>()
-        })),
+        "tools/list" => Ok(json!({ "tools": sockets.tools.listed() })),
         "tools/call" => Ok(call(sockets, &message["params"])),
         other => Err(json!({ "code": -32601, "message": format!("method `{other}` not found") })),
     };
@@ -4635,5 +4697,113 @@ mod tests {
         assert_eq!(ToolSet::parse("compact"), Some(ToolSet::Compact));
         assert_eq!(ToolSet::parse("full"), Some(ToolSet::Full));
         assert_eq!(ToolSet::parse("all"), None);
+    }
+
+    #[test]
+    fn generated_mode_offers_one_tool_per_command_run_with_the_caps() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Generated,
+        };
+        let listed = handle(
+            &mut sockets,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+        )
+        .unwrap()["result"]["tools"]
+            .clone();
+        let names: Vec<&str> = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        let compact = ToolSet::Compact.listed();
+        assert_eq!(names.len(), compact.len() + generated::tools().len());
+        for (listed, compact) in names.iter().zip(&compact) {
+            assert_eq!(*listed, compact["name"]);
+        }
+        assert!(names.contains(&"helios_cmd_workflow_submit"));
+        assert_eq!(ToolSet::parse("generated"), Some(ToolSet::Generated));
+
+        // Bad params are refused with the schema's error, before any node.
+        let (is_error, answer) = tool(&mut sockets, "helios_cmd_workflow_submit", json!({}));
+        assert!(is_error);
+        let answer = answer.as_str().unwrap().to_string();
+        assert!(
+            answer.starts_with("helios_cmd_workflow_submit: params: "),
+            "{answer}"
+        );
+        // The caps hold on a generated tool as on helios_command_run.
+        let items: Vec<String> = (0..=caps::MAX_BATCH)
+            .map(|i| format!("/in/{i}.png"))
+            .collect();
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_cmd_workflow_submit",
+            json!({ "items": items, "out": "/out", "format": "png" }),
+        );
+        assert!(is_error);
+        assert!(
+            answer.as_str().unwrap().contains("over the cap of 256"),
+            "{answer}"
+        );
+        // So do the roots: an absolute path outside them is refused.
+        let root = std::env::temp_dir().join(format!("helios-mcp-gen-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        sockets.roots = Roots::new(std::slice::from_ref(&root), Some(&root)).unwrap();
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_cmd_workflow_submit",
+            json!({ "items": ["/elsewhere/a.png"], "out": "/elsewhere", "format": "png" }),
+        );
+        assert!(is_error);
+        assert!(answer.as_str().unwrap().contains("/elsewhere"), "{answer}");
+        let _ = std::fs::remove_dir_all(&root);
+        // Without a node, a fitting call goes as far as finding one.
+        sockets.roots = Roots::unconfined();
+        let (is_error, answer) = tool(&mut sockets, "helios_cmd_cache_stats", json!({}));
+        assert!(is_error);
+        assert!(answer.as_str().unwrap().starts_with("no node"), "{answer}");
+
+        // Outside generated mode the tools are not offered.
+        sockets.tools = ToolSet::Full;
+        let (is_error, answer) = tool(&mut sockets, "helios_cmd_cache_stats", json!({}));
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            "no tool `helios_cmd_cache_stats` in full mode: start helios-mcp with --tools generated, or run `cache.stats` with helios_command_run"
+        );
+    }
+
+    #[test]
+    fn a_generated_tool_runs_its_command_on_the_node_as_the_agent() {
+        use helios_core::Bus;
+        use helios_core::jobs::Jobs;
+        use helios_node_core::endpoint::VaultService;
+        use helios_vault::{MemoryStore, Vault};
+
+        let bus = Arc::new(Bus::new());
+        let heard = bus.subscribe();
+        let service = VaultService::new(
+            Arc::new(Vault::new(MemoryStore::default())),
+            bus.clone(),
+            Jobs::new(bus.clone()),
+            "mcp-test",
+        );
+        let client = helios_inspect::client::Client::in_process(Arc::new(service));
+        let made = generated::find("helios_cmd_library_stacks_list").unwrap();
+        let arguments = made.run_arguments(&json!({})).unwrap();
+        let result = commands_call(&client, &generated::run_tool().request(&arguments).unwrap());
+        assert_eq!(result["isError"], false, "{result}");
+        let ran: Vec<String> = heard
+            .try_iter()
+            .filter(|e| e.kind == "control.command")
+            .map(|e| format!("{} {}", e.payload["id"], e.payload["origin"]))
+            .collect();
+        assert_eq!(ran, ["\"library.stacks.list\" \"agent:mcp\""]);
     }
 }
