@@ -877,6 +877,8 @@ gui-import-no-library = No library is open: start Helios with one (--vault FILE)
 
 gui-import-no-library-error = No library is open: { $error }
 
+gui-import-no-library-folder = Choose a library folder first: imports copy photos into it (Helios menu › Set up Helios…).
+
 gui-import-path = card or folder
 
 gui-import-remember = Remember for this workspace
@@ -1058,6 +1060,16 @@ gui-importer-refused = { $importer }: { $path } left out: { $why }
 gui-importer-scanned = { $importer }: { $found } photos found in { $source }, { $refused } left out
 
 gui-importer-warning = { $importer }: { $warning }
+
+gui-init-library-folder-choose = Choose…
+
+gui-init-library-folder-help = A folder on a disk with room for your photos; it is made if missing.
+
+gui-init-wizard = Set up Helios
+
+gui-init-wizard-about = A few choices before the first photos: each can be changed later.
+
+gui-init-wizard-finish = Finish
 
 gui-job-backup-done = Backup finished
 
@@ -2625,6 +2637,10 @@ health-library-folder-ok = A library folder is chosen
 
 health-library-folder-ok-detail = { $folder }
 
+health-library-folder-unwritable = The library folder cannot be written
+
+health-library-folder-unwritable-detail = { $folder } is missing or read-only: imports cannot copy photos into it.
+
 health-library-no-room = The library's disk is almost full
 
 health-library-no-room-detail = { $free } free of { $capacity } on { $volume }: the library needs room to grow.
@@ -2726,6 +2742,12 @@ health-vault-unreadable-detail = { $file }: { $error }
 init-library-folder = Library folder
 
 init-library-folder-why = Imports copy photos into it, and picked photos go there.
+
+library-folder-no-room = This disk has { $free } MiB free: choose a folder with room for photos.
+
+library-folder-not-absolute = Give the folder's full path.
+
+library-folder-not-writable = Helios cannot write in this folder: { $why }
 
 look-load-failed = cannot read the photo: { $error }
 

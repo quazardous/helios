@@ -95,6 +95,7 @@ mod import_history;
 mod import_sources;
 mod import_window;
 mod import_wizard;
+pub(crate) mod init_wizard;
 mod lifetime;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
@@ -247,6 +248,13 @@ enum Action {
     OpenFolder(Value),
     /// Choose the library folder (`library.chooseFolder`'s arguments).
     ChooseLibraryFolder(Value),
+    /// The setup's commands (`init_wizard`): every step, the folder step
+    /// (its arguments), the wizard's finish (the draft), the folder
+    /// chooser into the draft.
+    InitSetUp,
+    InitLibraryFolder(Value),
+    InitApply(Value),
+    InitChooseFolder,
     Fullscreen,
     Minimize,
     Maximize,
@@ -977,6 +985,7 @@ impl Shell {
             imports: Vec::new(),
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
+            init: init_wizard::InitState::default(),
             storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
@@ -3282,8 +3291,36 @@ impl Shell {
             Box::new(|a, _| Ok(Action::OpenFolder(a.clone()))),
         );
         add(
+            CommandSpec::new(init_wizard::COMMAND, "Set up Helios…", "Helios"),
+            Box::new(|_, _| Ok(Action::InitSetUp)),
+        );
+        add(
             CommandSpec::new(
-                helios_health::checks::CHOOSE_LIBRARY_FOLDER,
+                init_wizard::FOLDER_STEP,
+                "Choose the library folder in the setup (`path`: set at once)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::InitLibraryFolder(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                init_wizard::APPLY,
+                "Write the setup's settings (`library.folder`: the library folder)",
+                "Helios",
+            ),
+            Box::new(|a, _| Ok(Action::InitApply(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                init_wizard::CHOOSE,
+                "Choose the library folder for the setup",
+                "Library",
+            ),
+            Box::new(|_, _| Ok(Action::InitChooseFolder)),
+        );
+        add(
+            CommandSpec::new(
+                "library.chooseFolder",
                 "Choose the library folder imports copy photos into (`path`; asked through the folder chooser when absent)",
                 "Library",
             ),
@@ -3865,6 +3902,8 @@ impl Shell {
             PopItem::submenu(SYSTEM, "2_preferences", 0, SYSTEM_PROFILES, "Profiles"),
             PopItem::submenu(SYSTEM, "2_preferences", 1, SYSTEM_THEMES, "Themes"),
             command(SYSTEM, "2_preferences", 2, "workbench.keybindings"),
+            // The first-run setup, again.
+            command(SYSTEM, "2_preferences", 3, init_wizard::COMMAND),
             // egui-pop's About (`about::AboutPlugin`), also in Help.
             command(SYSTEM, "4_about", 0, "about"),
             command(SYSTEM, "9_quit", 0, "workbench.quit"),
@@ -6075,9 +6114,16 @@ impl Shell {
             }
             Action::ImportSource(args, origin) => return self.import_from_source(&args, &origin),
             Action::ImportWindow(args) => {
-                self.open_import_window(&args);
+                // The steps import requires first (the library folder).
+                if !self.ensure_for_import(&args) {
+                    self.open_import_window(&args);
+                }
                 return Ok(Value::Null);
             }
+            Action::InitSetUp => return self.init_setup(),
+            Action::InitLibraryFolder(args) => return self.init_library_folder(&args),
+            Action::InitApply(args) => return self.init_apply(&args),
+            Action::InitChooseFolder => return self.init_choose_folder(),
             Action::PauseAutomaticImports(args) => return self.pause_automatic_imports(&args),
             Action::Calibrate(args) => {
                 self.open_calibration(&args);
@@ -6543,6 +6589,7 @@ impl Shell {
         self.status_bar(&ctx);
         self.status_items(&ctx);
         self.health_tick(&ctx);
+        self.init_tick();
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.receive_imports();

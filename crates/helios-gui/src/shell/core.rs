@@ -79,6 +79,8 @@ pub(super) struct Core {
     pub(super) no_library: Option<Message>,
     /// The Health check page (a page of the Settings app).
     pub(super) health: health::HealthPage,
+    /// The first-run setup and its partial runs.
+    pub(super) init: super::init_wizard::InitState,
     /// The Storage page (a page of the Settings app).
     pub(super) storage: storage::StoragePage,
     /// The lines of the imports the host runs (`import_sink`).

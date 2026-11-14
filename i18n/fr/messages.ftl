@@ -2501,3 +2501,25 @@ gui-import-auto-resume = Reprendre
 gui-import-auto-resumed = Imports automatiques repris
 
 gui-settings-automatic-imports = Imports automatiques
+
+gui-import-no-library-folder = Choisissez d'abord un dossier de bibliothèque : les imports y copient les photos (menu Helios › Configurer Helios…).
+
+gui-init-library-folder-choose = Choisir…
+
+gui-init-library-folder-help = Un dossier sur un disque qui a de la place pour vos photos ; il est créé s'il manque.
+
+gui-init-wizard = Configurer Helios
+
+gui-init-wizard-about = Quelques choix avant les premières photos : chacun se change plus tard.
+
+gui-init-wizard-finish = Terminer
+
+health-library-folder-unwritable = Le dossier de la bibliothèque n'est pas accessible en écriture
+
+health-library-folder-unwritable-detail = { $folder } manque ou est en lecture seule : les imports ne peuvent pas y copier les photos.
+
+library-folder-no-room = Ce disque a { $free } Mio libres : choisissez un dossier qui a de la place pour les photos.
+
+library-folder-not-absolute = Donnez le chemin complet du dossier.
+
+library-folder-not-writable = Helios ne peut pas écrire dans ce dossier : { $why }

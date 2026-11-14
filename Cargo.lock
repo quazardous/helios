@@ -2477,6 +2477,7 @@ dependencies = [
  "helios-gpu",
  "helios-health",
  "helios-i18n",
+ "helios-init",
  "helios-inspect",
  "helios-library",
  "helios-load",

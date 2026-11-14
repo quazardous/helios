@@ -287,6 +287,9 @@ pub(crate) struct ImportWindow {
     /// The "Add a source…" wizard, while it is open: the window's body
     /// shows its steps ([`super::import_wizard`]).
     pub(super) wizard: Option<super::import_wizard::Wizard>,
+    /// Why it cannot import yet: a setup step it requires was left (the
+    /// library folder), said in its footer until the step is done.
+    pub(super) not_set_up: Option<Message>,
     /// The browsers of the source the Contents column shows, and the one
     /// shown ([`super::import_browsers`]).
     pub(super) browsing: super::import_browsers::Browsing,
@@ -1078,7 +1081,12 @@ impl Shell {
             // What the window's words need of the shell.
             let words = ShellWords {
                 backup: self.import_backup_line(),
-                no_library: self.core.no_library.clone().map(|m| self.text(m)),
+                no_library: self
+                    .core
+                    .no_library
+                    .clone()
+                    .or_else(|| self.import.get().not_set_up.clone())
+                    .map(|m| self.text(m)),
             };
             let texts: Texts = Arc::new(self.texts());
             let mut w = self.import.get_mut();

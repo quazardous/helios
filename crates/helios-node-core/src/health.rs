@@ -236,6 +236,7 @@ mod tests {
         );
 
         let photos = dir.join("Photos");
+        std::fs::create_dir_all(&photos).unwrap();
         helios_library::import::set_library_root(&vault, &photos).unwrap();
         let found = check(&inputs);
         assert_eq!(found.len(), 1, "{found:?}");

@@ -446,6 +446,26 @@ pub const SETTINGS: &[Setting] = &[
     },
 ];
 
+/// Settings another component keeps rather than the layers: declared here
+/// so a form draws them (their label, why, kind), written through their
+/// keeper. Not in [`Schema::core`]: the layers never hold them.
+///
+/// - `library.folder`: where imports copy photos, kept by the library in
+///   its catalogue (`helios_library::import::library_root`); the first
+///   run's library folder step fills it.
+pub const KEPT_ELSEWHERE: &[Setting] = &[Setting {
+    key: "library.folder",
+    concern: Concern::Project,
+    label: "Library folder",
+    about: "Where imports copy photos, and where picked photos go.",
+    kind: Kind::Text { default: "" },
+}];
+
+/// A setting declared in [`KEPT_ELSEWHERE`].
+pub fn kept_elsewhere(key: &str) -> Option<&'static Setting> {
+    KEPT_ELSEWHERE.iter().find(|s| s.key == key)
+}
+
 /// The declared settings a program knows.
 #[derive(Clone, Debug, Default)]
 pub struct Schema {

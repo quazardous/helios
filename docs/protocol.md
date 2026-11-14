@@ -65,8 +65,14 @@ are read on a vault's endpoint:
   `missing`, by module, the required steps (with their dependencies) not
   done yet. An unknown `module` is refused.
 
-An agent fills a step by setting its settings, or by running its command
-(`library.chooseFolder` with a `path`, on a desktop), then reads
+- `init.set` (`values`: setting to value): fills steps by setting the
+  settings they fill, each checked as its keeper does
+  (`{"values": {"library.folder": "/home/me/Pictures/Helios"}}`: a full
+  path, made if missing, written in, with room left); answers the steps
+  with `done`. A setting no step fills, or a value refused, is an error.
+
+An agent fills a step with `init.set`, or by running its command
+(`init.libraryFolder` with a `path`, on a desktop), then reads
 `init.status` again.
 
 ## Events
