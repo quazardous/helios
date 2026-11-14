@@ -18,7 +18,7 @@ use helios_vault_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
 /// How long a test waits for anything at most.
-const DEADLINE: Duration = Duration::from_secs(60);
+const DEADLINE: Duration = Duration::from_mins(1);
 
 /// A fresh folder of the test's own, emptied.
 fn scratch(name: &str) -> PathBuf {
