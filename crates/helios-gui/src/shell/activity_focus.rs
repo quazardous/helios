@@ -11,9 +11,13 @@
 //!   its own); its start, elapsed time and time left; its progress and
 //!   current step; the per-item outcome when it has items (an import's
 //!   added, skipped and failed files, with the reasons); its log (the
-//!   notes and states followed, [`crate::activity::LogLine`]); Cancel,
-//!   Retry when the failure may be retried, and "Show in Library" once
-//!   it is done.
+//!   notes and states followed, [`crate::activity::LogLine`]); Cancel
+//!   (unless the job says it cannot stop), Retry when the failure may be
+//!   retried, and once done its result links: "Open folder" (an export, a
+//!   backup, a snapshot), "Show in Library" (an import's photos, its
+//!   session in the Library) and "Import history" (the import window,
+//!   whose History lists the record), and what the job offered (a batch's
+//!   actions).
 //!
 //! Both read the node's promises (`promises.list`, followed by
 //! [`crate::activity::Activity`]), so a job an agent or the command line
@@ -64,8 +68,65 @@ const FAILED_SHOWN: usize = 20;
 #[derive(Clone, Debug, PartialEq)]
 enum Event {
     Ask(Action, String),
-    /// The main window to the front, its Library shown.
-    ShowLibrary,
+    /// A result link: a command with its arguments (the folder opened, the
+    /// import window shown), or [`SHOW_IMPORT`]: the main window to the
+    /// front, its Library on the import's photos.
+    Link(String, Value),
+}
+
+/// The pseudo-command of "Show in Library" on an import: its session
+/// shown in the Library (`id`: the import history's record), the main
+/// window brought forward.
+const SHOW_IMPORT: &str = "activity.showImport";
+
+/// A finished job's result links: what it says it made (its label, or
+/// the words the job said it in; the command it runs and its arguments).
+fn links(p: &Promise) -> Vec<(Message, Option<String>, String, Value)> {
+    let State::Done { result } = &p.state else {
+        return Vec::new();
+    };
+    let mut links = Vec::new();
+    if let Some(history) = result["history"].as_str() {
+        links.push((
+            Message::new("gui-jobs-show-library", "Show in Library"),
+            None,
+            SHOW_IMPORT.to_string(),
+            json!({ "id": history, "select": true }),
+        ));
+        links.push((
+            Message::new("gui-jobs-import-record", "Import history"),
+            None,
+            super::import_window::COMMAND.to_string(),
+            json!({}),
+        ));
+    }
+    if let Some(folder) = result["folder"].as_str() {
+        links.push((
+            Message::new("gui-jobs-open-folder", "Open folder"),
+            None,
+            super::export::OPEN_FOLDER.to_string(),
+            json!({ "path": folder }),
+        ));
+    }
+    // What the job finished offering (a batch's "Open folder"), in the
+    // words it said them.
+    for a in result["actions"].as_array().into_iter().flatten() {
+        if let (Some(title), Some(command)) = (a["title"].as_str(), a["command"].as_str()) {
+            links.push((
+                Message::new("gui-jobs-open-folder", "Open folder"),
+                Some(title.to_string()),
+                command.to_string(),
+                a["args"].clone(),
+            ));
+        }
+    }
+    links
+}
+
+/// Whether a job may be cancelled: its request says when it may not (a
+/// snapshot, a job of another node, work with no end).
+fn cancellable(p: &Promise) -> bool {
+    !p.state.is_settled() && !p.cancel_asked && p.request["cancellable"].as_bool() != Some(false)
 }
 
 /// Which jobs the list shows, by state.
@@ -117,6 +178,8 @@ pub(crate) struct Jobs {
     cleared: BTreeSet<String>,
     /// The rows drawn last frame, and whether each had a progress bar.
     drawn: Vec<(String, bool)>,
+    /// The result links run, oldest first (for tests and agents).
+    linked: Vec<(String, Value)>,
     /// Now, in seconds since the epoch.
     now: u64,
     /// The clock, frozen (pictures of the focus).
@@ -160,11 +223,16 @@ fn span(seconds: u64) -> String {
 fn kind_icon(kind: &str) -> &'static str {
     match kind {
         "import" => "phosphor:tray-arrow-down",
-        "export" => "phosphor:export",
+        "export" | "batch" => "phosphor:export",
         "trash" => "phosphor:trash",
         "backup" => "phosphor:hard-drives",
         "snapshot" => "phosphor:floppy-disk",
         "render" => "phosphor:image",
+        "calibration" => "phosphor:crosshair",
+        "health" => "phosphor:heartbeat",
+        "map" => "phosphor:map-trifold",
+        "thumbs" => "phosphor:images",
+        "capture" | "cull" | "workshop-run" => "phosphor:sparkle",
         _ => "phosphor:pulse",
     }
 }
@@ -391,7 +459,7 @@ impl Jobs {
                     });
                     ui.horizontal(|ui| {
                         self.progress_ui(ui, p, bar);
-                        if actions && !p.state.is_settled() && !p.cancel_asked {
+                        if actions && cancellable(p) {
                             let cancel = text(ui, Message::new("gui-promise-cancel", "Cancel"));
                             if ui.small_button(cancel).clicked() {
                                 self.events.push(Event::Ask(Action::Cancel, p.id.clone()));
@@ -545,7 +613,7 @@ impl Jobs {
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if !p.state.is_settled() && !p.cancel_asked {
+            if cancellable(&p) {
                 let cancel = text(ui, Message::new("gui-promise-cancel", "Cancel"));
                 if ui.button(cancel).clicked() {
                     self.events.push(Event::Ask(Action::Cancel, p.id.clone()));
@@ -563,15 +631,11 @@ impl Jobs {
             {
                 self.events.push(Event::Ask(Action::Retry, p.id.clone()));
             }
-            if matches!(p.state, State::Done { .. })
-                && ui
-                    .button(text(
-                        ui,
-                        Message::new("gui-jobs-show-library", "Show in Library"),
-                    ))
-                    .clicked()
-            {
-                self.events.push(Event::ShowLibrary);
+            for (label, said, command, args) in links(&p) {
+                let label = said.unwrap_or_else(|| text(ui, label));
+                if ui.button(label).clicked() {
+                    self.events.push(Event::Link(command, args));
+                }
             }
         });
         ui.add_space(6.0);
@@ -645,8 +709,40 @@ fn outcome_ui(ui: &mut egui::Ui, result: &Value) {
                     }
                 }
             });
+    } else if let Some(done) = result["done"].as_u64() {
+        // A job of the desktop's, mirrored: how many it did, skipped and
+        // failed.
+        egui::Grid::new("helios.activity.outcome")
+            .num_columns(2)
+            .spacing([12.0, 2.0])
+            .show(ui, |ui| {
+                ui.label(text(ui, Message::new("gui-jobs-items-done", "Done")));
+                ui.label(match result["total"].as_u64() {
+                    Some(total) => format!("{done}/{total}"),
+                    None => done.to_string(),
+                });
+                ui.end_row();
+                let skipped = result["skipped"].as_u64().unwrap_or(0);
+                if skipped > 0 {
+                    ui.label(text(ui, Message::new("gui-jobs-skipped", "Skipped")));
+                    ui.label(skipped.to_string());
+                    ui.end_row();
+                }
+                let failed = result["failed"].as_array().map_or(0, Vec::len);
+                if failed > 0 {
+                    ui.label(text(ui, Message::new("gui-jobs-items-failed", "Failed")));
+                    ui.label(failed.to_string());
+                    ui.end_row();
+                }
+            });
     } else {
         ui.label(text(ui, Message::new("gui-promise-done", "Done")));
+    }
+    if let Some(folder) = result["folder"].as_str() {
+        ui.horizontal(|ui| {
+            ui.label(text(ui, Message::new("gui-jobs-folder", "Folder")));
+            ui.weak(folder);
+        });
     }
     let failed = result["failed"].as_array().map_or(&[][..], Vec::as_slice);
     for f in failed.iter().take(FAILED_SHOWN) {
@@ -711,6 +807,31 @@ impl Shell {
         }
     }
 
+    /// Runs a result link of the detail: the import's session shown in
+    /// the Library, the main window brought forward; or the link's
+    /// command.
+    fn run_link(&mut self, command: &str, args: &Value) {
+        let ran = if command == SHOW_IMPORT {
+            let ran = self.run(
+                crate::library::IMPORT_SESSION_COMMAND,
+                args.clone(),
+                helios_shell::commands::Origin::User,
+            );
+            self.core.app.handle().raise_window(&WindowId::main());
+            ran
+        } else {
+            self.run(command, args.clone(), helios_shell::commands::Origin::User)
+        };
+        if let Err(e) = ran {
+            self.warn(format!("{command}: {e}"));
+        }
+        self.activity_focus
+            .state
+            .borrow_mut()
+            .linked
+            .push((command.to_string(), args.clone()));
+    }
+
     /// Shows `promises` in the focus at a frozen time `now`, as if the
     /// node had answered them then: for pictures of the focus.
     pub fn show_activity_at(&mut self, promises: Vec<helios_vault::promises::Promise>, now: u64) {
@@ -727,7 +848,16 @@ impl Shell {
             .iter()
             .map(|(id, bar)| json!({ "id": id, "bar": bar }))
             .collect();
-        json!({ "open": j.open, "selected": j.selected, "rows": rows })
+        let links: Vec<Value> = j
+            .selected()
+            .map(links)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, _, command, args)| json!({ "command": command, "args": args }))
+            .collect();
+        json!({ "open": j.open, "selected": j.selected, "rows": rows, "links": links,
+                "linked": j.linked.iter().map(|(c, a)| json!({ "command": c, "args": a }))
+                    .collect::<Vec<_>>() })
     }
 
     /// Each frame of the main window: the promises read, what the window
@@ -752,10 +882,7 @@ impl Shell {
         for event in events {
             match event {
                 Event::Ask(action, id) => self.core.activity.ask(action, &id),
-                Event::ShowLibrary => {
-                    let app = self.core.app.handle().clone();
-                    app.raise_window(&WindowId::main());
-                }
+                Event::Link(command, args) => self.run_link(&command, &args),
             }
         }
         let app = self.core.app.handle().clone();

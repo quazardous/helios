@@ -377,7 +377,7 @@ pub fn backup<S: Store>(
             }
         }
     }
-    if let Some(mount) = last_mount {
+    if let Some(mount) = &last_mount {
         let staging = mount.join(strategy::BACKUP_FOLDER).join(".helios-part");
         let _ = std::fs::remove_dir_all(staging.join(format!("{}-{id}", std::process::id())));
         let _ = std::fs::remove_dir(staging);
@@ -401,7 +401,13 @@ pub fn backup<S: Store>(
         "{} copied, {} found there and verified, {} not needed, {} failed",
         run.report.copied, run.report.verified, run.report.skipped, run.report.failed
     ));
-    job.finished();
+    // Where the copies are: the Activity focus offers the folder.
+    match &last_mount {
+        Some(mount) => job.finished_result(serde_json::json!({
+            "folder": mount.join(strategy::BACKUP_FOLDER),
+        })),
+        None => job.finished(),
+    }
     Ok(run.report)
 }
 

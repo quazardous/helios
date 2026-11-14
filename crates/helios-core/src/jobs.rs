@@ -17,7 +17,7 @@
 //! | `job.cancelling` | `id` |
 //! | `job.paused` | `id`, `reason` |
 //! | `job.resumed` | `id` |
-//! | `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed |
+//! | `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed; `actions` or `result` when finished with them |
 //!
 //! A job may name the graph node it works for (`node`, [`Start::node`]):
 //! an export names the node it renders. The desktop's Queue panel lists a
@@ -420,6 +420,12 @@ impl Report {
     /// "Show in folder").
     pub fn finished_with(&self, actions: Json) {
         self.end(FINISHED, json!({ "actions": actions }));
+    }
+
+    /// It did, with what it made (`result`: `{folder}` where its files
+    /// went), which the node's promise of the job settles with.
+    pub fn finished_result(&self, result: Json) {
+        self.end(FINISHED, json!({ "result": result }));
     }
 
     /// It failed, saying why.
