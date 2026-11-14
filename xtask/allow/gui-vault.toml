@@ -36,10 +36,6 @@ path = "crates/helios-gui/src/import_scan.rs"
 reason = "the import window's prefilter reads the vault's known files and volumes; to move to the client"
 
 [[allow]]
-path = "crates/helios-gui/src/shell/storage.rs"
-reason = "the Storage page reads and writes volumes, the strategy and backup statuses on the vault; to move to storage commands on the node"
-
-[[allow]]
 path = "crates/helios-gui/src/workshop_run.rs"
 reason = "a workshop's run reads locations and writes versions and its book on the vault; to move to the client"
 

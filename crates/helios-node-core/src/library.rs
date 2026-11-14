@@ -76,6 +76,12 @@ pub const IDS: &[&str] = &[
     STORAGE_GET,
     HISTORY_LIST,
     AGAIN,
+    STORAGE_VOLUMES,
+    STORAGE_STATUSES,
+    STORAGE_SAVE,
+    STORAGE_MARK,
+    STORAGE_STRATEGY_SET,
+    STORAGE_CARD,
 ];
 
 /// Takes photos out of the Library (Lightroom's "Remove from Catalog"):
@@ -98,6 +104,30 @@ pub const HEADS: &str = "library.versions.heads";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
+
+/// Reads the volumes the library knows (`volumes`, by name) and how many
+/// copies of photos each holds (`photos`, by volume id).
+pub const STORAGE_VOLUMES: &str = "storage.volumes";
+
+/// Reads every photo's backup status against the library's strategy, by
+/// image id (`helios_storage::strategy::statuses`).
+pub const STORAGE_STATUSES: &str = "storage.statuses";
+
+/// Saves what the user set on a known volume (name, roles, off site,
+/// RAID); answers the volume as kept.
+pub const STORAGE_SAVE: &str = "storage.volume.save";
+
+/// Writes the identity file on a volume plugged in at `mount` and moves
+/// its record to the marker's id (`helios_storage::registry::mark`).
+pub const STORAGE_MARK: &str = "storage.volume.mark";
+
+/// Keeps (or with a null `strategy` removes) the library's backup
+/// strategy.
+pub const STORAGE_STRATEGY_SET: &str = "storage.strategy.set";
+
+/// Whether a card an import read is safe to format now
+/// (`helios_library::import::card_safety`).
+pub const STORAGE_CARD: &str = "storage.card.safety";
 
 /// Moves photos' files to the system trash (Lightroom's "Delete from
 /// Disk", darktable's "delete (trash)") as a journaled job: refused on
@@ -451,6 +481,52 @@ pub fn specs() -> Vec<CommandSpec> {
                 json!({ "type": "string", "description": "an import's id, from import.history.list" }),
                 true,
             )])),
+        library(
+            STORAGE_VOLUMES,
+            "Read the volumes the library knows and its photos on each",
+        )
+        .read_only(),
+        library(
+            STORAGE_STATUSES,
+            "Read every photo's backup status against the strategy",
+        )
+        .read_only(),
+        library(STORAGE_SAVE, "Save a volume's name, roles and flags").params(object(&[(
+            "volume",
+            json!({ "type": "object", "description": "a volume as storage.volumes reads it" }),
+            true,
+        )])),
+        library(STORAGE_MARK, "Write a volume's identity file").params(object(&[
+            (
+                "volume",
+                json!({ "type": "object", "description": "a volume as storage.volumes reads it" }),
+                true,
+            ),
+            ("mount", absolute(), true),
+            (
+                "library",
+                json!({ "type": "string", "description": "the library the marker names" }),
+                true,
+            ),
+        ])),
+        library(STORAGE_STRATEGY_SET, "Set the library's backup strategy").params(object(&[(
+            "strategy",
+            json!({ "type": ["object", "null"], "description": "null removes it" }),
+            true,
+        )])),
+        library(STORAGE_CARD, "Say whether a card is safe to format")
+            .params(object(&[
+                ("root", absolute(), true),
+                ("path", absolute(), true),
+                ("label", string(), true),
+                (
+                    "files",
+                    json!({ "type": "array", "items": { "type": "array" },
+                            "description": "[path, image id or null] for each file read on the card" }),
+                    true,
+                ),
+            ]))
+            .read_only(),
     ]
 }
 
@@ -1111,7 +1187,86 @@ pub fn run<S: Store>(
             let volumes = helios_storage::registry::known(vault)?;
             Ok(json!({ "strategy": strategy, "volumes": volumes }))
         }
+        STORAGE_VOLUMES | STORAGE_STATUSES | STORAGE_SAVE | STORAGE_MARK | STORAGE_STRATEGY_SET
+        | STORAGE_CARD => storage(vault, id, params),
         other => Err(format!("no library command `{other}`")),
+    }
+}
+
+/// The `storage.*` commands: the Storage page's reads and writes.
+fn storage<S: Store>(vault: &Vault<S>, id: &str, params: &Value) -> Result<Value, String> {
+    use helios_storage::strategy::{self, Scope, Strategy};
+    use helios_storage::{Volume, registry};
+    let volume = |key: &str| -> Result<Volume, String> {
+        serde_json::from_value(params[key].clone()).map_err(|e| format!("`{key}`: {e}"))
+    };
+    match id {
+        STORAGE_VOLUMES => {
+            let volumes = registry::known(vault)?;
+            let mut photos = std::collections::BTreeMap::<String, usize>::new();
+            for (_, location) in vault.all_locations()? {
+                if let Some(v) = location.volume {
+                    *photos.entry(v.as_str().to_string()).or_default() += 1;
+                }
+            }
+            Ok(json!({ "volumes": volumes, "photos": photos }))
+        }
+        STORAGE_STATUSES => {
+            let s = strategy::load(vault, &Scope::Library)?;
+            let volumes = registry::known(vault)?;
+            let statuses: serde_json::Map<String, Value> =
+                strategy::statuses(vault, &volumes, s.as_ref())?
+                    .into_iter()
+                    .map(|(id, (status, _))| (id.hex(), json!(status)))
+                    .collect();
+            Ok(json!({ "statuses": statuses }))
+        }
+        STORAGE_SAVE => Ok(json!(registry::save(vault, &volume("volume")?)?)),
+        STORAGE_MARK => {
+            let mut v = volume("volume")?;
+            v.mount = Some(params["mount"].as_str().ok_or("`mount` is missing")?.into());
+            let library = params["library"].as_str().ok_or("`library` is missing")?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            Ok(json!(registry::mark(vault, &v, library, now)?))
+        }
+        STORAGE_STRATEGY_SET => {
+            let s: Option<Strategy> = serde_json::from_value(params["strategy"].clone())
+                .map_err(|e| format!("`strategy`: {e}"))?;
+            strategy::save(vault, &Scope::Library, s.as_ref())?;
+            Ok(json!({ "set": s.is_some() }))
+        }
+        STORAGE_CARD => {
+            let path = |key: &str| -> Result<PathBuf, String> {
+                params[key]
+                    .as_str()
+                    .map(PathBuf::from)
+                    .ok_or_else(|| format!("`{key}` is missing"))
+            };
+            let files = params["files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| {
+                    let file = PathBuf::from(f.get(0)?.as_str()?);
+                    let id = f
+                        .get(1)
+                        .and_then(Value::as_str)
+                        .and_then(|h| ImageId::from_hex(h).ok());
+                    Some((file, id))
+                })
+                .collect();
+            let card = helios_library::import::card_safety(
+                vault,
+                &path("root")?,
+                &path("path")?,
+                params["label"].as_str().ok_or("`label` is missing")?,
+                files,
+            )?;
+            Ok(json!(card))
+        }
+        other => Err(format!("no storage command `{other}`")),
     }
 }
 
@@ -1163,6 +1318,13 @@ mod tests {
             json!({}),
             json!({ "limit": 10 }),
             json!({ "id": "1700000000000-42-0" }),
+            json!({}),
+            json!({}),
+            json!({ "volume": { "id": "uuid:a", "name": "Backup" } }),
+            json!({ "volume": { "id": "label:B" }, "mount": "/media/b", "library": "/photos" }),
+            json!({ "strategy": null }),
+            json!({ "root": "/photos", "path": "/media/card", "label": "EOS_DIGITAL",
+                    "files": [["/media/card/DCIM/a.cr3", null]] }),
         ];
         assert_eq!(examples.len(), IDS.len(), "one example per command");
         for (spec, example) in specs().iter().zip(examples) {
@@ -1401,5 +1563,52 @@ mod tests {
             "cli",
         );
         assert!(refused.unwrap_err().contains("neither an image id"));
+    }
+
+    #[test]
+    fn the_storage_page_reads_and_writes_volumes_and_the_strategy_through_the_node() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user").unwrap();
+        let disk = helios_storage::Volume {
+            id: helios_storage::VolumeId("uuid:backup".into()),
+            identified_by: helios_storage::Identity::Uuid,
+            kind: helios_storage::VolumeKind::External,
+            mount: Some("/media/backup".into()),
+            ..helios_storage::detect::weak("Backup", None)
+        };
+        helios_storage::scan::scan(&vault, &[disk], "pc", 1, None).unwrap();
+
+        let read = call(STORAGE_VOLUMES, json!({}));
+        assert_eq!(read["volumes"][0]["name"], "Backup", "{read}");
+        assert_eq!(read["photos"], json!({}));
+
+        let mut volume = read["volumes"][0].clone();
+        volume["name"] = json!("Vault disk");
+        volume["roles"] = json!(["backup"]);
+        let saved = call(STORAGE_SAVE, json!({ "volume": volume }));
+        assert_eq!(saved["name"], "Vault disk");
+        let again = call(STORAGE_VOLUMES, json!({}));
+        assert_eq!(again["volumes"][0]["roles"], json!(["backup"]));
+
+        let strategy = json!(helios_storage::strategy::Strategy::default());
+        assert_eq!(
+            call(STORAGE_STRATEGY_SET, json!({ "strategy": strategy })),
+            json!({ "set": true })
+        );
+        assert_eq!(call(STORAGE_GET, json!({}))["strategy"], strategy);
+        assert_eq!(
+            call(STORAGE_STRATEGY_SET, json!({ "strategy": null })),
+            json!({ "set": false })
+        );
+        assert_eq!(call(STORAGE_GET, json!({}))["strategy"], Value::Null);
+        assert_eq!(call(STORAGE_STATUSES, json!({})), json!({ "statuses": {} }));
+
+        let card = call(
+            STORAGE_CARD,
+            json!({ "root": "/photos", "path": "/media/card", "label": "EOS_DIGITAL", "files": [] }),
+        );
+        assert_eq!(card["label"], "EOS_DIGITAL");
+        assert!(run(&vault, &bus, STORAGE_SAVE, &json!({}), "user").is_err());
     }
 }

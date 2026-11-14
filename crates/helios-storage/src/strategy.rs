@@ -152,7 +152,7 @@ pub fn of_image<S: Store>(vault: &Vault<S>, _image: &ImageId) -> Result<Option<S
 }
 
 /// An image's backup copies against its strategy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupStatus {
     /// Verified copies, one per physical drive.
     pub have: u8,

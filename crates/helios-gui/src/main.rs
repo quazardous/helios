@@ -462,20 +462,14 @@ fn catalogue_commands(
             "Library",
         ),
         move |_, _| {
-            let options = helios_vault_sqlite::Options {
-                keep_snapshots: catalogue::kept(&store),
-                ..helios_vault_sqlite::Options::default()
-            };
-            let taken = helios_vault_sqlite::snapshot::take_file(&at, "by-hand", &options)?;
-            let (node, at, copy, keep) = (node.clone(), at.clone(), taken.clone(), options.keep_snapshots);
-            std::thread::spawn(move || {
-                let mounted = helios_storage::system().volumes();
-                let (_, errors) = catalogue::copy_to_backups(&node, &mounted, &at, &copy, keep);
-                for e in errors {
-                    warn(&format!("catalogue snapshot copy: {e}"));
+            // Taken off the frame: the copy waits for a writer holding
+            // the catalogue.
+            catalogue::take_by_hand(&node, &at, catalogue::kept(&store), |taken| {
+                if let Err(e) = taken {
+                    warn(&format!("catalogue snapshot: {e}"));
                 }
-            });
-            Ok(json!({ "file": taken }))
+            })?;
+            Ok(json!({ "taking": true, "folder": helios_vault_sqlite::snapshot::dir(&at) }))
         },
     )?;
     let (at, t) = (file.clone(), shell.texts());
@@ -2203,11 +2197,13 @@ fn main() -> Result<(), String> {
                     .ok()
                     .flatten()
                     .map_or_else(|| "helios".to_string(), |p| p.display().to_string());
-                shell.set_storage(Arc::new(helios_gui::shell::VaultStorage::new(
-                    vault,
-                    helios_storage::system(),
-                    marker,
-                )));
+                if let Some(p) = &persist {
+                    shell.set_storage(Arc::new(helios_gui::shell::NodeStorage::new(
+                        p.node(),
+                        helios_storage::system(),
+                        marker,
+                    )));
+                }
             }
             // The import accounts, kept in the vault (public facts only).
             let mut health_accounts = None;
