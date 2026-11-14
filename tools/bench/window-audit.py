@@ -183,19 +183,37 @@ def storage_probe(args, comp, agent, title: str, name: str) -> dict:
     }
 
 
-def appears(agent, window: str, label: str, more_than: int, within: float) -> tuple[int, str]:
-    """How many nodes of `window`'s tree are named `label`, once more
-    than `more_than` or after `within` seconds; and the last error a
-    tree request gave, if any (`labelled` reads one as 0 nodes)."""
+def tree(agent, window: str) -> list[dict]:
+    """`window`'s whole tree (empty when the window is not open)."""
+    try:
+        return agent.ui({"action": "tree", "window": window}).get("nodes", [])
+    except (OSError, RuntimeError, ValueError):
+        return []
+
+
+def naming(nodes: list[dict], text: str) -> list[dict]:
+    """The nodes showing `text`: named by it, or holding it as their
+    value (egui gives a text label its text as a value; the agent reads
+    that as its name, but a value is checked too)."""
+    return [n for n in nodes if text in (n.get("label"), n.get("value"))]
+
+
+def appears(agent, window: str, label: str, more_than: int, within: float) -> tuple[int, str, list]:
+    """How many nodes of `window`'s whole tree show `label`, once more
+    than `more_than` or after `within` seconds; the last error a tree
+    request gave, if any; and the window's tree as last read."""
     deadline = time.monotonic() + within
     error = ""
+    nodes: list[dict] = []
     while True:
         try:
-            n = agent.ui({"action": "tree", "window": window, "label": label}).get("count", 0)
+            nodes = agent.ui({"action": "tree", "window": window}).get("nodes", [])
+            error = ""
         except (OSError, RuntimeError, ValueError) as exc:
-            n, error = 0, str(exc)
+            nodes, error = [], str(exc)
+        n = len(naming(nodes, label))
         if n > more_than or time.monotonic() >= deadline:
-            return n, error
+            return n, error, nodes
         time.sleep(0.1)
 
 
@@ -206,13 +224,14 @@ def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str
     headless compositor, the CPU throttled) it took more than 5 s to
     reach the window's tree, though it was drawn: so up to 20 s."""
     row = {"window": "import", "role": "CheckBox", "label": args.folder.name, "nth": 0}
-    base = (labelled(agent, "main", label), labelled(agent, "import", label))
+    before = (tree(agent, "main"), tree(agent, "import"))
+    base = (len(naming(before[0], label)), len(naming(before[1], label)))
     try:
         agent.ui({"action": action, **row})
     except (OSError, RuntimeError, ValueError) as exc:
         return {"probe": name, "ok": False, "error": f"{action}: {exc}"}
-    imp, error = appears(agent, "import", label, base[1], within=20.0)
-    main = labelled(agent, "main", label)
+    imp, error, after = appears(agent, "import", label, base[1], within=20.0)
+    main = len(naming(tree(agent, "main"), label))
     where = "import" if imp > base[1] else "main" if main > base[0] else "nowhere"
     shot(comp, args, name)
     out = {
@@ -221,8 +240,18 @@ def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str
         "seen": f"{what} in the {where} window",
         "counts": {"main": [base[0], main], "import": [base[1], imp]},
     }
-    if where == "nowhere" and error:
-        out["error"] = error
+    if where == "nowhere":
+        # What the import window's tree gained: the popup's nodes, when
+        # it shows under another text.
+        known = {n.get("id") for n in before[1]}
+        out["new"] = [
+            {k: n.get(k) for k in ("role", "label", "value")}
+            for n in after
+            if n.get("id") not in known
+        ][:20]
+        out["nodes"] = [len(before[1]), len(after)]
+        if error:
+            out["error"] = error
     return out
 
 
@@ -371,6 +400,12 @@ def probes(args, comp, agent) -> list[dict]:
     settle()
     if labelled(agent, "import", FORGET) > 0:
         out[-1]["seen"] += "; still open after Escape"
+    # Closed, so that Storage… below gets an import window of its own:
+    # asked again while it is open, the import window is only raised and
+    # no new window is listed.
+    if ic.present(comp, title):
+        compositor_close(comp, title)
+        settle()
 
     # Storage…: the Settings in their own window (the default), then
     # popped in over the main window. Last, in an import window of their
