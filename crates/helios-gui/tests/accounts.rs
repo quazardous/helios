@@ -1152,7 +1152,7 @@ fn from_a_fresh_profile_connect_choose_and_import_into_the_download_folder() {
     until(&mut h, connect, |h| shown(h, connect));
     // Pre-filled, editable; no Into nor Name for a download.
     assert!(shown(&h, "Download into"));
-    let _ = h.get_by_value(DOWNLOAD);
+    assert!(h.query_all_by_value(DOWNLOAD).next().is_some(), "pre-filled");
     assert!(!shown(&h, "Copy into the Library"));
     h.get_by_label(connect).click();
     until(&mut h, "the form", |h| connection(h)["state"] == "form");
