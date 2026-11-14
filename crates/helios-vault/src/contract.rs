@@ -65,6 +65,9 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     a_duplicate_is_a_new_head_beside_its_source(make());
     a_copy_is_picked_as_current_removed_and_brought_back(make());
     promises_are_created_progressed_settled_and_listed(make());
+    photo_files_are_one_photo_s_rows_read_by_photo_file_and_window(make());
+    removing_an_image_drops_its_photo_file_rows(make());
+    files_attach_detach_hold_and_undo(make());
 }
 
 /// For a store with read handles ([`Store::reader`]): a read that is not
@@ -1097,6 +1100,21 @@ impl<S: Store> Store for FailingAudit<S> {
     }
     fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {
         self.0.remove_image(id)
+    }
+    fn put_photo_file(&mut self, file: &crate::PhotoFile) -> Result<(), String> {
+        self.0.put_photo_file(file)
+    }
+    fn remove_photo_file(&mut self, image: &ImageId) -> Result<bool, String> {
+        self.0.remove_photo_file(image)
+    }
+    fn photo_of(&self, image: &ImageId) -> Result<Option<crate::PhotoFile>, String> {
+        self.0.photo_of(image)
+    }
+    fn photo_files(&self, photo: &ImageId) -> Result<Vec<crate::PhotoFile>, String> {
+        self.0.photo_files(photo)
+    }
+    fn photo_files_of(&self, photos: &[ImageId]) -> Result<Vec<crate::PhotoFile>, String> {
+        self.0.photo_files_of(photos)
     }
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
         self.0.field(id, name)
@@ -3248,4 +3266,238 @@ fn promises_are_created_progressed_settled_and_listed<S: Store>(store: S) {
         .wait_promise(&c.id, std::time::Duration::from_secs(5), &|| false)
         .unwrap();
     assert_eq!(settled.state, State::Cancelled);
+}
+
+fn photo_file(image: u8, photo: u8, role: crate::FileRole, rank: u32) -> crate::PhotoFile {
+    crate::PhotoFile {
+        image: self::image(image).id,
+        photo: self::image(photo).id,
+        role,
+        rank,
+        added_at: 10 + u64::from(image),
+        added_by: "import".into(),
+    }
+}
+
+fn photo_files_are_one_photo_s_rows_read_by_photo_file_and_window<S: Store>(s: S) {
+    use crate::FileRole::{Attachment, Camera, Master, Variant};
+    use crate::PhotoFile;
+    let mut s = with_images(s, 6);
+    let (one, two) = (image(1).id, image(2).id);
+    // Photo 1 has three files, photo 4 one; 6 has none.
+    let rows = [
+        photo_file(2, 1, Camera, 0),
+        photo_file(3, 1, Variant, 1),
+        photo_file(5, 4, Attachment, 0),
+    ];
+    for row in &rows {
+        s.put_photo_file(row).unwrap();
+    }
+    s.put_photo_file(&photo_file(6, 1, Variant, 0)).unwrap();
+    assert!(
+        s.put_photo_file(&photo_file(9, 1, Camera, 0))
+            .unwrap_err()
+            .contains("no image"),
+        "an unknown file"
+    );
+    assert!(
+        s.put_photo_file(&photo_file(2, 9, Camera, 0))
+            .unwrap_err()
+            .contains("no image"),
+        "an unknown photo"
+    );
+    assert!(
+        s.put_photo_file(&photo_file(3, 1, Master, 0)).is_err(),
+        "a master has no row"
+    );
+    // Read back by file and by photo, in the files' order.
+    assert_eq!(s.photo_of(&two).unwrap(), Some(rows[0].clone()));
+    assert_eq!(s.photo_of(&one).unwrap(), None, "a master has no row");
+    let mut of_one = s.photo_files(&one).unwrap();
+    PhotoFile::sort(&mut of_one);
+    assert_eq!(
+        of_one
+            .iter()
+            .map(|r| (r.image, r.role, r.rank))
+            .collect::<Vec<_>>(),
+        vec![
+            (two, Camera, 0),
+            (image(6).id, Variant, 0),
+            (image(3).id, Variant, 1),
+        ]
+    );
+    // A file belongs to one photo: put again, its row is replaced.
+    s.put_photo_file(&photo_file(6, 4, Attachment, 1)).unwrap();
+    assert_eq!(s.photo_files(&one).unwrap().len(), 2);
+    assert_eq!(
+        s.photo_of(&image(6).id).unwrap().unwrap().photo,
+        image(4).id
+    );
+    // The windowed read: only the window's photos' rows.
+    let mut window = s.photo_files_of(&[image(4).id, image(5).id]).unwrap();
+    PhotoFile::sort(&mut window);
+    assert_eq!(
+        window.iter().map(|r| r.image).collect::<Vec<_>>(),
+        vec![image(5).id, image(6).id]
+    );
+    assert_eq!(s.photo_files_of(&[]).unwrap(), Vec::new());
+    assert_eq!(s.photo_files_of(&[image(9).id]).unwrap(), Vec::new());
+    // Removed, a row is gone once.
+    assert!(s.remove_photo_file(&image(6).id).unwrap());
+    assert!(!s.remove_photo_file(&image(6).id).unwrap());
+    // Rows are kept whole by a transaction rolled back.
+    s.begin().unwrap();
+    s.remove_photo_file(&two).unwrap();
+    s.rollback().unwrap();
+    assert_eq!(s.photo_of(&two).unwrap(), Some(rows[0].clone()));
+}
+
+fn removing_an_image_drops_its_photo_file_rows<S: Store>(s: S) {
+    use crate::FileRole::Camera;
+    let mut s = with_images(s, 4);
+    s.put_photo_file(&photo_file(2, 1, Camera, 0)).unwrap();
+    s.put_photo_file(&photo_file(4, 3, Camera, 0)).unwrap();
+    // A master removed: its file becomes a plain image.
+    assert!(s.remove_image(&image(1).id).unwrap());
+    assert_eq!(s.photo_of(&image(2).id).unwrap(), None);
+    assert!(s.image(&image(2).id).unwrap().is_some(), "the file stays");
+    // A file removed: its photo has no file left.
+    assert!(s.remove_image(&image(4).id).unwrap());
+    assert_eq!(s.photo_files(&image(3).id).unwrap(), Vec::new());
+}
+
+fn files_attach_detach_hold_and_undo<S: Store>(mut s: S) {
+    use crate::FileRole::{Camera, Master, Variant};
+    // 1 and 3 are photos in the Library; 2 and 4 recorded off it (a
+    // RAW's JPEG, a variant); 5 is unrelated, off it; 6 a photo off it.
+    for i in 1..=6 {
+        s.add_image(&image(i)).unwrap();
+    }
+    s.set_library_flag(&image(1).id, &crate::LibraryFlag::added())
+        .unwrap();
+    s.set_library_flag(&image(3).id, &crate::LibraryFlag::added())
+        .unwrap();
+    let v = Vault::new(s);
+    let (raw, jpeg, other, variant, loose, off) = (
+        image(1).id,
+        image(2).id,
+        image(3).id,
+        image(4).id,
+        image(5).id,
+        image(6).id,
+    );
+    assert!(!v.holds(&jpeg).unwrap(), "not attached yet");
+    let attached = v.attach_file(&raw, &jpeg, Camera, 0, "user", 20).unwrap();
+    assert_eq!(attached.images.len(), 1);
+    assert_eq!(attached.images[0].image, jpeg);
+    assert!(attached.images[0].changed());
+    // Held: the master and its file, not an unrelated file nor a file of
+    // a photo off the Library.
+    assert!(v.holds(&raw).unwrap(), "a master in the Library");
+    assert!(v.holds(&jpeg).unwrap(), "a file of a photo in the Library");
+    assert!(!v.holds(&loose).unwrap(), "an unrelated file");
+    assert!(!v.holds(&image(9).id).unwrap(), "an unknown file");
+    v.attach_file(&off, &loose, Camera, 0, "user", 20).unwrap();
+    assert!(
+        !v.holds(&loose).unwrap(),
+        "a file of a photo off the Library"
+    );
+    // The audit records it on the file.
+    let audit = v.audit(&jpeg).unwrap();
+    let last = audit.last().unwrap();
+    assert_eq!(last.field, crate::files::PHOTO_FILE);
+    assert_eq!((last.old.clone(), last.who.as_str()), (None, "user"));
+    assert_eq!(last.new.as_ref().unwrap()["role"], json!("camera"));
+    // Attaching again the same way changes nothing.
+    assert!(
+        v.attach_file(&raw, &jpeg, Camera, 0, "user", 21)
+            .unwrap()
+            .is_empty()
+    );
+    // Refused: a file of another photo, a master attached, a file in the
+    // Library, a photo that is a file, an unknown image, a master role.
+    let refused = |r: Result<crate::Changes, String>, what: &str| {
+        assert!(r.is_err(), "{what} is refused");
+    };
+    refused(
+        v.attach_file(&other, &jpeg, Camera, 0, "user", 22),
+        "a file already of a photo",
+    );
+    refused(
+        v.attach_file(&other, &raw, Camera, 0, "user", 22),
+        "a photo in the Library",
+    );
+    refused(
+        v.attach_file(&jpeg, &variant, Variant, 0, "user", 22),
+        "a file made a photo",
+    );
+    refused(
+        v.attach_file(&raw, &image(9).id, Camera, 0, "user", 22),
+        "an unknown file",
+    );
+    refused(
+        v.attach_file(&raw, &variant, Master, 0, "user", 22),
+        "a master role",
+    );
+    refused(v.attach_file(&raw, &raw, Camera, 0, "user", 22), "itself");
+    refused(v.detach_file(&variant, "user", 22), "a file of no photo");
+    // A photo with files is never attached to another.
+    refused(
+        v.attach_file(&raw, &off, Variant, 0, "user", 22),
+        "a photo with files of its own",
+    );
+    let variant_attached = v
+        .attach_file(&raw, &variant, Variant, 0, "user", 23)
+        .unwrap();
+    // The photo's files: its master first, then by role.
+    assert_eq!(
+        v.files(&raw)
+            .unwrap()
+            .iter()
+            .map(|f| (f.image, f.role))
+            .collect::<Vec<_>>(),
+        vec![(raw, Master), (jpeg, Camera), (variant, Variant)]
+    );
+    assert_eq!(v.files(&other).unwrap().len(), 1, "a one-file photo");
+    assert!(v.files(&image(9).id).is_err());
+    assert_eq!(
+        v.files_of(&[raw, other])
+            .unwrap()
+            .iter()
+            .map(|f| f.image)
+            .collect::<Vec<_>>(),
+        vec![jpeg, variant]
+    );
+    assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+    // Undo of the attach: the JPEG is a plain image again, not held; redo
+    // ties it back.
+    v.revert(&variant_attached).unwrap();
+    let done = v.revert(&attached).unwrap();
+    assert_eq!(done.changed, 1, "{done:?}");
+    assert_eq!(v.photo_of(&jpeg).unwrap(), None);
+    assert!(!v.holds(&jpeg).unwrap());
+    assert_eq!(v.files(&raw).unwrap().len(), 1);
+    v.replay(&attached).unwrap();
+    assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().role, Camera);
+    assert!(v.holds(&jpeg).unwrap());
+    // A detach, undone and redone.
+    let detached = v.detach_file(&jpeg, "user", 30).unwrap();
+    assert!(!v.holds(&jpeg).unwrap());
+    assert_eq!(
+        v.audit(&jpeg).unwrap().last().unwrap().new,
+        None,
+        "the detach audited"
+    );
+    v.revert(&detached).unwrap();
+    assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+    v.replay(&detached).unwrap();
+    assert_eq!(v.photo_of(&jpeg).unwrap(), None);
+    // An undo never takes a row it no longer finds: attached elsewhere
+    // since, the file keeps its new photo.
+    v.revert(&detached).unwrap();
+    v.detach_file(&jpeg, "user", 31).unwrap();
+    v.attach_file(&other, &jpeg, Camera, 0, "user", 32).unwrap();
+    let kept = v.revert(&attached).unwrap();
+    assert_eq!(kept.kept, 1, "{kept:?}");
+    assert_eq!(v.photo_of(&jpeg).unwrap().unwrap().photo, other);
 }

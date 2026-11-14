@@ -46,6 +46,7 @@ pub mod copies;
 pub mod cull;
 pub mod edit;
 pub mod fields;
+pub mod files;
 pub mod journal;
 pub mod promises;
 pub mod read_order;
@@ -68,6 +69,7 @@ pub use fields::{
     AuditEntry, BackupFilter, BackupState, BackupVolume, Backups, Command, Facets, Order, Query,
     Sort,
 };
+pub use files::{FileRole, PhotoFile};
 pub use read_order::ReadOrder;
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
@@ -256,8 +258,31 @@ pub trait Store: Send {
     fn remove_location(&mut self, path: &Path) -> Result<bool, String>;
     /// Forgets an image with its fields; false if it was not known.
     /// Refused while a location or a version still names it. Its audit
-    /// rows stay: they are a record.
+    /// rows stay: they are a record. Its photo-file rows go: a master's
+    /// files become plain images, a file leaves its photo.
     fn remove_image(&mut self, id: &ImageId) -> Result<bool, String>;
+
+    /// Records a file of a photo ([`files`]), replacing the file's row if
+    /// it had one. Both images must exist; a master has no row.
+    fn put_photo_file(&mut self, file: &PhotoFile) -> Result<(), String>;
+    /// Forgets a file's row; false if it had none.
+    fn remove_photo_file(&mut self, image: &ImageId) -> Result<bool, String>;
+    /// The row of `image` as a file of a photo, if any.
+    fn photo_of(&self, image: &ImageId) -> Result<Option<PhotoFile>, String>;
+    /// The rows of a photo's files (its master has none), in no
+    /// particular order.
+    fn photo_files(&self, photo: &ImageId) -> Result<Vec<PhotoFile>, String>;
+    /// The rows of many photos' files in one call, in no particular
+    /// order: what a library window reads. A store backed by a database
+    /// answers in one statement per window; this default asks for each
+    /// photo in turn.
+    fn photo_files_of(&self, photos: &[ImageId]) -> Result<Vec<PhotoFile>, String> {
+        let mut all = Vec::new();
+        for photo in photos {
+            all.extend(self.photo_files(photo)?);
+        }
+        Ok(all)
+    }
 
     /// Records a sighting at its place (on a volume: the volume and the
     /// path there, which it must have; else its absolute path), replacing
@@ -442,6 +467,8 @@ pub struct MemoryStore {
     folders: Vec<Folder>,
     fields: BTreeMap<(ImageId, String), serde_json::Value>,
     audit: Vec<AuditEntry>,
+    /// Photo-file rows, by file.
+    photo_files: BTreeMap<ImageId, PhotoFile>,
 }
 
 impl MemoryStore {
@@ -934,8 +961,40 @@ impl Store for MemoryStore {
             ));
         }
         self.fields.retain(|(i, _), _| i != id);
+        self.photo_files
+            .retain(|image, row| image != id && row.photo != *id);
         self.images.remove(id);
         Ok(true)
+    }
+
+    fn put_photo_file(&mut self, file: &PhotoFile) -> Result<(), String> {
+        if file.role == FileRole::Master {
+            return Err("a photo's master has no file row".into());
+        }
+        for id in [&file.image, &file.photo] {
+            if !self.images.contains_key(id) {
+                return Err(format!("no image {}", id.hex()));
+            }
+        }
+        self.photo_files.insert(file.image, file.clone());
+        Ok(())
+    }
+
+    fn remove_photo_file(&mut self, image: &ImageId) -> Result<bool, String> {
+        Ok(self.photo_files.remove(image).is_some())
+    }
+
+    fn photo_of(&self, image: &ImageId) -> Result<Option<PhotoFile>, String> {
+        Ok(self.photo_files.get(image).cloned())
+    }
+
+    fn photo_files(&self, photo: &ImageId) -> Result<Vec<PhotoFile>, String> {
+        Ok(self
+            .photo_files
+            .values()
+            .filter(|row| row.photo == *photo)
+            .cloned()
+            .collect())
     }
 
     fn put_sighting(&mut self, sighting: &Sighting) -> Result<(), String> {

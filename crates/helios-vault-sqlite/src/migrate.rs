@@ -154,6 +154,25 @@ CREATE INDEX locations_volume ON locations (volume);
         // version's id: the workshop session it was made in.
         sql: "ALTER TABLE versions ADD COLUMN meta TEXT;",
     },
+    Migration {
+        version: 8,
+        name: "photo files",
+        // A photo's files besides its master (`docs/design/raw-jpeg-pairs.md`):
+        // the camera's JPEG or HEIF, later variants and attachments. A
+        // file belongs to one photo at most; the master has no row, so
+        // nothing is backfilled: every photo stays a one-file photo.
+        sql: "
+CREATE TABLE photo_files (
+    image    TEXT PRIMARY KEY REFERENCES images (id),
+    photo    TEXT NOT NULL REFERENCES images (id),
+    role     TEXT NOT NULL,
+    rank     INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL,
+    added_by TEXT NOT NULL
+);
+CREATE INDEX photo_files_photo ON photo_files (photo);
+",
+    },
 ];
 
 /// The image map (`docs/design/image-map.md`): an image is in the Library
