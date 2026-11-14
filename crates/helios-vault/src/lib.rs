@@ -42,6 +42,7 @@ pub mod changed;
 pub mod claims;
 pub mod collections;
 pub mod contract;
+pub mod copies;
 pub mod cull;
 pub mod edit;
 pub mod fields;

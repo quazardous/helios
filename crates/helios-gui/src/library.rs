@@ -67,6 +67,7 @@ use helios_vault::fields::{
 use serde_json::Value;
 
 mod batch;
+mod versions;
 pub use batch::{
     CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND,
     PasteMode, REMOVE_COMMAND, RESET_ROTATION_COMMAND, ROTATE_LEFT_COMMAND, ROTATE_RIGHT_COMMAND,
@@ -74,6 +75,7 @@ pub use batch::{
     TrashAsk, Turn,
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
+pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
 /// The library's name in egui-pop's steps and commands (`library` in
 /// their arguments).
@@ -1583,6 +1585,16 @@ pub struct Library {
     /// copies made with [`DUPLICATE_COMMAND`], darktable duplicates), for
     /// the grid's badge.
     head_counts: HashMap<String, usize>,
+    /// The heads of the photo under the cursor, as the node listed them,
+    /// for the versions strip.
+    versions: Option<(String, Vec<VersionHead>)>,
+    /// The photo whose heads the strip wants listed, for the host.
+    versions_wanted: Option<String>,
+    /// The photo whose heads were asked, until they come.
+    versions_asked: Option<String>,
+    /// What the strip and the commands asked of photos' versions, for
+    /// the host.
+    version_asks: Vec<VersionAsk>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1744,6 +1756,10 @@ impl Default for Library {
             quick: Vec::new(),
             quick_set: HashSet::new(),
             head_counts: HashMap::new(),
+            versions: None,
+            versions_wanted: None,
+            versions_asked: None,
+            version_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -2305,6 +2321,7 @@ impl Library {
             return;
         }
         self.head_counts = heads;
+        self.versions_changed();
         self.revision += 1;
     }
 
@@ -3459,6 +3476,10 @@ impl Library {
                 self.reindex();
             }
         }
+        if field == helios_vault::copies::CURRENT_VERSION {
+            self.versions_changed();
+            self.edit_changed(image);
+        }
     }
 
     /// Drops an image's pictures (its thumbnail, its large preview, its
@@ -4060,6 +4081,7 @@ impl Library {
                 remove: out.removed,
             });
         }
+        self.versions_strip(ui, &entry.id);
         for m in asked {
             if let Err(e) = self.mark(m) {
                 self.notes.push(e);
@@ -4174,6 +4196,12 @@ impl Library {
                                     "gui-library-duplicate-original",
                                     "Duplicate Original",
                                 ),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(REMOVE_VERSION_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-remove-version", "Remove Version…"),
                             ),
                         ),
                         crate::dialogs::MenuItem::Separator,

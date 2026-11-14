@@ -161,6 +161,8 @@ enum Asked {
     /// What moving photos' files to the trash would do
     /// (`library.images.trash`, `plan`), to ask first.
     TrashPlan(crate::library::TrashAsk),
+    /// A photo's heads, for the versions strip (`library.versions.list`).
+    Versions(String),
 }
 
 /// A write of the library sent to the node.
@@ -189,6 +191,13 @@ enum Write {
     /// Photos' files moved to the system trash, confirmed
     /// (`library.images.trash`): a journaled job, not a history step.
     Trash(Vec<String>),
+    /// One of a photo's heads made its current version
+    /// (`library.versions.switch`), asked at a time (seconds): one step of
+    /// the library's history.
+    SwitchVersion(String, String, f64),
+    /// A copy removed (`library.versions.remove`), asked at a time
+    /// (seconds): one step of the library's history.
+    RemoveVersion(String, String, f64),
     /// A library document kept, or removed when none
     /// (`library.documents.set`).
     Document {
@@ -253,6 +262,14 @@ impl Write {
                 helios_node_core::library::TRASH,
                 json!({ "images": images }),
             ),
+            Self::SwitchVersion(image, version, _) => (
+                helios_node_core::library::VERSIONS_SWITCH,
+                json!({ "image": image, "version": version }),
+            ),
+            Self::RemoveVersion(image, version, _) => (
+                helios_node_core::library::VERSIONS_REMOVE,
+                json!({ "image": image, "version": version }),
+            ),
             Self::Document { ns, key, document } => (
                 "library.documents.set",
                 json!({ "ns": ns, "key": key, "document": document }),
@@ -292,6 +309,8 @@ impl Write {
             | Self::Rotate(..)
             | Self::Duplicate(..)
             | Self::Trash(_)
+            | Self::SwitchVersion(..)
+            | Self::RemoveVersion(..)
             | Self::Document { .. }
             | Self::Session(..)
             | Self::Album(..)
@@ -504,6 +523,10 @@ fn read_heads(reader: &Reader) -> Result<HashMap<String, usize>, String> {
 struct Stacked {
     stacks: Vec<helios_vault::Stack>,
     decisions: Vec<helios_library::stacks::Decision>,
+    /// How many heads the photos with more than one have: a copy made,
+    /// removed or brought back by an undo changes them without moving
+    /// the library.
+    heads: HashMap<String, usize>,
 }
 
 /// Reads the stacks and the proposals through the node
@@ -516,7 +539,11 @@ fn read_stacked(reader: &Reader) -> Result<Stacked, String> {
     let waiting = reader.read("library.stacks.decisions", json!({}))?;
     let decisions = serde_json::from_value(waiting["decisions"].clone())
         .map_err(|e| format!("the node's stack proposals: {e}"))?;
-    Ok(Stacked { stacks, decisions })
+    Ok(Stacked {
+        stacks,
+        decisions,
+        heads: read_heads(reader)?,
+    })
 }
 
 /// [`read_stacked`] once the read cache heard the bus up to `seq`, so a
@@ -881,7 +908,9 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
             match asked {
                 // The filters' history is a convenience: a warning.
                 Asked::FilterHistory => shell.notify(Level::Warning, e.message),
-                Asked::Folders | Asked::Albums => unreadable(shell, e.message),
+                Asked::Folders | Asked::Albums | Asked::Versions(_) => {
+                    unreadable(shell, e.message);
+                }
                 Asked::TrashPlan(_) => not_trashed(shell, &e.message),
             }
             return;
@@ -917,7 +946,57 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
             shell.library_mut().set_albums(albums);
         }
         Asked::TrashPlan(ask) => ask_trash(shell, ask, &answer),
+        Asked::Versions(image) => {
+            let heads = answer["heads"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(crate::library::VersionHead::from_json)
+                .collect();
+            shell.library_mut().set_versions(image.clone(), heads);
+        }
     }
+}
+
+/// Records a step of a photo's versions (`library.versions.switch` or
+/// `remove`) in the library's history, so Ctrl+Z takes it back.
+fn record_versions_step(shell: &mut Shell, answer: &Value, at: f64, removed: bool) {
+    match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+        Ok(changes) if changes.is_empty() => {}
+        Ok(changes) => {
+            let label = crate::library_history::version_label(removed);
+            shell.library_history().record(label, changes, at);
+        }
+        Err(e) => shell.notify(
+            Level::Warning,
+            format!("the photo's versions cannot be set back with undo: {e}"),
+        ),
+    }
+}
+
+/// Asks before removing a copy of a photo: its number and name.
+fn ask_remove_version(shell: &mut Shell, image: &str, version: &str) {
+    let head = {
+        let lib = shell.library_mut();
+        lib.versions_of(image)
+            .and_then(|heads| heads.iter().find(|h| h.version == version))
+            .map_or(0, |h| h.number)
+    };
+    let confirm = crate::dialogs::Confirm {
+        title: shell.text(
+            Message::new("gui-version-remove-title", "Remove version { $number }?")
+                .with("number", head),
+        ),
+        detail: shell.text(Message::new(
+            "gui-version-remove-detail",
+            "This copy of the photo and the edits only it holds leave the Library; the file and the other versions stay. Undo brings it back.",
+        )),
+        verb: shell.text(Message::new("gui-version-remove-verb", "Remove Version")),
+        danger: true,
+        command: crate::library::REMOVE_VERSION_COMMAND.to_owned(),
+        args: json!({ "image": image, "version": version, "confirmed": true }),
+    };
+    shell.confirm(confirm);
 }
 
 /// Says the files were not moved to the trash, and why.
@@ -1301,6 +1380,21 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
+            (Write::SwitchVersion(image, _, at), Ok(answer)) => {
+                // Recorded so Ctrl+Z picks the version before; the strip
+                // and the photo's picture follow.
+                record_versions_step(shell, &answer, *at, false);
+                shell.library_mut().versions_changed();
+                shell.library_mut().edit_changed(image);
+            }
+            (Write::RemoveVersion(image, _, at), Ok(answer)) => {
+                record_versions_step(shell, &answer, *at, true);
+                let heads = to_usize(&answer["heads"]);
+                let mut lib = shell.library_mut();
+                lib.set_heads_of(image, heads);
+                lib.versions_changed();
+                lib.edit_changed(image);
+            }
             (Write::Rotate(_, turn, at), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z turns the
                 // photos back; the vault's events show the turn.
@@ -1396,6 +1490,17 @@ impl<S: Store + 'static> Persist<S> {
                 )
                 .with("error", e.message),
             ),
+            (Write::SwitchVersion(..) | Write::RemoveVersion(..), Err(e)) => {
+                shell.library_mut().versions_changed();
+                shell.notify(
+                    Level::Warning,
+                    Message::new(
+                        "gui-library-version-not-changed",
+                        "The photo's versions were not changed: { $error }",
+                    )
+                    .with("error", e.message),
+                );
+            }
             (Write::Remove(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1592,8 +1697,11 @@ impl<S: Store + 'static> Persist<S> {
         shell: &mut Shell,
         shown: Shown,
         moved: Option<Moved>,
-        stacked: Stacked,
+        mut stacked: Stacked,
     ) -> Vec<(String, PathBuf)> {
+        shell
+            .library_mut()
+            .set_heads(std::mem::take(&mut stacked.heads));
         if let Some(moved) = moved {
             // The entries shown, their fields kept up to date by the
             // vault's events.
@@ -1649,6 +1757,38 @@ impl<S: Store + 'static> Persist<S> {
         self.stacking = Some(spawn("helios-stacks-read", move || {
             read_stacked_after(&reader, seq)
         }));
+    }
+
+    /// The versions strip's reads and what was asked of photos'
+    /// versions: a switch or a confirmed removal written, a removal not
+    /// confirmed asked first.
+    fn ask_versions(&mut self, shell: &mut Shell, now: f64) {
+        use crate::library::VersionAsk;
+        if let Some(image) = shell.library_mut().take_versions_wanted() {
+            let pending = self.node.call(
+                helios_node_core::library::VERSIONS_LIST,
+                json!({ "image": image }),
+            );
+            self.asked.push((Asked::Versions(image), pending));
+        }
+        let asks = shell.library_mut().take_version_asks();
+        for ask in asks {
+            match ask {
+                VersionAsk::Switch { image, version } => self
+                    .writes
+                    .push_back(Write::SwitchVersion(image, version, now)),
+                VersionAsk::Remove {
+                    image,
+                    version,
+                    confirmed: true,
+                } => self
+                    .writes
+                    .push_back(Write::RemoveVersion(image, version, now)),
+                VersionAsk::Remove { image, version, .. } => {
+                    ask_remove_version(shell, &image, &version);
+                }
+            }
+        }
     }
 
     /// Sends what the Stacks panel asked to the node: a proposal, an
@@ -1956,6 +2096,7 @@ impl<S: Store + 'static> Persist<S> {
                 .into_iter()
                 .map(|(images, turn)| Write::Rotate(images, turn, now)),
         );
+        self.ask_versions(shell, now);
         let duplicates = shell.library_mut().take_duplicates();
         self.writes.extend(
             duplicates

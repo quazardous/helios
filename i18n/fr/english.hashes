@@ -187,6 +187,7 @@ command-library-quick-clear.title 1c4b266b7b1ccc5c
 command-library-quick-saveAs.title 81d31076888b75b1
 command-library-quick-toggle.title 1b2258b0758413c4
 command-library-remove.title cf5cd12b2502cc36
+command-library-removeVersion.title f43c144a3b82ca2b
 command-library-resetRotation.title fb146b4741145076
 command-library-rotateLeft.title c67b09b3051e86a1
 command-library-rotateRight.title f7027caee8e98de5
@@ -648,6 +649,8 @@ gui-history-rotate-right 9a5e9a3be34a7d6a
 gui-history-set-new 438a574de74bd810
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-undo cc7022a2d9050a57
+gui-history-version-remove 138b18170ea40861
+gui-history-version-switch 6585bab26c3cbe1d
 gui-history-workshop-accept c0b6bc35024979b8
 gui-history-workshop-decide 1e84185053f3310f
 gui-history-workshop-fix 9034a6482256e8c3
@@ -940,6 +943,7 @@ gui-library-quick-toggle 58f2469f03174d34
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
 gui-library-remove 7408ac1339c30e8a
+gui-library-remove-version 05f6c6d90bd65e27
 gui-library-rotate-left 8b862d06602996bb
 gui-library-rotate-reset 3ec2f5c2dd0b5c1c
 gui-library-rotate-right 077a60d3d82ca7a2
@@ -969,6 +973,9 @@ gui-library-sort-tip fdd935e0be790484
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
 gui-library-trash 6cddaea29caba8b5
+gui-library-version-copy 424486452ba52062
+gui-library-version-not-changed 5e359e73ab5dd059
+gui-library-versions-strip e2b7a3b085ebe75a
 gui-library-volume-offline 5f2b93239dade10c
 gui-log-clear 238f7a82e564b550
 gui-log-empty 204c4ef685556125
@@ -1414,6 +1421,9 @@ gui-trash-some-failed bc2872622cbe5f43
 gui-trash-title 74afe5f64d3a84d5
 gui-trash-verb e1b29a9a295e346b
 gui-vault-unreadable f60fd7de770903dc
+gui-version-remove-detail dd69cdd1d291f660
+gui-version-remove-title 7119231ab84fbfe3
+gui-version-remove-verb 5f0a4345d90ede41
 gui-window-frame-error 72035247381882d2
 gui-wizard-account 4103a27ff07b58ca
 gui-wizard-account-settings 4e8adab3079a2601

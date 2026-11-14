@@ -62,6 +62,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     culling_fields_filter_count_sort_and_rule(make());
     a_rotation_turns_resets_and_undoes(make());
     a_duplicate_is_a_new_head_beside_its_source(make());
+    a_copy_is_picked_as_current_removed_and_brought_back(make());
     promises_are_created_progressed_settled_and_listed(make());
 }
 
@@ -2988,6 +2989,68 @@ fn a_duplicate_is_a_new_head_beside_its_source<S: Store>(s: S) {
         v.duplicate(&image(9).id, DuplicateFrom::Current, "user", 7)
             .is_err()
     );
+}
+
+/// The versions strip and "Remove Version…" (L10): a head picked as the
+/// current version is what an edit opens; a copy removed takes its own
+/// line with it, the shared history stays, and undo brings it back.
+fn a_copy_is_picked_as_current_removed_and_brought_back<S: Store>(s: S) {
+    use crate::copies::CURRENT_VERSION;
+    use crate::versions::{DuplicateFrom, Version};
+    let v = Vault::new(with_images(s, 1));
+    let a = image(1).id;
+    let base = Version::new(a, Vec::new(), json!({ "exposure": 1 }), "user", 2);
+    v.add_version(&base).unwrap();
+    let copy = v.duplicate(&a, DuplicateFrom::Current, "user", 3).unwrap();
+    // The copy edited once: its line is two versions long.
+    let edited = Version::new(a, vec![copy.id], json!({ "exposure": 3 }), "user", 4);
+    v.add_version(&edited).unwrap();
+    let heads = v.heads_of(&a).unwrap();
+    assert_eq!(
+        heads
+            .iter()
+            .map(|h| (h.number, h.current))
+            .collect::<Vec<_>>(),
+        vec![(1, false), (2, true)],
+        "the newest head is current until one is picked"
+    );
+    assert_eq!(v.current_head(&a).unwrap().unwrap().id, edited.id);
+    // Picked: the first version is current, an edit opens it.
+    let switched = v.switch_version(&a, &base.id, "user", 5).unwrap();
+    assert_eq!(switched.images.len(), 1);
+    assert_eq!(v.current_head(&a).unwrap().unwrap().id, base.id);
+    let (session, head) = crate::EditSession::open(&v, a).unwrap();
+    assert_eq!(head.unwrap().id, base.id);
+    assert_eq!(session.head(), Some(base.id));
+    assert!(v.heads_of(&a).unwrap()[0].current);
+    assert!(
+        v.switch_version(&a, &copy.id, "user", 6).is_err(),
+        "a version continued since is no head"
+    );
+    // Undo of the switch: the newest is current again.
+    v.revert(&switched).unwrap();
+    assert_eq!(v.current_head(&a).unwrap().unwrap().id, edited.id);
+    // Removing the copy: its two versions go, the base stays.
+    v.switch_version(&a, &edited.id, "user", 7).unwrap();
+    let (removed, count) = v.remove_head(&a, &edited.id, "user", 8).unwrap();
+    assert_eq!(count, 2, "the copy and its edit");
+    let left: Vec<_> = v.versions(&a).unwrap().iter().map(|x| x.id).collect();
+    assert_eq!(left, vec![base.id]);
+    let rows = v.rows(&a).unwrap().unwrap();
+    assert!(
+        !rows.fields.contains_key(CURRENT_VERSION),
+        "the pick goes too"
+    );
+    assert!(
+        v.remove_head(&a, &base.id, "user", 9).is_err(),
+        "a photo keeps one version"
+    );
+    // Undo brings the copy back, current again.
+    v.revert(&removed).unwrap();
+    assert_eq!(v.versions(&a).unwrap().len(), 3);
+    assert_eq!(v.current_head(&a).unwrap().unwrap().id, edited.id);
+    v.replay(&removed).unwrap();
+    assert_eq!(v.versions(&a).unwrap().len(), 1);
 }
 
 fn promises_are_created_progressed_settled_and_listed<S: Store>(store: S) {
