@@ -189,7 +189,7 @@ fn kinds(w: &ImportWindow) -> Vec<(ConnectorManifest, Setup)> {
 
 /// The keys of a connector's source contract that are its own
 /// parameters, not choices.
-fn own_params(contract: &Contract) -> Contract {
+pub(super) fn own_params(contract: &Contract) -> Contract {
     let mut own = contract.clone();
     own.keys
         .retain(|name, key| !Choices::KEYS.contains(&name.as_str()) && key.ty != KeyType::Secret);
@@ -982,7 +982,7 @@ impl ImportWindow {
 /// ([`crate::config::plugins::descriptor`]), its label and help through
 /// the owner's catalogue; those hidden by another's value left out.
 /// Whether the values fit the contract, else why not.
-fn contract_ui(
+pub(super) fn contract_ui(
     ui: &mut egui::Ui,
     t: &dyn Fn(Message) -> String,
     owner: &str,
@@ -1025,7 +1025,11 @@ fn contract_ui(
 }
 
 /// Says why values do not fit their contract.
-fn refused_ui(ui: &mut egui::Ui, t: &dyn Fn(Message) -> String, fit: Result<(), String>) {
+pub(super) fn refused_ui(
+    ui: &mut egui::Ui,
+    t: &dyn Fn(Message) -> String,
+    fit: Result<(), String>,
+) {
     if let Err(why) = fit {
         ui.colored_label(
             ui.visuals().warn_fg_color,

@@ -789,7 +789,7 @@ offered (`ConnectorManifest::browsers`, `helios_connect::Browser`):
 | `tree` | The folders holding photos beside the grid ("Folder tree"); a folder clicked shows its photos and its subfolders' alone, and Import takes only those |
 | `timeline` | The grid in its agenda, by capture day ("By date"); the grid's mode before comes back when another browser is chosen |
 | `collections` | A service's albums ("Albums"); declared, nothing lists an account's photos yet |
-| `picker` | The service's own picking page: "Pick photos…", the flow of 2.4.2 |
+| `picker` | The service's own page where photos are chosen: "Choose photos in Google Photos…", the flow of 2.4.2 |
 
 The local folder offers `folder`, `tree` and `timeline`; a card `folder`
 and `timeline`; Google Photos `picker` alone, since Google's API no

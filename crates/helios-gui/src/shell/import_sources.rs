@@ -587,6 +587,26 @@ impl Sources {
         self.store();
     }
 
+    /// Sets a source's own parameters (the Detail column's), saving the
+    /// source when new; not a step of the column's Undo.
+    pub(crate) fn set_params(
+        &mut self,
+        key: &SourceKey,
+        connector: &str,
+        params: BTreeMap<String, serde_json::Value>,
+    ) {
+        if let Some(i) = self.position(key) {
+            self.list[i].params = params;
+        } else {
+            let source = self.identified(SavedSource {
+                params,
+                ..SavedSource::new(connector.to_string(), key)
+            });
+            self.list.push(source);
+        }
+        self.store();
+    }
+
     /// The account sources' parameters, kept up to date as the sources
     /// are read and kept.
     pub(crate) fn params(&self) -> SourceParams {
@@ -693,11 +713,6 @@ impl ImportWindow {
     /// An account's name, its id when not read yet.
     pub(super) fn account_label(&self, id: &str) -> String {
         self.accounts.label_of(id).unwrap_or_else(|| id.to_string())
-    }
-
-    /// Whether "Pick photos…" is offered on the account `id`.
-    pub(super) fn account_picks(&self, id: &str) -> bool {
-        self.accounts.picks(id, &self.connectors)
     }
 
     /// Selects an account's source: the column shows its choices.

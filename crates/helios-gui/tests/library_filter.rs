@@ -16,6 +16,11 @@
 //! Ctrl+Shift+K opens them in the window, not while a text field is typed
 //! in. Photos dragged from the grid onto an album or the quick collection
 //! go in, one step; a smart album or a set refuses them with the reason.
+//! The selection commands (L7): Ctrl+I inverts, Ctrl+Shift+A selects
+//! none, the photos of the same day selected; a photo's marks copied and
+//! pasted on others, merged or overwriting, written to the vault.
+//! "Remove from Library" (L8): Delete takes the selection out through the
+//! node, the grid follows, and the step undoes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1568,6 +1573,263 @@ fn the_library_read_again_is_read_off_the_frame() {
     h.run();
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     assert_eq!(persist.take_filled().map(|f| f.len()), Some(3));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The Library's filter history and the Folders section's counts go
+/// through the desktop's node: while another writer holds the vault
+/// file locked, the frames that write the history and ask the counts do
+/// not wait for it; once it lets go, the write is kept and the counts
+/// shown.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_filter_history_the_folders_or_the_albums() {
+    use helios_vault::Store as _;
+    let root = temp("held");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 1.0);
+    assert!(
+        h.state().library().filter_history().is_some(),
+        "read through the node"
+    );
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&path).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&json!(true)))
+        .unwrap();
+    run(
+        &mut h,
+        "library.filter.pin",
+        json!({ "query": "camera:R5", "pinned": true }),
+    );
+    h.get_by_label("Folders").click();
+    h.state_mut()
+        .library_mut()
+        .edit_album(helios_gui::library::AlbumEdit::QuickToggle {
+            images: vec![id(1).hex()],
+        });
+    let mut slowest = std::time::Duration::ZERO;
+    for i in 0..3 {
+        let started = std::time::Instant::now();
+        h.run();
+        persist.frame(h.state_mut(), 2.0 + f64::from(i));
+        slowest = slowest.max(started.elapsed());
+    }
+    assert!(
+        persist.busy(),
+        "the write waits for the vault, not the frame"
+    );
+    assert!(
+        slowest < std::time::Duration::from_secs(1),
+        "a frame waited {slowest:?} for the vault"
+    );
+
+    // Let go: the history is kept, the folders counted.
+    other.rollback().unwrap();
+    drop(other);
+    settle(&mut h, &mut persist, 10.0);
+    assert!(h.state().library().folder_tree().is_some());
+    let kept = persist
+        .vault()
+        .library_document(
+            helios_gui::recent_filters::NS,
+            helios_gui::recent_filters::KEY,
+        )
+        .unwrap()
+        .unwrap();
+    assert!(kept.to_string().contains("camera:R5"), "{kept}");
+    // The quick collection changed once, one step of the history.
+    assert_eq!(persist.vault().quick_collection().unwrap(), [id(1).hex()]);
+    assert_eq!(h.state().library().quick().len(), 1);
+    assert_eq!(
+        h.state()
+            .library_history()
+            .line()
+            .undo
+            .last()
+            .unwrap()
+            .label
+            .text,
+        "Add 1 photos to the quick collection"
+    );
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Some stored fields of photo `n`, as the vault holds them.
+fn stored(persist: &Persist<SqliteStore>, n: u8, names: &[&str]) -> Vec<Value> {
+    let row = persist
+        .vault()
+        .fields_of(&[id(n)], names)
+        .unwrap()
+        .remove(0);
+    names
+        .iter()
+        .map(|f| row.get(*f).cloned().unwrap_or(Value::Null))
+        .collect()
+}
+
+#[test]
+fn selection_commands_and_marks_pasted_merged_or_overwriting() {
+    use helios_vault::fields::{TAGS, TITLE};
+    let root = temp("batch");
+    let path = vault_file(&root);
+    {
+        // The first photo titled and tagged, the third taken a day later
+        // and tagged.
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .set_field(&id(1), TITLE, Some(&json!("Dawn")))
+            .unwrap();
+        store
+            .set_field(&id(1), TAGS, Some(&json!(["trip"])))
+            .unwrap();
+        store
+            .set_field(&id(3), CAPTURED, Some(&json!(86_400 * 2)))
+            .unwrap();
+        store
+            .set_field(&id(3), TAGS, Some(&json!(["old"])))
+            .unwrap();
+    }
+    let (mut h, mut persist) = window(&root, &path);
+    let selection = |h: &Harness<'_, Shell>| h.state().library().selection();
+
+    // In the grid: Ctrl+I inverts, Ctrl+Shift+A selects none.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::CTRL, Key::I);
+    // The key queues the command; the next frame runs it.
+    h.run();
+    h.run();
+    assert_eq!(selection(&h), [id(2).hex(), id(3).hex()]);
+    h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::A);
+    h.run();
+    h.run();
+    assert!(selection(&h).is_empty());
+
+    // The same day as the first photo: the second, not the third.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    let out = answer(&mut h, "library.select.similar", json!({ "by": "day" }));
+    assert_eq!(out["selected"], 2, "{out}");
+    assert_eq!(selection(&h), [id(1).hex(), id(2).hex()]);
+
+    // The first photo's marks merged on the third: its tag stays.
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    let copied = answer(&mut h, "library.marks.copy", json!({}));
+    assert_eq!(copied["title"], "Dawn", "{copied}");
+    let out = answer(
+        &mut h,
+        "library.marks.paste",
+        json!({ "images": [id(3).hex()] }),
+    );
+    assert_eq!(out["images"], 1, "{out}");
+    settle(&mut h, &mut persist, 2.0);
+    let names = [RATING, LABELS, TAGS, TITLE];
+    assert_eq!(
+        stored(&persist, 3, &names),
+        [
+            json!(3),
+            json!(["red"]),
+            json!(["old", "trip"]),
+            json!("Dawn")
+        ]
+    );
+
+    // The second photo's (one star, nothing else) overwriting the third's
+    // labels, tags and title on the selection; its stars stay.
+    answer(
+        &mut h,
+        "library.marks.copy",
+        json!({ "image": id(2).hex() }),
+    );
+    h.state_mut().library_mut().select_ids(&[id(3).hex()]);
+    answer(
+        &mut h,
+        "library.marks.paste",
+        json!({ "mode": "overwrite", "marks": ["labels", "tags", "title"] }),
+    );
+    settle(&mut h, &mut persist, 4.0);
+    let after = stored(&persist, 3, &names);
+    assert_eq!(after[0], json!(3));
+    for v in &after[1..] {
+        assert!(
+            v.is_null() || v.as_array().is_some_and(Vec::is_empty),
+            "{after:?}"
+        );
+    }
+    assert_eq!(h.state().library().entry(&id(3).hex()).unwrap().title, None);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn delete_removes_the_selection_from_the_library_and_undo_puts_it_back() {
+    use egui_pop::api::history::{Answer, Request};
+    let root = temp("remove");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    // As the desktop wires it: undo and redo move the vault's rows.
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    // The desktop's loop: the vault's event reads the library again.
+    let refill = |h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at| {
+        settle(h, persist, at);
+        assert!(persist.take_locations_changed(), "the vault's event heard");
+        persist.ask_fill(h.state(), true);
+        settle(h, persist, at + 10.0);
+    };
+    let in_library =
+        |persist: &Persist<SqliteStore>, n| persist.vault().in_library(&id(n)).unwrap();
+
+    // Delete in the grid, on the first and third photos.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(3).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press(Key::Delete);
+    h.run();
+    h.run();
+    refill(&mut h, &mut persist, 1.0);
+    assert!(!in_library(&persist, 1) && !in_library(&persist, 3));
+    assert!(in_library(&persist, 2));
+    assert_eq!(grid(&h), ["b.jpg"]);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Remove 2 photos from the Library"
+    );
+    // Its marks and its file stay: only the flag moved.
+    assert_eq!(persist.vault().locations(&id(1)).unwrap().len(), 1);
+
+    // Undone: both back in the grid.
+    let undone = history.undo(
+        &Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    refill(&mut h, &mut persist, 30.0);
+    assert!(in_library(&persist, 1) && in_library(&persist, 3));
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+
+    // By an agent, naming a photo.
+    let out = answer(&mut h, "library.remove", json!({ "images": [id(2).hex()] }));
+    assert_eq!(out["removed"], 1, "{out}");
+    refill(&mut h, &mut persist, 60.0);
+    assert_eq!(grid(&h), ["a.jpg", "c.nef"]);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -152,20 +152,22 @@ impl Shell {
     }
 
     /// How the import window opens a page in the system browser (a
-    /// sign-in, a picking): the platform's opener unless set (a test's).
+    /// sign-in, the page where photos are chosen): the platform's opener
+    /// unless set (a test's).
     pub fn set_import_browser(&mut self, opener: Arc<dyn Fn(&str) + Send + Sync>) {
         self.import.get_mut().accounts.opener = opener;
     }
 
-    /// Imports what a connector's picking listed ("Pick photos…" on an
-    /// account of a connector that picks), through `import`.
+    /// Imports the photos chosen in a service's page ("Choose photos in
+    /// Google Photos…" on an account of a connector that picks), through
+    /// `import`.
     pub fn set_import_remote(&mut self, import: super::import_accounts::ImportRemote) {
         self.import.get_mut().accounts.import = Some(import);
     }
 
-    /// The library folder picked photos are copied into when their source
-    /// has no folder of its own: read before a picking, asked for and
-    /// remembered through `library` when there is none.
+    /// The library folder chosen photos are copied into when the Choices
+    /// column's Into names none: read before the service's page opens;
+    /// with none, Into is asked for.
     pub fn set_import_library_folder(
         &mut self,
         library: Arc<dyn super::import_accounts::LibraryFolder>,

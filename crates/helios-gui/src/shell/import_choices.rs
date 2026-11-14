@@ -540,10 +540,9 @@ fn folder_name(p: &Path) -> String {
     )
 }
 
-/// The Choices column, its heading above what scrolls on its own when
-/// taller than the column; `end` draws the column's last lines, in the
-/// scroll too (a line after a scroll area that fills the column would
-/// overflow it).
+/// The choices in one column, as the "Add a source…" wizard shows
+/// them: whose they are, then the source's own ([`copy_ui`]) and those
+/// every source shares ([`shared_ui`]), `end` last.
 pub(super) fn choices_ui(
     ui: &mut egui::Ui,
     w: &mut ImportWindow,
@@ -551,8 +550,22 @@ pub(super) fn choices_ui(
     end: &mut dyn FnMut(&mut egui::Ui),
 ) -> Option<Asked> {
     let mut asked = None;
+    header_ui(ui, w, words);
+    egui::ScrollArea::vertical()
+        .id_salt("helios.import.choices")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            copy_ui(ui, w, words, &mut asked);
+            ui.separator();
+            shared_ui(ui, w, words);
+            end(ui);
+        });
+    asked
+}
+
+/// The choices' heading, and whose they are, with Reset and Undo.
+pub(super) fn header_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceWords) {
     ui.heading(&words.heading);
-    // Whose choices these are, with Reset and Undo.
     if let Some(shown_for) = &words.shown_for {
         ui.horizontal_wrapped(|ui| {
             ui.weak(shown_for);
@@ -574,59 +587,67 @@ pub(super) fn choices_ui(
             }
         });
     }
-    egui::ScrollArea::vertical()
-        .id_salt("helios.import.choices")
-        .auto_shrink([false, false])
+}
+
+/// The choices every source shares: duplicates, darktable edits (when
+/// the connector honours them), the camera's default look (when the
+/// library keeps one), More.
+pub(super) fn shared_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceWords) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(&words.duplicates);
+        let d = &mut w.choices.duplicates;
+        ui.radio_value(d, Duplicates::Skip, &words.skip);
+        ui.radio_value(d, Duplicates::Keep, &words.keep);
+        ui.radio_value(d, Duplicates::Ask, &words.ask);
+    });
+    if w.sources.honours.darktable {
+        ui.checkbox(&mut w.choices.darktable, &words.darktable)
+            .on_hover_text(&words.darktable_help);
+    }
+    // Only when the library keeps a camera's default look.
+    if w.camera_looks {
+        ui.checkbox(&mut w.choices.camera_look, &words.camera_look)
+            .on_hover_text(&words.camera_look_help);
+    }
+    egui::CollapsingHeader::new(&words.more)
+        .id_salt("helios.import.more")
+        .default_open(false)
         .show(ui, |ui| {
-            let mut copy = w.copies();
-            let before = copy;
-            ui.radio_value(&mut copy, true, &words.copy);
-            // A connector that cannot add in place always copies.
-            if w.sources.honours.add_in_place {
-                ui.radio_value(&mut copy, false, &words.add);
-            }
-            if copy != before {
-                // A saved source keeps it among its choices.
-                if w.sources.showing.is_some() {
-                    w.choices.copy_folders = copy;
-                    w.copy = None;
-                } else {
-                    w.copy = Some(copy);
-                }
-            }
-            if w.ticked.iter().any(|p| w.is_card(p)) {
-                ui.add(egui::Label::new(egui::RichText::new(&words.card_note).weak()).wrap());
-            }
-            if copy {
-                ui.separator();
-                copy_choices_ui(ui, w, words, &mut asked);
-            }
-            ui.separator();
-            ui.horizontal_wrapped(|ui| {
-                ui.label(&words.duplicates);
-                let d = &mut w.choices.duplicates;
-                ui.radio_value(d, Duplicates::Skip, &words.skip);
-                ui.radio_value(d, Duplicates::Keep, &words.keep);
-                ui.radio_value(d, Duplicates::Ask, &words.ask);
-            });
-            if w.sources.honours.darktable {
-                ui.checkbox(&mut w.choices.darktable, &words.darktable)
-                    .on_hover_text(&words.darktable_help);
-            }
-            // Only when the library keeps a camera's default look.
-            if w.camera_looks {
-                ui.checkbox(&mut w.choices.camera_look, &words.camera_look)
-                    .on_hover_text(&words.camera_look_help);
-            }
-            egui::CollapsingHeader::new(&words.more)
-                .id_salt("helios.import.more")
-                .default_open(false)
-                .show(ui, |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(&words.more_note).weak()).wrap());
-                });
-            end(ui);
+            ui.add(egui::Label::new(egui::RichText::new(&words.more_note).weak()).wrap());
         });
-    asked
+}
+
+/// A source's copy choices: copy or add where they are (a connector
+/// that cannot add in place always copies), then Into and Name for a
+/// copy.
+pub(super) fn copy_ui(
+    ui: &mut egui::Ui,
+    w: &mut ImportWindow,
+    words: &ChoiceWords,
+    asked: &mut Option<Asked>,
+) {
+    let mut copy = w.copies();
+    let before = copy;
+    ui.radio_value(&mut copy, true, &words.copy);
+    if w.sources.honours.add_in_place {
+        ui.radio_value(&mut copy, false, &words.add);
+    }
+    if copy != before {
+        // A saved source keeps it among its choices.
+        if w.sources.showing.is_some() {
+            w.choices.copy_folders = copy;
+            w.copy = None;
+        } else {
+            w.copy = Some(copy);
+        }
+    }
+    if w.ticked.iter().any(|p| w.is_card(p)) {
+        ui.add(egui::Label::new(egui::RichText::new(&words.card_note).weak()).wrap());
+    }
+    if copy {
+        ui.separator();
+        copy_choices_ui(ui, w, words, asked);
+    }
 }
 
 /// Into and Name: a copy's.

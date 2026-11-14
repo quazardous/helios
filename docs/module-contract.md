@@ -427,6 +427,33 @@ Images stay in GPU memory from one GPU step to the next and are only read
 back where the CPU needs them (see "GPU residency" in
 `docs/architecture.md`).
 
+## Init steps: what a module asks first
+
+Some modules cannot run before the person chose something: import needs a
+library folder to copy photos into. A module declares these **init steps**
+as data, like its settings and health checks (`helios-init`):
+
+- a step has an id (`library.folder`), a title, why it is asked, the
+  settings it fills (its fields, drawn by the declarative forms), the
+  command that may fill it instead (`library.chooseFolder`), whether it is
+  required or optional, and the steps it comes after;
+- it is **done** when the settings its `done` test names are set and not
+  empty, read from the settings each time: a folder later cleared makes
+  its step missing again;
+- a module declares the steps it **requires** before it runs (import
+  requires `library.folder`), so what it still misses is read from the
+  contract, not checked by hand;
+- one registry orders every step after its dependencies; a step coming
+  after an unknown step, or steps in a loop, are refused.
+
+A **run** asks for some steps (and those they come after), or all of them
+on the first launch, maybe opening on one, and answers its caller `done`,
+or `cancelled` with the required steps still missing. The steps say what
+they ask; the host decides where they are drawn: a first-run focus screen,
+a wizard bound to a window, or an agent filling the settings headless
+through `init.steps` and `init.status` ([protocol.md](protocol.md)). The
+outcome is read from the settings, never taken from the host.
+
 ## How a module is tested
 
 Every module is testable alone, with no darktable and no framework running:

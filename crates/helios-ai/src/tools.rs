@@ -116,8 +116,11 @@ pub fn call(ai: &Ai, request: &Value, images: Vec<Vec<u8>>) -> Result<Value, Str
         }
         "ai.prompts.set" => {
             let mut given = request["prompt"].clone();
-            if given["version"].is_null() {
-                given["version"] = json!(1);
+            let Some(fields) = given.as_object_mut() else {
+                return Err("`prompt` must be an object (id, capability, template…)".into());
+            };
+            if fields.get("version").is_none_or(Value::is_null) {
+                fields.insert("version".into(), json!(1));
             }
             let prompt: Prompt =
                 serde_json::from_value(given).map_err(|e| format!("the prompt: {e}"))?;

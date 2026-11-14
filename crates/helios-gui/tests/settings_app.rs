@@ -202,6 +202,72 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The image map's wide number settings are typed in a number input, not
+/// slid: a value typed and committed with Enter is saved; one out of
+/// range is refused with its reason, and the setting keeps its value.
+#[test]
+fn wide_number_settings_are_typed_and_a_value_out_of_range_is_refused() {
+    use egui::accesskit::Role;
+    use egui::{Key, Modifiers};
+    let shell = Shell::new(helios_panels(), None);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let dir = std::env::temp_dir().join(format!("helios-settings-number-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let app = h.state().app().handle().clone();
+    config::install(
+        &app,
+        Settings::resolve(&Sources::default()),
+        Some(Arc::new(Written::default())),
+        &dir,
+    );
+    h.run();
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "library/image-map" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_role_and_label(Role::Slider, "Files seen kept")
+            .is_none(),
+        "a count up to millions is not a slider"
+    );
+    let type_in = |h: &mut egui_kittest::Harness<'_, Shell>, label: &str, text: &str| {
+        h.get_by_role_and_label(Role::TextInput, label).focus();
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+        h.run();
+        h.get_by_role_and_label(Role::TextInput, label)
+            .type_text(text);
+        h.run();
+        h.key_press(Key::Enter);
+        saved(h);
+    };
+    let id = |k: &str| SettingId::new(k).unwrap();
+    type_in(&mut h, "Files seen kept", "2000000");
+    assert_eq!(app.setting::<i64>(&id("system.map.limit")), Some(2_000_000));
+    type_in(&mut h, "Missing files kept", "90");
+    assert_eq!(app.setting::<i64>(&id("system.map.keepMissing")), Some(90));
+    let global = std::fs::read_to_string(dir.join(config::GLOBAL_FILE)).unwrap();
+    assert!(global.contains("90"), "{global}");
+
+    type_in(&mut h, "Missing files kept", "5000");
+    assert_eq!(
+        app.setting::<i64>(&id("system.map.keepMissing")),
+        Some(90),
+        "out of range: refused"
+    );
+    assert!(
+        h.query_by_label_contains("Between 0").is_some(),
+        "the reason shows"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The search reaches inside the shortcuts editor: a shortcut found by
 /// its key lands on the shortcuts page, marked; and every setting shows
 /// once, whether a field binds it or a page's widget edits it.

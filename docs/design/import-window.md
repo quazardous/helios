@@ -74,18 +74,38 @@ or folders on Helios (the window opens with them as its source).
     Shift extends, Ctrl+A selects all, Space opens a quick look.
   - **Folders:** a folder source lists every image Helios reads
     (`IMAGE_EXTENSIONS`), subfolders included.
-- **Choices** (right), top to bottom, each with a live example:
-  - **Copy into the Library**, or **Add where they are** (references in
-    place). Copy is forced for a card unless the person changes it, with
-    a note on why.
-  - **Into**: destination and folder layout, with an example path.
-  - **Name**: the rename pattern (presets and custom, using today's
-    `{date}` `{time}` `{camera}` `{frame}` `{stem}` `{seq}`), with an
-    example name.
-  - **Duplicates**: skip (default), keep, or ask.
-  - **Read darktable edits** (sidecars as versions).
-  - **More** (folded): metadata template and time offset, once they
-    exist.
+- **Detail** (right): the selected source's connector in detail
+  (owner's design, 2026-11-14: three zones, sources left, photos in the
+  middle, the connector's detail right). Top to bottom, each with a live
+  example:
+  - **The choices every source shares:**
+    - **Duplicates**: skip (default), keep, or ask.
+    - **Read darktable edits** (sidecars as versions), when the
+      connector honours them.
+    - **Apply the camera's default look**, when the library keeps a
+      camera's default look: on by default, a raw of that camera starts
+      with it as its first version.
+    - **More** (folded): metadata template and time offset, once they
+      exist.
+  - **The connector's section**, under its name. Each connector fills it
+    through one contract: what it declares (its browsers, its
+    capabilities, its source contract) calls for each part, and no
+    connector draws the column itself.
+    - **The account** (an account's connector): its connection, and for
+      a connector whose photos are chosen in its service's page (Google
+      Photos), "Choose photos"; the photos chosen show in the middle.
+    - **Copy into the Library**, or **Add where they are** (references
+      in place). Copy is forced for a card unless the person changes it,
+      with a note on why; a connector that cannot add in place always
+      copies.
+    - **Into**: destination and folder layout, with an example path.
+    - **Name**: the rename pattern (presets and custom, using today's
+      `{date}` `{time}` `{camera}` `{frame}` `{stem}` `{seq}`), with an
+      example name.
+    - **Parameters**: the connector's own (its source contract's keys
+      that are not choices), drawn from the contract with Settings'
+      widgets and kept on the source as they change.
+  - **The backup line**, last.
 
   Built (2026-11-07): the choices reach the import as
   `library.importFiles`'s arguments (`copy`, `into`, `layout`, `rename`,
@@ -101,7 +121,7 @@ or folders on Helios (the window opens with them as its source).
   Choices column, copy or add for folders included (a card is still
   copied unless switched). "Save as preset…" asks a name in place;
   "Delete preset" deletes the one the choices are. The totals count the
-  photos ticked and their size. Sources and Choices keep fixed widths
+  photos ticked and their size. Sources and Detail keep fixed widths
   (at most a quarter of the window each); Contents takes the rest.
 
 ## After pressing Import

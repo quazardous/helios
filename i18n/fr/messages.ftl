@@ -150,6 +150,10 @@ gui-about-description = Un framework de traitement d’image client/serveur, pen
 
 gui-account-add = Ajouter un compte…
 
+gui-account-another = Utiliser un autre compte…
+
+gui-account-choose = Choisir des photos…
+
 gui-account-disconnect = Déconnecter
 
 gui-account-disconnect-explain = Helios demande au service de révoquer son accès, oublie les clés et jetons de ce compte sur cet ordinateur et retire le compte. Ce qui a été importé reste.
@@ -166,9 +170,13 @@ gui-account-disconnect-title = Déconnecter { $account } ?
 
 gui-account-identity-missing = Reconnectez pour voir le compte
 
-gui-account-never-used = Jamais
+gui-account-manage = Gérer les comptes…
 
-gui-account-pick = Choisir des photos…
+gui-account-menu = Compte
+
+gui-account-needs-reconnecting = à reconnecter
+
+gui-account-never-used = Jamais
 
 gui-account-status-connecting = Connexion en cours
 
@@ -217,6 +225,58 @@ gui-caption-decisions-count = { $count ->
 gui-caption-jobs = Afficher les tâches
 
 gui-caption-profile = Profil utilisé : { $name }
+
+gui-choose-about = { $service } s'ouvre dans votre navigateur. Choisissez vos photos, appuyez sur OK, puis revenez ici.
+
+gui-choose-closed = La page { $service } s'est fermée. Ouvrez-la à nouveau pour choisir vos photos.
+
+gui-choose-connect = Connecter { $service }
+
+gui-choose-connecting = Connectez-vous dans votre navigateur, puis revenez ici.
+
+gui-choose-copy-link = Copier le lien
+
+gui-choose-done = { $count } photos importées.
+
+gui-choose-failed = Les photos n'ont pas été importées : { $why }
+
+gui-choose-identity = Reconnectez-vous une fois pour voir de quel compte il s'agit.
+
+gui-choose-importing = Import de { $count } photos…
+
+gui-choose-into = Choisir le dossier…
+
+gui-choose-known = { $count } étaient déjà dans votre bibliothèque.
+
+gui-choose-more = Choisir d'autres photos…
+
+gui-choose-no-into = Choisissez d'abord où copier les photos : Dans, dans la colonne Choix.
+
+gui-choose-not-connected = Ce compte n'est pas connecté.
+
+gui-choose-not-open = La page ne s'est pas ouverte ?
+
+gui-choose-nothing = Aucune photo n'a été choisie.
+
+gui-choose-open-again = L'ouvrir à nouveau
+
+gui-choose-opening = Ouverture de { $service }…
+
+gui-choose-photos = Choisir des photos dans { $service }…
+
+gui-choose-reconnect = Reconnecter { $account }
+
+gui-choose-refused = ▲ { $service } ne laisse plus Helios lire ce compte.
+
+gui-choose-refused-why = Cela arrive quand l'accès a été retiré dans les réglages du compte chez { $service }, ou quand l'accès donné à Helios a expiré.
+
+gui-choose-signed-in = { $service } montre les photos du compte auquel votre navigateur est connecté : { $account }.
+
+gui-choose-try-again = Réessayer
+
+gui-choose-unreachable = Impossible de joindre { $service } : { $why }
+
+gui-choose-waiting = Choisissez vos photos dans le navigateur, appuyez sur OK, puis revenez ici.
 
 gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
@@ -434,6 +494,7 @@ gui-history-album-new-smart = Nouvel album dynamique « { $name } »
 gui-history-set-new = Nouvel ensemble d’albums « { $name } »
 gui-history-album-move = Déplacer « { $name } » dans un ensemble
 gui-history-album-move-out = Sortir « { $name } » de son ensemble
+gui-history-library-remove = Retirer { $count } photos de la bibliothèque
 gui-history-quick-add = Ajouter { $count } photos à la collection rapide
 gui-history-quick-remove = Retirer { $count } photos de la collection rapide
 gui-history-quick-clear = Vider la collection rapide
@@ -486,9 +547,7 @@ gui-import-browse-folder = Toutes les photos
 
 gui-import-browse-not-listed = Helios ne liste pas encore ici les photos de cette source.
 
-gui-import-browse-pick-about = Choisissez les photos dans la page du service : elles sont importées une fois choisies.
-
-gui-import-browse-picker = Choisir dans le service
+gui-import-browse-picker = Choisir dans la page du service
 
 gui-import-browse-timeline = Par date
 
@@ -511,6 +570,8 @@ gui-import-auto-new-files = Quand de nouveaux fichiers apparaissent
 gui-import-auto-started = Import automatique depuis { $source } : { $files } fichiers
 
 gui-import-auto-failed = Import automatique depuis { $source } : { $error }
+
+gui-import-window-services = Services
 
 gui-job-backup-done = Sauvegarde terminée
 
@@ -548,6 +609,7 @@ gui-library-badge-backup-unverified = non vérifiée
 
 gui-library-badge-no-backup = sans sauvegarde
 
+gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
 gui-look-fit-selection-done = Rendu boîtier de { $camera } ajusté sur { $fitted } photos sur { $photos } : Delta E { $held } (par défaut { $baseline })
@@ -782,35 +844,7 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
-gui-pick-account = Votre navigateur doit être connecté au compte relié sous le nom { $account } ; si la page dit qu'elle ne peut pas s'ouvrir, connectez-vous à ce compte et recommencez.
-
-gui-pick-again = Recommencer
-
 gui-pick-choose-folder = Choisir le dossier de la bibliothèque…
-
-gui-pick-browser = Choisissez vos photos dans votre navigateur, appuyez sur OK, puis revenez ici.
-
-gui-pick-done = { $count } photos importées.
-
-gui-pick-expired = La session de choix a expiré, recommencez.
-
-gui-pick-failed = Non importé : { $why }
-
-gui-pick-importing = Import de { $count } photos…
-
-gui-pick-known = { $count } déjà dans la bibliothèque, laissées telles quelles.
-
-gui-pick-more = Choisir d'autres photos…
-
-gui-pick-library-folder = Les photos choisies sont copiées dans le dossier de la bibliothèque. Choisissez-le une fois : il est retenu.
-
-gui-pick-nothing = Rien n'a été choisi à temps.
-
-gui-pick-sign-in = La source a refusé la connexion : reconnectez le compte.
-
-gui-pick-starting = Ouverture du choix…
-
-gui-pick-title = Choisir des photos dans { $source }
 
 gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 
@@ -1322,6 +1356,7 @@ gui-library-albums-none = Aucun album pour l’instant
 gui-library-quick = Collection rapide
 gui-library-quick-tip = B ajoute les photos sélectionnées ou les retire
 gui-library-quick-toggle = Ajouter ou retirer les photos sélectionnées
+gui-library-remove = Retirer de la bibliothèque
 gui-library-quick-save = Enregistrer comme album…
 gui-library-quick-clear = Vider la collection rapide
 gui-library-quick-save-title = Enregistrer la collection rapide comme album
@@ -2179,6 +2214,18 @@ health-library-ok = La bibliothèque s'ouvre et a de la place
 
 health-library-ok-detail = { $file }
 
+health-library-folder = Dossier de la bibliothèque
+
+health-library-folder-none = Aucun dossier de bibliothèque choisi
+
+health-library-folder-none-detail = Les imports qui copient les photos et les photos choisies n'ont nulle part où aller : ils demandent d'abord un dossier.
+
+health-library-folder-ok = Un dossier de bibliothèque est choisi
+
+health-library-folder-ok-detail = { $folder }
+
+health-fix-choose-library-folder = Choisir un dossier…
+
 health-met = Photos sauvegardées
 
 health-met-ok = Chaque photo a ses sauvegardes
@@ -2222,6 +2269,10 @@ health-vault-damaged-detail = { $file } : { $first } ({ $count } erreurs). Resta
 health-vault-unreadable = Le catalogue ne peut pas être vérifié
 
 health-vault-unreadable-detail = { $file } : { $error }
+
+init-library-folder = Dossier de la bibliothèque
+
+init-library-folder-why = Les imports y copient les photos, et les photos choisies y vont.
 
 look-load-failed = impossible de lire la photo : { $error }
 

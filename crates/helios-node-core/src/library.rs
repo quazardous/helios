@@ -3,12 +3,18 @@
 //! versions (`library.importDarktable`, one sidecar file with
 //! `library.keepSidecar`) and an image's edit read and saved
 //! (`library.edit.head`, `library.edit.save`), photos' fields set and
-//! read (`library.fields.set`, `library.fields.get`), the facet counts of
+//! read (`library.fields.set`, `library.fields.get`), photos taken out
+//! of the Library (`library.images.remove`), the facet counts of
 //! a query (`library.facets`), the photos changed outside Helios
 //! (`library.changed.list`), the import history listed
 //! (`import.history.list`) and one import run again
 //! (`import.history.again`, run as `library.import` by whoever serves
-//! it). `helios-node` lists them
+//! it), the library's documents (`library.documents.get`, `.set`), its
+//! folders counted (`library.folders`) and the workshop sessions' records
+//! (`library.workshop.sessions.list`, `.set`), the albums and the quick
+//! collection read (`library.albums.list`) and changed
+//! (`library.albums.edit`, answering what changed for an undo history).
+//! `helios-node` lists them
 //! with its verbs; the desktop's node serves them too
 //! ([`crate::endpoint`]). They run on the vault the node owns, by whoever
 //! the call's origin names; the stacks' changes are announced on the
@@ -33,6 +39,7 @@ pub const IDS: &[&str] = &[
     "library.edit.save",
     "library.fields.set",
     "library.fields.get",
+    REMOVE,
     "library.facets",
     "library.changed.list",
     "library.stacks.list",
@@ -44,9 +51,21 @@ pub const IDS: &[&str] = &[
     "library.stacks.accept",
     "library.stacks.decline",
     "library.stacks.decisions",
+    "library.documents.get",
+    "library.documents.set",
+    "library.folders",
+    "library.workshop.sessions.list",
+    "library.workshop.sessions.set",
+    "library.albums.list",
+    "library.albums.edit",
     HISTORY_LIST,
     AGAIN,
 ];
+
+/// Takes photos out of the Library (Lightroom's "Remove from Catalog"):
+/// their flag only, no file touched; answers the step (`changes`), which
+/// the vault's revert undoes.
+pub const REMOVE: &str = "library.images.remove";
 
 /// Lists the import history (`helios_library::import_history`).
 pub const HISTORY_LIST: &str = "import.history.list";
@@ -137,6 +156,11 @@ pub fn specs() -> Vec<CommandSpec> {
                                     `set_if_absent` sets only an empty field" }),
             true,
         )])),
+        library(
+            REMOVE,
+            "Take photos out of the Library, their files untouched",
+        )
+        .params(object(&[("images", images(), true)])),
         library("library.fields.get", "Read photos' fields")
             .params(object(&[
                 ("images", images(), true),
@@ -211,6 +235,68 @@ pub fn specs() -> Vec<CommandSpec> {
         library("library.stacks.decline", "Decline suggested stacks")
             .params(object(&[decision()])),
         library("library.stacks.decisions", "List the stack suggestions").read_only(),
+        library("library.documents.get", "Read a library document")
+            .params(object(&[("ns", string(), true), ("key", string(), true)]))
+            .read_only(),
+        library("library.documents.set", "Keep a library document").params(object(&[
+            ("ns", string(), true),
+            ("key", string(), true),
+            (
+                "document",
+                json!({ "description": "any JSON value; null removes the document" }),
+                true,
+            ),
+        ])),
+        library("library.folders", "Count the photos by folder")
+            .params(object(&[(
+                "query",
+                json!({ "type": "object",
+                        "description": "which photos, as a cursor's query (docs/protocol.md, Cursors)" }),
+                false,
+            )]))
+            .read_only(),
+        library(
+            "library.workshop.sessions.list",
+            "List the workshop sessions' records",
+        )
+        .read_only(),
+        library(
+            "library.workshop.sessions.set",
+            "Keep or drop a workshop session's record",
+        )
+        .params(object(&[
+            ("id", string(), true),
+            (
+                "record",
+                json!({ "type": ["object", "null"], "description": "null drops the record" }),
+                true,
+            ),
+        ])),
+        library(
+            "library.albums.list",
+            "List the albums and the quick collection",
+        )
+        .read_only(),
+        library("library.albums.edit", "Change an album or the quick collection").params(
+            object(&[
+                (
+                    "op",
+                    json!({ "type": "string", "enum": ALBUM_OPS }),
+                    true,
+                ),
+                ("id", string(), false),
+                ("name", string(), false),
+                ("images", images(), false),
+                ("set", json!({ "type": ["string", "null"] }), false),
+                ("members", json!({ "type": "boolean" }), false),
+                ("clear", json!({ "type": "boolean" }), false),
+                (
+                    "rules",
+                    json!({ "type": "object", "description": "a smart album's rules (docs/protocol.md, Cursors)" }),
+                    false,
+                ),
+            ]),
+        ),
         CommandSpec::new(HISTORY_LIST, "List the import history", "Library")
             .needs(Need::Vault)
             .params(object(&[(
@@ -299,6 +385,93 @@ fn now() -> u64 {
 
 fn to_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("library values serialize")
+}
+
+/// The changes `library.albums.edit` makes.
+const ALBUM_OPS: &[&str] = &[
+    "create",
+    "rename",
+    "delete",
+    "createSet",
+    "move",
+    "add",
+    "remove",
+    "createSmart",
+    "rules",
+    "quickToggle",
+    "quickClear",
+    "quickSave",
+];
+
+/// Changes an album or the quick collection as `params` asks
+/// (`library.albums.edit`). The answer: what changed (`changes`, for an
+/// undo history), the album's name (the new one for a creation, the
+/// name it had otherwise), how many photos the step put in or took out
+/// (`count`) and, for `quickToggle`, whether it put them in (`added`).
+fn edit_album<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, String> {
+    let id = text(params, "id");
+    let name = text(params, "name");
+    let set = params["set"].as_str();
+    let rules = || helios_vault::rules::Rule::parse(&params["rules"]);
+    let before = || -> String {
+        vault
+            .album(id)
+            .ok()
+            .flatten()
+            .map(|a| a.name)
+            .unwrap_or_default()
+    };
+    let photos = || params["images"].as_array().map_or(0, Vec::len);
+    let mut added = true;
+    let (name, count, changes) = match text(params, "op") {
+        "create" => vault
+            .create_album(Some(id), name, &named(vault, params, "images")?)
+            .map(|(a, c)| (a.name, a.images.len(), c))?,
+        "rename" => {
+            let was = before();
+            (was, 0, vault.rename_album(id, name)?)
+        }
+        "delete" => {
+            let was = before();
+            let members = params["members"].as_bool().unwrap_or(false);
+            (was, 0, vault.delete_collection(id, members)?)
+        }
+        "createSet" => vault
+            .create_set(Some(id), name, set)
+            .map(|(a, c)| (a.name, 0, c))?,
+        "move" => (before(), 0, vault.move_collection(id, set)?),
+        "add" => (
+            before(),
+            photos(),
+            vault.add_to_album(id, &named(vault, params, "images")?)?,
+        ),
+        "remove" => (
+            before(),
+            photos(),
+            vault.remove_from_album(id, &named(vault, params, "images")?)?,
+        ),
+        "createSmart" => vault
+            .create_smart_album(Some(id), name, rules()?)
+            .map(|(a, c)| (a.name, 0, c))?,
+        "rules" => (before(), 0, vault.set_album_rules(id, rules()?)?),
+        "quickToggle" => {
+            // The photos it moved: those already in are not counted.
+            let held = vault.quick_collection().map_or(0, |q| q.len());
+            let (put, changes) = vault.toggle_quick(&named(vault, params, "images")?)?;
+            added = put;
+            let now = vault.quick_collection().map_or(held, |q| q.len());
+            (String::new(), now.abs_diff(held), changes)
+        }
+        "quickClear" => {
+            let count = vault.quick_collection().map_or(0, |q| q.len());
+            (String::new(), count, vault.clear_quick()?)
+        }
+        "quickSave" => vault
+            .save_quick(Some(id), name, params["clear"].as_bool().unwrap_or(false))
+            .map(|(a, c)| (a.name, a.images.len(), c))?,
+        other => return Err(format!("no album change `{other}`: one of {ALBUM_OPS:?}")),
+    };
+    Ok(json!({ "name": name, "count": count, "added": added, "changes": to_json(&changes) }))
 }
 
 /// An image named by its id, or by an absolute path the vault knows.
@@ -469,6 +642,15 @@ pub fn run<S: Store>(
                     .collect::<Vec<_>>(),
             }))
         }
+        REMOVE => {
+            let ids = named(vault, params, "images")?;
+            if ids.is_empty() {
+                return Err("`images` names no photo".into());
+            }
+            vault.set_in_library(&ids, false, origin, now()).map(
+                |changes| json!({ "removed": changes.images.len(), "changes": to_json(&changes) }),
+            )
+        }
         "library.facets" => {
             let query = crate::cursor::query_of(&params["query"])?;
             let rule = match &params["rule"] {
@@ -557,6 +739,45 @@ pub fn run<S: Store>(
         "library.stacks.decisions" => {
             suggest::decisions(vault).map(|d| json!({ "decisions": to_json(&d) }))
         }
+        "library.documents.get" => vault
+            .library_document(text(params, "ns"), text(params, "key"))
+            .map(|document| json!({ "document": document })),
+        "library.documents.set" => {
+            let document = Some(&params["document"]).filter(|d| !d.is_null());
+            vault
+                .set_library_document(text(params, "ns"), text(params, "key"), document)
+                .map(|()| json!({ "kept": document.is_some() }))
+        }
+        "library.folders" => {
+            let query = crate::cursor::query_of(&params["query"])?;
+            vault.folders(&query).map(|folders| {
+                json!({
+                    "folders": folders
+                        .into_iter()
+                        .map(|(volume, folders)| json!({ "volume": volume.map(|v| v.0), "folders": folders }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+        }
+        "library.workshop.sessions.list" => vault.workshop_sessions().map(|sessions| {
+            json!({
+                "sessions": sessions
+                    .into_iter()
+                    .map(|(id, record)| json!({ "id": id, "record": record }))
+                    .collect::<Vec<_>>(),
+            })
+        }),
+        "library.workshop.sessions.set" => {
+            let record = Some(&params["record"]).filter(|r| !r.is_null());
+            vault
+                .set_workshop_session(text(params, "id"), record)
+                .map(|()| json!({ "kept": record.is_some() }))
+        }
+        "library.albums.list" => vault
+            .albums()
+            .and_then(|albums| Ok((albums, vault.quick_collection()?)))
+            .map(|(albums, quick)| json!({ "albums": to_json(&albums), "quick": quick })),
+        "library.albums.edit" => edit_album(vault, params),
         other => Err(format!("no library command `{other}`")),
     }
 }
@@ -589,6 +810,13 @@ mod tests {
             json!({ "decision": "d", "groups": [0, 2] }),
             json!({ "decision": "d" }),
             json!({}),
+            json!({ "ns": "filters", "key": "history" }),
+            json!({ "ns": "filters", "key": "history", "document": { "pinned": [] } }),
+            json!({ "query": {} }),
+            json!({}),
+            json!({ "id": "w1", "record": null }),
+            json!({}),
+            json!({ "op": "quickToggle", "images": [] }),
             json!({ "limit": 10 }),
             json!({ "id": "1700000000000-42-0" }),
         ];
@@ -596,6 +824,96 @@ mod tests {
         for (spec, example) in specs().iter().zip(examples) {
             validate(&spec.params, &example).unwrap_or_else(|e| panic!("{}: {e}", spec.id));
         }
+    }
+
+    #[test]
+    fn documents_folders_and_workshop_sessions_are_kept_and_read() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user").unwrap();
+        let key = json!({ "ns": "filters", "key": "history" });
+        assert_eq!(
+            call("library.documents.get", key.clone()),
+            json!({ "document": null })
+        );
+        let doc = json!({ "pinned": ["rating >= 3"] });
+        let mut set = key.clone();
+        set["document"] = doc.clone();
+        assert_eq!(call("library.documents.set", set), json!({ "kept": true }));
+        assert_eq!(
+            call("library.documents.get", key.clone()),
+            json!({ "document": doc })
+        );
+        let mut removed = key.clone();
+        removed["document"] = Value::Null;
+        call("library.documents.set", removed);
+        assert_eq!(
+            call("library.documents.get", key),
+            json!({ "document": null })
+        );
+
+        assert_eq!(call("library.folders", json!({})), json!({ "folders": [] }));
+
+        let record = json!({ "kept": true, "steps": [] });
+        call(
+            "library.workshop.sessions.set",
+            json!({ "id": "w1", "record": record }),
+        );
+        call(
+            "library.workshop.sessions.set",
+            json!({ "id": "w2", "record": { "kept": false } }),
+        );
+        call(
+            "library.workshop.sessions.set",
+            json!({ "id": "w2", "record": null }),
+        );
+        assert_eq!(
+            call("library.workshop.sessions.list", json!({})),
+            json!({ "sessions": [{ "id": "w1", "record": record }] })
+        );
+    }
+
+    #[test]
+    fn albums_are_changed_and_listed_and_their_changes_read_back() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user").unwrap();
+        let made = call(
+            "library.albums.edit",
+            json!({ "op": "create", "id": "trip", "name": "Trip", "images": [] }),
+        );
+        assert_eq!(made["name"], "Trip");
+        let changes: helios_vault::Changes =
+            serde_json::from_value(made["changes"].clone()).unwrap();
+        assert!(!changes.is_empty(), "{made}");
+        // Read back as it was: an undo walks these.
+        assert_eq!(to_json(&changes), made["changes"]);
+        let renamed = call(
+            "library.albums.edit",
+            json!({ "op": "rename", "id": "trip", "name": "Journey" }),
+        );
+        assert_eq!(renamed["name"], "Trip", "the name it had");
+        let listed = call("library.albums.list", json!({}));
+        assert_eq!(listed["quick"], json!([]));
+        let albums: Vec<_> = listed["albums"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| helios_vault::collections::Album::from_json(a).unwrap())
+            .collect();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(
+            (albums[0].id.as_str(), albums[0].name.as_str()),
+            ("trip", "Journey")
+        );
+        let wrong = run(
+            &vault,
+            &bus,
+            "library.albums.edit",
+            &json!({ "op": "nope" }),
+            "user",
+        );
+        assert!(wrong.is_err());
     }
 
     #[test]
