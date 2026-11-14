@@ -300,11 +300,11 @@ mod tests {
     use super::*;
 
     fn opening() -> Message {
-        Message::new("test-opening", "Opening the library")
+        Message::plain("Opening the library")
     }
 
     fn reading() -> Message {
-        Message::new("test-reading", "Reading the library")
+        Message::plain("Reading the library")
     }
 
     /// The boot splash lists the steps declared, ticks them as they end,
@@ -368,12 +368,9 @@ mod tests {
         let off_thread = Arc::new(AtomicBool::new(false));
         let ended = off_thread.clone();
         let end = End::new(phase.clone())
-            .then(
-                Message::new("test-saving", "Saving your changes"),
-                |h: &mut Host| {
-                    h.saved_at = Some(h.frames);
-                },
-            )
+            .then(Message::plain("Saving your changes"), |h: &mut Host| {
+                h.saved_at = Some(h.frames);
+            })
             .waiting_for(move || ended.load(Ordering::SeqCst));
         let mut h = end_harness(end);
         h.run_steps(2);
@@ -385,10 +382,7 @@ mod tests {
             "the splash drawn at the first pass, the step run at the next"
         );
         // The node's own step, declared off the thread.
-        let closing = phase.begin(Message::new(
-            "test-closing",
-            "Saving and closing the library",
-        ));
+        let closing = phase.begin(Message::plain("Saving and closing the library"));
         h.run_steps(5);
         h.get_by_label("Saving and closing the library");
         assert_eq!(h.state().1.outcome, Some(Ending::Running));
@@ -408,12 +402,9 @@ mod tests {
         let phase = Phase::new();
         let end = End::new(phase.clone()).stuck_after(Duration::ZERO);
         let jobs = phase
-            .begin(Message::new("test-jobs", "Stopping background jobs"))
+            .begin(Message::plain("Stopping background jobs"))
             .can_skip();
-        jobs.why(Message::new(
-            "test-why",
-            "Waiting for 2 running jobs to finish",
-        ));
+        jobs.why(Message::plain("Waiting for 2 running jobs to finish"));
         let mut h = end_harness(end);
         h.run_steps(2);
         h.get_by_label("Waiting for 2 running jobs to finish");
@@ -429,7 +420,7 @@ mod tests {
     #[test]
     fn a_step_that_cannot_be_left_offers_no_quit_now() {
         let phase = Phase::new();
-        let _saving = phase.begin(Message::new("test-saving", "Saving your changes"));
+        let _saving = phase.begin(Message::plain("Saving your changes"));
         let mut h = Harness::builder()
             .with_size(egui::vec2(640.0, 400.0))
             .build_ui(move |ui| {

@@ -193,13 +193,13 @@ mod tests {
     #[test]
     fn steps_are_listed_as_declared_and_done_as_their_handles_go() {
         let phase = Phase::new();
-        let library = phase.begin(Message::new("test-a", "Opening the library"));
-        let later = phase.declare(Message::new("test-b", "Reading the library"));
+        let library = phase.begin(Message::plain("Opening the library"));
+        let later = phase.declare(Message::plain("Reading the library"));
         let steps = phase.steps();
         assert_eq!(steps.len(), 2);
         assert!(steps[0].running() && !steps[1].running() && !steps[1].done());
         assert!(phase.busy());
-        library.why(Message::new("test-c", "Migrating"));
+        library.why(Message::plain("Migrating"));
         drop(library);
         later.start();
         let later = later.can_skip();
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn a_step_done_without_starting_took_nothing() {
         let phase = Phase::new();
-        phase.declare(Message::new("test-a", "Skipped")).done();
+        phase.declare(Message::plain("Skipped")).done();
         assert_eq!(phase.steps()[0].took, Some(Duration::ZERO));
     }
 }

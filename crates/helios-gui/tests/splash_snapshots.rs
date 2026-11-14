@@ -26,11 +26,9 @@ fn harness(kind: Kind, phase: Phase, stuck_after: Duration) -> Harness<'static> 
 #[test]
 fn the_boot_splash() {
     let phase = Phase::new();
-    phase
-        .begin(Message::new("test-a", "Opening the library"))
-        .done();
-    let _running = phase.begin(Message::new("test-b", "Building the interface"));
-    let _waiting = phase.declare(Message::new("test-c", "Reading the library"));
+    phase.begin(Message::plain("Opening the library")).done();
+    let _running = phase.begin(Message::plain("Building the interface"));
+    let _waiting = phase.declare(Message::plain("Reading the library"));
     let mut h = harness(Kind::Boot, phase, splash::STUCK);
     h.snapshot("splash_boot");
 }
@@ -38,17 +36,12 @@ fn the_boot_splash() {
 #[test]
 fn the_end_splash_with_a_step_that_lasts() {
     let phase = Phase::new();
-    phase
-        .begin(Message::new("test-a", "Saving your changes"))
-        .done();
+    phase.begin(Message::plain("Saving your changes")).done();
     let jobs = phase
-        .begin(Message::new("test-b", "Stopping background jobs"))
+        .begin(Message::plain("Stopping background jobs"))
         .can_skip();
-    jobs.why(Message::new(
-        "test-c",
-        "Waiting for 2 running jobs to finish",
-    ));
-    let _waiting = phase.declare(Message::new("test-d", "Saving and closing the library"));
+    jobs.why(Message::plain("Waiting for 2 running jobs to finish"));
+    let _waiting = phase.declare(Message::plain("Saving and closing the library"));
     let mut h = harness(Kind::End, phase, Duration::ZERO);
     h.snapshot("splash_end_stuck");
     drop(jobs);
