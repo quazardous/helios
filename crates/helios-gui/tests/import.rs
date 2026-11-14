@@ -606,11 +606,14 @@ fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_on
     assert!(h.state().import_choices().camera_look);
     h.state_mut().open_import_profiles();
     h.run_steps(3);
-    h.get_by_role_and_label(
+    // At the editor's foot (Advanced): scrolled to first.
+    let (checkbox, look) = (
         egui::accesskit::Role::CheckBox,
         "Apply the camera's default look",
-    )
-    .click();
+    );
+    h.get_by_role_and_label(checkbox, look).scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(checkbox, look).click();
     h.run_steps(3);
     assert!(!h.state().import_choices().camera_look);
     h.get_by_label("Done").click();
