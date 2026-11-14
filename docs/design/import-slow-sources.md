@@ -279,14 +279,18 @@ token bucket per account.
    view's thumbnails, the darkroom, calibration) picks through
    `helios_vault::ReadOrder`: the library folder's copy first, a card or
    ingest source last.
-2. **Import by rule as a node job.** `library.import` takes `{source,
+2. **Promises** (done): durable handles to a result to come, a node
+   concept (`promises.*`, `promise.progress` / `promise.done`, resumed
+   or failed `interrupted` after a crash, a promise line in the desktop);
+   see [../protocol.md](../protocol.md#promises).
+3. **Import by rule as a node job, answering a promise.** `library.import` takes `{source,
    rule}`; the job lists through the connector and imports page by page;
    "Import all" / "Import new" enabled at once; the window shows the job's
    progress and may close. Local sources first.
-3. **Google Photos on the same job.** The pick's pages stream to the grid
+4. **Google Photos on the same job.** The pick's pages stream to the grid
    and the job; downloads go through the per-account bucket, two at a
    time; quota and refused-refresh pauses.
-4. **Contract and middle-zone states.** `Caps::listing`,
+5. **Contract and middle-zone states.** `Caps::listing`,
    `thumbnail_cost`, `import_without_listing`, `Limits::parallel`, in the
    manifest; the list view (name, date, size, kind) chosen from them and
    from the count.

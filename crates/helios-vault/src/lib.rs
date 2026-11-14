@@ -46,6 +46,7 @@ pub mod cull;
 pub mod edit;
 pub mod fields;
 pub mod journal;
+pub mod promises;
 pub mod read_order;
 pub mod rules;
 pub mod settings;
@@ -1434,6 +1435,8 @@ pub struct Vault<S: Store> {
     readers: Option<Readers<S>>,
     reads: Mutex<Reads>,
     catalog: Mutex<catalog::State>,
+    /// Which promises have a runner here, and their changes' signal.
+    promises_rt: promises::Runtime,
     bus: Option<std::sync::Arc<helios_core::Bus>>,
 }
 
@@ -1455,6 +1458,7 @@ impl<S: Store> Vault<S> {
             readers,
             reads: Mutex::new(Reads::default()),
             catalog: Mutex::new(catalog::State::default()),
+            promises_rt: promises::Runtime::default(),
             bus: None,
         }
     }

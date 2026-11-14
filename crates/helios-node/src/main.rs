@@ -928,7 +928,7 @@ mod control {
         if let Some(reason) = disabled(node, scope, spec) {
             return refused(None, &reason);
         }
-        if helios_node::cursor::handles(id) {
+        if helios_node::cursor::handles(id) || helios_node::promises::handles(id) {
             return refused(
                 None,
                 &Message::plain(format!("`{id}` is served over JSON-RPC only, as a method")),
@@ -1102,7 +1102,8 @@ mod control {
     }
 
     impl Rpc {
-        /// A cursor command (`helios_node::cursor`), on the node's vault.
+        /// A cursor command (`helios_node::cursor`) or a promise command
+        /// (`helios_node::promises`), on the node's vault.
         fn cursor(&self, id: &str, params: &Value, call: &rpc::Call) -> Result<Value, rpc::Error> {
             let mut params = params.clone();
             if let Some(fields) = params.as_object_mut() {
@@ -1120,13 +1121,24 @@ mod control {
                     "the node keeps no vault: start it with --vault",
                 ));
             };
-            let mut answer = self.node.cursors.run(
-                importer.vault(),
-                id,
-                &params,
-                call,
-                std::time::Instant::now(),
-            )?;
+            let mut answer = if helios_node::promises::handles(id) {
+                // The vault keeps the promises and which have a runner
+                // here; no kind runs on this node yet, so a promise is
+                // read, waited on and cancelled, not retried.
+                helios_node::promises::Promises::new(
+                    importer.vault().clone(),
+                    self.node.jobs.clone(),
+                )
+                .run(id, &params, call)?
+            } else {
+                self.node.cursors.run(
+                    importer.vault(),
+                    id,
+                    &params,
+                    call,
+                    std::time::Instant::now(),
+                )?
+            };
             answer["command"] = json!(id);
             answer["seq"] = json!(self.node.bus.last_seq());
             Ok(answer)
@@ -1171,7 +1183,7 @@ mod control {
                         Value::Null => json!({}),
                         v => v.clone(),
                     };
-                    if helios_node::cursor::handles(id) {
+                    if helios_node::cursor::handles(id) || helios_node::promises::handles(id) {
                         return self.cursor(id, &args, call);
                     }
                     rpc::from_answer(with_seq(
@@ -1186,7 +1198,9 @@ mod control {
                         ),
                     ))
                 }
-                id if helios_node::cursor::handles(id) => self.cursor(id, &params, call),
+                id if helios_node::cursor::handles(id) || helios_node::promises::handles(id) => {
+                    self.cursor(id, &params, call)
+                }
                 id => {
                     let answer = run(
                         &self.node,
@@ -1212,7 +1226,7 @@ mod control {
         /// An import stops before its next file, a cursor window between
         /// chunks of rows.
         fn cancellable(&self, method: &str) -> bool {
-            method == "library.import" || method == "cursor.window"
+            method == "library.import" || method == "cursor.window" || method == "promises.wait"
         }
     }
 
