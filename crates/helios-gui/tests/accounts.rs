@@ -983,12 +983,17 @@ fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are(
         "the secret is never in the account's document"
     );
     let name = sources[0].name.clone().unwrap_or_default();
-    // A document saying add where they are (an older Helios's, say).
-    let text = kept
+    // A document saying add where they are (an older Helios's, say,
+    // from before import profiles: its choices, no profile).
+    let text: String = kept
         .borrow()
         .clone()
         .unwrap_or_default()
-        .replace("copy_folders = true", "copy_folders = false");
+        .replace("copy_folders = true", "copy_folders = false")
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("profile = "))
+        .map(|l| format!("{l}\n"))
+        .collect();
     assert!(text.contains("copy_folders = false"), "{text}");
     *kept.borrow_mut() = Some(text);
     let (read, write) = (kept.clone(), kept.clone());
