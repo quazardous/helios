@@ -221,23 +221,19 @@ impl<S: Store> Vault<S> {
         for name in names {
             fields::spec(name)?;
         }
-        let rows = self
-            .store
-            .lock()
-            .expect("store lock")
-            .fields_of(ids, names)?;
+        let rows = self.read(|s| s.fields_of(ids, names))?;
         self.count_query();
         Ok(rows)
     }
 
     /// The recorded changes of an image, oldest first.
     pub fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String> {
-        self.store.lock().expect("store lock").audit(id)
+        self.read(|s| s.audit(id))
     }
 
     /// Opens a cursor on a query: one store query.
     pub fn open_cursor(&self, query: Query) -> Result<CursorInfo, String> {
-        let ids = self.store.lock().expect("store lock").select(&query)?;
+        let ids = self.read(|s| s.select(&query))?;
         self.count_query();
         let mut catalog = self.catalog.lock().expect("catalog lock");
         catalog.next_cursor += 1;
@@ -268,11 +264,7 @@ impl<S: Store> Vault<S> {
         query: &Query,
         backups: Option<&fields::Backups>,
     ) -> Result<fields::Facets, String> {
-        let facets = self
-            .store
-            .lock()
-            .expect("store lock")
-            .facets(query, backups)?;
+        let facets = self.read(|s| s.facets(query, backups))?;
         self.count_query();
         Ok(facets)
     }
@@ -282,7 +274,7 @@ impl<S: Store> Vault<S> {
     /// each volume ([`crate::Store::folders`]): one store query, the
     /// Library's folders tree (`docs/design/library.md`, L5).
     pub fn folders(&self, query: &Query) -> Result<crate::VolumeFolders, String> {
-        let folders = self.store.lock().expect("store lock").folders(query)?;
+        let folders = self.read(|s| s.folders(query))?;
         self.count_query();
         Ok(folders)
     }
@@ -315,11 +307,7 @@ impl<S: Store> Vault<S> {
             fields::spec(name)?;
         }
         let ids = self.cursor_ids(cursor, offset, n)?;
-        let values = self
-            .store
-            .lock()
-            .expect("store lock")
-            .fields_of(&ids, names)?;
+        let values = self.read(|s| s.fields_of(&ids, names))?;
         self.count_query();
         Ok(ids
             .into_iter()
@@ -347,11 +335,7 @@ impl<S: Store> Vault<S> {
         for name in names {
             fields::spec(name)?;
         }
-        let rows = self
-            .store
-            .lock()
-            .expect("store lock")
-            .library_rows(ids, names)?;
+        let rows = self.read(|s| s.library_rows(ids, names))?;
         self.count_query();
         Ok(ids
             .iter()
@@ -393,7 +377,7 @@ impl<S: Store> Vault<S> {
             }
             (c.query.clone(), catalog.version)
         };
-        let ids = self.store.lock().expect("store lock").select(&query)?;
+        let ids = self.read(|s| s.select(&query))?;
         self.count_query();
         let mut catalog = self.catalog.lock().expect("catalog lock");
         let c = catalog

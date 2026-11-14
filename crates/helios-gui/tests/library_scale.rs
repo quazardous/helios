@@ -209,10 +209,12 @@ struct Cost {
 }
 
 fn read(path: &Path, n: u32, order: Order) -> Result<Cost, String> {
-    let vault = Vault::new(SqliteStore::open(path).unwrap());
+    // Read through the desktop's node, as the window reads it.
+    let persist = Persist::new(SqliteStore::open(path).unwrap(), Arc::new(Bus::new()));
+    let (vault, reader) = (persist.vault().clone(), persist.reader());
     let q0 = vault.reads().queries;
     let start = Instant::now();
-    let rows = read_library(&vault, order)?;
+    let rows = read_library(&reader, order)?;
     let elapsed = start.elapsed();
     let cost = Cost {
         images: rows.len(),

@@ -306,7 +306,8 @@ fn a_workspace_from_import_cull_dedupe_is_laid_out_and_set_for_culling() {
             "path": "/media/card",
             "copy": true,
             "rename": "{date}-{seq}",
-            "duplicates": "ask"
+            "duplicates": "ask",
+            "origin": "user"
         })]
     );
     std::fs::remove_dir_all(&root).unwrap();

@@ -611,6 +611,20 @@ gui-health-ignored-row = ignored
 
 gui-health-not-yet = Not checked yet: the checks run in the background.
 
+gui-health-owner-backup = Backups
+
+gui-health-owner-catalogue = Catalogue
+
+gui-health-owner-gpu = GPU
+
+gui-health-owner-library = Library
+
+gui-health-owner-other = Other checks
+
+gui-health-owner-plugins = Plugins
+
+gui-health-owner-storage = Storage
+
 gui-health-status = Status
 
 gui-health-summary-ok = All good
@@ -697,13 +711,29 @@ gui-image-opening = Opening { $name }…
 
 gui-import-auto = Import automatically
 
+gui-import-auto-ask = { $files } new photos ({ $size }) on { $source }: more than an automatic import takes without asking
+
+gui-import-auto-confirm = First automatic import from { $source }: check the photos, then Import confirms it
+
+gui-import-auto-confirmed = Automatic import confirmed: from now on it runs on its own
+
 gui-import-auto-failed = Automatic import from { $source }: { $error }
+
+gui-import-auto-held = Automatic imports are paused: { $source } not imported
 
 gui-import-auto-new-files = When new files appear
 
 gui-import-auto-off = Off
 
+gui-import-auto-open = Open
+
+gui-import-auto-paused = Automatic imports paused
+
 gui-import-auto-plugged = When plugged in
+
+gui-import-auto-resume = Resume
+
+gui-import-auto-resumed = Automatic imports resumed
 
 gui-import-auto-started = Automatic import from { $source }: { $files } files
 
@@ -772,6 +802,20 @@ gui-import-ended-reported = { $photos } photos imported, { $edits } darktable ed
 gui-import-failed = The import failed: { $error }
 
 gui-import-form-title = Import photos
+
+gui-import-history = History
+
+gui-import-history-added = { $count } added
+
+gui-import-history-again = Import again
+
+gui-import-history-by = By { $origin }
+
+gui-import-history-counts = { $added } added, { $located } located, { $unchanged } unchanged, { $skipped } skipped, { $failed } failed
+
+gui-import-history-failed = failed
+
+gui-import-history-none = No import yet
 
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
 
@@ -1874,6 +1918,8 @@ gui-settings-accounts-list = Import accounts
 gui-settings-accounts-no-service = No service with accounts is installed.
 
 gui-settings-accounts-none = No account yet: add one below.
+
+gui-settings-automatic-imports = Automatic imports
 
 gui-settings-backup = Backup
 

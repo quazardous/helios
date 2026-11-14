@@ -32,8 +32,12 @@
 //! strategy's after-import backup. The settings layers it keeps (`user`,
 //! `project/<folder>`) are read and written through them too
 //! (`settings.layer.get`, `settings.layer.set`), each change announced on
-//! the bus (`settings.layerChanged`). A signal cancels the running backups
-//! (the copy under way is recorded), then closes the vault cleanly.
+//! the bus (`settings.layerChanged`). Unless it was started for a client
+//! (`--idle-exit`), it runs the saved sources' automatic imports too (a
+//! card plugged in, new files in a watched folder), with the desktop's
+//! safeguards (`helios_node::auto_import`). A signal cancels the running
+//! backups (the copy under way is recorded), then closes the vault
+//! cleanly.
 //!
 //! `--control` serves the debug control endpoint (render, set a parameter,
 //! cancel, pause, resume, inject a fault). It exists only in debug builds and
@@ -946,6 +950,32 @@ mod control {
             answer["origin"] = json!(origin);
             return answer;
         }
+        if id == helios_node::library::AGAIN {
+            // The import of the history run again: `library.import` with
+            // its record's params, as whoever asks now.
+            let Some(importer) = &node.importer else {
+                return refused(
+                    None,
+                    &Message::new(
+                        "node-command-needs-vault",
+                        "the node keeps no vault: start it with --vault",
+                    ),
+                );
+            };
+            let mut answer = match helios_node::library::again_params(importer.vault(), params) {
+                Ok(again) => run(
+                    node,
+                    scope,
+                    helios_node::library::IMPORT,
+                    &again,
+                    origin,
+                    cancel,
+                ),
+                Err(e) => refused(None, &Message::plain(e)),
+            };
+            answer["command"] = json!(id);
+            return answer;
+        }
         if helios_node::library::handles(id) {
             node.bus.publish(SOURCE, None, &CommandRan { id, origin });
             let Some(importer) = &node.importer else {
@@ -1447,7 +1477,8 @@ mod control {
                     *signals,
                     cancel,
                 )
-                .and_then(|options| {
+                .and_then(|mut options| {
+                    options.origin = Some(origin.to_string());
                     let mut files = Vec::new();
                     importer
                         .import(paths, &options, &mut |line| files.push(line.clone()))
@@ -2013,7 +2044,14 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.
     let held = vault.zip(args.vault.as_ref()).map(|(vault, file)| {
-        let node = VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
+        let mut node =
+            VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
+        // A node that serves on its own runs the saved sources' automatic
+        // imports; one a client started for a while (`--idle-exit`) does
+        // not: it is there for that client.
+        if args.idle_exit.is_none() {
+            node.run_automatic_imports(helios_library::auto_import::Timing::default());
+        }
         let held = (
             node.vault().clone(),
             node.importer().clone(),

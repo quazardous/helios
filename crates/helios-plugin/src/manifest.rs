@@ -41,6 +41,23 @@
 //! `setting-<id>-<key>.label` / `.help` (`account-setting-…`,
 //! `source-setting-…`). A declaration with a problem, a default that does
 //! not fit its key among them, refuses the plugin.
+//!
+//! `[[health]]` declares the plugin's problem checks, through the health
+//! contract ([`helios_health::Declaration`]): each its id, its title,
+//! what it watches, the levels it may raise, the fix commands it may
+//! offer and when it runs (`every_minutes`, `on`). Helios runs them through the plugin's process (`health.check`,
+//! the `health` interface, started on `onHealth`: [`crate::health`]); an
+//! unsound declaration refuses the plugin, like a bad setting.
+//!
+//! ```toml
+//! [[health]]
+//! id = "accounts"
+//! title = "Google Photos accounts"
+//! watches = "Each Google Photos account still signs in"
+//! levels = ["ok", "warning"]
+//! fixes = ["import.reconnect"]
+//! every_minutes = 360
+//! ```
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -60,6 +77,7 @@ pub const INTERFACES: &[(&str, &[u32])] = &[
     ("device", &[1]),
     ("importer", &[1, 2]),
     ("import.source", &[1]),
+    ("health", &[1]),
 ];
 
 /// The services a plugin may provide; each is also an interface.
@@ -300,6 +318,49 @@ pub struct ConnectDecl {
 /// The step kinds Helios drives.
 pub const CONNECT_KINDS: &[&str] = &["oauth", "form", "device", "trust", "code", "test"];
 
+/// A problem check the plugin declares (`[[health]]`): its id within the
+/// plugin, its title and its health contract.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HealthDecl {
+    /// Unique in the plugin: `accounts`. Helios runs it as
+    /// `<plugin id>.<id>`.
+    pub id: String,
+    /// Its name for people, in English.
+    pub title: String,
+    /// What it watches, in English (one sentence).
+    pub watches: String,
+    /// The levels its findings may have: `ok`, `warning`, `problem`.
+    pub levels: Vec<helios_health::Level>,
+    /// The commands its findings' fixes may run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixes: Vec<String>,
+    /// How often it runs again, in minutes (at least 5); none: Helios's
+    /// own period (daily).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every_minutes: Option<u32>,
+    /// The events that run it at once besides its clock: `volumes` (a
+    /// volume came or went).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on: Vec<helios_health::Event>,
+}
+
+impl HealthDecl {
+    /// Its health contract.
+    pub fn declaration(&self) -> helios_health::Declaration {
+        helios_health::Declaration {
+            watches: self.watches.clone(),
+            levels: self.levels.clone(),
+            fixes: self.fixes.clone(),
+            every_minutes: self.every_minutes,
+            on: self.on.clone(),
+        }
+    }
+}
+
+/// The event that starts a plugin to run one of its checks.
+pub const ON_HEALTH: &str = "onHealth";
+
 /// A setting's type: the configuration contract's ([`helios_core::config`]).
 pub type SettingType = KeyType;
 
@@ -387,6 +448,9 @@ pub struct Manifest {
     pub source: InstanceDecl,
     #[serde(default)]
     pub capabilities: Vec<CapabilityDecl>,
+    /// Its problem checks (`[[health]]`), run through its process.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub health: Vec<HealthDecl>,
 }
 
 fn no_limits(limits: &helios_connect::Limits) -> bool {
@@ -482,8 +546,10 @@ impl Manifest {
         }
         p.extend(self.importer_problems());
         p.extend(self.connect_problems());
+        p.extend(self.health_problems());
         for e in &self.activation {
             let ok = match e.split_once(':') {
+                None if e == ON_HEALTH => !self.health.is_empty(),
                 None => e == "onStartup",
                 Some(("onService", s)) => self.services.iter().any(|x| x == s),
                 Some(("onCommand", c)) => self.commands.iter().any(|x| x.id == c),
@@ -520,6 +586,44 @@ impl Manifest {
             }
             if c.reason.trim().is_empty() {
                 p.push(format!("capability `{}` without a reason", c.name));
+            }
+        }
+        p
+    }
+
+    /// What keeps its checks from running: each declaration is sound
+    /// (the health contract's own problems), has a title and an id of its
+    /// own; the plugin starts on `onHealth` and gives the `health`
+    /// interface's version.
+    fn health_problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if self.health.is_empty() {
+            return p;
+        }
+        if !self.activation.iter().any(|e| e == ON_HEALTH) {
+            p.push(format!(
+                "`[[health]]` without the activation event `{ON_HEALTH}`"
+            ));
+        }
+        if !self.compat.interfaces.contains_key("health") {
+            p.push(
+                "`[[health]]` without the `health` interface version in `compat.interfaces`".into(),
+            );
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for check in &self.health {
+            p.extend(
+                check
+                    .declaration()
+                    .problems(&check.id)
+                    .into_iter()
+                    .map(|e| format!("health {e}")),
+            );
+            if check.title.trim().is_empty() {
+                p.push(format!("health check `{}`: a title", check.id));
+            }
+            if !seen.insert(check.id.as_str()) {
+                p.push(format!("health check `{}` is declared twice", check.id));
             }
         }
         p
@@ -819,6 +923,17 @@ kind = "form"
             "services = [\"import.source\"]\nlimits = { per_minute = 0 }",
             "a limit of 0 requests",
         );
+    }
+
+    #[test]
+    fn google_photos_declares_its_accounts_check_soundly() {
+        let text = include_str!("../../../plugins/sources/google-photos/helios-plugin.toml");
+        let m = Manifest::parse(text).unwrap();
+        let helios = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        assert_eq!(m.problems(helios), Vec::<String>::new());
+        let ids: Vec<&str> = m.health.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["accounts"]);
+        assert_eq!(m.health[0].declaration().fixes, ["import.reconnect"]);
     }
 
     #[test]

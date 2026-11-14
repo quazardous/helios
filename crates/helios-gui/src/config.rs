@@ -465,6 +465,7 @@ pub const QUICK: &[&str] = &[
     "system.ai.calls",
     "notifications.jobs",
     "interface.experimental.workshops",
+    helios_library::auto_import::PAUSED,
 ];
 
 /// Where each declared setting goes: scope and section.
@@ -508,6 +509,14 @@ pub const PLACES: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// The automatic imports' safeguards, on their own section of the
+/// Library page ([`helios_library::auto_import`]).
+pub const AUTOMATIC_IMPORTS: &[&str] = &[
+    helios_library::auto_import::PAUSED,
+    helios_library::auto_import::ASK_FILES,
+    helios_library::auto_import::ASK_GB,
+];
+
 /// A scope's or a section's title, by its path, in the catalogues
 /// (`cargo xtask i18n extract` reads them here).
 pub fn title(path: &str) -> Message {
@@ -529,6 +538,9 @@ pub fn title(path: &str) -> Message {
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
         "library/decisions" => Message::new("gui-settings-decisions", "Decisions"),
         "library/history" => Message::new("gui-settings-history", "History"),
+        "library/automatic-imports" => {
+            Message::new("gui-settings-automatic-imports", "Automatic imports")
+        }
         "storage/volumes" => Message::new("gui-settings-volumes", "Volumes"),
         "storage/caches" => Message::new("gui-settings-caches", "Caches"),
         "storage/catalogue" => Message::new("gui-settings-catalogue", "Catalogue"),
@@ -582,6 +594,19 @@ pub fn manifest(
             }
         });
     }
+    // Read as they change, by whichever runs the automatic imports: no
+    // restart.
+    m = m.section(
+        "library/automatic-imports",
+        &tt("library/automatic-imports"),
+        |s| {
+            for key in AUTOMATIC_IMPORTS {
+                if let Some(setting) = schema.get(key) {
+                    s.field(Field::setting(key).scopes(scopes(setting.concern)));
+                }
+            }
+        },
+    );
     let m = m.section("storage/catalogue", &tt("storage/catalogue"), |s| {
         s.description(&t(Message::new(
             "gui-settings-catalogue-about",
@@ -603,7 +628,7 @@ pub fn manifest(
         ));
     })
     .section("health/check", &tt("health/check"), |s| {
-        health_section(s, t);
+        health_section(s, plugins, t);
     })
     .section("accounts/list", &tt("accounts/list"), |s| {
         accounts_section(s, t);
@@ -739,13 +764,53 @@ fn backup_wizard(t: &dyn Fn(Message) -> String) -> Wizard {
     .verb(&t(Message::new("gui-backup-wizard-finish", "Use this strategy")))
 }
 
+/// The owners of health checks the Health page has a group for, in its
+/// order: Helios's own modules, then each plugin installed. Another
+/// owner's findings go in the page's last group, "Other checks".
+pub fn health_owners(plugins: &[plugins::PluginSettings]) -> Vec<String> {
+    let builtin = helios_health::Registry::builtin();
+    builtin
+        .by_owner()
+        .into_iter()
+        .map(|(owner, _)| owner.to_owned())
+        .chain(plugins.iter().map(|p| p.id.clone()))
+        .collect()
+}
+
+/// The words for the owner `owner` of health checks: a module's name, or
+/// a plugin's title.
+fn health_owner_title(owner: &str, plugins: &[plugins::PluginSettings]) -> Message {
+    match owner {
+        "storage" => Message::new("gui-health-owner-storage", "Storage"),
+        "library" => Message::new("gui-health-owner-library", "Library"),
+        "backup" => Message::new("gui-health-owner-backup", "Backups"),
+        "gpu" => Message::new("gui-health-owner-gpu", "GPU"),
+        "plugins" => Message::new("gui-health-owner-plugins", "Plugins"),
+        "catalogue" => Message::new("gui-health-owner-catalogue", "Catalogue"),
+        _ => Message::plain(
+            plugins
+                .iter()
+                .find(|p| p.id == owner)
+                .map_or(owner, |p| p.title.as_str()),
+        ),
+    }
+}
+
 /// The Health scope: how it stands, "Check now", and the findings of the
-/// last run (`health.findings`), the worst first, toned by their level,
-/// each with its fix ("Fix…", asked first when it changes something not
-/// easily taken back) and "Ignore"; the ignored ones last, with "Show
-/// again".
-fn health_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
-    use crate::shell::{HEALTH_CHECK_NOW, HEALTH_FINDINGS, HEALTH_FIX, HEALTH_IGNORE};
+/// last run (`health.findings`) grouped by owner (the module or the
+/// plugin whose check found them, [`health_owners`]; a group shows once
+/// it has findings), the worst first, toned by their level, each with its
+/// fix ("Fix…", asked first when it changes something not easily taken
+/// back) and "Ignore"; the ignored ones last, with "Show again".
+fn health_section(
+    s: &mut SectionBuilder<'_>,
+    plugins: &[plugins::PluginSettings],
+    t: &dyn Fn(Message) -> String,
+) {
+    use crate::shell::{
+        HEALTH_CHECK_NOW, HEALTH_FINDINGS, HEALTH_FIX, HEALTH_IGNORE, HEALTH_OTHERS,
+        health_owner_key,
+    };
     s.description(&t(Message::new(
         "gui-health-about",
         "Helios checks the backups, the disks, the GPU, the plugins and the catalogue snapshots in the background: a while after start, daily, and when a disk comes or goes.",
@@ -779,8 +844,8 @@ fn health_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             a.when("row.fix && !row.destructive")
         }
     };
-    s.list(
-        Records::command("findings", "", HEALTH_FINDINGS, "/findings", "id")
+    let list = |id: &str, pointer: &str| {
+        Records::command(id, "", HEALTH_FINDINGS, pointer, "id")
             .titles("title", Some("text"))
             .column("fixLabel", "")
             .column("ignoredText", "")
@@ -799,14 +864,21 @@ fn health_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
                     .args(json!({ "id": "${row.id}", "on": false }))
                     .when("row.ignored"),
             )
-            .empty(
-                &t(Message::new(
-                    "gui-health-not-yet",
-                    "Not checked yet: the checks run in the background.",
-                )),
-                None,
-            ),
+    };
+    for (i, owner) in health_owners(plugins).iter().enumerate() {
+        s.group(
+            &format!("owner-{i}"),
+            &t(health_owner_title(owner, plugins)),
+        );
+        s.group_when(&health_owner_key(owner));
+        s.list(list(&format!("findings-{i}"), &format!("/owners/{owner}")));
+    }
+    s.group(
+        "owner-others",
+        &t(Message::new("gui-health-owner-other", "Other checks")),
     );
+    s.group_when(HEALTH_OTHERS);
+    s.list(list("findings-others", "/others"));
 }
 
 /// The Caches page's usage: what each cache holds (`cache.stats`), per

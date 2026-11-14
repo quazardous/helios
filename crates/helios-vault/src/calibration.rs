@@ -28,15 +28,12 @@ pub const LOOK_DEFAULTS: &str = "look/defaults";
 impl<S: Store> Vault<S> {
     /// Every calibration profile, by id.
     pub fn calibration_profiles(&self) -> Result<Vec<(String, Value)>, String> {
-        self.store.lock().expect("store lock").documents(PROFILES)
+        self.read(|s| s.documents(PROFILES))
     }
 
     /// One calibration profile.
     pub fn calibration_profile(&self, id: &str) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(PROFILES, id)
+        self.read(|s| s.document(PROFILES, id))
     }
 
     /// Keeps `profile` under `id` (or with `None` removes it), answering
@@ -51,15 +48,12 @@ impl<S: Store> Vault<S> {
 
     /// A camera's default, by the camera's key.
     pub fn calibration_default(&self, camera: &str) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(DEFAULTS, camera)
+        self.read(|s| s.document(DEFAULTS, camera))
     }
 
     /// Every camera default, by camera key.
     pub fn calibration_defaults(&self) -> Result<Vec<(String, Value)>, String> {
-        self.store.lock().expect("store lock").documents(DEFAULTS)
+        self.read(|s| s.documents(DEFAULTS))
     }
 
     /// Keeps `rule` as the default of camera `camera` (or with `None`

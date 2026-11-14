@@ -143,10 +143,12 @@ pub fn command<S: Store>(
     params: &Value,
     origin: &str,
 ) -> Result<(Value, Changes), String> {
-    let Some(spec) = specs()
-        .into_iter()
-        .find(|s| s.id == id && s.id != library::IMPORT && !cursor::handles(s.id.as_str()))
-    else {
+    let Some(spec) = specs().into_iter().find(|s| {
+        s.id == id
+            && s.id != library::IMPORT
+            && s.id != library::AGAIN
+            && !cursor::handles(s.id.as_str())
+    }) else {
         return Err(format!("no command `{id}` on the vault"));
     };
     let mut checked = params.clone();
@@ -175,10 +177,10 @@ fn run_on<S: Store>(
 }
 
 /// Whether `origin` names who runs a call: `user`, `cli`, `control`,
-/// `agent:NAME` or `script:NAME`.
+/// `midi`, `agent:NAME`, `script:NAME` or `remote:NAME`.
 fn is_origin(origin: &str) -> bool {
-    matches!(origin, "user" | "cli" | "control")
-        || ["agent:", "script:"]
+    matches!(origin, "user" | "cli" | "control" | "midi")
+        || ["agent:", "script:", "remote:"]
             .iter()
             .any(|p| origin.strip_prefix(p).is_some_and(|name| !name.is_empty()))
 }
@@ -321,10 +323,18 @@ impl<S: Store + Send + 'static> VaultService<S> {
     }
 
     fn run(&self, id: &str, params: &Value, call: &Call) -> Result<Value, String> {
-        if id != library::IMPORT {
+        let origin = origin_of(params).to_string();
+        // An import of the history run again is that import, as asked now.
+        let again;
+        let params = if id == library::AGAIN {
+            again = library::again_params(&self.vault, params)?;
+            &again
+        } else if id != library::IMPORT {
             return run_on(&self.vault, &self.bus, id, params, origin_of(params))
                 .map(|(answer, _)| answer);
-        }
+        } else {
+            params
+        };
         let paths: Vec<PathBuf> = params["paths"]
             .as_array()
             .into_iter()
@@ -332,7 +342,8 @@ impl<S: Store + Send + 'static> VaultService<S> {
             .filter_map(Value::as_str)
             .map(PathBuf::from)
             .collect();
-        let options = library::import_options(params, Some(call.cancel_flag()))?;
+        let mut options = library::import_options(params, Some(call.cancel_flag()))?;
+        options.origin = Some(origin);
         let mut files = Vec::new();
         let report = helios_library::import::import(
             &self.vault,
@@ -423,7 +434,7 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
     /// An import stops before its next file, a cursor window between
     /// chunks of rows.
     fn cancellable(&self, method: &str) -> bool {
-        method == library::IMPORT || method == "cursor.window"
+        method == library::IMPORT || method == library::AGAIN || method == "cursor.window"
     }
 }
 
@@ -548,10 +559,18 @@ mod tests {
 
     #[test]
     fn origins_are_checked() {
-        for ok in ["user", "cli", "control", "agent:mcp", "script:x"] {
+        for ok in [
+            "user",
+            "cli",
+            "control",
+            "midi",
+            "agent:mcp",
+            "script:x",
+            "remote:phone",
+        ] {
             assert!(is_origin(ok), "{ok}");
         }
-        for bad in ["", "agent:", "robot"] {
+        for bad in ["", "agent:", "remote:", "robot"] {
             assert!(!is_origin(bad), "{bad}");
         }
     }

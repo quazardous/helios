@@ -1,6 +1,8 @@
-//! `cargo xtask check-commits [--full] [RANGE]`: every commit of a series
-//! builds, passes clippy and the tests it touches, so `git bisect` keeps
-//! working.
+//! `cargo xtask check-commits [--full] [--first-parent] [RANGE]`: every
+//! commit of a series builds, passes clippy and the tests it touches, so
+//! `git bisect --first-parent` keeps working. With `--first-parent` only
+//! the series' first-parent commits are walked: on `next`, each merge of a
+//! pull request, not the commits inside it (owner, 2026-11-13).
 //!
 //! The range is `BASE..HEAD`, or `BASE` alone for `BASE..HEAD`; without one
 //! it is the branch's upstream (`@{upstream}..HEAD`), else
@@ -11,9 +13,9 @@
 //! The last commit of the range is left out: the full gate runs on it
 //! anyway. Of the others, the [`CAP`] newest are walked, oldest first, and
 //! the older ones are listed as skipped. Each commit is checked out in one
-//! detached worktree under `target/check-commits/`, removed at the end, so
-//! the caller's checkout is never touched, and every commit builds in the
-//! same target directory, incrementally. Per commit:
+//! detached worktree in the system's temporary folder ([`worktree_dir`]),
+//! removed at the end, so the caller's checkout is never touched, and every
+//! commit builds in the same target directory, incrementally. Per commit:
 //!
 //! 1. `cargo build --workspace --all-targets`
 //! 2. `cargo clippy --workspace --all-targets -- -D warnings`
@@ -34,7 +36,7 @@
 //! `GITHUB_STEP_SUMMARY` when that is set.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Instant;
 
@@ -57,7 +59,18 @@ pub const FAST_TESTS: &str = "not (package(helios-parity) \
     | (package(helios-gui) & kind(test)) \
     | (package(helios-module-masks) & binary(stress)))";
 
-const WORKTREE: &str = "target/check-commits/worktree";
+/// The walk's worktree, outside the checkout: cargo, run in a folder,
+/// merges every `.cargo/config.toml` above it, so a worktree inside the
+/// checkout would mix the checkout's configuration with the commit's (an
+/// alias that changed type between the two fails every cargo command).
+/// Named after the checkout, so two checkouts walk side by side and a walk
+/// finds what a previous one left.
+fn worktree_dir(root: &Path) -> PathBuf {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut hasher);
+    std::env::temp_dir().join(format!("helios-check-commits-{:016x}", hasher.finish()))
+}
 
 /// A range as given on the command line: `(base, head)`.
 pub fn parse_range(arg: Option<&str>, upstream: Option<&str>) -> Option<(String, String)> {
@@ -326,7 +339,15 @@ fn summary(walked: &[Outcome], skipped: &[String], full: bool) -> String {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
-    let (full, arg) = parse_args(args)?;
+    // `--first-parent`: walk only the series' first-parent commits (on
+    // `next`, each merge), not the commits inside every merged branch.
+    let first_parent = args.contains(&"--first-parent");
+    let args: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| *a != "--first-parent")
+        .collect();
+    let (full, arg) = parse_args(&args)?;
     let upstream = git(
         root,
         &[
@@ -338,27 +359,31 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     )
     .ok();
     let (base, head) = parse_range(arg, upstream.as_deref())?;
-    Some(match walk(root, &base, &head, full) {
+    Some(match walk(root, &base, &head, full, first_parent) {
         Ok(code) => code,
         Err(e) => crate::fail(&[e]),
     })
 }
 
-fn walk(root: &Path, base: &str, head: &str, full: bool) -> Result<ExitCode, String> {
+fn walk(
+    root: &Path,
+    base: &str,
+    head: &str,
+    full: bool,
+    first_parent: bool,
+) -> Result<ExitCode, String> {
     let head = git(
         root,
         &["rev-parse", "--verify", &format!("{head}^{{commit}}")],
     )?;
     let base = resolve_base(root, base, &head)?;
-    let listed = git(
-        root,
-        &[
-            "rev-list",
-            "--reverse",
-            "--parents",
-            &format!("{base}..{head}"),
-        ],
-    )?;
+    let range = format!("{base}..{head}");
+    let mut list = vec!["rev-list", "--reverse", "--parents"];
+    if first_parent {
+        list.push("--first-parent");
+    }
+    list.push(&range);
+    let listed = git(root, &list)?;
     let commits = parse_history(&listed);
     let (walk, skipped) = plan_walk(&commits, CAP);
     let oneline = |sha: &str| {
@@ -381,7 +406,7 @@ fn walk(root: &Path, base: &str, head: &str, full: bool) -> Result<ExitCode, Str
 
     let mut results = Vec::new();
     if !walk.is_empty() {
-        let dir = root.join(WORKTREE);
+        let dir = worktree_dir(root);
         remove_worktree(root, &dir);
         let dir_s = dir.to_string_lossy().to_string();
         git(
@@ -512,6 +537,23 @@ mod tests {
 
     fn r(base: &str, head: &str) -> (String, String) {
         (base.into(), head.into())
+    }
+
+    #[test]
+    fn the_walk_worktree_is_outside_the_checkout() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let dir = worktree_dir(root);
+        assert!(
+            !dir.starts_with(root),
+            "{} is in the checkout",
+            dir.display()
+        );
+        assert_eq!(
+            dir,
+            worktree_dir(root),
+            "the same checkout, the same worktree"
+        );
+        assert_ne!(dir, worktree_dir(&root.join("other")));
     }
 
     #[test]

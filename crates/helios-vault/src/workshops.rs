@@ -23,15 +23,12 @@ pub const RUNS: &str = "workshops/runs";
 impl<S: Store> Vault<S> {
     /// A session's record, by its id.
     pub fn workshop_session(&self, id: &str) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(SESSIONS, id)
+        self.read(|s| s.document(SESSIONS, id))
     }
 
     /// Every session's record, by id.
     pub fn workshop_sessions(&self) -> Result<Vec<(String, Value)>, String> {
-        self.store.lock().expect("store lock").documents(SESSIONS)
+        self.read(|s| s.documents(SESSIONS))
     }
 
     /// Writes (or with `None` drops) a session's record.
@@ -41,10 +38,7 @@ impl<S: Store> Vault<S> {
 
     /// A workshop version's decision book (`workshop`: id@version).
     pub fn workshop_book(&self, workshop: &str) -> Result<Option<Value>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(BOOKS, workshop)
+        self.read(|s| s.document(BOOKS, workshop))
     }
 
     /// Writes a workshop version's decision book.
@@ -54,7 +48,7 @@ impl<S: Store> Vault<S> {
 
     /// A run's record, by the run's id.
     pub fn workshop_run(&self, run: &str) -> Result<Option<Value>, String> {
-        self.store.lock().expect("store lock").document(RUNS, run)
+        self.read(|s| s.document(RUNS, run))
     }
 
     /// Writes (or, with `None`, drops) a run's record.

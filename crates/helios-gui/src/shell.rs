@@ -52,8 +52,9 @@ pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{
     BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND,
-    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, PAGE as HEALTH_PAGE,
-    findings_answer as health_findings_answer,
+    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE,
+    OTHERS as HEALTH_OTHERS, PAGE as HEALTH_PAGE, findings_answer as health_findings_answer,
+    owner_key as health_owner_key,
 };
 pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;
@@ -91,10 +92,12 @@ pub use import_accounts::Imported as PickImported;
 pub use import_accounts::LibraryFolder;
 mod import_auto;
 mod import_choices;
+mod import_history;
 mod import_sources;
 mod import_window;
 mod import_wizard;
 mod lifetime;
+pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use lifetime::{Closing, LastWindow};
 mod storage;
@@ -207,6 +210,9 @@ enum Action {
     ImportSource(Value, Origin),
     /// Open the import window (`library.importWindow`'s arguments).
     ImportWindow(Value),
+    /// Pause or resume the automatic imports
+    /// (`library.importAutomatic.pause`'s arguments).
+    PauseAutomaticImports(Value),
     /// Open the Calibration focus (`calibrate.open`'s arguments).
     Calibrate(Value),
     /// `import.addSource` or `import.reconnect`, with its arguments.
@@ -227,6 +233,11 @@ enum Action {
     /// Import through an importer plugin (`library.importWith`'s
     /// arguments).
     ImportWith(Value, Origin),
+    /// List the import history (`import.history.list`'s arguments).
+    ImportHistory(Value),
+    /// Run an import of the history again (`import.history.again`'s
+    /// arguments), as whom.
+    ImportAgain(Value, Origin),
     /// Export photos (`library.export`'s arguments), as whom.
     Export(Value, Origin),
     /// Show a folder in the file manager (`library.openFolder`'s
@@ -624,6 +635,11 @@ pub struct Shell {
     lifetime: lifetime::Lifetime,
     /// What the node's endpoint asks of the windows' commands.
     window_asks: Option<crate::window_commands::Asks>,
+    /// The window group the shell's toasts go to while it answers, in
+    /// the main window's pass, what another window asked (the import
+    /// window's Import, Forget, Storage…); `None`: the window being drawn
+    /// or commanded, as egui-pop says.
+    toasts_in: Option<egui::ViewportId>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
 }
@@ -905,7 +921,7 @@ impl Shell {
             subworkspaces,
             agent_state,
             controls,
-            plugin_settings: _,
+            plugin_settings,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -959,7 +975,7 @@ impl Shell {
             duplicates: Rc::default(),
             imports: Vec::new(),
             no_library: None,
-            health: health::HealthPage::default(),
+            health: health::HealthPage::new(plugin_settings),
             storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
@@ -1001,6 +1017,7 @@ impl Shell {
             calibration: calibrate_focus::CalibrationFocus::default(),
             lifetime: lifetime::Lifetime::default(),
             window_asks: None,
+            toasts_in: None,
             notes: Vec::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
@@ -1739,8 +1756,8 @@ impl Shell {
             Some((_, gpu)) if gpu.handles().device == rs.device => {
                 self.focus.viewport.borrow().attach_gpu(gpu);
             }
-            _ => eprintln!(
-                "helios-gui: the window draws on another device than the process's GPU: \
+            _ => log::warn!(
+                "the window draws on another device than the process's GPU: \
                  the viewport computes on the CPU"
             ),
         }
@@ -2367,6 +2384,27 @@ impl Shell {
             self.notify_failure(Level::Warning, e.clone(), report);
         }
         result
+    }
+
+    /// Opens the Settings on a page (`admin.open` on `path`: Storage, the
+    /// health check). Popped in, the Settings are drawn over the main
+    /// window only: asked from another window (the import window's
+    /// Storage…), the main window comes to the front, as it does when the
+    /// import window closes. In their own window, that window shows.
+    pub(super) fn open_settings_page(&mut self, path: &str) -> Result<Value, String> {
+        let asked = self.core.app.handle().current_window_group();
+        let out = self.run(
+            egui_pop::api::admin::CMD_OPEN.as_str(),
+            json!({ "path": path }),
+            Origin::User,
+        )?;
+        let app = self.core.app.handle();
+        if asked != egui::ViewportId::ROOT && !egui_pop::api::admin::in_window(app) {
+            let ctx = app.egui();
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        Ok(out)
     }
 
     fn declare_commands(w: &Wiring<'_>, panels: &[PanelSpec]) {
@@ -3130,6 +3168,14 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                import_auto::PAUSE,
+                "Pause automatic imports, or resume them (`on`: true pauses, false resumes; without it, toggles)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::PauseAutomaticImports(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 calibrate_focus::COMMAND,
                 "Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)",
                 "Calibration",
@@ -3170,6 +3216,23 @@ impl Shell {
                 "Library",
             ),
             Box::new(|a, origin| Ok(Action::ImportWith(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                import_history::LIST,
+                "List the import history, newest first (`limit`): each import's sources, choices, counts, when and who asked",
+                "Library",
+            )
+            .read_only(),
+            Box::new(|a, _| Ok(Action::ImportHistory(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                import_history::AGAIN,
+                "Import again (`id`: an import of `import.history.list`): the same sources with the same choices; photos the library has are skipped as duplicates",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::ImportAgain(a.clone(), origin.clone()))),
         );
         // The main window's commands, greyed in the other windows' menus
         // (docs/design/windows.md, section 7).
@@ -3854,10 +3917,18 @@ impl Shell {
     }
 
     /// Shows a notice, in the shell's language: the status bar always, a
-    /// toast unless it is plain information. Kept in `notes` too.
+    /// toast unless it is plain information. Kept in `notes` too, and
+    /// written to the log file in English (target `helios`).
     /// An error offers its details (see [`Shell::notify_failure`]).
     pub fn notify(&mut self, level: Level, text: impl Into<Message>) {
         let message = text.into();
+        crate::log_panel::write(level, &message);
+        self.notify_unlogged(level, message);
+    }
+
+    /// [`Shell::notify`] for a message the Log panel has already taken,
+    /// and so written to the log file.
+    pub(crate) fn notify_unlogged(&mut self, level: Level, message: Message) {
         let report = (level == Level::Error)
             .then(|| crate::report::Context::default().cause(message.english.clone()));
         self.notify_with(level, message, report);
@@ -3871,7 +3942,9 @@ impl Shell {
         text: impl Into<Message>,
         report: crate::report::Context,
     ) {
-        self.notify_with(level, text.into(), Some(report));
+        let message = text.into();
+        crate::log_panel::write(level, &message);
+        self.notify_with(level, message, Some(report));
     }
 
     fn notify_with(
@@ -3900,7 +3973,10 @@ impl Shell {
             (t, _) => t,
         };
         if let (Some(t), Some(toasts)) = (toast, self.core.app.handle().service(&TOASTS)) {
-            toasts.notify(t);
+            match self.toasts_in {
+                Some(group) => toasts.notify_in(group, t),
+                None => toasts.notify(t),
+            };
         }
         self.core.notices.push(Notice {
             level,
@@ -5930,6 +6006,7 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
+            Action::PauseAutomaticImports(args) => return self.pause_automatic_imports(&args),
             Action::Calibrate(args) => {
                 self.open_calibration(&args);
                 return Ok(Value::Null);
@@ -5945,6 +6022,8 @@ impl Shell {
             Action::Storage(args) => return self.open_storage(&args),
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
+            Action::ImportHistory(args) => return self.import_history_list(&args),
+            Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ToggleStack => self

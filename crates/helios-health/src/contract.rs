@@ -1,12 +1,14 @@
 //! The health contract: what a check declares beside its id and title,
 //! so the [`Registry`](crate::Registry) can refuse an unsound one and the
-//! runner can hold each run to it. A module (or, later, a plugin) owns
+//! runner can hold each run to it. A module or a plugin owns
 //! its checks and declares, for each:
 //!
 //! - what it watches, in English, for people and tools reading the
 //!   declarations;
 //! - the [`Level`]s its findings may have;
-//! - the fix commands its findings may offer.
+//! - the fix commands its findings may offer;
+//! - when it runs: how often ([`Declaration::every_minutes`], Helios's
+//!   own period, daily, when it says nothing) and on which [`Event`]s.
 //!
 //! [`Declaration::problems`] lists what is wrong with a declaration (a
 //! check with any is refused when added, with its reasons), and
@@ -18,8 +20,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Finding, Level};
 
-/// What a check declares: what it watches, the levels it may raise and
-/// the fix commands it may offer.
+/// The least a check may ask between two runs, in minutes.
+pub const MIN_EVERY_MINUTES: u32 = 5;
+
+/// An event that runs a check at once, besides its clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Event {
+    /// A volume came or went (a disk plugged in or out, a card).
+    Volumes,
+}
+
+/// What a check declares: what it watches, the levels it may raise, the
+/// fix commands it may offer, and when it runs.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Declaration {
     /// What it watches, in English (one sentence).
@@ -29,6 +42,13 @@ pub struct Declaration {
     /// The commands its findings' fixes may run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<String>,
+    /// How often it runs again, in minutes; none: Helios's own period
+    /// (daily).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every_minutes: Option<u32>,
+    /// The events that run it at once, besides its clock.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on: Vec<Event>,
 }
 
 impl Declaration {
@@ -50,6 +70,26 @@ impl Declaration {
     pub fn fixes(mut self, commands: &[&str]) -> Self {
         self.fixes = commands.iter().map(|c| (*c).to_owned()).collect();
         self
+    }
+
+    /// Runs again every `minutes`.
+    #[must_use]
+    pub fn every(mut self, minutes: u32) -> Self {
+        self.every_minutes = Some(minutes);
+        self
+    }
+
+    /// Runs at once on each of `events` too.
+    #[must_use]
+    pub fn on(mut self, events: &[Event]) -> Self {
+        self.on = events.to_vec();
+        self
+    }
+
+    /// How long it waits between two runs; none: Helios's own period.
+    pub fn period(&self) -> Option<std::time::Duration> {
+        self.every_minutes
+            .map(|m| std::time::Duration::from_secs(u64::from(m) * 60))
     }
 
     /// What is wrong with the declaration of the check `id`; empty: it
@@ -77,6 +117,18 @@ impl Declaration {
                 ));
             } else if self.fixes[..i].contains(fix) {
                 p.push(format!("fix `{fix}` is named twice"));
+            }
+        }
+        if let Some(m) = self.every_minutes
+            && m < MIN_EVERY_MINUTES
+        {
+            p.push(format!(
+                "`every_minutes` is {m}: at least {MIN_EVERY_MINUTES}"
+            ));
+        }
+        for (i, event) in self.on.iter().enumerate() {
+            if self.on[..i].contains(event) {
+                p.push(format!("`on` names {event:?} twice"));
             }
         }
         p.into_iter()
@@ -142,6 +194,8 @@ mod tests {
         Declaration::new("The disks Helios writes to")
             .levels(&[Level::Ok, Level::Warning])
             .fixes(&["library.storage"])
+            .every(60)
+            .on(&[Event::Volumes])
     }
 
     #[test]
@@ -154,9 +208,13 @@ mod tests {
             "watches": "The disks Helios writes to",
             "levels": ["ok", "warning"],
             "fixes": ["library.storage"],
+            "every_minutes": 60,
+            "on": ["volumes"],
         }))
         .unwrap();
         assert_eq!(read, declared());
+        assert_eq!(read.period(), Some(std::time::Duration::from_hours(1)));
+        assert_eq!(Declaration::new("x").period(), None, "Helios's own");
     }
 
     #[test]
@@ -165,6 +223,8 @@ mod tests {
             watches: " ".into(),
             levels: vec![Level::Ok, Level::Ok],
             fixes: vec!["open folder".into(), "a.b".into(), "a.b".into()],
+            every_minutes: Some(1),
+            on: vec![Event::Volumes, Event::Volumes],
         };
         assert_eq!(
             bad.problems("Free Space"),
@@ -174,6 +234,8 @@ mod tests {
                 "check `Free Space`: `levels` names Ok twice",
                 "check `Free Space`: fix `open folder`: a command id such as `library.storage`",
                 "check `Free Space`: fix `a.b` is named twice",
+                "check `Free Space`: `every_minutes` is 1: at least 5",
+                "check `Free Space`: `on` names Volumes twice",
             ]
         );
         assert_eq!(

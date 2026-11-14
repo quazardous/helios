@@ -245,3 +245,50 @@ fn stacks_show_collapsed_and_expand_on_demand() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The stacks and the proposals waiting are read through the desktop's
+/// node and kept in its read cache. A stack made by another writer of
+/// this process drops them; they are read again off the frame, and a
+/// coming frame shows the stack.
+#[test]
+fn stacks_and_proposals_are_read_through_the_node() {
+    let (dir, mut shell, mut persist, burst, _) = setup("through-node");
+    let reader = persist.reader();
+    for method in ["library.stacks.list", "library.stacks.decisions"] {
+        assert!(
+            reader.cache().get(method, &json!({})).is_some(),
+            "{method} read through the node"
+        );
+    }
+    persist
+        .vault()
+        .create_stack(&burst, Some(burst[1]), "test", 1)
+        .unwrap();
+    let stacked = |shell: &Shell| {
+        shell
+            .library()
+            .entries
+            .iter()
+            .find(|e| e.id == burst[2].hex())
+            .unwrap()
+            .stack
+            .is_some()
+    };
+    persist.frame(&mut shell, 1.0);
+    assert!(
+        persist.busy(),
+        "the stacks are read on a thread of their own"
+    );
+    assert!(!stacked(&shell), "not shown yet");
+    persist.settle(&mut shell);
+    assert!(stacked(&shell), "a coming frame shows the stack");
+    assert!(
+        reader
+            .cache()
+            .get("library.stacks.list", &json!({}))
+            .is_some(),
+        "read again through the node"
+    );
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

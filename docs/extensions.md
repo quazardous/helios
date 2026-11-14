@@ -176,6 +176,55 @@ account's, the same step shows the account's own settings
 when the wizard ends: the values on its document, its secrets in the
 keyring under the account's id (a secret set shows as a mask).
 
+## Health checks
+
+A plugin declares its problem checks (Help > Health check) through the
+same health contract as Helios's own modules (`helios_health::Declaration`):
+each `[[health]]` gives its id, its title, what it watches, the levels its
+findings may have, the fix commands they may offer, and when it runs.
+
+```toml
+activation = ["onService:import.source", "onHealth"]
+
+[compat]
+interfaces = { protocol = 1, "import.source" = 1, health = 1 }
+
+[[health]]
+id = "accounts"                         # runs as `<plugin id>.accounts`
+title = "Google Photos accounts"
+watches = "Each Google Photos account still signs in"
+levels = ["ok", "warning"]              # ok, warning, problem
+fixes = ["import.reconnect"]            # the commands its fixes may run
+every_minutes = 360                     # runs every 6 hours (at least 5); daily when absent
+on = ["volumes"]                        # and at once when a volume comes or goes
+```
+
+Every check runs a while after Helios starts, then on its own clock
+(`every_minutes`, daily without it) and at once on the events it names
+(`volumes`: a disk or a card plugged in or out). "Check now" runs them
+all. Each check's last findings are kept apart, so a run of some checks
+leaves the others' as they were; Help > Health check groups them by
+owner: Helios's modules, then each plugin.
+
+Helios registers each check under the plugin (its owner, the plugin's
+id) and runs it with the others: it starts the plugin on `onHealth` and
+calls `health.check` with `{check, accounts?, config}`, waiting 20 s at
+most. `accounts` comes to a plugin with `[[connect]]`: its connector's
+accounts, each `{id, label, state, auth}`, `auth` an access token Helios
+renewed, or null when it has none to give. The plugin answers
+`{findings}`, each `{about?, level, message, detail?, fix?}`, a message
+as `{key, english, args}` and a fix as `{command, args, label}`; a
+finding's id is the check's, then `/about`. A disabled plugin, or one
+waiting for a permission, is not started and its checks say nothing (the
+plugins' own check says why). A plugin that does not start, crashes,
+does not answer in time, answers what is not findings, or a finding
+outside its declaration (a level or a fix it does not declare), gives
+that check's "failed" problem in place of its findings. A declaration
+that is unsound (an id that is not lowercase, nothing watched, no
+levels, a level twice, a fix that is not a command id, `every_minutes`
+under 5, an event twice, no title, an id twice) refuses the plugin with its reasons, as a bad setting does; so do
+`[[health]]` without `onHealth` or without the `health` interface.
+
 ## Packaging and trust
 
 - A signed archive: the manifest, the plugin's code, its modules.

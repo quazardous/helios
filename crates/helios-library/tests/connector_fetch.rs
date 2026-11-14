@@ -330,6 +330,37 @@ fn the_remote_source_is_a_volume_and_its_items_sightings_on_it() {
 }
 
 #[test]
+fn an_import_from_a_connector_leaves_its_record_in_the_history() {
+    let p = Place::new("history");
+    let a = png(4);
+    let fake = Fake::new(Originals::Exact, &[("a", a.clone())]);
+    let vault = Vault::new(MemoryStore::default());
+    let mut asked = options(&p.0);
+    asked.origin = Some("user".into());
+    run(
+        &vault,
+        &fake,
+        "me@example.org",
+        vec![item("a", &a, None)],
+        true,
+        &asked,
+    );
+    let records = helios_library::import_history::list(&vault, None).unwrap();
+    assert_eq!(records.len(), 1, "{records:?}");
+    let r = &records[0];
+    let remote = r.remote.as_ref().expect("the connector's source");
+    assert_eq!(
+        (remote.connector.as_str(), remote.id.as_str()),
+        ("fake", "me@example.org")
+    );
+    assert_eq!((r.origin.as_str(), r.counts.added), ("user", 1));
+    assert!(r.sources.is_empty());
+    // It runs again from the import window, where the source is listed
+    // or picked anew.
+    assert!(r.params().is_err());
+}
+
+#[test]
 fn a_fetch_cut_halfway_goes_on_from_the_bytes_landed() {
     let p = Place::new("resume");
     let a = png(4);

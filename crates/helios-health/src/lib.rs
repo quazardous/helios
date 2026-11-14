@@ -12,15 +12,18 @@
 //! - Each check declares what it watches, the levels it may raise and
 //!   the fixes it may offer ([`contract::Declaration`]); its findings are
 //!   held to it.
-//! - The [`Registry`] holds the checks by owner (the module, later the
-//!   plugin, that declares them): Helios's own, each module listing its
+//! - The [`Registry`] holds the checks by owner (the module or the
+//!   plugin that declares them): Helios's own, each module listing its
 //!   checks ([`checks`], [`backup`], [`gpu`], [`plugins`],
-//!   [`snapshots`]), and later those plugins bring (the seam is
-//!   [`Registry::add`], which refuses an unsound declaration).
-//! - [`Findings`] keeps the last findings in memory beside the
-//!   [`Ignored`] list, saved in a small JSON file and undoable.
-//! - [`runner`] runs every check as one background job, at start (after a
-//!   delay), daily and when a volume comes or goes.
+//!   [`snapshots`]), and those plugins declare in their manifest, run
+//!   through their process (`helios_plugin::health`); the seam is
+//!   [`Registry::add`], which refuses an unsound declaration.
+//! - [`Findings`] keeps the last findings in memory per source (each
+//!   check, with its owner) beside the [`Ignored`] list, saved in a small
+//!   JSON file and undoable.
+//! - [`runner`] runs the checks as background jobs: all of them a while
+//!   after start, then each as its declaration says (how often, on which
+//!   [`Event`]s).
 
 pub mod backup;
 pub mod checks;
@@ -39,7 +42,7 @@ use helios_storage::Volume;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
-pub use contract::Declaration;
+pub use contract::{Declaration, Event};
 
 /// How a finding stands, the worst last.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -145,9 +148,10 @@ pub trait Check: Send + Sync {
 }
 
 /// The checks the runner runs, in order, each with its owner: the module
-/// (later the plugin) that declares it. Helios's own are
-/// [`Registry::builtin`]; a plugin's will be added through
-/// [`Registry::add`] once the plugin protocol carries them.
+/// or the plugin that declares it. Helios's own are
+/// [`Registry::builtin`]; a plugin's are added through [`Registry::add`]
+/// by the plugin host (`helios_plugin::health`), its owner the plugin's
+/// id.
 #[derive(Clone, Default)]
 pub struct Registry {
     checks: Vec<Arc<dyn Check>>,
@@ -219,6 +223,11 @@ impl Registry {
         &self.checks
     }
 
+    /// Each check with its owner, in order.
+    pub fn owned(&self) -> impl Iterator<Item = (&str, &Arc<dyn Check>)> {
+        self.owners.iter().map(String::as_str).zip(&self.checks)
+    }
+
     /// The owner of the check `id`.
     pub fn owner(&self, id: &str) -> Option<&str> {
         let at = self.checks.iter().position(|c| c.id() == id)?;
@@ -253,7 +262,10 @@ pub fn run_one(check: &Arc<dyn Check>, ctx: &Context) -> Vec<Finding> {
     let declaration = check.declaration();
     match found {
         Ok(found) => {
-            let breach = found.iter().find_map(|f| declaration.breach(check.id(), f));
+            let breach = found
+                .iter()
+                .filter(|f| !(is_failure(f) && f.check == check.id()))
+                .find_map(|f| declaration.breach(check.id(), f));
             match breach {
                 None => found,
                 Some(why) => {
@@ -268,17 +280,32 @@ pub fn run_one(check: &Arc<dyn Check>, ctx: &Context) -> Vec<Finding> {
 
 /// The problem a check that failed gives in place of its findings.
 fn crashed(check: &Arc<dyn Check>) -> Finding {
+    failed(check.id(), check.title())
+}
+
+/// The key of the problem a check that failed gives.
+pub const FAILED: &str = "health-check-crashed";
+
+/// The problem the check `id`, named `title`, gives when it failed (it
+/// panicked, its plugin crashed or did not answer in time) in place of
+/// its findings. A check may always give it, whatever it declares.
+pub fn failed(id: &str, title: Message) -> Finding {
     Finding::new(
-        check.id(),
+        id,
         "",
         Level::Problem,
-        Message::new("health-check-crashed", "The check { $check } failed")
-            .with("check", check.title()),
+        Message::new("health-check-crashed", "The check { $check } failed").with("check", title),
         Message::new(
             "health-check-crashed-detail",
             "It stopped before it could say anything.",
         ),
     )
+}
+
+/// Whether `finding` is the problem of its check having failed
+/// ([`failed`]).
+fn is_failure(finding: &Finding) -> bool {
+    finding.level == Level::Problem && finding.message.key == FAILED && finding.id == finding.check
 }
 
 /// The findings the user chose to ignore, by id, kept in a small JSON
@@ -336,10 +363,20 @@ impl Ignored {
     }
 }
 
-/// The last findings, and the ignored list.
+/// One check's last findings, with its owner (the module or the plugin
+/// that declares it).
+#[derive(Clone, Debug)]
+pub struct Source {
+    pub owner: String,
+    pub check: String,
+    pub findings: Vec<Finding>,
+}
+
+/// The last findings, kept per source (each check, with its owner): a
+/// run of some checks only replaces theirs. And the ignored list.
 #[derive(Clone, Debug, Default)]
 pub struct Findings {
-    all: Vec<Finding>,
+    sources: Vec<Source>,
     pub ignored: Ignored,
     /// Whether a run came through yet.
     ran: bool,
@@ -353,22 +390,55 @@ impl Findings {
         }
     }
 
-    /// Takes a run's findings in place of the last ones.
-    pub fn replace(&mut self, findings: Vec<Finding>) {
-        self.all = findings;
+    /// Takes `owner`'s check `check`'s findings in place of its last
+    /// ones; a check not seen yet comes after the others.
+    pub fn put(&mut self, owner: &str, check: &str, findings: Vec<Finding>) {
+        match self.sources.iter_mut().find(|s| s.check == check) {
+            Some(s) => {
+                owner.clone_into(&mut s.owner);
+                s.findings = findings;
+            }
+            None => self.sources.push(Source {
+                owner: owner.to_owned(),
+                check: check.to_owned(),
+                findings,
+            }),
+        }
         self.ran = true;
+    }
+
+    /// Forgets the findings of the checks `keep` refuses (no longer
+    /// registered).
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.sources.retain(|s| keep(&s.check));
     }
 
     pub fn ran(&self) -> bool {
         self.ran
     }
 
+    /// Each check's findings, in the order the checks first ran.
+    pub fn sources(&self) -> &[Source] {
+        &self.sources
+    }
+
+    /// The owner of the check that found `finding`.
+    pub fn owner(&self, finding: &Finding) -> Option<&str> {
+        self.sources
+            .iter()
+            .find(|s| s.check == finding.check)
+            .map(|s| s.owner.as_str())
+    }
+
+    fn all(&self) -> impl Iterator<Item = &Finding> {
+        self.sources.iter().flat_map(|s| &s.findings)
+    }
+
     /// The findings not ignored, the worst first (in run order within a
     /// level).
     pub fn shown(&self) -> Vec<&Finding> {
         let mut shown: Vec<&Finding> = self
-            .all
-            .iter()
+            .all()
             .filter(|f| !self.ignored.contains(&f.id))
             .collect();
         shown.sort_by_key(|f| std::cmp::Reverse(f.level));
@@ -377,8 +447,7 @@ impl Findings {
 
     /// The findings ignored that the last run still found.
     pub fn ignored_findings(&self) -> Vec<&Finding> {
-        self.all
-            .iter()
+        self.all()
             .filter(|f| self.ignored.contains(&f.id))
             .collect()
     }
@@ -415,16 +484,66 @@ mod tests {
     fn the_worst_counts_warnings_and_problems_only() {
         let mut f = Findings::default();
         assert_eq!(f.worst(), None);
-        f.replace(vec![finding("a", Level::Ok)]);
+        f.put("o", "test", vec![finding("a", Level::Ok)]);
         assert_eq!(f.worst(), None, "all ok: no badge");
-        f.replace(vec![
-            finding("a", Level::Ok),
-            finding("b", Level::Warning),
-            finding("c", Level::Problem),
-        ]);
+        f.put(
+            "o",
+            "test",
+            vec![
+                finding("a", Level::Ok),
+                finding("b", Level::Warning),
+                finding("c", Level::Problem),
+            ],
+        );
         assert_eq!(f.worst(), Some((Level::Problem, 2)));
         let shown: Vec<&str> = f.shown().iter().map(|f| f.id.as_str()).collect();
         assert_eq!(shown, ["test/c", "test/b", "test/a"]);
+    }
+
+    #[test]
+    fn findings_are_kept_per_source_and_a_partial_run_replaces_only_its_own() {
+        let found = |check: &str, about: &str, level| {
+            Finding::new(
+                check,
+                about,
+                level,
+                Message::plain(about),
+                Message::plain(""),
+            )
+        };
+        let mut f = Findings::default();
+        assert!(!f.ran());
+        f.put(
+            "disks",
+            "disks.space",
+            vec![found("disks.space", "a", Level::Warning)],
+        );
+        f.put(
+            "net",
+            "net.cable",
+            vec![found("net.cable", "b", Level::Problem)],
+        );
+        assert!(f.ran());
+        // A run of one check only: the other's findings stay.
+        f.put(
+            "disks",
+            "disks.space",
+            vec![found("disks.space", "a", Level::Ok)],
+        );
+        let ids: Vec<(&str, Level)> = f.shown().iter().map(|x| (x.id.as_str(), x.level)).collect();
+        assert_eq!(
+            ids,
+            [
+                ("net.cable/b", Level::Problem),
+                ("disks.space/a", Level::Ok)
+            ]
+        );
+        let net = f.shown()[0];
+        assert_eq!(f.owner(net), Some("net"));
+        let order: Vec<&str> = f.sources().iter().map(|s| s.owner.as_str()).collect();
+        assert_eq!(order, ["disks", "net"]);
+        f.retain(|check| check != "net.cable");
+        assert_eq!(f.worst(), None, "an unregistered check's findings go");
     }
 
     #[test]
@@ -433,10 +552,11 @@ mod tests {
         let file = dir.join("ignored.json");
         let _ = std::fs::remove_file(&file);
         let mut f = Findings::with_ignored(Ignored::load(&file));
-        f.replace(vec![
-            finding("b", Level::Warning),
-            finding("c", Level::Problem),
-        ]);
+        f.put(
+            "o",
+            "test",
+            vec![finding("b", Level::Warning), finding("c", Level::Problem)],
+        );
         f.ignored.set("test/c", true).unwrap();
         assert_eq!(f.worst(), Some((Level::Warning, 1)));
         assert_eq!(f.ignored_findings().len(), 1);
@@ -613,6 +733,39 @@ mod tests {
             ])
         );
         assert!(r.checks().is_empty());
+    }
+
+    /// A check that says itself it failed (its plugin did not answer).
+    struct Fails;
+    impl Check for Fails {
+        fn id(&self) -> &'static str {
+            "fails"
+        }
+        fn title(&self) -> Message {
+            Message::plain("Fails")
+        }
+        fn declaration(&self) -> Declaration {
+            Declaration::new("Nothing").levels(&[Level::Ok])
+        }
+        fn run(&self, _: &Context) -> Vec<Finding> {
+            vec![failed(self.id(), self.title())]
+        }
+    }
+
+    #[test]
+    fn a_check_may_say_it_failed_whatever_it_declares() {
+        let mut r = Registry::default();
+        r.add("test", Arc::new(Fails)).unwrap();
+        let found = r.run(&Context::default());
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (
+                found[0].id.as_str(),
+                found[0].level,
+                found[0].message.key.as_str()
+            ),
+            ("fails", Level::Problem, FAILED)
+        );
     }
 
     #[test]
