@@ -26,6 +26,12 @@ both windows' accessibility trees (each OS window has its own):
   opened in it (the window quick pick, `window.pick`), the window closed by
   the compositor: the dialog is cancelled with it, none comes up over the
   main window;
+- `tooltip`: the import window opened again, the pointer left over the
+  folder's row (its tick): its tooltip, the folder's path, must show in
+  the import window's tree, not the main window's;
+- `context-menu`: the same row right-clicked: its menu ("Forget this
+  folder") must open in the import window, not the main window; Escape
+  closes it;
 - `storage`: the import window opened again, "Storage…" clicked in it,
   the Settings in their own window (Helios's default): the Settings window
   opens on the Storage page;
@@ -63,6 +69,7 @@ _spec.loader.exec_module(ic)
 CHOOSE = "Choose a folder…"
 STORAGE = "Storage…"
 PALETTE_KEY = "Ctrl+Shift+P"
+FORGET = "Forget this folder"
 
 
 def labelled(agent, window: str, label: str) -> int:
@@ -174,6 +181,78 @@ def storage_probe(args, comp, agent, title: str, name: str) -> dict:
         "new": new,
         "activated_later": activated(comp),
     }
+
+
+def tree(agent, window: str) -> list[dict]:
+    """`window`'s whole tree (empty when the window is not open)."""
+    try:
+        return agent.ui({"action": "tree", "window": window}).get("nodes", [])
+    except (OSError, RuntimeError, ValueError):
+        return []
+
+
+def naming(nodes: list[dict], text: str) -> list[dict]:
+    """The nodes showing `text`: named by it, or holding it as their
+    value (egui gives a text label its text as a value; the agent reads
+    that as its name, but a value is checked too)."""
+    return [n for n in nodes if text in (n.get("label"), n.get("value"))]
+
+
+def appears(agent, window: str, label: str, more_than: int, within: float) -> tuple[int, str, list]:
+    """How many nodes of `window`'s whole tree show `label`, once more
+    than `more_than` or after `within` seconds; the last error a tree
+    request gave, if any; and the window's tree as last read."""
+    deadline = time.monotonic() + within
+    error = ""
+    nodes: list[dict] = []
+    while True:
+        try:
+            nodes = agent.ui({"action": "tree", "window": window}).get("nodes", [])
+            error = ""
+        except (OSError, RuntimeError, ValueError) as exc:
+            nodes, error = [], str(exc)
+        n = len(naming(nodes, label))
+        if n > more_than or time.monotonic() >= deadline:
+            return n, error, nodes
+        time.sleep(0.1)
+
+
+def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str) -> dict:
+    """`action` (`hover`, `secondary_click`) on the folder's row in the
+    import window: where `label` (the popup's text) shows. A tooltip
+    shows after egui's delay, and on the box (the release build in a
+    headless compositor, the CPU throttled) it took more than 5 s to
+    reach the window's tree, though it was drawn: so up to 20 s."""
+    row = {"window": "import", "role": "CheckBox", "label": args.folder.name, "nth": 0}
+    before = (tree(agent, "main"), tree(agent, "import"))
+    base = (len(naming(before[0], label)), len(naming(before[1], label)))
+    try:
+        agent.ui({"action": action, **row})
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"probe": name, "ok": False, "error": f"{action}: {exc}"}
+    imp, error, after = appears(agent, "import", label, base[1], within=20.0)
+    main = len(naming(tree(agent, "main"), label))
+    where = "import" if imp > base[1] else "main" if main > base[0] else "nowhere"
+    shot(comp, args, name)
+    out = {
+        "probe": name,
+        "ok": where == "import" and main == base[0],
+        "seen": f"{what} in the {where} window",
+        "counts": {"main": [base[0], main], "import": [base[1], imp]},
+    }
+    if where == "nowhere":
+        # What the import window's tree gained: the popup's nodes, when
+        # it shows under another text.
+        known = {n.get("id") for n in before[1]}
+        out["new"] = [
+            {k: n.get(k) for k in ("role", "label", "value")}
+            for n in after
+            if n.get("id") not in known
+        ][:20]
+        out["nodes"] = [len(before[1]), len(after)]
+        if error:
+            out["error"] = error
+    return out
 
 
 def probes(args, comp, agent) -> list[dict]:
@@ -306,6 +385,27 @@ def probes(args, comp, agent) -> list[dict]:
         }
     )
     shot(comp, args, "close-with-dialog")
+
+    # A tooltip and a context menu raised in the import window.
+    title = open_import(args, comp, agent)
+    if title is None:
+        out.append({"probe": "tooltip", "ok": False, "error": "no import window listed"})
+        return out
+    out.append(popup_probe(args, comp, agent, "tooltip", "hover", str(args.folder), "tooltip"))
+    out.append(
+        popup_probe(args, comp, agent, "context-menu", "secondary_click", FORGET, "context menu")
+    )
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        agent.ui({"action": "key", "window": "import", "key": "Escape"})
+    settle()
+    if labelled(agent, "import", FORGET) > 0:
+        out[-1]["seen"] += "; still open after Escape"
+    # Closed, so that Storage… below gets an import window of its own:
+    # asked again while it is open, the import window is only raised and
+    # no new window is listed.
+    if ic.present(comp, title):
+        compositor_close(comp, title)
+        settle()
 
     # Storage…: the Settings in their own window (the default), then
     # popped in over the main window. Last, in an import window of their

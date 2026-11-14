@@ -1575,6 +1575,70 @@ fn the_library_read_again_is_read_off_the_frame() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// The Library's filter history and the Folders section's counts go
+/// through the desktop's node: while another writer holds the vault
+/// file locked, the frames that write the history and ask the counts do
+/// not wait for it; once it lets go, the write is kept and the counts
+/// shown.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_filter_history_or_the_folders() {
+    use helios_vault::Store as _;
+    let root = temp("held");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 1.0);
+    assert!(
+        h.state().library().filter_history().is_some(),
+        "read through the node"
+    );
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&path).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&json!(true)))
+        .unwrap();
+    run(
+        &mut h,
+        "library.filter.pin",
+        json!({ "query": "camera:R5", "pinned": true }),
+    );
+    h.get_by_label("Folders").click();
+    let mut slowest = std::time::Duration::ZERO;
+    for i in 0..3 {
+        let started = std::time::Instant::now();
+        h.run();
+        persist.frame(h.state_mut(), 2.0 + f64::from(i));
+        slowest = slowest.max(started.elapsed());
+    }
+    assert!(
+        persist.busy(),
+        "the write waits for the vault, not the frame"
+    );
+    assert!(
+        slowest < std::time::Duration::from_secs(1),
+        "a frame waited {slowest:?} for the vault"
+    );
+
+    // Let go: the history is kept, the folders counted.
+    other.rollback().unwrap();
+    drop(other);
+    settle(&mut h, &mut persist, 10.0);
+    assert!(h.state().library().folder_tree().is_some());
+    let kept = persist
+        .vault()
+        .library_document(
+            helios_gui::recent_filters::NS,
+            helios_gui::recent_filters::KEY,
+        )
+        .unwrap()
+        .unwrap();
+    assert!(kept.to_string().contains("camera:R5"), "{kept}");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Some stored fields of photo `n`, as the vault holds them.
 fn stored(persist: &Persist<SqliteStore>, n: u8, names: &[&str]) -> Vec<Value> {
     let row = persist
