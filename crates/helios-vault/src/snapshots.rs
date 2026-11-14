@@ -70,11 +70,7 @@ impl Snapshot {
 impl<S: Store> Vault<S> {
     /// An image's snapshots, in the order they were kept (oldest first).
     pub fn snapshots(&self, image: &ImageId) -> Result<Vec<Snapshot>, String> {
-        let doc = self
-            .store
-            .lock()
-            .expect("store lock")
-            .document(NAMESPACE, &image.hex())?;
+        let doc = self.read(|s| s.document(NAMESPACE, &image.hex()))?;
         doc.as_ref()
             .and_then(|d| d["snapshots"].as_array())
             .into_iter()

@@ -158,7 +158,15 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: cargo xtask check-commits "${BASE:-0}..$HEAD"
+        # A push to next walks only its first-parent commits (each merge):
+        # a pull request's own fix-up commits are not walked one by one
+        # (owner, 2026-11-13). A fork's pull request walks all its commits.
+        run: |
+          if [ "${{ github.event_name }}" = push ]; then
+            cargo xtask check-commits --first-parent "${BASE:-0}..$HEAD"
+          else
+            cargo xtask check-commits "${BASE:-0}..$HEAD"
+          fi
 
   # The controls gallery builds for wasm32: its pages stay web-ready.
   gallery-web:

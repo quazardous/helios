@@ -177,10 +177,10 @@ fn run_on<S: Store>(
 }
 
 /// Whether `origin` names who runs a call: `user`, `cli`, `control`,
-/// `agent:NAME` or `script:NAME`.
+/// `midi`, `agent:NAME`, `script:NAME` or `remote:NAME`.
 fn is_origin(origin: &str) -> bool {
-    matches!(origin, "user" | "cli" | "control")
-        || ["agent:", "script:"]
+    matches!(origin, "user" | "cli" | "control" | "midi")
+        || ["agent:", "script:", "remote:"]
             .iter()
             .any(|p| origin.strip_prefix(p).is_some_and(|name| !name.is_empty()))
 }
@@ -572,10 +572,18 @@ mod tests {
 
     #[test]
     fn origins_are_checked() {
-        for ok in ["user", "cli", "control", "agent:mcp", "script:x"] {
+        for ok in [
+            "user",
+            "cli",
+            "control",
+            "midi",
+            "agent:mcp",
+            "script:x",
+            "remote:phone",
+        ] {
             assert!(is_origin(ok), "{ok}");
         }
-        for bad in ["", "agent:", "robot"] {
+        for bad in ["", "agent:", "remote:", "robot"] {
             assert!(!is_origin(bad), "{bad}");
         }
     }

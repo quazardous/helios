@@ -185,11 +185,7 @@ impl<S: crate::Store> crate::Vault<S> {
             return Ok(false);
         }
         if let Some(bus) = &self.bus {
-            let all = self
-                .store
-                .lock()
-                .expect("store lock")
-                .versions(&version.image)?;
+            let all = self.read(|s| s.versions(&version.image))?;
             bus.publish(
                 "vault",
                 None,
@@ -206,12 +202,12 @@ impl<S: crate::Store> crate::Vault<S> {
     }
 
     pub fn version(&self, id: &VersionId) -> Result<Option<Version>, String> {
-        self.store.lock().expect("store lock").version(id)
+        self.read(|s| s.version(id))
     }
 
     /// An image's versions, oldest first.
     pub fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String> {
-        let mut all = self.store.lock().expect("store lock").versions(image)?;
+        let mut all = self.read(|s| s.versions(image))?;
         all.sort_by_key(|v| (v.at, v.id));
         Ok(all)
     }
@@ -220,18 +216,19 @@ impl<S: crate::Store> crate::Vault<S> {
     /// version's first parent, back to a first edit. Times are in seconds
     /// and steps come faster: the line, not the time, orders a history.
     pub fn history(&self, head: &VersionId) -> Result<Vec<Version>, String> {
-        let store = self.store.lock().expect("store lock");
-        let mut line = Vec::new();
-        let mut next = Some(*head);
-        while let Some(id) = next {
-            let version = store
-                .version(&id)?
-                .ok_or_else(|| format!("no version {}", id.hex()))?;
-            next = version.parents.first().copied();
-            line.push(version);
-        }
-        line.reverse();
-        Ok(line)
+        self.read(|store| {
+            let mut line = Vec::new();
+            let mut next = Some(*head);
+            while let Some(id) = next {
+                let version = store
+                    .version(&id)?
+                    .ok_or_else(|| format!("no version {}", id.hex()))?;
+                next = version.parents.first().copied();
+                line.push(version);
+            }
+            line.reverse();
+            Ok(line)
+        })
     }
 
     /// An image's heads: its current edit, or its diverged edits.

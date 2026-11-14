@@ -68,13 +68,37 @@
 //! typed arguments and documentation for the processing node's verbs, and
 //! the server's own (sandbox, AI, workspace files).
 //!
+//! Compact mode (`helios-mcp --tools compact`, [`ToolSet::Compact`]): the
+//! server offers only the generic pair and the sandbox pair that starts a
+//! node for it, four tools instead of the whole list, for an agent whose
+//! context is short; every command stays reachable through
+//! `helios_command_run`.
+//!
+//! Outcome unknown, never resend: when the connection to the node closes
+//! after a request was sent and before its answer came, the tool's error
+//! starts with "outcome unknown" (`-32008` on the generic pair). The
+//! request may have been applied; the agent reads the state before
+//! sending it again, and never resends a change blindly. "cannot reach
+//! the node" means it was not sent.
+//!
+//! Caps and untrusted text (`crate::caps`): a request is at most 1 MiB,
+//! a `limit` at most 1,000 items, a wait's `timeout_ms` at most 10
+//! minutes, a batch at most 256 `items`; an answer's lists and text are
+//! cut to their caps with a "truncated, N more" note after the JSON, an
+//! image over 2048 px on its long edge or 5 MiB is left out with a note
+//! saying why, and text from photos' metadata or files (titles, tags,
+//! camera strings, paths) is named in a note as data, never instructions.
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use helios_ai::Ai;
 use helios_inspect::{Address, request_at};
+
+use crate::caps;
+use crate::roots::{Access, Roots};
 
 use serde_json::{Map, Value, json};
 
@@ -2400,8 +2424,20 @@ pub const TOOLS: &[Tool] = &[
 ];
 
 impl Tool {
+    /// Whether the tool changes something: its request then carries a
+    /// key (`_meta.request_id`, the `request_id` argument or a new one),
+    /// so it may be sent again after an unknown outcome and is applied
+    /// once (`helios_inspect::request_ids`).
+    pub fn changes(&self) -> bool {
+        match self.endpoint {
+            Endpoint::Control => !CONTROL_READS.contains(&self.cmd),
+            Endpoint::Commands => self.cmd == "command.run",
+            Endpoint::Inspect | Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace => false,
+        }
+    }
+
     pub fn input_schema(&self) -> Value {
-        let properties: Map<String, Value> = self
+        let mut properties: Map<String, Value> = self
             .params
             .iter()
             .map(|p| {
@@ -2410,6 +2446,17 @@ impl Tool {
                 (p.name.to_string(), schema)
             })
             .collect();
+        if self.changes() {
+            properties.insert(
+                REQUEST_ID.into(),
+                json!({
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": helios_inspect::request_ids::LONGEST,
+                    "description": "This change's key. Given again after an outcome unknown, the node applies the change once and answers `already_applied`. A new one when left out.",
+                }),
+            );
+        }
         let required: Vec<&str> = self
             .params
             .iter()
@@ -2422,10 +2469,11 @@ impl Tool {
     /// The request this tool sends for these arguments, defaults filled in.
     pub fn request(&self, arguments: &Value) -> Result<Value, String> {
         let given = arguments.as_object().cloned().unwrap_or_default();
-        if let Some(unknown) = given
-            .keys()
-            .find(|k| !self.params.iter().any(|p| p.name == *k))
-        {
+        if let Some(unknown) = given.keys().find(|k| {
+            let known = self.params.iter().any(|p| p.name == *k);
+            let key = self.changes() && *k == REQUEST_ID;
+            !(known || key)
+        }) {
             return Err(format!("{}: unknown argument `{unknown}`", self.name));
         }
         let mut request = Map::new();
@@ -2443,6 +2491,16 @@ impl Tool {
                 }
             }
         }
+        if self.changes() {
+            let key = match given.get(REQUEST_ID) {
+                None => helios_inspect::request_ids::new_request_id(),
+                Some(key) => key
+                    .as_str()
+                    .ok_or_else(|| format!("{}: `{REQUEST_ID}` is a string", self.name))?
+                    .to_string(),
+            };
+            request.insert("_meta".into(), json!({ REQUEST_ID: key }));
+        }
         Ok(Value::Object(request))
     }
 }
@@ -2455,6 +2513,39 @@ pub struct Sockets {
     pub node_bin: PathBuf,
     /// The AI service, opened at the first `helios_ai_*` call.
     pub ai: Option<Arc<Ai>>,
+    /// The folders the agent may read and write (`crate::roots`).
+    pub roots: Roots,
+    /// The tools offered: all of them, or the compact set.
+    pub tools: ToolSet,
+}
+
+/// Which tools the server offers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolSet {
+    /// Every tool.
+    #[default]
+    Full,
+    /// The generic pair over the command registry, and the sandbox pair
+    /// that starts a node for it: a short list for a short context.
+    Compact,
+}
+
+impl ToolSet {
+    /// `full` or `compact`, as `--tools` takes it.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "full" => Some(Self::Full),
+            "compact" => Some(Self::Compact),
+            _ => None,
+        }
+    }
+
+    /// Whether this set offers `tool`.
+    #[must_use]
+    pub fn offers(self, tool: &Tool) -> bool {
+        self == Self::Full || matches!(tool.endpoint, Endpoint::Commands | Endpoint::Sandbox)
+    }
 }
 
 /// The current image of `node`: its output exported as a PNG through the
@@ -2506,10 +2597,7 @@ fn ai_call(sockets: &mut Sockets, request: &Value) -> Value {
         }
     }
     match helios_ai::tools::call(&ai, request, images) {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            false,
-        ),
+        Ok(answer) => answer_result(answer, false),
         Err(e) => tool_result(e, true),
     }
 }
@@ -2538,20 +2626,156 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
         _ => crate::sandbox::stop(&dir).map(|ran| json!({ "stopped": ran })),
     };
     match result {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            false,
-        ),
+        Ok(answer) => answer_result(answer, false),
         Err(e) => tool_result(e, true),
     }
 }
 
-fn send(address: &Address, request: &Value) -> Result<Value, String> {
-    request_at(address, request).map_err(|e| format!("cannot reach the node at {address}: {e}"))
+/// The argument that keys a change (`Tool::changes`).
+const REQUEST_ID: &str = "request_id";
+
+/// The control tools that only read: their requests carry no key.
+const CONTROL_READS: &[&str] = &[
+    "cache.stats",
+    "decisions",
+    "workflow.runs",
+    "workflow.items",
+];
+
+/// What an agent may do after an unknown outcome of `request`: send it
+/// again with its key, when it has one.
+fn resend_hint(request: &Value) -> String {
+    request["_meta"][REQUEST_ID]
+        .as_str()
+        .map_or_else(String::new, |key| {
+            format!(
+                "; or send it again with `{REQUEST_ID}` \"{key}\": the node applies it once and answers `already_applied` if it ran"
+            )
+        })
 }
 
+/// Sends `request` to the node at `address`. A request sent whose answer
+/// never came says its outcome is unknown, rather than that the node
+/// could not be reached: the agent reads the state before resending it,
+/// or resends it with its key.
+fn send(address: &Address, request: &Value) -> Result<Value, String> {
+    request_at(address, request).map_err(|e| {
+        if helios_inspect::unanswered(&e) {
+            format!(
+                "outcome unknown at the node at {address}: {e}{}",
+                resend_hint(request)
+            )
+        } else {
+            format!("cannot reach the node at {address}: {e}")
+        }
+    })
+}
+
+/// A tool's text result (an error, a message), cut to the answer's cap.
 fn tool_result(text: String, is_error: bool) -> Value {
-    json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
+    json!({ "content": caps::text_content(text), "isError": is_error })
+}
+
+/// A tool's JSON answer, cut to the caps and with its untrusted text
+/// marked (`crate::caps`).
+fn answer_result(answer: Value, is_error: bool) -> Value {
+    json!({ "content": caps::answer_content(answer), "isError": is_error })
+}
+
+/// The workspace tools that only read the workspace's files.
+const WORKSPACE_READS: &[&str] = &[
+    "workspace.parts",
+    "workspace.state",
+    "context.read",
+    "clipboard.state",
+    "history.list",
+    "history.read",
+];
+
+/// The workspace tools that write into the configuration directory.
+const CONFIG_WRITES: &[&str] = &[
+    "workspace.save_as_template",
+    "macro.publish",
+    "workshop.save",
+];
+
+/// Whether a text reads as a path rather than an id (a template's
+/// `source`, a run's item): absolute, or holding a separator.
+fn path_like(text: &str) -> bool {
+    Path::new(text).is_absolute() || text.contains('/') || text.contains('\\')
+}
+
+/// Refuses a request naming a path outside the agent's roots: each path
+/// argument with the access its tool makes. A command run through the
+/// generic pair does not say what it does with a path, so every absolute
+/// path in its params needs the write root.
+fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
+    if !roots.is_confined() {
+        return Ok(());
+    }
+    let cmd = tool.cmd;
+    let check = |text: &str, access: Access| roots.check(Path::new(text), access).map(|_| ());
+    for param in tool.params {
+        let value = &request[param.name];
+        // One key per arm, each said on its own, even where two give the
+        // same access.
+        #[allow(clippy::match_same_arms)]
+        let access = match param.name {
+            "path" if cmd == "export" => Access::Write,
+            // A template's id or a workspace's folder; elsewhere a node or
+            // an endpoint's name.
+            "source" if tool.endpoint == Endpoint::Workspace && !cmd.starts_with("clipboard.") => {
+                Access::Read
+            }
+            "path" | "file" => Access::Read,
+            "dir" | "out" | "vault" => Access::Write,
+            "workspace" if WORKSPACE_READS.contains(&cmd) => Access::Read,
+            "workspace" => Access::Write,
+            "config" if CONFIG_WRITES.contains(&cmd) => {
+                // Left out, the user's own: written there only if granted.
+                let config = value
+                    .as_str()
+                    .map_or_else(helios_template::workspace::config_dir, PathBuf::from);
+                roots.check(&config, Access::Write)?;
+                continue;
+            }
+            "config" => Access::Read,
+            "items" => {
+                for item in value.as_array().into_iter().flatten() {
+                    let path = item.as_str().or_else(|| item["path"].as_str());
+                    if let Some(path) = path.filter(|p| Path::new(p).is_absolute()) {
+                        check(path, Access::Read)?;
+                    }
+                }
+                continue;
+            }
+            "params" if cmd == "command.run" => {
+                let mut paths = Vec::new();
+                absolute_paths(value, &mut paths);
+                for path in paths {
+                    check(path, Access::Write)?;
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        match value.as_str().filter(|s| !s.is_empty()) {
+            Some(text) if param.name == "source" && !path_like(text) => {}
+            Some(text) => check(text, access)?,
+            None => {}
+        }
+    }
+    Ok(())
+}
+
+/// Every string of `value` that is an absolute path, at any depth.
+fn absolute_paths<'a>(value: &'a Value, into: &mut Vec<&'a str>) {
+    match value {
+        Value::String(s) if Path::new(s).is_absolute() => into.push(s),
+        Value::Array(items) => items.iter().for_each(|v| absolute_paths(v, into)),
+        Value::Object(map) => map.values().for_each(|v| absolute_paths(v, into)),
+        _ => {}
+    }
 }
 
 fn call(sockets: &mut Sockets, params: &Value) -> Value {
@@ -2559,10 +2783,22 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
     let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
         return tool_result(format!("no tool `{name}`"), true);
     };
+    if !sockets.tools.offers(tool) {
+        return tool_result(
+            format!("no tool `{name}` in compact mode: run its command with helios_command_run"),
+            true,
+        );
+    }
     let request = match tool.request(&params["arguments"]) {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
     };
+    if let Err(e) = caps::check_request(&request) {
+        return tool_result(format!("{}: {e}", tool.name), true);
+    }
+    if let Err(e) = confine(&sockets.roots, tool, &request) {
+        return tool_result(format!("{}: {e}", tool.name), true);
+    }
     if tool.endpoint == Endpoint::Sandbox {
         return sandbox(sockets, tool, &request);
     }
@@ -2577,10 +2813,7 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
     }
     if tool.endpoint == Endpoint::Workspace {
         return match workspace_call(&request, &sockets.node_bin) {
-            Ok(answer) => tool_result(
-                serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-                false,
-            ),
+            Ok(answer) => answer_result(answer, false),
             Err(e) => tool_result(e, true),
         };
     }
@@ -2604,10 +2837,10 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
         }
     };
     match send(socket, &request) {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            answer["ok"] != true,
-        ),
+        Ok(answer) => {
+            let is_error = answer["ok"] != true;
+            answer_result(answer, is_error)
+        }
         Err(e) => tool_result(e, true),
     }
 }
@@ -2657,10 +2890,15 @@ pub fn commands_call(client: &helios_inspect::client::Client, request: &Value) -
     } else {
         ("commands.list", pick(&["window", "filter", "enabled_only"]))
     };
-    match client.request(method, params) {
-        Ok(answer) => tool_result(
-            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
-            false,
+    let pending = match request["_meta"][REQUEST_ID].as_str() {
+        Some(key) if method == "command.run" => client.call_keyed(method, params, key),
+        _ => client.call(method, params),
+    };
+    match pending.wait() {
+        Ok(answer) => answer_result(answer, false),
+        Err(e) if e.code == helios_inspect::rpc::code::OUTCOME_UNKNOWN => tool_result(
+            format!("outcome unknown: {}{}", e.message, resend_hint(request)),
+            true,
         ),
         Err(e) => tool_result(e.message, true),
     }
@@ -2938,7 +3176,7 @@ pub fn handle(sockets: &mut Sockets, message: &Value) -> Option<Value> {
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({
-            "tools": TOOLS.iter().map(|t| json!({
+            "tools": TOOLS.iter().filter(|t| sockets.tools.offers(t)).map(|t| json!({
                 "name": t.name, "description": t.description, "inputSchema": t.input_schema(),
             })).collect::<Vec<_>>()
         })),
@@ -3009,6 +3247,67 @@ mod tests {
                 tool.name
             );
         }
+    }
+
+    #[test]
+    fn a_limit_over_the_cap_is_refused_before_the_node() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
+        };
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_workflow_items",
+            json!({ "run": "r1", "limit": 5000 }),
+        );
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(
+                "helios_workflow_items: `limit` 5000 is over the cap of 1000 items: page with `offset`"
+            )
+        );
+    }
+
+    #[test]
+    fn a_wait_or_a_batch_over_the_cap_is_refused_before_the_node() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
+        };
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_wait_idle",
+            json!({ "timeout_ms": 86_400_000 }),
+        );
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(
+                "helios_wait_idle: `timeout_ms` 86400000 is over the cap of 600000 ms (10 minutes): wait again rather than longer"
+            )
+        );
+        let items = vec![json!("/photos/a.raf"); 300];
+        let (is_error, answer) = tool(
+            &mut sockets,
+            "helios_workflow_submit",
+            json!({ "items": items, "out": "/photos/out", "format": "jpeg" }),
+        );
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(
+                "helios_workflow_submit: `items` holds 300 steps, over the cap of 256 per batch: send the rest in another call"
+            )
+        );
     }
 
     #[test]
@@ -3089,6 +3388,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         assert!(
             handle(
@@ -3158,6 +3459,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: Some(Arc::new(ai)),
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         (sockets, runtime)
     }
@@ -3187,6 +3490,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": ws, "config": config });
@@ -3257,6 +3562,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = json!({ "workspace": root.join("shoot"), "config": root.join("config") });
         for name in [
@@ -3309,6 +3616,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": dir, "config": config });
@@ -3386,6 +3695,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let base = json!({ "workspace": root.join("work"), "config": root.join("config") });
         for (name, extra) in [
@@ -3439,6 +3750,8 @@ mod tests {
             control: None,
             node_bin: PathBuf::from("helios-node"),
             ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Full,
         };
         let args = |extra: Value| {
             let mut a = json!({ "workspace": dir, "config": config });
@@ -3977,5 +4290,182 @@ mod tests {
                 .ends_with("params: `stack` is missing"),
             "{refused}"
         );
+    }
+
+    /// A node that reads one request, then closes without answering.
+    #[cfg(unix)]
+    fn drops_after_reading(name: &str) -> (PathBuf, std::thread::JoinHandle<()>) {
+        use std::io::BufRead;
+        let dir = std::env::temp_dir().join(format!("helios-mcp-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("node.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let node = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            let mut line = String::new();
+            let _ = std::io::BufReader::new(stream).read_line(&mut line);
+        });
+        (path, node)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_change_sent_and_never_answered_is_outcome_unknown_not_unreachable() {
+        let (path, node) = drops_after_reading("send");
+        let request = json!({ "cmd": "set_param", "node": "exp", "param": "ev", "value": 1.0 });
+        let error = send(&Address::Unix(path.clone()), &request).unwrap_err();
+        node.join().unwrap();
+        assert!(error.starts_with("outcome unknown"), "{error}");
+        assert!(error.contains("never resend it blindly"), "{error}");
+        let gone = send(&Address::Unix(path.clone()), &request).unwrap_err();
+        assert!(gone.starts_with("cannot reach the node"), "{gone}");
+
+        let (path, node) = drops_after_reading("run");
+        let client = helios_inspect::client::Client::connect(&Address::Unix(path)).unwrap();
+        let run = json!({ "cmd": "command.run", "id": "edit.undo" });
+        let result = commands_call(&client, &run);
+        node.join().unwrap();
+        assert_eq!(result["isError"], true);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("outcome unknown"), "{text}");
+    }
+
+    #[test]
+    fn changes_carry_a_key_and_reads_do_not() {
+        let tool = |name: &str| TOOLS.iter().find(|t| t.name == name).unwrap();
+        let set = tool("helios_set_param");
+        assert!(set.changes());
+        assert!(set.input_schema()["properties"][REQUEST_ID].is_object());
+        let arguments = json!({ "node": "exp", "param": "ev", "value": 1.0 });
+        let first = set.request(&arguments).unwrap();
+        let key = first["_meta"][REQUEST_ID].as_str().unwrap();
+        assert_ne!(
+            set.request(&arguments).unwrap()["_meta"],
+            first["_meta"],
+            "a new key each"
+        );
+        let mut given = arguments.clone();
+        given[REQUEST_ID] = json!("mine");
+        assert_eq!(set.request(&given).unwrap()["_meta"][REQUEST_ID], "mine");
+        assert!(resend_hint(&first).contains(key), "{}", resend_hint(&first));
+        assert!(tool("helios_command_run").changes());
+        for read in [
+            "helios_commands_list",
+            "helios_workflow_runs",
+            "helios_state",
+        ] {
+            let read = tool(read);
+            assert!(!read.changes(), "{}", read.name);
+            assert!(read.input_schema()["properties"].get(REQUEST_ID).is_none());
+        }
+    }
+
+    /// Counts the commands it runs.
+    #[derive(Default)]
+    struct Runs(std::sync::atomic::AtomicU32);
+
+    impl helios_inspect::rpc::Service for Runs {
+        fn call(
+            &self,
+            _: &str,
+            _: Value,
+            _: &helios_inspect::rpc::Call,
+        ) -> Result<Value, helios_inspect::rpc::Error> {
+            let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            Ok(json!({ "runs": n }))
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_run_sent_again_with_its_request_id_is_applied_once() {
+        let dir = std::env::temp_dir().join(format!("helios-mcp-{}-keys", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("node.sock");
+        let runs = Arc::new(Runs::default());
+        helios_inspect::serve_rpc_at(
+            &helios_inspect::Listen::Unix(path.clone()),
+            None,
+            |_: Value, _: &mut helios_inspect::Connection<'_>| None,
+            runs.clone(),
+        )
+        .unwrap();
+        let tool = TOOLS
+            .iter()
+            .find(|t| t.name == "helios_command_run")
+            .unwrap();
+        let arguments = json!({ "id": "theme.select", "request_id": "agent-1" });
+        let run = || {
+            // A new connection each time, as after an unknown outcome.
+            let client =
+                helios_inspect::client::Client::connect(&Address::Unix(path.clone())).unwrap();
+            let result = commands_call(&client, &tool.request(&arguments).unwrap());
+            assert_eq!(result["isError"], false, "{result}");
+            let text = result["content"][0]["text"].as_str().unwrap().to_string();
+            serde_json::from_str::<Value>(&text).unwrap()
+        };
+        assert_eq!(run(), json!({ "runs": 1 }));
+        assert_eq!(run(), json!({ "runs": 1, "already_applied": true }));
+        assert_eq!(runs.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_mode_offers_the_generic_pair_and_the_sandbox_only() {
+        let mut sockets = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+            roots: Roots::unconfined(),
+            tools: ToolSet::Compact,
+        };
+        let list = |sockets: &mut Sockets| {
+            handle(
+                sockets,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            )
+            .unwrap()["result"]["tools"]
+                .clone()
+        };
+        let compact = list(&mut sockets);
+        let names: Vec<&str> = compact
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "helios_commands_list",
+                "helios_command_run",
+                "helios_sandbox_start",
+                "helios_sandbox_stop"
+            ]
+        );
+        let other = TOOLS.iter().find(|t| !ToolSet::Compact.offers(t)).unwrap();
+        let (is_error, answer) = tool(&mut sockets, other.name, example(other));
+        assert!(is_error);
+        assert_eq!(
+            answer,
+            json!(format!(
+                "no tool `{}` in compact mode: run its command with helios_command_run",
+                other.name
+            ))
+        );
+        sockets.tools = ToolSet::Full;
+        let full = list(&mut sockets);
+        assert_eq!(full.as_array().unwrap().len(), TOOLS.len());
+        // The point of the mode: a list a small fraction of the full one.
+        assert!(compact.to_string().len() * 10 < full.to_string().len());
+        assert_eq!(ToolSet::parse("compact"), Some(ToolSet::Compact));
+        assert_eq!(ToolSet::parse("full"), Some(ToolSet::Full));
+        assert_eq!(ToolSet::parse("all"), None);
     }
 }

@@ -533,6 +533,8 @@ fn survival_killed_after_an_agent_s_edit_through_the_desktop_keeps_it() {
                     control: None,
                     node_bin: PathBuf::from("helios-node"),
                     ai: None,
+                    roots: helios_node::roots::Roots::unconfined(),
+                    tools: helios_node::mcp::ToolSet::Full,
                 };
                 helios_node::mcp::handle(
                     &mut sockets,

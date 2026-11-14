@@ -374,6 +374,8 @@ fn the_cli_and_the_mcp_pair_list_and_run_commands_on_a_running_node() {
         control: None,
         node_bin: PathBuf::from(env!("CARGO_BIN_EXE_helios-node")),
         ai: None,
+        roots: helios_node::roots::Roots::unconfined(),
+        tools: helios_node::mcp::ToolSet::Full,
     };
     let mut tool = |name: &str, arguments: Value| {
         let answer = helios_node::mcp::handle(

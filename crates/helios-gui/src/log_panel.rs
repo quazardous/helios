@@ -18,6 +18,16 @@ pub const PANEL: &str = "helios.log";
 /// How many entries the panel keeps; the oldest go first.
 pub const KEPT: usize = 1000;
 
+/// Writes a message to the log file, in English, target `helios`, at its
+/// level (`info`, `warn`, `error`).
+pub fn write(level: Level, message: &Message) {
+    match level {
+        Level::Info => log::info!(target: "helios", "{}", message.english),
+        Level::Warning => log::warn!(target: "helios", "{}", message.english),
+        Level::Error => log::error!(target: "helios", "{}", message.english),
+    }
+}
+
 /// One entry.
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -34,11 +44,7 @@ pub struct Log {
 impl Log {
     /// Adds an entry, and writes it to the log file in English.
     pub fn push(&mut self, level: Level, message: Message) {
-        match level {
-            Level::Info => log::info!(target: "helios", "{}", message.english),
-            Level::Warning => log::warn!(target: "helios", "{}", message.english),
-            Level::Error => log::error!(target: "helios", "{}", message.english),
-        }
+        write(level, &message);
         if self.entries.len() == KEPT {
             self.entries.remove(0);
         }

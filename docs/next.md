@@ -112,7 +112,7 @@ Every failed box job gets its reason at once:
 |---|---|---|
 | Local | fmt, check, typos | while coding |
 | Bench box, narrow | the manifests' jobs (clippy first) | the tester, per batch on a `gate/…` branch |
-| `next`'s CI | the whole suite, survival, the commits walk, lint, Windows | every push of `next` |
+| `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, Windows | every push of `next` |
 | Bench box, wide | `test-affected`, `test`, GPU, timing, `stability` | daily, before a release, on demand |
 
 CI looks for regressions and backward-compatibility breaks. Load, soak and

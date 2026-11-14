@@ -339,6 +339,30 @@ pub(crate) enum PickStatus {
     Cancelled,
 }
 
+impl PickStatus {
+    /// Writes how a picking from a source of kind `kind` ended to the log
+    /// file: `info` for an outcome, `warn` for a failure; nothing for a
+    /// step.
+    fn log(&self, kind: &str) {
+        match self {
+            PickStatus::Done { added, known } => {
+                log::info!("picking from {kind}: {added} photos imported, {known} already in");
+            }
+            PickStatus::Nothing => log::info!("picking from {kind}: nothing picked in time"),
+            PickStatus::Cancelled => log::info!("picking from {kind}: cancelled"),
+            PickStatus::Expired => {
+                log::warn!("picking from {kind}: the session expired before it was done");
+            }
+            PickStatus::SignIn => log::warn!("picking from {kind}: the source refused the sign-in"),
+            PickStatus::Failed(why) => log::warn!("picking from {kind}: not imported: {why}"),
+            PickStatus::Starting
+            | PickStatus::Browser { .. }
+            | PickStatus::Importing { .. }
+            | PickStatus::NeedsFolder => {}
+        }
+    }
+}
+
 /// A picking running.
 pub(crate) struct Picking {
     /// The account picked from.
@@ -552,6 +576,8 @@ impl Accounts {
         let (st, stop, account_ref) = (status.clone(), cancel.clone(), account.account_ref());
         let opener = self.opener.clone();
         let folder = self.library.clone();
+        // The log names the source's kind, not the account (an address).
+        let kind = account.connector.clone();
         let set = move |s: PickStatus| {
             *st.lock().unwrap_or_else(PoisonError::into_inner) = s;
             wake();
@@ -568,7 +594,11 @@ impl Accounts {
             match known {
                 Ok(true) => {}
                 Ok(false) => return set(PickStatus::NeedsFolder),
-                Err(e) => return set(PickStatus::Failed(e)),
+                Err(e) => {
+                    let end = PickStatus::Failed(e);
+                    end.log(&kind);
+                    return set(end);
+                }
             }
             let deadline = std::time::Instant::now() + PICK_WAIT;
             // Every picking is a session of its own, its page opened at
@@ -612,6 +642,7 @@ impl Accounts {
                 }
                 Err(e) => PickStatus::Failed(helios_connect::connect::said(&e)),
             };
+            end.log(&kind);
             set(end);
         });
         self.picking = Some(Picking {

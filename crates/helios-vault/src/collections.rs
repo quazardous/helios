@@ -302,24 +302,26 @@ impl<S: Store> Vault<S> {
     /// of the Library its rules select now, a set how many its members
     /// hold together (one store query each).
     pub fn albums(&self) -> Result<Vec<Album>, String> {
-        let store = self.store.lock().expect("store lock");
-        let mut albums = albums_of(&*store)?;
-        for album in albums.iter_mut().filter(|a| a.is_smart() || a.is_set()) {
-            let query = Query {
-                album: Some(album.id.clone()),
-                ..Query::default()
-            };
-            album.count = store.select(&query).ok().map(|ids| ids.len());
-        }
-        Ok(albums)
+        self.read(|store| {
+            let mut albums = albums_of(store)?;
+            for album in albums.iter_mut().filter(|a| a.is_smart() || a.is_set()) {
+                let query = Query {
+                    album: Some(album.id.clone()),
+                    ..Query::default()
+                };
+                album.count = store.select(&query).ok().map(|ids| ids.len());
+            }
+            Ok(albums)
+        })
     }
 
     /// An album by id.
     pub fn album(&self, id: &str) -> Result<Option<Album>, String> {
-        let store = self.store.lock().expect("store lock");
-        Ok(store
-            .document(COLLECTIONS, id)?
-            .and_then(|d| Album::of(id, &d)))
+        self.read(|store| {
+            Ok(store
+                .document(COLLECTIONS, id)?
+                .and_then(|d| Album::of(id, &d)))
+        })
     }
 
     /// Makes an album named `name` holding `images` (each once), under
@@ -505,8 +507,7 @@ impl<S: Store> Vault<S> {
     /// The photos of the quick collection ([`QUICK`]), by id, in the
     /// order they were put in it (none before it was ever filled).
     pub fn quick_collection(&self) -> Result<Vec<String>, String> {
-        let store = self.store.lock().expect("store lock");
-        Ok(quick_of(store.document(COLLECTIONS, QUICK)?.as_ref()))
+        self.read(|store| Ok(quick_of(store.document(COLLECTIONS, QUICK)?.as_ref())))
     }
 
     /// B: when the quick collection holds every photo of `images`, takes

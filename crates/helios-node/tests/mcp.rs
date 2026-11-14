@@ -245,3 +245,113 @@ fn workflow_verbs(client: &mut Client, dir: &std::path::Path) {
     assert_eq!(done["nodes"]["exp"]["cancelled"], 0, "{done}");
     assert!(out.join("a.png").exists() && out.join("b.png").exists());
 }
+
+/// `helios-mcp` started with roots refuses a path outside them before
+/// anything is sent, and lets one inside through (to the next refusal:
+/// no node here).
+#[test]
+fn paths_outside_the_roots_are_refused() {
+    let dir = std::env::temp_dir().join(format!("helios-mcp-roots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for sub in ["photos", "out", "elsewhere"] {
+        std::fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    std::fs::write(dir.join("photos/a.png"), b"png").unwrap();
+    std::os::unix::fs::symlink(dir.join("elsewhere"), dir.join("out/away")).unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_helios-mcp"))
+        .arg("--read-root")
+        .arg(dir.join("photos"))
+        .arg("--write-root")
+        .arg(dir.join("out"))
+        .env_remove("HELIOS_SOCKET")
+        .env_remove("HELIOS_CONTROL_SOCKET")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut client = Client {
+        stdin: server.stdin.take().unwrap(),
+        stdout: BufReader::new(server.stdout.take().unwrap()),
+        next: 0,
+    };
+    let path = |p: &str| dir.join(p).display().to_string();
+
+    let refused = |client: &mut Client, tool: &str, args: Value, what: &str| {
+        let (failed, answer) = client.tool(tool, args);
+        let text = answer.as_str().unwrap_or_default().to_string();
+        assert!(failed && text.contains(what), "{tool}: {answer}");
+    };
+    // Read outside every root, through `..`, and a relative path.
+    let load = |p: String| json!({ "node": "src", "path": p });
+    refused(
+        &mut client,
+        "helios_load_source",
+        load(path("elsewhere/x.png")),
+        "outside the roots",
+    );
+    refused(
+        &mut client,
+        "helios_load_source",
+        load(path("photos/../elsewhere/x.png")),
+        "`..`",
+    );
+    refused(
+        &mut client,
+        "helios_load_source",
+        load("photos/a.png".into()),
+        "not an absolute path",
+    );
+    // Write under a read root, and through a link out of the write root.
+    let export = |p: String| json!({ "node": "exp", "path": p, "format": "png" });
+    refused(
+        &mut client,
+        "helios_export",
+        export(path("photos/b.png")),
+        "for writing",
+    );
+    refused(
+        &mut client,
+        "helios_export",
+        export(path("out/away/b.png")),
+        "outside the roots",
+    );
+    // A run's items and its output folder.
+    let submit = |item: String, out: String| json!({ "items": [{ "path": item }], "out": out, "format": "png", "name": "{stem}" });
+    refused(
+        &mut client,
+        "helios_workflow_submit",
+        submit(path("elsewhere/a.png"), path("out")),
+        "outside the roots",
+    );
+    refused(
+        &mut client,
+        "helios_workflow_submit",
+        submit(path("photos/a.png"), path("photos")),
+        "for writing",
+    );
+    // A workspace edited outside the write root.
+    refused(
+        &mut client,
+        "helios_workspace_reset",
+        json!({ "workspace": path("photos"), "config": path("out") }),
+        "for writing",
+    );
+
+    // Inside the roots, the call goes on: here, to the missing node.
+    refused(
+        &mut client,
+        "helios_load_source",
+        load(path("photos/a.png")),
+        "no control socket",
+    );
+    refused(
+        &mut client,
+        "helios_export",
+        export(path("out/new/b.png")),
+        "no control socket",
+    );
+
+    drop(client);
+    let _ = server.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+}

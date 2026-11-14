@@ -551,6 +551,13 @@ gui-health-fix-confirm 0a3cd6829a383aa5
 gui-health-ignore 02ae4dca2fe966d3
 gui-health-ignored-row cab77268003e5915
 gui-health-not-yet a0bc7e382f8db442
+gui-health-owner-backup 88370677b97f91a2
+gui-health-owner-catalogue 2c923a6c2be2a1dc
+gui-health-owner-gpu 184fd09d2ce24c55
+gui-health-owner-library 6d7e88ea6aaf5346
+gui-health-owner-other f8b1e1555fa951cc
+gui-health-owner-plugins f4791889f7d7e08b
+gui-health-owner-storage afe5a5223bb567fc
 gui-health-status 3e7c0b435060d3d7
 gui-health-summary-ok 0c936b2e0fd0d0d9
 gui-health-summary-problems e497b20956952fd7

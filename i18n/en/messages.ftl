@@ -611,6 +611,20 @@ gui-health-ignored-row = ignored
 
 gui-health-not-yet = Not checked yet: the checks run in the background.
 
+gui-health-owner-backup = Backups
+
+gui-health-owner-catalogue = Catalogue
+
+gui-health-owner-gpu = GPU
+
+gui-health-owner-library = Library
+
+gui-health-owner-other = Other checks
+
+gui-health-owner-plugins = Plugins
+
+gui-health-owner-storage = Storage
+
 gui-health-status = Status
 
 gui-health-summary-ok = All good

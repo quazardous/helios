@@ -427,7 +427,7 @@ impl Viewport {
             Ok(shown) => self
                 .after
                 .show(shown.map(|s| s.with_mask(self.layer.clone()))),
-            Err(e) => eprintln!("helios-gui: viewport: {e}"),
+            Err(e) => log::warn!("viewport: {e}"),
         }
     }
 
@@ -847,7 +847,7 @@ impl Viewport {
         match helios_values::sync(store, &mut e.graph) {
             Ok(0) => {}
             Ok(_) => self.reshow(),
-            Err(e) => eprintln!("helios-gui: viewport: {e}"),
+            Err(e) => log::warn!("viewport: {e}"),
         }
         self.follow_camera_jpeg(store);
     }
@@ -1249,7 +1249,7 @@ impl Viewport {
                 && self.masks.click(pos, &m, &mut store).is_some()
                 && let Err(e) = self.mask(crate::masks::Command::Close, Origin::User, &mut store)
             {
-                eprintln!("helios-gui: masks: {e}");
+                log::warn!("masks: {e}");
             }
             if let Some(at) = self.masks.take_double()
                 && let Err(e) = self.mask(
@@ -1258,7 +1258,7 @@ impl Viewport {
                     &mut store,
                 )
             {
-                eprintln!("helios-gui: masks: {e}");
+                log::warn!("masks: {e}");
             }
         }
         for signal in out.signals {

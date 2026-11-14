@@ -52,8 +52,9 @@ pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{
     BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND,
-    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, PAGE as HEALTH_PAGE,
-    findings_answer as health_findings_answer,
+    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE,
+    OTHERS as HEALTH_OTHERS, PAGE as HEALTH_PAGE, findings_answer as health_findings_answer,
+    owner_key as health_owner_key,
 };
 pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;
@@ -920,7 +921,7 @@ impl Shell {
             subworkspaces,
             agent_state,
             controls,
-            plugin_settings: _,
+            plugin_settings,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -974,7 +975,7 @@ impl Shell {
             duplicates: Rc::default(),
             imports: Vec::new(),
             no_library: None,
-            health: health::HealthPage::default(),
+            health: health::HealthPage::new(plugin_settings),
             storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
@@ -1755,8 +1756,8 @@ impl Shell {
             Some((_, gpu)) if gpu.handles().device == rs.device => {
                 self.focus.viewport.borrow().attach_gpu(gpu);
             }
-            _ => eprintln!(
-                "helios-gui: the window draws on another device than the process's GPU: \
+            _ => log::warn!(
+                "the window draws on another device than the process's GPU: \
                  the viewport computes on the CPU"
             ),
         }
@@ -3916,10 +3917,18 @@ impl Shell {
     }
 
     /// Shows a notice, in the shell's language: the status bar always, a
-    /// toast unless it is plain information. Kept in `notes` too.
+    /// toast unless it is plain information. Kept in `notes` too, and
+    /// written to the log file in English (target `helios`).
     /// An error offers its details (see [`Shell::notify_failure`]).
     pub fn notify(&mut self, level: Level, text: impl Into<Message>) {
         let message = text.into();
+        crate::log_panel::write(level, &message);
+        self.notify_unlogged(level, message);
+    }
+
+    /// [`Shell::notify`] for a message the Log panel has already taken,
+    /// and so written to the log file.
+    pub(crate) fn notify_unlogged(&mut self, level: Level, message: Message) {
         let report = (level == Level::Error)
             .then(|| crate::report::Context::default().cause(message.english.clone()));
         self.notify_with(level, message, report);
@@ -3933,7 +3942,9 @@ impl Shell {
         text: impl Into<Message>,
         report: crate::report::Context,
     ) {
-        self.notify_with(level, text.into(), Some(report));
+        let message = text.into();
+        crate::log_panel::write(level, &message);
+        self.notify_with(level, message, Some(report));
     }
 
     fn notify_with(
