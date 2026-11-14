@@ -763,6 +763,12 @@ gui-history-set-new = New album set “{ $name }”
 
 gui-history-snapshot-restored = Restored “{ $name }”
 
+gui-history-stack-group = Group { $count } photos into a stack
+
+gui-history-stack-top = Move to top of stack
+
+gui-history-stack-ungroup = Unstack
+
 gui-history-undo = Undo
 
 gui-history-user-batch = { $count } commands
@@ -1488,6 +1494,14 @@ gui-library-sort-rating = Rating
 gui-library-sort-size = File size
 
 gui-library-sort-tip = Sort by
+
+gui-library-stack-group = Group into Stack
+
+gui-library-stack-not-changed = The stack was not changed: { $error }
+
+gui-library-stack-top = Move to Top of Stack
+
+gui-library-stack-ungroup = Unstack
 
 gui-library-sync = Sync zoom and pan
 

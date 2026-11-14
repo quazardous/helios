@@ -342,6 +342,26 @@ in the library history, so Ctrl+Z brings a removed copy back), and
 {"id": 11, "result": {"image": "4f1c…", "removed": 1, "heads": 1, "changes": {…}}}
 ```
 
+Manual stacks (Lightroom's "Group into Stack" and "Unstack"):
+`library.stacks.group` (`images`, `top`) groups photos into one stack,
+collapsed; the stacks any of them is in already are merged into it, so
+grouping one member of a stack with another photo adds that photo. The
+photo on top is `top`, else the first merged stack's top, else the
+first photo. `library.stacks.ungroup` (`images`) dissolves the stacks
+any of them is in; the photos stay. Both, and `library.stacks.top`,
+answer `changes`, the step the vault's revert undoes (the desktop's
+Ctrl+Z); each change is announced as `vault.stack_changed`:
+
+```json
+{"id": 12, "method": "library.stacks.group",
+ "params": {"images": ["4f1c…", "77b0…"], "top": "77b0…"}}
+{"id": 12, "result": {"stack": {"id": "c3d9…", "members": ["4f1c…", "77b0…"],
+ "top": "77b0…", "expanded": false, "who": "user", "at": 1700000200},
+ "merged": 0, "changes": {…}}}
+{"id": 13, "method": "library.stacks.ungroup", "params": {"images": ["4f1c…"]}}
+{"id": 13, "result": {"ungrouped": 1, "stacks": ["c3d9…"], "changes": {…}}}
+```
+
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to
 the system trash (Lightroom's "Delete from Disk", darktable's "delete
 (trash)") as a journaled job (`helios_library::trash`). The job is kept
@@ -619,6 +639,18 @@ person's imports (the import window's Import, Import again, a drop, File
 follows the promises in its status bar; an agent's, a script's or an
 automatic import there, and an importer plugin's, still run on the
 desktop's own `library.import` command.
+
+Photos chosen in a service's page (Google Photos) are imported the same
+way by the process that holds their connector: it hands them to its node
+(`import_promise::hand`, in process) and asks `library.import` with
+`remote` (the key it got) and a `rule` (`all` or `new`). The promise
+downloads them one by one (`done` of `total`, the item's name as
+`note`), each a verified copy in `into` or the library folder; a rate
+limit or an expired download address is waited out, and it settles as an
+import by rule does, `failed` naming each `item`. A pick lives in its
+process: a `remote` key the process does not hold is refused, and a
+promise of one taken up after a restart fails, not retryable (the photos
+chosen again skip those already imported, by their item ids).
 
 ## A client cache
 

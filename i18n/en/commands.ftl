@@ -412,6 +412,15 @@ command-library-select-similar =
 command-library-sort =
     .title = Sort the library (`by`: captured, imported, name, rating, edited, size or focus; `descending`); kept with the workspace. Without `by`, says how it is sorted
 
+command-library-stack-group =
+    .title = Group into Stack: the photos in one stack (`images`: ids, else the selection; `top`: the photo on top, else the one under the cursor), the stacks they are in merged; Ctrl+Z takes it back
+
+command-library-stack-top =
+    .title = Move to Top of Stack: the photo shown for its stack (`image`: an id, else the photo under the cursor); Ctrl+Z puts the former top back
+
+command-library-stack-ungroup =
+    .title = Unstack: ungroup the stacks the photos are in (`images`: ids, else the selection), the photos untouched; Ctrl+Z groups them again
+
 command-library-storage =
     .title = Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)
 

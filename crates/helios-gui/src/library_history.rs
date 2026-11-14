@@ -17,6 +17,9 @@
 //! - **One step per rotation** (L9): the photos' `rotation` field
 //!   before and after, as the node's `library.images.rotate` answers
 //!   them.
+//! - **One step per manual stack change** (L11): a group, an unstack, a
+//!   new top; the stacks' documents before and after, as the node's
+//!   `library.stacks.group`, `.ungroup` and `.top` answer them.
 //! - **For the session only** (docs/design/undo.md, decided 2026-10-14):
 //!   the steps live in memory; a restart starts with none.
 //! - **Active with the library's panels** (the Library, the Filmstrip,
@@ -173,6 +176,35 @@ pub fn remove_label(photos: usize) -> Label {
         text: m.english.clone(),
         key: Some(m.key),
         args: [("count".to_string(), photos.to_string())].into(),
+    }
+}
+
+/// A manual stack's step: "Group 3 photos into a stack", "Unstack",
+/// "Move to top of stack".
+pub fn stack_label(ask: &crate::library::StackAsk) -> Label {
+    use crate::library::StackAsk;
+    let (m, args) = match ask {
+        StackAsk::Group { images, .. } => (
+            Message::new(
+                "gui-history-stack-group",
+                "Group { $count } photos into a stack",
+            )
+            .with("count", images.len()),
+            [("count".to_string(), images.len().to_string())].into(),
+        ),
+        StackAsk::Ungroup { .. } => (
+            Message::new("gui-history-stack-ungroup", "Unstack"),
+            std::collections::BTreeMap::default(),
+        ),
+        StackAsk::Top { .. } => (
+            Message::new("gui-history-stack-top", "Move to top of stack"),
+            std::collections::BTreeMap::default(),
+        ),
+    };
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args,
     }
 }
 

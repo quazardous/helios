@@ -2205,6 +2205,105 @@ fn the_versions_strip_switches_and_a_removed_copy_comes_back_with_undo() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn photos_are_grouped_topped_and_ungrouped_each_undone_and_redone() {
+    use egui_pop::api::history::{Answer, Request};
+    let root = temp("manual-stacks");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let (a, b) = (id(1).hex(), id(2).hex());
+    let stack_of = |h: &Harness<'static, Shell>, image: &str| {
+        h.state()
+            .library()
+            .entry(image)
+            .and_then(|e| e.stack.as_ref())
+            .map(|s| (s.top.clone(), s.count))
+    };
+    let request = Request::new(helios_gui::library_history::LIBRARY);
+    let user = egui_pop::model::commands::Origin::User;
+
+    // Group into Stack: the selection, the cursor's photo on top.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[a.clone(), b.clone()]);
+    let out = answer(&mut h, "library.stack.group", json!({}));
+    assert_eq!(out["grouped"], 2, "{out}");
+    for at in [1.0, 5.0, 9.0] {
+        settle(&mut h, &mut persist, at);
+    }
+    let stack = persist.vault().stack_of(&id(1)).unwrap().expect("grouped");
+    assert_eq!(stack.top, b, "the cursor's photo on top");
+    assert_eq!(stack_of(&h, &a), Some((b.clone(), 2)), "the grid shows it");
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Group 2 photos into a stack"
+    );
+
+    // Move to Top of Stack.
+    let out = answer(&mut h, "library.stack.top", json!({ "image": a }));
+    assert_eq!(out["stack"], json!(stack.id), "{out}");
+    for at in [12.0, 15.0, 18.0] {
+        settle(&mut h, &mut persist, at);
+    }
+    assert_eq!(persist.vault().stack(&stack.id).unwrap().unwrap().top, a);
+    assert_eq!(stack_of(&h, &b), Some((a.clone(), 2)));
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Move to top of stack"
+    );
+    // Undone: the former top is back; redone: the new one.
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    assert_eq!(persist.vault().stack(&stack.id).unwrap().unwrap().top, b);
+    let redone = history.redo(&request, &user);
+    assert!(matches!(redone, Answer::Done(Ok(_))), "{redone:?}");
+    assert_eq!(persist.vault().stack(&stack.id).unwrap().unwrap().top, a);
+
+    // Unstack: the stack goes, the photos stay.
+    let out = answer(&mut h, "library.stack.ungroup", json!({ "images": [b] }));
+    assert_eq!(out["ungrouped"], 1, "{out}");
+    for at in [21.0, 24.0, 27.0] {
+        settle(&mut h, &mut persist, at);
+    }
+    assert!(persist.vault().stacks().unwrap().is_empty());
+    assert_eq!(stack_of(&h, &a), None, "the grid follows");
+    assert_eq!(history.line().undo.last().unwrap().label.text, "Unstack");
+    assert!(
+        answer_err(&mut h, "library.stack.ungroup", json!({ "images": [b] })),
+        "in no stack now"
+    );
+
+    // Undone: the stack is back, and the Library read again shows it.
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    assert_eq!(persist.vault().stacks().unwrap().len(), 1);
+    assert!(persist.take_locations_changed(), "the vault's event heard");
+    persist.ask_fill(h.state(), true);
+    for at in [30.0, 35.0, 40.0] {
+        settle(&mut h, &mut persist, at);
+    }
+    assert_eq!(stack_of(&h, &b), Some((a.clone(), 2)));
+    // Undone twice more: the top, then the grouping.
+    for _ in 0..2 {
+        let undone = history.undo(&request, &user);
+        assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    }
+    assert!(persist.vault().stacks().unwrap().is_empty(), "ungrouped");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Whether a command, run as `answer` runs it, failed.
 fn answer_err(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> bool {
     match h.state_mut().run(id, args, Origin::User) {

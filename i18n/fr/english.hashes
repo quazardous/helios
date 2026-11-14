@@ -196,6 +196,9 @@ command-library-select-invert.title 9fabaf6253c7fd7d
 command-library-select-none.title cf5dfbd241a5672e
 command-library-select-similar.title 341f6a0f2b867360
 command-library-sort.title ac723c2319de076f
+command-library-stack-group.title eb49ab3f0992e73e
+command-library-stack-top.title 86d66aed75468b70
+command-library-stack-ungroup.title 9c5161dff0696632
 command-library-storage.title 72ca240c73a1c7aa
 command-library-trash.title 6fb6defb78678f5c
 command-macro-dissolve.title e472cc526f105a70
@@ -649,6 +652,9 @@ gui-history-rotate-reset 9eaab9c1a1706d76
 gui-history-rotate-right 9a5e9a3be34a7d6a
 gui-history-set-new 438a574de74bd810
 gui-history-snapshot-restored 2d32618201a21647
+gui-history-stack-group dc99d5ac25f8faa1
+gui-history-stack-top 2fc730ecf55f9f1b
+gui-history-stack-ungroup 7fdaa277408e1d88
 gui-history-undo cc7022a2d9050a57
 gui-history-user-batch d8f126e521da2cde
 gui-history-version-remove 138b18170ea40861
@@ -1004,6 +1010,10 @@ gui-library-sort-name a461cba6b8059f30
 gui-library-sort-rating 36690a4e79cfa166
 gui-library-sort-size da247eb7d8a1f68e
 gui-library-sort-tip fdd935e0be790484
+gui-library-stack-group 4c9d9df46949e0d0
+gui-library-stack-not-changed 920a7518ca6e1686
+gui-library-stack-top b1a57d326a19a81b
+gui-library-stack-ungroup 7fdaa277408e1d88
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
 gui-library-trash 6cddaea29caba8b5
