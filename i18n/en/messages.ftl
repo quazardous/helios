@@ -151,6 +151,10 @@ gui-about-description = A client/server, AI-first image processing framework.
 
 gui-account-add = Add account…
 
+gui-account-another = Use another account…
+
+gui-account-choose = Choose photos…
+
 gui-account-connected = connected
 
 gui-account-connecting = connecting…
@@ -171,17 +175,19 @@ gui-account-disconnect-title = Disconnect { $account }?
 
 gui-account-identity-missing = Reconnect to see the account
 
+gui-account-manage = Manage accounts…
+
+gui-account-menu = Account
+
 gui-account-needs-attention = needs attention
+
+gui-account-needs-reconnecting = needs reconnecting
 
 gui-account-never-used = Never
 
 gui-account-not-connected = not connected
 
-gui-account-pick = Pick photos…
-
 gui-account-reconnect = Reconnect
-
-gui-account-sign-out = Sign out
 
 gui-account-status-connecting = Connecting
 
@@ -378,6 +384,58 @@ gui-catalogue-restore-title = Restore the catalogue?
 gui-catalogue-snapshot-now = Snapshot now
 
 gui-catalogue-today = today
+
+gui-choose-about = { $service } opens in your browser. Choose your photos, press Done there, then come back here.
+
+gui-choose-closed = The { $service } page has closed. Open it again to choose your photos.
+
+gui-choose-connect = Connect { $service }
+
+gui-choose-connecting = Sign in in your browser, then come back here.
+
+gui-choose-copy-link = Copy the link
+
+gui-choose-done = { $count } photos imported.
+
+gui-choose-failed = The photos were not imported: { $why }
+
+gui-choose-identity = Reconnect once to show which account this is.
+
+gui-choose-importing = Importing { $count } photos…
+
+gui-choose-into = Choose the folder…
+
+gui-choose-known = { $count } were already in your Library.
+
+gui-choose-more = Choose more photos…
+
+gui-choose-no-into = Choose where the photos are copied first: Into, in the Choices column.
+
+gui-choose-not-connected = This account is not connected.
+
+gui-choose-not-open = The page did not open?
+
+gui-choose-nothing = No photos were chosen.
+
+gui-choose-open-again = Open it again
+
+gui-choose-opening = Opening { $service }…
+
+gui-choose-photos = Choose photos in { $service }…
+
+gui-choose-reconnect = Reconnect { $account }
+
+gui-choose-refused = ▲ { $service } no longer lets Helios read this account.
+
+gui-choose-refused-why = This happens when access was removed in the account's settings at { $service }, or when the access Helios was given ran out.
+
+gui-choose-signed-in = { $service } shows the photos of the account your browser is signed in to: { $account }.
+
+gui-choose-try-again = Try again
+
+gui-choose-unreachable = Could not reach { $service }: { $why }
+
+gui-choose-waiting = Choose your photos in the browser, press Done there, then come back here.
 
 gui-compare-first = Compare shows { $count } photos at most: the first { $count } are compared
 
@@ -673,6 +731,8 @@ gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
 
+gui-history-library-remove = Remove { $count } photos from the Library
+
 gui-history-preview-applied = applied
 
 gui-history-preview-bypassed = bypassed
@@ -769,9 +829,7 @@ gui-import-browse-folder = All photos
 
 gui-import-browse-not-listed = Helios does not list this source's photos here yet.
 
-gui-import-browse-pick-about = Choose the photos in the service's own page: they are imported once picked.
-
-gui-import-browse-picker = Pick in the service
+gui-import-browse-picker = Choose in the service's page
 
 gui-import-browse-timeline = By date
 
@@ -831,8 +889,6 @@ gui-import-remember-help = The workspace's import source: the next import does n
 
 gui-import-verb = Import
 
-gui-import-window-accounts = Accounts
-
 gui-import-window-add = Add where they are
 
 gui-import-window-add-favourite = Add to favourites
@@ -864,6 +920,8 @@ gui-import-window-choices-reset-help = This source takes the default choices aga
 gui-import-window-choices-undo = Undo
 
 gui-import-window-choose = Choose a folder…
+
+gui-import-window-choose-on-the-right = Choose photos in the panel on the right: they show here.
 
 gui-import-window-contents = Contents
 
@@ -984,6 +1042,8 @@ gui-import-window-select-all = all
 gui-import-window-select-day = day
 
 gui-import-window-select-none = none
+
+gui-import-window-services = Services
 
 gui-import-window-sources = Sources
 
@@ -1159,6 +1219,8 @@ gui-library-no-cursor = No image under the cursor
 
 gui-library-none = No images
 
+gui-library-not-removed = The photos were not removed from the Library: { $error }
+
 gui-library-not-saved = Not saved, the library shows what was saved last: { $error }
 
 gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
@@ -1186,6 +1248,8 @@ gui-library-quick-toggle = Add or remove the selected photos
 gui-library-read = { $count } images in the library
 
 gui-library-reading = Reading the library…
+
+gui-library-remove = Remove from Library
 
 gui-library-search = Search images
 
@@ -1615,35 +1679,7 @@ gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
 
-gui-pick-account = Your browser must be signed in to the account connected as { $account }; if the page says it cannot open, sign in to that account and start again.
-
-gui-pick-again = Start again
-
-gui-pick-browser = Pick your photos in your browser, press Done, then come back here.
-
 gui-pick-choose-folder = Choose the library folder…
-
-gui-pick-done = { $count } photos imported.
-
-gui-pick-expired = The picking session expired, start again.
-
-gui-pick-failed = Not imported: { $why }
-
-gui-pick-importing = Importing { $count } photos…
-
-gui-pick-known = { $count } already in the library, left as they are.
-
-gui-pick-library-folder = Picked photos are copied into the library folder. Choose it once: it is remembered.
-
-gui-pick-more = Pick more photos…
-
-gui-pick-nothing = Nothing was picked in time.
-
-gui-pick-sign-in = The source refused the sign-in: reconnect the account.
-
-gui-pick-starting = Opening the picking…
-
-gui-pick-title = Pick photos in { $source }
 
 gui-pointer-choice-close = Close the pointer profile notice
 
@@ -2541,6 +2577,8 @@ health-fix-acknowledge-changed = Acknowledge
 
 health-fix-back-up-now = Back up now
 
+health-fix-choose-library-folder = Choose a folder…
+
 health-fix-gpu-docs = How to choose the GPU
 
 health-fix-library-folder = Open the library's folder
@@ -2604,6 +2642,16 @@ health-library = The library
 health-library-closed = The library cannot be opened
 
 health-library-closed-detail = { $file }: { $error }
+
+health-library-folder = Library folder
+
+health-library-folder-none = No library folder chosen
+
+health-library-folder-none-detail = Imports that copy photos and picked photos have nowhere to go: they ask for a folder first.
+
+health-library-folder-ok = A library folder is chosen
+
+health-library-folder-ok-detail = { $folder }
 
 health-library-no-room = The library's disk is almost full
 
@@ -2702,6 +2750,10 @@ health-vault-ok-detail = { $file } passed SQLite's quick check
 health-vault-unreadable = The catalogue cannot be checked
 
 health-vault-unreadable-detail = { $file }: { $error }
+
+init-library-folder = Library folder
+
+init-library-folder-why = Imports copy photos into it, and picked photos go there.
 
 look-default-bad-params = the look's { $node } parameters: { $error }
 

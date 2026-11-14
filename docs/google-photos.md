@@ -106,37 +106,46 @@ it is your own app, in testing, so continue. The browser then says to
 go back to Helios.
 
 Helios keeps the sign-in in your system keyring, never in the Library.
-The account is shown with its address, "Google Photos — name@example.com",
-in the import window, the source editor and **Settings > Accounts**, so
-several accounts stay apart. An account connected before Helios asked
-for the address says **Reconnect to see the account**: one reconnection
-(one consent) shows it. **Settings > Accounts** shows the account, the
-sources using it and when it was last used; rename it there, or
-**Disconnect** it: Helios revokes its access at Google and forgets it,
-and asks whether the sources using it are kept (until you reconnect) or
-forgotten. When Google refuses the access later (you revoked it in your
-Google account, or a testing app's sign-in aged out: Google ends them
-after seven days), the account shows **Access refused** and **Reconnect**
-signs in again.
+The account is shown once in the import window: one row under
+**Services**, its address under its name, and, once selected, one header
+line in the Contents column, "Google Photos · name@example.com", with a
+**⋯** menu: **Reconnect**, **Use another account…** and **Manage
+accounts…** (Settings > Accounts). Several accounts stay apart. An
+account connected before Helios asked for the address says **needs
+reconnecting**, and its Contents offer **Reconnect** once (one consent)
+to show it. **Settings > Accounts** shows the account, the sources using
+it and when it was last used; rename it there, or **Disconnect** it:
+Helios revokes its access at Google and forgets it, and asks whether the
+sources using it are kept (until you reconnect) or forgotten. When Google
+refuses the access later (you revoked it in your Google account, or a
+testing app's sign-in aged out: Google ends them after seven days), the
+account says so in one sentence and its one button is **Reconnect
+name@example.com**.
 
-## Picking and importing
+## Choosing and importing
 
-In the import window, a connected Google Photos account shows **Pick
-photos…**. Helios creates a picking session and opens Google Photos' picker in
-your browser. Select the photos, press **Done**; the tab closes and
-Helios lists what you picked, downloads each photo and imports it into
-your Library folder, then closes the session at Google. **Cancel** stops waiting; a picking
-waits 30 minutes at most. A photo you
-already imported from Google Photos is recognised by its Google id and
-not downloaded again.
+Select the account in the import window: the Contents column shows one
+button, **Choose photos in Google Photos…**. Google Photos opens in your
+browser. Select the photos and press **Done**; meanwhile the Contents
+column says so in a status line, with the page to open again or copy and
+**Cancel**, and the rest of the window stays usable. Helios lists what you
+chose, downloads each photo and imports it, then closes the page at
+Google. Google's page waits 30 minutes at most. A photo you already
+imported from Google Photos is recognised by its Google id and not
+downloaded again.
 
-Pick again whenever you want: **Pick photos…** stays on the account, in
-its source's menu and in the Contents column, and a finished picking
-offers **Pick more photos…**. Each is a new picking session; its photos
-are added to the same source, and those already in the Library are said
-so and left as they are. Google's download addresses last an hour: one
-that expired during an import is renewed by listing the picking again,
-never shown as an error.
+The photos are copied where the Choices column's **Into** says, as for
+any source, else into your Library folder; the connector never asks for a
+folder. With neither, the Contents column asks you to choose Into first,
+before Google's page opens.
+
+Choose again whenever you want: once imported, the Contents column offers
+**Choose more photos…**. Each is a new page at Google; its photos are
+added to the same source, and those already in the Library are said so
+and left as they are. Google's download addresses last an hour: one that
+expired during an import is renewed by listing the photos again, never
+shown as an error. Each problem gets one sentence and one button: nothing
+chosen, Google's page closed, Google unreachable, access refused.
 
 ## For developers
 

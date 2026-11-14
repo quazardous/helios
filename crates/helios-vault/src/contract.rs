@@ -527,8 +527,12 @@ fn an_image_off_the_library_never_shows_in_a_library_read<S: Store>(s: S) {
     v.set_in_library(&[c.id], false, "user", 10).unwrap();
     assert!(v.stacks().unwrap().is_empty());
     assert_eq!(v.stack_of(&a.id).unwrap(), None);
+    // The step as a node answers it, read back whole: what the desktop
+    // records to undo.
+    let sent: crate::Changes = serde_json::from_value(serde_json::to_value(&out).unwrap()).unwrap();
+    assert_eq!(sent, out, "a step read back from its JSON");
     // Undo puts the flag back; redo takes it out again.
-    v.revert(&out).unwrap();
+    v.revert(&sent).unwrap();
     assert!(v.in_library(&b.id).unwrap());
     assert_eq!(ids(v.images().unwrap()), [a.id, b.id]);
     assert_eq!(v.refresh(cursor.id).unwrap().inserted, [b.id]);
@@ -2476,6 +2480,10 @@ fn the_quick_collection_toggles_clears_and_saves<S: Store>(s: S) {
     let (added, out) = v.toggle_quick(&[id(2)]).unwrap();
     assert!(!added);
     assert_eq!(in_album(&v, QUICK), vec![id(1), id(3)]);
+    // As a node's client gets them: in JSON, read back whole.
+    let read: crate::Changes = serde_json::from_value(serde_json::to_value(&out).unwrap()).unwrap();
+    assert_eq!(read, out);
+    let out = read;
     v.revert(&out).unwrap();
     assert_eq!(in_album(&v, QUICK).len(), 3);
     v.replay(&out).unwrap();

@@ -241,6 +241,15 @@ impl Cursors {
                                     "locations": locations_json(&row.locations) })
                         }));
                         read
+                    } else if names.is_empty() {
+                        // Only the ids: the cursor's snapshot holds them,
+                        // the store is not asked.
+                        let ids = vault
+                            .cursor_ids(handle, at, n)
+                            .map_err(|e| missing_or(cursor, e))?;
+                        let read = ids.len();
+                        rows.extend(ids.iter().map(|id| json!({ "id": id.hex(), "fields": {} })));
+                        read
                     } else {
                         let chunk = vault
                             .fetch(handle, at, n, &names)

@@ -13,13 +13,13 @@
 use std::collections::{HashMap, HashSet};
 
 use helios_core::ContentHash;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{ImageId, parse_hash};
 
 /// A version, identified by its content.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VersionId(pub ContentHash);
 
 impl VersionId {
@@ -33,7 +33,7 @@ impl VersionId {
 }
 
 /// One version of an image's edit.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Version {
     pub id: VersionId,
     pub image: ImageId,
@@ -50,7 +50,7 @@ pub struct Version {
     /// What else the step that made it carries, not hashed: the workshop
     /// session it was made in (`{"workshop_session": "<id>"}`), so a
     /// session can be rebuilt from the versions.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Value>,
 }
 

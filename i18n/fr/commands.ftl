@@ -191,6 +191,8 @@ command-library-export =
 
 command-library-fitCameraLook =
     .title = Ajuster un rendu boîtier sur la sélection : un rendu à partir de photos d’un seul boîtier, ajusté à leurs JPEG intégrés et écrit dans chacune (`images` : des identifiants, sinon la sélection ; `default` : le garder aussi comme défaut du boîtier)
+command-library-chooseFolder =
+    .title = Choisir le dossier de la bibliothèque où les imports copient les photos (`path` ; demandé par le sélecteur de dossiers s'il manque)
 
 command-library-openFolder =
     .title = Ouvrir un dossier dans le gestionnaire de fichiers (`path`)
@@ -690,10 +692,27 @@ command-library-collection-list =
     .title = Lister les albums : `id`, `name`, `kind` (album, dynamique ou ensemble), l’ensemble `set` où il est, combien de photos chacun contient (un ensemble : celles de ses albums réunies), les `rules` d’un album dynamique ; et le nombre `quick` de la collection rapide
 command-library-quick-toggle =
     .title = Mettre des photos dans la collection rapide (`images` : identifiants, sinon la sélection), ou les en retirer quand elle les contient toutes ; restreindre la bibliothèque à elle avec la collection `quick`
+command-library-remove =
+    .title = Retirer de la bibliothèque : en sortir les photos (`images` : identifiants, sinon la sélection), leurs fichiers intacts ; Ctrl+Z les y remet
 command-library-quick-clear =
     .title = Vider la collection rapide ; ses photos restent dans la bibliothèque
 command-library-quick-saveAs =
     .title = Enregistrer la collection rapide comme album (`name` ; `clear` : la vider aussi) ; sans `name`, le demande. Répond l’`id` de l’album
+
+command-library-select-none =
+    .title = Ne sélectionner aucune photo, le curseur retiré aussi
+
+command-library-select-invert =
+    .title = Inverser la sélection : les photos affichées qui n’étaient pas sélectionnées
+
+command-library-select-similar =
+    .title = Sélectionner les photos affichées semblables aux photos sélectionnées (`by` : day, prises le même jour, par défaut ; ou stack, dans la même pile)
+
+command-library-marks-copy =
+    .title = Copier les marques d’une photo : note, étiquettes de couleur, mots-clés et titre (`image` : un identifiant, sinon la photo sous le curseur). Les répond
+
+command-library-marks-paste =
+    .title = Coller les marques copiées (`images` : identifiants, sinon la sélection ; `marks` : parmi rating, labels, tags, title, toutes par défaut ; `mode` : merge, par défaut, ajoute étiquettes et mots-clés, overwrite rend chaque marque identique à la copie)
 
 command-library-scanFolder =
     .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume
