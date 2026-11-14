@@ -1495,10 +1495,12 @@ gui-history-version-switch = Changer de version
 gui-library-stack-group = Grouper en pile
 gui-library-stack-ungroup = Dégrouper
 gui-library-stack-top = Placer en haut de la pile
+gui-library-stack-pairs = Empiler les paires RAW+JPEG
 gui-library-stack-not-changed = La pile n’a pas été changée : { $error }
 gui-history-stack-group = Grouper { $count } photos en pile
 gui-history-stack-ungroup = Dégrouper
 gui-history-stack-top = Placer en haut de la pile
+gui-history-stack-pairs = Empiler les paires RAW+JPEG
 gui-library-rotate-right = Rotation à droite
 gui-library-rotate-reset = Réinitialiser la rotation
 gui-library-trash = Mettre à la corbeille…
@@ -2574,6 +2576,8 @@ gui-import-profiles-rename = Renommer
 gui-import-profiles-delete = Supprimer
 
 gui-import-profiles-save-name = Enregistrer
+gui-import-profiles-stack-pairs = Empiler les paires RAW+JPEG
+gui-import-profiles-stack-pairs-help = Un RAW et un JPEG de la même prise sont montrés comme une seule pile, le RAW dessus
 
 gui-import-profiles-default-for = Par défaut pour
 

@@ -777,6 +777,8 @@ gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-stack-group = Group { $count } photos into a stack
 
+gui-history-stack-pairs = Stack RAW+JPEG pairs
+
 gui-history-stack-top = Move to top of stack
 
 gui-history-stack-ungroup = Unstack
@@ -1048,6 +1050,10 @@ gui-import-profiles-new-name = New profile
 gui-import-profiles-rename = Rename
 
 gui-import-profiles-save-name = Save
+
+gui-import-profiles-stack-pairs = Stack RAW+JPEG pairs
+
+gui-import-profiles-stack-pairs-help = A raw and a JPEG of the same shot are shown as one stack, the raw on top
 
 gui-import-profiles-title = Import profiles
 
@@ -1566,6 +1572,8 @@ gui-library-sort-tip = Sort by
 gui-library-stack-group = Group into Stack
 
 gui-library-stack-not-changed = The stack was not changed: { $error }
+
+gui-library-stack-pairs = Stack RAW+JPEG Pairs
 
 gui-library-stack-top = Move to Top of Stack
 

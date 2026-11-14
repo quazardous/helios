@@ -421,6 +421,9 @@ command-library-sort =
 command-library-stack-group =
     .title = Group into Stack: the photos in one stack (`images`: ids, else the selection; `top`: the photo on top, else the one under the cursor), the stacks they are in merged; Ctrl+Z takes it back
 
+command-library-stack-pairs =
+    .title = Stack RAW+JPEG Pairs: each raw and JPEG of one shot among the photos (`images`: ids, else the selection) in a stack of their own, the raw on top; photos in a stack already are left as they are; Ctrl+Z takes it back
+
 command-library-stack-top =
     .title = Move to Top of Stack: the photo shown for its stack (`image`: an id, else the photo under the cursor); Ctrl+Z puts the former top back
 

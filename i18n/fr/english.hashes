@@ -199,6 +199,7 @@ command-library-select-none.title cf5dfbd241a5672e
 command-library-select-similar.title 341f6a0f2b867360
 command-library-sort.title ac723c2319de076f
 command-library-stack-group.title eb49ab3f0992e73e
+command-library-stack-pairs.title e0d6099954ae1a6d
 command-library-stack-top.title 86d66aed75468b70
 command-library-stack-ungroup.title 9c5161dff0696632
 command-library-storage.title 72ca240c73a1c7aa
@@ -661,6 +662,7 @@ gui-history-rotate-right 9a5e9a3be34a7d6a
 gui-history-set-new 438a574de74bd810
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-stack-group dc99d5ac25f8faa1
+gui-history-stack-pairs b6c19740069f7141
 gui-history-stack-top 2fc730ecf55f9f1b
 gui-history-stack-ungroup 7fdaa277408e1d88
 gui-history-undo cc7022a2d9050a57
@@ -790,6 +792,8 @@ gui-import-profiles-new 32961961f4910d59
 gui-import-profiles-new-name 2688fa82aa6f847a
 gui-import-profiles-rename 81224e15032bac73
 gui-import-profiles-save-name 835b5f8f6d37f13e
+gui-import-profiles-stack-pairs b6c19740069f7141
+gui-import-profiles-stack-pairs-help f5696f64d9bc85d4
 gui-import-profiles-title 54f542c963db9254
 gui-import-remember 75f1f4460d6a89ec
 gui-import-remember-help e20b1b9d5a401bc1
@@ -1048,6 +1052,7 @@ gui-library-sort-size da247eb7d8a1f68e
 gui-library-sort-tip fdd935e0be790484
 gui-library-stack-group 4c9d9df46949e0d0
 gui-library-stack-not-changed 920a7518ca6e1686
+gui-library-stack-pairs d1bf042c2f47a121
 gui-library-stack-top b1a57d326a19a81b
 gui-library-stack-ungroup 7fdaa277408e1d88
 gui-library-sync 0b5c87b7f38a10af
