@@ -536,6 +536,10 @@ generic pair (`helios_commands_list`, `helios_command_run`) are these two
 methods on the node a client finds this way: every command, the node's
 and a desktop's window commands, reached without a tool or a verb of its
 own, run as `cli` or `agent:mcp`.
+`helios-mcp --tools generated` also offers each command of the registries
+compiled in as a tool of its own (`helios_cmd_<id>`), its params schema as
+the tool's input schema; a call is that `command.run` with `scope: "node"`
+([cli.md](cli.md)).
 
 A client (`helios_node::connect`):
 
