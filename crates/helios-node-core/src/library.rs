@@ -389,6 +389,12 @@ pub fn import_spec() -> CommandSpec {
                 false,
             ),
             ("signals", or_null("boolean"), false),
+            (
+                "camera_look",
+                json!({ "type": ["boolean", "null"],
+                        "description": "the cameras' default looks put on the raws brought in (on when absent)" }),
+                false,
+            ),
         ]))
         .needs(Need::Vault)
 }

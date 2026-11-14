@@ -1432,8 +1432,9 @@ impl<S: Store + 'static> Persist<S> {
         port: &str,
     ) -> Result<Option<Version>, String> {
         // Opened for the first time, a raw gets its camera's default
-        // calibration profile (as its first edit, read just below).
-        if let Some(said) = crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
+        // calibration profile and default camera look (as its first
+        // edit, read just below).
+        for said in crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
             shell.notify(Level::Info, said);
         }
         // The steps of an image still on their way are written first: its

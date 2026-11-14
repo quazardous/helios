@@ -721,6 +721,7 @@ mod tests {
                 "rename",
                 "duplicates",
                 "darktable",
+                "camera_look",
             ] {
                 assert!(config.source.get(key).is_some(), "{id}: {key}");
             }

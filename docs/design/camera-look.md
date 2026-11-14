@@ -733,6 +733,67 @@ Left for the next slices: the fit of a selection from the library's
 menus (the command takes `images` already), the per-camera default at
 import, and the "Camera look" preset in the module's preset menu.
 
+### Built: a selection and a default per camera (2026-11-13)
+
+- **One look from several photos.** `look.camera.fit` with `together`
+  (`helios_calibrate::look::combine`): each raw is fitted on its own,
+  with its gates; the looks that passed are averaged (matrices, tables
+  and chroma curves of the looks with colour, node by node, a missing
+  table or chroma curve counting as the identity; tone curves at every
+  knot any of them has, at most 48) and the average is scored on every
+  photo's held-out pairs pooled, against the default render's on the
+  same pairs. The photos must be of one camera: the library's capture
+  fields are read first, so a mixed selection is refused before any raw
+  is read ("the photos are of 2 cameras (…): a camera look is fitted from
+  photos of one camera"), and each raw's own camera is checked again.
+  The look is written into every raw of the selection (a photo whose own
+  fit was refused gets the camera's look too), one library step.
+- **From the Library.** "Fit a camera look from the selection"
+  (`library.fitCameraLook`, in the grid's context menu) hands the
+  selection to the desktop's `look.camera.fitSelection`, which refuses a
+  mixed selection at once and runs the fit on a thread as a
+  `calibration` job: its progress counts the photos read, the jobs
+  centre cancels it before the next photo (nothing written), its log
+  says the look's Delta E or why none was found.
+- **A default per camera,** as raw editors keep develop defaults per
+  camera model (Lightroom's "Set Default Settings" for a camera): the
+  look's two nodes' parameters kept in the vault's `look/defaults`
+  namespace under the camera's key (`look.camera.setDefault {camera,
+  look | image | clear}`, one library step; `together` with `default`
+  keeps the look it fitted). The raws of that camera imported from then
+  on start with it (next section); photos already in the library keep
+  their edits.
+- **The header** says "The default look of <camera>" when the open
+  photo's look is the camera's default (the same `preview` provenance),
+  or that the camera has another default; "Save as the camera's
+  default" keeps the open edit's look (its amounts included), "Clear the
+  default" clears it.
+
+### Built: the default at import and the preset (2026-11-13)
+
+- **At import,** as Lightroom applies a camera's develop defaults: once
+  an import ends, each photo new to the vault, never edited, whose file
+  is a raw of a camera with a default look gets it as its first version
+  (`helios_node_core::calibrate::look::default_on_import`). The camera
+  is read from the raw's header as the open photo's is named (the
+  decoder's clean make and model, no mosaic decoded), so the key matches
+  the one the header saved. The version's origin is
+  `import:camera-look`, and the import's own library step takes it in:
+  undoing the import takes the look back too. A photo whose only
+  versions have that origin still counts as never edited, so its first
+  opening puts the camera's default profile on it. The look is no
+  longer put on a photo when it first opens: photos already in the
+  library get it from the preset.
+- **The choice.** The import window's Choices show "Apply the camera's
+  default look" when the library keeps one, on by default; it is the
+  local sources' `camera_look` key, kept with the other choices and
+  presets, and `library.import`'s `camera_look` (false leaves the looks
+  off; the node's `library.import` takes it too).
+- **The preset.** The Camera look header has a Presets list; its
+  "Camera look" is `look.camera.choose {look: camera}`: the camera's
+  default look written into the open edit and turned on, or a fit to
+  the camera's JPEG when the camera has none, one undoable step.
+
 **3b. The user's side and the hooks.**
 
 - The Camera look entry and its header (section 3.4), the amount, the
@@ -755,8 +816,8 @@ import, and the "Camera look" preset in the module's preset menu.
 
 - Lens-correction warping of the sensor proxy (needs makers' tables).
 - A maker-note reader for picture styles beyond the refusal list.
-- Fitting a per-camera look from many files (a "camera standard"
-  profile learnt from the library), then exporting it as a DCP.
+- Exporting a per-camera look (fitted from many files, see "Built: a
+  selection and a default per camera") as a DCP.
 - Using the look as the start of a chart-free "match this JPEG" for
   out-of-camera JPEGs shot with the raw (RAW + JPEG pairs).
 

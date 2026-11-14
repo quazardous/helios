@@ -174,6 +174,59 @@ enum Known {
     Claim(ImageId),
 }
 
+/// Whether the item is known before any byte is fetched: its sighting
+/// (`old`, at its place on the source's volume), then its claim.
+fn known_before<S: Store>(
+    vault: &Vault<S>,
+    item: &Item,
+    old: Option<&Sighting>,
+) -> Result<Option<Known>, String> {
+    if let Some(s) = old
+        && let Some(id) = s.image
+        && item.size.is_none_or(|z| z == s.size)
+        && item.modified.is_none_or(|m| m.max(0) as u64 == s.modified)
+        && vault.in_library(&id)?
+    {
+        return Ok(Some(Known::Item(id)));
+    }
+    let Some(claim) = &item.claim else {
+        return Ok(None);
+    };
+    let id = match &claim.algorithm {
+        // A Helios peer's claim is the image id itself.
+        HashAlgo::Blake3 => ImageId::from_hex(&claim.digest.to_ascii_lowercase()).ok(),
+        HashAlgo::Other(_) => None,
+        algo => vault.claimed(algo.name(), &claim.digest)?,
+    };
+    Ok(match id {
+        Some(id) if vault.in_library(&id)? => Some(Known::Claim(id)),
+        _ => None,
+    })
+}
+
+/// Which of `items`, listed under `source`, are already in the Library,
+/// known before any byte is fetched (their item id seen before and
+/// unchanged, or their claimed hash): what the import window marks "in
+/// your Library". Reads the vault only: never on the interface thread.
+pub fn in_library<S: Store>(
+    vault: &Vault<S>,
+    source: &SourceRef,
+    items: &[Item],
+) -> Result<Vec<bool>, String> {
+    let volume = volume_of(source);
+    items
+        .iter()
+        .map(|item| {
+            let old = vault.sighting_at(
+                Some(&volume.id),
+                Some(&PathBuf::from(&item.id.0)),
+                Path::new(&item.path),
+            )?;
+            Ok(known_before(vault, item, old.as_ref())?.is_some())
+        })
+        .collect()
+}
+
 /// The state of one import from a connector.
 struct Run<'a, S: Store> {
     vault: &'a Vault<S>,
@@ -293,32 +346,6 @@ impl<S: Store> Run<'_, S> {
             },
         };
         self.vault.record_sighting(&new)
-    }
-
-    /// Whether the item is known before any byte is fetched: its
-    /// sighting, then its claim.
-    fn known(&self, item: &Item, old: Option<&Sighting>) -> Result<Option<Known>, String> {
-        if let Some(s) = old
-            && let Some(id) = s.image
-            && item.size.is_none_or(|z| z == s.size)
-            && item.modified.is_none_or(|m| m.max(0) as u64 == s.modified)
-            && self.vault.in_library(&id)?
-        {
-            return Ok(Some(Known::Item(id)));
-        }
-        let Some(claim) = &item.claim else {
-            return Ok(None);
-        };
-        let id = match &claim.algorithm {
-            // A Helios peer's claim is the image id itself.
-            HashAlgo::Blake3 => ImageId::from_hex(&claim.digest.to_ascii_lowercase()).ok(),
-            HashAlgo::Other(_) => None,
-            algo => self.vault.claimed(algo.name(), &claim.digest)?,
-        };
-        Ok(match id {
-            Some(id) if self.vault.in_library(&id)? => Some(Known::Claim(id)),
-            _ => None,
-        })
     }
 
     /// A Library image the item probably is, by capture time, camera and
@@ -464,7 +491,7 @@ impl<S: Store> Run<'_, S> {
             ));
         }
         let old = self.sighting(item)?;
-        let known = self.known(item, old.as_ref())?;
+        let known = known_before(self.vault, item, old.as_ref())?;
         if let Some(known) = &known {
             let (id, of) = match known {
                 Known::Item(id) => (*id, "item"),

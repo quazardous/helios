@@ -251,6 +251,20 @@ fn the_manifest_declares_the_google_sign_in_then_a_test() {
     assert_eq!(steps[1].kind, helios_connect::StepKind::Test);
 }
 
+/// Where the photos picked go is the source's `download` folder, filled
+/// in from the start: the import window never asks for one.
+#[test]
+fn the_manifest_declares_the_download_folder_filled_in() {
+    let text = include_str!("../helios-plugin.toml");
+    let manifest = helios_plugin::manifest::Manifest::parse(text).unwrap();
+    let source = manifest.contracts().source;
+    let download = source.get("download").expect("a download folder");
+    assert_eq!(
+        download.default,
+        Some(serde_json::json!("<Pictures>/Google Photos/{account}"))
+    );
+}
+
 /// The scopes Google's verification and the privacy page list are the
 /// ones the sign-in asks, no more, no fewer.
 #[test]

@@ -26,7 +26,8 @@ use crate::{
 /// offers them: copied (`copy`, the default given) into a folder (`into`,
 /// the Library folder when unset) by date (`layout`) under a name
 /// (`rename`), or added where they are; what to do with duplicates; and
-/// whether darktable's XMP sidecars are read.
+/// whether darktable's XMP sidecars are read and the camera's default
+/// look applied.
 pub fn source_contract(copy: bool) -> Contract {
     let copies = |key: ConfigKey| key.group("Copies").visible_when("copy", json!(true));
     Contract::new()
@@ -74,6 +75,13 @@ pub fn source_contract(copy: bool) -> Contract {
                 .default_value(json!(true))
                 .label("Read darktable edits")
                 .help("Read the XMP sidecars darktable writes beside the photos"),
+        )
+        .key(
+            "camera_look",
+            ConfigKey::new(KeyType::Bool)
+                .default_value(json!(true))
+                .label("Apply the camera's default look")
+                .help("Raws of a camera with a default camera look start with it"),
         )
 }
 
