@@ -14,11 +14,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use helios_core::Message;
-use helios_library::import_history::Record;
+use helios_library::import_history::{Place, Record};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::import_sources::MountedCard;
 
 /// The command listing the history.
 pub const LIST: &str = "import.history.list";
@@ -58,16 +59,32 @@ pub(super) struct History {
 const RECENT_FOLDERS: usize = 8;
 
 impl History {
-    /// The folders imported from lately, newest first, each once.
-    pub(super) fn recent_folders(&self) -> Vec<std::path::PathBuf> {
+    /// The folders imported from lately, newest first, each once. A
+    /// source on a card is the card's: listed once, where it is mounted
+    /// now among `mounted` (else where it was last).
+    pub(super) fn recent_folders(&self, mounted: &[MountedCard]) -> Vec<std::path::PathBuf> {
         let mut out: Vec<std::path::PathBuf> = Vec::new();
+        let mut places: Vec<&Place> = Vec::new();
         for r in &self.records {
             if r.importer.is_some() || r.remote.is_some() {
                 continue;
             }
             for s in &r.sources {
-                if !out.contains(s) {
-                    out.push(s.clone());
+                let path = match r.place_of(s) {
+                    Some(place) => {
+                        if places.contains(&place) {
+                            continue;
+                        }
+                        places.push(place);
+                        mounted
+                            .iter()
+                            .find(|m| m.id == place.volume.0)
+                            .map_or_else(|| s.clone(), |m| m.root.join(&place.rel_path))
+                    }
+                    None => s.clone(),
+                };
+                if !out.contains(&path) {
+                    out.push(path);
                 }
             }
             if out.len() >= RECENT_FOLDERS {
@@ -79,10 +96,28 @@ impl History {
     }
 
     /// When `folder` was last imported from (seconds since the epoch).
-    pub(super) fn last_import_of(&self, folder: &std::path::Path) -> Option<u64> {
+    /// On a card mounted now (among `mounted`), the card's imports count
+    /// wherever it was mounted, and another card's at that path do not.
+    pub(super) fn last_import_of(
+        &self,
+        folder: &std::path::Path,
+        mounted: &[MountedCard],
+    ) -> Option<u64> {
+        let on_card = mounted.iter().find_map(|m| {
+            let rel = folder.strip_prefix(&m.root).ok()?;
+            Some((m.id.as_str(), rel))
+        });
         self.records
             .iter()
-            .find(|r| r.error.is_none() && r.sources.iter().any(|s| s == folder))
+            .find(|r| {
+                r.error.is_none()
+                    && r.sources.iter().any(|s| match (on_card, r.place_of(s)) {
+                        (Some((id, rel)), Some(place)) => {
+                            place.volume.0 == id && place.rel_path == rel
+                        }
+                        (Some(_), None) | (None, _) => s == folder,
+                    })
+            })
             .map(|r| r.when)
     }
 
@@ -237,6 +272,24 @@ impl Shell {
             .find(|r| r.id == id)
             .ok_or_else(|| format!("no import `{id}` in the history"))?;
         let mut params = record.params()?;
+        // A card's source is read where the card is mounted now.
+        let mounted = self.import.get().sources.mounted.clone();
+        let paths: Vec<std::path::PathBuf> = record
+            .sources
+            .iter()
+            .map(|s| {
+                record
+                    .place_of(s)
+                    .and_then(|place| {
+                        mounted
+                            .iter()
+                            .find(|m| m.id == place.volume.0)
+                            .map(|m| m.root.join(&place.rel_path))
+                    })
+                    .unwrap_or_else(|| s.clone())
+            })
+            .collect();
+        params["paths"] = json!(paths);
         params["origin"] = json!(crate::persist::who(origin));
         self.core.imports.push(params.clone());
         // The window lists the new record once it is written.

@@ -56,6 +56,7 @@ pub mod platform;
 mod plugins;
 pub mod pointer_choice;
 pub mod preview;
+pub mod promise_line;
 pub mod queue;
 pub mod quick_open;
 pub mod quit;
