@@ -530,7 +530,8 @@ fn the_camera_s_default_look_is_a_choice_on_by_default_when_the_library_keeps_on
         [json!({
             "paths": [dcim.join("IMG_0002.JPG")],
             "duplicates": "skip",
-            "camera_look": false
+            "camera_look": false,
+            "origin": "user"
         })]
     );
     let _ = std::fs::remove_dir_all(&dir);
