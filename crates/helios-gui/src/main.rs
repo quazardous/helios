@@ -454,7 +454,7 @@ fn catalogue_commands(
     use serde_json::{Value, json};
 
     let settings = shell.app().handle().store();
-    let (vault, at, store) = (persist.vault().clone(), file.clone(), settings.clone());
+    let (node, at, store) = (persist.node().clone(), file.clone(), settings.clone());
     shell.register(
         CommandSpec::new(
             catalogue::SNAPSHOT_COMMAND,
@@ -467,10 +467,10 @@ fn catalogue_commands(
                 ..helios_vault_sqlite::Options::default()
             };
             let taken = helios_vault_sqlite::snapshot::take_file(&at, "by-hand", &options)?;
-            let (vault, at, copy, keep) = (vault.clone(), at.clone(), taken.clone(), options.keep_snapshots);
+            let (node, at, copy, keep) = (node.clone(), at.clone(), taken.clone(), options.keep_snapshots);
             std::thread::spawn(move || {
                 let mounted = helios_storage::system().volumes();
-                let (_, errors) = catalogue::copy_to_backups(&vault, &mounted, &at, &copy, keep);
+                let (_, errors) = catalogue::copy_to_backups(&node, &mounted, &at, &copy, keep);
                 for e in errors {
                     warn(&format!("catalogue snapshot copy: {e}"));
                 }
@@ -511,29 +511,25 @@ fn catalogue_commands(
             Ok(json!({ "restarting": true }))
         },
     )?;
-    // The schedule. The thread holds the vault only while it works, so
-    // quitting releases it.
-    let vault = Arc::downgrade(persist.vault());
+    // The schedule. The thread holds the node's client only while it
+    // works, so quitting releases it.
+    let node = Arc::downgrade(persist.node());
     std::thread::Builder::new()
         .name("catalogue-snapshots".into())
         .spawn(move || {
             std::thread::sleep(std::time::Duration::from_mins(2));
             loop {
-                let Some(vault) = vault.upgrade() else { return };
+                let Some(node) = node.upgrade() else { return };
                 if helios_vault_sqlite::snapshot::due(&file, catalogue::every(&settings), seconds())
                 {
                     let mounted = helios_storage::system().volumes();
-                    if let Err(e) = catalogue::take(
-                        &vault,
-                        &mounted,
-                        &file,
-                        "daily",
-                        catalogue::kept(&settings),
-                    ) {
+                    if let Err(e) =
+                        catalogue::take(&node, &mounted, &file, "daily", catalogue::kept(&settings))
+                    {
                         warn(&format!("catalogue snapshot: {e}"));
                     }
                 }
-                drop(vault);
+                drop(node);
                 std::thread::sleep(std::time::Duration::from_mins(10));
             }
         })
@@ -2238,11 +2234,13 @@ fn main() -> Result<(), String> {
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));
-                // The imports recorded, listed in the window to run again.
-                shell.set_import_history(helios_gui::shell::import_history_of(vault.clone()));
                 // An offline folder's photos, as the image map recorded
                 // them, with the thumbnails the library's cache has.
                 shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+            }
+            // The imports recorded, listed in the window to run again.
+            if let Some(p) = &persist {
+                shell.set_import_history(helios_gui::shell::import_history_of(p.node().clone()));
             }
             if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
                 shell.set_import_thumbnail_cache(cache);

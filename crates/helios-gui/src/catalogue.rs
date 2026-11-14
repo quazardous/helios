@@ -16,9 +16,9 @@ use std::sync::PoisonError;
 
 use egui_pop::core::binding::SharedStore;
 use egui_pop::model::ids::SettingId;
-use helios_storage::strategy::{self, Scope};
+use helios_inspect::client::Client;
+use helios_storage::strategy::{self, Strategy};
 use helios_storage::{Volume, registry};
-use helios_vault::{Store, Vault};
 use helios_vault_sqlite::snapshot;
 use serde::Serialize;
 
@@ -121,21 +121,28 @@ pub fn list(file: &Path, volumes: &[Volume]) -> Vec<Listed> {
 
 /// Copies the snapshot `taken` to every backup disk of the library's
 /// strategy plugged in, verified, keeping `keep` there; the copies made,
-/// and the errors met (one disk failing does not stop the others).
-pub fn copy_to_backups<S: Store>(
-    vault: &Vault<S>,
+/// and the errors met (one disk failing does not stop the others). The
+/// strategy and the disks the library knows are read through its node
+/// (`library.storage.get`).
+pub fn copy_to_backups(
+    node: &Client,
     mounted: &[Volume],
     file: &Path,
     taken: &Path,
     keep: usize,
 ) -> (Vec<PathBuf>, Vec<String>) {
-    let Ok(Some(s)) = strategy::load(vault, &Scope::Library) else {
+    let stored = match node.request("library.storage.get", serde_json::json!({})) {
+        Ok(stored) => stored,
+        Err(e) => return (Vec::new(), vec![e.message]),
+    };
+    let Ok(Some(s)) = serde_json::from_value::<Option<Strategy>>(stored["strategy"].clone()) else {
         return (Vec::new(), Vec::new());
     };
-    let volumes = match registry::merged(vault, mounted) {
+    let known: Vec<Volume> = match serde_json::from_value(stored["volumes"].clone()) {
         Ok(v) => v,
-        Err(e) => return (Vec::new(), vec![e]),
+        Err(e) => return (Vec::new(), vec![e.to_string()]),
     };
+    let volumes = registry::merge(known, mounted);
     let (mut copies, mut errors) = (Vec::new(), Vec::new());
     for (v, folder) in strategy::catalogue_destinations(&s, &volumes, &library_name(file)) {
         match snapshot::copy_verified(taken, &folder, keep) {
@@ -149,8 +156,8 @@ pub fn copy_to_backups<S: Store>(
 /// Takes a snapshot of the catalogue at `file` now (`reason`: `daily`,
 /// `by-hand`), keeping `keep`, and copies it to the backup disks
 /// ([`copy_to_backups`]); a failing copy is logged, the snapshot stands.
-pub fn take<S: Store>(
-    vault: &Vault<S>,
+pub fn take(
+    node: &Client,
     mounted: &[Volume],
     file: &Path,
     reason: &str,
@@ -161,7 +168,7 @@ pub fn take<S: Store>(
         ..helios_vault_sqlite::Options::default()
     };
     let taken = snapshot::take_file(file, reason, &options)?;
-    let (copies, errors) = copy_to_backups(vault, mounted, file, &taken, keep);
+    let (copies, errors) = copy_to_backups(node, mounted, file, &taken, keep);
     for e in errors {
         log::warn!("catalogue snapshot copy: {e}");
     }

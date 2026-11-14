@@ -193,6 +193,9 @@ fn every_command_has_a_schema_its_example_fits() {
         json!({ "profile": "ab", "path": "/profiles" }),
         json!({ "path": null, "file": { "kind": "helios.chartprofile" }, "dry_run": true }),
         json!({ "images": ["/a.nef"], "dry_run": true }),
+        json!({ "camera": "nikon z 6", "clear": true }),
+        json!({ "camera": "nikon z 6", "image": null }),
+        json!({ "image": "0a", "camera": "nikon z 6", "light": [0.31, 0.33] }),
     ];
     let specs = specs();
     assert_eq!(specs.len(), examples.len());
@@ -550,6 +553,43 @@ fn a_raw_opened_the_first_time_gets_its_camera_s_default_once() {
         OnOpen::Edited
     ));
     assert_eq!(vault.versions(&image).unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_photo_opened_through_the_node_gets_its_default_and_its_offer() {
+    let (vault, path, image, id) = applied_vault("open-command");
+    as_camera(&vault, &id, "daylight", "nikon z 6", D65);
+    run(
+        Some(&vault),
+        SET_DEFAULT,
+        &json!({ "profiles": ["daylight"] }),
+        0,
+    )
+    .unwrap();
+    let params = json!({ "image": image.hex(), "camera": "nikon z 6", "light": [0.3130, 0.3295] });
+    let opened = run_as(Some(&vault), OPEN, &params, "user", 50).unwrap();
+    assert_eq!(
+        opened.answer["default"]["outcome"], "applied",
+        "{}",
+        opened.answer
+    );
+    assert_eq!(opened.answer["default"]["profile"], "daylight");
+    assert_eq!(opened.changes.images.len(), 1);
+    let offer = &opened.answer["offer"];
+    assert_eq!(offer["camera"], "nikon z 6");
+    assert_eq!(offer["profiles"].as_array().unwrap().len(), 1, "{offer}");
+    assert_eq!(offer["path"], json!(path.to_string_lossy()));
+    assert_eq!(offer["look_default"], Value::Null);
+    // Opened again: the photo's edit is left alone, the offer the same.
+    let again = run_as(Some(&vault), OPEN, &params, "user", 60).unwrap();
+    assert_eq!(again.answer["default"]["outcome"], "edited");
+    assert!(again.changes.images.is_empty());
+    assert_eq!(&again.answer["offer"], offer);
+    // The offer alone, read without an image.
+    let read = run(Some(&vault), OFFER, &json!({ "camera": "nikon z 6" }), 0).unwrap();
+    assert_eq!(read.answer["profiles"], offer["profiles"]);
+    assert_eq!(read.answer["path"], Value::Null);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

@@ -71,6 +71,7 @@ pub const IDS: &[&str] = &[
     "library.albums.list",
     "library.albums.edit",
     "library.changes.apply",
+    STORAGE_GET,
     HISTORY_LIST,
     AGAIN,
 ];
@@ -84,6 +85,9 @@ pub const REMOVE: &str = "library.images.remove";
 /// orientation (`turn`); no file touched, no pixel decoded; answers the
 /// step (`changes`), which the vault's revert undoes.
 pub const ROTATE: &str = "library.images.rotate";
+
+/// Reads the library's backup strategy and the volumes it knows.
+pub const STORAGE_GET: &str = "library.storage.get";
 
 /// Moves photos' files to the system trash (Lightroom's "Delete from
 /// Disk", darktable's "delete (trash)") as a journaled job: refused on
@@ -403,6 +407,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 true,
             ),
         ])),
+        library(
+            STORAGE_GET,
+            "Read the backup strategy and the volumes the library knows",
+        )
+        .read_only(),
         CommandSpec::new(HISTORY_LIST, "List the import history", "Library")
             .needs(Need::Vault)
             .params(object(&[(
@@ -1015,6 +1024,12 @@ pub fn run<S: Store>(
             };
             walked.map(|done| to_json(&done))
         }
+        STORAGE_GET => {
+            use helios_storage::strategy::{self, Scope};
+            let strategy = strategy::load(vault, &Scope::Library)?;
+            let volumes = helios_storage::registry::known(vault)?;
+            Ok(json!({ "strategy": strategy, "volumes": volumes }))
+        }
         other => Err(format!("no library command `{other}`")),
     }
 }
@@ -1062,6 +1077,7 @@ mod tests {
             json!({}),
             json!({ "op": "quickToggle", "images": [] }),
             json!({ "changes": { "images": [], "documents": [] }, "forward": false }),
+            json!({}),
             json!({ "limit": 10 }),
             json!({ "id": "1700000000000-42-0" }),
         ];
