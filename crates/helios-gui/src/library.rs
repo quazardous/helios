@@ -68,6 +68,11 @@ use serde_json::Value;
 
 mod batch;
 mod versions;
+
+/// The batch a change was asked in, if any
+/// ([`crate::library_history::Group`]).
+pub type Batch = Option<crate::library_history::Group>;
+
 pub use batch::{
     CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND,
     PasteMode, REMOVE_COMMAND, RESET_ROTATION_COMMAND, ROTATE_LEFT_COMMAND, ROTATE_RIGHT_COMMAND,
@@ -1575,8 +1580,9 @@ pub struct Library {
     /// Whether the albums must be read again
     /// ([`Library::take_albums_wanted`]).
     albums_wanted: Wanted,
-    /// Album changes asked, for the host to make in the vault.
-    album_edits: Vec<AlbumEdit>,
+    /// Album changes asked, for the host to make in the vault, each with
+    /// the batch it was asked in.
+    album_edits: Vec<(AlbumEdit, Batch)>,
     /// The quick collection's photos, as last read with the albums.
     quick: Vec<String>,
     /// The same, for the grid's badge.
@@ -1665,10 +1671,10 @@ pub struct Library {
     copied: Option<CopiedMarks>,
     /// The photos asked taken out of the Library ([`REMOVE_COMMAND`]),
     /// for the host.
-    removals: Vec<Vec<String>>,
+    removals: Vec<(Vec<String>, Batch)>,
     /// The photos asked turned ([`ROTATE_LEFT_COMMAND`] and the others),
     /// for the host.
-    rotations: Vec<(Vec<String>, Turn)>,
+    rotations: Vec<(Vec<String>, Turn, Batch)>,
     /// The photos asked duplicated ([`DUPLICATE_COMMAND`],
     /// [`DUPLICATE_ORIGINAL_COMMAND`]), for the host.
     duplicates: Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)>,
@@ -2378,11 +2384,12 @@ impl Library {
 
     /// Queues an album change for the host ([`Library::take_album_edits`]).
     pub fn edit_album(&mut self, edit: AlbumEdit) {
-        self.album_edits.push(edit);
+        self.album_edits
+            .push((edit, crate::library_history::current_batch()));
     }
 
-    /// The album changes asked since, in order.
-    pub fn take_album_edits(&mut self) -> Vec<AlbumEdit> {
+    /// The album changes asked since, in order, each with its batch.
+    pub fn take_album_edits(&mut self) -> Vec<(AlbumEdit, Batch)> {
         std::mem::take(&mut self.album_edits)
     }
 

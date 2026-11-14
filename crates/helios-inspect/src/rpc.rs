@@ -398,7 +398,19 @@ pub trait Service: Send + Sync {
         let _ = method;
         false
     }
+
+    /// Opens a group around a command batch's steps (`params`: the
+    /// batch's), closed when the guard returned drops: after the last
+    /// step, a failed one or a cancel alike. A desktop groups the steps'
+    /// changes as one undo step ([`crate::batch`]); by default, no group.
+    fn group(&self, params: &Value) -> Option<Group> {
+        let _ = params;
+        None
+    }
 }
+
+/// A batch's open group ([`Service::group`]): closed when dropped.
+pub type Group = Box<dyn std::any::Any>;
 
 /// The calls of one connection still running: their cancel flags, and
 /// whether their method looks at it.

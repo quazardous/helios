@@ -296,6 +296,10 @@ impl Service for Keyed {
     fn cancellable(&self, method: &str) -> bool {
         method == crate::batch::METHOD || self.service.cancellable(method)
     }
+
+    fn group(&self, params: &Value) -> Option<crate::rpc::Group> {
+        self.service.group(params)
+    }
 }
 
 #[cfg(test)]

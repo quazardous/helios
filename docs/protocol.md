@@ -210,6 +210,11 @@ the batch's.
   same key, or read the state; never resend it blindly.
 - The batch's answer is a success even when a step failed; a failed step
   is in its result, not in the call's error.
+- **One undo step on a desktop:** what the window commands of a batch
+  change in the library is one step of its history, "Agent: 3
+  commands", by the batch's origin. One undo takes it all back; a batch
+  stopped by a failed step leaves one step for what ran, and one that
+  changed nothing undoable leaves none.
 
 ## Cursors
 
