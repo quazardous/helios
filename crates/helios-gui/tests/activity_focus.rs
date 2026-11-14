@@ -41,7 +41,7 @@ struct Gate {
 }
 
 /// Runs a stand-in job as its request's `script` says: `bar` (120 of
-/// 412, IMG_0120.JPG), `spin` (3 so far, no total), `fail` (fails, then
+/// 412, `IMG_0120.JPG`), `spin` (3 so far, no total), `fail` (fails, then
 /// succeeds on its retry), held until cancelled or the gate ends them.
 fn run(gate: &Gate, handle: &Handle<MemoryStore>) {
     let script = handle.request()["script"]
