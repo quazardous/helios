@@ -113,6 +113,54 @@ pub fn heads(versions: &[Version]) -> Vec<&Version> {
     out
 }
 
+/// How many heads each image has, from its versions' links (image,
+/// version, parents): what [`crate::Store::head_counts`] answers, worked
+/// out without the edits.
+pub fn count_heads(
+    links: impl IntoIterator<Item = (ImageId, VersionId, Vec<VersionId>)>,
+) -> std::collections::BTreeMap<ImageId, usize> {
+    let mut of: HashMap<ImageId, Vec<VersionId>> = HashMap::new();
+    let mut continued: HashSet<VersionId> = HashSet::new();
+    for (image, id, parents) in links {
+        of.entry(image).or_default().push(id);
+        continued.extend(parents);
+    }
+    of.into_iter()
+        .map(|(image, ids)| {
+            let heads = ids.iter().filter(|id| !continued.contains(id)).count();
+            (image, heads)
+        })
+        .collect()
+}
+
+/// Where a duplicate's edit comes from (Lightroom's "Create Virtual
+/// Copy", darktable's "duplicate" and "duplicate virgin").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DuplicateFrom {
+    /// The image's newest head: the edit the darkroom opens.
+    Current,
+    /// No edit: the photo as its file gives it.
+    Original,
+}
+
+impl DuplicateFrom {
+    /// From its word: `current` (or none) or `original`.
+    pub fn parse(word: Option<&str>) -> Result<Self, String> {
+        match word {
+            None | Some("current") => Ok(Self::Current),
+            Some("original") => Ok(Self::Original),
+            Some(other) => Err(format!("`from` is `current` or `original`, not `{other}`")),
+        }
+    }
+}
+
+/// The key a duplicate's edit carries its number under: two copies of
+/// the same edit stay two versions (their ids differ).
+pub const DUPLICATE_KEY: &str = "duplicate";
+
+/// The label a duplicate is kept with.
+pub const DUPLICATE_LABEL: &str = "Duplicate";
+
 /// How long the line leading to each of `versions` is (what
 /// [`crate::Vault::history`] returns for it, counted): each version's
 /// first parent, back to a first edit. Worked out from the versions given,
@@ -229,6 +277,62 @@ impl<S: crate::Store> crate::Vault<S> {
             line.reverse();
             Ok(line)
         })
+    }
+
+    /// Makes a new head of an image: a copy of its newest head's edit
+    /// (`Current`), or of no edit (`Original`), kept beside it, never
+    /// continuing it, so both stay heads with a history of their own. A
+    /// copy of the current edit continues the same versions its source
+    /// continues (it shares their history); a copy of the original is a
+    /// first edit. Its edit carries a number under [`DUPLICATE_KEY`], the
+    /// lowest that makes a new version. Being the newest, it is the head
+    /// an edit opens next. Returns the version kept.
+    pub fn duplicate(
+        &self,
+        image: &ImageId,
+        from: DuplicateFrom,
+        origin: &str,
+        now: u64,
+    ) -> Result<Version, String> {
+        if self.image(image)?.is_none() {
+            return Err(format!("no image {}", image.hex()));
+        }
+        let all = self.versions(image)?;
+        let source = match from {
+            DuplicateFrom::Original => None,
+            DuplicateFrom::Current => {
+                let depths = depths(&all)?;
+                heads(&all)
+                    .into_iter()
+                    .max_by_key(|v| (v.at, depths[&v.id], v.id))
+                    .cloned()
+            }
+        };
+        let (parents, mut edit) = match source {
+            Some(v) => (v.parents, v.edit),
+            None => (Vec::new(), Value::Object(serde_json::Map::default())),
+        };
+        if !edit.is_object() {
+            edit = Value::Object(serde_json::Map::default());
+        }
+        let known: HashSet<VersionId> = all.iter().map(|v| v.id).collect();
+        for n in 1u64.. {
+            edit[DUPLICATE_KEY] = n.into();
+            let copy = Version::new(*image, parents.clone(), edit.clone(), origin, now)
+                .labelled(DUPLICATE_LABEL);
+            if known.contains(&copy.id) {
+                continue;
+            }
+            self.add_version(&copy)?;
+            return Ok(copy);
+        }
+        unreachable!("a number makes a new version")
+    }
+
+    /// How many heads each image with versions has: more than one, the
+    /// image has copies (or diverged edits) the grid counts.
+    pub fn head_counts(&self) -> Result<std::collections::BTreeMap<ImageId, usize>, String> {
+        self.read(crate::Store::head_counts)
     }
 
     /// An image's heads: its current edit, or its diverged edits.

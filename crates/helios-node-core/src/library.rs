@@ -6,7 +6,8 @@
 //! with `library.edit.add`), its snapshots (`library.snapshots.get`,
 //! `.set`), photos' fields set and
 //! read (`library.fields.set`, `library.fields.get`), photos taken out
-//! of the Library (`library.images.remove`), their files moved to the
+//! of the Library (`library.images.remove`) or turned
+//! (`library.images.rotate`), their files moved to the
 //! system trash as a journaled job (`library.images.trash`, its jobs
 //! read with `library.trash.jobs`), the facet counts of
 //! a query (`library.facets`), the photos changed outside Helios
@@ -47,6 +48,9 @@ pub const IDS: &[&str] = &[
     "library.snapshots.set",
     "library.fields.set",
     REMOVE,
+    ROTATE,
+    DUPLICATE,
+    HEADS,
     TRASH,
     TRASH_JOBS,
     "library.fields.get",
@@ -78,6 +82,19 @@ pub const IDS: &[&str] = &[
 /// their flag only, no file touched; answers the step (`changes`), which
 /// the vault's revert undoes.
 pub const REMOVE: &str = "library.images.remove";
+
+/// Turns photos a quarter left or right, or back to their file's
+/// orientation (`turn`); no file touched, no pixel decoded; answers the
+/// step (`changes`), which the vault's revert undoes.
+pub const ROTATE: &str = "library.images.rotate";
+
+/// Makes a new head of each photo: a copy of its current edit, or of no
+/// edit (`from`: `original`), beside the others (Lightroom's "Create
+/// Virtual Copy", darktable's "duplicate").
+pub const DUPLICATE: &str = "library.images.duplicate";
+
+/// How many heads each photo with more than one has.
+pub const HEADS: &str = "library.versions.heads";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -212,6 +229,33 @@ pub fn specs() -> Vec<CommandSpec> {
             "Take photos out of the Library, their files untouched",
         )
         .params(object(&[("images", images(), true)])),
+        library(
+            ROTATE,
+            "Turn photos a quarter left or right, or back to their file's orientation",
+        )
+        .params(object(&[
+            ("images", images(), true),
+            (
+                "turn",
+                json!({ "type": "string", "enum": ["left", "right", "reset"],
+                        "description": "left (counter-clockwise), right (clockwise) or reset" }),
+                true,
+            ),
+        ])),
+        library(
+            DUPLICATE,
+            "Make a new version of photos, from their current edit or the original",
+        )
+        .params(object(&[
+            ("images", images(), true),
+            (
+                "from",
+                json!({ "type": "string", "enum": ["current", "original"],
+                        "description": "current (the newest head's edit, the default) or original (no edit)" }),
+                false,
+            ),
+        ])),
+        library(HEADS, "Count the heads of photos with more than one").read_only(),
         library(
             TRASH,
             "Move photos' files to the system trash, as a journaled job",
@@ -852,6 +896,47 @@ pub fn run<S: Store>(
                 |changes| json!({ "removed": changes.images.len(), "changes": to_json(&changes) }),
             )
         }
+        ROTATE => {
+            let ids = named(vault, params, "images")?;
+            if ids.is_empty() {
+                return Err("`images` names no photo".into());
+            }
+            let turn = helios_vault::rotation::Turn::parse(text(params, "turn"))?;
+            vault.rotate(&ids, turn, origin, now()).map(
+                |changes| json!({ "rotated": changes.images.len(), "changes": to_json(&changes) }),
+            )
+        }
+        DUPLICATE => {
+            let ids = named(vault, params, "images")?;
+            if ids.is_empty() {
+                return Err("`images` names no photo".into());
+            }
+            let from = helios_vault::versions::DuplicateFrom::parse(params["from"].as_str())?;
+            let at = now();
+            let mut versions = serde_json::Map::new();
+            for id in &ids {
+                if versions.contains_key(&id.hex()) {
+                    continue;
+                }
+                let copy = vault.duplicate(id, from, origin, at)?;
+                versions.insert(id.hex(), json!(copy.id.hex()));
+            }
+            let counts = vault.head_counts()?;
+            let heads: serde_json::Map<String, Value> = ids
+                .iter()
+                .map(|id| (id.hex(), json!(counts.get(id).copied().unwrap_or(0))))
+                .collect();
+            Ok(json!({ "duplicated": versions.len(), "versions": versions, "heads": heads }))
+        }
+        HEADS => {
+            let heads: serde_json::Map<String, Value> = vault
+                .head_counts()?
+                .into_iter()
+                .filter(|(_, n)| *n > 1)
+                .map(|(id, n)| (id.hex(), json!(n)))
+                .collect();
+            Ok(json!({ "heads": heads }))
+        }
         TRASH_JOBS => match params["job"].as_str() {
             Some(job) => helios_library::trash::get(vault, job)?
                 .map(|job| json!({ "job": to_json(&job) }))
@@ -1027,6 +1112,9 @@ mod tests {
             json!({ "image": "0a", "snapshots": [{ "id": 1, "name": "A", "version": null }] }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
             json!({ "images": ["0a"] }),
+            json!({ "images": ["0a"], "turn": "right" }),
+            json!({ "images": ["0a"], "from": "original" }),
+            json!({}),
             json!({ "images": ["0a"], "plan": true }),
             json!({ "job": "trash-1700000000-1" }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
@@ -1244,6 +1332,36 @@ mod tests {
             "user",
         );
         assert!(wrong.is_err());
+    }
+
+    #[test]
+    fn duplicates_are_new_heads_the_counts_follow() {
+        let bus = Arc::new(Bus::new());
+        let vault = Vault::new(helios_vault::MemoryStore::default()).with_bus(bus.clone());
+        let dir = std::env::temp_dir().join(format!("helios-duplicate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.raw");
+        std::fs::write(&path, b"a photo copied").unwrap();
+        let image = vault.import_file(&path, 1).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user");
+        let hex = image.hex();
+        assert_eq!(call(HEADS, json!({})).unwrap(), json!({ "heads": {} }));
+        let once = call(DUPLICATE, json!({ "images": [hex, hex] })).unwrap();
+        assert_eq!(once["duplicated"], 1, "named twice, copied once: {once}");
+        assert_eq!(
+            once["heads"][&hex], 1,
+            "a first copy of a photo never edited"
+        );
+        let twice = call(DUPLICATE, json!({ "images": [hex], "from": "original" })).unwrap();
+        assert_eq!(twice["heads"][&hex], 2);
+        assert_ne!(twice["versions"][&hex], once["versions"][&hex]);
+        assert_eq!(
+            call(HEADS, json!({})).unwrap(),
+            json!({ "heads": { hex.clone(): 2 } })
+        );
+        assert!(call(DUPLICATE, json!({ "images": [hex], "from": "nope" })).is_err());
+        assert!(call(DUPLICATE, json!({ "images": [] })).is_err());
     }
 
     #[test]
