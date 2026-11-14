@@ -98,8 +98,19 @@ or folders on Helios (the window opens with them as its source).
     - **Apply the camera's default look**, when the library keeps a
       camera's default look: on by default, a raw of that camera starts
       with it as its first version.
-    - **More** (folded): metadata template and time offset, once they
-      exist.
+    - **Include** (folded unless set): which files of the source are
+      imported (raw, JPEG, video, other; name patterns; a day range by
+      the file's date; a size range; new photos only). A filter is
+      saved by name ("Save filter as…", kept in `import-filters.json`
+      beside the presets) and picked again on any source (2026-11-14).
+    - **Apply During Import** (folded unless set): keywords, a rating
+      and a colour label every photo imported is given, as Lightroom's
+      metadata presets (2026-11-14).
+    - Both are kept on the source with its other choices (a card by its
+      volume), reach every import of it, manual or automatic, as
+      `library.import`'s `filter` and `apply`, and are recorded in the
+      import history.
+    - **More** (folded): time offset, once it exists.
   - **The connector's section**, under its name. Each connector fills it
     through one contract: what it declares (its browsers, its
     capabilities, its source contract) calls for each part, and no
