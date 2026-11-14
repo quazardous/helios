@@ -3461,8 +3461,19 @@ fn forget_this_source_takes_a_folder_off_the_column_and_undo_brings_it_back() {
     h.state_mut().undo_import_source_choice();
     h.run_steps(3);
     assert!(h.state().import_recent().contains(&family));
-    // A folder with its own choices: forgotten with them.
-    click(&mut h, "Keep");
+    // A folder with its own profile: forgotten with it.
+    h.state_mut().put_import_profile(ImportProfile {
+        id: String::new(),
+        name: "Keep all".into(),
+        choices: Choices {
+            duplicates: Duplicates::Keep,
+            ..Choices::default()
+        },
+    });
+    h.run_steps(3);
+    h.get_by_value("Everyday").click();
+    h.run_steps(3);
+    click(&mut h, "Keep all");
     assert_eq!(h.state().import_sources().len(), 1);
     row_menu(&mut h, "trips");
     click(&mut h, "Forget this source");
