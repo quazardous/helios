@@ -62,6 +62,7 @@ pub struct Declarations {
 /// set where the themes are declared); egui-pop's own window commands
 /// Helios installs take theirs here too.
 pub const COMMAND_ICONS: &[(&str, &str)] = &[
+    ("activity.show", "phosphor:pulse"),
     ("calibrate.open", "phosphor:eyedropper"),
     ("compare.next", "chevron-right"),
     ("compare.previous", "chevron-left"),

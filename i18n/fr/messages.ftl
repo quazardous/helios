@@ -482,6 +482,8 @@ gui-history-calibration-save = Enregistrer le profil de calibration « { $name }
 gui-history-calibration-import = Importer le profil de calibration « { $name } »
 gui-history-import = Importer { $count } photos
 gui-history-workshop-run = Atelier « { $name } » sur { $count } photos
+gui-history-agent-batch = Agent : { $count } commandes
+gui-history-user-batch = { $count } commandes
 gui-history-album-new = Nouvel album « { $name } »
 gui-history-album-rename = Renommer l’album « { $name } »
 gui-history-album-delete = Supprimer l’album « { $name } »
@@ -2220,6 +2222,24 @@ gui-status-health-warning = { $count ->
 }
 
 gui-status-health-show = Ouvrir le bilan de santé
+
+gui-activity-importing = Importation { $done }/{ $total }
+
+gui-activity-importing-start = Importation…
+
+gui-activity-percent = { $label } { $percent } %
+
+gui-activity-show = Afficher les tâches de fond
+
+gui-activity-running = { $count ->
+    [one] { $count } tâche de fond en cours
+   *[other] { $count } tâches de fond en cours
+}
+
+gui-activity-failed = { $count ->
+    [one] { $count } tâche de fond a échoué
+   *[other] { $count } tâches de fond ont échoué
+}
 
 gui-health-checking = Vérification…
 

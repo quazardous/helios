@@ -21,6 +21,11 @@
 //! so on a socket endpoint (`crate::request_ids`) a step sent again in a
 //! later batch with the same key is applied once. The batch itself may
 //! carry a key too: sent again, the whole answer comes back.
+//!
+//! Grouping: the steps run inside the service's group
+//! ([`Service::group`]), opened before the first and closed after the
+//! last, even when one fails or the batch is cancelled. The desktop makes
+//! the library changes of a batch one undo step.
 
 use std::sync::Arc;
 
@@ -63,6 +68,9 @@ pub fn run(service: &dyn Service, params: &Value, call: &Call) -> Result<Value, 
         };
         runs.push((id, command_run(id, step, params)?));
     }
+    // The steps' changes are one group (one undo step on a desktop),
+    // closed when this returns, whatever its steps did.
+    let _group = service.group(params);
     let (mut ran, mut failed, mut skipped) = (0, 0, 0);
     let mut stopped = false;
     let mut results = Vec::with_capacity(runs.len());
@@ -160,6 +168,10 @@ impl Service for Batched {
 
     fn cancellable(&self, method: &str) -> bool {
         method == METHOD || self.0.cancellable(method)
+    }
+
+    fn group(&self, params: &Value) -> Option<crate::rpc::Group> {
+        self.0.group(params)
     }
 }
 

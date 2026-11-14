@@ -199,6 +199,18 @@ gui-account-status-reconnect = Needs reconnecting
 
 gui-account-status-refused = Access refused
 
+gui-activity-failed = { $count } background tasks failed
+
+gui-activity-importing = Importing { $done }/{ $total }
+
+gui-activity-importing-start = Importing…
+
+gui-activity-percent = { $label } { $percent } %
+
+gui-activity-running = { $count } background tasks running
+
+gui-activity-show = Show the background tasks
+
 gui-album-not-changed = The album was not changed: { $error }
 
 gui-backup-card-safe = { $card } is safe to format: every photo has its backups
@@ -685,6 +697,8 @@ gui-health-summary-warnings = Warnings: { $count }
 
 gui-health-undo-ignore = Show again
 
+gui-history-agent-batch = Agent: { $count } commands
+
 gui-history-album-add = Add { $count } photos to “{ $name }”
 
 gui-history-album-delete = Delete album “{ $name }”
@@ -750,6 +764,8 @@ gui-history-set-new = New album set “{ $name }”
 gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo
+
+gui-history-user-batch = { $count } commands
 
 gui-history-version-remove = Remove version
 

@@ -249,6 +249,10 @@ struct ShellWords {
 #[derive(Default)]
 pub(crate) struct ImportWindow {
     open: bool,
+    /// The imports running and ended during this run (the node's
+    /// promises, [`crate::activity::Activity::imports`]), shown above the
+    /// footer with their progress, outcome, Cancel and Retry.
+    promises: Vec<helios_vault::promises::Promise>,
     /// The OS window opened for it, not seen closed since.
     shown: Option<WindowId>,
     /// Its title as last drawn, for the window of the main one it is
@@ -720,6 +724,8 @@ enum Event {
     ManageAccounts,
     /// "Import again" on an import of the history (its id).
     Again(String),
+    /// Cancel or Retry on an import's promise line (its id).
+    Promise(String, crate::promise_line::Action),
 }
 
 /// The window's event for an account's action: Settings > Accounts is
@@ -1120,6 +1126,19 @@ impl Shell {
     /// a file its folder with only the files given ticked; `copy` sets
     /// copy or add), else on the first card, else on the last source used.
     /// Open already, its window comes to the front.
+    /// The import window, where the imports show with their progress
+    /// and outcome: brought forward when open, as it is, else opened.
+    pub(super) fn show_import_activity(&mut self) {
+        let shown = {
+            let w = self.import.get();
+            w.open.then(|| w.shown.clone()).flatten()
+        };
+        match shown {
+            Some(id) => self.core.app.handle().raise_window(&id),
+            None => self.open_import_window(&Value::Null),
+        }
+    }
+
     pub(super) fn open_import_window(&mut self, args: &Value) {
         // The strategy line reads the strategy and its disks as they are.
         self.refresh_volumes();
@@ -1228,6 +1247,7 @@ impl Shell {
             if w.accounts.wake.is_none() {
                 w.accounts.wake = Some(Arc::new(w.waker()));
             }
+            w.promises = self.core.activity.imports();
         }
         let (open, inserted) = {
             let mut w = self.import.get_mut();
@@ -1457,6 +1477,7 @@ impl Shell {
                 }
             }
             Event::Import => self.import_ticked_sources(),
+            Event::Promise(id, action) => self.core.activity.ask(action, &id),
             Event::Again(id) => {
                 if let Err(e) = self.import_again(&json!({ "id": id }), &Origin::User) {
                     self.warn(e);
@@ -1491,9 +1512,11 @@ impl Shell {
     /// Imports the photos ticked of each source ticked, as
     /// `library.importFiles` does with their `paths` and the choices
     /// (copied or added where they are, filed, named, duplicates,
-    /// darktable edits), kept as the last used; the window closes at
-    /// once. Without a library open, nothing is imported: a toast says
-    /// why and the window stays.
+    /// darktable edits), kept as the last used. Handed to the node, each
+    /// import answers at once with its promise: the window stays, showing
+    /// its line, and may close while it runs; queued for the host (a
+    /// shell with no node), the window closes at once. Without a library
+    /// open, nothing is imported: a toast says why and the window stays.
     fn import_ticked_sources(&mut self) {
         // No library to import into: said, the window left open.
         if let Err(e) = self.can_import() {
@@ -1519,6 +1542,9 @@ impl Shell {
             }
             (w.choices.clone(), copy, std::mem::take(&mut w.ticked))
         };
+        // Whether an import went to the node: the window then stays, its
+        // promise line showing the import, and may be closed any time.
+        let mut handed = false;
         for path in &ticked {
             let (files, card, own) = {
                 let mut w = self.import.get_mut();
@@ -1542,7 +1568,11 @@ impl Shell {
                 Some((c, copy)) => c.args(&files, *copy),
                 None => choices.args(&files, copy),
             };
-            if let Err(e) = self.import_files(&args, &Origin::User) {
+            let started = self.import_files(&args, &Origin::User);
+            if let Ok(answer) = &started {
+                handed |= answer.get("promise").is_some();
+            }
+            if let Err(e) = started {
                 self.warn(e);
             } else if self
                 .import
@@ -1565,7 +1595,11 @@ impl Shell {
             }
             w.memory.last = Some(path.clone());
         }
-        self.import.get_mut().close_after_import();
+        if handed {
+            self.import.get_mut().save();
+        } else {
+            self.import.get_mut().close_after_import();
+        }
     }
 }
 
@@ -1917,7 +1951,8 @@ impl ImportWindow {
                 | Event::Storage
                 | Event::ManageAccounts
                 | Event::Dropped(_)
-                | Event::Again(_)),
+                | Event::Again(_)
+                | Event::Promise(..)),
             ) => {
                 self.events.push(e);
                 ctx.request_repaint_of(ViewportId::ROOT);
@@ -2158,6 +2193,16 @@ impl ImportWindow {
             }
         });
         layout.footer(ui, |ui| {
+            // The imports running, and those ended during this run: they
+            // go on when the window closes.
+            if !w.promises.is_empty() {
+                ui.separator();
+            }
+            for p in &w.promises {
+                if let Some(action) = crate::promise_line::show(ui, p) {
+                    event = Some(Event::Promise(p.id.clone(), action));
+                }
+            }
             ui.separator();
             ui.horizontal(|ui| {
                 if let Some(e) = presets_ui(ui, w, words) {

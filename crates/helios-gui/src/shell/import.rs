@@ -79,6 +79,14 @@ impl Shell {
         self.core.import_lines.0.clone()
     }
 
+    /// Follows the promises of the desktop's node (`node`): the status
+    /// bar shows those running, and the person's imports go to it as
+    /// imports by rule, answered at once with their promise
+    /// ([`crate::activity`]).
+    pub fn follow_activity(&mut self, node: std::sync::Arc<helios_inspect::client::Client>) {
+        self.core.activity.follow(node);
+    }
+
     /// Whether an import can be queued: not without a library open, the
     /// error then saying so (rather than the host's missing command).
     pub(super) fn can_import(&self) -> Result<(), String> {
@@ -343,7 +351,7 @@ impl Shell {
         }
         // Run later as the user: who asked is said, for the history.
         target["origin"] = json!(who);
-        Ok(self.queue_import(target, copy, args))
+        self.queue_import(target, copy, args)
     }
 
     /// Makes the import dialog's answer the workspace's import source:
@@ -370,17 +378,24 @@ impl Shell {
         Ok(())
     }
 
-    /// Queues an import (`library.import`'s arguments) for the host,
-    /// placed, renamed and with duplicates handled as `choices` say
-    /// (`into`, `layout`, `rename`, `duplicates`), else as the
-    /// workspace's import source says; `copy` overrides its placement (a
-    /// reference is never renamed nor filed).
+    /// Starts an import (`library.import`'s arguments), placed, renamed
+    /// and with duplicates handled as `choices` say (`into`, `layout`,
+    /// `rename`, `duplicates`), else as the workspace's import source
+    /// says; `copy` overrides its placement (a reference is never renamed
+    /// nor filed). The person's own imports go to the node, which answers
+    /// at once with a promise (`{"promise": …}`, [`Self::import_by_rule`]);
+    /// the others (an agent's or a script's, an automatic import), and
+    /// every import of a shell with no node, are queued for the host's
+    /// `library.import` (`{"queued": args}`).
+    ///
+    /// # Errors
+    /// The node refused the import.
     pub(super) fn queue_import(
         &mut self,
         mut args: Value,
         copy: Option<bool>,
         choices: &Value,
-    ) -> Value {
+    ) -> Result<Value, String> {
         let source = self.focus.import_source.as_ref();
         let given = |key: &str| {
             choices
@@ -412,8 +427,39 @@ impl Shell {
                 args[key] = value.clone();
             }
         }
+        if self.core.activity.has_node() && args["origin"] == crate::persist::WHO {
+            return self.import_by_rule(args);
+        }
         self.core.imports.push(args.clone());
-        json!({ "queued": args })
+        Ok(json!({ "queued": args }))
+    }
+
+    /// Hands an import (`library.import`'s arguments: `paths`, the
+    /// choices) to the node as an import by rule, its `items` the paths:
+    /// the node answers at once with its promise (`{"promise": …}`), which
+    /// the status bar and the import window follow while it runs.
+    ///
+    /// # Errors
+    /// The node refused it: its choices, a path gone, no library folder.
+    pub(super) fn import_by_rule(&mut self, args: Value) -> Result<Value, String> {
+        let paths = paths_of(&args);
+        if paths.is_empty() {
+            return Err("`paths` is missing".into());
+        }
+        let mut params = args;
+        if let Some(fields) = params.as_object_mut() {
+            // Who asked is the node's caller; the paths are the rule's.
+            for key in ["paths", "path", "origin"] {
+                fields.remove(key);
+            }
+            // The desktop keeps darktable's edits unless told not to;
+            // the node leaves them out unless told to.
+            let darktable = fields.get("darktable") != Some(&json!(false));
+            fields.insert("darktable".into(), json!(darktable));
+        }
+        params["rule"] = json!({ "items": paths });
+        let promise = self.core.activity.start(params)?;
+        Ok(json!({ "promise": promise }))
     }
 
     /// Takes in the lines imports sent: duplicates to their panel, the

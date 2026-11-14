@@ -246,6 +246,8 @@ enum Action {
     /// Run an import of the history again (`import.history.again`'s
     /// arguments), as whom.
     ImportAgain(Value, Origin),
+    /// Show the background tasks (`activity.show`).
+    Activity,
     /// Export photos (`library.export`'s arguments), as whom.
     Export(Value, Origin),
     /// Show a folder in the file manager (`library.openFolder`'s
@@ -368,7 +370,18 @@ enum Action {
     RecordStop,
 }
 
-type Queue = Arc<Mutex<Vec<(Action, Option<Resolver>)>>>;
+/// The actions queued, each with its result's resolver and the batch
+/// its command ran in (`crate::library_history::current_batch`).
+type Queue = Arc<
+    Mutex<
+        Vec<(
+            Action,
+            Option<Resolver>,
+            Option<crate::library_history::Group>,
+            Option<std::sync::mpsc::Sender<Result<Value, String>>>,
+        )>,
+    >,
+>;
 
 /// How a command turns its arguments into an action.
 type ActionOf = Box<dyn Fn(&Value, &Origin) -> Result<Action, String> + Send + Sync>;
@@ -991,6 +1004,7 @@ impl Shell {
             stack_review: Rc::default(),
             duplicates: Rc::default(),
             imports: Vec::new(),
+            activity: crate::activity::Activity::default(),
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
             init: init_wizard::InitState::default(),
@@ -2391,18 +2405,30 @@ impl Shell {
         origin: Origin,
         cx: &egui_pop::model::when::WhenContext,
     ) -> Result<Value, String> {
-        let result = match CommandId::new(id) {
-            Ok(c) => match self.core.app.run_in(&c, args, to_pop(&origin), cx) {
-                Reply::Done(r) => r,
-                Reply::Later(_) => Ok(json!({ "queued": true })),
-            },
-            Err(e) => Err(e.to_string()),
+        match self.dispatch_in(id, args, origin, cx) {
+            Reply::Done(r) => r,
+            Reply::Later(_) => Ok(json!({ "queued": true })),
+        }
+    }
+
+    /// [`Shell::run_in`], a command whose work waits for the next frame
+    /// answering its result to come.
+    pub fn dispatch_in(
+        &mut self,
+        id: &str,
+        args: Value,
+        origin: Origin,
+        cx: &egui_pop::model::when::WhenContext,
+    ) -> Reply {
+        let reply = match CommandId::new(id) {
+            Ok(c) => self.core.app.run_in(&c, args, to_pop(&origin), cx),
+            Err(e) => Reply::Done(Err(e.to_string())),
         };
-        if let Err(e) = &result {
+        if let Reply::Done(Err(e)) = &reply {
             let report = crate::report::Context::command(id).cause(e.clone());
             self.notify_failure(Level::Warning, e.clone(), report);
         }
-        result
+        reply
     }
 
     /// Opens the Settings on a page (`admin.open` on `path`: Storage, the
@@ -2451,7 +2477,14 @@ impl Shell {
             )
             .expect("shell commands are declared once");
         let (q, later) = (w.queue.clone(), w.later.clone());
-        let push = move |a: Action| lock(&q).push((a, later.take()));
+        let push = move |a: Action| {
+            lock(&q).push((
+                a,
+                later.take(),
+                crate::library_history::current_batch(),
+                crate::window_commands::take_tap(),
+            ));
+        };
         let mut add = |spec: CommandSpec, action: ActionOf| {
             let push = push.clone();
             registry
@@ -3315,6 +3348,10 @@ impl Shell {
                 "Library",
             ),
             Box::new(|a, origin| Ok(Action::ImportAgain(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(crate::activity::COMMAND, "Background tasks…", "View"),
+            Box::new(|_, _| Ok(Action::Activity)),
         );
         // The main window's commands, greyed in the other windows' menus
         // (docs/design/windows.md, section 7).
@@ -6222,6 +6259,11 @@ impl Shell {
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::ImportHistory(args) => return self.import_history_list(&args),
             Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
+            Action::Activity => {
+                self.core.activity.acknowledge();
+                self.show_import_activity();
+                return Ok(Value::Null);
+            }
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ChooseLibraryFolder(args) => return self.choose_library_folder(&args),
@@ -6473,10 +6515,15 @@ impl Shell {
             if actions.is_empty() {
                 break;
             }
-            for (a, resolver) in actions {
-                let result = self.apply(ctx, a);
+            for (a, resolver, batch, tap) in actions {
+                // Run in the batch its command ran in: what it asks of
+                // the library is the batch's step.
+                let result = crate::library_history::within_batch(batch, || self.apply(ctx, a));
                 if let Err(e) = &result {
                     self.warn(e.clone());
+                }
+                if let Some(tap) = tap {
+                    let _ = tap.send(result.clone());
                 }
                 if let Some(r) = resolver {
                     r.resolve(result);
@@ -6620,8 +6667,8 @@ impl Shell {
         // The History panel's snapshots: a toast for each restore.
         self.follow_snapshots();
         // The node's endpoint lists and runs the windows' commands.
-        if let Some(asks) = self.window_asks.take() {
-            crate::window_commands::answer(self, &asks, &ctx);
+        if let Some(mut asks) = self.window_asks.take() {
+            crate::window_commands::answer(self, &mut asks, &ctx);
             self.window_asks = Some(asks);
         }
         self.apply_queue(&ctx);
@@ -6963,6 +7010,8 @@ impl Shell {
             line.decisions_for_a_person = decisions.for_a_person();
         }
         line.profile.clone_from(&self.core.profile_name);
+        self.core.activity.set_context(ctx);
+        line.activity = self.core.activity.summary();
     }
 
     /// What the status line says now: the hovered mask handle's

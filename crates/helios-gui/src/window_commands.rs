@@ -6,15 +6,26 @@
 //!
 //! The endpoint's threads ask; the interface answers on its own thread, at
 //! its next frame ([`Shell::serve_window_commands`]), which a request
-//! wakes. A [`Bridge`] is made before the window exists (the node is
+//! wakes. A command whose work waits for the frame (the shell's queued
+//! actions) answers its result once done, a frame later. A [`Bridge`] is made before the window exists (the node is
 //! advertised first) and attached once the shell is built: until then it
 //! says the window is not open yet.
+//!
+//! A `command.batch` runs its steps in a group ([`Bridge`]'s
+//! `WindowCommands::group`): what the window commands it runs change in
+//! the library is one step of the library's history, by the batch's
+//! origin ("Agent: 3 commands"). The group is the endpoint thread's while
+//! the batch runs (a batch within a batch stays in the outer one), closed
+//! when the batch ends, whatever its steps did.
 
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::host::Reply;
 use egui_pop::api::windows::CONTEXT_APP_WINDOW;
 use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::CommandId;
@@ -23,6 +34,7 @@ use helios_node_core::endpoint::{WindowCommand, WindowCommands};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
+use crate::library_history::Group;
 use crate::shell::Shell;
 
 /// How long a request waits for the interface's answer.
@@ -39,12 +51,53 @@ enum Ask {
         params: Value,
         origin: String,
         window: String,
+        /// The batch it runs in, if any.
+        batch: Option<Group>,
         reply: Sender<Result<Value, String>>,
     },
 }
 
-/// The requests the shell answers at each frame.
-pub struct Asks(Receiver<Ask>);
+/// The batches' ids in this process.
+static BATCHES: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// The batch the endpoint's thread runs now.
+    static BATCH: RefCell<Option<Group>> = const { RefCell::new(None) };
+}
+
+/// A batch's group, open on the endpoint's thread until dropped.
+struct Open {
+    /// It opened the group (not a batch within one).
+    outer: bool,
+}
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        if self.outer {
+            BATCH.with(|b| b.borrow_mut().take());
+        }
+    }
+}
+
+/// The requests the shell answers at each frame, and the commands run
+/// whose results come at a later frame, with where to answer them.
+pub struct Asks(Receiver<Ask>, Vec<(Receiver<Answer>, Sender<Answer>)>);
+
+/// A command's result.
+type Answer = Result<Value, String>;
+
+thread_local! {
+    /// Where the action a window command queues sends its result
+    /// ([`take_tap`]), while it is dispatched.
+    static TAP: RefCell<Option<Sender<Answer>>> = const { RefCell::new(None) };
+}
+
+/// Where the result of the action being queued goes, if a window command
+/// run through the endpoint queued it: the shell's queue sends it there
+/// once applied.
+pub fn take_tap() -> Option<Sender<Answer>> {
+    TAP.with(|t| t.borrow_mut().take())
+}
 
 /// Where requests go once the shell answers, and what to wake.
 type Link = Option<(Sender<Ask>, egui::Context)>;
@@ -61,7 +114,7 @@ impl Bridge {
     /// The shell answers from now on; a request wakes `ctx`.
     pub fn attach(&self, shell: &mut Shell, ctx: &egui::Context) {
         let (tx, rx) = channel();
-        shell.serve_window_commands(Asks(rx));
+        shell.serve_window_commands(Asks(rx, Vec::new()));
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some((tx, ctx.clone()));
     }
 
@@ -94,18 +147,48 @@ impl WindowCommands for Bridge {
 
     fn run(&self, id: &str, params: Value, origin: &str, window: &str) -> Result<Value, String> {
         let (id, origin, window) = (id.to_string(), origin.to_string(), window.to_string());
+        let batch = BATCH.with(|b| b.borrow().clone());
         self.ask(|reply| Ask::Run {
             id,
             params,
             origin,
             window,
+            batch,
             reply,
         })
     }
+
+    fn group(&self, origin: &str) -> Option<helios_inspect::rpc::Group> {
+        let outer = BATCH.with(|b| {
+            let mut b = b.borrow_mut();
+            if b.is_some() {
+                return false;
+            }
+            *b = Some(Group {
+                id: BATCHES.fetch_add(1, Ordering::Relaxed) + 1,
+                origin: crate::host::to_pop(&origin_of(origin)),
+            });
+            true
+        });
+        Some(Box::new(Open { outer }))
+    }
 }
 
-/// Answers the requests waiting, on the interface's thread.
-pub(crate) fn answer(shell: &mut Shell, asks: &Asks, ctx: &egui::Context) {
+/// Answers the requests waiting, on the interface's thread: a command
+/// whose work waits for the frame answers once it is done (the shell's
+/// queue runs after this, so at the next frame).
+pub(crate) fn answer(shell: &mut Shell, asks: &mut Asks, ctx: &egui::Context) {
+    asks.1.retain(|(result, reply)| match result.try_recv() {
+        Ok(result) => {
+            let _ = reply.send(result);
+            false
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => true,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            let _ = reply.send(Err("the command's queued work was dropped".into()));
+            false
+        }
+    });
     while let Ok(ask) = asks.0.try_recv() {
         match ask {
             Ask::List { window, reply } => {
@@ -116,11 +199,28 @@ pub(crate) fn answer(shell: &mut Shell, asks: &Asks, ctx: &egui::Context) {
                 params,
                 origin,
                 window,
+                batch,
                 reply,
             } => {
-                let _ = reply.send(run(shell, ctx, &id, params, &origin, &window));
+                let (tap, result) = channel();
+                TAP.with(|t| *t.borrow_mut() = Some(tap));
+                let ran = run(shell, ctx, &id, params, &origin, &window, batch);
+                // Taken: the command queued an action that answers.
+                let tapped = TAP.with(|t| t.borrow_mut().take()).is_none();
+                match ran {
+                    Reply::Done(result) => {
+                        let _ = reply.send(result);
+                    }
+                    Reply::Later(_) if tapped => asks.1.push((result, reply)),
+                    Reply::Later(_) => {
+                        let _ = reply.send(Ok(json!({ "queued": true })));
+                    }
+                }
             }
         }
+    }
+    if !asks.1.is_empty() {
+        ctx.request_repaint();
     }
 }
 
@@ -236,7 +336,9 @@ fn origin_of(origin: &str) -> Origin {
 }
 
 /// Runs command `id` in open window `window`, refused with its reason
-/// where it does not apply there.
+/// where it does not apply there; within `batch`, what it changes in the
+/// library is the batch's step. A command whose work waits for the frame
+/// answers later.
 fn run(
     shell: &mut Shell,
     ctx: &egui::Context,
@@ -244,7 +346,25 @@ fn run(
     params: Value,
     origin: &str,
     window: &str,
-) -> Result<Value, String> {
+    batch: Option<Group>,
+) -> Reply {
+    let cx = match runnable(shell, ctx, id, window) {
+        Ok(cx) => cx,
+        Err(e) => return Reply::Done(Err(e)),
+    };
+    crate::library_history::within_batch(batch, || {
+        shell.dispatch_in(id, params, origin_of(origin), &cx)
+    })
+}
+
+/// The context command `id` runs in, in open window `window`; refused
+/// with its reason where it does not apply there.
+fn runnable(
+    shell: &Shell,
+    ctx: &egui::Context,
+    id: &str,
+    window: &str,
+) -> Result<WhenContext, String> {
     check_window(window)?;
     let app = shell.app().handle().clone();
     if !app.windows().iter().any(|w| w.id.as_str() == window) {
@@ -259,7 +379,7 @@ fn run(
     if let Some(reason) = disabled_reason(&app, ctx, &spec, &cx) {
         return Err(reason);
     }
-    shell.run_in(id, params, origin_of(origin), &cx)
+    Ok(cx)
 }
 
 #[cfg(test)]

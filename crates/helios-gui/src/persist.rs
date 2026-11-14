@@ -181,10 +181,15 @@ enum Write {
     Decline(String),
     /// Photos taken out of the Library (`library.images.remove`), asked
     /// at a time (seconds): one step of the library's history.
-    Remove(Vec<String>, f64),
+    Remove(Vec<String>, f64, crate::library::Batch),
     /// Photos turned (`library.images.rotate`), asked at a time
     /// (seconds): one step of the library's history.
-    Rotate(Vec<String>, crate::library::Turn, f64),
+    Rotate(
+        Vec<String>,
+        crate::library::Turn,
+        f64,
+        crate::library::Batch,
+    ),
     /// Photos duplicated (`library.images.duplicate`): a new version of
     /// each, from its current edit or the original.
     Duplicate(Vec<String>, helios_vault::versions::DuplicateFrom),
@@ -210,7 +215,7 @@ enum Write {
     Session(String, Option<Value>),
     /// An album or the quick collection changed (`library.albums.edit`),
     /// recorded in the library's history at `f64` (seconds) once done.
-    Album(crate::library::AlbumEdit, f64),
+    Album(crate::library::AlbumEdit, f64, crate::library::Batch),
     /// A step of the edit shown (`library.edit.add`).
     Edit(Box<EditStep>),
     /// An image's snapshots kept (`library.snapshots.set`).
@@ -243,11 +248,11 @@ impl Write {
                 json!({ "decision": decision, "groups": groups }),
             ),
             Self::Decline(decision) => ("library.stacks.decline", json!({ "decision": decision })),
-            Self::Remove(images, _) => (
+            Self::Remove(images, ..) => (
                 helios_node_core::library::REMOVE,
                 json!({ "images": images }),
             ),
-            Self::Rotate(images, turn, _) => (
+            Self::Rotate(images, turn, ..) => (
                 helios_node_core::library::ROTATE,
                 json!({ "images": images, "turn": turn_word(*turn) }),
             ),
@@ -278,7 +283,7 @@ impl Write {
                 "library.workshop.sessions.set",
                 json!({ "id": id, "record": record }),
             ),
-            Self::Album(edit, _) => ("library.albums.edit", album_params(edit)),
+            Self::Album(edit, ..) => ("library.albums.edit", album_params(edit)),
             Self::Edit(step) => (
                 "library.edit.add",
                 json!({
@@ -1127,13 +1132,26 @@ impl<S: Store + 'static> Persist<S> {
     /// The link to a vault opened by its owner (the local node), whose
     /// changes are announced on `bus`.
     pub fn on(vault: Arc<Vault<S>>, bus: Arc<Bus>) -> Self {
+        Self::on_promises(vault, bus, None)
+    }
+
+    /// [`Persist::on`], its promises (the imports by rule) run by
+    /// `promises`, the node's, rather than by promises of its own.
+    pub fn on_promises(
+        vault: Arc<Vault<S>>,
+        bus: Arc<Bus>,
+        promises: Option<Arc<helios_node_core::promises::Promises<S>>>,
+    ) -> Self {
         let events = bus.subscribe();
-        let service = helios_node_core::endpoint::VaultService::new(
+        let mut service = helios_node_core::endpoint::VaultService::new(
             vault.clone(),
             bus.clone(),
             helios_core::jobs::Jobs::new(bus.clone()),
             &format!("desktop-{}", std::process::id()),
         );
+        if let Some(promises) = promises {
+            service = service.with_promises(promises);
+        }
         let node = Arc::new(Client::in_process(Arc::new(service)).with_origin(WHO));
         let cache = Arc::new(ReadCache::new());
         // The cache hears the vault's events on a thread of its own, so a
@@ -1351,7 +1369,7 @@ impl<S: Store + 'static> Persist<S> {
                 )
                 .with("error", e.message),
             ),
-            (Write::Remove(_, at), Ok(answer)) => {
+            (Write::Remove(_, at, batch), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z puts the
                 // photos back; the Library reads itself again on the
                 // vault's event.
@@ -1359,7 +1377,9 @@ impl<S: Store + 'static> Persist<S> {
                     Ok(changes) => {
                         let count = changes.images.len();
                         let label = crate::library_history::remove_label(count);
-                        shell.library_history().record(label, changes, *at);
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
                     }
                     Err(e) => shell.notify(
                         Level::Warning,
@@ -1382,7 +1402,7 @@ impl<S: Store + 'static> Persist<S> {
                 lib.versions_changed();
                 lib.edit_changed(image);
             }
-            (Write::Rotate(_, turn, at), Ok(answer)) => {
+            (Write::Rotate(_, turn, at, batch), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z turns the
                 // photos back; the vault's events show the turn.
                 match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
@@ -1390,7 +1410,9 @@ impl<S: Store + 'static> Persist<S> {
                     Ok(changes) => {
                         let label =
                             crate::library_history::rotate_label(*turn, changes.images.len());
-                        shell.library_history().record(label, changes, *at);
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
                     }
                     Err(e) => shell.notify(
                         Level::Warning,
@@ -1438,14 +1460,16 @@ impl<S: Store + 'static> Persist<S> {
                 };
                 shell.notify(level, line);
             }
-            (Write::Album(edit, at), Ok(done)) => {
+            (Write::Album(edit, at, batch), Ok(done)) => {
                 match serde_json::from_value::<helios_vault::Changes>(done["changes"].clone()) {
                     Ok(changes) => {
                         let name = done["name"].as_str().unwrap_or_default();
                         let count = to_usize(&done["count"]);
                         let added = done["added"].as_bool().unwrap_or(true);
                         let label = crate::library_history::album_label(edit, name, count, added);
-                        shell.library_history().record(label, changes, *at);
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
                     }
                     Err(e) => shell.notify(Level::Warning, e.to_string()),
                 }
@@ -2035,8 +2059,8 @@ impl<S: Store + 'static> Persist<S> {
     /// reads the albums again when that history moved (a change, an undo,
     /// a redo, an import).
     fn edit_albums(&mut self, shell: &mut Shell, now: f64) {
-        for edit in shell.library_mut().take_album_edits() {
-            self.writes.push_back(Write::Album(edit, now));
+        for (edit, batch) in shell.library_mut().take_album_edits() {
+            self.writes.push_back(Write::Album(edit, now, batch));
         }
         self.keep_filter_history(shell);
         self.read_albums_if_wanted(shell);
@@ -2075,13 +2099,13 @@ impl<S: Store + 'static> Persist<S> {
         self.writes.extend(
             removals
                 .into_iter()
-                .map(|images| Write::Remove(images, now)),
+                .map(|(images, batch)| Write::Remove(images, now, batch)),
         );
         let rotations = shell.library_mut().take_rotations();
         self.writes.extend(
             rotations
                 .into_iter()
-                .map(|(images, turn)| Write::Rotate(images, turn, now)),
+                .map(|(images, turn, batch)| Write::Rotate(images, turn, now, batch)),
         );
         self.ask_versions(shell, now);
         let duplicates = shell.library_mut().take_duplicates();
