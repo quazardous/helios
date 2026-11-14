@@ -3152,6 +3152,14 @@ impl Shell {
                 "Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back",
             ),
             (
+                crate::library::TRASH_COMMAND,
+                "Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z",
+            ),
+            (
+                crate::library::DELETE_REJECTED_COMMAND,
+                "Delete Rejected…: the rejected photos shown to the system trash (`images`: of them, those named), asked first unless `confirmed`",
+            ),
+            (
                 crate::library::MARKS_PASTE_COMMAND,
                 "Paste the copied marks (`images`: ids, else the selection; `marks`: some of rating, labels, tags, title, all by default; `mode`: merge, the default, adds labels and tags, overwrite makes each mark the copy's)",
             ),
@@ -5123,10 +5131,11 @@ impl Shell {
     /// marks copied.
     fn library_batch(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
         use crate::library::{
-            CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode,
-            REMOVE_COMMAND, SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND,
-            Similar,
+            CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND,
+            MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND, SELECT_INVERT_COMMAND,
+            SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar, TRASH_COMMAND,
         };
+        let confirmed = args.get("confirmed").and_then(Value::as_bool) == Some(true);
         let text = |key: &str| args.get(key).and_then(Value::as_str);
         let images = || -> Result<Option<Vec<String>>, String> {
             match args.get("images") {
@@ -5164,6 +5173,10 @@ impl Shell {
                 Ok(json!({ "images": count, "marks": kinds }))
             }
             REMOVE_COMMAND => Ok(json!({ "removed": lib.remove_from_library(images()?)? })),
+            TRASH_COMMAND => Ok(json!({ "asked": lib.ask_trash(images()?, confirmed)? })),
+            DELETE_REJECTED_COMMAND => Ok(json!({
+                "asked": lib.ask_delete_rejected(images()?, confirmed)?
+            })),
             other => Err(format!("`{other}` is not a selection command")),
         }
     }

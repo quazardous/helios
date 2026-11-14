@@ -1029,6 +1029,8 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library | `C` | compare the selected photos (`library.compare`) |
 | library | `Ctrl+Shift+A`, `Ctrl+I` | select none, invert the selection (`library.select.none`, `library.select.invert`, darktable); not while a text field is typed in |
 | library | `Delete` | remove the selected photos from the Library, their files untouched (`library.remove`, Lightroom, darktable); Ctrl+Z puts them back; not while a text field is typed in |
+| library | `Ctrl+Alt+Shift+Delete` | Move to Trash…: the selected photos' files to the system trash, asked first (`library.trash`, Lightroom's "Remove and Delete from Disk"); not while a text field is typed in |
+| library | `Ctrl+Backspace` | Delete Rejected…: the rejected photos shown to the system trash, asked first (`library.deleteRejected`, Lightroom's "Delete Rejected Photos"); not while a text field is typed in |
 | library | `Ctrl+Shift+K` | the recent and pinned filters and the smart albums, to apply one (`library.filter.switch`; darktable's Ctrl+K, which starts chords here); not while a text field is typed in |
 | Compare place | `Right`, `Left` | the next, previous photo active (`compare.next`, `compare.previous`) |
 | culling | `Space`, `Backspace` | next, previous image (in the grid `Space` selects) |
