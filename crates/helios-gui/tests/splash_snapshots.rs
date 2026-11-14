@@ -2,7 +2,8 @@
 //! in the workspace's `kittest.toml`): the boot splash with a step done,
 //! one running and one waiting its turn; the end splash with a step that
 //! lasts, its reason and "Quit now". egui's own dark style: the splash
-//! draws with whatever style the window has. Regenerate with
+//! draws with whatever style the window has. A fixed version: the build's
+//! changes with each commit. Regenerate with
 //! `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test splash_snapshots`
 //! (the box's `gui-snapshots` job).
 
@@ -17,7 +18,7 @@ fn harness(kind: Kind, phase: Phase, stuck_after: Duration) -> Harness<'static> 
     let mut h = Harness::builder()
         .with_size(egui::vec2(800.0, 500.0))
         .build_ui(move |ui| {
-            splash::show(ui, kind, &phase, Instant::now(), stuck_after);
+            splash::show_as(ui, kind, &phase, Instant::now(), stuck_after, "1.0.0");
         });
     h.run_steps(3);
     h

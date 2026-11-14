@@ -50,6 +50,19 @@ fn title(kind: Kind) -> Message {
 /// stand at `now`, a step past `stuck_after` with why it lasts. "Quit
 /// now", at the end, asks the phase to stop waiting.
 pub fn show(ui: &mut egui::Ui, kind: Kind, phase: &Phase, now: Instant, stuck_after: Duration) {
+    show_as(ui, kind, phase, now, stuck_after, env!("HELIOS_VERSION"));
+}
+
+/// As [`show`], with the version given (a snapshot's stays the same
+/// from one build to the next).
+pub fn show_as(
+    ui: &mut egui::Ui,
+    kind: Kind,
+    phase: &Phase,
+    now: Instant,
+    stuck_after: Duration,
+    version: &str,
+) {
     let ctx = ui.ctx().clone();
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let rect = ui.max_rect();
@@ -71,7 +84,7 @@ pub fn show(ui: &mut egui::Ui, kind: Kind, phase: &Phase, now: Instant, stuck_af
     ui.add(egui::Image::new((logo.id(), egui::vec2(64.0, 64.0))));
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Helios").heading().strong());
-    ui.label(egui::RichText::new(env!("HELIOS_VERSION")).weak().small());
+    ui.label(egui::RichText::new(version).weak().small());
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         let title = text(title(kind));
