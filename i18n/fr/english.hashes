@@ -203,6 +203,7 @@ command-library-stack-top.title 86d66aed75468b70
 command-library-stack-ungroup.title 9c5161dff0696632
 command-library-storage.title 72ca240c73a1c7aa
 command-library-trash.title 6fb6defb78678f5c
+command-library-window.title 6d7e88ea6aaf5346
 command-macro-dissolve.title e472cc526f105a70
 command-macro-fold.title 33ae65c670fa307a
 command-macro-interface.title 9339d37c74694ea4
@@ -1057,6 +1058,8 @@ gui-library-version-copy 424486452ba52062
 gui-library-version-not-changed 5e359e73ab5dd059
 gui-library-versions-strip e2b7a3b085ebe75a
 gui-library-volume-offline 5f2b93239dade10c
+gui-library-window 6d7e88ea6aaf5346
+gui-library-window-elsewhere b1b3b086f19f7352
 gui-log-clear 238f7a82e564b550
 gui-log-empty 204c4ef685556125
 gui-look-fit-selection-done 6a5f0732e0e2eadf

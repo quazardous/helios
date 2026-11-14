@@ -155,6 +155,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.stack.ungroup", "phosphor:stack-minus"),
     ("library.storage", "phosphor:hard-drives"),
     ("library.trash", "phosphor:trash"),
+    ("library.window", "phosphor:images-square"),
     ("macro.dissolve", "phosphor:selection-slash"),
     ("macro.fold", "phosphor:package"),
     ("macro.interface", "phosphor:sliders-horizontal"),

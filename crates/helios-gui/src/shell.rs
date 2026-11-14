@@ -84,6 +84,9 @@ pub use accounts_admin::{
 };
 mod activity_focus;
 pub use activity_focus::WINDOW as ACTIVITY_WINDOW;
+mod focus_window;
+mod library_focus;
+pub use library_focus::{COMMAND as LIBRARY_WINDOW_COMMAND, WINDOW as LIBRARY_WINDOW};
 mod calibrate_focus;
 mod camera_look;
 pub use calibrate_focus::{COMMAND as CALIBRATE_COMMAND, WINDOW as CALIBRATE_WINDOW};
@@ -145,6 +148,10 @@ pub const NOTICE_DETAILS: &str = "notice.details";
 /// the image shown): greyed in another window's menus, which say where
 /// it runs (docs/design/windows.md, section 7).
 pub const IN_MAIN_WINDOW: &str = "appWindow == 'main'";
+
+/// The `when` of a command on the library's selection: the main window's
+/// and the Library window's, which show the same Library.
+pub const IN_LIBRARY: &str = "appWindow == 'main' || appWindow == 'library'";
 
 /// The screen's own scale (physical pixels per point, the interface zoom
 /// left out) from which it is `hidpi` for profile variants.
@@ -255,6 +262,8 @@ enum Action {
     ImportAgain(Value, Origin),
     /// Open the Activity focus (`activity.show`'s arguments).
     Activity(Value),
+    /// Open the Library focus in its own window (`library.window`).
+    LibraryWindow,
     /// Export photos (`library.export`'s arguments), as whom.
     Export(Value, Origin),
     /// Show a folder in the file manager (`library.openFolder`'s
@@ -672,6 +681,10 @@ pub struct Shell {
     calibration: calibrate_focus::CalibrationFocus,
     /// The Activity focus, in an OS window of its own.
     activity_focus: activity_focus::ActivityFocus,
+    /// The Library focus, in an OS window of its own.
+    library_focus: library_focus::LibraryFocus,
+    /// The focus windows' list as last kept (`focus_window::OPEN_DOC`).
+    focus_windows_kept: Option<String>,
     /// The application's life, apart from its windows'.
     lifetime: lifetime::Lifetime,
     /// What the node's endpoint asks of the windows' commands.
@@ -1060,11 +1073,14 @@ impl Shell {
             import: import_window::ImportFocus::new(),
             calibration: calibrate_focus::CalibrationFocus::default(),
             activity_focus: activity_focus::ActivityFocus::default(),
+            library_focus: library_focus::LibraryFocus::default(),
+            focus_windows_kept: None,
             lifetime: lifetime::Lifetime::default(),
             window_asks: None,
             toasts_in: None,
             notes: Vec::new(),
         };
+        shell.restore_focus_windows();
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
         }
@@ -1288,7 +1304,11 @@ impl Shell {
             if has(&shell, panel) {
                 let library = shell.focus.library.clone();
                 let comparison = shell.focus.comparison.clone();
+                let window = shell.library_focus.state.clone();
                 shell.set_content(panel, move |ui| {
+                    if view == 0 && library_focus::in_main_window(&window, ui.ctx()) {
+                        return library_focus::elsewhere_ui(ui);
+                    }
                     let mut library = library.borrow_mut();
                     match view {
                         0 => library.grid(ui),
@@ -3393,6 +3413,12 @@ impl Shell {
             ),
             Box::new(|a, _| Ok(Action::Activity(a.clone()))),
         );
+        add(
+            // The Library in a window of its own, brought to the front
+            // when open.
+            CommandSpec::new(library_focus::COMMAND, "Library", "Window"),
+            Box::new(|_, _| Ok(Action::LibraryWindow)),
+        );
         // The main window's commands, greyed in the other windows' menus
         // (docs/design/windows.md, section 7).
         add(
@@ -3401,7 +3427,7 @@ impl Shell {
                 "Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)",
                 "Library",
             )
-            .when(IN_MAIN_WINDOW),
+            .when(IN_LIBRARY),
             Box::new(|a, origin| Ok(Action::Export(a.clone(), origin.clone()))),
         );
         add(
@@ -3464,7 +3490,7 @@ impl Shell {
                 "Fit a camera look from the selection: one look from photos of one camera, fitted to their embedded JPEGs and written into each (`images`: ids, else the selection; `default`: keep it as the camera's default too)",
                 "Library",
             )
-            .when(IN_MAIN_WINDOW),
+            .when(IN_LIBRARY),
             Box::new(|a, origin| Ok(Action::FitCameraLook(a.clone(), origin.clone()))),
         );
         add(
@@ -3473,7 +3499,7 @@ impl Shell {
                 "Copy files: the selected images' files, for a file manager or another application",
                 "Library",
             )
-            .when(IN_MAIN_WINDOW),
+            .when(IN_LIBRARY),
             Box::new(|_, origin| Ok(Action::CopyFiles(origin.clone()))),
         );
         add(
@@ -4055,10 +4081,11 @@ impl Shell {
             // Window: Helios's windows, open or not, to bring one forward.
             command(MENU_WINDOW, "1_open", 0, lifetime::MAIN_WINDOW),
             command(MENU_WINDOW, "1_open", 1, import_window::COMMAND),
+            command(MENU_WINDOW, "1_open", 2, library_focus::COMMAND),
             command(
                 MENU_WINDOW,
                 "1_open",
-                2,
+                3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
             ),
             // File > Storage: the disks and what each is for.
@@ -6322,6 +6349,10 @@ impl Shell {
                 self.open_activity(&args);
                 return Ok(Value::Null);
             }
+            Action::LibraryWindow => {
+                self.open_library_window();
+                return Ok(Value::Null);
+            }
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ChooseLibraryFolder(args) => return self.choose_library_folder(&args),
@@ -6806,6 +6837,8 @@ impl Shell {
         self.import_window_frame(&ctx);
         self.calibration_frame(&ctx);
         self.activity_frame(&ctx);
+        self.library_window_frame(&ctx);
+        self.keep_focus_windows();
         self.workshop_frame(&ctx);
         let refused = std::mem::take(&mut self.focus.library.borrow_mut().notes);
         for n in refused {

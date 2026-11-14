@@ -20,14 +20,15 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use egui::{Color32, Context as Egui, Pos2, Rect, Sense, Stroke, Vec2, ViewportId};
-use egui_pop::api::windows::{WindowId, WindowSpec};
+use egui::{Color32, Context as Egui, Pos2, Rect, Sense, Stroke};
+use egui_pop::api::windows::WindowId;
 use helios_calibrate::{Layout, XRITE_CC24_2014};
 use helios_core::Message;
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::focus_window::{FocusWindow, WindowFocus};
 
 /// The command that opens the focus (`path`: the chart shot; `corners`:
 /// four `[x, y]` in its pixels; `camera`: the profiles listed for it).
@@ -37,17 +38,19 @@ pub const COMMAND: &str = "calibrate.open";
 /// (`appWindow == 'calibrate'`, `window: "calibrate"` for agents).
 pub const WINDOW: &str = "calibrate";
 
-/// The id of the window of the main one the focus is drawn in where the
-/// backend has no windows of its own.
-const EMBEDDED_ID: &str = "helios.calibrate.embedded";
-
 /// The longest side of the picture shown, in pixels.
 const SHOWN_SIDE: u32 = 2048;
 /// A handle's side, in points.
 const HANDLE: f32 = 16.0;
 
-const MIN_SIZE: Vec2 = egui::vec2(720.0, 440.0);
-const MAX_DEFAULT_SIZE: Vec2 = egui::vec2(1280.0, 820.0);
+/// The focus's window (`focus_window`).
+static FRAME: FocusWindow = FocusWindow {
+    window: WINDOW,
+    embedded: "helios.calibrate.embedded",
+    min_size: egui::vec2(720.0, 440.0),
+    max_default_size: egui::vec2(1280.0, 820.0),
+    share: 0.85,
+};
 
 /// What the window asked of the shell, run at the main window's pass.
 #[derive(Clone, Debug, PartialEq)]
@@ -687,15 +690,30 @@ fn window_title() -> Message {
     Message::new("gui-calibrate-title", "Calibrate camera colour")
 }
 
-fn default_size(main: Vec2) -> Vec2 {
-    let max = (main - egui::vec2(32.0, 32.0)).max(Vec2::ZERO);
-    (main * 0.85).min(MAX_DEFAULT_SIZE).max(MIN_SIZE).min(max)
-}
+impl WindowFocus for Calibration {
+    fn is_open(&self) -> bool {
+        self.open
+    }
 
-/// Whether the focus's content holds the main window: moved into it when
-/// the main window was closed while it was open.
-fn holds_main_window(app: &egui_pop::api::app::AppHandle) -> bool {
-    app.window_viewport(&WindowId::new(WINDOW)) == Some(ViewportId::ROOT)
+    fn set_open(&mut self, open: bool) {
+        self.open = open;
+    }
+
+    fn shown(&mut self) -> &mut Option<WindowId> {
+        &mut self.shown
+    }
+
+    fn title(&self, _: &Egui) -> String {
+        self.text(window_title())
+    }
+
+    fn window_ui(&mut self, ui: &mut egui::Ui) {
+        Calibration::window_ui(self, ui);
+    }
+
+    fn asks_main_pass(&self) -> bool {
+        !self.events.is_empty()
+    }
 }
 
 impl Shell {
@@ -703,12 +721,9 @@ impl Shell {
     /// `path` with its `corners` when given, its profiles listed (of
     /// `camera` when given). Open already, its window comes forward.
     pub(super) fn open_calibration(&mut self, args: &Value) {
-        if let Some(id) = &self.calibration.get().shown {
-            self.core.app.handle().raise_window(id);
-        }
+        super::focus_window::open(self.core.app.handle(), &self.calibration.state);
         {
             let mut c = self.calibration.state.borrow_mut();
-            c.open = true;
             c.error = None;
             c.said = None;
             if let Some(camera) = args["camera"].as_str() {
@@ -788,7 +803,8 @@ impl Shell {
         for event in events {
             self.calibration_event(event);
         }
-        self.follow_calibration(ctx);
+        let app = self.core.app.handle().clone();
+        FRAME.follow(&app, ctx, &self.calibration.state);
     }
 
     #[allow(
@@ -900,101 +916,6 @@ impl Shell {
         }
         if event != Event::Solve {
             self.refresh_profiles();
-        }
-    }
-
-    /// The focus's OS window, opened while the focus is open and closed
-    /// with it; closed by itself, the focus closes and the main window
-    /// stays. Where the backend has no windows of its own, a window of
-    /// the main one instead.
-    fn follow_calibration(&mut self, ctx: &Egui) {
-        if ctx.embed_viewports() {
-            self.embedded_calibration(ctx);
-            return;
-        }
-        let app = self.core.app.handle().clone();
-        let id = WindowId::new(WINDOW);
-        let there = app.window_viewport(&id).is_some();
-        let mut c = self.calibration.state.borrow_mut();
-        match (c.open, there) {
-            (true, false) if c.shown.is_some() => {
-                c.open = false;
-                c.shown = None;
-            }
-            (true, false) => {
-                let title = c.text(window_title());
-                let spec = WindowSpec::new(WINDOW, title)
-                    .size(default_size(ctx.content_rect().size()))
-                    .min_size(MIN_SIZE)
-                    .shell_bars(true);
-                c.shown = Some(id.clone());
-                drop(c);
-                let state = self.calibration.state.clone();
-                app.open_window(spec, move |ui, window| {
-                    let Ok(mut c) = state.try_borrow_mut() else {
-                        return;
-                    };
-                    let closing = !c.open || window.close_requested();
-                    if !closing {
-                        egui::CentralPanel::default().show(ui, |ui| c.window_ui(ui));
-                        if !c.events.is_empty() {
-                            ui.ctx().request_repaint_of(ViewportId::ROOT);
-                        }
-                        return;
-                    }
-                    c.open = false;
-                    let app = window.app().clone();
-                    if holds_main_window(&app) {
-                        app.raise_window(&WindowId::main());
-                    } else {
-                        window.close();
-                        super::import_window::hide_closing_window(ui.ctx());
-                    }
-                });
-            }
-            (false, true) if holds_main_window(&app) => {
-                drop(c);
-                app.raise_window(&WindowId::main());
-            }
-            (false, true) => {
-                c.shown = None;
-                drop(c);
-                app.close_window(&id);
-            }
-            (false, false) => c.shown = None,
-            (true, true) => {}
-        }
-    }
-
-    /// The focus in a window of the main one (kittest, the web).
-    fn embedded_calibration(&mut self, ctx: &Egui) {
-        let state = self.calibration.state.clone();
-        let Ok(mut c) = state.try_borrow_mut() else {
-            return;
-        };
-        if !c.open {
-            return;
-        }
-        let title = c.text(window_title());
-        let main = ctx.content_rect().size();
-        let max = (main - egui::vec2(32.0, 32.0)).max(Vec2::ZERO);
-        let mut open = true;
-        egui::Window::new(&title)
-            .id(egui::Id::unique(EMBEDDED_ID))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(default_size(main))
-            .min_size(MIN_SIZE.min(max))
-            .max_size(max)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
-            .show(ctx, |ui| {
-                ui.set_min_size(default_size(main) - egui::vec2(16.0, 40.0));
-                c.window_ui(ui);
-            });
-        if !open {
-            c.open = false;
         }
     }
 }
