@@ -224,7 +224,19 @@ the colour labels, the others kept). `library.fields.get` (`images`,
 `fields`, `locations`) reads those fields as stored: `rows` (`id`,
 `fields`, and `locations` when asked), in the order asked.
 
-The desktop's library writes its fields and its stacks' expansion this
+`library.documents.get` (`ns`, `key`) reads a library document
+(`document`, null when there is none), such as the Library's pinned and
+recent filters; `library.documents.set` (`ns`, `key`, `document`) keeps
+one, a null `document` removing it. `library.folders` (`query`, the
+whole Library when none) counts the photos by folder: `folders`, one
+entry per volume (`volume`, null for files on no known volume) with its
+`folders` (each folder's path and how many photos it holds).
+`library.workshop.sessions.list` lists the workshop sessions' records
+(`sessions`: `id`, `record`), and `library.workshop.sessions.set` (`id`,
+`record`) keeps one, a null `record` dropping it.
+
+The desktop's library writes its fields, its stacks' expansion, its
+filter history and its workshop sessions' records this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
 answers are picked up at the next frames. Its grid reads the same way:
@@ -233,6 +245,8 @@ catalog moves, read whole again when its sort changes or the cursor is
 gone), the search filter's photos through a cursor of their own and its
 counts through `library.facets`, each read on a thread of its own and
 shown at a coming frame, through a `ReadCache` fed by the bus's events.
+The Folders section's counts and the filter history are read through
+the node too, and shown at the frame their answer comes.
 
 ## A client cache
 
