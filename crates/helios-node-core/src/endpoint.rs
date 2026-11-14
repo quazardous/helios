@@ -208,13 +208,16 @@ pub struct VaultService<S: Store> {
     promises: Arc<promises::Promises<S>>,
 }
 
-impl<S: Store> VaultService<S> {
+impl<S: Store + 'static> VaultService<S> {
     /// The commands on `vault`, its changes and imports announced on
     /// `bus`, its imports run as jobs on `jobs`; `node.hello` names the
     /// node `instance`.
     pub fn new(vault: Arc<Vault<S>>, bus: Arc<Bus>, jobs: Jobs, instance: &str) -> Self {
         Self {
-            promises: Arc::new(promises::Promises::new(vault.clone(), jobs.clone())),
+            promises: Arc::new(crate::import_promise::register(
+                promises::Promises::new(vault.clone(), jobs.clone()),
+                bus.clone(),
+            )),
             vault,
             bus,
             jobs,
@@ -225,7 +228,8 @@ impl<S: Store> VaultService<S> {
     }
 
     /// Answers the promise commands with `promises`, the node's (with the
-    /// kinds it runs), rather than one of its own that runs none.
+    /// kinds it runs), rather than one of its own (which runs imports
+    /// only). An import by rule starts on them.
     #[must_use]
     pub fn with_promises(mut self, promises: Arc<promises::Promises<S>>) -> Self {
         self.promises = promises;
@@ -348,6 +352,10 @@ impl<S: Store + Send + 'static> VaultService<S> {
         } else if id != library::IMPORT {
             return run_on(&self.vault, &self.bus, id, params, origin_of(params))
                 .map(|(answer, _)| answer);
+        } else if crate::import_promise::by_rule(params) {
+            // An import by rule answers at once with its promise.
+            let promise = crate::import_promise::start(&self.promises, params, &origin)?;
+            return Ok(json!({ "promise": promise }));
         } else {
             params
         };
@@ -358,6 +366,9 @@ impl<S: Store + Send + 'static> VaultService<S> {
             .filter_map(Value::as_str)
             .map(PathBuf::from)
             .collect();
+        if paths.is_empty() {
+            return Err("`library.import` needs `paths`, or a `source` and a `rule`".into());
+        }
         let mut options = library::import_options(params, Some(call.cancel_flag()))?;
         options.origin = Some(origin);
         let mut files = Vec::new();

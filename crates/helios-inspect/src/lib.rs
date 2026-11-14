@@ -874,9 +874,12 @@ pub mod control {
         /// `signals` is false. The import is announced on the bus
         /// (`library.imported`), which starts the backup strategy's
         /// after-import run; `$/cancel` stops it before its next file.
-        /// `paths` are absolute.
+        /// `paths` are absolute. An import by `source` and `rule` is
+        /// answered by the node with a promise before it becomes this
+        /// request; with neither, `paths` is empty and refused.
         #[serde(rename = "library.import")]
         LibraryImport {
+            #[serde(default)]
             paths: Vec<PathBuf>,
             #[serde(default, skip_serializing_if = "std::ops::Not::not")]
             copy: bool,

@@ -343,7 +343,8 @@ drives a running node through either endpoint.
 
 ```bash
 helios import --vault library.db [--reference | --copy [--into DIR]] [--rename PATTERN]
-              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+              FOLDERS-CARDS-OR-FILES...
 helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve STACK
               | expand STACK | collapse STACK | top STACK IMAGE
               | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
@@ -353,9 +354,15 @@ helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve
 `import` brings a folder, a file or a mounted card into the vault,
 referenced in place or copied into the library folder (renamed by a
 pattern, sidecars along), finds exact duplicates by content and handles
-them by policy, and measures each image's near-duplicate signals. One JSON
-line per file, then `{"report": ...}`; exit 1 when a file failed, 130
-when interrupted (Ctrl-C stops it before its next file and leaves no
+them by policy, and measures each image's near-duplicate signals. The
+node answers at once with a promise (docs/protocol.md, "Promises"),
+printed as `{"promise": ...}`: the import goes on in the node, and
+`helios run promises.wait --param id=…` waits for it. One folder or
+card is imported whole (`--new`: only what the library does not know);
+several sources, or files, as the items named. With `--wait` it waits:
+one JSON line per file that failed, then `{"report": ..., "promise":
+..., "history": ...}`; exit 1 when a file failed, 130 when interrupted
+(Ctrl-C cancels the import before its next file and leaves no
 half-written copy).
 
 `stacks` lists, makes and dissolves stacks, and asks for stack

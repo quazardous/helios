@@ -231,6 +231,11 @@ impl<S: Store> Promises<S> {
     pub fn vault(&self) -> &Arc<Vault<S>> {
         &self.vault
     }
+
+    /// The jobs its work reports under.
+    pub fn jobs(&self) -> &Jobs {
+        &self.jobs
+    }
 }
 
 impl<S: Store + Send + 'static> Promises<S> {
@@ -331,6 +336,17 @@ impl<S: Store + Send + 'static> Promises<S> {
             }
         }
         Ok(resumed)
+    }
+
+    /// Whether some promise's work runs in this process now.
+    pub fn working(&self) -> bool {
+        let open = Filter {
+            states: vec!["pending".into(), "running".into()],
+            ..Filter::default()
+        };
+        self.vault
+            .promises(&open)
+            .is_ok_and(|open| open.iter().any(|p| self.vault.promise_live(&p.id)))
     }
 
     /// Asks promise `id`'s work to stop: its runner settles it cancelled

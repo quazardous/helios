@@ -534,12 +534,35 @@ pub fn specs() -> Vec<CommandSpec> {
 pub const IMPORT: &str = "library.import";
 
 /// `library.import`'s spec: files and folders imported into the library,
-/// copied or not.
+/// copied or not. With `paths`, it answers once done with its report;
+/// with a `source` and a `rule`, at once with a promise of its outcome
+/// ([`crate::import_promise`]).
 pub fn import_spec() -> CommandSpec {
     let or_null = |kind: &str| json!({ "type": [kind, "null"] });
     CommandSpec::new(IMPORT, "Import into the library", "Library")
         .params(object(&[
-            ("paths", json!({ "type": "array", "items": absolute() }), true),
+            (
+                "paths",
+                json!({ "type": "array", "items": absolute(),
+                        "description": "imported now: the answer is the import's report" }),
+                false,
+            ),
+            (
+                "source",
+                json!({ "type": "string",
+                        "description": "an absolute path: a folder or a card, imported by `rule`; the answer is a promise" }),
+                false,
+            ),
+            (
+                "rule",
+                json!({ "description": "what of the source: `all` (the default), `new` (what the library does not know), or `{\"items\": [absolute paths]}`; the answer is a promise",
+                        "anyOf": [
+                            { "type": "string", "enum": ["all", "new"] },
+                            { "type": "object", "properties": { "items": { "type": "array", "items": absolute(), "minItems": 1 } },
+                              "required": ["items"], "additionalProperties": false }
+                        ] }),
+                false,
+            ),
             ("copy", json!({ "type": "boolean" }), false),
             ("into", json!({ "type": ["string", "null"], "description": "an absolute path" }), false),
             ("rename", json!({ "type": ["string", "null"], "description": "a rename pattern" }), false),
