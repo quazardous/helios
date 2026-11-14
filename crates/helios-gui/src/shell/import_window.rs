@@ -374,6 +374,9 @@ pub(crate) struct ImportWindow {
     /// The photos chosen in a service's page, while the grid shows them
     /// ([`super::import_chosen`]).
     pub(super) chosen: Option<super::import_chosen::ChosenContents>,
+    /// The services' albums, and the album selected as the source
+    /// ([`super::import_albums`]).
+    pub(super) albums: super::import_albums::Albums,
 }
 
 impl ImportWindow {
@@ -2075,6 +2078,27 @@ impl ImportWindow {
                 Shown::Picker(_) => {
                     ui.separator();
                     ui.weak(&words.grid.choose_on_the_right);
+                }
+                // The album selected under the account, in the grid once
+                // its photos are listed.
+                Shown::Albums if w.shows_album() => {
+                    if let Some(paths) = contents_ui(ui, w, &words.grid, reading, app) {
+                        event = Some(Event::Dropped(paths));
+                    }
+                }
+                Shown::Albums => {
+                    ui.separator();
+                    match w.album_shown().map(|(_, _, p)| p) {
+                        Some(super::import_albums::Photos::Failed(why)) => {
+                            ui.weak(format!("{} {why}", browse.album_failed));
+                        }
+                        Some(_) => {
+                            ui.weak(&browse.album_reading);
+                        }
+                        None => {
+                            ui.weak(&browse.album_choose);
+                        }
+                    }
                 }
                 Shown::NotListed => {
                     ui.separator();

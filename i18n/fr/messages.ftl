@@ -2579,3 +2579,17 @@ library-folder-no-room = Ce disque a { $free } Mio libres : choisissez un dossie
 library-folder-not-absolute = Donnez le chemin complet du dossier.
 
 library-folder-not-writable = Helios ne peut pas écrire dans ce dossier : { $why }
+
+gui-import-albums-reading = Lecture des albums…
+
+gui-import-albums-more = Plus d’albums
+
+gui-import-albums-none = Aucun album
+
+gui-import-albums-failed = Impossible de lire les albums :
+
+gui-import-album-reading = Lecture de l’album…
+
+gui-import-album-failed = Impossible de lire l’album :
+
+gui-import-album-choose = Choisissez un album sous le compte, dans Sources.

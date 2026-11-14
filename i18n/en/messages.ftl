@@ -761,6 +761,20 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-album-choose = Choose an album under the account, in Sources.
+
+gui-import-album-failed = Could not read the album:
+
+gui-import-album-reading = Reading the album…
+
+gui-import-albums-failed = Could not read the albums:
+
+gui-import-albums-more = More albums
+
+gui-import-albums-none = No albums
+
+gui-import-albums-reading = Reading the albums…
+
 gui-import-auto = Import automatically
 
 gui-import-auto-ask = { $files } new photos ({ $size }) on { $source }: more than an automatic import takes without asking

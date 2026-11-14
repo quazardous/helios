@@ -641,6 +641,13 @@ gui-history-workshop-run deb043ee2096a079
 gui-image-not-reopened 422cb049e7d6fe52
 gui-image-opened 8cddc04842c75210
 gui-image-opening 0a3761ae857369a4
+gui-import-album-choose 22c71250277e8013
+gui-import-album-failed 85cce57ec87b3495
+gui-import-album-reading eb3d2f3d20a14921
+gui-import-albums-failed 5e699a6d438388b6
+gui-import-albums-more 3e2dde8a1ff6ad62
+gui-import-albums-none 1163523777a63a98
+gui-import-albums-reading 010fe50ce8b5f4f6
 gui-import-auto 04cb4bc503badcd5
 gui-import-auto-ask 15f250bcbcdfc2e5
 gui-import-auto-confirm b150717406cb2314
