@@ -73,6 +73,9 @@ pub(super) struct Core {
     pub(super) duplicates: Rc<RefCell<crate::duplicates::Duplicates>>,
     /// Imports asked for (`library.import`'s arguments), for the host.
     pub(super) imports: Vec<Value>,
+    /// The node's promises followed: the imports started here, the
+    /// status bar's indicator ([`crate::activity`]).
+    pub(super) activity: crate::activity::Activity,
     /// Why the host has no library to import into (no `library.import`
     /// registered), else none: imports then say so instead of being
     /// queued.

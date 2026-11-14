@@ -1132,13 +1132,26 @@ impl<S: Store + 'static> Persist<S> {
     /// The link to a vault opened by its owner (the local node), whose
     /// changes are announced on `bus`.
     pub fn on(vault: Arc<Vault<S>>, bus: Arc<Bus>) -> Self {
+        Self::on_promises(vault, bus, None)
+    }
+
+    /// [`Persist::on`], its promises (the imports by rule) run by
+    /// `promises`, the node's, rather than by promises of its own.
+    pub fn on_promises(
+        vault: Arc<Vault<S>>,
+        bus: Arc<Bus>,
+        promises: Option<Arc<helios_node_core::promises::Promises<S>>>,
+    ) -> Self {
         let events = bus.subscribe();
-        let service = helios_node_core::endpoint::VaultService::new(
+        let mut service = helios_node_core::endpoint::VaultService::new(
             vault.clone(),
             bus.clone(),
             helios_core::jobs::Jobs::new(bus.clone()),
             &format!("desktop-{}", std::process::id()),
         );
+        if let Some(promises) = promises {
+            service = service.with_promises(promises);
+        }
         let node = Arc::new(Client::in_process(Arc::new(service)).with_origin(WHO));
         let cache = Arc::new(ReadCache::new());
         // The cache hears the vault's events on a thread of its own, so a

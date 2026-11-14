@@ -586,7 +586,9 @@ them (they survive a restart), and every client of the node sees them.
 `library.import` with a `source` (an absolute folder or card) and a
 `rule` (`all`, the default; `new`, what the library does not know; or
 `{"items": [absolute paths]}`), beside the import's choices (`copy`,
-`into`, `rename`, `layout`, `duplicates`, `signals`, `camera_look`),
+`into`, `rename`, `layout`, `duplicates`, `signals`, `darktable`: each
+photo's darktable sidecars kept as versions, off when absent,
+`camera_look`, and a saved source's `filter` and `apply`),
 answers `{"promise": …}` of kind `import` at once. Its work lists the
 source through its connector (`note`: "listing: N found"), then imports
 each file (`done` of `total`, the file's name as `note`), and settles
@@ -595,8 +597,12 @@ the import's report, the files that failed and why, the import
 history's record id. Cancelled, it stops before its next file and keeps
 what it imported. The kind resumes after a stop: the same import runs
 again and skips what the library already holds. `library.import` with
-`paths` still answers once done with its report (the desktop's import
-window and `import.history.again` use it).
+`paths` still answers once done with its report. The desktop hands the
+person's imports (the import window's Import, Import again, a drop, File
+› Import) to its node this way, with the paths as the rule's `items`, and
+follows the promises in its status bar; an agent's, a script's or an
+automatic import there, and an importer plugin's, still run on the
+desktop's own `library.import` command.
 
 ## A client cache
 
