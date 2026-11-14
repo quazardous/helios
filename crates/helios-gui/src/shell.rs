@@ -1297,7 +1297,11 @@ impl Shell {
             if has(&shell, panel) {
                 let library = shell.focus.library.clone();
                 let comparison = shell.focus.comparison.clone();
+                let window = shell.library_focus.state.clone();
                 shell.set_content(panel, move |ui| {
+                    if view == 0 && library_focus::in_main_window(&window, ui.ctx()) {
+                        return library_focus::elsewhere_ui(ui);
+                    }
                     let mut library = library.borrow_mut();
                     match view {
                         0 => library.grid(ui),

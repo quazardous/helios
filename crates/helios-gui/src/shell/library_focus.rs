@@ -141,3 +141,23 @@ impl Shell {
         }
     }
 }
+
+/// Whether the Library window is drawn inside the main one (a backend
+/// without OS windows of its own: kittest, the web). The main window's
+/// Library panel then leaves the Library to it: egui keeps one widget per
+/// id in a window, and the Library's widgets have ids of their own.
+pub(super) fn in_main_window(state: &Rc<RefCell<LibraryWindow>>, ctx: &Egui) -> bool {
+    ctx.embed_viewports() && state.try_borrow().is_ok_and(|w| w.open)
+}
+
+/// What the main window's Library panel shows meanwhile.
+pub(super) fn elsewhere_ui(ui: &mut egui::Ui) {
+    let text = crate::i18n::text(
+        ui.ctx(),
+        Message::new(
+            "gui-library-window-elsewhere",
+            "The Library is open in its own window",
+        ),
+    );
+    ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+}
