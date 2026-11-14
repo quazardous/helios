@@ -22,8 +22,9 @@
 //!   with jobs.
 //! - A job must exist in `tools/bench/Benchfile` and carry its required
 //!   parameters (`branch` excepted: the tester gives it).
-//! - `filter=` names one test: a second name (a space, a `+` or a comma)
-//!   makes the box's filter match nothing, so the job would pass empty.
+//! - `filter=` names one test, or several joined by `+` (the Benchfile turns
+//!   each `+` into a space, one filter per name). A comma or a space would
+//!   make the box's filter match nothing, so the job would pass empty.
 //! - `test-affected`, `test` and `--affected` are refused: a change tests
 //!   its own part; the whole suite is `next`'s CI.
 
@@ -144,9 +145,9 @@ fn job(item: &str, benchfile: &str) -> Result<Job, Vec<String>> {
             problems.push(format!("`{item}`: `{w}` is not `key=value`"));
             continue;
         };
-        if k == "filter" && v.contains(['+', ',']) {
+        if k == "filter" && v.contains([',', ' ']) {
             problems.push(format!(
-                "`{item}`: `filter={v}` names more than one test, which selects none; one name per job"
+                "`{item}`: `filter={v}` joins test names with a comma or a space, which selects none; join them with `+`"
             ));
         }
         if k == "branch" {
@@ -237,16 +238,25 @@ mod tests {
     }
 
     #[test]
+    fn several_tests_joined_by_plus_make_one_job() {
+        let body =
+            "Tests:\n- test-crate crate=x test=lib filter=a_test+another_test\nCoverage: y\n";
+        let Ok(Manifest::Jobs { jobs, .. }) = parse(body, BF) else {
+            panic!("refused: {:?}", parse(body, BF));
+        };
+        assert_eq!(
+            jobs[0].params[2],
+            ("filter".into(), "a_test+another_test".into())
+        );
+    }
+
+    #[test]
     fn what_the_box_would_run_wrong_is_refused() {
         let refused = |body: &str| parse(body, BF).unwrap_err().join("\n");
         assert!(refused("no block here").contains("no `Tests:` block"));
         assert!(
-            refused("Tests:\n- test-crate crate=x filter=a+b\nCoverage: y\n")
-                .contains("more than one test")
-        );
-        assert!(
             refused("Tests:\n- test-crate crate=x filter=a,b\nCoverage: y\n")
-                .contains("more than one test")
+                .contains("join them with `+`")
         );
         assert!(
             refused("Tests:\n- test-affected\nCoverage: y\n").contains("never the whole suite")
