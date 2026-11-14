@@ -68,6 +68,7 @@ clip-application-x-helios-images-json.title cafd24c4eaef756b
 clip-application-x-helios-mask-json.title 2f3bd09547ac8967
 clip-application-x-helios-nodes-json.title 65bc64e9a42a73d8
 clip-application-x-helios-param-json.title bcd6c3b8b514812b
+command-activity-show.title 6be2d207355d6fe9
 command-calibrate-open.title 55fe1b5697baf66d
 command-compare-next.title 6a4e045ce2fd0a54
 command-compare-previous.title 76e72bf6ba4bc334
@@ -375,6 +376,12 @@ gui-account-status-not-connected e566c631cb5af5ed
 gui-account-status-ok e055ee2a95ee5237
 gui-account-status-reconnect 46f1fc371bf4cfa9
 gui-account-status-refused 717c0d1ec961c487
+gui-activity-failed a31c4dc6b36a1ad5
+gui-activity-importing 724ccbc427c4b08d
+gui-activity-importing-start ad3266023257d7d6
+gui-activity-percent 97220c481430cc33
+gui-activity-running 6f09ed8460211387
+gui-activity-show cb047eaae7922caf
 gui-album-not-changed f8e2d0fadf57137b
 gui-backup-card-safe c563f3ba220cc628
 gui-backup-wizard 405c12301ee0562b

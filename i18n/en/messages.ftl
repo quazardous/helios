@@ -199,6 +199,18 @@ gui-account-status-reconnect = Needs reconnecting
 
 gui-account-status-refused = Access refused
 
+gui-activity-failed = { $count } background tasks failed
+
+gui-activity-importing = Importing { $done }/{ $total }
+
+gui-activity-importing-start = Importing…
+
+gui-activity-percent = { $label } { $percent } %
+
+gui-activity-running = { $count } background tasks running
+
+gui-activity-show = Show the background tasks
+
 gui-album-not-changed = The album was not changed: { $error }
 
 gui-backup-card-safe = { $card } is safe to format: every photo has its backups
