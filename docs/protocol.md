@@ -296,8 +296,8 @@ copies of one edit stay two versions; it is labelled `Duplicate`, made
 by the call's origin, and, being the newest head, is the one an edit
 opens next. A photo named twice is copied once. It answers `duplicated`,
 the new version of each photo (`versions`) and each photo's head count
-(`heads`), and announces each copy as `vault.version_added`. Removing a
-copy is not built yet. `library.versions.heads` (no params, read-only)
+(`heads`), and announces each copy as `vault.version_added`.
+`library.versions.heads` (no params, read-only)
 answers the head count of every photo with more than one, for the
 grid's versions badge:
 
@@ -308,6 +308,33 @@ grid's versions badge:
  "heads": {"4f1c…": 2}}}
 {"id": 8, "method": "library.versions.heads", "params": {}}
 {"id": 8, "result": {"heads": {"4f1c…": 2}}}
+```
+
+`library.versions.list` (`image`, read-only) answers a photo's heads,
+oldest first: each `version`, its `number` (from 1), `label`, `at` and
+whether it is `current`, the head an edit opens (the versions strip).
+The current version is the head the user picked, else the newest.
+`library.versions.switch` (`image`, `version`, one of its heads) picks
+it, in the photo's `current_version` field with an audit row; once an
+edit continues it, the newest head (that continuation) is current
+again. `library.versions.remove` (`image`, `version`) removes a copy:
+that head and the versions only it leads to, the history it shares
+with the other heads kept; a photo's last head is refused. Both answer
+`changes`, the step the vault's revert undoes (the desktop records it
+in the library history, so Ctrl+Z brings a removed copy back), and
+`remove` also the count of versions `removed` and of `heads` left:
+
+```json
+{"id": 9, "method": "library.versions.list", "params": {"image": "4f1c…"}}
+{"id": 9, "result": {"image": "4f1c…", "heads": [
+ {"version": "77b0…", "number": 1, "label": null, "at": 1700000000, "current": false},
+ {"version": "9a02…", "number": 2, "label": "Duplicate", "at": 1700000100, "current": true}]}}
+{"id": 10, "method": "library.versions.switch",
+ "params": {"image": "4f1c…", "version": "77b0…"}}
+{"id": 10, "result": {"image": "4f1c…", "current": "77b0…", "changes": {…}}}
+{"id": 11, "method": "library.versions.remove",
+ "params": {"image": "4f1c…", "version": "9a02…"}}
+{"id": 11, "result": {"image": "4f1c…", "removed": 1, "heads": 1, "changes": {…}}}
 ```
 
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to

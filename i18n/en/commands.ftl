@@ -382,6 +382,9 @@ command-library-quick-toggle =
 command-library-remove =
     .title = Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back
 
+command-library-removeVersion =
+    .title = Remove Version…: remove a copy of a photo with the edits only it holds (`image`: an id, else the photo under the cursor; `version`: a head's id, else its current one), asked first unless `confirmed`; a photo keeps one version; Ctrl+Z brings it back
+
 command-library-resetRotation =
     .title = Reset Rotation: turn the photos back to their file's orientation (`images`: ids, else the selection)
 

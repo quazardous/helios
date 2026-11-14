@@ -9,8 +9,9 @@
 //!
 //! **Which head.** Versions form a graph; two surfaces editing at once
 //! make two heads, and neither overwrites the other. A session opens the
+//! current version ([`crate::copies`]: the head the user picked, else the
 //! newest head (the latest `at`, then the longest history, then the
-//! greatest id) and from then on continues the version it saved last, not
+//! greatest id)) and from then on continues the version it saved last, not
 //! whatever another writer added meanwhile: concurrent edits become two
 //! heads, as versions intend. Its history is the line of first parents
 //! back from the head ([`Vault::history`]).
@@ -43,7 +44,7 @@ use helios_core::{Event, Graph, ModuleKind, Params};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::{ImageId, Store, Vault, Version, VersionId, versions};
+use crate::{ImageId, Store, Vault, Version, VersionId};
 
 /// The parameters of a graph's modules, by node name, with each node's
 /// module: what a version keeps of a surface's network. Sources and
@@ -309,22 +310,11 @@ impl EditSession {
         if vault.image(&image)?.is_none() {
             return Err(format!("no image {}", image.hex()));
         }
-        let all = vault.versions(&image)?;
-        // The newest head: the latest time, then (steps come faster than
-        // seconds) the longest history, then the greatest id. The lengths
-        // come from the versions read once, not a walk of the store per
-        // head: diverged heads pile up on a busy image, and each walk held
-        // the store, and every other call, for the length of its history.
-        let depths = versions::depths(&all)?;
-        let mut head = None;
-        let mut best = None;
-        for v in versions::heads(&all) {
-            let key = (v.at, depths[&v.id], v.id);
-            if best.as_ref().is_none_or(|b| key > *b) {
-                best = Some(key);
-                head = Some(v.clone());
-            }
-        }
+        // The current version: the head the user picked
+        // ([`crate::copies::CURRENT_VERSION`]), else the newest (the
+        // latest time, then, as steps come faster than seconds, the
+        // longest history, then the greatest id).
+        let head = vault.current_head(&image)?;
         Ok((
             Self {
                 image,

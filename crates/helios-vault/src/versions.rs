@@ -137,7 +137,7 @@ pub fn count_heads(
 /// Copy", darktable's "duplicate" and "duplicate virgin").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DuplicateFrom {
-    /// The image's newest head: the edit the darkroom opens.
+    /// The image's current version: the edit the darkroom opens.
     Current,
     /// No edit: the photo as its file gives it.
     Original,
@@ -279,7 +279,7 @@ impl<S: crate::Store> crate::Vault<S> {
         })
     }
 
-    /// Makes a new head of an image: a copy of its newest head's edit
+    /// Makes a new head of an image: a copy of its current version's edit
     /// (`Current`), or of no edit (`Original`), kept beside it, never
     /// continuing it, so both stay heads with a history of their own. A
     /// copy of the current edit continues the same versions its source
@@ -300,13 +300,7 @@ impl<S: crate::Store> crate::Vault<S> {
         let all = self.versions(image)?;
         let source = match from {
             DuplicateFrom::Original => None,
-            DuplicateFrom::Current => {
-                let depths = depths(&all)?;
-                heads(&all)
-                    .into_iter()
-                    .max_by_key(|v| (v.at, depths[&v.id], v.id))
-                    .cloned()
-            }
+            DuplicateFrom::Current => self.current_head(image)?,
         };
         let (parents, mut edit) = match source {
             Some(v) => (v.parents, v.edit),

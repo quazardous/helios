@@ -567,9 +567,21 @@ it next. Marks (rating, labels, tags, rotation) stay the photo's, shared
 by its versions (L-C5). The grid keeps one cell per photo and counts its
 versions in a badge ("2 versions"), darktable's duplicates included.
 Written through the node's `library.images.duplicate`, read with
-`library.versions.heads` (docs/protocol.md). Not yet: the version strip
-in the photo's panel, versions as cells (a view option), and undoing or
-removing a copy.
+`library.versions.heads` (docs/protocol.md).
+
+**Versions strip** (2026-11-14): under the marks of the photo under the
+cursor, a photo with more than one version shows each with its number
+and name ("1 Copy", "2 Copy"), the current one highlighted. A click
+makes another one current: the version the darkroom opens and the grid
+shows (`library.versions.switch`, kept in the photo's `current_version`
+field). Once that version is edited, its continuation is the newest
+and current. "Remove Version…" (`library.removeVersion`, the grid's
+context menu) asks first, then removes that copy and the edits only it
+holds (`library.versions.remove`); the history it shares with the other
+versions stays, and a photo keeps one version. Both are steps of the
+Library's history: Ctrl+Z picks the version before or brings the copy
+back. Not yet: versions as cells (a view option), and a render of each
+version in the strip (it shows the photo's thumbnail).
 
 `vault.autoAdvance` (or the Auto-advance box) moves the cursor to the
 next image after each mark, as Lightroom's Caps Lock mode. The grid's

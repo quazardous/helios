@@ -138,6 +138,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.quick.saveAs", "phosphor:floppy-disk"),
     ("library.quick.toggle", "phosphor:lightning"),
     ("library.remove", "phosphor:minus-circle"),
+    ("library.removeVersion", "phosphor:eraser"),
     ("library.resetRotation", "phosphor:arrow-u-up-left"),
     ("library.rotateLeft", "phosphor:arrow-counter-clockwise"),
     ("library.rotateRight", "phosphor:arrow-clockwise"),
