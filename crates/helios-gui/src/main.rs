@@ -378,6 +378,12 @@ impl helios_gui::shell::LibraryFolder for LibraryFolder {
     fn get(&self) -> Result<Option<PathBuf>, String> {
         helios_library::import::library_root(self.0.as_ref())
     }
+
+    fn set(&self, dir: &Path) -> Result<(), String> {
+        let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        helios_library::import::set_library_root(self.0.as_ref(), &dir)
+    }
 }
 
 fn seconds() -> u64 {
