@@ -468,7 +468,7 @@ fn schema_5_gains_the_text_index_and_keeps_its_rows() {
     {
         let db = Connection::open(&path).unwrap();
         db.execute_batch(
-            "DROP INDEX fields_name_text; ALTER TABLE versions DROP COLUMN meta; PRAGMA user_version = 5;",
+            "DROP TABLE photo_files; DROP INDEX fields_name_text; ALTER TABLE versions DROP COLUMN meta; PRAGMA user_version = 5;",
         )
             .unwrap();
     }
@@ -502,5 +502,73 @@ fn schema_5_gains_the_text_index_and_keeps_its_rows() {
         "{plan:?}"
     );
     drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Schema 8 adds the photo-file table: a vault at schema 7 keeps every
+/// row, every photo stays a one-file photo (no row is backfilled), and
+/// files attach once it is open.
+#[test]
+fn schema_7_gains_the_photo_file_table_with_no_row() {
+    use helios_vault::{FileRole, PhotoFile};
+    let dir = scratch("photo-files");
+    let path = dir.join("vault.db");
+    let (raw, jpeg) = (
+        ImageId::from_hex(&"01".repeat(32)).unwrap(),
+        ImageId::from_hex(&"03".repeat(32)).unwrap(),
+    );
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        for id in [raw, jpeg] {
+            store
+                .add_image(&helios_vault::Image {
+                    id,
+                    size: 100,
+                    partial: id.0,
+                })
+                .unwrap();
+        }
+        store.set_library_flag(&raw, &LibraryFlag::added()).unwrap();
+        store
+            .set_field(&raw, "rating", Some(&serde_json::json!(2)))
+            .unwrap();
+    }
+    // Back to schema 7 as an older Helios left it.
+    {
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("DROP TABLE photo_files; PRAGMA user_version = 7;")
+            .unwrap();
+    }
+    let mut store = SqliteStore::open(&path).unwrap();
+    let migrated = store.report().migrated.clone().unwrap();
+    assert_eq!((migrated.from, migrated.to), (7, SCHEMA_VERSION));
+    assert!(migrated.snapshot.is_some(), "a snapshot first");
+    assert!(migrated.orphans.is_empty(), "{:?}", migrated.orphans);
+    assert_eq!(store.images().unwrap().len(), 1);
+    assert_eq!(
+        store.field(&raw, "rating").unwrap(),
+        Some(serde_json::json!(2))
+    );
+    assert_eq!(
+        store.photo_files(&raw).unwrap(),
+        Vec::new(),
+        "no row backfilled"
+    );
+    assert_eq!(store.photo_of(&jpeg).unwrap(), None);
+    let row = PhotoFile {
+        image: jpeg,
+        photo: raw,
+        role: FileRole::Camera,
+        rank: 0,
+        added_at: 9,
+        added_by: "user".into(),
+    };
+    store.put_photo_file(&row).unwrap();
+    drop(store);
+    // Kept across reopening, with no step left to run.
+    let store = SqliteStore::open(&path).unwrap();
+    assert!(store.report().migrated.is_none());
+    assert_eq!(store.photo_of(&jpeg).unwrap(), Some(row));
+    drop(store);
     let _ = std::fs::remove_dir_all(&dir);
 }
