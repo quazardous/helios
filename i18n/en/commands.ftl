@@ -367,6 +367,24 @@ command-library-importWindow =
 command-library-importWith =
     .title = Import with an importer plugin (`plugin`, `importer`; `source`: the file or folder it reads, asked when absent; `copy`, `darktable`)
 
+command-library-keyword =
+    .title = Scope the library to a keyword branch (`path`, levels joined with `|`: the photos with that keyword or one below it; null: none), with the other filters. Without `path`, says the branch
+
+command-library-keyword-add =
+    .title = Tag photos with a keyword (`keyword`, levels joined with `|`; `images`: ids, else the selection), a mark as `library.tag` makes it
+
+command-library-keyword-list =
+    .title = List the keyword branches (`path`, levels joined with `|`) with how many photos have a keyword of each (`count`)
+
+command-library-keyword-merge =
+    .title = Merge a keyword branch into another photos have, on every photo (`from`, `into`); without `into`, asks it; Ctrl+Z takes it back
+
+command-library-keyword-remove =
+    .title = Take a keyword off photos, with those below it (`keyword`; `images`: ids, else the selection), a mark as `library.tag` makes it
+
+command-library-keyword-rename =
+    .title = Rename a keyword branch on every photo, the keywords below it along (`from`, `to`: a keyword no photo has yet); without `to`, asks it; Ctrl+Z takes it back
+
 command-library-marks-copy =
     .title = Copy a photo's marks: rating, colour labels, tags and title (`image`: an id, else the photo under the cursor). Answers them
 
