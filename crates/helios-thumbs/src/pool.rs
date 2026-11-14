@@ -297,10 +297,12 @@ fn small(shared: &Shared, job: &Job) -> Outcome {
 
 /// The cached thumbnail of `job` at `size`, when it is still right. An
 /// entry stored before this reader ([`crate::cache::READER`]) of a
-/// picture its EXIF orientation turns was read sideways: its entries are
-/// dropped, to be read again. One of a picture with nothing to turn is
-/// marked and kept, never read again. A raw's is kept as it is: its tag
-/// would cost reading the whole raw, for every raw.
+/// picture its EXIF orientation turns was read sideways, and one of a
+/// picture holding a grey stream beside its colour one (a phone's gain
+/// map) may show that grey stream: their entries are dropped, to be read
+/// again. One of another picture is marked and kept, never read again. A
+/// raw's is kept as it is: its tag would cost reading the whole raw, for
+/// every raw.
 fn cached(cache: &ThumbCache, job: &Job, key: &Key, size: u32) -> Option<Rgb8> {
     let (rgb, current) = cache.get_marked(key, size)?;
     if current {
@@ -312,7 +314,7 @@ fn cached(cache: &ThumbCache, job: &Job, key: &Key, size: u32) -> Option<Rgb8> {
     let Ok(bytes) = std::fs::read(path) else {
         return Some(rgb);
     };
-    if helios_load::picture_orientation(&bytes) == 1 {
+    if helios_load::picture_orientation(&bytes) == 1 && !read::has_grey_beside_colour(&bytes) {
         cache.mark(key);
         return Some(rgb);
     }

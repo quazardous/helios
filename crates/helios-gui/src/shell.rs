@@ -95,6 +95,7 @@ mod import_auto;
 mod import_choices;
 mod import_detail;
 mod import_history;
+mod import_profiles;
 mod import_sources;
 mod import_window;
 mod import_wizard;
@@ -7059,12 +7060,14 @@ fn menu_rows(
                     continue;
                 };
                 let title = label.clone().unwrap_or_else(|| h.command_menu_title(&spec));
-                let mut button = egui::Button::new(title);
+                let mut button = egui::Button::new(&title);
                 if let Some(k) = h.keys_for(&cid).first() {
                     button = button.shortcut_text(k.clone());
                 }
                 let applies = h.applies(&cid, cx);
                 let r = ui.add_enabled(applies && *enabled, button);
+                // A menu's row, for screen readers and accesskit tests.
+                egui_pop::core::a11y::name(&r, egui::Role::MenuItem, &title);
                 // A row its owner greyed (an offline folder's) says
                 // nothing more; one whose command does not apply, why.
                 if *enabled && !applies {

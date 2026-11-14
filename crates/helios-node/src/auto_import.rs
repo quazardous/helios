@@ -105,6 +105,10 @@ struct Choices {
     layout: Layout,
     rename: String,
     darktable: bool,
+    /// Which files are taken.
+    filter: Option<helios_library::import_profile::Filter>,
+    /// What every photo imported is given.
+    apply: Option<helios_library::import_profile::Apply>,
 }
 
 impl Default for Choices {
@@ -117,6 +121,8 @@ impl Default for Choices {
             layout: Layout::Day,
             rename: "{stem}".into(),
             darktable: true,
+            filter: None,
+            apply: None,
         }
     }
 }
@@ -161,6 +167,8 @@ fn options(
         darktable: choices.darktable,
         cancel: Some(cancel.clone()),
         origin: Some(guard::origin(name)),
+        filter: choices.filter.filter(|f| !f.is_all()),
+        apply: choices.apply.filter(|a| !a.is_empty()),
         ..Options::default()
     };
     if card || choices.copy_folders {

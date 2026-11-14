@@ -128,7 +128,8 @@ fn a_card_plugged_in_with_the_import_window_closed_is_seen_by_the_node() {
         h.run();
     }
     assert!(h.state().import_window_open());
-    let _ = h.get_by_label("EOS_DIGITAL · 64 GB");
+    // An item says its name; its size is on its detail line.
+    let _ = h.get_by_role_and_label(egui::accesskit::Role::Button, "EOS_DIGITAL");
 
     // Unplugged: on the bus, and gone from the window's list.
     plugged.unplug(&volume.id);

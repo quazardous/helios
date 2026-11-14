@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 
 use helios_core::Message;
 use helios_library::import::{Duplicates, Layout};
+use helios_library::import_profile::{Apply, Filter};
 use helios_library::rename::{Naming, Pattern};
 use helios_library::signals::{self, Signals};
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,13 @@ pub struct Choices {
     pub darktable: bool,
     /// The raws of a camera with a default camera look start with it.
     pub camera_look: bool,
+    /// Which files are taken: all by default
+    /// ([`super::import_profiles`]).
+    #[serde(skip_serializing_if = "Filter::is_all")]
+    pub filter: Filter,
+    /// What every photo imported is given: keywords, a rating, a label.
+    #[serde(skip_serializing_if = "Apply::is_empty")]
+    pub apply: Apply,
 }
 
 impl Default for Choices {
@@ -91,6 +99,8 @@ impl Choices {
                 .unwrap_or_default(),
             darktable: flag("darktable", true),
             camera_look: flag("camera_look", true),
+            filter: Filter::default(),
+            apply: Apply::default(),
         }
     }
 
@@ -131,6 +141,12 @@ impl Choices {
             "darktable": self.darktable,
             "camera_look": self.camera_look,
         });
+        if !self.filter.is_all() {
+            args["filter"] = json!(self.filter);
+        }
+        if !self.apply.is_empty() {
+            args["apply"] = json!(self.apply);
+        }
         if copy {
             args["layout"] = json!(self.layout.as_str());
             args["rename"] = json!(self.rename);
@@ -219,6 +235,8 @@ pub(super) struct ChoiceWords {
     pub camera_look_help: String,
     pub more: String,
     pub more_note: String,
+    /// The Include and Apply During Import sections' words.
+    pub profile: super::import_profiles::ProfileWords,
     /// Whose choices the column shows: a source's, or the window's.
     pub shown_for: Option<String>,
     pub own_choices: String,
@@ -306,6 +324,11 @@ impl Shell {
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
         w.presets_file = Some(presets);
+        let filters = file.with_file_name(super::import_profiles::FILE);
+        w.filters = read(&filters)
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        w.filters_file = Some(filters);
         w.choices_file = Some(file);
     }
 
@@ -480,6 +503,7 @@ impl ImportWindow {
                 "Raws of a camera with a default camera look start with it, as their first version",
             )),
             more: t(Message::new("gui-import-window-more", "More")),
+            profile: super::import_profiles::ProfileWords::new(t),
             more_note: t(Message::new(
                 "gui-import-window-more-note",
                 "Metadata templates and time offsets come later.",
@@ -609,6 +633,8 @@ pub(super) fn shared_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceW
         ui.checkbox(&mut w.choices.camera_look, &words.camera_look)
             .on_hover_text(&words.camera_look_help);
     }
+    super::import_profiles::include_ui(ui, w, &words.profile);
+    super::import_profiles::apply_ui(ui, w, &words.profile);
     egui::CollapsingHeader::new(&words.more)
         .id_salt("helios.import.more")
         .default_open(false)
@@ -728,6 +754,7 @@ mod tests {
             duplicates: Duplicates::Keep,
             darktable: false,
             camera_look: false,
+            ..Choices::default()
         };
         let values = choices.values();
         contract

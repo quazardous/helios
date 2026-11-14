@@ -94,6 +94,96 @@ fn the_fast_read_takes_the_smallest_embedded_jpeg_large_enough() {
     assert_eq!(rgb.pixels.len(), (256 * 171 * 3) as usize);
 }
 
+/// A grey JPEG, `w`×`h`, every pixel `v`: one component, as a phone's
+/// Ultra HDR gain map or depth map is stored.
+fn grey_jpeg(w: u32, h: u32, v: u8) -> Vec<u8> {
+    let img = image::GrayImage::from_pixel(w, h, image::Luma([v]));
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(Cursor::new(&mut out), 90)
+        .encode_image(&img)
+        .unwrap();
+    out
+}
+
+/// A phone's JPEG: its colour picture, then a smaller grey gain map
+/// appended after it (as an Ultra HDR or Motion Photo file holds it).
+fn phone_jpeg(gain: u8) -> Vec<u8> {
+    let mut file = gradient_jpeg(2000, 1500);
+    file.extend_from_slice(&grey_jpeg(1000, 750, gain));
+    file
+}
+
+/// The mean distance of a thumbnail's red and blue from its green: 0 for
+/// a grey picture.
+fn chroma(rgb: &Rgb8) -> f64 {
+    let n = rgb.pixels.len() / 3;
+    let sum: u64 = rgb
+        .pixels
+        .chunks_exact(3)
+        .map(|p| u64::from(p[0].abs_diff(p[1])) + u64::from(p[2].abs_diff(p[1])))
+        .sum();
+    sum as f64 / n as f64
+}
+
+#[test]
+fn a_phone_jpeg_s_thumbnail_is_its_colour_picture_not_its_gain_map() {
+    use helios_load::Kind;
+    for gain in [128u8, 255] {
+        let file = phone_jpeg(gain);
+        let found = embedded_jpegs(&file);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(!found[0].grey() && found[1].grey(), "{found:?}");
+        // The gain map is the smallest stream large enough: colour first.
+        assert_eq!(choose(&found, SMALL)[0].width, 2000);
+        let rgb = helios_thumbs::read::from_bytes(file, Kind::Picture, SMALL).unwrap();
+        assert_eq!((rgb.width, rgb.height), (256, 192));
+        // A gain map all white was a blank white cell.
+        let mean = rgb.pixels.iter().map(|&v| f64::from(v)).sum::<f64>() / rgb.pixels.len() as f64;
+        assert!(mean < 200.0, "gain {gain}: mean {mean}, a blank cell");
+        assert!(chroma(&rgb) > 20.0, "gain {gain}: chroma {}", chroma(&rgb));
+    }
+    // A grey picture's only stream is still read.
+    let grey =
+        helios_thumbs::read::from_bytes(grey_jpeg(800, 600, 90), Kind::Picture, SMALL).unwrap();
+    assert_eq!((grey.width, grey.height), (256, 192));
+    assert!(chroma(&grey) < 1.0);
+}
+
+#[test]
+fn a_grey_entry_of_a_phone_jpeg_stored_before_is_read_again() {
+    let dir = scratch("gain-map");
+    let cache = std::sync::Arc::new(ThumbCache::open(&dir.join("cache"), 1 << 30).unwrap());
+    let path = write(&dir, "PXL.MP.jpg", &phone_jpeg(200));
+    // What the reader before stored: the gain map, grey, marked reader 2.
+    let grey = Rgb8 {
+        width: SMALL,
+        height: 192,
+        pixels: vec![200; (SMALL * 192 * 3) as usize],
+    };
+    for size in [SMALL, LARGE] {
+        cache
+            .put_jpeg(&Key::preview("pxl"), size, &marked_jpeg_075(&grey))
+            .unwrap();
+    }
+    assert!(!cache.get_marked(&Key::preview("pxl"), SMALL).unwrap().1);
+    let job = Job {
+        id: "pxl".into(),
+        path: Some(path),
+    };
+    let Outcome::Thumb(thumb) = one(Some(cache.clone()), job) else {
+        panic!("a thumbnail");
+    };
+    assert!(
+        chroma(&thumb) > 20.0,
+        "read again in colour: {}",
+        chroma(&thumb)
+    );
+    let (stored, current) = cache.get_marked(&Key::preview("pxl"), SMALL).unwrap();
+    assert!(current, "stored by this reader");
+    assert!(chroma(&stored) > 20.0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_cache_hit_returns_without_touching_the_file() {
     let dir = scratch("hit");

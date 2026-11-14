@@ -551,7 +551,7 @@ impl Sources {
     }
 
     /// Sets a source's own choices, saving the source when new.
-    fn set(&mut self, key: &SourceKey, connector: &str, choices: Option<Choices>) {
+    pub(super) fn set(&mut self, key: &SourceKey, connector: &str, choices: Option<Choices>) {
         if self.get(key).is_none() && choices.is_none() {
             return;
         }
