@@ -595,6 +595,19 @@ impl ShellBuilder {
         Shell::assemble(self.parts, app)
     }
 
+    /// The shell, its application built on the context of a window
+    /// already open ([`open_window`]): the desktop opens its window on
+    /// the boot splash first, and builds the shell once the start's work
+    /// off the window's thread is done.
+    pub fn build_in_window(self, ctx: &Egui) -> Shell {
+        let app = self
+            .app
+            .plugin(self.i18n)
+            .build(ctx)
+            .unwrap_or_else(|e| panic!("Helios's application builds: {e}"));
+        Shell::assemble(self.parts, app)
+    }
+
     /// Opens the window (egui-pop's `run_native_with`): the window's
     /// place from the last run, the application built on the window's
     /// context, then `make` gives eframe the application around the
@@ -612,6 +625,32 @@ impl ShellBuilder {
                 Ok(make(Shell::assemble(parts, app), cc))
             })
     }
+}
+
+/// Opens the main window before its shell exists, as egui-pop's
+/// `run_native_with` does for a [`ShellBuilder`]: its place from the
+/// last run (kept under `ui_settings`), the present mode for several
+/// windows, the native window recorded. `make` gives eframe the
+/// application, which builds its shell later
+/// ([`ShellBuilder::build_in_window`]).
+pub fn open_window(
+    title: &str,
+    mut options: eframe::NativeOptions,
+    ui_settings: Option<&Path>,
+    make: impl FnOnce(&eframe::CreationContext<'_>) -> Box<dyn eframe::App> + 'static,
+) -> eframe::Result {
+    if let Some(dir) = ui_settings {
+        egui_pop::api::window::restore(dir, &mut options);
+    }
+    egui_pop::api::windows::present_mode(&mut options);
+    eframe::run_native(
+        title,
+        options,
+        Box::new(move |cc| {
+            egui_pop::api::frame::record_native_window(cc);
+            Ok(make(cc))
+        }),
+    )
 }
 
 /// The Settings window's id (egui-pop's Settings app in its window mode):
