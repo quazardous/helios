@@ -207,12 +207,34 @@ def popup_probe(args, comp, agent, name: str, action: str, label: str, what: str
     main = labelled(agent, "main", label)
     where = "import" if imp > base[1] else "main" if main > base[0] else "nowhere"
     shot(comp, args, name)
-    return {
+    out = {
         "probe": name,
         "ok": where == "import" and main == base[0],
         "seen": f"{what} in the {where} window",
         "counts": {"main": [base[0], main], "import": [base[1], imp]},
     }
+    if where == "nowhere":
+        diag = {}
+        for w in ("import", "main"):
+            try:
+                diag[w + "-label"] = agent.ui({"action": "tree", "window": w, "label": label})
+            except (OSError, RuntimeError, ValueError) as exc:
+                diag[w + "-label"] = {"error": str(exc)}
+            try:
+                nodes = agent.ui({"action": "tree", "window": w}).get("nodes", [])
+                diag[w] = {
+                    "count": len(nodes),
+                    "near": [
+                        n
+                        for n in nodes
+                        if label in f"{n.get('label', '')} {n.get('value', '')}"
+                        or n.get("role") not in ("GenericContainer", "Label", "Button", "CheckBox")
+                    ][:40],
+                }
+            except (OSError, RuntimeError, ValueError) as exc:
+                diag[w] = {"error": str(exc)}
+        out["diag"] = diag
+    return out
 
 
 def probes(args, comp, agent) -> list[dict]:
