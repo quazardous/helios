@@ -276,6 +276,16 @@ many were in it) and `changes`, the step as the vault records it, which
 its revert puts back: the desktop's Ctrl+Z. Announced as
 `vault.library_changed`, as an undo or a redo of a library step is.
 
+`library.images.rotate` (`images`, `turn`: `left`, `right` or `reset`)
+turns photos a quarter counter-clockwise or clockwise, or back to their
+file's EXIF orientation (Lightroom's "Rotate Left" and "Rotate Right",
+darktable's "reset rotation"): their `rotation` field (quarter turns
+clockwise, on top of the file's orientation), set by the call's origin
+with its audit row; no file is touched and no pixel decoded. A photo
+named twice turns once, and a reset leaves an unturned photo out. It
+answers `rotated` and `changes`, the step its revert undoes (the
+desktop's Ctrl+Z), and announces each turn as `vault.field_changed`.
+
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to
 the system trash (Lightroom's "Delete from Disk", darktable's "delete
 (trash)") as a journaled job (`helios_library::trash`). The job is kept

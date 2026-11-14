@@ -376,6 +376,15 @@ command-library-quick-toggle =
 command-library-remove =
     .title = Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back
 
+command-library-resetRotation =
+    .title = Reset Rotation: turn the photos back to their file's orientation (`images`: ids, else the selection)
+
+command-library-rotateLeft =
+    .title = Rotate Left: turn the photos a quarter counter-clockwise (`images`: ids, else the selection); Ctrl+Z turns them back
+
+command-library-rotateRight =
+    .title = Rotate Right: turn the photos a quarter clockwise (`images`: ids, else the selection); Ctrl+Z turns them back
+
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
 

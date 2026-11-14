@@ -14,6 +14,9 @@
 //! - **One step per "Remove from Library"** (L8): the photos' flags
 //!   before and after, as the node's `library.images.remove` answers
 //!   them.
+//! - **One step per rotation** (L9): the photos' `rotation` field
+//!   before and after, as the node's `library.images.rotate` answers
+//!   them.
 //! - **For the session only** (docs/design/undo.md, decided 2026-10-14):
 //!   the steps live in memory; a restart starts with none.
 //! - **Active with the library's panels** (the Library, the Filmstrip,
@@ -89,6 +92,26 @@ pub fn remove_label(photos: usize) -> Label {
         "gui-history-library-remove",
         "Remove { $count } photos from the Library",
     )
+    .with("count", photos);
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [("count".to_string(), photos.to_string())].into(),
+    }
+}
+
+/// A rotation's label: "Rotate 3 photos left", "Rotate 3 photos
+/// right", "Reset the rotation of 3 photos".
+pub fn rotate_label(turn: crate::library::Turn, photos: usize) -> Label {
+    use crate::library::Turn;
+    let m = match turn {
+        Turn::Left => Message::new("gui-history-rotate-left", "Rotate { $count } photos left"),
+        Turn::Right => Message::new("gui-history-rotate-right", "Rotate { $count } photos right"),
+        Turn::Reset => Message::new(
+            "gui-history-rotate-reset",
+            "Reset the rotation of { $count } photos",
+        ),
+    }
     .with("count", photos);
     Label {
         text: m.english.clone(),

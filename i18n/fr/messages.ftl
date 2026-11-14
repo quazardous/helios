@@ -492,6 +492,9 @@ gui-history-set-new = Nouvel ensemble d’albums « { $name } »
 gui-history-album-move = Déplacer « { $name } » dans un ensemble
 gui-history-album-move-out = Sortir « { $name } » de son ensemble
 gui-history-library-remove = Retirer { $count } photos de la bibliothèque
+gui-history-rotate-left = Rotation à gauche de { $count } photos
+gui-history-rotate-right = Rotation à droite de { $count } photos
+gui-history-rotate-reset = Réinitialiser la rotation de { $count } photos
 gui-history-quick-add = Ajouter { $count } photos à la collection rapide
 gui-history-quick-remove = Retirer { $count } photos de la collection rapide
 gui-history-quick-clear = Vider la collection rapide
@@ -665,6 +668,7 @@ gui-library-badge-backup-unverified = non vérifiée
 gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
+gui-library-not-rotated = Les photos n’ont pas été tournées : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
 gui-look-fit-selection-done = Rendu boîtier de { $camera } ajusté sur { $fitted } photos sur { $photos } : Delta E { $held } (par défaut { $baseline })
@@ -1412,6 +1416,9 @@ gui-library-quick = Collection rapide
 gui-library-quick-tip = B ajoute les photos sélectionnées ou les retire
 gui-library-quick-toggle = Ajouter ou retirer les photos sélectionnées
 gui-library-remove = Retirer de la bibliothèque
+gui-library-rotate-left = Rotation à gauche
+gui-library-rotate-right = Rotation à droite
+gui-library-rotate-reset = Réinitialiser la rotation
 gui-library-trash = Mettre à la corbeille…
 gui-library-delete-rejected = Supprimer les rejetées…
 gui-trash-title = Mettre { $count } photos à la corbeille ?

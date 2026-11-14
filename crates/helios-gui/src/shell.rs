@@ -3153,6 +3153,18 @@ impl Shell {
                 "Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back",
             ),
             (
+                crate::library::ROTATE_LEFT_COMMAND,
+                "Rotate Left: turn the photos a quarter counter-clockwise (`images`: ids, else the selection); Ctrl+Z turns them back",
+            ),
+            (
+                crate::library::ROTATE_RIGHT_COMMAND,
+                "Rotate Right: turn the photos a quarter clockwise (`images`: ids, else the selection); Ctrl+Z turns them back",
+            ),
+            (
+                crate::library::RESET_ROTATION_COMMAND,
+                "Reset Rotation: turn the photos back to their file's orientation (`images`: ids, else the selection)",
+            ),
+            (
                 crate::library::TRASH_COMMAND,
                 "Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z",
             ),
@@ -5133,8 +5145,9 @@ impl Shell {
     fn library_batch(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
         use crate::library::{
             CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND,
-            MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND, SELECT_INVERT_COMMAND,
-            SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar, TRASH_COMMAND,
+            MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND, RESET_ROTATION_COMMAND,
+            ROTATE_LEFT_COMMAND, ROTATE_RIGHT_COMMAND, SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND,
+            SELECT_SIMILAR_COMMAND, Similar, TRASH_COMMAND, Turn,
         };
         let confirmed = args.get("confirmed").and_then(Value::as_bool) == Some(true);
         let text = |key: &str| args.get(key).and_then(Value::as_str);
@@ -5174,6 +5187,9 @@ impl Shell {
                 Ok(json!({ "images": count, "marks": kinds }))
             }
             REMOVE_COMMAND => Ok(json!({ "removed": lib.remove_from_library(images()?)? })),
+            ROTATE_LEFT_COMMAND => Ok(json!({ "rotated": lib.rotate(images()?, Turn::Left)? })),
+            ROTATE_RIGHT_COMMAND => Ok(json!({ "rotated": lib.rotate(images()?, Turn::Right)? })),
+            RESET_ROTATION_COMMAND => Ok(json!({ "rotated": lib.rotate(images()?, Turn::Reset)? })),
             TRASH_COMMAND => Ok(json!({ "asked": lib.ask_trash(images()?, confirmed)? })),
             DELETE_REJECTED_COMMAND => Ok(json!({
                 "asked": lib.ask_delete_rejected(images()?, confirmed)?

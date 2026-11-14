@@ -739,6 +739,12 @@ gui-history-quick-remove = Remove { $count } photos from the quick collection
 
 gui-history-quick-save = Save the quick collection as “{ $name }”
 
+gui-history-rotate-left = Rotate { $count } photos left
+
+gui-history-rotate-reset = Reset the rotation of { $count } photos
+
+gui-history-rotate-right = Rotate { $count } photos right
+
 gui-history-set-new = New album set “{ $name }”
 
 gui-history-snapshot-restored = Restored “{ $name }”
@@ -1291,6 +1297,8 @@ gui-library-none = No images
 
 gui-library-not-removed = The photos were not removed from the Library: { $error }
 
+gui-library-not-rotated = The photos were not rotated: { $error }
+
 gui-library-not-saved = Not saved, the library shows what was saved last: { $error }
 
 gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
@@ -1320,6 +1328,12 @@ gui-library-read = { $count } images in the library
 gui-library-reading = Reading the library…
 
 gui-library-remove = Remove from Library
+
+gui-library-rotate-left = Rotate Left
+
+gui-library-rotate-reset = Reset Rotation
+
+gui-library-rotate-right = Rotate Right
 
 gui-library-search = Search images
 

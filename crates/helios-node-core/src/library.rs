@@ -6,7 +6,8 @@
 //! with `library.edit.add`), its snapshots (`library.snapshots.get`,
 //! `.set`), photos' fields set and
 //! read (`library.fields.set`, `library.fields.get`), photos taken out
-//! of the Library (`library.images.remove`), their files moved to the
+//! of the Library (`library.images.remove`) or turned
+//! (`library.images.rotate`), their files moved to the
 //! system trash as a journaled job (`library.images.trash`, its jobs
 //! read with `library.trash.jobs`), the facet counts of
 //! a query (`library.facets`), the photos changed outside Helios
@@ -47,6 +48,7 @@ pub const IDS: &[&str] = &[
     "library.snapshots.set",
     "library.fields.set",
     REMOVE,
+    ROTATE,
     TRASH,
     TRASH_JOBS,
     "library.fields.get",
@@ -78,6 +80,11 @@ pub const IDS: &[&str] = &[
 /// their flag only, no file touched; answers the step (`changes`), which
 /// the vault's revert undoes.
 pub const REMOVE: &str = "library.images.remove";
+
+/// Turns photos a quarter left or right, or back to their file's
+/// orientation (`turn`); no file touched, no pixel decoded; answers the
+/// step (`changes`), which the vault's revert undoes.
+pub const ROTATE: &str = "library.images.rotate";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -212,6 +219,19 @@ pub fn specs() -> Vec<CommandSpec> {
             "Take photos out of the Library, their files untouched",
         )
         .params(object(&[("images", images(), true)])),
+        library(
+            ROTATE,
+            "Turn photos a quarter left or right, or back to their file's orientation",
+        )
+        .params(object(&[
+            ("images", images(), true),
+            (
+                "turn",
+                json!({ "type": "string", "enum": ["left", "right", "reset"],
+                        "description": "left (counter-clockwise), right (clockwise) or reset" }),
+                true,
+            ),
+        ])),
         library(
             TRASH,
             "Move photos' files to the system trash, as a journaled job",
@@ -852,6 +872,16 @@ pub fn run<S: Store>(
                 |changes| json!({ "removed": changes.images.len(), "changes": to_json(&changes) }),
             )
         }
+        ROTATE => {
+            let ids = named(vault, params, "images")?;
+            if ids.is_empty() {
+                return Err("`images` names no photo".into());
+            }
+            let turn = helios_vault::rotation::Turn::parse(text(params, "turn"))?;
+            vault.rotate(&ids, turn, origin, now()).map(
+                |changes| json!({ "rotated": changes.images.len(), "changes": to_json(&changes) }),
+            )
+        }
         TRASH_JOBS => match params["job"].as_str() {
             Some(job) => helios_library::trash::get(vault, job)?
                 .map(|job| json!({ "job": to_json(&job) }))
@@ -1027,6 +1057,7 @@ mod tests {
             json!({ "image": "0a", "snapshots": [{ "id": 1, "name": "A", "version": null }] }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
             json!({ "images": ["0a"] }),
+            json!({ "images": ["0a"], "turn": "right" }),
             json!({ "images": ["0a"], "plan": true }),
             json!({ "job": "trash-1700000000-1" }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),

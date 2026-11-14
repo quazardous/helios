@@ -14,6 +14,12 @@
 //! `library.images.remove`; the host records the step it answers in the
 //! library's history, so Ctrl+Z puts the photos back.
 //!
+//! "Rotate Left" and "Rotate Right" (L9, Ctrl+[ and Ctrl+], as Lightroom
+//! and darktable) and "Reset Rotation" (darktable's) turn the selection
+//! through the node's `library.images.rotate`: the photo's `rotation`
+//! field, one step of the library's history; the views turn the
+//! thumbnails they hold, no picture decoded again.
+//!
 //! "Move to Trash…" and "Delete rejected…" (L8) send photos' files to the
 //! system trash: asked first (the node plans the job, the host asks with
 //! the count and the place), then run by the node's
@@ -25,6 +31,7 @@ use serde_json::{Value, json};
 
 use super::{LABELS, Library, Op};
 use helios_vault::fields::TITLE;
+pub use helios_vault::rotation::Turn;
 
 /// Selects nothing, the cursor gone too (darktable's Ctrl+Shift+A).
 pub const SELECT_NONE_COMMAND: &str = "library.select.none";
@@ -44,6 +51,18 @@ pub const MARKS_PASTE_COMMAND: &str = "library.marks.paste";
 /// files untouched (Lightroom's "Remove from Catalog", darktable's
 /// "remove"): one undoable step.
 pub const REMOVE_COMMAND: &str = "library.remove";
+
+/// Turns photos a quarter counter-clockwise (`images`, else the
+/// selection; Lightroom's "Rotate Left", Ctrl+[).
+pub const ROTATE_LEFT_COMMAND: &str = "library.rotateLeft";
+
+/// Turns photos a quarter clockwise (`images`, else the selection;
+/// Lightroom's "Rotate Right", Ctrl+]).
+pub const ROTATE_RIGHT_COMMAND: &str = "library.rotateRight";
+
+/// Turns photos back to their file's orientation (`images`, else the
+/// selection; darktable's "reset rotation").
+pub const RESET_ROTATION_COMMAND: &str = "library.resetRotation";
 
 /// Moves photos' files to the system trash (`images`, else the
 /// selection), after a question unless `confirmed` (Lightroom's "Remove
@@ -363,6 +382,33 @@ impl Library {
         std::mem::take(&mut self.removals)
     }
 
+    /// Queues `images` (those shown), else the selection, to be turned by
+    /// the host ([`Library::take_rotations`]); how many.
+    ///
+    /// # Errors
+    /// No photo to turn.
+    pub fn rotate(&mut self, images: Option<Vec<String>>, turn: Turn) -> Result<usize, String> {
+        let keys = match images {
+            Some(ids) => {
+                let keys: Vec<String> = ids.into_iter().filter(|i| self.holds(i)).collect();
+                if keys.is_empty() {
+                    return Err("none of the `images` is in the library".into());
+                }
+                keys
+            }
+            None => self.targets()?,
+        };
+        let count = keys.len();
+        self.rotations.push((keys, turn));
+        Ok(count)
+    }
+
+    /// The photos asked turned since, one list per command, with the
+    /// turn.
+    pub fn take_rotations(&mut self) -> Vec<(Vec<String>, Turn)> {
+        std::mem::take(&mut self.rotations)
+    }
+
     /// Queues `images` (those shown), else the selection, for their files
     /// to go to the trash ([`Library::take_trash_asks`]); how many.
     ///
@@ -473,6 +519,27 @@ mod tests {
         assert!(lib.targets().is_err(), "no cursor left either");
         assert_eq!(lib.invert_selection(), 4);
         assert!(Similar::parse("week").is_err());
+    }
+
+    #[test]
+    fn rotate_queues_the_selection_or_the_photos_named() {
+        let mut lib = library();
+        lib.select_none();
+        assert!(lib.rotate(None, Turn::Right).is_err(), "nothing selected");
+        lib.select_ids(&["a".into(), "c".into()]);
+        assert_eq!(lib.rotate(None, Turn::Left), Ok(2));
+        assert_eq!(
+            lib.rotate(Some(vec!["d".into(), "zz".into()]), Turn::Reset),
+            Ok(1)
+        );
+        assert_eq!(
+            lib.take_rotations(),
+            [
+                (vec!["a".to_string(), "c".into()], Turn::Left),
+                (vec!["d".to_string()], Turn::Reset)
+            ]
+        );
+        assert!(lib.take_rotations().is_empty());
     }
 
     #[test]

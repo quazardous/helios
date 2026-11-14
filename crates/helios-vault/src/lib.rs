@@ -48,6 +48,7 @@ pub mod fields;
 pub mod journal;
 pub mod promises;
 pub mod read_order;
+pub mod rotation;
 pub mod rules;
 pub mod settings;
 pub mod sightings;
