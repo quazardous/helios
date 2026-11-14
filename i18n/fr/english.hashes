@@ -908,6 +908,9 @@ gui-jobs-detail 7f36358b4c3c3015
 gui-jobs-elapsed 0b2f468ceb6ddadb
 gui-jobs-filter-kind b8f0171a1547e3b8
 gui-jobs-filter-state d1b7844581f1659b
+gui-jobs-folder 385fe1e894da806d
+gui-jobs-import-record 81b8ac971a4f357a
+gui-jobs-items-done 3570446200466199
 gui-jobs-items-failed f6df755a7ae7b232
 gui-jobs-kind 8b0a7965ee2a5653
 gui-jobs-kind-all f8e7ab7d2426fe84
@@ -915,6 +918,7 @@ gui-jobs-left c0e396cf7a28168d
 gui-jobs-log a80c03551590b8a9
 gui-jobs-none 4813fdc36361c9e0
 gui-jobs-none-selected dcdbdfd576d4efb0
+gui-jobs-open-folder f210d24be00c9227
 gui-jobs-show-library 7c528fb6f4bb611a
 gui-jobs-skipped fd41fca85ae5114f
 gui-jobs-source 4341e763e77e52fe

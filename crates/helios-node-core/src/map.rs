@@ -11,6 +11,9 @@
 //!   ([`crate::node::Link::adopt`]), both stop when the node stops, before
 //!   the vault closes; a quit does not ask about them (they only keep the
 //!   map current).
+//! - Each stands in the node's promises while it runs, with no end and
+//!   no total ([`crate::job_promises::Standing`]): the Activity focus
+//!   lists them, the status bar does not count them.
 //! - [`recorder`] makes, on a scan's thread, the recorder of what an
 //!   import window's sources list, over the volumes known then.
 
@@ -27,7 +30,11 @@ use helios_storage::Volume;
 use helios_storage::exclude::{Blacklist, Checker};
 use helios_vault::{Store, Vault};
 
+use crate::job_promises::Standing;
 use crate::node::NodeJobs;
+
+/// The kind of the thumbnail re-check's standing promise.
+pub const THUMBS_KIND: &str = "thumbs";
 
 /// What the map records and keeps (`system.map.*`).
 #[derive(Clone, Debug)]
@@ -92,6 +99,8 @@ impl ImageMap {
             let load = BusLoad::new(jobs.bus());
             let (vault, feed) = (vault.clone(), feed.clone());
             map.spawn("thumbnail re-check", move |stop| {
+                // A promise with no end while it runs (Activity).
+                let _standing = Standing::start(vault.clone(), THUMBS_KIND, "Thumbnail re-check");
                 // The pool lists the cache's folder; the re-check waits for it.
                 before();
                 Check::new(vault, Box::new(Disk), cache, checker, volumes, feed)
@@ -105,6 +114,8 @@ impl ImageMap {
         let load = BusLoad::new(jobs.bus());
         let listed = vault.clone();
         map.spawn("image map", move |stop| {
+            let _standing =
+                Standing::start(vault.clone(), helios_library::map_job::KIND, "Image map");
             Job::new(
                 vault,
                 Box::new(Disk),
