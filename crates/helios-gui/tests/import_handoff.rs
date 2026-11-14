@@ -276,19 +276,18 @@ fn import_again_goes_through_a_promise() {
     shell.set_import_history(reader);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run_steps(3);
-    let answer = h
-        .state_mut()
+    // The command runs at the coming frame.
+    h.state_mut()
         .run(
             "import.history.again",
             json!({ "id": "import-1" }),
             Origin::User,
         )
         .unwrap();
-    assert!(answer["promise"]["id"].is_string(), "{answer}");
-    assert!(h.state_mut().take_imports().is_empty(), "not queued");
     until(&mut h, "the import started on the node", |_| {
         !gate.requests.lock().unwrap().is_empty()
     });
+    assert!(h.state_mut().take_imports().is_empty(), "not queued");
     let request = gate.requests.lock().unwrap()[0].clone();
     assert_eq!(request["rule"], json!({ "items": [photos] }), "{request}");
     until(&mut h, "the indicator", |h| {

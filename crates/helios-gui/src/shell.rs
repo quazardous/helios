@@ -3315,11 +3315,7 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::ImportAgain(a.clone(), origin.clone()))),
         );
         add(
-            CommandSpec::new(
-                crate::activity::COMMAND,
-                "Background tasks…",
-                "View",
-            ),
+            CommandSpec::new(crate::activity::COMMAND, "Background tasks…", "View"),
             Box::new(|_, _| Ok(Action::Activity)),
         );
         // The main window's commands, greyed in the other windows' menus
