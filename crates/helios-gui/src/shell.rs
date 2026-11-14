@@ -3174,6 +3174,10 @@ impl Shell {
                 "Duplicate Original: a new version of each photo with no edit, beside the others (`images`: ids, else the selection)",
             ),
             (
+                crate::library::REMOVE_VERSION_COMMAND,
+                "Remove Version…: remove a copy of a photo with the edits only it holds (`image`: an id, else the photo under the cursor; `version`: a head's id, else its current one), asked first unless `confirmed`; a photo keeps one version; Ctrl+Z brings it back",
+            ),
+            (
                 crate::library::TRASH_COMMAND,
                 "Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z",
             ),
@@ -5206,6 +5210,11 @@ impl Shell {
             DUPLICATE_ORIGINAL_COMMAND => Ok(json!({
                 "duplicated": lib.duplicate(images()?, helios_vault::versions::DuplicateFrom::Original)?
             })),
+            crate::library::REMOVE_VERSION_COMMAND => {
+                let (image, version) =
+                    lib.ask_remove_version(text("image"), text("version"), confirmed)?;
+                Ok(json!({ "image": image, "version": version, "asked": !confirmed }))
+            }
             TRASH_COMMAND => Ok(json!({ "asked": lib.ask_trash(images()?, confirmed)? })),
             DELETE_REJECTED_COMMAND => Ok(json!({
                 "asked": lib.ask_delete_rejected(images()?, confirmed)?

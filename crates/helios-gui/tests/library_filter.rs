@@ -2103,3 +2103,115 @@ fn ctrl_quote_duplicates_the_selection_and_the_grid_counts_versions() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The versions strip (L10): the photo under the cursor with two
+/// versions lists them, the newest current; a click on the first makes
+/// it current through the node; "Remove Version…" asks, removes the copy,
+/// and undo brings it back.
+#[test]
+fn the_versions_strip_switches_and_a_removed_copy_comes_back_with_undo() {
+    use egui_pop::api::history::{Answer, Request};
+    let root = temp("versions-strip");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let photo = id(1).hex();
+    h.state_mut()
+        .library_mut()
+        .select_ids(std::slice::from_ref(&photo));
+    for at in [1.0, 5.0] {
+        answer(&mut h, "library.duplicate", json!({ "images": [photo] }));
+        settle(&mut h, &mut persist, at);
+    }
+    assert_eq!(persist.vault().heads(&id(1)).unwrap().len(), 2);
+    // The strip asks the photo's heads, then shows them.
+    settle(&mut h, &mut persist, 8.0);
+    settle(&mut h, &mut persist, 9.0);
+    let listed = h.state().library().versions_of(&photo).map(<[_]>::to_vec);
+    let listed = listed.expect("the strip's heads read");
+    assert_eq!(listed.len(), 2);
+    assert!(listed[1].current, "the newest is current: {listed:?}");
+    let first = listed[0].version.clone();
+
+    // A click on the first version makes it current.
+    h.get_by_label("1 Copy").click();
+    settle(&mut h, &mut persist, 12.0);
+    settle(&mut h, &mut persist, 13.0);
+    let current = persist.vault().current_head(&id(1)).unwrap().unwrap();
+    assert_eq!(current.id.hex(), first);
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Switch version"
+    );
+    let listed = h.state().library().versions_of(&photo).map(<[_]>::to_vec);
+    assert!(listed.is_some_and(|l| l[0].current), "the strip follows");
+
+    // Remove Version… on it: asked first, then the copy goes.
+    let out = answer(&mut h, "library.removeVersion", json!({}));
+    assert_eq!(out["asked"], true, "{out}");
+    assert_eq!(out["version"], json!(first));
+    settle(&mut h, &mut persist, 15.0);
+    assert_eq!(
+        persist.vault().heads(&id(1)).unwrap().len(),
+        2,
+        "asked only"
+    );
+    let out = answer(
+        &mut h,
+        "library.removeVersion",
+        json!({ "image": photo, "version": first, "confirmed": true }),
+    );
+    assert_eq!(out["asked"], false, "{out}");
+    settle(&mut h, &mut persist, 20.0);
+    assert_eq!(persist.vault().heads(&id(1)).unwrap().len(), 1);
+    assert_eq!(h.state().library().heads_of(&photo), None, "no badge left");
+    assert_eq!(
+        history.line().undo.last().unwrap().label.text,
+        "Remove version"
+    );
+    assert!(
+        answer_err(&mut h, "library.removeVersion", json!({ "image": photo })),
+        "a photo keeps one version"
+    );
+
+    // Undone: the copy is back.
+    let undone = history.undo(
+        &Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    settle(&mut h, &mut persist, 30.0);
+    assert_eq!(persist.vault().heads(&id(1)).unwrap().len(), 2);
+    persist.ask_fill(h.state(), true);
+    settle(&mut h, &mut persist, 40.0);
+    assert_eq!(h.state().library().heads_of(&photo), Some(2));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Whether a command, run as `answer` runs it, failed.
+fn answer_err(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> bool {
+    match h.state_mut().run(id, args, Origin::User) {
+        Err(_) => true,
+        Ok(out) if out != json!({ "queued": true }) => false,
+        Ok(_) => {
+            h.run();
+            h.state()
+                .history()
+                .into_iter()
+                .rev()
+                .find(|r| r.id == id)
+                .is_some_and(|r| r.result.is_err())
+        }
+    }
+}

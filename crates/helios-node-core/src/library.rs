@@ -51,6 +51,9 @@ pub const IDS: &[&str] = &[
     ROTATE,
     DUPLICATE,
     HEADS,
+    VERSIONS_LIST,
+    VERSIONS_SWITCH,
+    VERSIONS_REMOVE,
     TRASH,
     TRASH_JOBS,
     "library.fields.get",
@@ -95,6 +98,18 @@ pub const DUPLICATE: &str = "library.images.duplicate";
 
 /// How many heads each photo with more than one has.
 pub const HEADS: &str = "library.versions.heads";
+
+/// A photo's heads, numbered, the current one marked (the versions
+/// strip).
+pub const VERSIONS_LIST: &str = "library.versions.list";
+
+/// Makes one of a photo's heads its current version: the one an edit
+/// opens. Answers the step (`changes`) the vault's revert undoes.
+pub const VERSIONS_SWITCH: &str = "library.versions.switch";
+
+/// Removes a copy: one of a photo's heads with the versions only it
+/// leads to, never the last. Answers the step (`changes`).
+pub const VERSIONS_REMOVE: &str = "library.versions.remove";
 
 /// Reads the library's backup strategy and the volumes it knows.
 pub const STORAGE_GET: &str = "library.storage.get";
@@ -256,6 +271,48 @@ pub fn specs() -> Vec<CommandSpec> {
             ),
         ])),
         library(HEADS, "Count the heads of photos with more than one").read_only(),
+        library(
+            VERSIONS_LIST,
+            "List a photo's versions (its heads), numbered, the current one marked",
+        )
+        .params(object(&[(
+            "image",
+            json!({ "type": "string", "description": "a photo id (hex) or a file path" }),
+            true,
+        )]))
+        .read_only(),
+        library(
+            VERSIONS_SWITCH,
+            "Make one of a photo's versions its current one, the one an edit opens",
+        )
+        .params(object(&[
+            (
+                "image",
+                json!({ "type": "string", "description": "a photo id (hex) or a file path" }),
+                true,
+            ),
+            (
+                "version",
+                json!({ "type": "string", "description": "the head's version id (hex)" }),
+                true,
+            ),
+        ])),
+        library(
+            VERSIONS_REMOVE,
+            "Remove one of a photo's versions (a copy) with the edits only it holds; undoable",
+        )
+        .params(object(&[
+            (
+                "image",
+                json!({ "type": "string", "description": "a photo id (hex) or a file path" }),
+                true,
+            ),
+            (
+                "version",
+                json!({ "type": "string", "description": "the head's version id (hex)" }),
+                true,
+            ),
+        ])),
         library(
             TRASH,
             "Move photos' files to the system trash, as a journaled job",
@@ -960,6 +1017,36 @@ pub fn run<S: Store>(
                 .collect();
             Ok(json!({ "heads": heads }))
         }
+        VERSIONS_LIST => {
+            let id = image(vault, text(params, "image"))?;
+            let heads: Vec<Value> = vault
+                .heads_of(&id)?
+                .into_iter()
+                .map(|h| {
+                    json!({ "version": h.version.hex(), "number": h.number,
+                            "label": h.label, "at": h.at, "current": h.current })
+                })
+                .collect();
+            Ok(json!({ "image": id.hex(), "heads": heads }))
+        }
+        VERSIONS_SWITCH | VERSIONS_REMOVE => {
+            let photo = image(vault, text(params, "image"))?;
+            let version = helios_vault::VersionId::from_hex(text(params, "version"))
+                .map_err(|e| format!("`version`: {e}"))?;
+            if id == VERSIONS_SWITCH {
+                let changes = vault.switch_version(&photo, &version, origin, now())?;
+                Ok(
+                    json!({ "image": photo.hex(), "current": version.hex(), "changes": to_json(&changes) }),
+                )
+            } else {
+                let (changes, removed) = vault.remove_head(&photo, &version, origin, now())?;
+                let heads = vault.heads_of(&photo)?.len();
+                Ok(
+                    json!({ "image": photo.hex(), "removed": removed, "heads": heads,
+                           "changes": to_json(&changes) }),
+                )
+            }
+        }
         TRASH_JOBS => match params["job"].as_str() {
             Some(job) => helios_library::trash::get(vault, job)?
                 .map(|job| json!({ "job": to_json(&job) }))
@@ -1138,6 +1225,9 @@ mod tests {
             json!({ "images": ["0a"], "turn": "right" }),
             json!({ "images": ["0a"], "from": "original" }),
             json!({}),
+            json!({ "image": "0a" }),
+            json!({ "image": "0a", "version": "0b" }),
+            json!({ "image": "0a", "version": "0b" }),
             json!({ "images": ["0a"], "plan": true }),
             json!({ "job": "trash-1700000000-1" }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
@@ -1385,6 +1475,53 @@ mod tests {
         );
         assert!(call(DUPLICATE, json!({ "images": [hex], "from": "nope" })).is_err());
         assert!(call(DUPLICATE, json!({ "images": [] })).is_err());
+    }
+
+    #[test]
+    fn a_copy_is_listed_switched_removed_and_undone_through_the_node() {
+        let bus = Arc::new(Bus::new());
+        let vault = Vault::new(helios_vault::MemoryStore::default()).with_bus(bus.clone());
+        let dir = std::env::temp_dir().join(format!("helios-copies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.raw");
+        std::fs::write(&path, b"a photo with copies").unwrap();
+        let image = vault.import_file(&path, 1).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user");
+        let hex = image.hex();
+        call(DUPLICATE, json!({ "images": [hex] })).unwrap();
+        let copy = call(DUPLICATE, json!({ "images": [hex], "from": "original" })).unwrap();
+        let copy = copy["versions"][&hex].as_str().unwrap().to_string();
+        let list = call(VERSIONS_LIST, json!({ "image": hex })).unwrap();
+        let heads = list["heads"].as_array().unwrap();
+        assert_eq!(heads.len(), 2, "{list}");
+        assert_eq!(heads[0]["number"], 1);
+        assert_eq!(heads[1]["current"], true, "the newest is current: {list}");
+        let first = heads[0]["version"].as_str().unwrap().to_string();
+        // Switched: the first is current, and the step undoes.
+        let switched = call(VERSIONS_SWITCH, json!({ "image": hex, "version": first })).unwrap();
+        let list = call(VERSIONS_LIST, json!({ "image": hex })).unwrap();
+        assert_eq!(list["heads"][0]["current"], true, "{list}");
+        let head = call("library.edit.head", json!({ "image": hex })).unwrap();
+        assert_eq!(head["head"]["version"], json!(first), "an edit opens it");
+        let undo: helios_vault::Changes =
+            serde_json::from_value(switched["changes"].clone()).unwrap();
+        vault.revert(&undo).unwrap();
+        let list = call(VERSIONS_LIST, json!({ "image": hex })).unwrap();
+        assert_eq!(list["heads"][1]["current"], true, "undone: {list}");
+        // Removed: one head left, and undo brings the copy back.
+        let removed = call(VERSIONS_REMOVE, json!({ "image": hex, "version": copy })).unwrap();
+        assert_eq!(removed["removed"], 1, "{removed}");
+        assert_eq!(removed["heads"], 1);
+        assert!(
+            call(VERSIONS_REMOVE, json!({ "image": hex, "version": first })).is_err(),
+            "a photo keeps one version"
+        );
+        let undo: helios_vault::Changes =
+            serde_json::from_value(removed["changes"].clone()).unwrap();
+        vault.revert(&undo).unwrap();
+        assert_eq!(call(HEADS, json!({})).unwrap()["heads"][&hex], 2);
+        assert!(call(VERSIONS_SWITCH, json!({ "image": hex, "version": "zz" })).is_err());
     }
 
     #[test]
