@@ -36,7 +36,7 @@
 //! on screen, no longer drawn, a black one, and the process with it. The
 //! quit's work being done by then, the host does not wait for eframe:
 //! [`Released`] tells it when eframe let go of the application, and the
-//! work left for after the window ([`AfterWindow`]) runs once, from the
+//! work left for after the window ([`AfterClose`]) runs once, from the
 //! host's thread when eframe returns, or from a watch past [`GRACE`],
 //! which then ends the process.
 
@@ -116,14 +116,14 @@ pub const GRACE: Duration = Duration::from_millis(200);
 /// The work left for after the window: run once, by whoever comes first
 /// (the host as eframe returns, or the watch past [`GRACE`]).
 #[derive(Clone)]
-pub struct AfterWindow(Arc<Mutex<Option<Work>>>);
+pub struct AfterClose(Arc<Mutex<Option<Work>>>);
 
 /// A piece of work run once, on any thread.
 type Work = Box<dyn FnOnce() + Send>;
 
-impl AfterWindow {
+impl AfterClose {
     pub fn new(work: impl FnOnce() + Send + 'static) -> Self {
-        AfterWindow(Arc::new(Mutex::new(Some(Box::new(work)))))
+        AfterClose(Arc::new(Mutex::new(Some(Box::new(work)))))
     }
 
     /// Runs the work unless it ran already: whether it ran now.
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn the_work_after_the_window_runs_once_from_the_host() {
         let (tx, rx) = mpsc::channel();
-        let after = AfterWindow::new(move || tx.send("work").unwrap());
+        let after = AfterClose::new(move || tx.send("work").unwrap());
         let (ended_tx, ended) = mpsc::channel();
         after.watch(Duration::from_millis(100), move || {
             ended_tx.send(()).unwrap();
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn the_watch_runs_the_work_when_eframe_does_not_return() {
         let (tx, rx) = mpsc::channel();
-        let after = AfterWindow::new(move || tx.send("work").unwrap());
+        let after = AfterClose::new(move || tx.send("work").unwrap());
         let (ended_tx, ended) = mpsc::channel();
         let started = Instant::now();
         after.watch(Duration::from_millis(50), move || {

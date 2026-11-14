@@ -2208,7 +2208,7 @@ fn main() -> Result<(), String> {
     let after_window = {
         let ending = ending.clone();
         let args = args.clone();
-        quit::AfterWindow::new(move || {
+        quit::AfterClose::new(move || {
             // No client finds the node any more once it stops.
             drop(advertised);
             drop(vault);
