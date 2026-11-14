@@ -40,7 +40,7 @@
 //!     helios import-darktable --vault FILE|--node ADDRESS FOLDERS-OR-IMAGES...
 //!
 //!     helios import --vault FILE|--node ADDRESS [--reference | --copy [--into DIR]] [--rename PATTERN]
-//!                   [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+//!                   [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--no-wait]
 //!                   FOLDERS-CARDS-OR-FILES...
 //!     helios stacks --vault FILE|--node ADDRESS list | create IMAGE... [--top IMAGE] | dissolve STACK
 //!                   | expand STACK | collapse STACK | top STACK IMAGE
@@ -49,7 +49,7 @@
 //!
 //!     helios commands [--vault FILE|--node ADDRESS] [--window W] [--filter F] [--enabled]
 //!     helios run ID [--vault FILE|--node ADDRESS] [--param KEY=VALUE]... [--json PARAMS] [--request-id KEY]
-//!                [--window W] [--scope node|window]
+//!                [--window W] [--scope node|window] [--no-wait]
 //!     helios batch-run [--vault FILE|--node ADDRESS] --json '{"steps": [...]}' [--window W] [--request-id KEY]
 //!     helios run [--vault FILE|--node ADDRESS] 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...] | --file SCRIPT|-
 //!                [--keep-going] [--json] [--window W] [--request-id KEY]
@@ -80,6 +80,9 @@
 //! param (its value read as JSON, else as text), `--json` gives them all.
 //! Both print the node's answer; a refusal (params against the schema, a
 //! greyed command's reason) goes to the standard error with exit code 1.
+//! A command answering with a promise (an import by rule) is waited for,
+//! its settled promise printed: exit 1 when it failed, 130 when
+//! cancelled; `--no-wait` prints the promise at once.
 //! With steps between `--`, or a script (`--file`, `-` for the standard
 //! input, one step per line), `run` chains them as one `command.batch`
 //! (`helios_node::chain`): one line per step (`--json`: one JSON object
@@ -121,9 +124,12 @@
 //! `helios_library::import`): referenced in place, or copied into the
 //! library folder and renamed by a pattern, their sidecars along; exact
 //! duplicates skipped, kept or listed for an answer; near-duplicate
-//! signals measured. One JSON line per file, then the report; exit 1
-//! when a file failed, 130 when interrupted (Ctrl-C stops it before its
-//! next file, a copy under way removed). `stacks` lists, makes and dissolves stacks, and
+//! signals measured. The node answers with a promise, waited for (its
+//! progress on the standard error when that is a terminal): one JSON
+//! line per file that failed, then the report; exit 1 when a file or the
+//! import failed, 130 when interrupted (Ctrl-C cancels it before its
+//! next file, a copy under way removed). `--no-wait` prints the promise
+//! at once and leaves the import to the node. `stacks` lists, makes and dissolves stacks, and
 //! asks for stack suggestions (`helios_library::stacks`), which apply
 //! only once accepted. IMAGE is an image's id or a file the vault knows.
 //!
@@ -158,6 +164,16 @@ use helios_inspect::client::Client;
 use helios_inspect::control::{ControlRequest, FileFormat, MoveTo, RunItem};
 use helios_inspect::{Address, Request, request_at, rpc};
 use helios_node::batch::{Options, Outcome};
+
+/// Prints a line on stdout, as `println!` does, but a closed stdout (a
+/// reader gone, `| head`, a broken pipe) is not a panic: the line is lost.
+macro_rules! out {
+    ($($arg:tt)*) => {{
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, $($arg)*);
+        let _ = out.flush();
+    }};
+}
 
 const USAGE: &str = "usage:
   helios --version
@@ -194,7 +210,7 @@ const USAGE: &str = "usage:
                [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
   helios import-darktable --vault FILE|--node ADDRESS FOLDERS-OR-IMAGES...
   helios import --vault FILE|--node ADDRESS [--reference | --copy [--into DIR]] [--rename PATTERN]
-                [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+                [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--no-wait]
                 FOLDERS-CARDS-OR-FILES...
   helios stacks --vault FILE|--node ADDRESS list | create IMAGE... [--top IMAGE] | dissolve STACK
                 | expand STACK | collapse STACK | top STACK IMAGE
@@ -202,7 +218,7 @@ const USAGE: &str = "usage:
                 | accept DECISION [--groups N,N...] | decline DECISION | decisions
   helios commands --vault FILE|--node ADDRESS [--window W] [--filter F] [--enabled]
   helios run ID --vault FILE|--node ADDRESS [--param KEY=VALUE]... [--json PARAMS]
-             [--window W] [--scope node|window]
+             [--window W] [--scope node|window] [--no-wait]
   helios batch-run --vault FILE|--node ADDRESS --json '{\"steps\": [{\"id\": ID, \"params\": {...}}, ...]}'
              [--window W] [--request-id KEY]
   helios run --vault FILE|--node ADDRESS 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...] | --file SCRIPT|-
@@ -788,13 +804,7 @@ fn on_node_keyed(
     if !interrupt {
         return pending.wait();
     }
-    let interrupted = Arc::new(AtomicBool::new(false));
-    #[cfg(unix)]
-    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
-        if let Err(e) = signal_hook::flag::register(signal, interrupted.clone()) {
-            eprintln!("helios: cannot watch for interrupts: {e}");
-        }
-    }
+    let interrupted = interrupt_flag();
     let mut asked = false;
     loop {
         if let Some(answer) = pending.wait_timeout(std::time::Duration::from_millis(100)) {
@@ -805,6 +815,103 @@ fn on_node_keyed(
             asked = true;
         }
     }
+}
+
+/// Set once Ctrl-C or SIGTERM is heard.
+fn interrupt_flag() -> Arc<AtomicBool> {
+    let interrupted = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        if let Err(e) = signal_hook::flag::register(signal, interrupted.clone()) {
+            eprintln!("helios: cannot watch for interrupts: {e}");
+        }
+    }
+    interrupted
+}
+
+/// How a settled promise ends the command: 0 done, 130 cancelled, 1
+/// failed.
+fn settled_code(promise: &serde_json::Value) -> ExitCode {
+    match promise["state"].as_str() {
+        Some("done") => ExitCode::SUCCESS,
+        Some("cancelled") => ExitCode::from(130),
+        _ => ExitCode::from(1),
+    }
+}
+
+/// Whether `promise` is still to settle (`pending` or `running`).
+fn unsettled(promise: &serde_json::Value) -> bool {
+    matches!(promise["state"].as_str(), Some("pending" | "running"))
+}
+
+/// One progress line of a running promise: its label, `done/total` and
+/// its note.
+fn progress_text(promise: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let mut text = promise["label"].as_str().unwrap_or("Working").to_string();
+    if let Some(done) = promise["done"].as_u64() {
+        let _ = match promise["total"].as_u64() {
+            Some(total) => write!(text, ": {done}/{total}"),
+            None => write!(text, ": {done}"),
+        };
+    }
+    if let Some(note) = promise["note"].as_str().filter(|n| !n.is_empty()) {
+        text.push(' ');
+        text.push_str(note);
+    }
+    text
+}
+
+/// Waits for promise `id` to settle (`promises.wait`) and answers it
+/// settled. On a terminal, its progress is shown on stderr. Ctrl-C asks
+/// the node to cancel it (`promises.cancel`) and the wait goes on until
+/// it settles `cancelled`.
+fn settle(client: &Client, id: &serde_json::Value) -> Result<serde_json::Value, String> {
+    use std::sync::atomic::Ordering;
+    let progress = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let timeout_ms = if progress { 500 } else { 600_000 };
+    let interrupted = interrupt_flag();
+    let mut cancelled = false;
+    let mut shown = false;
+    let settled = loop {
+        let pending = client.call(
+            "promises.wait",
+            serde_json::json!({ "id": id, "timeout_ms": timeout_ms }),
+        );
+        let answer = loop {
+            if let Some(answer) = pending.wait_timeout(std::time::Duration::from_millis(100)) {
+                break answer;
+            }
+            if !cancelled && interrupted.load(Ordering::SeqCst) {
+                client.cancel(&pending);
+            }
+        };
+        if !cancelled && interrupted.load(Ordering::SeqCst) {
+            // Ctrl-C: the import stops before its next file, a copy
+            // under way removed; the files done stay imported.
+            cancelled = true;
+            on_node(
+                client,
+                "promises.cancel",
+                serde_json::json!({ "id": id }),
+                false,
+            )
+            .map_err(|e| e.message)?;
+            continue;
+        }
+        let answer = answer.map_err(|e| e.message)?;
+        if answer["settled"] == true {
+            break answer["promise"].clone();
+        }
+        if progress {
+            eprint!("\r\x1b[2K{}", progress_text(&answer["promise"]));
+            shown = true;
+        }
+    };
+    if shown {
+        eprint!("\r\x1b[2K");
+    }
+    Ok(settled)
 }
 
 /// Prints one JSON line.
@@ -896,7 +1003,7 @@ struct ImportArgs {
 /// the rule's items.
 fn import_options(args: &[String]) -> Result<ImportArgs, String> {
     let (mut vault, mut node) = (None, None);
-    let (mut wait, mut new) = (false, false);
+    let (mut wait, mut new) = (true, false);
     let mut sources = Vec::new();
     let mut params = serde_json::Map::new();
     let mut args = args.iter();
@@ -933,7 +1040,9 @@ fn import_options(args: &[String]) -> Result<ImportArgs, String> {
             "--no-signals" => {
                 params.insert("signals".into(), false.into());
             }
+            // Waiting is the default; `--wait` is kept for scripts.
             "--wait" => wait = true,
+            "--no-wait" => wait = false,
             "--new" => new = true,
             flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
             _ => sources.push(serde_json::Value::from(absolute_text(arg)?)),
@@ -969,9 +1078,10 @@ fn import_options(args: &[String]) -> Result<ImportArgs, String> {
 }
 
 /// `helios import`: see `helios_library::import`, run by the vault's node
-/// (`library.import`), which answers with a promise. Without `--wait`
-/// the promise is printed and the import goes on in the node; with it,
-/// the files that failed, then `{"report": ...}` once it is settled.
+/// (`library.import`), which answers with a promise. It waits for the
+/// promise to settle (its progress on stderr, on a terminal), then
+/// prints the files that failed and `{"report": ...}`. With `--no-wait`
+/// the promise is printed at once and the import goes on in the node.
 fn import(args: &[String]) -> ExitCode {
     let ImportArgs {
         vault,
@@ -997,38 +1107,14 @@ fn import(args: &[String]) -> ExitCode {
         line(&serde_json::json!({ "promise": promise }));
         return ExitCode::SUCCESS;
     }
-    let id = promise["id"].clone();
-    // Ctrl-C cancels the import: it stops before its next file, a copy
-    // under way removed; the files done stay imported.
-    let mut cancelled = false;
-    let settled = loop {
-        let waited = on_node(
-            &client,
-            "promises.wait",
-            serde_json::json!({ "id": id, "timeout_ms": 600_000 }),
-            true,
-        );
-        match waited {
-            Ok(answer) if answer["settled"] == true => break answer["promise"].clone(),
-            Ok(_) => {}
-            Err(_) if !cancelled => {
-                cancelled = true;
-                if let Err(e) = on_node(
-                    &client,
-                    "promises.cancel",
-                    serde_json::json!({ "id": id }),
-                    false,
-                ) {
-                    eprintln!("helios: {}", e.message);
-                    return ExitCode::from(1);
-                }
-            }
-            Err(e) => {
-                eprintln!("helios: {}", e.message);
-                return ExitCode::from(1);
-            }
+    let settled = match settle(&client, &promise["id"]) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("helios: {e}");
+            return ExitCode::from(1);
         }
     };
+    let id = &promise["id"];
     let result = &settled["result"];
     for file in result["failed"].as_array().into_iter().flatten() {
         line(file);
@@ -1202,7 +1288,7 @@ fn stacks(args: &[String]) -> ExitCode {
     };
     match on_node(&client, method, params, false) {
         Ok(answer) => {
-            println!(
+            out!(
                 "{}",
                 serde_json::to_string_pretty(&answer[field]).expect("JSON values serialize")
             );
@@ -1228,6 +1314,8 @@ struct CommandArgs {
     params: serde_json::Map<String, serde_json::Value>,
     words: Vec<String>,
     request_id: Option<String>,
+    /// `helios run` answers a promise at once, unsettled (`--no-wait`).
+    no_wait: bool,
 }
 
 fn command_args(args: &[String]) -> Result<CommandArgs, String> {
@@ -1243,6 +1331,7 @@ fn command_args(args: &[String]) -> Result<CommandArgs, String> {
             "--scope" => parsed.scope = Some(value()?),
             "--request-id" => parsed.request_id = Some(value()?),
             "--enabled" => parsed.enabled = true,
+            "--no-wait" => parsed.no_wait = true,
             "--json" => {
                 let params: serde_json::Value = serde_json::from_str(&value()?)
                     .map_err(|e| format!("--json takes a JSON object: {e}"))?;
@@ -1327,8 +1416,24 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
             .unwrap_or_else(helios_inspect::request_ids::new_request_id)
     });
     match on_node_keyed(&client, method, params, key.is_some(), key.as_deref()) {
-        Ok(answer) => {
-            println!(
+        Ok(mut answer) => {
+            // A command answering with a promise (an import by rule) is
+            // waited for, its settled promise printed in its place.
+            if method == "command.run" && !parsed.no_wait && unsettled(&answer["promise"]) {
+                match settle(&client, &answer["promise"]["id"]) {
+                    Ok(settled) => answer["promise"] = settled,
+                    Err(e) => {
+                        eprintln!("helios: {e}");
+                        return ExitCode::from(1);
+                    }
+                }
+                out!(
+                    "{}",
+                    serde_json::to_string_pretty(&answer).expect("JSON values serialize")
+                );
+                return settled_code(&answer["promise"]);
+            }
+            out!(
                 "{}",
                 serde_json::to_string_pretty(&answer).expect("JSON values serialize")
             );
@@ -1532,7 +1637,7 @@ fn sandbox(args: &[String]) -> ExitCode {
     };
     match result {
         Ok(answer) => {
-            println!(
+            out!(
                 "{}",
                 serde_json::to_string_pretty(&answer).expect("JSON values serialize")
             );
@@ -1557,7 +1662,7 @@ fn doctor(args: &[String]) -> ExitCode {
                 "error": offer.error,
                 "viewport": helios_display::drawn(&offer),
             });
-            println!(
+            out!(
                 "{}",
                 serde_json::to_string_pretty(&report).expect("JSON values serialize")
             );
@@ -1566,7 +1671,7 @@ fn doctor(args: &[String]) -> ExitCode {
         [what] if what == "ai" => {
             match helios_ai::Ai::open(helios_ai::store::Paths::default_for_user()) {
                 Ok(ai) => {
-                    println!(
+                    out!(
                         "{}",
                         serde_json::to_string_pretty(&ai.doctor()).expect("JSON values serialize")
                     );
@@ -1597,7 +1702,7 @@ fn main() -> ExitCode {
     if let [flag] = args.as_slice()
         && (flag == "--version" || flag == "-V")
     {
-        println!("helios {}", env!("CARGO_PKG_VERSION"));
+        out!("helios {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
     if args.first().is_some_and(|a| a == "sandbox") {
@@ -1633,7 +1738,7 @@ fn main() -> ExitCode {
     };
     match request_at(&call.socket, &call.body) {
         Ok(answer) => {
-            println!(
+            out!(
                 "{}",
                 serde_json::to_string_pretty(&answer).expect("JSON values serialize")
             );
@@ -1655,5 +1760,40 @@ fn main() -> ExitCode {
             eprintln!("helios: cannot reach the node at {}: {e}", call.socket);
             ExitCode::from(3)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_running_promise_shows_its_progress() {
+        let p = json!({ "label": "Import photos", "state": "running",
+                        "done": 3, "total": 10, "note": "a.jpg" });
+        assert_eq!(progress_text(&p), "Import photos: 3/10 a.jpg");
+        let p = json!({ "label": "Import photos", "state": "running", "done": 3 });
+        assert_eq!(progress_text(&p), "Import photos: 3");
+        assert_eq!(progress_text(&json!({ "state": "pending" })), "Working");
+    }
+
+    #[test]
+    fn a_promise_is_settled_once_done_failed_or_cancelled() {
+        assert!(unsettled(&json!({ "state": "pending" })));
+        assert!(unsettled(&json!({ "state": "running" })));
+        for state in ["done", "failed", "cancelled"] {
+            assert!(!unsettled(&json!({ "state": state })), "{state}");
+        }
+        assert!(!unsettled(&serde_json::Value::Null));
+        assert_eq!(settled_code(&json!({ "state": "done" })), ExitCode::SUCCESS);
+        assert_eq!(
+            settled_code(&json!({ "state": "cancelled" })),
+            ExitCode::from(130)
+        );
+        assert_eq!(
+            settled_code(&json!({ "state": "failed" })),
+            ExitCode::from(1)
+        );
     }
 }
