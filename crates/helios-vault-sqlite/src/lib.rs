@@ -1991,6 +1991,35 @@ impl Store for SqliteStore {
         })
     }
 
+    fn head_counts(&self) -> Result<std::collections::BTreeMap<ImageId, usize>, String> {
+        // The links only, not the edits: one pass over the table.
+        let mut statement = self
+            .db
+            .prepare("SELECT image, id, parents FROM versions")
+            .map_err(err)?;
+        let rows: Vec<(String, String, String)> = statement
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)?;
+        let links = rows
+            .into_iter()
+            .map(|(image, id, parents)| {
+                let parents: Vec<String> =
+                    serde_json::from_str(&parents).map_err(|e| format!("version {id}: {e}"))?;
+                Ok((
+                    ImageId::from_hex(&image)?,
+                    VersionId::from_hex(&id)?,
+                    parents
+                        .iter()
+                        .map(|p| VersionId::from_hex(p))
+                        .collect::<Result<Vec<_>, String>>()?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(helios_vault::versions::count_heads(links))
+    }
+
     fn document(&self, ns: &str, key: &str) -> Result<Option<Value>, String> {
         let text: Option<String> = self
             .db

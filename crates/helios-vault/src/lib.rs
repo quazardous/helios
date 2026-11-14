@@ -48,6 +48,7 @@ pub mod fields;
 pub mod journal;
 pub mod promises;
 pub mod read_order;
+pub mod rotation;
 pub mod rules;
 pub mod settings;
 pub mod sightings;
@@ -357,6 +358,19 @@ pub trait Store: Send {
     /// Forgets a version; false if it was not kept. Refused while another
     /// version names it as a parent.
     fn remove_version(&mut self, id: &VersionId) -> Result<bool, String>;
+    /// How many heads each image with versions has
+    /// ([`versions::heads`]). A store backed by a database reads the
+    /// versions' links in one statement, without their edits.
+    fn head_counts(&self) -> Result<std::collections::BTreeMap<ImageId, usize>, String> {
+        let mut out = std::collections::BTreeMap::new();
+        for image in self.images()? {
+            let all = self.versions(&image.id)?;
+            if !all.is_empty() {
+                out.insert(image.id, versions::heads(&all).len());
+            }
+        }
+        Ok(out)
+    }
 
     /// A JSON document by namespace and key: what the vault keeps besides
     /// images (a workflow journal's rows, configuration layers).
