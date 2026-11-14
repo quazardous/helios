@@ -84,15 +84,28 @@ fn window_library_opens_the_focus_in_its_own_window_and_again_brings_it_forward(
     assert_eq!(h.state().library_window_state()["open"], false);
 }
 
-/// The centre of the cell labelled `name` the Library window drew (the
-/// main window's Library panel draws one too).
+/// The cell labelled `name` in the Library window: the main window's
+/// filmstrip draws one too, under the window and partly within its
+/// area, so the cell is looked for among the window's own nodes.
 fn in_window<'a>(h: &'a Harness<'_, Shell>, name: &'a str) -> egui_kittest::Node<'a> {
-    let drawn = h.state().library_window_state()["drawn"].clone();
-    let at = |i: usize| drawn[i].as_f64().expect("the window drew the Library") as f32;
-    let area = egui::Rect::from_min_max(egui::pos2(at(0), at(1)), egui::pos2(at(2), at(3)));
-    h.get_all_by_label(name)
-        .find(|n| area.contains(n.rect().center()))
-        .unwrap_or_else(|| panic!("no {name} in the Library window"))
+    h.get_by_role_and_label(egui::accesskit::Role::Window, "Library")
+        .get_by_label(name)
+}
+
+/// A pointer press and release on `at`, each on frames of its own, as a
+/// hand clicks: the grid's cells also sense drags.
+fn click_at(h: &mut Harness<'_, Shell>, at: egui::Pos2) {
+    h.event(egui::Event::PointerMoved(at));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+    }
 }
 
 #[test]
@@ -103,22 +116,33 @@ fn the_library_window_s_selection_is_the_one_commands_act_on() {
     h.run();
     run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
     assert_eq!(h.state().library_window_state()["open"], true);
-    // Pressed and released on frames of their own, as a hand does: the
-    // grid's cells also sense drags.
-    // Selected as the window's grid selects (its clicks are the grid's
-    // own, tested with the panel): one selection for both windows.
-    assert!(
-        in_window(&h, "b.jpg").rect().is_positive(),
-        "the window shows b"
-    );
-    h.state_mut().library_mut().select_ids(&["b".to_string()]);
-    h.run_steps(2);
+    // A click on b in the window's grid: one selection for both windows.
+    let at = in_window(&h, "b.jpg").rect().center();
+    click_at(&mut h, at);
     assert_eq!(h.state().library().selected, Some(1));
     // A command, from wherever it comes, acts on that selection.
     run(&mut h, "vault.rate", json!({ "stars": 4 }));
     let library = h.state().library();
     assert_eq!(library.entries[1].rating, 4);
     assert_eq!(library.entries[0].rating, 0, "only the selection");
+}
+
+#[test]
+fn a_click_on_a_cell_of_the_library_window_selects_it() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    // Through accesskit, as agents and screen readers click.
+    in_window(&h, "a.jpg").click_accesskit();
+    h.run_steps(2);
+    assert_eq!(h.state().library().selected, Some(0), "a, clicked");
+    // With the pointer, the cell under it; the main window's filmstrip,
+    // drawn under the window, does not take the click.
+    let at = in_window(&h, "c.jpg").rect().center();
+    click_at(&mut h, at);
+    assert_eq!(h.state().library().selected, Some(2), "c, clicked");
 }
 
 #[test]
