@@ -110,7 +110,7 @@ impl Asker for Fake {
 
 struct Library {
     vault: Arc<Vault<MemoryStore>>,
-    runner: Arc<Runner<MemoryStore>>,
+    runner: Arc<Runner>,
     history: LibraryHistory,
     calls: Arc<Mutex<u64>>,
     images: Vec<ImageId>,
@@ -149,35 +149,14 @@ fn library(name: &str) -> Library {
         images.push(id);
         first.push(v);
     }
-    let built = catalogue()
-        .build_composite(
-            &helios_template::network::composite_ref(WORKSHOP).unwrap(),
-            0,
-        )
-        .unwrap();
     let history = LibraryHistory::default();
     let calls = Arc::new(Mutex::new(0));
-    let counted = calls.clone();
-    let runner = Arc::new(
-        Runner::new(
-            vault.clone(),
-            Arc::new(Engine::new(bus.clone())),
-            Jobs::new(bus),
-            history.clone(),
-        )
-        .with_load(Arc::new(move |path, _| {
-            let mut graph = Graph::new();
-            let src = graph.add_source("input", photo(index(path)));
-            let node = graph
-                .add_module(NODE, ModuleRef::composite(built.clone()), &Params::new())
-                .map_err(|e| e.to_string())?;
-            graph
-                .connect(src, helios_template::SOURCE_PORT, node, "input")
-                .map_err(|e| e.to_string())?;
-            Ok(graph)
-        }))
-        .with_askers(Arc::new(move || Box::new(Fake(counted.clone())))),
-    );
+    let runner = Arc::new(runner_on(
+        Arc::new(client_of(&vault, &bus)),
+        &bus,
+        &history,
+        &calls,
+    ));
     Library {
         vault,
         runner,
@@ -186,6 +165,55 @@ fn library(name: &str) -> Library {
         images,
         first,
     }
+}
+
+/// A client of a node owning `vault`, as the desktop's.
+fn client_of<S: helios_vault::Store + 'static>(
+    vault: &Arc<Vault<S>>,
+    bus: &Arc<Bus>,
+) -> helios_inspect::client::Client {
+    let service = helios_node_core::endpoint::VaultService::new(
+        vault.clone(),
+        bus.clone(),
+        Jobs::new(bus.clone()),
+        "test",
+    );
+    helios_inspect::client::Client::in_process(Arc::new(service)).with_origin("user")
+}
+
+/// A runner over the library `node` serves, loading photo `i` as a
+/// source into the workshop, its junctions answered by a counted fake.
+fn runner_on(
+    node: Arc<helios_inspect::client::Client>,
+    bus: &Arc<Bus>,
+    history: &LibraryHistory,
+    calls: &Arc<Mutex<u64>>,
+) -> Runner {
+    let built = catalogue()
+        .build_composite(
+            &helios_template::network::composite_ref(WORKSHOP).unwrap(),
+            0,
+        )
+        .unwrap();
+    let counted = calls.clone();
+    Runner::new(
+        node,
+        Arc::new(Engine::new(bus.clone())),
+        Jobs::new(bus.clone()),
+        history.clone(),
+    )
+    .with_load(Arc::new(move |path, _| {
+        let mut graph = Graph::new();
+        let src = graph.add_source("input", photo(index(path)));
+        let node = graph
+            .add_module(NODE, ModuleRef::composite(built.clone()), &Params::new())
+            .map_err(|e| e.to_string())?;
+        graph
+            .connect(src, helios_template::SOURCE_PORT, node, "input")
+            .map_err(|e| e.to_string())?;
+        Ok(graph)
+    }))
+    .with_askers(Arc::new(move || Box::new(Fake(counted.clone()))))
 }
 
 fn ask(lib: &Library, on_breach: Option<OnBreach>) -> RunAsk {
@@ -635,4 +663,86 @@ fn the_panel_shows_the_review_and_accepts_a_held_photo() {
         .filter(|p| p["state"] == "accepted")
         .count();
     assert_eq!(accepted, 1, "{review}");
+}
+
+/// A run reads and writes the library through the node, on its own
+/// thread: while another writer holds the vault file locked, the frame
+/// that starts it does not wait; once it lets go, the run's versions and
+/// record are written.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_frame_that_starts_a_run() {
+    use helios_vault::Store as _;
+    use helios_vault_sqlite::SqliteStore;
+    use std::time::{Duration, Instant};
+    let dir = temp("held");
+    let path = dir.join("vault.db");
+    let bus = Arc::new(Bus::new());
+    let persist = helios_gui::persist::Persist::new(SqliteStore::open(&path).unwrap(), bus.clone());
+    let mut images = Vec::new();
+    for i in 0..3 {
+        let file = dir.join(format!("p{i}.bin"));
+        std::fs::write(&file, format!("photo {i}")).unwrap();
+        images.push(persist.vault().import_file(&file, 1).unwrap());
+    }
+    let history = LibraryHistory::default();
+    let calls = Arc::new(Mutex::new(0));
+    let runner = Arc::new(runner_on(persist.node().clone(), &bus, &history, &calls));
+    let ask = RunAsk {
+        node: NODE.into(),
+        workshop: WORKSHOP.into(),
+        name: "Backlit".into(),
+        catalogue: catalogue(),
+        bundle: helios_template::workspace::blank(),
+        images: images.clone(),
+        on_breach: None,
+        who: "user".into(),
+    };
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&path).unwrap();
+    other.begin().unwrap();
+    other
+        .set_document("library/elsewhere", "held", Some(&json!(true)))
+        .unwrap();
+    let started = Instant::now();
+    let answer = runner.start(ask).unwrap();
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_millis(500),
+        "the frame waited {took:?} for the vault"
+    );
+    let run = answer["run"].as_str().unwrap().to_string();
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Let go: the run ends, its record kept.
+    other.rollback().unwrap();
+    drop(other);
+    let end = Instant::now() + Duration::from_secs(60);
+    let record = loop {
+        if let Some(record) = persist.vault().workshop_run(&run).unwrap() {
+            break record;
+        }
+        assert!(Instant::now() < end, "the run's record is written");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(record["photos"].as_array().unwrap().len(), 3, "{record}");
+    let applied = images
+        .iter()
+        .filter(|i| {
+            edit::EditSession::open(persist.vault(), **i)
+                .unwrap()
+                .1
+                .is_some()
+        })
+        .count();
+    let written = record["photos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["state"] == "applied")
+        .count();
+    assert!(written > 0, "{record}");
+    assert_eq!(applied, written, "{record}");
+    drop((runner, persist));
+    let _ = std::fs::remove_dir_all(&dir);
 }

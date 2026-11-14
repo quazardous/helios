@@ -25,11 +25,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use helios_core::jobs::{Jobs, Progress, Report, Start};
 use helios_core::{Engine, Graph, Message};
+use helios_inspect::client::Client;
 use helios_template::format::{Limits, OnBreach};
 use helios_template::limits::{Action, Budget, Raised};
 use helios_template::run::{self, Asker, Book, NoAi, Setup};
 use helios_template::{Bundle, Catalogue};
-use helios_vault::{Change, Changes, ImageId, Store, Vault, Version, edit};
+use helios_vault::{Change, Changes, ImageId, Version, edit};
 use serde_json::{Value, json};
 
 use crate::library_history::LibraryHistory;
@@ -97,9 +98,11 @@ pub struct Outcome {
     pub changes: Changes,
 }
 
-/// Runs workshops over photos of a library.
-pub struct Runner<S: Store> {
-    vault: Arc<Vault<S>>,
+/// Runs workshops over photos of a library, reading and writing it
+/// through the node (`workshop.*`, `docs/protocol.md`, "Workshop runs"):
+/// a run's thread makes the calls, never the frame.
+pub struct Runner {
+    node: Arc<Client>,
     engine: Arc<Engine>,
     jobs: Jobs,
     history: LibraryHistory,
@@ -135,19 +138,19 @@ pub fn label(name: &str, count: usize) -> egui_pop::api::history::Label {
     }
 }
 
-impl<S: Store + Send + 'static> Runner<S> {
-    /// Runs over `vault`, rendering on `engine` (the desktop's), reported
+impl Runner {
+    /// Runs over the library `node` serves, rendering on `engine` (the desktop's), reported
     /// to `jobs`, each run a step of `history`. Files load through the
     /// workspace's network ([`crate::templates::develop_file`]); no AI
     /// answers junctions until one is given ([`Runner::with_askers`]).
     pub fn new(
-        vault: Arc<Vault<S>>,
+        node: Arc<Client>,
         engine: Arc<Engine>,
         jobs: Jobs,
         history: LibraryHistory,
     ) -> Self {
         Self {
-            vault,
+            node,
             engine,
             jobs,
             history,
@@ -174,20 +177,45 @@ impl<S: Store + Send + 'static> Runner<S> {
         self
     }
 
-    /// The photo's file name, for the review's rows.
-    fn file_name(&self, image: &ImageId) -> Option<String> {
-        let locations = self.vault.locations(image).ok()?;
-        let order = self.vault.read_order().ok()?;
-        order
-            .pick(&locations)
-            .or(locations.first())?
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
+    /// Calls `method` on the node and waits for its answer: on a run's
+    /// thread, or a command's, never the frame's.
+    fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.node.request(method, params).map_err(|e| e.message)
+    }
+
+    /// A workshop version's decision book, as the library keeps it.
+    fn book_doc(&self, workshop: &str) -> Result<Option<Value>, String> {
+        let read = self.call("workshop.book.get", json!({ "workshop": workshop }))?;
+        Ok(Some(read["book"].clone()).filter(|b| !b.is_null()))
+    }
+
+    /// Writes a workshop version's decision book.
+    fn set_book(&self, workshop: &str, book: &Value) -> Result<(), String> {
+        self.call(
+            "workshop.book.set",
+            json!({ "workshop": workshop, "book": book }),
+        )
+        .map(drop)
+    }
+
+    /// Writes (or with `None` drops) a run's record.
+    fn set_record(&self, run: &str, record: Option<&Value>) -> Result<(), String> {
+        self.call(
+            "workshop.record.set",
+            json!({ "run": run, "record": record }),
+        )
+        .map(drop)
+    }
+
+    /// Writes `version`: the photo's rows before and after it.
+    fn add_version(&self, version: &Version) -> Result<Change, String> {
+        let version = serde_json::to_value(version).map_err(|e| e.to_string())?;
+        let added = self.call("workshop.version.add", json!({ "version": version }))?;
+        serde_json::from_value(added["change"].clone()).map_err(|e| format!("a change: {e}"))
     }
 
     fn book(&self, workshop: &str) -> Result<(Book, u64), String> {
-        let doc = self.vault.workshop_book(workshop)?.unwrap_or(Value::Null);
+        let doc = self.book_doc(workshop)?.unwrap_or(Value::Null);
         let runs = doc["runs"].as_u64().unwrap_or(0);
         let book = if doc.is_null() {
             Book::default()
@@ -209,10 +237,11 @@ impl<S: Store + Send + 'static> Runner<S> {
             helios_core::Params,
             Graph,
             Option<Version>,
+            Option<String>,
         ),
         String,
     > {
-        let (graph, head, current) = self.opened(ask, image)?;
+        let (graph, head, current, name) = self.opened(ask, image)?;
         let id = graph
             .find(&ask.node)
             .ok_or_else(|| format!("the photo's network has no `{}`", ask.node))?;
@@ -232,7 +261,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             .engine
             .render_at(&graph, from, &port, region, scale)
             .map_err(|e| e.to_string())?;
-        Ok((input, current, graph, head))
+        Ok((input, current, graph, head, name))
     }
 
     /// The dry run: the photos, `J` (junctions per photo), how many photos
@@ -370,7 +399,7 @@ impl<S: Store + Send + 'static> Runner<S> {
     /// before the next photo. What was written is one library step.
     ///
     /// # Errors
-    /// The workshop does not build, or the vault fails.
+    /// The workshop does not build, or the node refuses a read or write.
     pub fn run(
         &self,
         ask: &RunAsk,
@@ -411,7 +440,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             }
             let photo = self
                 .input(ask, image)
-                .and_then(|(input, current, graph, head)| {
+                .and_then(|(input, current, graph, head, name)| {
                     let p = run::photo(
                         &setup,
                         &input,
@@ -420,9 +449,16 @@ impl<S: Store + Send + 'static> Runner<S> {
                         &mut book,
                         &mut *asker,
                     )?;
-                    Ok((p, current, graph, head, input.content_hash().to_string()))
+                    Ok((
+                        p,
+                        current,
+                        graph,
+                        head,
+                        input.content_hash().to_string(),
+                        name,
+                    ))
                 });
-            let (p, current, graph, head, input) = match photo {
+            let (p, current, graph, head, input, name) = match photo {
                 Ok(x) => x,
                 Err(e) => {
                     if let Some(r) = report {
@@ -442,7 +478,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             let params = run::params_of(&built, &current, &p.checked.values);
             let mut entry = json!({
                 "image": hex,
-                "name": self.file_name(image),
+                "name": name,
                 "input": input,
                 "flags": p.checked.flags,
                 "provenance": p.provenance,
@@ -472,7 +508,6 @@ impl<S: Store + Send + 'static> Runner<S> {
                 out.unchanged.push(hex);
                 continue;
             }
-            let before = self.vault.rows(image)?;
             let meta = json!({ "workshop_run": {
                 "run": id,
                 "workshop": ask.workshop,
@@ -495,13 +530,8 @@ impl<S: Store + Send + 'static> Runner<S> {
             entry["state"] = json!("applied");
             entry["version"] = json!(version.id.hex());
             record.push(entry);
-            self.vault.add_version(&version)?;
-            let after = self.vault.rows(image)?;
-            out.changes.images.push(Change {
-                image: *image,
-                before,
-                after,
-            });
+            let change = self.add_version(&version)?;
+            out.changes.images.push(change);
             if !held.flags.is_empty() {
                 out.flagged.push(held);
             }
@@ -512,7 +542,7 @@ impl<S: Store + Send + 'static> Runner<S> {
         }
         let mut doc = serde_json::to_value(&book).map_err(|e| e.to_string())?;
         doc["runs"] = json!(n);
-        self.vault.set_workshop_book(&ask.workshop, &doc)?;
+        self.set_book(&ask.workshop, &doc)?;
         let doc = json!({
             "run": id,
             "n": n,
@@ -526,7 +556,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             "cancelled": out.cancelled,
             "photos": record,
         });
-        self.vault.set_workshop_run(id, Some(&doc))?;
+        self.set_record(id, Some(&doc))?;
         out.changes.documents.push(helios_vault::DocumentChange {
             ns: helios_vault::workshops::RUNS.into(),
             key: id.into(),

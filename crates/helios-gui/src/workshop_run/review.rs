@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use helios_core::Message;
 use helios_template::run::{Book, Recorded};
-use helios_vault::{Change, Changes, DocumentChange, ImageId, Store, Version, edit};
+use helios_vault::{Change, Changes, DocumentChange, ImageId, ImageRows, Version, edit};
 use serde_json::{Value, json};
 
 use super::{RunAsk, Runner, edit_with, seconds};
@@ -140,7 +140,7 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-impl<S: Store + Send + 'static> Runner<S> {
+impl Runner {
     /// `workshop.review {run, action, image, flag, values, junction,
     /// value}` asked by `who` (`user`, `agent:<session>`); `ask` names the
     /// workshop applied in the workspace, which accept, fix and rerun
@@ -156,10 +156,10 @@ impl<S: Store + Send + 'static> Runner<S> {
         ask: Option<RunAsk>,
     ) -> Result<Value, String> {
         let run = args["run"].as_str().ok_or("`run`: the run's id")?;
-        let record = self
-            .vault
-            .workshop_run(run)?
-            .ok_or_else(|| format!("no run `{run}` in this library"))?;
+        let record =
+            Some(self.call("workshop.record.get", json!({ "run": run }))?["record"].take())
+                .filter(|r| !r.is_null())
+                .ok_or_else(|| format!("no run `{run}` in this library"))?;
         let action = args["action"].as_str().unwrap_or("list");
         if matches!(action, "accept" | "revert" | "rerun") && who != "user" {
             return Err(format!(
@@ -201,7 +201,7 @@ impl<S: Store + Send + 'static> Runner<S> {
                     p["rerun"] = started["run"].clone();
                 }
             }
-            self.vault.set_workshop_run(run, Some(&doc))?;
+            self.set_record(run, Some(&doc))?;
             return Ok(started);
         }
         if action != "list" {
@@ -247,7 +247,7 @@ impl<S: Store + Send + 'static> Runner<S> {
                     ));
                 }
             };
-            self.vault.set_workshop_run(run, Some(&doc))?;
+            self.set_record(run, Some(&doc))?;
             changes.documents.push(DocumentChange {
                 ns: helios_vault::workshops::RUNS.into(),
                 key: run.into(),
@@ -262,19 +262,36 @@ impl<S: Store + Send + 'static> Runner<S> {
         Ok(listing(&record, args["flag"].as_str()))
     }
 
-    /// The photo's graph with its edit, its head, and the workshop's
-    /// values on it now.
+    /// What the node answers of a photo (`workshop.photo`): its head,
+    /// the file read, its name and its rows.
+    fn photo(&self, image: &ImageId) -> Result<Value, String> {
+        self.call("workshop.photo", json!({ "image": image.hex() }))
+    }
+
+    /// The photo's graph with its edit, its head, the workshop's values
+    /// on it now, and its file's name.
+    #[allow(clippy::type_complexity)]
     pub(super) fn opened(
         &self,
         ask: &RunAsk,
         image: &ImageId,
-    ) -> Result<(helios_core::Graph, Option<Version>, helios_core::Params), String> {
-        let (_, head) = edit::EditSession::open(&self.vault, *image)?;
-        let location = self
-            .vault
-            .file_to_read(image)?
+    ) -> Result<
+        (
+            helios_core::Graph,
+            Option<Version>,
+            helios_core::Params,
+            Option<String>,
+        ),
+        String,
+    > {
+        let photo = self.photo(image)?;
+        let head: Option<Version> =
+            serde_json::from_value(photo["head"].clone()).map_err(|e| format!("a version: {e}"))?;
+        let file = photo["file"]
+            .as_str()
             .ok_or("no file of the photo is at hand")?;
-        let mut graph = (self.load)(&location.path, &ask.bundle)?;
+        let name = photo["name"].as_str().map(str::to_string);
+        let mut graph = (self.load)(std::path::Path::new(file), &ask.bundle)?;
         if let Some(v) = &head {
             edit::apply_to_graph(&mut graph, &v.edit)?;
         }
@@ -285,7 +302,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             .params(id)
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
-        Ok((graph, head, current))
+        Ok((graph, head, current, name))
     }
 
     /// Writes `values` (by exposed name) on the photo as a version
@@ -302,10 +319,9 @@ impl<S: Store + Send + 'static> Runner<S> {
         who: &str,
     ) -> Result<(Change, Version), String> {
         let (built, ..) = Self::workshop(ask)?;
-        let (graph, head, current) = self.opened(ask, &image)?;
+        let (graph, head, current, _) = self.opened(ask, &image)?;
         let params = helios_template::run::params_of(&built, &current, values);
         let edit = edit_with(head.as_ref(), &graph, &ask.node, &params)?;
-        let before = self.vault.rows(&image)?;
         let label = format!(
             "workshop {} (run {}, {how})",
             doc["name"].as_str().unwrap_or_default(),
@@ -314,16 +330,8 @@ impl<S: Store + Send + 'static> Runner<S> {
         let version = Version::new(image, head.iter().map(|h| h.id).collect(), edit, who, now())
             .labelled(&label)
             .with_meta(Some(json!({ "workshop_run": meta })));
-        self.vault.add_version(&version)?;
-        let after = self.vault.rows(&image)?;
-        Ok((
-            Change {
-                image,
-                before,
-                after,
-            },
-            version,
-        ))
+        let change = self.add_version(&version)?;
+        Ok((change, version))
     }
 
     fn accept(
@@ -373,7 +381,10 @@ impl<S: Store + Send + 'static> Runner<S> {
             .map(helios_vault::VersionId::from_hex)
             .transpose()?
             .ok_or("the photo's version is not recorded")?;
-        let now = self.vault.rows(&image)?.ok_or("the photo is gone")?;
+        let now: ImageRows = serde_json::from_value(self.photo(&image)?["rows"].take())
+            .ok()
+            .flatten()
+            .ok_or("the photo is gone")?;
         if now.versions.iter().any(|v| v.parents.contains(&version)) {
             return Err(
                 "the photo was edited after the run: its later edit continues the run's, undo that edit first"
@@ -390,7 +401,11 @@ impl<S: Store + Send + 'static> Runner<S> {
             }],
             ..Changes::default()
         };
-        self.vault.replay(&changes)?;
+        let changed = serde_json::to_value(&changes).map_err(|e| e.to_string())?;
+        self.call(
+            "library.changes.apply",
+            json!({ "changes": changed, "forward": true }),
+        )?;
         let p = &mut doc["photos"][i];
         p["state"] = json!("reverted");
         p["version"] = Value::Null;
@@ -483,7 +498,7 @@ impl<S: Store + Send + 'static> Runner<S> {
             .ok_or("the photo's input is not recorded")?;
         let workshop = doc["workshop"].as_str().unwrap_or_default().to_string();
         let workshop = workshop.as_str();
-        let before = self.vault.workshop_book(workshop)?;
+        let before = self.book_doc(workshop)?;
         let mut book_doc = before.clone().unwrap_or_else(|| json!({}));
         let mut book: Book = serde_json::from_value(book_doc.clone()).unwrap_or_default();
         let key = Book::key_of(workshop, junction, input);
@@ -500,7 +515,7 @@ impl<S: Store + Send + 'static> Runner<S> {
         if !runs.is_null() {
             book_doc["runs"] = runs;
         }
-        self.vault.set_workshop_book(workshop, &book_doc)?;
+        self.set_book(workshop, &book_doc)?;
         doc["photos"][i]["decided"][junction] = json!({ "value": value, "by": who });
         Ok(Changes {
             documents: vec![DocumentChange {
