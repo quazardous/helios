@@ -243,17 +243,11 @@ gui-choose-copy-link = Copier le lien
 gui-choose-identity = Reconnectez-vous une fois pour voir de quel compte il s'agit.
 
 
-gui-choose-library-unread = Impossible de lire le dossier de la bibliothèque : { $why }
-
 gui-choose-more-hint = Rouvre la page : les photos choisies là-bas s'ajoutent à celles-ci
 
 gui-choose-more-short = En choisir d'autres…
 
-gui-choose-into = Choisir le dossier…
 
-
-
-gui-choose-no-into = Choisissez d'abord où copier les photos : Dans, dans la colonne Choix.
 
 gui-choose-not-connected = Ce compte n'est pas connecté.
 

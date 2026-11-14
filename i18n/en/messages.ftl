@@ -399,15 +399,9 @@ gui-choose-copy-link = Copy the link
 
 gui-choose-identity = Reconnect once to show which account this is.
 
-gui-choose-into = Choose the folder…
-
-gui-choose-library-unread = Could not read the library folder: { $why }
-
 gui-choose-more-hint = Opens the page again: the photos chosen there are added to these
 
 gui-choose-more-short = Choose more…
-
-gui-choose-no-into = Choose where the photos are copied first: Into, in the Choices column.
 
 gui-choose-not-connected = This account is not connected.
 
