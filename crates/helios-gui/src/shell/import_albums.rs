@@ -230,22 +230,19 @@ impl Albums {
                 if stop.is_cancelled() {
                     return;
                 }
-                let photos = match end {
-                    Some(e) => {
-                        log::warn!("an album of {}: {e}", src.connector);
-                        Photos::Failed(said(&e))
-                    }
-                    None => {
-                        let known = known
-                            .as_ref()
-                            .map_or_else(|| vec![false; items.len()], |k| k(&src, &items));
-                        Photos::Listed(Arc::new(Batch {
-                            connector,
-                            source: src,
-                            items,
-                            known,
-                        }))
-                    }
+                let photos = if let Some(e) = end {
+                    log::warn!("an album of {}: {e}", src.connector);
+                    Photos::Failed(said(&e))
+                } else {
+                    let known = known
+                        .as_ref()
+                        .map_or_else(|| vec![false; items.len()], |k| k(&src, &items));
+                    Photos::Listed(Arc::new(Batch {
+                        connector,
+                        source: src,
+                        items,
+                        known,
+                    }))
                 };
                 *lock(&out) = photos;
                 wake();
