@@ -82,9 +82,15 @@ pub struct Importer {
     jobs: Jobs,
     bus: Arc<Bus>,
     link: Link,
+    promises: Arc<helios_node_core::promises::Promises<SqliteStore>>,
 }
 
 impl Importer {
+    /// The node's promises (`promises.*`), imports by rule among them.
+    pub fn promises(&self) -> &Arc<helios_node_core::promises::Promises<SqliteStore>> {
+        &self.promises
+    }
+
     /// The node's vault, for its library commands ([`crate::library`]).
     pub fn vault(&self) -> &Arc<Vault<SqliteStore>> {
         &self.vault
@@ -222,6 +228,7 @@ impl VaultNode {
             jobs: jobs.clone(),
             bus,
             link: link.clone(),
+            promises: node.promises().clone(),
         };
         let inputs = HealthInputs::new(
             options.volumes,

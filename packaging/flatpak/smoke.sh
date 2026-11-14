@@ -43,7 +43,7 @@ grep -q '^helios [0-9]' "$work/version.txt"
 echo "== import"
 mkdir -p "$work/photos"
 cp "$picture" "$work/photos/"
-helios import --vault "$work/library.helios" "$work/photos" | tee "$work/import.txt"
+helios import --wait --vault "$work/library.helios" "$work/photos" | tee "$work/import.txt"
 grep -q '"report"' "$work/import.txt"
 
 echo "== export"
