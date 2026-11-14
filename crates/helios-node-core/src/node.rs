@@ -359,6 +359,13 @@ impl<S: Store + 'static> LocalNode<S> {
         &self.vault
     }
 
+    /// The node's library as the desktop in its process uses it, its
+    /// promises the node's.
+    pub fn library(&self) -> crate::desktop::Library<S> {
+        crate::desktop::Library::on(self.vault.clone(), self.bus.clone())
+            .with_promises(self.promises.clone())
+    }
+
     /// The settings layers the node keeps (the person's and the
     /// libraries'), for a client to read and write.
     pub fn settings(&self) -> NodeSettings<S> {
