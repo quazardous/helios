@@ -1030,8 +1030,15 @@ fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are(
     h.get(share("photos")).type_text("-2026");
     h.run_steps(3);
     click(&mut h, "Next");
-    until(&mut h, "the choices", |h| shown(h, "Duplicates"));
+    until(&mut h, "the profiles", |h| shown(h, "Everyday"));
     assert!(!shown(&h, "Add where they are"), "copy only");
+    assert!(
+        shown(
+            &h,
+            "This source's photos are always copied into the Library: it cannot add them where they are."
+        ),
+        "copy only, said"
+    );
     click(&mut h, "Next");
     click(&mut h, "Save the source");
     assert!(!h.state().import_wizard_open());
@@ -1042,8 +1049,9 @@ fn edit_source_sets_an_account_sources_parameter_and_refuses_add_where_they_are(
         .unwrap_or_default()
         .to_owned();
     assert!(share.contains("2026") && share != "photos", "{share}");
-    let choices = sources[0].choices.clone().unwrap();
-    assert!(choices.copy_folders && !choices.darktable, "{choices:?}");
+    // Its profile, Everyday; the copy its connector requires is the
+    // import's (`ImportWindow::copies`), whatever the profile says.
+    assert_eq!(sources[0].profile.as_deref(), Some("everyday"));
     let text = kept.borrow().clone().unwrap_or_default();
     assert!(text.contains("share = ") && text.contains("2026"), "{text}");
 }
