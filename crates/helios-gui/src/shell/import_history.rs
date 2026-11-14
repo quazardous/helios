@@ -35,9 +35,15 @@ const READ_EVERY: Duration = Duration::from_secs(2);
 /// Reads the history from the library, newest first.
 pub type Reader = Arc<dyn Fn() -> Result<Vec<Record>, String> + Send + Sync>;
 
-/// A [`Reader`] of `vault`'s history.
-pub fn reader_of<S: helios_vault::Store + 'static>(vault: Arc<helios_vault::Vault<S>>) -> Reader {
-    Arc::new(move || helios_library::import_history::list(&vault, None))
+/// A [`Reader`] of the history of the library behind `node`
+/// (`import.history.list`).
+pub fn reader_of(node: Arc<helios_inspect::client::Client>) -> Reader {
+    Arc::new(move || {
+        let mut listed = node
+            .request("import.history.list", serde_json::json!({}))
+            .map_err(|e| e.message)?;
+        serde_json::from_value(listed["imports"].take()).map_err(|e| e.to_string())
+    })
 }
 
 /// The window's part: the reader, and the records last read.

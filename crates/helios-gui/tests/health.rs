@@ -761,7 +761,26 @@ fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() 
     let lib = Library::new("snapshots-taken");
     lib.strategy(Some(&Strategy::default()));
     let mounted = [lib.studio.clone(), lib.backup.clone()];
-    let (taken, copies) = catalogue::take(&lib.vault, &mounted, &lib.file, "by-hand", 3).unwrap();
+    // The strategy and the disks read through the library's node.
+    let bus = Arc::new(helios_core::Bus::new());
+    let node = helios_inspect::client::Client::in_process(Arc::new(
+        helios_node_core::endpoint::VaultService::new(
+            lib.vault.clone(),
+            bus.clone(),
+            helios_core::jobs::Jobs::new(bus),
+            "test",
+        ),
+    ));
+    use helios_vault::Store as _;
+    // Another writer holding the vault's file does not hold the snapshot
+    // up: the node only reads.
+    let mut other = SqliteStore::open(&lib.file).unwrap();
+    other.begin().unwrap();
+    let started = std::time::Instant::now();
+    let (taken, copies) = catalogue::take(&node, &mounted, &lib.file, "by-hand", 3).unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    other.rollback().unwrap();
+    drop(other);
     assert_eq!(
         copies,
         [lib.dir
