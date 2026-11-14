@@ -841,7 +841,10 @@ fn a_vault_held_locked_does_not_delay_the_storage_pages_frames() {
     // Shown at once all the same.
     assert!(h.state().storage_strategy().is_some());
     assert!(
-        h.state().storage_volumes()[0].roles.contains(&Role::Backup),
+        h.state()
+            .storage_volumes()
+            .iter()
+            .any(|v| v.id.as_str() == "uuid:studio" && v.roles.contains(&Role::Backup)),
         "{:?}",
         h.state().storage_volumes()
     );
