@@ -235,6 +235,10 @@ fn work(node: &Weak<Client>, cached: &Cached, queue: &Receiver<Job>) {
     }
 }
 
+fn from<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, String> {
+    serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
 /// The volumes known, the photos on each, the strategy and the backups,
 /// read through `node`.
 fn read_all(node: &Client) -> Result<Read, String> {
@@ -247,9 +251,6 @@ fn read_all(node: &Client) -> Result<Read, String> {
             .cloned()
             .ok_or_else(|| format!("no `{what}` read"))
     };
-    fn from<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, String> {
-        serde_json::from_value(v).map_err(|e| e.to_string())
-    }
     let photos: HashMap<String, usize> = from(field(&volumes, "photos")?)?;
     Ok(Read {
         known: from(field(&stored, "volumes")?)?,
