@@ -342,6 +342,26 @@ in the library history, so Ctrl+Z brings a removed copy back), and
 {"id": 11, "result": {"image": "4f1c…", "removed": 1, "heads": 1, "changes": {…}}}
 ```
 
+Manual stacks (Lightroom's "Group into Stack" and "Unstack"):
+`library.stacks.group` (`images`, `top`) groups photos into one stack,
+collapsed; the stacks any of them is in already are merged into it, so
+grouping one member of a stack with another photo adds that photo. The
+photo on top is `top`, else the first merged stack's top, else the
+first photo. `library.stacks.ungroup` (`images`) dissolves the stacks
+any of them is in; the photos stay. Both, and `library.stacks.top`,
+answer `changes`, the step the vault's revert undoes (the desktop's
+Ctrl+Z); each change is announced as `vault.stack_changed`:
+
+```json
+{"id": 12, "method": "library.stacks.group",
+ "params": {"images": ["4f1c…", "77b0…"], "top": "77b0…"}}
+{"id": 12, "result": {"stack": {"id": "c3d9…", "members": ["4f1c…", "77b0…"],
+ "top": "77b0…", "expanded": false, "who": "user", "at": 1700000200},
+ "merged": 0, "changes": {…}}}
+{"id": 13, "method": "library.stacks.ungroup", "params": {"images": ["4f1c…"]}}
+{"id": 13, "result": {"ungrouped": 1, "stacks": ["c3d9…"], "changes": {…}}}
+```
+
 `library.images.trash` (`images`, `plan`, `job`) moves photos' files to
 the system trash (Lightroom's "Delete from Disk", darktable's "delete
 (trash)") as a journaled job (`helios_library::trash`). The job is kept

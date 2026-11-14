@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use helios_core::Event;
 
-use crate::{ImageId, Store, Vault};
+use crate::{Changes, DocumentChange, ImageId, Store, Vault};
 
 const STACKS: &str = "stacks";
 pub(crate) const SIGNALS: &str = "signals";
@@ -97,6 +97,16 @@ fn in_library<S: Store>(store: &S, mut stack: Stack) -> Result<Option<Stack>, St
     }
     stack.members = members;
     Ok(Some(stack))
+}
+
+/// A stack's document before and after a step.
+fn document_change(id: &str, before: Option<Value>, after: Option<Value>) -> DocumentChange {
+    DocumentChange {
+        ns: STACKS.into(),
+        key: id.into(),
+        before,
+        after,
+    }
 }
 
 fn all<S: Store>(store: &S) -> Result<Vec<Stack>, String> {
@@ -219,29 +229,42 @@ impl<S: Store> Vault<S> {
         Ok(stack)
     }
 
+    /// Changes a stored stack in one transaction; answers it after, with
+    /// the step ([`Changes`]) the vault's revert undoes.
     fn change_stack(
         &self,
         id: &str,
         change: &'static str,
         f: impl FnOnce(&mut Stack) -> Result<(), String>,
-    ) -> Result<Stack, String> {
-        let stack = self.transaction(|store| {
-            let mut stack = store
+    ) -> Result<(Stack, Changes), String> {
+        let (stack, changes) = self.transaction(|store| {
+            let before = store
                 .document(STACKS, id)?
-                .map(read)
-                .transpose()?
                 .ok_or_else(|| format!("no stack {id}"))?;
+            let mut stack = read(before.clone())?;
             f(&mut stack)?;
             let doc = serde_json::to_value(&stack).expect("stacks serialize");
             store.set_document(STACKS, id, Some(&doc))?;
-            Ok(stack)
+            let mut changes = Changes::default();
+            if before != doc {
+                changes
+                    .documents
+                    .push(document_change(id, Some(before), Some(doc)));
+            }
+            Ok((stack, changes))
         })?;
         self.announce(&stack, change);
-        Ok(stack)
+        Ok((stack, changes))
     }
 
     /// Puts a member on top of its stack.
     pub fn set_stack_top(&self, id: &str, top: &ImageId) -> Result<Stack, String> {
+        self.set_stack_top_step(id, top).map(|(stack, _)| stack)
+    }
+
+    /// Puts a member on top of its stack; answers the stack and the step
+    /// ([`Changes`]) the vault's revert undoes (none when it was on top).
+    pub fn set_stack_top_step(&self, id: &str, top: &ImageId) -> Result<(Stack, Changes), String> {
         self.change_stack(id, "top", |stack| {
             if !stack.contains(top) {
                 return Err(format!("{} is not in stack {id}", top.hex()));
@@ -251,12 +274,133 @@ impl<S: Store> Vault<S> {
         })
     }
 
+    /// Groups `members` into one stack (Lightroom's "Group into Stack"),
+    /// collapsed: two images or more of the vault, counted with the
+    /// members of the stacks they are in already, which are merged into
+    /// it. `top` goes on top, else the top of the first stack merged,
+    /// else the first member. One transaction; answers the stack, the
+    /// step ([`Changes`]) the vault's revert undoes and the stacks merged.
+    pub fn group_stack(
+        &self,
+        members: &[ImageId],
+        top: Option<ImageId>,
+        who: &str,
+        now: u64,
+    ) -> Result<(Stack, Changes, Vec<Stack>), String> {
+        let (stack, changes, merged) = self.transaction(|store| {
+            let mut unique: Vec<ImageId> = Vec::new();
+            for m in members {
+                if store.image(m)?.is_none() {
+                    return Err(format!("no image {}", m.hex()));
+                }
+                if !unique.contains(m) {
+                    unique.push(*m);
+                }
+            }
+            let merged: Vec<Stack> = all(store)?
+                .into_iter()
+                .filter(|s| unique.iter().any(|m| s.contains(m)))
+                .collect();
+            for s in &merged {
+                for m in &s.members {
+                    let id = ImageId::from_hex(m)?;
+                    if !unique.contains(&id) {
+                        unique.push(id);
+                    }
+                }
+            }
+            if unique.len() < 2 {
+                return Err("a stack needs two images or more".into());
+            }
+            let top = match top {
+                Some(top) => top,
+                None => match merged.first() {
+                    Some(s) => ImageId::from_hex(&s.top)?,
+                    None => unique[0],
+                },
+            };
+            if !unique.contains(&top) {
+                return Err(format!("{} is not a member of the stack", top.hex()));
+            }
+            let stack = Stack {
+                id: stack_id(&unique),
+                members: unique.iter().map(ImageId::hex).collect(),
+                top: top.hex(),
+                expanded: false,
+                who: who.into(),
+                at: now,
+            };
+            let mut changes = Changes::default();
+            for s in &merged {
+                if s.id != stack.id {
+                    let before = store.document(STACKS, &s.id)?;
+                    store.set_document(STACKS, &s.id, None)?;
+                    changes.documents.push(document_change(&s.id, before, None));
+                }
+            }
+            let before = store.document(STACKS, &stack.id)?;
+            let mut kept = stack.clone();
+            if let Some(old) = before.clone().map(read).transpose()? {
+                // The same members grouped again: only the top may move.
+                kept.who = old.who;
+                kept.at = old.at;
+                kept.expanded = old.expanded;
+            }
+            let doc = serde_json::to_value(&kept).expect("stacks serialize");
+            if before.as_ref() != Some(&doc) {
+                store.set_document(STACKS, &kept.id, Some(&doc))?;
+                changes
+                    .documents
+                    .push(document_change(&kept.id, before, Some(doc)));
+            }
+            Ok((kept, changes, merged))
+        })?;
+        for s in merged.iter().filter(|s| s.id != stack.id) {
+            self.announce(s, "dissolved");
+        }
+        if !changes.is_empty() {
+            self.announce(&stack, "created");
+        }
+        Ok((stack, changes, merged))
+    }
+
+    /// Ungroups the stacks any of `images` is in (Lightroom's "Unstack"):
+    /// the groupings are forgotten, the images stay. One transaction;
+    /// answers the stacks and the step ([`Changes`]) the vault's revert
+    /// undoes.
+    ///
+    /// # Errors
+    /// None of `images` is in a stack.
+    pub fn ungroup_stacks(&self, images: &[ImageId]) -> Result<(Vec<Stack>, Changes), String> {
+        let (gone, changes) = self.transaction(|store| {
+            let gone: Vec<Stack> = all(store)?
+                .into_iter()
+                .filter(|s| images.iter().any(|m| s.contains(m)))
+                .collect();
+            if gone.is_empty() {
+                return Err("none of the images is in a stack".into());
+            }
+            let mut changes = Changes::default();
+            for s in &gone {
+                let before = store.document(STACKS, &s.id)?;
+                store.set_document(STACKS, &s.id, None)?;
+                changes.documents.push(document_change(&s.id, before, None));
+            }
+            Ok((gone, changes))
+        })?;
+        for s in &gone {
+            self.announce(s, "dissolved");
+        }
+        Ok((gone, changes))
+    }
+
     /// Shows a stack expanded (every member) or collapsed (its top).
     pub fn set_stack_expanded(&self, id: &str, expanded: bool) -> Result<Stack, String> {
         self.change_stack(id, "expanded", |stack| {
             stack.expanded = expanded;
             Ok(())
         })
+        .map(|(stack, _)| stack)
     }
 
     /// Keeps an image's signals (or with `None` forgets them), and its
@@ -406,6 +550,51 @@ mod tests {
         assert!(vault.stacks().unwrap().is_empty());
         assert_eq!(vault.images().unwrap().len(), 4);
         assert!(vault.dissolve_stack(&stack.id).is_err());
+    }
+
+    #[test]
+    fn grouping_merges_stacks_and_each_step_is_undone_by_revert() {
+        let (vault, ids) = vault_with(5);
+        let first = vault
+            .create_stack(&ids[..2], Some(ids[1]), "user", 10)
+            .unwrap();
+        // Grouping one member of a stack with two more merges it: its
+        // top stays on top.
+        let (stack, changes, merged) = vault
+            .group_stack(&[ids[0], ids[2], ids[3]], None, "user", 11)
+            .unwrap();
+        assert_eq!(merged, [first.clone()]);
+        assert_eq!(stack.members.len(), 4);
+        assert_eq!(stack.top, ids[1].hex());
+        assert_eq!(vault.stacks().unwrap(), [stack.clone()]);
+        assert_eq!(changes.documents.len(), 2);
+        vault.revert(&changes).unwrap();
+        assert_eq!(vault.stacks().unwrap(), [first.clone()]);
+        vault.replay(&changes).unwrap();
+        assert_eq!(vault.stacks().unwrap(), [stack.clone()]);
+
+        let (moved, top) = vault.set_stack_top_step(&stack.id, &ids[3]).unwrap();
+        assert_eq!(moved.top, ids[3].hex());
+        vault.revert(&top).unwrap();
+        assert_eq!(vault.stack(&stack.id).unwrap().unwrap().top, ids[1].hex());
+        vault.replay(&top).unwrap();
+        // Already on top: nothing to undo.
+        let (_, none) = vault.set_stack_top_step(&stack.id, &ids[3]).unwrap();
+        assert!(none.is_empty());
+
+        let (gone, ungrouped) = vault.ungroup_stacks(&[ids[2], ids[4]]).unwrap();
+        assert_eq!(gone.len(), 1);
+        assert!(vault.stacks().unwrap().is_empty());
+        assert_eq!(vault.images().unwrap().len(), 5);
+        vault.revert(&ungrouped).unwrap();
+        assert_eq!(vault.stack(&stack.id).unwrap().unwrap().top, ids[3].hex());
+        assert!(vault.ungroup_stacks(&[ids[4]]).is_err());
+        assert!(vault.group_stack(&[ids[4]], None, "user", 12).is_err());
+        assert!(
+            vault
+                .group_stack(&[ids[4], ids[0]], Some(ids[4]), "user", 12)
+                .is_ok()
+        );
     }
 
     #[test]

@@ -289,6 +289,13 @@ helios stacks --vault library.db dissolve STACK
 
 An image is named by its id or by a file the vault knows.
 
+In the desktop's Library, Ctrl+G groups the selection into a stack
+("Group into Stack"; the stacks the photos are in are merged, the photo
+under the cursor goes on top), Ctrl+Shift+G ungroups the stacks of the
+selection ("Unstack"), and "Move to Top of Stack" in the grid's context
+menu puts the photo under the cursor on top. Each is undone with
+Ctrl+Z.
+
 ## Suggesting stacks: `stacks.suggest`
 
 `stacks.suggest` is a library decision: it asks a **resolver** for stacks

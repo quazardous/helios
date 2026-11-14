@@ -91,10 +91,13 @@ impl Library {
         if !self.holds(image) {
             return Err(format!("{image} is not in the library"));
         }
-        self.version_asks.push(VersionAsk::Switch {
-            image: image.to_string(),
-            version: version.to_string(),
-        });
+        self.version_asks.push((
+            VersionAsk::Switch {
+                image: image.to_string(),
+                version: version.to_string(),
+            },
+            crate::library_history::current_batch(),
+        ));
         Ok(())
     }
 
@@ -130,16 +133,19 @@ impl Library {
                 .map(|h| h.version.clone())
                 .ok_or("the photo's versions are not read yet: name `version`")?,
         };
-        self.version_asks.push(VersionAsk::Remove {
-            image: image.clone(),
-            version: version.clone(),
-            confirmed,
-        });
+        self.version_asks.push((
+            VersionAsk::Remove {
+                image: image.clone(),
+                version: version.clone(),
+                confirmed,
+            },
+            crate::library_history::current_batch(),
+        ));
         Ok((image, version))
     }
 
-    /// What was asked of photos' versions since.
-    pub fn take_version_asks(&mut self) -> Vec<VersionAsk> {
+    /// What was asked of photos' versions since, each with its batch.
+    pub fn take_version_asks(&mut self) -> Vec<(VersionAsk, super::Batch)> {
         std::mem::take(&mut self.version_asks)
     }
 
@@ -256,7 +262,10 @@ mod tests {
             "the current one by default"
         );
         assert_eq!(
-            lib.take_version_asks(),
+            lib.take_version_asks()
+                .into_iter()
+                .map(|(ask, _)| ask)
+                .collect::<Vec<_>>(),
             [
                 VersionAsk::Switch {
                     image: "b".into(),
