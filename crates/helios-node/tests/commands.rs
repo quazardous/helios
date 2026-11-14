@@ -436,3 +436,110 @@ fn the_cli_and_the_mcp_pair_list_and_run_commands_on_a_running_node() {
         ]
     );
 }
+
+/// `helios run` chains: three steps answer in order, one line each; the
+/// first failed step stops the rest unless `--keep-going`; the same
+/// chain sent again with its key applies each step once (as after an
+/// unknown outcome); a script holds one step per line.
+#[test]
+fn helios_run_chains_steps_in_order_and_applies_a_resent_step_once() {
+    let node = Node::start("chain");
+    let address = node.dir.join("batch.sock");
+    let address = address.to_str().unwrap();
+    let runs = |node: &Node| ran(node).len();
+
+    let (code, out, err) = helios(&[
+        "run",
+        "--node",
+        address,
+        "--json",
+        "workflow.runs",
+        "--",
+        "workflow.runs",
+        "--",
+        "workflow.runs {}",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    let lines: Vec<Value> = out
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3, "{out}");
+    for (n, line) in lines.iter().enumerate() {
+        assert_eq!(line["step"], n + 1, "{line}");
+        assert_eq!(line["id"], "workflow.runs", "{line}");
+        assert_eq!(line["ok"], true, "{line}");
+        assert_eq!(line["answer"]["origin"], "cli", "{line}");
+    }
+    assert_eq!(runs(&node), 3);
+
+    // A failed step stops the rest, exit 1.
+    let chain = ["workflow.runs", "--", "pause", "--", "workflow.runs"];
+    let mut args = vec!["run", "--node", address];
+    args.extend(chain);
+    let (code, out, err) = helios(&args);
+    assert_eq!(code, 1, "{out}{err}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines[0].starts_with("ok      1 workflow.runs"), "{out}");
+    assert!(
+        lines[1].starts_with("failed  2 pause: only the debug control endpoint"),
+        "{out}"
+    );
+    assert_eq!(lines[2], "skipped 3 workflow.runs", "{out}");
+    assert_eq!(lines[3], "1 ran, 1 failed, 1 skipped", "{out}");
+    assert_eq!(runs(&node), 4);
+    // --keep-going runs every step; still exit 1.
+    args.push("--keep-going");
+    let (code, out, err) = helios(&args);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(
+        out.lines().nth(2).unwrap().starts_with("ok      3"),
+        "{out}"
+    );
+    assert_eq!(runs(&node), 6);
+
+    // Sent again with its key, each step that ran is applied once.
+    let keyed = [
+        "run",
+        "--node",
+        address,
+        "--json",
+        "--request-id",
+        "chain-key",
+        "workflow.runs",
+        "--",
+        "workflow.runs",
+    ];
+    let (code, first, err) = helios(&keyed);
+    assert_eq!(code, 0, "{first}{err}");
+    assert!(!first.contains("already_applied"), "{first}");
+    assert_eq!(runs(&node), 8);
+    let (code, again, err) = helios(&keyed);
+    assert_eq!(code, 0, "{again}{err}");
+    for line in again.lines() {
+        let line: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(line["already_applied"], true, "{line}");
+    }
+    assert_eq!(runs(&node), 8, "nothing ran twice");
+
+    // A script: one step per line, comments skipped.
+    let script = node.dir.join("steps.txt");
+    std::fs::write(
+        &script,
+        "# three reads\nworkflow.runs\n\nworkflow.runs {}\nworkflow.runs\n",
+    )
+    .unwrap();
+    let (code, out, err) = helios(&["run", "--node", address, "--file", script.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out.lines().last(),
+        Some("3 ran, 0 failed, 0 skipped"),
+        "{out}"
+    );
+    assert_eq!(runs(&node), 11);
+
+    // Wrong usage: an empty step.
+    let (code, _, err) = helios(&["run", "--node", address, "workflow.runs", "--"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("step 2 is empty"), "{err}");
+}
