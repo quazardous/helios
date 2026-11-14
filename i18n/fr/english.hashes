@@ -145,6 +145,7 @@ command-helios-workshops-moveTo.title 06334f8399557153
 command-help-health.title f0b3089eccbece31
 command-keymap-package-remove.title 09c89d2776f3a70e
 command-keymap-package.title dafef66dd3b9bf88
+command-library-chooseFolder.title 3f79579939a31f09
 command-library-collection-add.title bc2b88d961d3487b
 command-library-collection-create.title 715fcdd4f4b1b07a
 command-library-collection-delete.title 26c9dd4bf07bdfc0
@@ -168,12 +169,17 @@ command-library-importFiles.title a7190ef3f937e18a
 command-library-importSource.title b212d23cfe694c9e
 command-library-importWindow.title 5cf073c01aa7d73f
 command-library-importWith.title 8da42d005844e0c1
+command-library-marks-copy.title 110f7a1c6333475d
+command-library-marks-paste.title d7524ecd5be40fab
 command-library-openFolder.title 79525ab3a42262e5
 command-library-pasteFiles.title 409587651f782f9a
 command-library-quick-clear.title 1c4b266b7b1ccc5c
 command-library-quick-saveAs.title 81d31076888b75b1
 command-library-quick-toggle.title 1b2258b0758413c4
 command-library-scanFolder.title 65e0df53774b720b
+command-library-select-invert.title 9fabaf6253c7fd7d
+command-library-select-none.title cf5dfbd241a5672e
+command-library-select-similar.title 341f6a0f2b867360
 command-library-sort.title ac723c2319de076f
 command-library-storage.title 72ca240c73a1c7aa
 command-macro-dissolve.title e472cc526f105a70
@@ -1463,6 +1469,7 @@ health-cards 83aff067e1873bf9
 health-check-crashed d322acec9bb5dd69
 health-check-crashed-detail 36ba7a967769478f
 health-fix-back-up-now 3c376e3ce76d8253
+health-fix-choose-library-folder db696f6e530b1a77
 health-fix-gpu-docs e4a90238995c2ea0
 health-fix-library-folder 58938ce39af62bad
 health-fix-no-destination c0868aab0fc05629
@@ -1495,6 +1502,11 @@ health-gpu-software-detail db781fc15eeb6c93
 health-library 05a6f52961060837
 health-library-closed 8acdc57976c0eb12
 health-library-closed-detail 61f97265649bdc9f
+health-library-folder bc7222a2b755bc22
+health-library-folder-none 637121fb60326e93
+health-library-folder-none-detail 6c8890153af58c1a
+health-library-folder-ok a9ef3ec19731b8d7
+health-library-folder-ok-detail d9e113c5e8150755
 health-library-no-room 733d55e8e094a5dd
 health-library-no-room-detail 1cdd96a1db3eecbd
 health-library-ok c5056df052b42d90

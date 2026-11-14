@@ -36,7 +36,7 @@
 //! allow (nothing runs).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
@@ -309,6 +309,8 @@ pub struct Imported {
 pub trait LibraryFolder: Send + Sync {
     /// The library folder, if one is known.
     fn get(&self) -> Result<Option<PathBuf>, String>;
+    /// Remembers `dir` as the library folder.
+    fn set(&self, dir: &Path) -> Result<(), String>;
 }
 
 /// How long the service's page is waited for at most.

@@ -977,6 +977,11 @@ impl helios_gui::shell::LibraryFolder for Folder {
     fn get(&self) -> Result<Option<std::path::PathBuf>, String> {
         Ok(self.0.lock().unwrap().clone())
     }
+
+    fn set(&self, dir: &std::path::Path) -> Result<(), String> {
+        *self.0.lock().unwrap() = Some(dir.to_path_buf());
+        Ok(())
+    }
 }
 
 /// The folders the picked photos were imported into, by import.
