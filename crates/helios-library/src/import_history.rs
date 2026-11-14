@@ -20,10 +20,12 @@
 //! The newest [`KEPT`] records are kept; older ones are dropped as new
 //! ones are written.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use helios_connect::SourceRef;
+use helios_storage::VolumeId;
 use helios_vault::{Store, Vault};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -93,6 +95,15 @@ impl From<&SourceRef> for Remote {
     }
 }
 
+/// Where a source was on a removable volume.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Place {
+    /// The volume's id (`uuid:…`, `weak:<label>:<size>`).
+    pub volume: VolumeId,
+    /// The source's path inside it (empty: its root).
+    pub rel_path: PathBuf,
+}
+
 /// One import.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -109,6 +120,11 @@ pub struct Record {
     /// The folders, cards and files imported. Empty for an importer
     /// plugin's import, whose files its own scan listed.
     pub sources: Vec<PathBuf>,
+    /// The sources on a removable volume (a card, a camera, an external
+    /// disk), by path: the volume and the path inside it. The same card
+    /// mounted elsewhere is the same source ([`Record::place_of`]).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub places: BTreeMap<PathBuf, Place>,
     /// The importer plugin that listed the files, if one did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub importer: Option<String>,
@@ -126,6 +142,11 @@ pub struct Record {
 }
 
 impl Record {
+    /// Where `source`, one of its sources, was on a removable volume.
+    pub fn place_of(&self, source: &std::path::Path) -> Option<&Place> {
+        self.places.get(source)
+    }
+
     /// The params of `library.import` that run this import again, or why
     /// it cannot be: an importer plugin's import is run again from the
     /// import window, its plugin listing the files anew, and so is an
@@ -209,6 +230,31 @@ pub fn record<S: Store>(
     now: u64,
     outcome: Result<&Report, &str>,
 ) -> Result<Record, String> {
+    record_on(vault, sources, &[], options, now, outcome)
+}
+
+/// [`record`], `mounted` the removable volumes mounted as the import ran
+/// ([`crate::import::Options::places`]): each source on one keeps its
+/// place there.
+///
+/// # Errors
+/// The vault's.
+pub fn record_on<S: Store>(
+    vault: &Vault<S>,
+    sources: &[PathBuf],
+    mounted: &[crate::import::Mounted],
+    options: &Options,
+    now: u64,
+    outcome: Result<&Report, &str>,
+) -> Result<Record, String> {
+    let places = sources
+        .iter()
+        .filter_map(|s| {
+            let absolute = std::path::absolute(s).ok()?;
+            let (volume, rel_path) = crate::import::place_of(mounted, &absolute)?;
+            Some((s.clone(), Place { volume, rel_path }))
+        })
+        .collect();
     let importer = options.listed.as_ref().map(|l| l.by.clone());
     let record = Record {
         id: key(now),
@@ -220,6 +266,11 @@ pub fn record<S: Store>(
             Vec::new()
         } else {
             sources.to_vec()
+        },
+        places: if importer.is_some() {
+            BTreeMap::new()
+        } else {
+            places
         },
         importer,
         remote: None,

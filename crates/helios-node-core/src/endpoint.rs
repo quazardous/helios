@@ -32,7 +32,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, validate};
-use crate::{calibrate, cursor, init, library};
+use crate::{calibrate, cursor, init, library, promises};
 
 /// Who publishes the endpoint's events on the bus.
 pub const SOURCE: &str = "node";
@@ -122,6 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
     std::iter::once(library::import_spec())
         .chain(library::specs())
         .chain(cursor::specs())
+        .chain(promises::specs())
         .chain(calibrate::specs())
         .chain(init::specs())
         .collect()
@@ -149,6 +150,7 @@ pub fn command<S: Store>(
             && s.id != library::IMPORT
             && s.id != library::AGAIN
             && !cursor::handles(s.id.as_str())
+            && !promises::handles(s.id.as_str())
     }) else {
         return Err(format!("no command `{id}` on the vault"));
     };
@@ -203,6 +205,7 @@ pub struct VaultService<S: Store> {
     instance: String,
     windows: Option<Arc<dyn WindowCommands>>,
     cursors: cursor::Cursors,
+    promises: Arc<promises::Promises<S>>,
 }
 
 impl<S: Store> VaultService<S> {
@@ -211,6 +214,7 @@ impl<S: Store> VaultService<S> {
     /// node `instance`.
     pub fn new(vault: Arc<Vault<S>>, bus: Arc<Bus>, jobs: Jobs, instance: &str) -> Self {
         Self {
+            promises: Arc::new(promises::Promises::new(vault.clone(), jobs.clone())),
             vault,
             bus,
             jobs,
@@ -218,6 +222,14 @@ impl<S: Store> VaultService<S> {
             windows: None,
             cursors: cursor::Cursors::default(),
         }
+    }
+
+    /// Answers the promise commands with `promises`, the node's (with the
+    /// kinds it runs), rather than one of its own that runs none.
+    #[must_use]
+    pub fn with_promises(mut self, promises: Arc<promises::Promises<S>>) -> Self {
+        self.promises = promises;
+        self
     }
 
     /// Serves a desktop's windows' commands too.
@@ -423,6 +435,27 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
             answer["seq"] = json!(self.bus.last_seq());
             return Ok(answer);
         }
+        if promises::handles(method) {
+            if spec.read_only {
+                let mut answer = self.promises.run(method, &checked, call)?;
+                answer["command"] = json!(method);
+                answer["seq"] = json!(self.bus.last_seq());
+                return Ok(answer);
+            }
+            self.bus.publish(
+                SOURCE,
+                None,
+                &CommandRan {
+                    id: method,
+                    origin: &origin,
+                },
+            );
+            let mut answer = self.promises.run(method, &checked, call)?;
+            answer["command"] = json!(method);
+            answer["origin"] = json!(origin);
+            answer["seq"] = json!(self.bus.last_seq());
+            return Ok(answer);
+        }
         self.bus.publish(
             SOURCE,
             None,
@@ -449,9 +482,12 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
     }
 
     /// An import stops before its next file, a cursor window between
-    /// chunks of rows.
+    /// chunks of rows, a promise's wait at once.
     fn cancellable(&self, method: &str) -> bool {
-        method == library::IMPORT || method == library::AGAIN || method == "cursor.window"
+        method == library::IMPORT
+            || method == library::AGAIN
+            || method == "cursor.window"
+            || method == "promises.wait"
     }
 }
 
@@ -624,6 +660,7 @@ mod tests {
             commands["commands"].as_array().unwrap().len(),
             1 + library::IDS.len()
                 + cursor::IDS.len()
+                + promises::IDS.len()
                 + calibrate::specs().len()
                 + init::specs().len()
         );

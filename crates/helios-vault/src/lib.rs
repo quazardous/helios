@@ -46,6 +46,7 @@ pub mod cull;
 pub mod edit;
 pub mod fields;
 pub mod journal;
+pub mod promises;
 pub mod read_order;
 pub mod rotation;
 pub mod rules;
@@ -1435,6 +1436,8 @@ pub struct Vault<S: Store> {
     readers: Option<Readers<S>>,
     reads: Mutex<Reads>,
     catalog: Mutex<catalog::State>,
+    /// Which promises have a runner here, and their changes' signal.
+    promises_rt: promises::Runtime,
     bus: Option<std::sync::Arc<helios_core::Bus>>,
 }
 
@@ -1456,6 +1459,7 @@ impl<S: Store> Vault<S> {
             readers,
             reads: Mutex::new(Reads::default()),
             catalog: Mutex::new(catalog::State::default()),
+            promises_rt: promises::Runtime::default(),
             bus: None,
         }
     }
@@ -1694,18 +1698,25 @@ impl<S: Store> Vault<S> {
     /// at `now`, the Library flag left as it is. What a copy import notes
     /// of its source, read whole while copied, so a later import of the
     /// same file unchanged knows it without a read.
+    ///
+    /// `place`, for a file on a removable volume: the volume and its path
+    /// there, so the file is known wherever the volume is mounted next.
     pub fn record_read(
         &self,
         path: &Path,
+        place: Option<(VolumeId, PathBuf)>,
         id: ImageId,
         size: u64,
         modified: u64,
         now: u64,
     ) -> Result<(), String> {
         let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        self.transaction(|store| {
-            store.put_location(&id, &Location::seen(path, size, modified, now))
-        })?;
+        let mut location = Location::seen(path, size, modified, now);
+        if let Some((volume, rel)) = place {
+            location.volume = Some(volume);
+            location.rel_path = Some(rel);
+        }
+        self.transaction(|store| store.put_location(&id, &location))?;
         self.placed([id]);
         Ok(())
     }

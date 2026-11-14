@@ -295,6 +295,7 @@ pub fn registry() -> &'static Registry {
             .into_iter()
             .chain(crate::library::specs())
             .chain(crate::cursor::specs())
+            .chain(crate::promises::specs())
             .chain(crate::calibrate::profile_specs())
         {
             registry.register(spec).expect("each verb is declared once");
@@ -422,6 +423,7 @@ mod tests {
             .filter(|id| {
                 !crate::library::handles(id)
                     && !crate::cursor::handles(id)
+                    && !crate::promises::handles(id)
                     && !crate::calibrate::PROFILE_IDS.contains(id)
             })
             .collect();

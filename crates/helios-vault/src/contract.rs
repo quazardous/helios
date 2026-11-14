@@ -61,6 +61,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
     a_rotation_turns_resets_and_undoes(make());
+    promises_are_created_progressed_settled_and_listed(make());
 }
 
 /// For a store with read handles ([`Store::reader`]): a read that is not
@@ -2945,4 +2946,134 @@ fn a_rotation_turns_resets_and_undoes<S: Store>(s: S) {
     let audit = v.audit(&b).unwrap();
     assert!(audit.iter().any(|e| e.field == ROTATION && e.who == "user"));
     assert!(v.rotate(&[image(9).id], Turn::Right, "user", 11).is_err());
+}
+
+fn promises_are_created_progressed_settled_and_listed<S: Store>(store: S) {
+    use crate::promises::{DONE, Filter, PROGRESS, State};
+
+    let bus = Arc::new(Bus::new());
+    let v = Vault::new(store).with_bus(bus.clone());
+    let a = v
+        .create_promise(
+            "import",
+            "import-{id}",
+            "Import 3 photos",
+            json!({ "paths": ["/a"] }),
+            10,
+        )
+        .unwrap();
+    let b = v
+        .create_promise("export", "export-1", "Export 1 photo", json!(null), 10)
+        .unwrap();
+    assert_ne!(a.id, b.id, "ids are unique");
+    assert_eq!(
+        a.owner,
+        format!("import-{}", a.id),
+        "the owner names the promise"
+    );
+    assert_eq!((a.state.name(), a.attempts), ("pending", 1));
+    // Progress makes it running; it reads back as written.
+    let running = v
+        .progress_promise(&a.id, 1, Some(3), Some("a.cr3"), 11)
+        .unwrap();
+    assert_eq!(
+        running.state,
+        State::Running {
+            done: 1,
+            total: Some(3),
+            note: Some("a.cr3".into())
+        }
+    );
+    assert_eq!(v.promise(&a.id).unwrap(), Some(running));
+    // Settled once, with its result; never changed again.
+    let done = v
+        .settle_promise(
+            &a.id,
+            State::Done {
+                result: json!({ "imported": 3 }),
+            },
+            12,
+        )
+        .unwrap();
+    assert_eq!(done.updated, 12);
+    assert!(v.settle_promise(&a.id, State::Cancelled, 13).is_err());
+    assert!(v.progress_promise(&a.id, 2, None, None, 13).is_err());
+    assert!(v.ask_cancel_promise(&a.id, 13).is_err());
+    assert!(
+        v.settle_promise(&b.id, State::Pending, 13).is_err(),
+        "not an outcome"
+    );
+    // A cancel asked is noted; a failure that may be retried goes back to
+    // pending, one attempt more.
+    assert!(v.ask_cancel_promise(&b.id, 13).unwrap().cancel_asked);
+    v.settle_promise(
+        &b.id,
+        State::Failed {
+            reason: "disk full".into(),
+            retryable: true,
+        },
+        14,
+    )
+    .unwrap();
+    let again = v.retry_promise(&b.id, 15).unwrap();
+    assert_eq!(
+        (again.state.name(), again.attempts, again.cancel_asked),
+        ("pending", 2, false)
+    );
+    assert!(v.retry_promise(&a.id, 15).is_err(), "only a failed one");
+    // Lists filter by state, owner and kind, newest first.
+    let all: Vec<String> = v
+        .promises(&Filter::default())
+        .unwrap()
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(all, [b.id.clone(), a.id.clone()]);
+    let done_only = Filter {
+        states: vec!["done".into()],
+        ..Filter::default()
+    };
+    assert_eq!(v.promises(&done_only).unwrap().len(), 1);
+    let by_owner = Filter {
+        owner: Some("export-1".into()),
+        ..Filter::default()
+    };
+    assert_eq!(v.promises(&by_owner).unwrap()[0].id, b.id);
+    let by_kind = Filter {
+        kind: Some("nothing".into()),
+        ..Filter::default()
+    };
+    assert!(v.promises(&by_kind).unwrap().is_empty());
+    // Every change is announced: progress while unsettled, done once.
+    let kinds: Vec<(&str, String)> = bus
+        .since(0)
+        .iter()
+        .map(|e| (e.kind, e.payload["id"].as_str().unwrap_or("").to_string()))
+        .collect();
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|(k, id)| *k == DONE && *id == a.id)
+            .count(),
+        1
+    );
+    assert!(kinds.iter().any(|(k, id)| *k == PROGRESS && *id == b.id));
+    // Only a settled promise is forgotten.
+    assert!(v.forget_promise(&b.id).is_err());
+    assert!(v.forget_promise(&a.id).unwrap());
+    assert_eq!(v.promise(&a.id).unwrap(), None);
+    // A wait answers at once on a settled promise, at its timeout on one
+    // that is not.
+    let c = v.create_promise("t", "t-1", "t", json!(null), 20).unwrap();
+    let start = std::time::Instant::now();
+    let still = v
+        .wait_promise(&c.id, std::time::Duration::from_millis(50), &|| false)
+        .unwrap();
+    assert_eq!(still.state.name(), "pending");
+    assert!(start.elapsed() >= std::time::Duration::from_millis(50));
+    v.settle_promise(&c.id, State::Cancelled, 21).unwrap();
+    let settled = v
+        .wait_promise(&c.id, std::time::Duration::from_secs(5), &|| false)
+        .unwrap();
+    assert_eq!(settled.state, State::Cancelled);
 }
