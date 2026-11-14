@@ -1967,7 +1967,8 @@ impl Contents {
     /// Whether an Import takes the cell `i` when it is ticked.
     pub fn importable(&self, i: usize) -> bool {
         let c = &self.cells[i];
-        self.shows(c) && !c.offline && !(self.new_only && c.known()) && !self.filtered_out(i)
+        let held = self.new_only && c.known();
+        self.shows(c) && !c.offline && !held && !self.filtered_out(i)
     }
 
     /// The cells shown, by day (oldest first), each day in time order.
