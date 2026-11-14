@@ -1144,6 +1144,7 @@ gui-import-window-forget-source-hint = Takes it off this column, its name and ch
 gui-import-window-import = Import { $count }
 
 gui-import-window-in-library = in your Library
+gui-import-window-filtered = skipped by the import profile's filter
 
 gui-import-window-into = Into
 

@@ -816,6 +816,8 @@ struct GridWords {
     /// The pair's chip: "R+J".
     pair_short: String,
     offline: String,
+    /// A photo the source's import profile filter skips.
+    filtered: String,
     /// The browsers' switch and words.
     browse: super::import_browsers::BrowseWords,
     /// A source whose photos are chosen in its service's page: where to
@@ -827,6 +829,8 @@ struct GridWords {
 const IN_LIBRARY_ICON: &str = "phosphor:check-circle";
 /// The icon over a photo whose volume is not plugged in.
 const OFFLINE_ICON: &str = "phosphor:plugs";
+/// The icon over a photo its source's import profile filter skips.
+const FILTERED_ICON: &str = "phosphor:funnel";
 
 /// The window's words, in the shell's language.
 struct Words {
@@ -1837,6 +1841,10 @@ impl ImportWindow {
             pair: t(Message::new("gui-import-window-pair", "RAW+JPG")),
             pair_short: t(Message::new("gui-import-window-pair-short", "R+J")),
             offline: t(Message::new("gui-import-window-offline", "offline")),
+            filtered: t(Message::new(
+                "gui-import-window-filtered",
+                "skipped by the import profile's filter",
+            )),
             browse: super::import_browsers::BrowseWords::new(t),
             choose_on_the_right: t(Message::new(
                 "gui-import-window-choose-on-the-right",
@@ -1867,6 +1875,7 @@ impl ImportWindow {
         self.follow_selection();
         // The Contents column shows the source browsed in its browser.
         self.follow_browser();
+        self.follow_filters();
         let shown = self.sources.showing.clone();
         let before = self.choices.clone();
         // The profile editor edits a profile, not the source shown.
@@ -1974,6 +1983,11 @@ impl ImportWindow {
             self.keep_source_choices(shown, &before);
         }
         self.link_sources();
+        // A profile picked or its filter edited in this pass: the grid
+        // and the Import count follow at once.
+        if self.follow_filters() {
+            ctx.request_repaint();
+        }
     }
 
     /// Adds, reconnects or signs out an account, as the Sources column
@@ -2607,6 +2621,42 @@ fn entry_of(cell: &crate::import_scan::Cell) -> Option<SourceEntry> {
 }
 
 impl ImportWindow {
+    /// Gives the grid each source's import profile filter, the one its
+    /// Import runs with (as `Shell::import_ticked_sources` picks the
+    /// choices): the photos it skips are greyed and not counted. Whether
+    /// they changed.
+    pub(super) fn follow_filters(&mut self) -> bool {
+        let window = if self.manager.is_some() {
+            // The editor's choices are the profile edited, kept on it as
+            // they change: the window's are its profile's.
+            self.profiles.choices(&self.profile_in_use()).filter
+        } else {
+            self.choices.filter.clone()
+        };
+        let kept = self.sources.kept();
+        let mut filters: std::collections::HashMap<
+            PathBuf,
+            helios_library::import_profile::Filter,
+        > = self
+            .ticked
+            .iter()
+            .map(|p| {
+                let f = if kept {
+                    self.choices_for(p).filter
+                } else {
+                    window.clone()
+                };
+                (p.clone(), f)
+            })
+            .collect();
+        if let Some(root) = self.chosen_root() {
+            filters.insert(root.to_path_buf(), window);
+        }
+        let before = self.contents.revision();
+        self.contents.set_filters(filters);
+        self.contents.revision() != before
+    }
+
     /// The browser over the contents: made the first time, given what the
     /// scans found since (entries, marks, previews), on the first source
     /// ticked, its selection the photos ticked.
@@ -2661,6 +2711,9 @@ impl ImportWindow {
                         MarkChip::icon(IN_LIBRARY_ICON, words.in_library.clone())
                             .tone(Tone::Success),
                     );
+                }
+                if c.filtered_out(i) {
+                    chips.push(MarkChip::icon(FILTERED_ICON, words.filtered.clone()));
                 }
                 if cell.is_pair() {
                     chips.push(MarkChip::text(words.pair_short.clone(), words.pair.clone()));

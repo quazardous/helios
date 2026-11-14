@@ -47,6 +47,7 @@ use helios_connect::{
     ProviderRef, Settings, SourceRef, Text,
 };
 use helios_core::ContentHash;
+use helios_library::import_profile::Filter;
 use helios_storage::Card;
 use image::ImageEncoder;
 
@@ -1711,6 +1712,9 @@ pub struct Contents {
     pub types: Types,
     /// Images already in the Library are greyed and left out.
     pub new_only: bool,
+    /// Each source's import profile filter (by the source's path): the
+    /// files it skips are greyed and left out, as the import will.
+    filters: HashMap<PathBuf, Filter>,
     /// The folder the import window's folder tree shows: the photos in it
     /// and its subfolders alone; `None`: every photo.
     folder: Option<PathBuf>,
@@ -1914,6 +1918,44 @@ impl Contents {
         folders.into_iter().collect()
     }
 
+    /// Each source's import profile filter, by the source's path; a
+    /// source without one takes every file.
+    pub fn set_filters(&mut self, filters: HashMap<PathBuf, Filter>) {
+        if self.filters != filters {
+            self.filters = filters;
+            self.revision += 1;
+        }
+    }
+
+    /// Whether the import profile filter of the cell's source takes the
+    /// file at `path`: the import's own predicate
+    /// ([`Filter::takes`]) on the size and time listed, its "new only"
+    /// on what the grid knows of the Library.
+    fn filter_takes(&self, c: &Cell, path: &Path) -> bool {
+        let Some(filter) = self.filters.get(&c.source).filter(|f| !f.is_all()) else {
+            return true;
+        };
+        if filter.new_only {
+            let slot = usize::from(c.raw.as_deref() != Some(path));
+            if c.known[slot] {
+                return false;
+            }
+        }
+        let (size, modified) = self
+            .files
+            .get(path)
+            .copied()
+            .unwrap_or((c.bytes, c.modified));
+        filter.takes(path, size, modified.and_then(|m| u64::try_from(m).ok()))
+    }
+
+    /// Whether the import profile filter of its source skips every file
+    /// of the cell (under the types shown): greyed, not imported.
+    pub fn filtered_out(&self, i: usize) -> bool {
+        let c = &self.cells[i];
+        !c.files(self.types).iter().any(|p| self.filter_takes(c, p))
+    }
+
     pub fn set_types(&mut self, types: Types) {
         if self.types != types {
             self.types = types;
@@ -1925,7 +1967,7 @@ impl Contents {
     /// Whether an Import takes the cell `i` when it is ticked.
     pub fn importable(&self, i: usize) -> bool {
         let c = &self.cells[i];
-        self.shows(c) && !c.offline && !(self.new_only && c.known())
+        self.shows(c) && !c.offline && !(self.new_only && c.known()) && !self.filtered_out(i)
     }
 
     /// The cells shown, by day (oldest first), each day in time order.
@@ -1995,7 +2037,13 @@ impl Contents {
             .filter(|&i| {
                 self.cells[i].source == source && self.cells[i].ticked && self.importable(i)
             })
-            .flat_map(|i| self.cells[i].files(types))
+            .flat_map(|i| {
+                let c = &self.cells[i];
+                c.files(types)
+                    .into_iter()
+                    .filter(|p| self.filter_takes(c, p))
+                    .collect::<Vec<_>>()
+            })
             .collect()
     }
 }
@@ -2359,5 +2407,52 @@ mod tests {
         c.set_types(Types::All);
         c.new_only = false;
         assert_eq!(c.counts().selected, 2);
+    }
+
+    #[test]
+    fn a_source_s_profile_filter_greys_what_it_skips_and_the_count_follows() {
+        let mut c = Contents::new();
+        c.new_only = false;
+        c.add(found("/card/DCIM/IMG_1.CR2", false, 100));
+        c.add(found("/card/DCIM/IMG_1.JPG", false, 100));
+        c.add(found("/card/DCIM/DSC_2.JPG", false, 100));
+        c.add(found("/card/DCIM/IMG_3.JPG", true, 100));
+        assert_eq!(c.counts().selected, 3);
+        let before = c.revision();
+        // Raws alone: the pair stays for its raw, the JPEGs are greyed.
+        let raws = Filter {
+            kinds: vec![helios_library::import_profile::Kind::Raw],
+            ..Filter::default()
+        };
+        c.set_filters(HashMap::from([(PathBuf::from("/card"), raws.clone())]));
+        assert!(c.revision() > before, "the grid is published again");
+        assert!(!c.filtered_out(0) && c.filtered_out(1) && c.filtered_out(2));
+        let n = c.counts();
+        assert_eq!((n.photos, n.selected, n.selected_bytes), (3, 1, 20));
+        assert_eq!(
+            c.selected_files(Path::new("/card")),
+            [PathBuf::from("/card/DCIM/IMG_1.CR2")]
+        );
+        // The same filter again changes nothing.
+        let same = c.revision();
+        c.set_filters(HashMap::from([(PathBuf::from("/card"), raws)]));
+        assert_eq!(c.revision(), same);
+        // Names and new only: the known photo is left out by the filter
+        // too, with the window's "New only" off.
+        let named = Filter {
+            names: vec!["IMG_*".into()],
+            new_only: true,
+            ..Filter::default()
+        };
+        c.set_filters(HashMap::from([(PathBuf::from("/card"), named)]));
+        assert_eq!(c.counts().selected, 1);
+        assert!(c.filtered_out(2) && c.filtered_out(1));
+        // Another source's filter does not apply here.
+        let other = Filter {
+            kinds: vec![helios_library::import_profile::Kind::Video],
+            ..Filter::default()
+        };
+        c.set_filters(HashMap::from([(PathBuf::from("/other"), other)]));
+        assert_eq!(c.counts().selected, 3);
     }
 }
