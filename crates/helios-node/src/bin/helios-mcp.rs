@@ -1,11 +1,13 @@
 //! `helios-mcp`: an MCP server (stdio) over a running node's endpoints.
 //!
 //!     helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE]
-//!                [--read-root DIR]... [--write-root DIR] [--tools full|compact]
+//!                [--read-root DIR]... [--write-root DIR] [--tools full|compact|generated]
 //!
 //! `--tools compact` offers only the generic pair over the command
 //! registry (`helios_commands_list`, `helios_command_run`) and the sandbox
-//! pair, for an agent with a short context; `full`, the default, every tool.
+//! pair, for an agent with a short context; `--tools generated` adds one
+//! tool per command of the registry (`helios_cmd_<id>`, generated from it);
+//! `full`, the default, every hand-written tool.
 //!
 //! With a root, the paths an agent gives a tool are confined: read under a
 //! read root or the write root, written under the write root, refused
@@ -62,7 +64,7 @@ fn main() -> ExitCode {
             },
             _ => {
                 eprintln!(
-                    "usage: helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE] [--read-root DIR]... [--write-root DIR] [--tools full|compact]"
+                    "usage: helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE] [--read-root DIR]... [--write-root DIR] [--tools full|compact|generated]"
                 );
                 return ExitCode::from(2);
             }

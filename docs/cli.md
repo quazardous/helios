@@ -421,6 +421,21 @@ about a hundred, for an agent whose context is short. Every command stays
 reachable through `helios_command_run`; a call to another tool is refused
 and says so. `--tools full`, the default, offers every tool.
 
+`helios-mcp --tools generated` adds to those five one tool per command of
+the registry, generated from it: `helios_cmd_<id>` (`.` turned into `_`:
+`helios_cmd_library_stacks_list`), described by the command's label and
+category, its params schema as the input schema, `readOnlyHint` and
+`title` as annotations. Its arguments are the command's params, plus the
+server's own, which start with `_`: `_vault`, `_node` and `_window` pick
+the node as `helios_command_run`'s do, `_request_id` keys a change. A call
+is checked against the schema first, then runs as `helios_command_run`
+would, with the same caps, roots, key and "outcome unknown". The list is
+the registries compiled in (the node's verbs and a vault's commands),
+sorted by name, at most 120; a desktop's window commands depend on its
+open windows and stay reached through `helios_command_run`. `full` stays
+the default: its hand-written tools document the processing node's verbs
+better than a schema alone.
+
 ## Through the vault's node
 
 `import`, `import-darktable`, `stacks`, `commands`, `run` and `batch --sidecar --vault`
