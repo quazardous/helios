@@ -609,7 +609,10 @@ mod tests {
         let commands = client.request("commands.list", json!({})).unwrap();
         assert_eq!(
             commands["commands"].as_array().unwrap().len(),
-            1 + library::IDS.len() + cursor::IDS.len() + calibrate::specs().len()
+            1 + library::IDS.len()
+                + cursor::IDS.len()
+                + calibrate::specs().len()
+                + init::specs().len()
         );
     }
 
