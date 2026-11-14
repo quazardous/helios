@@ -11,9 +11,10 @@
 //!   Import takes only those.
 //! - **By date** (`timeline`): the same grid in the browser's agenda, by
 //!   capture day; the mode before comes back when another is chosen.
-//! - **Choose in the service's page** (`picker`): no grid yet, the
-//!   service's own page ("Choose photos in Google Photos…",
-//!   [`super::import_accounts::choose_ui`]).
+//! - **Choose in the service's page** (`picker`): the service's own page
+//!   ("Choose photos in Google Photos…",
+//!   [`super::import_accounts::choose_ui`]); the photos chosen there then
+//!   fill the grid ([`super::import_chosen`]).
 //! - **Albums** (`collections`): declared by connectors that will list a
 //!   service's albums; nothing lists an account's photos yet, so it says
 //!   so.
@@ -203,8 +204,8 @@ pub(super) enum Shown {
     /// The grid (all photos, the tree's folder, the timeline).
     Grid,
     /// An account whose photos are chosen in its service's page (from
-    /// the Detail column).
-    Picker,
+    /// the Detail column): the grid once they are chosen.
+    Picker(String),
     /// Nothing Helios lists.
     NotListed,
 }
@@ -235,7 +236,7 @@ pub(super) fn switch_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &BrowseW
         _ => None,
     };
     match (w.browsing.current, account) {
-        (Some(Browser::Picker), Some(_)) => Shown::Picker,
+        (Some(Browser::Picker), Some(id)) => Shown::Picker(id),
         (_, Some(_)) | (Some(Browser::Collections | Browser::Picker), None) => Shown::NotListed,
         _ => Shown::Grid,
     }
