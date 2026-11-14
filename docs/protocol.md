@@ -34,7 +34,8 @@ direction. Why JSON-RPC, and what other projects do, is in
   one connection carries several calls at once; answers come in the order
   the calls end, matched by id. A call without an id is a notification:
   it runs, and nothing is answered.
-- Batches (an array of calls) are not served yet: send one call per line.
+- Batches (an array of calls) are not served yet: send one call per line,
+  or several commands as one `command.batch` ([Command batches](#command-batches)).
 
 ## Protocol methods
 
@@ -43,6 +44,7 @@ direction. Why JSON-RPC, and what other projects do, is in
 | `node.hello` | all | `protocol` (semver), `oldest` (the oldest version still served), `instance` (the node's, the same on its three endpoints; a restarted node has another), `endpoint` (`inspect`, `debug`, `batch`), `permissions` (`inspect`; `batch`; `batch` and `debug`), `server` (name and version) |
 | `commands.list` | all | the capability list: on control and batch, every command with its schema, needs, `scope` (`node`), and whether it runs here, with `disabledReason` when it does not (`filter`, `enabled_only`); on inspect, its methods |
 | `command.run` | control, batch, a vault's | `{id, params, origin}` (and on a desktop's, `window`, `scope`): runs a listed command by its id, its params checked against its schema, a greyed one refused with its reason; the same as calling the id as a method |
+| `command.batch` | control, batch, a vault's | `{steps, stop_on_error, window, scope, origin}`: runs several commands in one call, each step as `command.run` runs it, and answers each step's result in order ([Command batches](#command-batches)) |
 | `events.subscribe` | inspect | `{prefix, since}`: answers `{subscription, last_seq, gap, instance}`, then sends the events whose kind starts with `prefix` as notifications on the same connection |
 | `events.unsubscribe` | inspect | `{subscription}`: stops it |
 | `$/cancel` | all | `{id}`: stops a call still running |
@@ -167,11 +169,47 @@ reads from the answer whether it had already run.
   `"already_applied": true`.
 - An in-process client (`Client::in_process`) calls the service directly:
   there is no connection to lose, and keys are not looked at.
+- A step of a command batch takes its own key (its `request_id`), looked
+  at as its `command.run`'s would be ([Command batches](#command-batches)).
 
 `helios-mcp` sends a key with every tool that changes something (the
-control tools that write, `helios_command_run`), a new one unless the
+control tools that write, `helios_command_run`, `helios_command_batch`), a new one unless the
 agent gives `request_id`, and names it after an outcome unknown. The `helios` CLI does
 the same with `--request-id` ([cli.md](cli.md)).
+
+## Command batches
+
+`command.batch` runs several commands in one call: each step is
+`{id, params, window, scope, request_id}` (only `id` required), run in
+order as `command.run` would run it, by the batch's origin (`origin`,
+else `_meta.origin`). A step without its own `window` or `scope` takes
+the batch's.
+
+```json
+{"jsonrpc": "2.0", "id": 9, "method": "command.batch", "params": {"steps": [{"id": "theme.select", "params": {"name": "helios-light"}}, {"id": "library.stacks.dissolve", "params": {}}, {"id": "library.stacks.list"}], "_meta": {"origin": "cli"}}}
+{"jsonrpc": "2.0", "id": 9, "result": {"steps": [{"id": "theme.select", "ok": true, "answer": {…}}, {"id": "library.stacks.dissolve", "ok": false, "error": {"code": -32602, "message": "…"}}, {"id": "library.stacks.list", "skipped": true}], "ran": 1, "failed": 1, "skipped": 1, "cancelled": false, "atomic": false}}
+```
+
+- **One result per step, in the order sent:** `ok: true` with its
+  `answer`, `ok: false` with its `error` (as a call's), or
+  `skipped: true`.
+- **`stop_on_error`** (true when not given): the first failed step stops
+  the batch, the steps after it are skipped. False, every step runs
+  whatever the others did.
+- **Not atomic** (`"atomic": false`): the steps that ran before a failed
+  one stay applied. Read the answer to know which.
+- **At most 256 steps;** more, an empty list or a step without `id` is
+  refused (-32602) before any step runs.
+- **Cancelled** (`$/cancel`): the running step ends, the rest are
+  skipped, and `cancelled` is true.
+- **Keys:** a step's `request_id` is its run's key, so a step sent again
+  in a later batch with the same key is applied once and its result says
+  `already_applied`. The batch may carry a key of its own
+  (`_meta.request_id`): sent again, the batch's whole answer comes back.
+  After an outcome unknown (-32008) on a batch, send it again with the
+  same key, or read the state; never resend it blindly.
+- The batch's answer is a success even when a step failed; a failed step
+  is in its result, not in the call's error.
 
 ## Cursors
 
@@ -238,6 +276,24 @@ many were in it) and `changes`, the step as the vault records it, which
 its revert puts back: the desktop's Ctrl+Z. Announced as
 `vault.library_changed`, as an undo or a redo of a library step is.
 
+`library.images.trash` (`images`, `plan`, `job`) moves photos' files to
+the system trash (Lightroom's "Delete from Disk", darktable's "delete
+(trash)") as a journaled job (`helios_library::trash`). The job is kept
+as the library document `trash/<job>` before any file moves: each file
+with its outcome (`pending`, `trashed`, `refused`, `failed`, `missing`,
+with the `reason`), written as it goes. Files on a memory card, on a
+backup or archive volume, in a `Helios Backup/` or `Helios Archive/`
+folder, or on a volume not plugged in are refused, with the reason. The
+trashed files' locations are marked missing, and a photo with a file
+trashed and none left to do leaves the Library (`vault.library_changed`;
+not a library step: the system trash is the undo). It answers `job`,
+`trashed`, `missing`, `refused` and `failed` (the files, with their
+`reason`) and `removed`. With `plan`, it only says what it would do:
+`images`, `files` (how many would go), `folders` and `refused`. With
+`job`, it resumes a job kept: its pending and failed files.
+`library.trash.jobs` (`job`) reads the jobs kept, newest first (`jobs`),
+or one (`job`).
+
 `library.documents.get` (`ns`, `key`) reads a library document
 (`document`, null when there is none), such as the Library's pinned and
 recent filters; `library.documents.set` (`ns`, `key`, `document`) keeps
@@ -271,9 +327,34 @@ in or took out and, for `quickToggle`, whether it put them in
 {"jsonrpc": "2.0", "id": 4, "result": {"name": "Trip 2024", "count": 0, "added": true, "changes": {"images": [], "documents": [{"ns": "library/collections", "key": "trip-2024", "before": {"kind": "album", "name": "Trip 2024", "images": []}, "after": {"kind": "album", "name": "Summer 2024", "images": []}}]}}}
 ```
 
+`library.changes.apply` walks such `changes` back (`forward` false: an
+undo) or again (`forward` true: a redo), all or nothing, and answers
+what it did: images `removed`, `restored`, `changed`, and `kept` as they
+are (changed since, or gone).
+
+`library.edit.head` (`image`) reads an image's newest edit: `head`, the
+whole version (`id`, also as `version`, `image`, `parents`, `edit`,
+`origin`, `at`, `label`, `meta`), null for an image never edited.
+`library.edit.add` writes one step of an edit session a client keeps on
+its side (its versions' ids are computed from their content):
+`version`, in the form `head` has, `step`, the session's step number,
+and `inProgress`, a step saved during a gesture. It refuses a version
+whose parents are not written, and announces the step as `edit.saved`.
+`library.snapshots.get` (`image`) reads an image's snapshots, oldest
+first (`snapshots`: `id`, `name`, `origin`, `at`, the `version` each is
+pinned to, null for the image with no edit, and that version's `edit`,
+or an `error` when it cannot be read); `library.snapshots.set` (`image`,
+`snapshots` in that form, without `edit`) replaces them, an empty list
+removing them.
+
+```json
+{"jsonrpc": "2.0", "id": 5, "method": "library.edit.add", "params": {"version": {"id": "9f…", "image": "0a…", "parents": ["41…"], "edit": {"modules": []}, "origin": "user", "at": 1700000000, "label": "set exposure"}, "step": 2, "inProgress": false}}
+{"jsonrpc": "2.0", "id": 5, "result": {"image": "0a…", "version": "9f…"}}
+```
+
 The desktop's library writes its fields, its stacks' expansion, its
-filter history, its workshop sessions' records, its albums and its photos
-taken out this
+filter history, its workshop sessions' records, its albums, its photos
+taken out, the steps of the edit shown and its snapshots this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
 answers are picked up at the next frames. Its grid reads the same way:
@@ -381,7 +462,7 @@ The desktop's embedded node does the same while it holds its library
 (`helios_node_core::endpoint::advertise`): it serves the library's
 commands (`library.import`, `library.importDarktable`,
 `library.keepSidecar`, `library.edit.head`, `library.edit.save`,
-`library.stacks.*`, plus `node.hello`, `commands.list` and
+`library.edit.add`, `library.snapshots.*`, `library.stacks.*`, plus `node.hello`, `commands.list` and
 `command.run`) on a private socket (loopback TCP behind a session token where there are no Unix
 sockets), writes the rendezvous file, whose `inspect` names that same
 endpoint, and removes it as Helios quits. The CLI and `helios-mcp` then

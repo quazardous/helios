@@ -157,6 +157,9 @@ enum Asked {
     Folders,
     /// The albums and the quick collection (`library.albums.list`).
     Albums,
+    /// What moving photos' files to the trash would do
+    /// (`library.images.trash`, `plan`), to ask first.
+    TrashPlan(crate::library::TrashAsk),
 }
 
 /// A write of the library sent to the node.
@@ -176,6 +179,9 @@ enum Write {
     /// Photos taken out of the Library (`library.images.remove`), asked
     /// at a time (seconds): one step of the library's history.
     Remove(Vec<String>, f64),
+    /// Photos' files moved to the system trash, confirmed
+    /// (`library.images.trash`): a journaled job, not a history step.
+    Trash(Vec<String>),
     /// A library document kept, or removed when none
     /// (`library.documents.set`).
     Document {
@@ -189,6 +195,18 @@ enum Write {
     /// An album or the quick collection changed (`library.albums.edit`),
     /// recorded in the library's history at `f64` (seconds) once done.
     Album(crate::library::AlbumEdit, f64),
+    /// A step of the edit shown (`library.edit.add`).
+    Edit(Box<EditStep>),
+    /// An image's snapshots kept (`library.snapshots.set`).
+    Snapshots(ImageId, Vec<helios_vault::snapshots::Snapshot>),
+}
+
+/// A step of an edit session sent to the node.
+struct EditStep {
+    version: Version,
+    in_progress: bool,
+    /// The session once the step is written.
+    after: EditSession,
 }
 
 impl Write {
@@ -213,6 +231,10 @@ impl Write {
                 helios_node_core::library::REMOVE,
                 json!({ "images": images }),
             ),
+            Self::Trash(images) => (
+                helios_node_core::library::TRASH,
+                json!({ "images": images }),
+            ),
             Self::Document { ns, key, document } => (
                 "library.documents.set",
                 json!({ "ns": ns, "key": key, "document": document }),
@@ -222,6 +244,21 @@ impl Write {
                 json!({ "id": id, "record": record }),
             ),
             Self::Album(edit, _) => ("library.albums.edit", album_params(edit)),
+            Self::Edit(step) => (
+                "library.edit.add",
+                json!({
+                    "version": step.version,
+                    "step": step.after.steps(),
+                    "inProgress": step.in_progress,
+                }),
+            ),
+            Self::Snapshots(image, snapshots) => (
+                "library.snapshots.set",
+                json!({
+                    "image": image.hex(),
+                    "snapshots": snapshots.iter().map(helios_vault::snapshots::Snapshot::to_json).collect::<Vec<_>>(),
+                }),
+            ),
         }
     }
 
@@ -234,9 +271,12 @@ impl Write {
             | Self::Accept(..)
             | Self::Decline(_)
             | Self::Remove(..)
+            | Self::Trash(_)
             | Self::Document { .. }
             | Self::Session(..)
-            | Self::Album(..) => &[],
+            | Self::Album(..)
+            | Self::Edit(_)
+            | Self::Snapshots(..) => &[],
         };
         changes.iter().map(|c| c.image.as_str())
     }
@@ -283,7 +323,11 @@ fn change_json(change: &Change) -> Value {
 
 /// The edit of the image shown.
 struct Editing {
+    /// The session as the steps made: some may still be on their way to
+    /// the node.
     session: EditSession,
+    /// The session as the node wrote it: what a refused step goes back to.
+    confirmed: EditSession,
     /// The module each node of the shown network runs, and the
     /// parameters it has, by node name: what an edit saves.
     modules: BTreeMap<String, (String, BTreeSet<String>)>,
@@ -529,8 +573,9 @@ fn row_of(row: &Value) -> Result<LibraryRow, String> {
     })
 }
 
-/// An image as the library shows it, and where it can be read (its first
-/// present copy).
+/// An image as the library shows it, and where it can be read: its first
+/// present copy, the node listing them in read order (the library's copy
+/// before a card's file, `helios_vault::ReadOrder`).
 fn entry_of(row: LibraryRow, changed: &HashMap<String, u64>) -> (Entry, Option<PathBuf>) {
     let presence = Presence::of(&row.locations);
     // The volume to plug in, for an image with no copy at hand.
@@ -787,6 +832,7 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
                 // The filters' history is a convenience: a warning.
                 Asked::FilterHistory => shell.notify(Level::Warning, e.message),
                 Asked::Folders | Asked::Albums => unreadable(shell, e.message),
+                Asked::TrashPlan(_) => not_trashed(shell, &e.message),
             }
             return;
         }
@@ -820,7 +866,101 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
             shell.library_mut().set_quick(quick);
             shell.library_mut().set_albums(albums);
         }
+        Asked::TrashPlan(ask) => ask_trash(shell, ask, &answer),
     }
+}
+
+/// Says the files were not moved to the trash, and why.
+fn not_trashed(shell: &mut Shell, error: &str) {
+    shell.notify(
+        Level::Warning,
+        Message::new(
+            "gui-trash-failed",
+            "The files were not moved to the Trash: { $error }",
+        )
+        .with("error", error),
+    );
+}
+
+/// The refusals of a trash plan or job, in one line: how many, and the
+/// first reason.
+fn refusals(answer: &Value) -> Option<Message> {
+    let refused = answer["refused"].as_array().filter(|r| !r.is_empty())?;
+    let reason = refused[0]["reason"].as_str().unwrap_or_default();
+    Some(
+        Message::new(
+            "gui-trash-refused",
+            "{ $count } files stay where they are: { $reason }",
+        )
+        .with("count", refused.len())
+        .with("reason", reason),
+    )
+}
+
+/// Asks before moving files to the trash, naming how many and where;
+/// says so when nothing can go.
+fn ask_trash(shell: &mut Shell, ask: &crate::library::TrashAsk, plan: &Value) {
+    use crate::library::{DELETE_REJECTED_COMMAND, TRASH_COMMAND};
+    let files = plan["files"].as_u64().unwrap_or(0);
+    if files == 0 {
+        let why = refusals(plan).map_or_else(String::new, |m| shell.text(m));
+        shell.notify(
+            Level::Warning,
+            Message::new(
+                "gui-trash-nothing",
+                "No file can be moved to the Trash. { $why }",
+            )
+            .with("why", why),
+        );
+        return;
+    }
+    let folders: Vec<&str> = plan["folders"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let place = match folders.as_slice() {
+        [one] => (*one).to_string(),
+        many => shell.text(
+            Message::new("gui-trash-folders", "{ $count } folders").with("count", many.len()),
+        ),
+    };
+    let count = ask.images.len();
+    let title = if ask.rejected {
+        Message::new(
+            "gui-trash-rejected-title",
+            "Delete { $count } rejected photos?",
+        )
+    } else {
+        Message::new("gui-trash-title", "Move { $count } photos to the Trash?")
+    }
+    .with("count", count);
+    let mut detail = shell.text(
+        Message::new(
+            "gui-trash-detail",
+            "Their { $files } files in { $place } go to the system Trash, which can restore them; Undo cannot, and they leave the Library.",
+        )
+        .with("files", files)
+        .with("place", place),
+    );
+    if let Some(m) = refusals(plan) {
+        detail = format!("{detail} {}", shell.text(m));
+    }
+    let confirm = crate::dialogs::Confirm {
+        title: shell.text(title),
+        detail,
+        verb: shell.text(Message::new("gui-trash-verb", "Move to Trash")),
+        danger: true,
+        command: if ask.rejected {
+            DELETE_REJECTED_COMMAND
+        } else {
+            TRASH_COMMAND
+        }
+        .to_owned(),
+        args: json!({ "images": ask.images, "confirmed": true }),
+    };
+    shell.confirm(confirm);
 }
 
 /// The photos counted by folder, from `library.folders`'s answer.
@@ -1069,7 +1209,19 @@ impl<S: Store + 'static> Persist<S> {
         write: Write,
         answer: Result<Value, helios_inspect::rpc::Error>,
     ) {
+        let write = match write {
+            Write::Edit(step) => return self.edit_written(shell, *step, answer),
+            other => other,
+        };
         match (&write, answer) {
+            (Write::Snapshots(..), Err(e)) => shell.notify(
+                Level::Error,
+                Message::new(
+                    "gui-snapshots-not-saved",
+                    "The snapshots were not saved: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Remove(_, at), Ok(answer)) => {
                 // The step the node made, recorded so Ctrl+Z puts the
                 // photos back; the Library reads itself again on the
@@ -1085,6 +1237,38 @@ impl<S: Store + 'static> Persist<S> {
                         format!("the photos taken out cannot be put back with undo: {e}"),
                     ),
                 }
+            }
+            (Write::Trash(_), Ok(done)) => {
+                let trashed = done["trashed"].as_u64().unwrap_or(0);
+                let failed = done["failed"].as_array().map_or(0, Vec::len);
+                let mut line = shell.text(
+                    Message::new(
+                        "gui-trash-done",
+                        "{ $count } files moved to the Trash (job { $job })",
+                    )
+                    .with("count", trashed)
+                    .with("job", done["job"].as_str().unwrap_or_default()),
+                );
+                if let Some(m) = refusals(&done) {
+                    line = format!("{line}. {}", shell.text(m));
+                }
+                if failed > 0 {
+                    let first = done["failed"][0]["reason"].as_str().unwrap_or_default();
+                    line = format!(
+                        "{line}. {}",
+                        shell.text(
+                            Message::new("gui-trash-some-failed", "{ $count } failed: { $error }",)
+                                .with("count", failed)
+                                .with("error", first)
+                        )
+                    );
+                }
+                let level = if failed > 0 {
+                    Level::Warning
+                } else {
+                    Level::Info
+                };
+                shell.notify(level, line);
             }
             (Write::Album(edit, at), Ok(done)) => {
                 match serde_json::from_value::<helios_vault::Changes>(done["changes"].clone()) {
@@ -1108,6 +1292,7 @@ impl<S: Store + 'static> Persist<S> {
                 .with("error", e.message),
             ),
             (_, Ok(_)) => {}
+            (Write::Trash(_), Err(e)) => not_trashed(shell, &e.message),
             (Write::Remove(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1130,7 +1315,8 @@ impl<S: Store + 'static> Persist<S> {
                 | Write::Accept(..)
                 | Write::Decline(_)
                 | Write::Document { .. }
-                | Write::Session(..),
+                | Write::Session(..)
+                | Write::Edit(_),
                 Err(e),
             ) => shell.notify(Level::Warning, e.message),
         }
@@ -1391,7 +1577,17 @@ impl<S: Store + 'static> Persist<S> {
         for said in crate::calibrate::on_open(&self.vault, image, &graph, shell.values()) {
             shell.notify(Level::Info, said);
         }
-        let (session, head) = EditSession::open(&self.vault, image)?;
+        // The steps of an image still on their way are written first: its
+        // head is read after them.
+        self.settle_edits(shell);
+        let head = self
+            .reader
+            .read("library.edit.head", json!({ "image": image.hex() }))?;
+        let head: Option<Version> = match &head["head"] {
+            Value::Null => None,
+            row => Some(serde_json::from_value(row.clone()).map_err(|e| e.to_string())?),
+        };
+        let session = EditSession::resume(image, head.as_ref());
         // The image with no edit: what a snapshot pinned to no version
         // restores.
         let unedited = edit::of_graph(&graph);
@@ -1423,6 +1619,7 @@ impl<S: Store + 'static> Persist<S> {
             store.committed()
         };
         self.editing = Some(Editing {
+            confirmed: session.clone(),
             session,
             modules,
             committed,
@@ -1443,7 +1640,10 @@ impl<S: Store + 'static> Persist<S> {
         unedited: &Value,
     ) -> Vec<crate::edit_snapshots::Taken> {
         use crate::edit_snapshots::{Pin, Taken, origin_of, values_of_edit};
-        let kept = match self.vault.snapshots(&image) {
+        let kept = match self
+            .reader
+            .read("library.snapshots.get", json!({ "image": image.hex() }))
+        {
             Ok(k) => k,
             Err(e) => {
                 shell.notify(Level::Warning, e);
@@ -1451,14 +1651,18 @@ impl<S: Store + 'static> Persist<S> {
             }
         };
         let mut out = Vec::new();
-        for s in kept {
-            let edit = match &s.version {
-                None => Ok(unedited.clone()),
-                Some(v) => self
-                    .vault
-                    .version(v)
-                    .and_then(|found| found.ok_or_else(|| format!("no version {}", v.hex())))
-                    .map(|found| found.edit),
+        for row in kept["snapshots"].as_array().into_iter().flatten() {
+            let s = match helios_vault::snapshots::Snapshot::from_json(row) {
+                Ok(s) => s,
+                Err(e) => {
+                    shell.notify(Level::Warning, e);
+                    continue;
+                }
+            };
+            let edit = match (&s.version, row["error"].as_str()) {
+                (_, Some(error)) => Err(error.to_string()),
+                (None, None) => Ok(unedited.clone()),
+                (Some(_), None) => Ok(row["edit"].clone()),
             };
             match edit.and_then(|e| values_of_edit(&e)) {
                 Ok(values) => out.push(Taken {
@@ -1510,16 +1714,27 @@ impl<S: Store + 'static> Persist<S> {
             book.settle(settled.then_some((step, committed, pin)));
             (book.pinned(), book.take_dirty())
         };
-        // Said once: the next change writes the whole list again.
-        if write && let Err(err) = self.vault.set_snapshots(&image, &pinned) {
-            shell.notify(
-                Level::Error,
-                Message::new(
-                    "gui-snapshots-not-saved",
-                    "The snapshots were not saved: { $error }",
-                )
-                .with("error", err),
-            );
+        // Sent after the edit's steps they pin: a refusal is said once,
+        // the next change writes the whole list again.
+        if write {
+            self.writes.push_back(Write::Snapshots(image, pinned));
+        }
+    }
+
+    /// Waits until the node has written the steps of edits and the
+    /// snapshots sent: an image opened is read after them.
+    fn settle_edits(&mut self, shell: &mut Shell) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let edits = |p: &Self| {
+            p.writing
+                .iter()
+                .map(|(w, _)| w)
+                .chain(&p.writes)
+                .any(|w| matches!(w, Write::Edit(_) | Write::Snapshots(..)))
+        };
+        while edits(self) && std::time::Instant::now() < deadline {
+            self.pump(shell);
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 
@@ -1631,6 +1846,19 @@ impl<S: Store + 'static> Persist<S> {
                 .into_iter()
                 .map(|images| Write::Remove(images, now)),
         );
+        for ask in shell.library_mut().take_trash_asks() {
+            if ask.confirmed {
+                self.writes.push_back(Write::Trash(ask.images));
+            } else {
+                // Asked first: the node says which files would go and
+                // which stay, then the question names them.
+                let pending = self.node.call(
+                    helios_node_core::library::TRASH,
+                    json!({ "images": ask.images, "plan": true }),
+                );
+                self.asked.push((Asked::TrashPlan(ask), pending));
+            }
+        }
         let expansions = shell.library_mut().take_expansions();
         self.writes.extend(
             expansions
@@ -1766,7 +1994,7 @@ impl<S: Store + 'static> Persist<S> {
                 current,
             )
         };
-        let saved = if committed == e.committed {
+        let step = if committed == e.committed {
             if let Some((gesture, by)) = gesture {
                 e.gesture = Some((gesture.clone(), by.clone()));
                 let since = *e.flushed_at.get_or_insert(now);
@@ -1774,8 +2002,7 @@ impl<S: Store + 'static> Persist<S> {
                     return;
                 }
                 e.flushed_at = Some(now);
-                e.session
-                    .save_in_progress(&self.vault, current, &gesture, &by, at)
+                e.session.step_in_progress(current, &gesture, &by, at)
             } else {
                 e.flushed_at = None;
                 // A gesture ended with no step: cancelled. If it was
@@ -1786,32 +2013,62 @@ impl<S: Store + 'static> Persist<S> {
                 if !e.session.in_progress() {
                     return;
                 }
-                e.session.save(
-                    &self.vault,
-                    current,
-                    &format!("{gesture} (cancelled)"),
-                    &by,
-                    at,
-                )
+                e.session
+                    .step(current, &format!("{gesture} (cancelled)"), &by, at)
             }
         } else {
             e.committed = committed;
             e.flushed_at = None;
             e.gesture = None;
-            e.session.save(&self.vault, current, &label, &origin, at)
+            e.session.step(current, &label, &origin, at)
         };
-        e.unsaved = saved.is_err();
-        if saved.is_ok() && !e.session.in_progress() {
-            // Renders of the image's head version are made again once a
-            // gesture ends, not at each save while it goes (a drag).
-            shell.library_mut().edit_changed(&e.session.image().hex());
+        // Written by the node in its turn, off the UI thread; its answer
+        // is picked up at a coming frame ([`Persist::written`]).
+        e.unsaved = false;
+        if let Some(version) = step {
+            self.writes.push_back(Write::Edit(Box::new(EditStep {
+                version,
+                in_progress: e.session.in_progress(),
+                after: e.session.clone(),
+            })));
         }
-        if let Err(err) = saved {
-            shell.notify(
-                Level::Error,
-                Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
-                    .with("error", err),
-            );
+    }
+
+    /// A step of an edit answered: the image's renders made again once a
+    /// gesture ended; refused, the session goes back to what the node
+    /// wrote, the steps made after it dropped.
+    fn edit_written(
+        &mut self,
+        shell: &mut Shell,
+        step: EditStep,
+        answer: Result<Value, helios_inspect::rpc::Error>,
+    ) {
+        let image = step.version.image;
+        let editing = self.editing.as_mut().filter(|e| e.session.image() == image);
+        match answer {
+            Ok(_) => {
+                if let Some(e) = editing {
+                    e.confirmed = step.after;
+                }
+                // Renders of the image's head version are made again once
+                // a gesture ends, not at each save while it goes (a drag).
+                if !step.in_progress {
+                    shell.library_mut().edit_changed(&image.hex());
+                }
+            }
+            Err(err) => {
+                if let Some(e) = editing {
+                    e.session = e.confirmed.clone();
+                    e.unsaved = true;
+                }
+                self.writes
+                    .retain(|w| !matches!(w, Write::Edit(s) if s.version.image == image));
+                shell.notify(
+                    Level::Error,
+                    Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
+                        .with("error", err.message),
+                );
+            }
         }
     }
 }

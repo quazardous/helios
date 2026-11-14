@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use helios_export::batch::{BatchRequest, Clash, Item, Settings, extension};
-use helios_vault::{EditSession, ImageId, Location, Store, Vault};
+use helios_vault::{EditSession, ImageId, Store, Vault};
 
 use crate::rename::{Naming, Pattern};
 use crate::signals::Signals;
@@ -63,12 +63,10 @@ pub fn plan<S: Store>(
     let ext = extension(&settings.output.format);
     let mut taken = HashSet::new();
     let mut items = Vec::with_capacity(images.len());
+    let order = vault.read_order()?;
     for (i, image) in images.iter().enumerate() {
-        let source = vault
-            .locations(image)?
-            .into_iter()
-            .find(Location::present)
-            .map(|l| l.path);
+        // The library's copy, a card's file only without one.
+        let source = order.file(&vault.locations(image)?).map(|l| l.path.clone());
         let Some(source) = source else {
             items.push(Item {
                 image: image.hex(),

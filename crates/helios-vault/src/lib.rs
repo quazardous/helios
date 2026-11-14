@@ -47,6 +47,7 @@ pub mod edit;
 pub mod fields;
 pub mod journal;
 pub mod promises;
+pub mod read_order;
 pub mod rules;
 pub mod settings;
 pub mod sightings;
@@ -65,6 +66,7 @@ pub use fields::{
     AuditEntry, BackupFilter, BackupState, BackupVolume, Backups, Command, Facets, Order, Query,
     Sort,
 };
+pub use read_order::ReadOrder;
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
 pub use undo::{Change, Changes, DocumentChange, ImageRows, Replayed};
@@ -1695,18 +1697,25 @@ impl<S: Store> Vault<S> {
     /// at `now`, the Library flag left as it is. What a copy import notes
     /// of its source, read whole while copied, so a later import of the
     /// same file unchanged knows it without a read.
+    ///
+    /// `place`, for a file on a removable volume: the volume and its path
+    /// there, so the file is known wherever the volume is mounted next.
     pub fn record_read(
         &self,
         path: &Path,
+        place: Option<(VolumeId, PathBuf)>,
         id: ImageId,
         size: u64,
         modified: u64,
         now: u64,
     ) -> Result<(), String> {
         let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        self.transaction(|store| {
-            store.put_location(&id, &Location::seen(path, size, modified, now))
-        })?;
+        let mut location = Location::seen(path, size, modified, now);
+        if let Some((volume, rel)) = place {
+            location.volume = Some(volume);
+            location.rel_path = Some(rel);
+        }
+        self.transaction(|store| store.put_location(&id, &location))?;
         self.placed([id]);
         Ok(())
     }

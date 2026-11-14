@@ -24,6 +24,9 @@ blake3.workspace = true
 log = "0.4"
 serde.workspace = true
 serde_json.workspace = true
+# "Move to Trash": the system trash per platform (freedesktop.org on
+# Linux and the BSDs, the Recycle Bin, the Finder's Trash). MIT.
+trash = { version = "5.3", default-features = false, features = ["coinit_apartmentthreaded", "freedesktop"] }
 
 [dev-dependencies]
 egui-pop-model.workspace = true

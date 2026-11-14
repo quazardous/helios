@@ -697,6 +697,15 @@ Into, the folder pattern, Name, Duplicates, Read darktable edits).
   takes the card's id the first time a card is seen at its path, its
   choices kept. The card's row and the column's first line show its
   label and its UUID's first characters.
+  The same holds in the left panels and the image map (2026-11-14): a
+  pinned card is kept with its volume id (the window's memory, `cards`)
+  and follows the card; each import history record keeps, for a source on
+  a removable volume, the volume and the path inside it (`places`), so
+  History lists the card once, where it is mounted now, with its last
+  import, and "Import again" reads it there. A copy import notes the
+  card's files on the volume (its id and the path inside it), so a card
+  read once is "already seen" wherever it is mounted next, and another
+  card mounted at the same path is read.
 - **Choices a connector cannot honour are hidden.** A connector reached
   through an account (`caps.accounts`, Google Photos) is remote: its
   photos are always copied ("Add where they are" hidden) and carry no

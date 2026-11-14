@@ -313,6 +313,9 @@ command-library-compare =
 command-library-copyFiles =
     .title = Copy files: the selected images' files, for a file manager or another application
 
+command-library-deleteRejected =
+    .title = Delete Rejected…: the rejected photos shown to the system trash (`images`: of them, those named), asked first unless `confirmed`
+
 command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 
@@ -390,6 +393,9 @@ command-library-sort =
 
 command-library-storage =
     .title = Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)
+
+command-library-trash =
+    .title = Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z
 
 command-macro-dissolve =
     .title = Give a macro way to its nodes, as ordinary ones (`node`; `dry_run`)

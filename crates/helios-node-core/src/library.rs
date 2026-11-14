@@ -2,9 +2,13 @@
 //! verbs: the stacks (`library.stacks.*`), darktable's sidecars kept as
 //! versions (`library.importDarktable`, one sidecar file with
 //! `library.keepSidecar`) and an image's edit read and saved
-//! (`library.edit.head`, `library.edit.save`), photos' fields set and
+//! (`library.edit.head`, `library.edit.save`, a session's step written
+//! with `library.edit.add`), its snapshots (`library.snapshots.get`,
+//! `.set`), photos' fields set and
 //! read (`library.fields.set`, `library.fields.get`), photos taken out
-//! of the Library (`library.images.remove`), the facet counts of
+//! of the Library (`library.images.remove`), their files moved to the
+//! system trash as a journaled job (`library.images.trash`, its jobs
+//! read with `library.trash.jobs`), the facet counts of
 //! a query (`library.facets`), the photos changed outside Helios
 //! (`library.changed.list`), the import history listed
 //! (`import.history.list`) and one import run again
@@ -13,7 +17,8 @@
 //! folders counted (`library.folders`) and the workshop sessions' records
 //! (`library.workshop.sessions.list`, `.set`), the albums and the quick
 //! collection read (`library.albums.list`) and changed
-//! (`library.albums.edit`, answering what changed for an undo history).
+//! (`library.albums.edit`, answering what changed for an undo history),
+//! and such changes undone or done again (`library.changes.apply`).
 //! `helios-node` lists them
 //! with its verbs; the desktop's node serves them too
 //! ([`crate::endpoint`]). They run on the vault the node owns, by whoever
@@ -37,8 +42,13 @@ pub const IDS: &[&str] = &[
     "library.keepSidecar",
     "library.edit.head",
     "library.edit.save",
+    "library.edit.add",
+    "library.snapshots.get",
+    "library.snapshots.set",
     "library.fields.set",
     REMOVE,
+    TRASH,
+    TRASH_JOBS,
     "library.fields.get",
     "library.facets",
     "library.changed.list",
@@ -58,6 +68,7 @@ pub const IDS: &[&str] = &[
     "library.workshop.sessions.set",
     "library.albums.list",
     "library.albums.edit",
+    "library.changes.apply",
     HISTORY_LIST,
     AGAIN,
 ];
@@ -66,6 +77,16 @@ pub const IDS: &[&str] = &[
 /// their flag only, no file touched; answers the step (`changes`), which
 /// the vault's revert undoes.
 pub const REMOVE: &str = "library.images.remove";
+
+/// Moves photos' files to the system trash (Lightroom's "Delete from
+/// Disk", darktable's "delete (trash)") as a journaled job: refused on
+/// cards and backup volumes, the photos taken out of the Library; `plan`
+/// only says what it would do, `job` resumes a job kept
+/// (`helios_library::trash`).
+pub const TRASH: &str = "library.images.trash";
+
+/// Reads the trash jobs kept, or one (`job`), with each file's outcome.
+pub const TRASH_JOBS: &str = "library.trash.jobs";
 
 /// Lists the import history (`helios_library::import_history`).
 pub const HISTORY_LIST: &str = "import.history.list";
@@ -148,6 +169,32 @@ pub fn specs() -> Vec<CommandSpec> {
             ("edit", json!({ "type": "object" }), true),
             ("label", string(), true),
         ])),
+        library("library.edit.add", "Write a step of an edit session").params(object(&[
+            (
+                "version",
+                json!({ "type": "object",
+                        "description": "the version (id, image, parents, edit, origin, at, label, meta)" }),
+                true,
+            ),
+            (
+                "step",
+                json!({ "type": "integer", "minimum": 1, "description": "the session's step number" }),
+                true,
+            ),
+            ("inProgress", json!({ "type": "boolean" }), false),
+        ])),
+        library("library.snapshots.get", "Read an image's snapshots")
+            .params(object(&[("image", string(), true)]))
+            .read_only(),
+        library("library.snapshots.set", "Keep an image's snapshots").params(object(&[
+            ("image", string(), true),
+            (
+                "snapshots",
+                json!({ "type": "array", "items": { "type": "object" },
+                        "description": "{id, name, origin, at, version}: version null for the image with no edit" }),
+                true,
+            ),
+        ])),
         library("library.fields.set", "Set photos' fields").params(object(&[(
             "changes",
             json!({ "type": "array", "items": { "type": "object" },
@@ -161,6 +208,28 @@ pub fn specs() -> Vec<CommandSpec> {
             "Take photos out of the Library, their files untouched",
         )
         .params(object(&[("images", images(), true)])),
+        library(
+            TRASH,
+            "Move photos' files to the system trash, as a journaled job",
+        )
+        .params(object(&[
+            ("images", images(), false),
+            (
+                "plan",
+                json!({ "type": "boolean",
+                        "description": "only say which files would go and which are refused" }),
+                false,
+            ),
+            (
+                "job",
+                json!({ "type": "string",
+                        "description": "a job kept, to resume: its pending and failed files" }),
+                false,
+            ),
+        ])),
+        library(TRASH_JOBS, "Read the trash jobs and each file's outcome")
+            .params(object(&[("job", string(), false)]))
+            .read_only(),
         library("library.fields.get", "Read photos' fields")
             .params(object(&[
                 ("images", images(), true),
@@ -297,6 +366,23 @@ pub fn specs() -> Vec<CommandSpec> {
                 ),
             ]),
         ),
+        library(
+            "library.changes.apply",
+            "Undo or redo a step of the library's history",
+        )
+        .params(object(&[
+            (
+                "changes",
+                json!({ "type": "object",
+                        "description": "what the step changed, as library.albums.edit answers it" }),
+                true,
+            ),
+            (
+                "forward",
+                json!({ "type": "boolean", "description": "true: done again; false: undone" }),
+                true,
+            ),
+        ])),
         CommandSpec::new(HISTORY_LIST, "List the import history", "Library")
             .needs(Need::Vault)
             .params(object(&[(
@@ -381,6 +467,65 @@ fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+/// `library.images.trash`: a plan, a new job worked, or a job resumed.
+fn trash<S: Store>(
+    vault: &Vault<S>,
+    bus: &Arc<Bus>,
+    params: &Value,
+    origin: &str,
+) -> Result<Value, String> {
+    use helios_library::trash::{self, Outcome};
+    let volumes = trash::volumes(vault)?;
+    let id = if let Some(job) = params["job"].as_str() {
+        job.to_string()
+    } else {
+        let ids = named(vault, params, "images")?;
+        if ids.is_empty() {
+            return Err("`images` names no photo".into());
+        }
+        if params["plan"].as_bool() == Some(true) {
+            let files = trash::plan(vault, &ids, &volumes)?;
+            let job = trash::Job {
+                id: String::new(),
+                at: now(),
+                by: origin.into(),
+                images: ids.iter().map(ImageId::hex).collect(),
+                files,
+                done: false,
+            };
+            let refused: Vec<_> = job
+                .files
+                .iter()
+                .filter(|f| f.outcome == Outcome::Refused)
+                .collect();
+            return Ok(json!({
+                "images": ids.len(),
+                "files": job.count(Outcome::Pending),
+                "folders": job.folders(),
+                "refused": to_json(&refused),
+            }));
+        }
+        trash::start(vault, &ids, &volumes, origin, now())?.id
+    };
+    let jobs = helios_core::jobs::Jobs::new(Arc::clone(bus));
+    let worked = trash::work(vault, &id, &*trash::bin(), Some(&jobs), now())?;
+    let job = &worked.job;
+    let of = |outcome: Outcome| {
+        job.files
+            .iter()
+            .filter(|f| f.outcome == outcome)
+            .collect::<Vec<_>>()
+    };
+    Ok(json!({
+        "job": job.id,
+        "trashed": job.count(Outcome::Trashed),
+        "missing": job.count(Outcome::Missing),
+        "refused": to_json(&of(Outcome::Refused)),
+        "failed": to_json(&of(Outcome::Failed)),
+        "removed": worked.changes.images.len(),
+    }))
 }
 
 fn to_json<T: serde::Serialize>(value: &T) -> Value {
@@ -532,6 +677,9 @@ pub fn run<S: Store>(
     params: &Value,
     origin: &str,
 ) -> Result<Value, String> {
+    if id == TRASH {
+        return trash(vault, bus, params, origin);
+    }
     let bus = Some(&**bus);
     match id {
         HISTORY_LIST => {
@@ -587,7 +735,12 @@ pub fn run<S: Store>(
             let (_, head) = helios_vault::EditSession::open(vault, id)?;
             Ok(json!({
                 "image": id.hex(),
-                "head": head.map(|v| json!({ "version": v.id.hex(), "edit": v.edit })),
+                // The whole version, its id also as `version`.
+                "head": head.map(|v| {
+                    let mut row = to_json(&v);
+                    row["version"] = json!(v.id.hex());
+                    row
+                }),
             }))
         }
         "library.edit.save" => {
@@ -601,6 +754,42 @@ pub fn run<S: Store>(
                 now(),
             )?;
             Ok(json!({ "image": id.hex(), "version": saved.map(|v| v.id.hex()) }))
+        }
+        "library.edit.add" => {
+            let version: helios_vault::Version = serde_json::from_value(params["version"].clone())
+                .map_err(|e| format!("a version: {e}"))?;
+            let step = params["step"].as_u64().unwrap_or(1);
+            let in_progress = params["inProgress"].as_bool().unwrap_or(false);
+            helios_vault::edit::add_step(vault, &version, step, in_progress)?;
+            Ok(json!({ "image": version.image.hex(), "version": version.id.hex() }))
+        }
+        "library.snapshots.get" => {
+            let id = image(vault, text(params, "image"))?;
+            let mut out = Vec::new();
+            for s in vault.snapshots(&id)? {
+                let mut row = s.to_json();
+                // Its version's edit, for the values it shows.
+                if let Some(v) = &s.version {
+                    match vault.version(v)? {
+                        Some(found) => row["edit"] = found.edit,
+                        None => row["error"] = json!(format!("no version {}", v.hex())),
+                    }
+                }
+                out.push(row);
+            }
+            Ok(json!({ "image": id.hex(), "snapshots": out }))
+        }
+        "library.snapshots.set" => {
+            let id = image(vault, text(params, "image"))?;
+            let snapshots = params["snapshots"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(helios_vault::snapshots::Snapshot::from_json)
+                .collect::<Result<Vec<_>, _>>()?;
+            vault
+                .set_snapshots(&id, &snapshots)
+                .map(|()| json!({ "kept": snapshots.len() }))
         }
         "library.fields.set" => {
             let mut commands = Vec::new();
@@ -651,6 +840,14 @@ pub fn run<S: Store>(
                 |changes| json!({ "removed": changes.images.len(), "changes": to_json(&changes) }),
             )
         }
+        TRASH_JOBS => match params["job"].as_str() {
+            Some(job) => helios_library::trash::get(vault, job)?
+                .map(|job| json!({ "job": to_json(&job) }))
+                .ok_or_else(|| format!("no trash job {job}")),
+            None => {
+                helios_library::trash::list(vault).map(|jobs| json!({ "jobs": to_json(&jobs) }))
+            }
+        },
         "library.facets" => {
             let query = crate::cursor::query_of(&params["query"])?;
             let rule = match &params["rule"] {
@@ -778,6 +975,16 @@ pub fn run<S: Store>(
             .and_then(|albums| Ok((albums, vault.quick_collection()?)))
             .map(|(albums, quick)| json!({ "albums": to_json(&albums), "quick": quick })),
         "library.albums.edit" => edit_album(vault, params),
+        "library.changes.apply" => {
+            let changes: helios_vault::Changes = serde_json::from_value(params["changes"].clone())
+                .map_err(|e| format!("the changes: {e}"))?;
+            let walked = if params["forward"].as_bool().unwrap_or(false) {
+                vault.replay(&changes)
+            } else {
+                vault.revert(&changes)
+            };
+            walked.map(|done| to_json(&done))
+        }
         other => Err(format!("no library command `{other}`")),
     }
 }
@@ -797,8 +1004,13 @@ mod tests {
             json!({ "image": "/p/a.raf", "sidecar": "/p/a.raf.xmp", "version": 0, "base": true }),
             json!({ "image": "0a" }),
             json!({ "image": "0a", "edit": {}, "label": "macro.make" }),
+            json!({ "version": { "id": "0a" }, "step": 1, "inProgress": false }),
+            json!({ "image": "0a" }),
+            json!({ "image": "0a", "snapshots": [{ "id": 1, "name": "A", "version": null }] }),
             json!({ "changes": [{ "image": "0a", "field": "rating", "value": 3 }] }),
             json!({ "images": ["0a"] }),
+            json!({ "images": ["0a"], "plan": true }),
+            json!({ "job": "trash-1700000000-1" }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
             json!({ "query": {} }),
             json!({}),
@@ -818,6 +1030,7 @@ mod tests {
             json!({ "id": "w1", "record": null }),
             json!({}),
             json!({ "op": "quickToggle", "images": [] }),
+            json!({ "changes": { "images": [], "documents": [] }, "forward": false }),
             json!({ "limit": 10 }),
             json!({ "id": "1700000000000-42-0" }),
         ];
@@ -875,6 +1088,92 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_session_steps_through_the_node_and_its_snapshots_are_kept() {
+        use helios_vault::{EditSession, Version};
+        let bus = Arc::new(Bus::new());
+        let vault = Vault::new(helios_vault::MemoryStore::default()).with_bus(bus.clone());
+        let dir = std::env::temp_dir().join(format!("helios-edit-steps-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.raw");
+        std::fs::write(&path, b"an edited photo").unwrap();
+        let image = vault.import_file(&path, 1).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let heard = bus.subscribe();
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user").unwrap();
+        let hex = image.hex();
+        assert_eq!(
+            call("library.edit.head", json!({ "image": hex }))["head"],
+            Value::Null
+        );
+        // The desktop's session steps on its side, the node writes them.
+        let mut session = EditSession::resume(image, None);
+        let first = session
+            .step(json!({ "modules": [] }), "exposure", "user", 1)
+            .unwrap();
+        let second = session
+            .step_in_progress(json!({ "modules": [1] }), "drag", "user", 2)
+            .unwrap();
+        for (version, step, in_progress) in [(&first, 1, false), (&second, 2, true)] {
+            let written = call(
+                "library.edit.add",
+                json!({ "version": to_json(version), "step": step, "inProgress": in_progress }),
+            );
+            assert_eq!(written["version"], version.id.hex());
+        }
+        let saved: Vec<_> = heard
+            .try_iter()
+            .filter(|e| e.kind == "edit.saved")
+            .collect();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[1].payload["in_progress"], true);
+        assert_eq!(saved[1].payload["label"], "drag (in progress)");
+        let head = call("library.edit.head", json!({ "image": hex }))["head"].clone();
+        assert_eq!(head["version"], second.id.hex());
+        let read: Version = serde_json::from_value(head).unwrap();
+        assert_eq!(read, second);
+        // A step whose parent is not written is refused.
+        let mut stray = EditSession::resume(image, Some(&second));
+        stray
+            .step(json!({ "modules": [2] }), "a", "user", 3)
+            .unwrap();
+        let orphan = stray
+            .step(json!({ "modules": [3] }), "b", "user", 4)
+            .unwrap();
+        let refused = run(
+            &vault,
+            &bus,
+            "library.edit.add",
+            &json!({ "version": to_json(&orphan), "step": 2 }),
+            "user",
+        );
+        assert!(refused.is_err());
+
+        let snapshots = json!([
+            { "id": 1, "name": "Before", "origin": "user", "at": 5, "version": null },
+            { "id": 2, "name": "After", "origin": "user", "at": 6, "version": first.id.hex() },
+        ]);
+        assert_eq!(
+            call(
+                "library.snapshots.set",
+                json!({ "image": hex, "snapshots": snapshots })
+            )["kept"],
+            2
+        );
+        let got = call("library.snapshots.get", json!({ "image": hex }))["snapshots"].clone();
+        assert_eq!(got[0]["edit"], Value::Null);
+        assert_eq!(got[1]["name"], "After");
+        assert_eq!(got[1]["edit"], first.edit);
+        call(
+            "library.snapshots.set",
+            json!({ "image": hex, "snapshots": [] }),
+        );
+        assert_eq!(
+            call("library.snapshots.get", json!({ "image": hex }))["snapshots"],
+            json!([])
+        );
+    }
+
+    #[test]
     fn albums_are_changed_and_listed_and_their_changes_read_back() {
         let vault = Vault::new(helios_vault::MemoryStore::default());
         let bus = Arc::new(Bus::new());
@@ -894,6 +1193,17 @@ mod tests {
             json!({ "op": "rename", "id": "trip", "name": "Journey" }),
         );
         assert_eq!(renamed["name"], "Trip", "the name it had");
+        // Undone and done again through the node, as the desktop's
+        // history walks it.
+        for forward in [false, true] {
+            let walked = call(
+                "library.changes.apply",
+                json!({ "changes": renamed["changes"], "forward": forward }),
+            );
+            let _: helios_vault::Replayed = serde_json::from_value(walked).unwrap();
+            let name = vault.albums().unwrap()[0].name.clone();
+            assert_eq!(name, if forward { "Journey" } else { "Trip" });
+        }
         let listed = call("library.albums.list", json!({}));
         assert_eq!(listed["quick"], json!([]));
         let albums: Vec<_> = listed["albums"]

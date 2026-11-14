@@ -402,6 +402,80 @@ impl EditSession {
         )
     }
 
+    /// The committed step [`EditSession::save`] would write, the session
+    /// moved on as if it was: for a writer that sends the version to the
+    /// vault itself (the desktop, through its node), the session kept
+    /// before the step to go back to if the write fails. None: nothing to
+    /// save.
+    pub fn step(&mut self, edit: Value, label: &str, origin: &str, now: u64) -> Option<Version> {
+        let force = self.in_progress;
+        self.next(edit, label, origin, now, force, false)
+    }
+
+    /// The step [`EditSession::save_in_progress`] would write, as
+    /// [`EditSession::step`].
+    pub fn step_in_progress(
+        &mut self,
+        edit: Value,
+        label: &str,
+        origin: &str,
+        now: u64,
+    ) -> Option<Version> {
+        self.next(
+            edit,
+            &format!("{label} (in progress)"),
+            origin,
+            now,
+            false,
+            true,
+        )
+    }
+
+    /// Continues the image's `head` (none: an image never edited), as
+    /// [`EditSession::open`] does with the head it reads.
+    pub fn resume(image: ImageId, head: Option<&Version>) -> Self {
+        Self {
+            image,
+            head: head.map(|v| v.id),
+            saved: head.map(|v| v.edit.clone()),
+            in_progress: false,
+            steps: 0,
+            meta: None,
+        }
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the save's parts, each named by its caller"
+    )]
+    fn next(
+        &mut self,
+        edit: Value,
+        label: &str,
+        origin: &str,
+        now: u64,
+        force: bool,
+        in_progress: bool,
+    ) -> Option<Version> {
+        if !force && self.saved.as_ref() == Some(&edit) {
+            return None;
+        }
+        let version = Version::new(
+            self.image,
+            self.head.into_iter().collect(),
+            edit,
+            origin,
+            now,
+        )
+        .labelled(label)
+        .with_meta(self.meta.clone());
+        self.head = Some(version.id);
+        self.saved = Some(version.edit.clone());
+        self.in_progress = in_progress;
+        self.steps += 1;
+        Some(version)
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "the save's parts, each named by its caller"
@@ -416,37 +490,39 @@ impl EditSession {
         force: bool,
         in_progress: bool,
     ) -> Result<Option<Version>, String> {
-        if !force && self.saved.as_ref() == Some(&edit) {
+        // The session moves on only once the version is written.
+        let mut after = self.clone();
+        let Some(version) = after.next(edit, label, origin, now, force, in_progress) else {
             return Ok(None);
-        }
-        let version = Version::new(
-            self.image,
-            self.head.into_iter().collect(),
-            edit,
-            origin,
-            now,
-        )
-        .labelled(label)
-        .with_meta(self.meta.clone());
-        vault.add_version(&version)?;
-        self.head = Some(version.id);
-        self.saved = Some(version.edit.clone());
-        self.in_progress = in_progress;
-        self.steps += 1;
-        if let Some(bus) = &vault.bus {
-            bus.publish(
-                "vault",
-                None,
-                &EditSaved {
-                    image: self.image.hex(),
-                    version: version.id.hex(),
-                    step: self.steps,
-                    label: label.into(),
-                    origin: origin.into(),
-                    in_progress,
-                },
-            );
-        }
+        };
+        add_step(vault, &version, after.steps, in_progress)?;
+        *self = after;
         Ok(Some(version))
     }
+}
+
+/// Writes `version`, step `step` of an edit session (`in_progress`: saved
+/// during a gesture), and announces it ([`EditSaved`]).
+pub fn add_step<S: Store>(
+    vault: &Vault<S>,
+    version: &Version,
+    step: u64,
+    in_progress: bool,
+) -> Result<(), String> {
+    vault.add_version(version)?;
+    if let Some(bus) = &vault.bus {
+        bus.publish(
+            "vault",
+            None,
+            &EditSaved {
+                image: version.image.hex(),
+                version: version.id.hex(),
+                step,
+                label: version.label.clone().unwrap_or_default(),
+                origin: version.origin.clone(),
+                in_progress,
+            },
+        );
+    }
+    Ok(())
 }

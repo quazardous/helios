@@ -86,10 +86,6 @@ pub const KIND: &str = "import";
 /// The imports' job ids in this process: `import-1`, `import-2`...
 pub(crate) static NEXT: AtomicU64 = AtomicU64::new(1);
 
-/// Where the library folder is kept (`library/settings`, key `root`).
-const SETTINGS: &str = "settings";
-const ROOT: &str = "root";
-
 /// Where imported files end up.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Placement {
@@ -281,6 +277,48 @@ pub struct Options {
     /// Who asked for it (`user`, `cli`, `agent:NAME`…), for its record in
     /// the import history ([`crate::import_history`]).
     pub origin: Option<String>,
+    /// The removable volumes (cards, cameras, external disks) mounted
+    /// now, as the caller's volume watch sees them; `None`: the
+    /// machine's, read once as the import starts ([`Options::places`]).
+    /// A file on one is known by the volume and its path there, not by
+    /// where the volume is mounted: a card read once is "already seen"
+    /// wherever it is mounted next.
+    pub mounted: Option<Vec<helios_storage::Volume>>,
+}
+
+/// A removable volume mounted now: its mount point and its identity.
+pub type Mounted = (PathBuf, helios_storage::VolumeId);
+
+impl Options {
+    /// The removable volumes mounted now, deepest mount point first:
+    /// [`Options::mounted`], else the machine's.
+    pub fn places(&self) -> Vec<Mounted> {
+        let volumes = self
+            .mounted
+            .clone()
+            .unwrap_or_else(|| helios_storage::Volumes::volumes(&*helios_storage::system()));
+        let mut out: Vec<Mounted> = volumes
+            .iter()
+            .filter(|v| {
+                matches!(
+                    v.kind,
+                    helios_storage::VolumeKind::Removable | helios_storage::VolumeKind::External
+                )
+            })
+            .filter_map(|v| Some((v.mount.clone()?, v.id.clone())))
+            .collect();
+        out.sort_by_key(|(m, _)| std::cmp::Reverse(m.components().count()));
+        out
+    }
+}
+
+/// The volume among `mounted` (deepest first) holding `path`, with the
+/// path inside it.
+pub fn place_of(mounted: &[Mounted], path: &Path) -> Option<(helios_storage::VolumeId, PathBuf)> {
+    mounted.iter().find_map(|(root, id)| {
+        let rel = path.strip_prefix(root).ok()?;
+        Some((id.clone(), rel.to_path_buf()))
+    })
 }
 
 impl Default for Options {
@@ -295,6 +333,7 @@ impl Default for Options {
             listed: None,
             cancel: None,
             origin: None,
+            mounted: None,
         }
     }
 }
@@ -515,14 +554,12 @@ impl Report {
 
 /// The library folder copies go to, as the vault remembers it.
 pub fn library_root<S: Store>(vault: &Vault<S>) -> Result<Option<PathBuf>, String> {
-    Ok(vault
-        .library_document(SETTINGS, ROOT)?
-        .and_then(|v| v["path"].as_str().map(PathBuf::from)))
+    vault.library_folder()
 }
 
 /// Remembers the library folder copies go to.
 pub fn set_library_root<S: Store>(vault: &Vault<S>, root: &Path) -> Result<(), String> {
-    vault.set_library_document(SETTINGS, ROOT, Some(&json!({ "path": root })))
+    vault.set_library_folder(root)
 }
 
 /// The room a library folder needs at least to be offered: 1 GiB.
@@ -885,6 +922,8 @@ struct Run<'a, S: Store> {
     touched: Vec<(ImageId, Option<ImageRows>)>,
     /// Its job's id: what sets the Library flag (`library_by`).
     by: String,
+    /// The removable volumes mounted as it started ([`Options::places`]).
+    places: Vec<Mounted>,
 }
 
 impl<S: Store> Run<'_, S> {
@@ -927,8 +966,23 @@ impl<S: Store> Run<'_, S> {
             return Ok(None);
         };
         let absolute = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let place = place_of(&self.places, &absolute);
+        // On a removable volume, the file is known by the volume and its
+        // path there: the same card mounted elsewhere is read once, and
+        // another card mounted where it was is not taken for it. Its
+        // presence is not asked: the file is here now.
+        if let Some((volume, rel)) = &place
+            && let Some(s) = self.vault.sighting_at(Some(volume), Some(rel), &absolute)?
+        {
+            return Ok(s.image.filter(|_| s.size == size && s.modified == modified));
+        }
         Ok(self.vault.at_path(&absolute)?.and_then(|(id, l)| {
-            (l.present() && l.size == size && l.modified == modified).then_some(id)
+            // A location on another volume is another card's file.
+            let here = match (&place, &l.volume) {
+                (Some((volume, _)), Some(v)) => v == volume,
+                _ => true,
+            };
+            (here && l.present() && l.size == size && l.modified == modified).then_some(id)
         }))
     }
 
@@ -979,12 +1033,23 @@ impl<S: Store> Run<'_, S> {
         let before = if copying { stamp(path) } else { None };
         let seen = self.seen_before(path)?;
         let outcome = self.file_known(path, copying, seen)?;
+        // A card's file known by its volume, mounted elsewhere now, is
+        // noted where it is.
+        let absolute = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let place = place_of(&self.places, &absolute);
+        let moved = seen.is_some()
+            && place.is_some()
+            && self
+                .vault
+                .at_path(&absolute)?
+                .is_none_or(|(_, l)| l.volume.is_none());
         if let Some((size, modified)) = before
-            && seen.is_none()
-            && let Some(id) = self.hashes.get(path).copied()
+            && (seen.is_none() || moved)
+            && let Some(id) = seen.or_else(|| self.hashes.get(path).copied())
             && self.vault.image(&id)?.is_some()
         {
-            self.vault.record_read(path, id, size, modified, self.now)?;
+            self.vault
+                .record_read(path, place, id, size, modified, self.now)?;
         }
         Ok(outcome)
     }
@@ -1329,11 +1394,13 @@ pub fn import<S: Store>(
     now: u64,
     emit: &mut impl FnMut(&Value),
 ) -> Result<Report, String> {
-    let ended = run_import(vault, jobs, sources, options, now, emit);
+    let places = options.places();
+    let ended = run_import(vault, jobs, sources, options, &places, now, emit);
     // Each import leaves its record, whoever ran it; a record that cannot
     // be written does not undo the import, it is said.
     let outcome = ended.as_ref().map_err(String::as_str);
-    if let Err(e) = crate::import_history::record(vault, sources, options, now, outcome) {
+    if let Err(e) = crate::import_history::record_on(vault, sources, &places, options, now, outcome)
+    {
         log::warn!("import history: {e}");
     }
     ended
@@ -1345,6 +1412,7 @@ fn run_import<S: Store>(
     jobs: &Jobs,
     sources: &[PathBuf],
     options: &Options,
+    places: &[Mounted],
     now: u64,
     emit: &mut impl FnMut(&Value),
 ) -> Result<Report, String> {
@@ -1401,6 +1469,7 @@ fn run_import<S: Store>(
         stop,
         touched: Vec::new(),
         by: id.clone(),
+        places: places.to_vec(),
     };
     for (done, (source, path)) in files.iter().enumerate() {
         if run.stopped() {

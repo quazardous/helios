@@ -1177,6 +1177,8 @@ gui-library-cull-soft = soft
 
 gui-library-cull-unmeasured = not measured
 
+gui-library-delete-rejected = Delete Rejected…
+
 gui-library-drop-add = Add { $count } photos
 
 gui-library-drop-set = Not here: drop the photos on one of the set's albums
@@ -1310,6 +1312,8 @@ gui-library-sort-tip = Sort by
 gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
+
+gui-library-trash = Move to Trash…
 
 gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 
@@ -2284,6 +2288,26 @@ gui-theme-exported = theme exported to { $path }
 gui-theme-problem = theme { $name }: { $problem }
 
 gui-theme-unknown = theme { $name }: no theme `{ $name }`: { $default } is used instead
+
+gui-trash-detail = Their { $files } files in { $place } go to the system Trash, which can restore them; Undo cannot, and they leave the Library.
+
+gui-trash-done = { $count } files moved to the Trash (job { $job })
+
+gui-trash-failed = The files were not moved to the Trash: { $error }
+
+gui-trash-folders = { $count } folders
+
+gui-trash-nothing = No file can be moved to the Trash. { $why }
+
+gui-trash-refused = { $count } files stay where they are: { $reason }
+
+gui-trash-rejected-title = Delete { $count } rejected photos?
+
+gui-trash-some-failed = { $count } failed: { $error }
+
+gui-trash-title = Move { $count } photos to the Trash?
+
+gui-trash-verb = Move to Trash
 
 gui-vault-unreadable = Cannot read the library: { $error }
 
