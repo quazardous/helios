@@ -1865,7 +1865,12 @@ fn main() -> Result<(), String> {
     if let [flag] = args.as_slice()
         && (flag == "--version" || flag == "-V")
     {
-        println!("helios-gui {}", env!("HELIOS_VERSION"));
+        // A closed stdout is no panic: on Windows a shell may not wait
+        // for a windowed program and close the pipe first.
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "helios-gui {}", env!("HELIOS_VERSION"));
+        let _ = out.flush();
         return Ok(());
     }
     start::begin();
