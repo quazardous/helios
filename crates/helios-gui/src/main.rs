@@ -65,6 +65,8 @@ fn earlier_layout(workspace: &Path, ui_settings: &Path) -> Option<Layout> {
 type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
 type LocalNode = helios_gui::node::LocalNode<helios_vault_sqlite::SqliteStore>;
 type Backups = helios_gui::node_jobs::Backups<helios_vault_sqlite::SqliteStore>;
+/// The node's library, as the desktop wires it.
+type Library = helios_node_core::desktop::Library<helios_vault_sqlite::SqliteStore>;
 
 /// A problem worth knowing: on the terminal, and in the log file (set up
 /// right after the instance check).
@@ -150,7 +152,7 @@ fn seconds_f64() -> f64 {
 /// settings. The plugins' own checks join them, owned by each plugin, a
 /// connector's handed its accounts by `accounts`.
 fn health_runner(
-    vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
+    library: Option<Library>,
     file: Option<PathBuf>,
     cards: Arc<std::sync::Mutex<Vec<helios_library::import::Card>>>,
     settings: egui_pop::core::binding::SharedStore,
@@ -159,28 +161,31 @@ fn health_runner(
 ) -> helios_health::runner::Runner {
     use helios_health::backup::CardShort;
     use helios_health::{Findings, Ignored, Registry, runner};
-    let context =
-        helios_node_core::health::HealthInputs::new(helios_storage::system(), vault, file)
-            .with_destination_days(move || helios_gui::platform::destination_days(&settings))
-            .with_cards(move || {
-                cards
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .iter()
-                    .filter(|c| c.path.is_dir())
-                    .map(|c| CardShort {
-                        label: c.label.clone(),
-                        short: c.short,
-                    })
-                    .collect()
-            })
-            .with_gpu(health_gpu)
-            .with_plugins({
-                let plugins = plugins.clone();
-                move || health_plugins(&plugins)
-            })
-            .with_snapshots(helios_gui::catalogue::health)
-            .into_context();
+    let inputs = match library {
+        Some(library) => library.health_inputs(helios_storage::system(), file),
+        None => helios_node_core::health::HealthInputs::new(helios_storage::system(), None, file),
+    };
+    let context = inputs
+        .with_destination_days(move || helios_gui::platform::destination_days(&settings))
+        .with_cards(move || {
+            cards
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .filter(|c| c.path.is_dir())
+                .map(|c| CardShort {
+                    label: c.label.clone(),
+                    short: c.short,
+                })
+                .collect()
+        })
+        .with_gpu(health_gpu)
+        .with_plugins({
+            let plugins = plugins.clone();
+            move || health_plugins(&plugins)
+        })
+        .with_snapshots(helios_gui::catalogue::health)
+        .into_context();
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
     let mut registry = Registry::builtin();
     if let Err(problems) = registry.add(
@@ -354,43 +359,27 @@ fn health_plugins(broker: &helios_plugin::Broker) -> Vec<helios_health::plugins:
 /// (`helios_library::capture::backfill`): a job in the jobs centre that
 /// resumes where the last one stopped, and does nothing once finished;
 /// then, the same way, the culling signals (`helios_library::cull`).
-fn backfill_captures<S: helios_vault::Store + 'static>(
-    vault: Arc<helios_vault::Vault<S>>,
-    jobs: helios_core::jobs::Jobs,
-) {
-    std::thread::spawn(move || {
-        if let Err(e) =
-            helios_library::capture::backfill(&vault, &jobs, &helios_library::capture::Files, None)
-        {
-            warn(&format!("capture backfill: {e}"));
-        }
-        // The culling signals (focus, clipping, exposure) of the photos
-        // measured before Helios kept them, after the captures.
-        if let Err(e) =
-            helios_library::cull::backfill(&vault, &jobs, &helios_library::cull::Files, None)
-        {
-            warn(&format!("cull backfill: {e}"));
-        }
-    });
+fn backfill_captures(library: Library, jobs: helios_core::jobs::Jobs) {
+    std::thread::spawn(move || library.backfill(&jobs, |e| warn(&e)));
 }
 
 /// The library's folder, kept in its vault: where chosen photos are
 /// copied when the import window's Into names none.
-struct LibraryFolder(Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>);
+struct LibraryFolder(Library);
 
 impl helios_gui::shell::LibraryFolder for LibraryFolder {
     fn get(&self) -> Result<Option<PathBuf>, String> {
-        helios_library::import::library_root(self.0.as_ref())
+        self.0.folder()
     }
 
     fn set(&self, dir: &Path) -> Result<(), String> {
         let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        helios_library::import::set_library_root(self.0.as_ref(), &dir)
+        self.0.set_folder(&dir)
     }
 
     fn has_camera_looks(&self) -> bool {
-        self.0.look_defaults().is_ok_and(|d| !d.is_empty())
+        self.0.has_camera_looks()
     }
 }
 
@@ -611,7 +600,7 @@ fn library_commands(
     use serde_json::{Value, json};
 
     let text = |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
-    let (vault, jobs) = (persist.vault().clone(), shell.jobs());
+    let (library, jobs) = (persist.library().clone(), shell.jobs());
     // The node's backups, for the strategy's "after each import".
     let after_import = backups.cloned();
     let (done, ctx) = (refill.clone(), ctx.clone());
@@ -647,7 +636,7 @@ fn library_commands(
         shell.add_import_connector(Arc::new(provider));
     }
     {
-        let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
+        let (library, jobs, done, ctx) = (library.clone(), jobs.clone(), done.clone(), ctx.clone());
         let history = history.clone();
         let backed = after_import.clone();
         shell.set_import_remote(Arc::new(move |job, mut emit| {
@@ -664,7 +653,7 @@ fn library_commands(
                 &options.placement,
                 helios_library::import::Placement::Copy { into: Some(_) }
             );
-            if !into && helios_library::import::library_root(vault.as_ref())?.is_none() {
+            if !into && library.folder()?.is_none() {
                 return Err("no folder to copy the photos into: set Into in the Choices".into());
             }
             let remote = helios_library::fetch::Remote {
@@ -673,14 +662,8 @@ fn library_commands(
                 items: job.items,
                 new_only: false,
             };
-            let mut report = helios_library::fetch::import_remote(
-                vault.as_ref(),
-                &jobs,
-                &remote,
-                &options,
-                seconds(),
-                &mut emit,
-            )?;
+            let mut report =
+                library.import_remote(&jobs, &remote, &options, seconds(), &mut emit)?;
             let label = helios_gui::library_history::import_label(report.added + report.located);
             history.record(label, std::mem::take(&mut report.changes), seconds_f64());
             // The strategy's "after each import", run by the node.
@@ -698,15 +681,15 @@ fn library_commands(
     {
         // Which chosen photos the Library holds already: marked in the
         // import window's grid.
-        let vault = vault.clone();
+        let library = library.clone();
         shell.set_import_remote_known(Arc::new(move |source, items| {
-            helios_library::fetch::in_library(vault.as_ref(), source, items).unwrap_or_else(|e| {
+            library.in_library(source, items).unwrap_or_else(|e| {
                 warn(&format!("chosen photos in the Library: {e}"));
                 vec![false; items.len()]
             })
         }));
     }
-    shell.set_import_library_folder(Arc::new(LibraryFolder(vault.clone())));
+    shell.set_import_library_folder(Arc::new(LibraryFolder(library.clone())));
     // The person's imports run as the node's promises: the desktop hears
     // each, for its undo step, its panels and the backups after it, and
     // follows the promises in its status bar.
@@ -751,7 +734,8 @@ fn library_commands(
             if sources.is_empty() && through.is_none() {
                 return Err("`path` is missing".into());
             }
-            let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
+            let (library, jobs, done, ctx) =
+                (library.clone(), jobs.clone(), done.clone(), ctx.clone());
             let (lines, asked, history) = (lines.clone(), args.clone(), history.clone());
             let backed = after_import.clone();
             // The import window's "Apply the camera's default look", on
@@ -770,39 +754,20 @@ fn library_commands(
                     // The plugin lists, Helios imports.
                     Some(plugins) => {
                         let import = |files: &[std::path::PathBuf], options: &_, emit: &mut _| {
-                            let library = vault.as_ref();
-                            helios_library::import::import(
-                                library,
-                                &jobs,
-                                files,
-                                options,
-                                seconds(),
-                                emit,
-                            )
+                            library.import(&jobs, files, options, seconds(), emit)
                         };
                         helios_gui::importers::run(plugins, &jobs, &asked, &mut emit, import)
                     }
-                    None => helios_library::import::import(
-                        vault.as_ref(),
-                        &jobs,
-                        &sources,
-                        &options,
-                        seconds(),
-                        &mut emit,
-                    ),
+                    None => library.import(&jobs, &sources, &options, seconds(), &mut emit),
                 };
                 let end = match ended {
                     Ok(mut report) => {
                         // The cameras' default looks on the raws brought
                         // in, inside the import's own step.
                         let looks = if camera_look {
-                            helios_node_core::calibrate::look::default_on_import(
-                                vault.as_ref(),
-                                &mut report.changes,
-                                seconds(),
-                                &helios_node_core::calibrate::look::raw_camera,
-                            )
-                            .unwrap_or_else(|m| {
+                            library
+                                .camera_looks_on_import(&mut report.changes, seconds())
+                                .unwrap_or_else(|m| {
                                 warn(&format!("import: camera look: {}", m.english));
                                 0
                             })
@@ -840,7 +805,7 @@ fn library_commands(
     if let Some(backups) = backups {
         helios_gui::node_jobs::register_back_up_now(shell, backups)?;
     }
-    let vault = persist.vault().clone();
+    let changed = persist.library().clone();
     shell.register(
         CommandSpec::new(
             helios_health::checks::ACKNOWLEDGE_CHANGED,
@@ -858,7 +823,7 @@ fn library_commands(
                 })
                 .transpose()?
                 .unwrap_or_default();
-            let cleared = vault.acknowledge_changed(&images)?;
+            let cleared = changed.acknowledge_changed(&images)?;
             Ok(json!({ "cleared": cleared }))
         },
     )?;
@@ -925,7 +890,7 @@ fn library_commands(
     )?;
     // The image map: forget a folder or a volume (its sightings not in
     // the Library go; listings skip it until listed again on purpose).
-    let vault = persist.vault().clone();
+    let map = persist.library().clone();
     shell.register(
         CommandSpec::new(
             helios_gui::shell::FORGET_FOLDER,
@@ -934,14 +899,15 @@ fn library_commands(
         ),
         move |args, _| {
             let path = text(args, "path").ok_or("`path` is missing")?;
-            let mounted = helios_storage::system().volumes();
-            let volumes =
-                helios_storage::registry::merged(vault.as_ref(), &mounted).unwrap_or(mounted);
-            helios_library::map::forget_folder(&vault, &volumes, Path::new(&path), seconds())
-                .map(|n| serde_json::json!({ "forgotten": n }))
+            map.forget_folder(
+                helios_storage::system().volumes(),
+                Path::new(&path),
+                seconds(),
+            )
+            .map(|n| serde_json::json!({ "forgotten": n }))
         },
     )?;
-    let vault = persist.vault().clone();
+    let map = persist.library().clone();
     shell.register(
         CommandSpec::new(
             helios_gui::shell::FORGET_VOLUME,
@@ -950,9 +916,7 @@ fn library_commands(
         ),
         move |args, _| {
             let id = text(args, "volume").ok_or("`volume` is missing")?;
-            let id = helios_vault::storage::VolumeId(id);
-            vault
-                .forget(Some(&id), None, seconds())
+            map.forget_volume(&id, seconds())
                 .map(|n| serde_json::json!({ "forgotten": n }))
         },
     )?;
@@ -1110,11 +1074,7 @@ fn prepare_library(
 
 /// Starts making `path` ready: decoded through `bundle`'s network, and
 /// imported into `vault` when there is one.
-fn prepare(
-    path: PathBuf,
-    bundle: helios_template::Bundle,
-    vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
-) -> Preparing {
+fn prepare(path: PathBuf, bundle: helios_template::Bundle, library: Option<Library>) -> Preparing {
     let (tx, ready) = std::sync::mpsc::channel();
     let file = path.clone();
     let sender = tx.clone();
@@ -1122,7 +1082,9 @@ fn prepare(
         .name("helios-image-open".into())
         .spawn(move || {
             let prepared = image_graph(&file, &bundle).and_then(|(graph, node)| {
-                let image = vault.map(|v| v.import_file(&file, seconds())).transpose()?;
+                let image = library
+                    .map(|l| l.import_file(&file, seconds()))
+                    .transpose()?;
                 Ok(Prepared {
                     path: file,
                     image,
@@ -1244,20 +1206,16 @@ impl App {
     /// cache's 1024 px entry) drawn before either.
     fn open_from_library(&mut self, id: &str) -> Result<(), String> {
         let bundle = self.bundle();
-        let persist = self.persist.as_mut().ok_or("no vault open")?;
+        let persist = self.persist.as_mut().ok_or("no library open")?;
         let image = helios_vault::ImageId::from_hex(id)?;
         // The library's copy, a card's file only without one.
-        let path = persist
-            .vault()
-            .file_to_read(&image)?
-            .map(|l| l.path)
-            .ok_or_else(|| {
-                // On a disk not plugged in: say which one.
-                self.shell.library().unavailable(id).map_or_else(
-                    || format!("no copy of image {id} is present"),
-                    |m| self.shell.text(m),
-                )
-            })?;
+        let path = persist.library().file_to_read(&image)?.ok_or_else(|| {
+            // On a disk not plugged in: say which one.
+            self.shell.library().unavailable(id).map_or_else(
+                || format!("no copy of image {id} is present"),
+                |m| self.shell.text(m),
+            )
+        })?;
         // A newer opening replaces one still being made ready.
         self.preparing.retain(|p| p.library.is_none());
         self.preparing
@@ -1494,8 +1452,8 @@ impl App {
                 // Made ready off the window's thread, opened once it is.
                 self.shell
                     .notify(helios_gui::dialogs::Level::Info, opening_notice(&path));
-                let vault = self.persist.as_ref().map(|p| p.vault().clone());
-                self.preparing.push(prepare(path, self.bundle(), vault));
+                let library = self.persist.as_ref().map(|p| p.library().clone());
+                self.preparing.push(prepare(path, self.bundle(), library));
                 Ok(())
             }
             Open::Workspace(dir) => {
@@ -2018,234 +1976,36 @@ fn main() -> Result<(), String> {
         .and_then(|v| v["profile"].as_str().map(String::from))
         .unwrap_or_else(|| "default".into());
     start::mark("workspace and settings read");
-    let bus = std::sync::Arc::new(helios_core::Bus::new());
+    let config = helios_gui::shell::config_dir();
     let health_file = vault_file.clone();
     let catalogue_file = vault_file.clone();
     let thumbs_file = vault_file.clone();
     let map_file = vault_file.clone();
-    // A library that cannot be opened leaves Helios without one: the
-    // reason is said, and imports refuse with it. The local node owns the
-    // vault (docs/design/node-client-split.md, choice A): it saves it on
-    // its own schedule and closes it when it stops; the window is its
-    // client, linked to it by `Persist`.
-    let (node, no_library) = match vault_file
-        .as_deref()
-        .map(helios_gui::platform::open_library)
-    {
-        Some(Ok(store)) => (
-            Some(LocalNode::open(
-                store,
-                bus.clone(),
-                helios_gui::node::FLUSH_EVERY,
-            )),
-            None,
-        ),
-        Some(Err(e)) => {
-            warn(&format!("the library: {e}"));
-            (None, Some(e))
-        }
-        None => (None, None),
-    };
-    // The node watches the machine's cards and disks, with or without a
-    // window; without a library, a watch of the desktop's own still lists
-    // the cards.
-    let volume_watch = node.as_ref().map_or_else(
-        || {
-            helios_gui::node_volumes::VolumeWatch::start(
-                helios_storage::system(),
-                bus.clone(),
-                helios_gui::node_volumes::POLL,
-            )
-        },
-        |n| n.watch_volumes(helios_storage::system()),
-    );
-    // The `helios` CLI and `helios-mcp` reach this node instead of
-    // starting another: its commands served while it holds the vault,
-    // its rendezvous file written beside it, removed as Helios ends. The
-    // windows' commands are served beside the node's, answered by the
+    // The windows' commands are served beside the node's, answered by the
     // window once it is open.
     let window_commands = helios_gui::window_commands::Bridge::new();
-    let advertised = node
-        .as_ref()
-        .zip(vault_file.as_deref())
-        .and_then(|(n, file)| {
-            let instance = format!("desktop-{}", std::process::id());
-            let service = helios_node_core::endpoint::VaultService::new(
-                n.vault().clone(),
-                bus.clone(),
-                helios_core::jobs::Jobs::new(bus.clone()),
-                &instance,
-            )
-            .with_promises(n.promises().clone())
-            .with_windows(std::sync::Arc::new(window_commands.clone()));
-            match helios_node_core::endpoint::advertise(
-                file,
-                std::sync::Arc::new(service),
-                &instance,
-            ) {
-                Ok(Some(advertised)) => Some(advertised),
-                Ok(None) => {
-                    warn("the library: another Helios node holds it; the CLI and agents reach that one");
-                    None
-                }
-                Err(e) => {
-                    warn(&format!("the library's command endpoint: {e}"));
-                    None
-                }
-            }
-        });
-    // The node's promises answer the desktop's imports by rule; what the
-    // desktop keeps of each (its undo step, its panels) is heard through
-    // the node's import watch (`library_commands`).
-    let import_watch = node.as_ref().map(LocalNode::import_watch);
-    let persist = node
-        .as_ref()
-        .map(|n| Persist::on_promises(n.vault().clone(), bus, Some(n.promises().clone())));
-    start::mark("vault opened (and migrated)");
-    // Workshop sessions a former run left unkept are dropped (C6), through
-    // the node on a thread of its own: the window does not wait for it.
-    if let Some(node) = persist.as_ref().map(|p| p.node().clone()) {
-        let dropping = std::thread::Builder::new()
-            .name("helios-unkept-sessions".into())
-            .spawn(move || {
-                if let Err(e) = helios_gui::persist::drop_unkept_sessions(&node) {
-                    log::warn!(target: "helios", "the workshop sessions: {e}");
-                }
-            });
-        if let Err(e) = dropping {
-            warn(&format!("the workshop sessions: {e}"));
-        }
-    }
-    let vault = node.as_ref().map(|n| n.vault().clone());
-    // The library is read while the window opens.
-    let library_reading = persist.as_ref().map(|p| read_library(p.reader()));
-    // Helios's settings, resolved once from their layers: the machine's
-    // file, the library's and the person's layers the node keeps (as
-    // `helios-node --vault` does), `--set`. Every part reads them from
-    // here; what does not read is left out and logged.
-    let config = helios_gui::shell::config_dir();
-    let node_settings = node.as_ref().map(LocalNode::settings);
-    // Heard from before they are read: a layer another client of the
-    // node changes from now on is read again (`NodeSettingsStore::follow`).
-    let layer_events = persist.as_ref().map(|p| p.bus().subscribe());
-    let settings = {
-        let (sources, problems) = helios_gui::config::read(
-            &config,
-            &|name| node_settings.as_ref().map_or(Ok(None), |n| n.read(name)),
-            vault
-                .as_ref()
-                .and(vault_file.as_deref())
-                .and_then(helios_gui::config::project_layer),
-            &run_settings,
-        );
-        let settings = helios_gui::config::Settings::resolve(&sources);
-        for p in problems.iter().chain(settings.problems()) {
-            log::warn!(target: "helios", "the settings: {p}");
-        }
-        settings
+    // The library, its node, the settings and the plugins are made ready
+    // on a thread of their own while the window opens on the boot splash,
+    // which shows their steps as they run. The node goes to the end's
+    // work as soon as it exists: a window closed during the start still
+    // stops it.
+    let (node_kept, node_to_stop) = std::sync::mpsc::channel::<NodeKept>();
+    let booting = {
+        let from = BootFrom {
+            library_file: vault_file.clone(),
+            run_settings,
+            image_file,
+            workspace: workspace.clone(),
+            config: config.clone(),
+            window_commands: window_commands.clone(),
+            node_kept,
+        };
+        std::thread::Builder::new()
+            .name("helios-boot".into())
+            .spawn(move || boot(from))
+            .map_err(|e| format!("no thread to start Helios on: {e}"))?
     };
-    let queue_when_empty = helios_gui::queue::when_empty(settings.config());
-    // The experimental features, read once: on, their panels are
-    // declared (and their commands registered) for the whole session.
-    let experimental = helios_gui::Experimental {
-        workshops: helios_gui::workshops::enabled(settings.config()),
-    };
-    // The workspace as it stands: its template's network, as edited.
-    let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
-        Ok(state) => state.bundle,
-        Err(e) => {
-            warn(&format!("the workspace: {e}"));
-            helios_template::workspace::blank()
-        }
-    };
-    start::mark("workspace read");
-    // The image asked for is made ready while the window opens.
-    let preparing = image_file.map(|path| prepare(path, bundle, vault.clone()));
     let earlier = earlier_layout(&workspace, &ui_settings);
-    // The plugins installed (built-in, the ones Helios ships beside its
-    // executable, the user's), read before anything of them runs: their
-    // importers are File > Import from's entries.
-    let plugins = {
-        let _step = phases::boot().begin(Message::new("gui-boot-plugins", "Reading the plugins"));
-        let mut broker = helios_plugin::Broker::new(helios_plugin::Policy::default());
-        let mut dirs = helios_plugin::default_dirs(None);
-        if let (Some(root), Some(programs)) = (
-            helios_plugin::bundled::default_root(),
-            helios_plugin::bundled::programs_dir(),
-        ) {
-            match helios_plugin::bundled::add_to(&mut dirs, &root, &programs) {
-                Ok(added) => {
-                    for name in added.without_program {
-                        log::info!(
-                            "the {name} plugin is not offered: its program is not beside Helios in {}",
-                            programs.display()
-                        );
-                    }
-                }
-                Err(e) => warn(&format!(
-                    "the plugins Helios ships could not be written to {}: {e}",
-                    root.display()
-                )),
-            }
-        }
-        broker.discover(&dirs);
-        for r in broker.rejected() {
-            warn(&format!(
-                "plugin {} refused: {}",
-                r.dir.display(),
-                r.problems.join("; ")
-            ));
-        }
-        // The capabilities the person allowed, kept in their settings
-        // layer through the node: given back now, written again each
-        // time one is granted or taken back.
-        if let Some(layers) = node_settings.clone() {
-            let user = helios_node_core::settings::USER;
-            match layers.read(user) {
-                Ok(text) => broker.load_grants(&helios_plugin::grants::read(
-                    text.as_deref().unwrap_or_default(),
-                )),
-                Err(e) => warn(&format!("the plugins' permissions: {e}")),
-            }
-            broker.on_grants(move |grants| {
-                let written = layers
-                    .read(user)
-                    .and_then(|text| {
-                        helios_plugin::grants::write(text.as_deref().unwrap_or_default(), grants)
-                    })
-                    .and_then(|text| layers.write(user, &text));
-                if let Err(e) = written {
-                    log::warn!(target: "helios", "the plugins' permissions not kept: {e}");
-                }
-            });
-        }
-        Arc::new(broker)
-    };
-    // From the interface's declaration to the application ready (its
-    // modules, its commands, the window).
-    let interface =
-        phases::boot().begin(Message::new("gui-boot-interface", "Building the interface"));
-    let known_vault = vault.clone();
-    let health_vault = vault.clone();
-    let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
-        .workspace(&workspace)
-        .on_exit(move |app| save_workspace(&dir, app))
-        .desktop(instance)
-        // The desktop speaks the system's language by default.
-        .system_language()
-        .system_focus(focus_mode(&focus_reading))
-        .plugins(&plugins);
-    // A darkroom left on an image the vault no longer has is not
-    // restored.
-    if let Some(vault) = vault.clone() {
-        builder = builder.images(Arc::new(move |id: &str| {
-            helios_vault::ImageId::from_hex(id)
-                .ok()
-                .and_then(|image| vault.locations(&image).ok())
-                .is_some_and(|l| l.iter().any(helios_vault::Location::present))
-        }));
-    }
-    start::mark("shell declared (commands, themes, translations)");
     let gpu = gpu_opening
         .join()
         .map_err(|_| "the GPU's opening stopped (a panic)".to_string())?
@@ -2271,42 +2031,22 @@ fn main() -> Result<(), String> {
         start::mark("window being created");
         viewport
     }));
-    // egui-pop opens the window where it was last (repaired) and builds
-    // the application on its context.
-    // The library's thumbnail cache, beside its catalogue.
-    let _ = THUMB_CACHE.set(
-        thumbs_file
-            .as_ref()
-            .filter(|_| vault.is_some())
-            .and_then(|file| {
-                let limit = helios_gui::thumbnails::cache_limit(&settings);
-                helios_gui::thumbnails::open_cache(file, limit)
-                    .map_err(|e| warn(&e))
-                    .ok()
-            }),
-    );
-    // The grids' thumbnail textures, within their budget.
-    let texture_budget = helios_gui::thumb_textures::budget(&settings);
-    // The Settings app writes them back: the person's and the library's
-    // layers through the node, the machine's to its file.
-    let settings_dir = config.clone();
-    // The GUI connects to the node as it starts, and disconnects as it
-    // ends (`on_exit`); the shell asks the node to quit.
-    let node_link = node.as_ref().map(LocalNode::link);
-    let node_client = node.as_ref().map(LocalNode::connect);
     // The work left for after the window: the node stopped (its last
-    // flush, the vault closed) against its deadline, whether or not the
+    // flush, the library closed) against its deadline, whether or not the
     // shell asked it to quit (an error ending eframe). Run as eframe
     // returns, or by the watch should eframe not return (`quit`).
     let after_window = {
         let ending = ending.clone();
         let args = args.clone();
         quit::AfterClose::new(move || {
-            // No client finds the node any more once it stops.
-            drop(advertised);
-            drop(vault);
+            // The start's work hands the node over once it is open (none
+            // without a library): a window closed during the start waits
+            // for it here.
+            let kept = node_to_stop.recv().ok().flatten();
             let mut finisher = quit::Finisher::default();
-            if let Some(node) = node {
+            if let Some((node, advertised)) = kept {
+                // No client finds the node any more once it stops.
+                drop(advertised);
                 if QUIT_NOW.load(Ordering::SeqCst) {
                     // "Quit now": what the node still does is left.
                     quit::mark("node left (quit now)");
@@ -2331,26 +2071,83 @@ fn main() -> Result<(), String> {
         })
     };
     let watched = after_window.clone();
-    let ran = builder
-        .run_native("helios-gui", options, move |mut shell, cc| {
-            start::mark("window open, application built (plugins, fonts)");
-            window_commands.attach(&mut shell, &cc.egui_ctx);
+    let window_settings = ui_settings.clone();
+    let ran = helios_gui::shell::open_window("helios-gui", options, Some(&window_settings), move |cc| {
+        start::mark("window open on the boot splash");
+        let _ = WINDOW.set(cc.egui_ctx.clone());
+        let render_state = cc.wgpu_render_state.clone();
+        // The shell, once the start's work is done: built on the
+        // interface's thread, in the frame after the splash drew that work
+        // done.
+        let make = move |booted: Booted, boot: splash::Boot, ctx: &egui::Context| -> App {
+            let Booted {
+                library,
+                no_library,
+                volume_watch,
+                import_watch,
+                persist,
+                library_reading,
+                node_settings,
+                layer_events,
+                settings,
+                preparing,
+                plugins,
+                node_link,
+                node_client,
+                interface,
+            } = booted;
+            let queue_when_empty = helios_gui::queue::when_empty(settings.config());
+            // The experimental features, read once: on, their panels are
+            // declared (and their commands registered) for the whole
+            // session.
+            let experimental = helios_gui::Experimental {
+                workshops: helios_gui::workshops::enabled(settings.config()),
+            };
+            let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
+                .workspace(&workspace)
+                .on_exit(move |app| save_workspace(&dir, app))
+                .desktop(instance)
+                // The desktop speaks the system's language by default.
+                .system_language()
+                .system_focus(focus_mode(&focus_reading))
+                .plugins(&plugins);
+            // A darkroom left on an image the library no longer has is
+            // not restored.
+            if let Some(library) = library.clone() {
+                builder = builder.images(Arc::new(move |id: &str| library.image_present(id)));
+            }
+            start::mark("shell declared (commands, themes, translations)");
+            let mut shell = builder.build_in_window(ctx);
+            start::mark("application built (plugins, fonts)");
+            // The library's thumbnail cache, beside its catalogue.
+            let _ = THUMB_CACHE.set(
+                thumbs_file
+                    .as_ref()
+                    .filter(|_| library.is_some())
+                    .and_then(|file| {
+                        let limit = helios_gui::thumbnails::cache_limit(&settings);
+                        helios_gui::thumbnails::open_cache(file, limit)
+                            .map_err(|e| warn(&e))
+                            .ok()
+                    }),
+            );
+            // The grids' thumbnail textures, within their budget.
+            let texture_budget = helios_gui::thumb_textures::budget(&settings);
+            // The Settings app writes them back: the person's and the
+            // library's layers through the node, the machine's to its file.
+            let settings_dir = config.clone();
+            window_commands.attach(&mut shell, ctx);
             if let Some(link) = node_link.clone() {
                 shell.attach_node(link);
             }
             // The node runs the backups (its jobs): they go on when the
             // window that started them closes.
             let backups = persist.as_ref().zip(node_link.as_ref()).map(|(p, link)| {
-                Backups::new(
-                    p.vault().clone(),
-                    shell.jobs(),
-                    helios_storage::system(),
-                    |e| warn(&e),
-                )
-                .adopted_by(link)
+                p.library()
+                    .backups(shell.jobs(), helios_storage::system(), |e| warn(&e))
+                    .adopted_by(link)
             });
-            let _ = WINDOW.set(cc.egui_ctx.clone());
-            shell.library_mut().set_texture_budget(texture_budget);
+                        shell.library_mut().set_texture_budget(texture_budget);
             // The render cache's budget (`system.cache.budget` / `share`).
             helios_gui::caches::apply_settings(&shell, &settings);
             // Helios's settings kept through the node, followed live: a
@@ -2369,7 +2166,7 @@ fn main() -> Result<(), String> {
             // The plugins' own settings, handed to each as it starts and
             // again when the person changes them.
             helios_gui::config::connect_plugins(shell.app().handle(), &plugins);
-            if let Some(rs) = cc.wgpu_render_state.as_ref() {
+            if let Some(rs) = render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
             start::mark("GPU attached to the viewport");
@@ -2384,17 +2181,10 @@ fn main() -> Result<(), String> {
             // The volumes and where each photo is: present, offline or
             // missing, scanned at start, when a volume comes or goes and
             // every five minutes.
-            if let Some(vault) = known_vault.clone() {
-                let library = vault.clone();
-                let scanner = helios_storage::scan::Scanner::start(
-                    vault.clone(),
+            if let Some(library) = library.clone() {
+                let scanner = library.scan_volumes(
                     helios_storage::system(),
                     helios_storage::node(),
-                    move || {
-                        helios_library::import::library_root(&library)
-                            .ok()
-                            .flatten()
-                    },
                     std::time::Duration::from_mins(5),
                     |outcome| match outcome {
                         Ok(report) => log::debug!("volumes scanned: {report:?}"),
@@ -2412,7 +2202,8 @@ fn main() -> Result<(), String> {
                     backups.follow(&volume_watch);
                 }
                 // The Storage page, and the volumes offline photos name.
-                let marker = helios_library::import::library_root(&vault)
+                let marker = library
+                    .folder()
                     .ok()
                     .flatten()
                     .map_or_else(|| "helios".to_string(), |p| p.display().to_string());
@@ -2426,7 +2217,7 @@ fn main() -> Result<(), String> {
             }
             // The import accounts, kept in the vault (public facts only).
             let mut health_accounts = None;
-            if let Some(vault) = known_vault.clone() {
+            if let Some(library) = library.clone() {
                 // Secrets and tokens in the system keyring (Windows has no
                 // keyring support yet: kept for the session only); `oauth`
                 // steps through the browser sign-in.
@@ -2441,8 +2232,7 @@ fn main() -> Result<(), String> {
                     helios_connect::oauth::OAuth::system().with_own_in(secrets.clone()),
                 );
                 shell.set_import_sign_in(web.clone());
-                let book: Arc<dyn helios_connect::account::AccountBook> =
-                    Arc::new(helios_connect::account::VaultAccounts(vault));
+                let book: Arc<dyn helios_connect::account::AccountBook> = library.accounts();
                 // A plugin's health check tries its connector's accounts.
                 health_accounts = Some(health_accounts_of(book.clone(), secrets.clone(), web));
                 shell.set_import_accounts(book, secrets);
@@ -2479,7 +2269,7 @@ fn main() -> Result<(), String> {
             }
             // The image map: what the import window's sources list is
             // recorded, Helios's own folders never.
-            if let Some(vault) = known_vault.clone() {
+            if let Some(library) = library.clone() {
                 let settings = helios_gui::image_map::settings(settings.config());
                 let mut helios = vec![helios_gui::shell::config_dir()];
                 helios.extend(helios_gui::platform::data_dir_with(|k| {
@@ -2491,11 +2281,9 @@ fn main() -> Result<(), String> {
                         .parent()
                         .map(|d| d.join(".helios"))
                 }));
-                shell.set_import_map(Arc::new(helios_node_core::map::recorder(
-                    vault.clone(),
-                    settings.clone(),
-                    helios.clone(),
-                )));
+                shell.set_import_map(Arc::new(
+                    library.map_recorder(settings.clone(), helios.clone()),
+                ));
                 // The map's job: the import window's cells in view first,
                 // then each volume plugged in.
                 let feed = helios_library::map_job::Feed::default();
@@ -2539,9 +2327,8 @@ fn main() -> Result<(), String> {
                     let cache: Box<dyn helios_library::thumb_check::Thumbs> = Box::new(cache);
                     (cache, before)
                 });
-                backfill_captures(vault.clone(), shell.jobs());
-                let map = helios_node_core::map::ImageMap::start(
-                    vault,
+                backfill_captures(library.clone(), shell.jobs());
+                let map = library.start_image_map(
                     shell.jobs(),
                     settings,
                     helios,
@@ -2559,7 +2346,7 @@ fn main() -> Result<(), String> {
             // window; the shell shows the same runner's findings.
             let (cards, settings) = (shell.waiting_cards(), shell.app().handle().store());
             let runner = health_runner(
-                health_vault.clone(),
+                library.clone(),
                 health_file.clone(),
                 cards,
                 settings,
@@ -2653,13 +2440,13 @@ fn main() -> Result<(), String> {
                     backups.as_ref(),
                     &plugins,
                     &refill,
-                    &cc.egui_ctx,
+                    ctx,
                 )
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
             if let (Some(p), Some(file)) = (&persist, catalogue_file.clone())
-                && let Err(e) = catalogue_commands(&mut shell, p, file, &cc.egui_ctx)
+                && let Err(e) = catalogue_commands(&mut shell, p, file, ctx)
             {
                 shell.notes.push(format!("catalogue commands: {e}"));
             }
@@ -2712,7 +2499,7 @@ fn main() -> Result<(), String> {
             // The node runs the exports (its jobs): they go on when the
             // window that started them closes.
             let exporter = persist.as_ref().zip(node_link.as_ref()).map(|(p, link)| {
-                let ctx = cc.egui_ctx.clone();
+                let ctx = ctx.clone();
                 // On the viewport's engine: one render cache and one
                 // budget for the desktop, so exporting the image open does
                 // not compute again what the darkroom holds.
@@ -2740,7 +2527,7 @@ fn main() -> Result<(), String> {
                 preparing: preparing.into_iter().collect(),
                 #[cfg(target_os = "macos")]
                 menu_bar: helios_gui::macos::MenuBar::new(),
-                boot: splash::Boot::new(phases::boot().clone()),
+                boot,
                 end: None,
                 shell_exited: false,
                 _rest_dropped: quit::MarkOnDrop(
@@ -2755,27 +2542,335 @@ fn main() -> Result<(), String> {
             }
             start::mark("application ready");
             drop(interface);
-            // eframe let go of the application: the quit's work is done
-            // but for the node's stop; past the grace, it goes on without
-            // eframe, whose window would stay up until an event came.
-            Box::new(quit::Released::new(app, move || {
-                // The end splash saw the node stop: little is left to wait for.
-                let grace = if ENDED.load(Ordering::SeqCst) {
-                    quit::GRACE_AFTER_SPLASH
-                } else {
-                    quit::GRACE
-                };
-                watched.watch(grace, || {
-                    quit::mark("eframe did not return: the process ends");
-                    if let Some(dir) = platform::crash_dir() {
-                        helios_gui::ending::mark_clean(&dir);
-                    }
-                    std::process::exit(0);
-                });
-            }))
-        })
-        .map_err(|e| e.to_string());
+            app
+        };
+        let starting = splash::Starting::new(phases::boot().clone(), booting, make);
+        // eframe let go of the application: the quit's work is done
+        // but for the node's stop; past the grace, it goes on without
+        // eframe, whose window would stay up until an event came.
+        Box::new(quit::Released::new(Window(starting), move || {
+            // The end splash saw the node stop: little is left to wait for.
+            let grace = if ENDED.load(Ordering::SeqCst) {
+                quit::GRACE_AFTER_SPLASH
+            } else {
+                quit::GRACE
+            };
+            watched.watch(grace, || {
+                quit::mark("eframe did not return: the process ends");
+                if let Some(dir) = platform::crash_dir() {
+                    helios_gui::ending::mark_clean(&dir);
+                }
+                std::process::exit(0);
+            });
+        }))
+    })
+    .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");
     after_window.run();
     ran
+}
+
+/// The node, and its endpoint advertised to the CLI and agents, kept for
+/// the end's work: stopped after the window.
+type NodeKept = Option<(LocalNode, Option<helios_node_core::endpoint::Advertised>)>;
+
+/// What the start's work, off the window's thread, is given.
+struct BootFrom {
+    /// `--vault FILE`, else the default library.
+    library_file: Option<PathBuf>,
+    /// One invocation's settings (`--set KEY=VALUE`).
+    run_settings: Vec<(String, String)>,
+    /// The image named on the command line.
+    image_file: Option<PathBuf>,
+    workspace: PathBuf,
+    /// Helios's settings folder.
+    config: PathBuf,
+    window_commands: helios_gui::window_commands::Bridge,
+    /// Where the node goes for the end's work.
+    node_kept: std::sync::mpsc::Sender<NodeKept>,
+}
+
+/// What the start's work hands the window: the library opened by its
+/// node, the settings resolved, the plugins read.
+struct Booted {
+    library: Option<Library>,
+    /// Why the library could not be opened.
+    no_library: Option<String>,
+    volume_watch: helios_gui::node_volumes::VolumeWatch,
+    import_watch: Option<helios_node_core::import_promise::Watch>,
+    persist: Option<Persist>,
+    library_reading: Option<LibraryReading>,
+    node_settings:
+        Option<helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>>,
+    layer_events: Option<std::sync::mpsc::Receiver<helios_core::Envelope>>,
+    settings: helios_gui::config::Settings,
+    preparing: Option<Preparing>,
+    plugins: Arc<helios_plugin::Broker>,
+    node_link: Option<helios_node_core::node::Link>,
+    node_client: Option<helios_node_core::node::Client>,
+    /// "Building the interface", begun: done once the shell is.
+    interface: phases::Running,
+}
+
+/// The start's work, off the window's thread (the boot splash shows its
+/// steps): the library opened by the desktop's node, its endpoint
+/// advertised, the settings resolved, the image named made ready, the
+/// plugins read.
+fn boot(from: BootFrom) -> Booted {
+    let BootFrom {
+        library_file,
+        run_settings,
+        image_file,
+        workspace,
+        config,
+        window_commands,
+        node_kept,
+    } = from;
+    let bus = Arc::new(helios_core::Bus::new());
+    // A library that cannot be opened leaves Helios without one: the
+    // reason is said, and imports refuse with it. The local node owns the
+    // library (docs/design/node-client-split.md, choice A): it saves it
+    // on its own schedule and closes it when it stops; the window is its
+    // client, linked to it by `Persist`.
+    let (node, no_library) = match library_file
+        .as_deref()
+        .map(helios_gui::platform::open_library)
+    {
+        Some(Ok(store)) => (
+            Some(LocalNode::open(
+                store,
+                bus.clone(),
+                helios_gui::node::FLUSH_EVERY,
+            )),
+            None,
+        ),
+        Some(Err(e)) => {
+            warn(&format!("the library: {e}"));
+            (None, Some(e))
+        }
+        None => (None, None),
+    };
+    let library = node.as_ref().map(LocalNode::library);
+    // The node watches the machine's cards and disks, with or without a
+    // window; without a library, a watch of the desktop's own still lists
+    // the cards.
+    let volume_watch = node.as_ref().map_or_else(
+        || {
+            helios_gui::node_volumes::VolumeWatch::start(
+                helios_storage::system(),
+                bus.clone(),
+                helios_gui::node_volumes::POLL,
+            )
+        },
+        |n| n.watch_volumes(helios_storage::system()),
+    );
+    // The `helios` CLI and `helios-mcp` reach this node instead of
+    // starting another: its commands served while it holds the library,
+    // its rendezvous file written beside it, removed as Helios ends.
+    let advertised = library
+        .as_ref()
+        .zip(library_file.as_deref())
+        .and_then(|(library, file)| {
+            let instance = format!("desktop-{}", std::process::id());
+            let service = library
+                .service(&instance)
+                .with_windows(Arc::new(window_commands));
+            match helios_node_core::endpoint::advertise(file, Arc::new(service), &instance) {
+                Ok(Some(advertised)) => Some(advertised),
+                Ok(None) => {
+                    warn("the library: another Helios node holds it; the CLI and agents reach that one");
+                    None
+                }
+                Err(e) => {
+                    warn(&format!("the library's command endpoint: {e}"));
+                    None
+                }
+            }
+        });
+    // The node's promises answer the desktop's imports by rule; what the
+    // desktop keeps of each (its undo step, its panels) is heard through
+    // the node's import watch (`library_commands`).
+    let import_watch = node.as_ref().map(LocalNode::import_watch);
+    let node_settings = node.as_ref().map(LocalNode::settings);
+    // The GUI connects to the node as it starts, and disconnects as it
+    // ends (`on_exit`); the shell asks the node to quit.
+    let node_link = node.as_ref().map(LocalNode::link);
+    let node_client = node.as_ref().map(LocalNode::connect);
+    let _ = node_kept.send(node.map(|n| (n, advertised)));
+    let persist = library.clone().map(Persist::on_library);
+    start::mark("library opened (and migrated)");
+    // Workshop sessions a former run left unkept are dropped (C6), through
+    // the node on a thread of its own: the window does not wait for it.
+    if let Some(node) = persist.as_ref().map(|p| p.node().clone()) {
+        let dropping = std::thread::Builder::new()
+            .name("helios-unkept-sessions".into())
+            .spawn(move || {
+                if let Err(e) = helios_gui::persist::drop_unkept_sessions(&node) {
+                    log::warn!(target: "helios", "the workshop sessions: {e}");
+                }
+            });
+        if let Err(e) = dropping {
+            warn(&format!("the workshop sessions: {e}"));
+        }
+    }
+    // The library is read while the shell is built.
+    let library_reading = persist.as_ref().map(|p| read_library(p.reader()));
+    // Heard from before they are read: a layer another client of the
+    // node changes from now on is read again (`NodeSettingsStore::follow`).
+    let layer_events = persist.as_ref().map(|p| p.bus().subscribe());
+    // Helios's settings, resolved once from their layers: the machine's
+    // file, the library's and the person's layers the node keeps (as
+    // `helios-node --vault` does), `--set`. Every part reads them from
+    // here; what does not read is left out and logged.
+    let settings = {
+        let (sources, problems) = helios_gui::config::read(
+            &config,
+            &|name| node_settings.as_ref().map_or(Ok(None), |n| n.read(name)),
+            library
+                .as_ref()
+                .and(library_file.as_deref())
+                .and_then(helios_gui::config::project_layer),
+            &run_settings,
+        );
+        let settings = helios_gui::config::Settings::resolve(&sources);
+        for p in problems.iter().chain(settings.problems()) {
+            log::warn!(target: "helios", "the settings: {p}");
+        }
+        settings
+    };
+    // The workspace as it stands: its template's network, as edited.
+    let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
+        Ok(state) => state.bundle,
+        Err(e) => {
+            warn(&format!("the workspace: {e}"));
+            helios_template::workspace::blank()
+        }
+    };
+    start::mark("workspace read");
+    // The image asked for is made ready while the shell is built.
+    let preparing = image_file.map(|path| prepare(path, bundle, library.clone()));
+    let plugins = read_plugins(node_settings.clone());
+    let interface =
+        phases::boot().begin(Message::new("gui-boot-interface", "Building the interface"));
+    Booted {
+        library,
+        no_library,
+        volume_watch,
+        import_watch,
+        persist,
+        library_reading,
+        node_settings,
+        layer_events,
+        settings,
+        preparing,
+        plugins,
+        node_link,
+        node_client,
+        interface,
+    }
+}
+
+/// The plugins installed (built-in, the ones Helios ships beside its
+/// executable, the user's), read before anything of them runs: their
+/// importers are File > Import from's entries. The capabilities the
+/// person allowed are kept in their settings layer through the node.
+fn read_plugins(
+    node_settings: Option<
+        helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>,
+    >,
+) -> Arc<helios_plugin::Broker> {
+    let _step = phases::boot().begin(Message::new("gui-boot-plugins", "Reading the plugins"));
+    let mut broker = helios_plugin::Broker::new(helios_plugin::Policy::default());
+    let mut dirs = helios_plugin::default_dirs(None);
+    if let (Some(root), Some(programs)) = (
+        helios_plugin::bundled::default_root(),
+        helios_plugin::bundled::programs_dir(),
+    ) {
+        match helios_plugin::bundled::add_to(&mut dirs, &root, &programs) {
+            Ok(added) => {
+                for name in added.without_program {
+                    log::info!(
+                        "the {name} plugin is not offered: its program is not beside Helios in {}",
+                        programs.display()
+                    );
+                }
+            }
+            Err(e) => warn(&format!(
+                "the plugins Helios ships could not be written to {}: {e}",
+                root.display()
+            )),
+        }
+    }
+    broker.discover(&dirs);
+    for r in broker.rejected() {
+        warn(&format!(
+            "plugin {} refused: {}",
+            r.dir.display(),
+            r.problems.join("; ")
+        ));
+    }
+    // The capabilities the person allowed, kept in their settings
+    // layer through the node: given back now, written again each
+    // time one is granted or taken back.
+    if let Some(layers) = node_settings.clone() {
+        let user = helios_node_core::settings::USER;
+        match layers.read(user) {
+            Ok(text) => broker.load_grants(&helios_plugin::grants::read(
+                text.as_deref().unwrap_or_default(),
+            )),
+            Err(e) => warn(&format!("the plugins' permissions: {e}")),
+        }
+        broker.on_grants(move |grants| {
+            let written = layers
+                .read(user)
+                .and_then(|text| {
+                    helios_plugin::grants::write(text.as_deref().unwrap_or_default(), grants)
+                })
+                .and_then(|text| layers.write(user, &text));
+            if let Err(e) = written {
+                log::warn!(target: "helios", "the plugins' permissions not kept: {e}");
+            }
+        });
+    }
+    Arc::new(broker)
+}
+
+/// The main window's application: the boot splash while the start's
+/// work runs off the window's thread, then Helios's.
+struct Window(splash::Starting<Booted, App>);
+
+impl eframe::App for Window {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(app) = self.0.app_mut() {
+            app.logic(ctx, frame);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        match self.0.pass(ui) {
+            Some(app) => app.ui(ui, frame),
+            None => start::trace_frame("boot splash drawn (the start's work)"),
+        }
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if let Some(app) = self.0.app_mut() {
+            app.raw_input_hook(ctx, raw_input);
+        }
+    }
+
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        self.0.app().map_or_else(
+            || helios_gui::display::CLEAR_COLOR.to_normalized_gamma_f32(),
+            |app| app.clear_color(visuals),
+        )
+    }
+
+    fn on_exit(&mut self) {
+        if let Some(app) = self.0.app_mut() {
+            app.on_exit();
+        } else {
+            quit::mark("on_exit (during the start)");
+        }
+    }
 }

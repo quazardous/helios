@@ -58,11 +58,13 @@ use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, ROTATION, TAGS, TITLE};
 use helios_vault::{
-    EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version, edit,
+    EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Version, edit,
 };
 use serde_json::{Value, json};
 
 use crate::Shell;
+
+mod fixtures;
 use crate::dialogs::Level;
 use crate::library::{Change, Entry};
 
@@ -105,7 +107,8 @@ pub fn who(origin: &helios_shell::commands::Origin) -> String {
 pub const FLUSH_SECONDS: f64 = 1.0;
 
 pub struct Persist<S: Store> {
-    vault: Arc<Vault<S>>,
+    /// The node's library, for what the desktop wires on it.
+    library: helios_node_core::desktop::Library<S>,
     bus: Arc<Bus>,
     events: Receiver<Envelope>,
     editing: Option<Editing>,
@@ -1154,34 +1157,18 @@ fn unreadable(shell: &mut Shell, error: String) {
 }
 
 impl<S: Store + 'static> Persist<S> {
-    /// A vault on `store`, announcing its changes on `bus`.
+    /// A library on `store` of its own, announcing its changes on `bus`
+    /// (tests and tools).
     pub fn new(store: S, bus: Arc<Bus>) -> Self {
-        Self::on(Arc::new(Vault::new(store).with_bus(bus.clone())), bus)
+        Self::on_library(helios_node_core::desktop::Library::on_store(store, bus))
     }
 
-    /// The link to a vault opened by its owner (the local node), whose
-    /// changes are announced on `bus`.
-    pub fn on(vault: Arc<Vault<S>>, bus: Arc<Bus>) -> Self {
-        Self::on_promises(vault, bus, None)
-    }
-
-    /// [`Persist::on`], its promises (the imports by rule) run by
-    /// `promises`, the node's, rather than by promises of its own.
-    pub fn on_promises(
-        vault: Arc<Vault<S>>,
-        bus: Arc<Bus>,
-        promises: Option<Arc<helios_node_core::promises::Promises<S>>>,
-    ) -> Self {
+    /// The link to the node's `library`: the node's service in this
+    /// process, reached through an in-process client.
+    pub fn on_library(library: helios_node_core::desktop::Library<S>) -> Self {
+        let bus = library.bus().clone();
         let events = bus.subscribe();
-        let mut service = helios_node_core::endpoint::VaultService::new(
-            vault.clone(),
-            bus.clone(),
-            helios_core::jobs::Jobs::new(bus.clone()),
-            &format!("desktop-{}", std::process::id()),
-        );
-        if let Some(promises) = promises {
-            service = service.with_promises(promises);
-        }
+        let service = library.service(&format!("desktop-{}", std::process::id()));
         let node = Arc::new(Client::in_process(Arc::new(service)).with_origin(WHO));
         let cache = Arc::new(ReadCache::new());
         // The cache hears the vault's events on a thread of its own, so a
@@ -1207,7 +1194,7 @@ impl<S: Store + 'static> Persist<S> {
             cache,
         };
         Self {
-            vault,
+            library,
             bus,
             events,
             editing: None,
@@ -1659,8 +1646,9 @@ impl<S: Store + 'static> Persist<S> {
         }
     }
 
-    pub fn vault(&self) -> &Arc<Vault<S>> {
-        &self.vault
+    /// The node's library, for what the desktop wires on it.
+    pub fn library(&self) -> &helios_node_core::desktop::Library<S> {
+        &self.library
     }
 
     pub fn bus(&self) -> &Arc<Bus> {
