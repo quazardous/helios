@@ -92,10 +92,15 @@ sliced, until a card shows it.
   (measured above); slower on a card or a network share (not measured).
 - **Import during listing imports a snapshot**: "Import N" counts the
   ticked cells, so the files listed after the click are left out.
-- **A second run of a copy import** reads and stages every file again
-  before the duplicate check drops it (`Run::file`: the shortcut by the
-  image map, `seen_before`, applies only to imports in place). Resuming
-  a card copy of 20,000 raws after a crash costs the whole card again.
+- **A second run of a copy import** read and staged every file again
+  before the duplicate check dropped it (`Run::file`: the shortcut by the
+  image map, `seen_before`, applied only to imports in place). Resuming
+  a card copy of 20,000 raws after a crash cost the whole card again.
+  Done (slice 1): a copy notes the source file it read in the map, and a
+  file unchanged since (place, size, time) whose image is in the Library
+  is left out without a read. A file changed since, or an image taken out
+  of the Library, is read and copied again, as an import in place
+  imports it again.
 
 ### Google Photos: the code path, and an estimate
 
@@ -266,7 +271,7 @@ token bucket per account.
 
 ## 7. Slices
 
-1. **Copy imports skip what the map knows.** `Run::file` uses
+1. **Copy imports skip what the map knows** (done). `Run::file` uses
    `seen_before` for copies too (the source file's sighting links to an
    image in the Library, unchanged): a resumed card copy reads nothing
    already done.
