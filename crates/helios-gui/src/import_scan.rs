@@ -440,9 +440,15 @@ impl Default for Connectors {
 
 impl Connectors {
     /// Adds a connector's provider (a plugin's, a test's); one of the same
-    /// id replaces it.
+    /// id replaces it, and the connector a scan lists through too.
     pub fn add_provider(&mut self, provider: ProviderRef) {
         let id = provider.manifest().id;
+        if let Some((_, connector)) = self.by_id.iter_mut().find(|(i, _)| *i == id) {
+            match provider.create(&Settings::Null, &self.services) {
+                Ok(c) => *connector = Arc::from(c),
+                Err(e) => log::warn!("import connector {id}: {e}"),
+            }
+        }
         self.providers.retain(|p| p.manifest().id != id);
         self.providers.push(provider);
     }

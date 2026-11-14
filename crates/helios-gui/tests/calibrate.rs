@@ -57,10 +57,7 @@ fn the_shell_answers_a_chart_dry_run() {
     }
     calibrate::register(
         &mut shell,
-        Some(calibrate::Node {
-            vault: vault.clone(),
-            bus: bus.clone(),
-        }),
+        Some(Arc::new(client_on(&vault, &bus))),
         history.clone(),
     )
     .unwrap();
@@ -195,13 +192,34 @@ fn the_shell_answers_a_chart_dry_run() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Frames until `done` holds of the shell's values: what the user asks
+/// of the node runs off the frame. Within a minute: a deadline, not a
+/// guess at how long it takes.
+fn until(h: &mut egui_kittest::Harness<'_, Shell>, done: impl Fn(&helios_values::Store) -> bool) {
+    let end = std::time::Instant::now() + std::time::Duration::from_mins(1);
+    while !done(&h.state().values().lock().unwrap()) {
+        assert!(std::time::Instant::now() < end, "the node answers");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        h.run();
+    }
+    h.run();
+}
+
 /// A profile document of camera "Test Bayer" under light `xy`, its
 /// matrix bent by `bend`.
 /// A client of a node owning `vault`, as the desktop's.
 fn client_of<S: helios_vault::Store + 'static>(
     vault: &Arc<helios_vault::Vault<S>>,
 ) -> helios_inspect::client::Client {
-    let bus = Arc::new(helios_core::Bus::new());
+    client_on(vault, &Arc::new(helios_core::Bus::new()))
+}
+
+/// A client of a node owning `vault`, its runs heard on `bus`.
+fn client_on<S: helios_vault::Store + 'static>(
+    vault: &Arc<helios_vault::Vault<S>>,
+    bus: &Arc<helios_core::Bus>,
+) -> helios_inspect::client::Client {
+    let bus = bus.clone();
     let service = helios_node_core::endpoint::VaultService::new(
         vault.clone(),
         bus.clone(),
@@ -286,15 +304,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
 
     let mut shell = Shell::new(helios_panels(), None);
     let history = shell.library_history();
-    calibrate::register(
-        &mut shell,
-        Some(calibrate::Node {
-            vault: vault.clone(),
-            bus: Arc::new(helios_core::Bus::new()),
-        }),
-        history,
-    )
-    .unwrap();
+    calibrate::register(&mut shell, Some(Arc::new(client_of(&vault))), history).unwrap();
     // As an image of the library opens: the header is offered its camera's
     // profiles (no default rule: nothing is applied).
     let image = helios_vault::ImageId::from_hex(&"cd".repeat(32)).unwrap();
@@ -328,6 +338,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
             .clone()
     };
     let choose = |h: &mut egui_kittest::Harness<'_, Shell>, profile: &str| {
+        let before = h.state().values().lock().unwrap().undo_steps().len();
         h.state_mut()
             .run(
                 calibrate::CHOOSE,
@@ -335,6 +346,8 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
                 Origin::User,
             )
             .unwrap();
+        // Read through the node off the frame: one step once written.
+        until(h, |s| s.undo_steps().len() > before);
     };
     choose(&mut h, "daylight");
     assert_eq!(read(&h, "bypass/chartprofile"), Value::Bool(false));
@@ -397,10 +410,7 @@ fn the_shell_fits_a_camera_look_through_the_node_and_says_why_not() {
     let history = shell.library_history();
     calibrate::register(
         &mut shell,
-        Some(calibrate::Node {
-            vault: vault.clone(),
-            bus: Arc::new(helios_core::Bus::new()),
-        }),
+        Some(Arc::new(client_of(&vault))),
         history.clone(),
     )
     .unwrap();
@@ -507,10 +517,7 @@ fn look_shell(
     let history = shell.library_history();
     calibrate::register(
         &mut shell,
-        Some(calibrate::Node {
-            vault: vault.clone(),
-            bus: Arc::new(helios_core::Bus::new()),
-        }),
+        Some(Arc::new(client_of(&vault))),
         history.clone(),
     )
     .unwrap();
@@ -548,7 +555,9 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Fit to the camera's JPEG")
         .click();
     h.run();
-    h.run();
+    // The fit runs through the node off the frame: its refusal comes at a
+    // coming frame.
+    until(&mut h, |s| !calibrate::read_refusal(s).is_empty());
     h.get_by_label("Not fitted: the photo is not a raw: it has no sensor data to fit");
     assert!(history.line().undo.is_empty());
 
@@ -788,7 +797,11 @@ fn the_camera_look_preset_puts_the_camera_s_default_look_on_in_one_step() {
     h.get_by_role_and_label(egui::accesskit::Role::MenuItem, "Camera look")
         .click();
     h.run();
-    h.run();
+    // Read through the node off the frame.
+    until(&mut h, |s| {
+        s.get("node/cameratone/preview")
+            .is_some_and(|e| e.value == Value::Text("fitted-to".into()))
+    });
     assert_eq!(
         read(&h, "node/cameratone/preview"),
         Value::Text("fitted-to".into())
