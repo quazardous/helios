@@ -200,7 +200,7 @@ impl<S: Store> Vault<S> {
             .map(|(_, doc)| parse(doc))
             .collect::<Result<Vec<_>, _>>()?;
         all.retain(|p| filter.keeps(p));
-        all.sort_by(|a, b| (b.created, sequence(&b.id)).cmp(&(a.created, sequence(&a.id))));
+        all.sort_by_key(|p| std::cmp::Reverse((p.created, sequence(&p.id))));
         Ok(all)
     }
 
@@ -311,7 +311,10 @@ impl<S: Store> Vault<S> {
     /// Notes whether promise `id` has a runner in this process.
     pub fn set_promise_live(&self, id: &str, live: bool) {
         let rt = &self.promises_rt;
-        let mut set = rt.live.lock().unwrap_or_else(|e| e.into_inner());
+        let mut set = rt
+            .live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if live {
             set.insert(id.into());
         } else {
@@ -325,7 +328,7 @@ impl<S: Store> Vault<S> {
         let rt = &self.promises_rt;
         rt.live
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains(id)
     }
 
@@ -343,7 +346,10 @@ impl<S: Store> Vault<S> {
         loop {
             // Read under the lock: a change made after the read wakes the
             // wait below, so none is missed.
-            let guard = rt.live.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = rt
+                .live
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let p = self
                 .promise(id)?
                 .ok_or_else(|| format!("no promise `{id}`"))?;
@@ -356,7 +362,7 @@ impl<S: Store> Vault<S> {
             drop(
                 rt.changed
                     .wait_timeout(guard, slice)
-                    .unwrap_or_else(|e| e.into_inner()),
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
             );
         }
     }
@@ -388,7 +394,10 @@ impl<S: Store> Vault<S> {
     fn promise_changed(&self, p: &Promise) {
         {
             let rt = &self.promises_rt;
-            let _guard = rt.live.lock().unwrap_or_else(|e| e.into_inner());
+            let _guard = rt
+                .live
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             rt.changed.notify_all();
         }
         if let Some(bus) = &self.bus {

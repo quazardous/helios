@@ -271,7 +271,10 @@ fn after_a_stop_resumable_promises_run_again_and_the_others_fail_interrupted() {
             p.done(json!({ "from": 1 }));
         })
         .kind("again", false, |p| p.done(Value::Null));
-    assert_eq!(promises.recover().unwrap(), [resumable.clone()]);
+    assert_eq!(
+        promises.recover().unwrap(),
+        std::slice::from_ref(&resumable)
+    );
     let p = vault.wait_promise(&resumable, DEADLINE, &|| false).unwrap();
     assert_eq!(p.state.name(), "done");
     assert_eq!(p.attempts, 2);

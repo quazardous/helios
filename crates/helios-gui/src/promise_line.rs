@@ -78,13 +78,12 @@ pub fn show(ui: &mut Ui, p: &Promise) -> Option<Action> {
                             .with("reason", reason.as_str()),
                     ),
                 );
-                if *retryable {
-                    if ui
+                if *retryable
+                    && ui
                         .button(text(Message::new("gui-promise-retry", "Retry")))
                         .clicked()
-                    {
-                        action = Some(Action::Retry);
-                    }
+                {
+                    action = Some(Action::Retry);
                 }
             }
             State::Cancelled => {
@@ -94,13 +93,11 @@ pub fn show(ui: &mut Ui, p: &Promise) -> Option<Action> {
         if !p.state.is_settled() {
             if p.cancel_asked {
                 ui.weak(text(Message::new("gui-promise-cancelling", "Cancelling…")));
-            } else {
-                if ui
-                    .button(text(Message::new("gui-promise-cancel", "Cancel")))
-                    .clicked()
-                {
-                    action = Some(Action::Cancel);
-                }
+            } else if ui
+                .button(text(Message::new("gui-promise-cancel", "Cancel")))
+                .clicked()
+            {
+                action = Some(Action::Cancel);
             }
         }
     });
