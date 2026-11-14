@@ -1511,3 +1511,74 @@ fn a_card_copied_once_is_known_wherever_it_is_mounted_and_another_card_is_not() 
     );
     assert!(report.read > 0, "another card's file is read: {lines:?}");
 }
+
+/// An import session (`docs/design/library.md`, the Imports section):
+/// each import's record keeps the photos it brought in, and a smart
+/// album's `import` rule selects exactly them; the same photos imported
+/// again are no new session's.
+#[test]
+fn an_import_session_keeps_its_photos_and_a_rule_selects_them() {
+    use helios_library::import_history;
+    use helios_vault::Query;
+    use helios_vault::rules::{IMPORT_HISTORY, Rule};
+    assert_eq!(format!("library/{}", import_history::NS), IMPORT_HISTORY);
+    let p = Place::new("sessions");
+    let (first, second) = (p.join("first"), p.join("second"));
+    picture(&first.join("a.png"), 0, 1.0, 0);
+    picture(&first.join("b.png"), 1, 1.0, 0);
+    picture(&second.join("c.png"), 0, 0.5, 3);
+    let vault = vault();
+    let (one, _) = run(
+        &vault,
+        None,
+        std::slice::from_ref(&first),
+        &Options::default(),
+    );
+    let (two, _) = run(
+        &vault,
+        None,
+        std::slice::from_ref(&second),
+        &Options::default(),
+    );
+    // Imported again: nothing new, an empty session.
+    run(
+        &vault,
+        None,
+        std::slice::from_ref(&first),
+        &Options::default(),
+    );
+    let records = import_history::list(&vault, None).unwrap();
+    assert_eq!(records.len(), 3);
+    assert!(records[0].images.is_empty(), "{:?}", records[0]);
+    assert_eq!(records[1].images.len(), 1);
+    assert_eq!(records[2].images.len(), 2);
+    // The report names its record: the session the Library shows.
+    assert_eq!(one.history.as_deref(), Some(records[2].id.as_str()));
+    assert_eq!(two.history.as_deref(), Some(records[1].id.as_str()));
+    let selected = |id: &str| {
+        let rules = Rule::parse(&serde_json::json!({"match": "all", "rules": [
+            {"field": "import", "op": "in", "value": id},
+        ]}))
+        .unwrap();
+        let cursor = vault
+            .open_cursor(Query {
+                rules: Some(rules),
+                ..Query::default()
+            })
+            .unwrap();
+        let mut ids: Vec<String> = vault
+            .cursor_ids(cursor.id, 0, 99)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.hex())
+            .collect();
+        vault.close_cursor(cursor.id);
+        ids.sort();
+        ids
+    };
+    let mut kept = records[2].images.clone();
+    kept.sort();
+    assert_eq!(selected(&records[2].id), kept);
+    assert_eq!(selected(&records[1].id), records[1].images);
+    assert!(selected(&records[0].id).is_empty());
+}

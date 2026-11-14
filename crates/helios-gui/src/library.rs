@@ -583,7 +583,7 @@ impl Change {
 /// dates (a date being the capture day by the camera's clock:
 /// `date:2024-06-01..2024-06-30` takes both days whole), and in its text
 /// Helios's own keys ([`helios_terms`]): `camera:`, `lens:`, `type:`,
-/// `folder:`, `collection:`, `presence:`, `cull:` and `backup:`; the other words are looked for
+/// `folder:`, `collection:`, `import:`, `presence:`, `cull:` and `backup:`; the other words are looked for
 /// in the photo's name and tags. A `backup:` term is measured against no
 /// volume until the library sets its rule ([`Library::set_backup_rule`]).
 pub fn query_of(filter: &Filter) -> Query {
@@ -608,6 +608,11 @@ pub fn query_of(filter: &Filter) -> Query {
             states,
         }),
         cull: terms.cull,
+        // An import session: the photos it brought in, by the vault's
+        // `import` rule (nothing copied or moved).
+        rules: terms.import.and_then(|id| {
+            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id)).ok()
+        }),
         ..Query::default()
     }
 }
@@ -622,6 +627,9 @@ pub struct Terms {
     pub folder: Option<String>,
     /// The collection the photos are in (its id): an album for now.
     pub collection: Option<String>,
+    /// The import session the photos came in with (its id in the import
+    /// history): the Library's Imports section.
+    pub import: Option<String>,
     pub presence: Vec<helios_vault::Presence>,
     /// The backup states every `backup:` term allows (`None`: no term).
     pub backup: Option<Vec<helios_vault::BackupState>>,
@@ -679,7 +687,8 @@ pub fn quoted(value: &str) -> String {
 /// Helios's own keys in a filter's text (the words egui-pop's grammar
 /// leaves): `camera:<model>`, `lens:<lens>`, `type:<cr3>` (each exact;
 /// several of one key take any of them), `folder:<path>` (a copy there
-/// or below), `collection:<id>` (in that album), `presence:present|offline|missing`,
+/// or below), `collection:<id>` (in that album), `import:<id>` (brought
+/// in by that import session), `presence:present|offline|missing`,
 /// `cull:sharp|soft|clipped|unmeasured` (several: any of them) and
 /// `backup:<state>` (several: every one holds). A key with a value it does not know stays
 /// a word, as before.
@@ -703,6 +712,8 @@ pub fn helios_terms(text: &str) -> Terms {
             t.folder = Some(v);
         } else if let Some(v) = value("collection:") {
             t.collection = Some(v);
+        } else if let Some(v) = value("import:") {
+            t.import = Some(v);
         } else if let Some(p) = value("presence:").and_then(|v| match v.to_lowercase().as_str() {
             "present" => Some(helios_vault::Presence::Present),
             "offline" => Some(helios_vault::Presence::Offline),
@@ -1074,6 +1085,45 @@ fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
             ),
         ],
     );
+}
+
+/// The command that scopes the library to an import session of the
+/// import history (`id`; null: the whole library), its photos selected
+/// with `select: true`.
+pub const IMPORT_SESSION_COMMAND: &str = "library.importSession";
+
+/// The command running the workshop applied on the Library's selection
+/// ("Run Workshop…": `workshop.run` on the selection).
+pub const RUN_WORKSHOP_COMMAND: &str = "library.runWorkshop";
+
+/// An import session the Library's Imports section lists: an import of
+/// the import history, its photos a virtual collection (nothing copied
+/// or moved).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportSession {
+    /// Its id in the import history.
+    pub id: String,
+    /// When it ran (seconds since the epoch).
+    pub when: u64,
+    /// Its source, as the history names it (a card, a folder, a
+    /// connector's source).
+    pub source: String,
+    /// The photos it brought in or found again.
+    pub count: u64,
+}
+
+impl ImportSession {
+    /// Its row: when, the source, how many photos.
+    pub fn line(&self) -> String {
+        let when = chrono::DateTime::from_timestamp(i64::try_from(self.when).unwrap_or(0), 0)
+            .map(|utc| {
+                utc.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        format!("{when} · {} · {}", self.source, self.count)
+    }
 }
 
 /// The command that scopes the library to a collection (`id`; null: the
@@ -1582,6 +1632,12 @@ pub struct Library {
     /// Whether the albums must be read again
     /// ([`Library::take_albums_wanted`]).
     albums_wanted: Wanted,
+    /// The import sessions of the import history, newest first, as the
+    /// host last read them (the Imports section).
+    imports: Vec<ImportSession>,
+    /// The import session whose photos are all selected once its query
+    /// answers ([`Library::show_import`]).
+    select_session: Option<String>,
     /// Album changes asked, for the host to make in the vault, each with
     /// the batch it was asked in.
     album_edits: Vec<(AlbumEdit, Batch)>,
@@ -1763,6 +1819,8 @@ impl Default for Library {
             folders: FolderCounts::Unread,
             albums: None,
             albums_wanted: Wanted::Yes,
+            imports: Vec::new(),
+            select_session: None,
             album_edits: Vec::new(),
             quick: Vec::new(),
             quick_set: HashSet::new(),
@@ -2284,6 +2342,41 @@ impl Library {
         self.set_filter(filter);
     }
 
+    /// The import session the filter is scoped to (its `import:` term).
+    pub fn import_session(&self) -> Option<String> {
+        helios_terms(&self.filter.text).import
+    }
+
+    /// Scopes the library to an import session (its `import:` term in
+    /// the filter, in place of any other), or to none; the rest of the
+    /// filter is kept. With `select`, its photos are all selected once
+    /// its query answers.
+    pub fn show_import(&mut self, id: Option<&str>, select: bool) {
+        let mut words: Vec<String> = tokens(&self.filter.text)
+            .into_iter()
+            .filter(|t| !t.to_lowercase().starts_with("import:"))
+            .collect();
+        if let Some(id) = id {
+            words.push(format!("import:{}", quoted(id)));
+        }
+        let filter = Filter {
+            text: words.join(" "),
+            ..self.filter.clone()
+        };
+        self.select_session = id.filter(|_| select).map(String::from);
+        self.set_filter(filter);
+    }
+
+    /// The import sessions the Imports section lists, newest first.
+    pub fn imports(&self) -> &[ImportSession] {
+        &self.imports
+    }
+
+    /// The import sessions as the host read them, newest first.
+    pub fn set_imports(&mut self, imports: Vec<ImportSession>) {
+        self.imports = imports;
+    }
+
     /// The vault's albums, as last read (none before the host reads them).
     pub fn albums(&self) -> Option<&[helios_vault::collections::Album]> {
         self.albums.as_deref()
@@ -2793,6 +2886,13 @@ impl Library {
     pub fn set_matches(&mut self, ids: impl IntoIterator<Item = String>) {
         self.matches = Some(ids.into_iter().collect());
         self.reorder();
+        // An import session shown with its photos selected: all of them,
+        // once its query answered.
+        if self.select_session.is_some() && self.select_session == self.import_session() {
+            self.select_session = None;
+            let all = self.shown_where(|_| true);
+            self.set_selected(all);
+        }
     }
 
     /// Where thumbnails are sent, by image id, from any thread.
@@ -3887,6 +3987,53 @@ impl Library {
         }
     }
 
+    /// The Imports section: every import session of the import history,
+    /// newest first (when, source, how many photos); a click shows its
+    /// photos (its `import:` term, with the other filters), a click on it
+    /// again drops the scope. Nothing is copied or moved.
+    fn imports_section(&mut self, ui: &mut Ui) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let word = |m: Message| crate::i18n::text(&ctx, m);
+        let selected = self.import_session();
+        let mut chosen = None;
+        egui::CollapsingHeader::new(word(Message::new("gui-library-imports", "Imports")))
+            .id_salt("helios.library.imports")
+            .show(ui, |ui| {
+                if self.imports.is_empty() {
+                    ui.weak(word(Message::new(
+                        "gui-library-imports-none",
+                        "No import yet",
+                    )));
+                    return;
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.library.imports.scroll")
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        for session in &self.imports {
+                            let on = selected.as_deref() == Some(session.id.as_str());
+                            if ui.selectable_label(on, session.line()).clicked() {
+                                chosen = Some(session.id.clone());
+                            }
+                        }
+                    });
+            });
+        if let Some(id) = chosen {
+            let same = selected.as_deref() == Some(id.as_str());
+            crate::dialogs::request(
+                ui.ctx(),
+                crate::dialogs::Request::Run(
+                    IMPORT_SESSION_COMMAND.into(),
+                    serde_json::json!({ "id": (!same).then_some(id) }),
+                    helios_shell::commands::Origin::User,
+                ),
+            );
+        }
+    }
+
     /// The rows of the collections in the set `parent` (none: the top),
     /// a set as a group that opens and closes, its members indented
     /// below it.
@@ -4112,6 +4259,7 @@ impl Library {
         self.facets_bar(ui);
         self.folders_section(ui);
         self.albums_section(ui);
+        self.imports_section(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
             let text = crate::i18n::text(
@@ -4176,6 +4324,12 @@ impl Library {
                         crate::dialogs::MenuItem::command("library.export"),
                         crate::dialogs::MenuItem::command("library.copyFiles"),
                         crate::dialogs::MenuItem::command("library.fitCameraLook"),
+                        crate::dialogs::MenuItem::command(RUN_WORKSHOP_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-run-workshop", "Run Workshop…"),
+                            ),
+                        ),
                         crate::dialogs::MenuItem::Separator,
                         crate::dialogs::MenuItem::command(ROTATE_LEFT_COMMAND).labeled(
                             crate::i18n::text(

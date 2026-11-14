@@ -101,9 +101,11 @@ mod import_sources;
 mod import_window;
 mod import_wizard;
 pub(crate) mod init_wizard;
+mod library_imports;
 mod lifetime;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
+pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
 mod storage;
 mod storage_admin;
@@ -300,6 +302,8 @@ enum Action {
     /// Scopes the library to a folder (`path`; null: none), as whom;
     /// without `path`, says the folder.
     Folder(Value, Origin),
+    /// The Library's import sessions and Run Workshop… (`library_imports`).
+    LibraryImports(&'static str, Value, Origin),
     /// Scopes the library to a collection (`id`; null: none), as whom;
     /// without `id`, says the collection.
     Collection(Value, Origin),
@@ -3015,6 +3019,18 @@ impl Shell {
             ),
             Box::new(|a, origin| Ok(Action::Collection(a.clone(), origin.clone()))),
         );
+        for (id, title) in library_imports::COMMANDS
+            .iter()
+            .chain(std::iter::once(&library_imports::RUN_WORKSHOP))
+        {
+            let id: &'static str = id;
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, origin| {
+                    Ok(Action::LibraryImports(id, a.clone(), origin.clone()))
+                }),
+            );
+        }
         for (id, title) in [
             (
                 crate::library::COLLECTION_CREATE_COMMAND,
@@ -4061,6 +4077,13 @@ impl Shell {
             command(MENU_EDIT, "1_clipboard", 10, "library.copyFiles"),
             command(MENU_EDIT, "1_clipboard", 11, "viewport.copyImage"),
             command(MENU_EDIT, "1_clipboard", 12, "library.pasteFiles"),
+            // Edit > Run Workshop…, on the Library's selection.
+            command(
+                MENU_EDIT,
+                "3_workshop",
+                0,
+                crate::library::RUN_WORKSHOP_COMMAND,
+            ),
         ];
         // A row's context menu in the Masks panel: its commands act on
         // that row's member, the tree giving its key. Its entries are
@@ -6190,6 +6213,9 @@ impl Shell {
             Action::ComparePhotos(args) => return self.compare_photos(&args),
             Action::Sort(args, origin) => return self.sort_library(&args, &origin),
             Action::Folder(args, origin) => return self.folder_library(&args, &origin),
+            Action::LibraryImports(id, args, origin) => {
+                return self.library_imports_command(id, &args, &origin);
+            }
             Action::Collection(args, origin) => return self.collection_library(&args, &origin),
             Action::CollectionEdit(id, args) => return self.collection_edit(id, &args),
             Action::RecentFilters(id, args) => return self.recent_filters(id, &args),
@@ -6743,6 +6769,7 @@ impl Shell {
         // Duplicates panel.
         let asked = self.receive_imports();
         self.select_imported_photos();
+        self.follow_import_sessions();
         self.receive_exports();
         if asked > 0 {
             self.note(

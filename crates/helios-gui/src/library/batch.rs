@@ -224,7 +224,7 @@ impl Library {
     }
 
     /// The ids of the photos shown that `keep` takes, in order.
-    fn shown_where(&self, keep: impl Fn(&super::Entry) -> bool) -> Vec<String> {
+    pub(crate) fn shown_where(&self, keep: impl Fn(&super::Entry) -> bool) -> Vec<String> {
         self.order
             .iter()
             .map(|&i| &self.entries[i])
@@ -234,7 +234,7 @@ impl Library {
     }
 
     /// Selects `keys`, the cursor on the first; how many.
-    fn set_selected(&mut self, keys: Vec<String>) -> usize {
+    pub(crate) fn set_selected(&mut self, keys: Vec<String>) -> usize {
         let cursor = keys.first().cloned();
         self.selected = cursor.as_ref().and_then(|c| self.at(c));
         let count = keys.len();

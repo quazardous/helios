@@ -141,6 +141,7 @@ pub(super) struct Words {
     title: String,
     none: String,
     again: String,
+    show: String,
 }
 
 impl Words {
@@ -149,6 +150,7 @@ impl Words {
             title: t(Message::new("gui-import-history-imports", "Imports")),
             none: t(Message::new("gui-import-history-none", "No import yet")),
             again: t(Message::new("gui-import-history-again", "Import again")),
+            show: t(Message::new("gui-import-history-show", "Show in Library")),
         }
     }
 }
@@ -229,6 +231,22 @@ pub(super) fn history_ui(
                     asked = Some(r.id.clone());
                 }
             }
+            // Its photos, as the Library's import session.
+            if r.error.is_none() {
+                let button = ui.small_button(&words.show);
+                let name = format!("{}: {text}", words.show);
+                button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+                if button.on_hover_text(&words.show).clicked() {
+                    crate::dialogs::request(
+                        ui.ctx(),
+                        crate::dialogs::Request::Run(
+                            crate::library::IMPORT_SESSION_COMMAND.into(),
+                            json!({ "id": r.id, "select": true }),
+                            Origin::User,
+                        ),
+                    );
+                }
+            }
         });
     }
     asked
@@ -243,7 +261,7 @@ impl Shell {
         w.history.read_at = None;
     }
 
-    fn history_reader(&self) -> Result<Reader, String> {
+    pub(super) fn history_reader(&self) -> Result<Reader, String> {
         self.import
             .get()
             .history

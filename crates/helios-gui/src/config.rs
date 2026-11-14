@@ -488,6 +488,7 @@ pub const PLACES: &[(&str, &[&str])] = &[
             "system.map.keepMissing",
         ],
     ),
+    ("library/imports", &[crate::shell::SHOW_IMPORT_SETTING]),
     ("library/decisions", &["project.decisions.mode"]),
     ("library/history", &["system.workflow.keep_days"]),
     (
@@ -536,6 +537,7 @@ pub fn title(path: &str) -> Message {
         "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
         "interface/experimental" => Message::new("gui-settings-experimental", "Experimental"),
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
+        "library/imports" => Message::new("gui-settings-imports", "Imports"),
         "library/decisions" => Message::new("gui-settings-decisions", "Decisions"),
         "library/history" => Message::new("gui-settings-history", "History"),
         "library/automatic-imports" => {

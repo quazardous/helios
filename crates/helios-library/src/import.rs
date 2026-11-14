@@ -418,6 +418,10 @@ pub struct Report {
     /// they stay on disk when the import is undone.
     #[serde(skip)]
     pub copies: Vec<PathBuf>,
+    /// Its record in the import history ([`crate::import_history`]): the
+    /// import session the Library shows. None when it was not written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
@@ -1444,6 +1448,10 @@ pub fn import_recorded<S: Store>(
                 None
             }
         };
+    let ended = ended.map(|mut report| {
+        report.history.clone_from(&record);
+        report
+    });
     (ended, record)
 }
 

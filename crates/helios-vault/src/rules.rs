@@ -78,18 +78,35 @@ pub enum RuleKind {
     /// A capture time (seconds, the camera's clock read as UTC): a
     /// number's operators, and `within` a [`Relative`] period.
     Date,
+    /// An import session of the import history (its id, a record of
+    /// [`IMPORT_HISTORY`]): `in`, `not_in`, the photos it brought into
+    /// the Library or found again.
+    Import,
+    /// When a photo was imported (seconds since the epoch, UTC): a
+    /// number's operators on the time of the sessions that hold it, and
+    /// `within` a [`Relative`] period. A photo in no session never
+    /// matches.
+    Imported,
 }
+
+/// The store's documents namespace the import history keeps its records
+/// in (the library documents' `import/history`,
+/// `helios_library::import_history::NS`), each with the photos it
+/// brought in (`images`) and its time (`when`).
+pub const IMPORT_HISTORY: &str = "library/import/history";
 
 impl RuleKind {
     /// The operators the kind takes.
     pub fn ops(self) -> &'static [&'static str] {
         match self {
             RuleKind::Number => &["=", "!=", "<", "<=", ">", ">=", "between"],
-            RuleKind::Date => &["=", "!=", "<", "<=", ">", ">=", "between", "within"],
+            RuleKind::Date | RuleKind::Imported => {
+                &["=", "!=", "<", "<=", ">", ">=", "between", "within"]
+            }
             RuleKind::Set => &["has", "lacks"],
             RuleKind::Text => &["is", "is_not", "contains"],
             RuleKind::Flag => &["is", "is_not"],
-            RuleKind::Folder | RuleKind::Album => &["in", "not_in"],
+            RuleKind::Folder | RuleKind::Album | RuleKind::Import => &["in", "not_in"],
         }
     }
 }
@@ -116,6 +133,8 @@ pub const RULE_FIELDS: &[RuleField] = &[
     f("folder", "", RuleKind::Folder),
     f("album", "", RuleKind::Album),
     f("captured", capture::CAPTURED, RuleKind::Date),
+    f("import", "", RuleKind::Import),
+    f("imported", "", RuleKind::Imported),
     f("camera", capture::CAMERA_MODEL, RuleKind::Text),
     f("make", capture::CAMERA_MAKE, RuleKind::Text),
     f("lens", capture::LENS, RuleKind::Text),
@@ -216,10 +235,10 @@ fn check_value(spec: &RuleField, op: &str, value: Value) -> Result<Value, String
             .ok_or_else(|| format!("`{name}`: {v} is not a text"))
     };
     match spec.kind {
-        RuleKind::Date if op == "within" => Relative::parse(&value)
+        RuleKind::Date | RuleKind::Imported if op == "within" => Relative::parse(&value)
             .map(Relative::to_json)
             .map_err(|e| format!("`{name}`: {e}")),
-        RuleKind::Number | RuleKind::Date if op == "between" => {
+        RuleKind::Number | RuleKind::Date | RuleKind::Imported if op == "between" => {
             let pair = value
                 .as_array()
                 .filter(|a| a.len() == 2)
@@ -230,7 +249,7 @@ fn check_value(spec: &RuleField, op: &str, value: Value) -> Result<Value, String
             }
             Ok(json!([pair[0], pair[1]]))
         }
-        RuleKind::Number | RuleKind::Date => {
+        RuleKind::Number | RuleKind::Date | RuleKind::Imported => {
             number(&value)?;
             Ok(value)
         }
@@ -249,7 +268,7 @@ fn check_value(spec: &RuleField, op: &str, value: Value) -> Result<Value, String
             }
             Ok(Value::from(item))
         }
-        RuleKind::Text | RuleKind::Album => Ok(Value::from(text(&value)?)),
+        RuleKind::Text | RuleKind::Album | RuleKind::Import => Ok(Value::from(text(&value)?)),
         RuleKind::Flag => {
             let flag = text(&value)?;
             if !FLAGS.contains(&flag.as_str()) {
@@ -334,7 +353,15 @@ impl Rule {
                 rules: rules.iter().map(|r| r.at(now)).collect(),
             },
             Rule::Condition(c) if c.op == "within" => {
-                let (start, end) = Relative::parse(&c.value).map_or((0, 0), |r| r.range(now));
+                let (mut start, mut end) =
+                    Relative::parse(&c.value).map_or((0, 0), |r| r.range(now));
+                // An import's time is UTC, not a camera's clock: the
+                // local days, as UTC.
+                if c.field.kind == RuleKind::Imported {
+                    let offset = LOCAL_OFFSET.load(Ordering::Relaxed);
+                    start -= offset;
+                    end -= offset;
+                }
                 let bound = |op: &'static str, at: i64| {
                     Rule::Condition(Condition {
                         field: c.field,

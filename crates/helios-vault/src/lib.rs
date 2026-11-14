@@ -665,20 +665,23 @@ impl MemoryStore {
                 let Some(n) = n else {
                     return false;
                 };
-                let v = c.number();
-                return match c.op {
-                    "=" => n == v,
-                    "!=" => n != v,
-                    "<" => n < v,
-                    "<=" => n <= v,
-                    ">" => n > v,
-                    ">=" => n >= v,
-                    _ => {
-                        let (low, high) = c.bounds();
-                        (low..=high).contains(&n)
-                    }
-                };
+                return number_holds(c, n);
             }
+            RuleKind::Imported => {
+                // Any session holding the photo, at its time.
+                let hex = id.hex();
+                return self
+                    .documents
+                    .iter()
+                    .filter(|((ns, _), _)| ns == rules::IMPORT_HISTORY)
+                    .filter(|(_, d)| holds_image(d, &hex))
+                    .filter_map(|(_, d)| d.get("when").and_then(serde_json::Value::as_f64))
+                    .any(|when| number_holds(c, when));
+            }
+            RuleKind::Import => self
+                .documents
+                .get(&(rules::IMPORT_HISTORY.to_string(), c.text().to_string()))
+                .is_some_and(|d| holds_image(d, &id.hex())),
             RuleKind::Set => self.items_of(id, c.field.field).contains(&c.text()),
             RuleKind::Text => {
                 let v = self.text_of(id, c.field.field);
@@ -713,6 +716,31 @@ impl MemoryStore {
     fn resolved<'a>(&self, query: &'a Query) -> Result<std::borrow::Cow<'a, Query>, String> {
         rules::resolve(query, || self.documents(collections::COLLECTIONS))
     }
+}
+
+/// Whether `n` passes a number's condition (`between`: both bounds kept).
+fn number_holds(c: &rules::Condition, n: f64) -> bool {
+    let v = c.number();
+    match c.op {
+        "=" => n == v,
+        "!=" => n != v,
+        "<" => n < v,
+        "<=" => n <= v,
+        ">" => n > v,
+        ">=" => n >= v,
+        _ => {
+            let (low, high) = c.bounds();
+            (low..=high).contains(&n)
+        }
+    }
+}
+
+/// Whether a document's `images` (ids, hex) hold `hex`: an album's, an
+/// import session's.
+fn holds_image(doc: &serde_json::Value, hex: &str) -> bool {
+    doc.get("images")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|a| a.iter().any(|i| i.as_str() == Some(hex)))
 }
 
 /// A folder as the start of the paths below it: its path with one
