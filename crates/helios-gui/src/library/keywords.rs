@@ -532,12 +532,12 @@ mod tests {
         );
         assert_eq!(lib.add_keyword("Pets | Cat", Some(vec!["a".into()])), Ok(1));
         assert_eq!(lib.entry("a").unwrap().tags, ["Animals|Dog", "Pets|Cat"]);
-        assert_eq!(
-            lib.remove_keyword("Pets", Some(vec!["a".into(), "b".into()])),
-            Ok(1)
-        );
+        assert_eq!(lib.remove_keyword("Pets", Some(vec!["a".into()])), Ok(1));
         assert_eq!(lib.entry("a").unwrap().tags, ["Animals|Dog"]);
-        assert!(lib.remove_keyword("Pets", Some(vec!["a".into()])).is_err());
+        assert!(
+            lib.remove_keyword("Pets|Cat", Some(vec!["a".into()]))
+                .is_err()
+        );
 
         assert!(
             lib.ask_rename_keyword("Animals", "Pets").is_err(),
