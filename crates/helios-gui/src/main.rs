@@ -712,7 +712,7 @@ fn library_commands(
     shell.register(
         CommandSpec::new(
             helios_gui::shell::IMPORT_COMMAND,
-            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `profile`: an import profile's id, under the options given; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out; `camera_look`: false leaves the cameras' default looks off the raws)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out; `camera_look`: false leaves the cameras' default looks off the raws)",
             "Library",
         ),
         move |args, origin| {
@@ -722,9 +722,7 @@ fn library_commands(
             if args.get("origin").is_none() {
                 args["origin"] = json!(helios_gui::persist::who(origin));
             }
-            // A profile named: its choices under the options given, as
-            // the node's `library.import` takes them.
-            let args = &helios_node_core::import_profiles::expand(library.vault(), &args)?;
+            let args = &args;
             let options = helios_gui::importers::options(args)?;
             let through = args.get("importer").is_some().then(|| plugins.clone());
             let mut sources: Vec<std::path::PathBuf> = args
