@@ -454,6 +454,7 @@ gui-catalogue-restore-confirm d40c5f1fec7495ff
 gui-catalogue-snapshot-now cf36c18d2cdb0849
 gui-catalogue-today c9dc63ec85b5ade4
 gui-choose-about a9204c80a1aed9bd
+gui-choose-chosen 2324457b4079925f
 gui-choose-closed 2057e0ea9e1b8bb7
 gui-choose-connect 8ba1755f48951806
 gui-choose-connecting 268d46e2c91c444d
@@ -701,6 +702,7 @@ gui-import-window-choices-reset c7f725faf218071d
 gui-import-window-choices-reset-help 91c0381c5ef67b36
 gui-import-window-choices-undo cc7022a2d9050a57
 gui-import-window-choose db696f6e530b1a77
+gui-import-window-choose-on-the-right f7756c068292a0fe
 gui-import-window-contents ad5874f98f978353
 gui-import-window-copy 1910d5f23c0a4434
 gui-import-window-counts c479037efdc60eca
