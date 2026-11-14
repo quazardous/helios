@@ -1435,10 +1435,12 @@ pub(crate) fn choose_ui(
         .as_ref()
         .filter(|p| p.account == id)
         .map(Picking::status);
+    // The text wraps to the Detail column's width: a line wider than the
+    // column would widen its content past its edge.
     let spinning = |ui: &mut egui::Ui, text: String| {
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             ui.spinner();
-            ui.label(text);
+            ui.add(egui::Label::new(text).wrap());
         });
     };
     let warned = |ui: &mut egui::Ui, text: String| {
@@ -1504,11 +1506,9 @@ pub(crate) fn choose_ui(
                     ui.ctx().copy_text(url.clone());
                 }
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                cancel = ui
-                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                    .clicked();
-            });
+            cancel = ui
+                .button(t(Message::new("gui-connect-cancel", "Cancel")))
+                .clicked();
         }
         Some(PickStatus::Importing { items }) => spinning(
             ui,
