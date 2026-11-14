@@ -858,8 +858,20 @@ through the node's `library.stacks.group`, `.ungroup` and `.top`.
 Grouping photos of a stack with others merges the stack (Lightroom's
 habit); the photo under the cursor goes on top. Each is one step of the
 library history (the stacks' documents before and after), and joins a
-`command.batch`'s step as the other library commands do. Not yet: the
-RAW+JPEG pairs stacked at import.
+`command.batch`'s step as the other library commands do.
+
+Part 2 built (2026-11-14): RAW+JPEG pairs stacked at import
+(`helios_library::pairs`). A raw and a JPEG in one folder are a pair
+when their names match but for the extension, or, renamed, when the
+camera's clock (EXIF, within half a second) and the camera say the same
+shot with no rival file at that moment. The import stacks the pairs it
+brought in, the raw on top, as part of its own undo step; it is the
+import option `stack_pairs`, on by default, an import profile's
+(Advanced: "Stack RAW+JPEG pairs") and read by the node's import on
+every path (window, automatic, by rule, remote). "Stack RAW+JPEG Pairs"
+(`library.stack.pairs`, through the node's `library.stacks.pairs`) does
+it on photos imported before, one step. A photo already in a stack is
+left as it is.
 
 **L12. Keyword tree.** A Keywords section: the tree from `|` paths with
 counts, click to filter, drag on photos, rename and merge a branch as

@@ -1084,6 +1084,70 @@ fn an_import_is_undone_and_redone_its_files_kept() {
     }
 }
 
+#[test]
+fn raw_jpeg_pairs_are_stacked_at_import_the_raw_on_top_and_undone_with_it() {
+    let p = Place::new("pairs");
+    let roll = p.join("roll");
+    // One shot written twice by the camera, and a JPEG alone.
+    picture(&roll.join("IMG_0001.JPG"), 0, 1.0, 0);
+    std::fs::write(roll.join("IMG_0001.CR3"), b"a camera raw, as bytes").unwrap();
+    picture(&roll.join("IMG_0002.JPG"), 1, 1.0, 0);
+    let vault = vault();
+    let (report, lines) = run(
+        &vault,
+        None,
+        std::slice::from_ref(&roll),
+        &Options::default(),
+    );
+    assert_eq!((report.added, report.stacked), (3, 1), "{lines:?}");
+    let id_of = |name: &str| {
+        let line = lines
+            .iter()
+            .find(|l| l["path"] == serde_json::json!(roll.join(name)))
+            .unwrap();
+        ImageId::from_hex(line["id"].as_str().unwrap()).unwrap()
+    };
+    let (raw, jpeg, alone) = (
+        id_of("IMG_0001.CR3"),
+        id_of("IMG_0001.JPG"),
+        id_of("IMG_0002.JPG"),
+    );
+    let stacks = vault.stacks().unwrap();
+    assert_eq!(stacks.len(), 1, "{stacks:?}");
+    assert_eq!(stacks[0].top, raw.hex(), "the raw on top");
+    assert!(stacks[0].contains(&jpeg));
+    assert_eq!(stacks[0].who, "import");
+    assert!(vault.stack_of(&alone).unwrap().is_none(), "the lone JPEG");
+    // The import's undo takes the stack back with the photos; its redo
+    // makes it again.
+    assert_eq!(report.changes.documents.len(), 1, "{:?}", report.changes);
+    vault.revert(&report.changes).unwrap();
+    assert!(vault.stacks().unwrap().is_empty());
+    vault.replay(&report.changes).unwrap();
+    assert_eq!(vault.stacks().unwrap(), stacks);
+    vault.revert(&report.changes).unwrap();
+
+    // The option off: the pair stays apart (the stack undone is gone, not
+    // hidden), and the record says so.
+    let off = Options {
+        stack_pairs: false,
+        ..Options::default()
+    };
+    let (report, lines) = run(&vault, None, std::slice::from_ref(&roll), &off);
+    assert_eq!(report.stacked, 0, "{lines:?}");
+    assert!(vault.stacks().unwrap().is_empty());
+    let recorded = helios_library::import_history::choices(&off);
+    assert_eq!(recorded["stack_pairs"], false, "{recorded}");
+
+    // Stacked later, on the photos chosen: one step, undone.
+    let (made, step) =
+        helios_library::pairs::stack_pairs(&vault, &[raw, jpeg, alone], "user", 2000).unwrap();
+    assert_eq!(made.len(), 1);
+    assert_eq!(made[0].top, raw.hex());
+    vault.revert(&step).unwrap();
+    assert!(vault.stacks().unwrap().is_empty());
+}
+
 /// The modification time of `path`, in seconds, as a listing records it.
 fn modified_of(path: &Path) -> u64 {
     std::fs::metadata(path)

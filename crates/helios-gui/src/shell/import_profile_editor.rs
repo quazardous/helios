@@ -430,6 +430,17 @@ impl ImportWindow {
             ui.checkbox(&mut self.choices.camera_look, &words.camera_look)
                 .on_hover_text(&words.camera_look_help);
         }
+        ui.checkbox(
+            &mut self.choices.stack_pairs,
+            t(Message::new(
+                "gui-import-profiles-stack-pairs",
+                "Stack RAW+JPEG pairs",
+            )),
+        )
+        .on_hover_text(t(Message::new(
+            "gui-import-profiles-stack-pairs-help",
+            "A raw and a JPEG of the same shot are shown as one stack, the raw on top",
+        )));
         asked.is_some()
     }
 }

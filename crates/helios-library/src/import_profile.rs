@@ -238,8 +238,8 @@ impl Apply {
     }
 }
 
-/// Reads an import's `filter` and `apply` arguments into `options`; absent
-/// or null, nothing changes.
+/// Reads an import's `filter`, `apply` and `stack_pairs` arguments into
+/// `options`; absent or null, nothing changes.
 ///
 /// # Errors
 /// An argument that is not a filter or an apply, or a label not known.
@@ -259,17 +259,23 @@ pub fn read(args: &Value, options: &mut Options) -> Result<(), String> {
         }
         options.apply = (!apply.is_empty()).then_some(apply);
     }
+    if let Some(stack) = args.get("stack_pairs").and_then(Value::as_bool) {
+        options.stack_pairs = stack;
+    }
     Ok(())
 }
 
-/// The `filter` and `apply` arguments of `options`, set into `choices` when
-/// they say something (the import history's record).
+/// The `filter`, `apply` and `stack_pairs` arguments of `options`, set
+/// into `choices` when they say something (pairs left apart only) (the import history's record).
 pub fn write(options: &Options, choices: &mut Value) {
     if let Some(filter) = &options.filter {
         choices["filter"] = json!(filter);
     }
     if let Some(apply) = &options.apply {
         choices["apply"] = json!(apply);
+    }
+    if !options.stack_pairs {
+        choices["stack_pairs"] = json!(false);
     }
 }
 
@@ -278,6 +284,14 @@ pub fn filter_schema() -> Value {
     json!({
         "type": ["object", "null"],
         "description": "which files are taken: `kinds` (raw, jpeg, video, other), `names` (patterns with * and ?), `from` and `to` (YYYY-MM-DD), `min_bytes`, `max_bytes`, `new_only`",
+    })
+}
+
+/// The schema of `library.import`'s `stack_pairs` argument.
+pub fn stack_pairs_schema() -> Value {
+    json!({
+        "type": ["boolean", "null"],
+        "description": "RAW+JPEG pairs of one shot stacked, the raw on top (on when absent)",
     })
 }
 
@@ -355,5 +369,16 @@ mod tests {
         read(&json!({ "filter": {}, "apply": {} }), &mut options).unwrap();
         assert!(options.filter.is_none() && options.apply.is_none());
         assert!(read(&json!({ "apply": { "label": "pink" } }), &mut options).is_err());
+        // Pairs are stacked unless told not to; off, the record says so.
+        let mut options = Options::default();
+        assert!(options.stack_pairs);
+        read(&json!({ "stack_pairs": false }), &mut options).unwrap();
+        assert!(!options.stack_pairs);
+        let mut choices = json!({});
+        write(&options, &mut choices);
+        assert_eq!(choices["stack_pairs"], false);
+        let mut again = Options::default();
+        read(&choices, &mut again).unwrap();
+        assert!(!again.stack_pairs);
     }
 }

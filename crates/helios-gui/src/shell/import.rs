@@ -421,8 +421,9 @@ impl Shell {
         {
             args["duplicates"] = duplicates;
         }
-        // A saved source's filter and what its photos are given.
-        for key in ["filter", "apply"] {
+        // A saved source's filter, what its photos are given, and its
+        // RAW+JPEG pairs left apart.
+        for key in ["filter", "apply", "stack_pairs"] {
             if let Some(value) = choices.get(key).filter(|v| !v.is_null()) {
                 args[key] = value.clone();
             }

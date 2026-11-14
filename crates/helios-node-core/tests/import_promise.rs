@@ -254,3 +254,61 @@ fn an_import_cut_by_a_stop_is_taken_up_and_finishes_without_duplicates() {
     drop(vault);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_import_by_rule_stacks_its_raw_jpeg_pairs_unless_told_not_to() {
+    let dir = scratch("pairs");
+    let roll = dir.join("roll");
+    std::fs::create_dir_all(&roll).unwrap();
+    // One shot as a raw and a JPEG, and a JPEG alone.
+    std::fs::write(roll.join("DSC_0001.NEF"), [1u8; 2_000]).unwrap();
+    std::fs::write(roll.join("DSC_0001.JPG"), [2u8; 2_000]).unwrap();
+    std::fs::write(roll.join("DSC_0002.JPG"), [3u8; 2_000]).unwrap();
+    let bus = Arc::new(Bus::new());
+    let vault = Arc::new(Vault::new(MemoryStore::default()).with_bus(bus.clone()));
+    let service = VaultService::new(vault.clone(), bus.clone(), Jobs::new(bus.clone()), "test");
+    let client = Client::in_process(Arc::new(service)).with_origin("agent:test");
+    let import = |params: Value| {
+        let answer = client.request("library.import", params).unwrap();
+        let settled = wait(&client, &answer["promise"]["id"]);
+        assert_eq!(settled["state"], "done", "{settled}");
+        settled["result"]["report"].clone()
+    };
+
+    let report = import(json!({ "source": roll, "rule": "all", "signals": false }));
+    assert_eq!(
+        (report["added"].clone(), report["stacked"].clone()),
+        (json!(3), json!(1)),
+        "{report}"
+    );
+    let stacks = vault.stacks().unwrap();
+    assert_eq!(stacks.len(), 1, "{stacks:?}");
+    let raw = vault
+        .at_path(&roll.join("DSC_0001.NEF"))
+        .unwrap()
+        .expect("the raw imported")
+        .0;
+    assert_eq!(stacks[0].top, raw.hex(), "the raw on top");
+    let alone = vault
+        .at_path(&roll.join("DSC_0002.JPG"))
+        .unwrap()
+        .expect("the lone JPEG imported")
+        .0;
+    assert!(vault.stack_of(&alone).unwrap().is_none());
+
+    // Off: a fresh library keeps the pair apart.
+    let other = Arc::new(Vault::new(MemoryStore::default()).with_bus(bus.clone()));
+    let service = VaultService::new(other.clone(), bus.clone(), Jobs::new(bus.clone()), "test");
+    let client = Client::in_process(Arc::new(service)).with_origin("agent:test");
+    let answer = client
+        .request(
+            "library.import",
+            json!({ "source": roll, "rule": "all", "signals": false, "stack_pairs": false }),
+        )
+        .unwrap();
+    let settled = wait(&client, &answer["promise"]["id"]);
+    assert_eq!(settled["state"], "done", "{settled}");
+    assert_eq!(images(&other), 3);
+    assert!(other.stacks().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}

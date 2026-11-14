@@ -81,7 +81,7 @@ pub use batch::{
     TrashAsk, Turn,
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
-pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
+pub use grouping::{GROUP_COMMAND, PAIRS_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
 /// The library's name in egui-pop's steps and commands (`library` in
@@ -4388,6 +4388,12 @@ impl Library {
                             crate::i18n::text(
                                 ui.ctx(),
                                 Message::new("gui-library-stack-top", "Move to Top of Stack"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(PAIRS_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-stack-pairs", "Stack RAW+JPEG Pairs"),
                             ),
                         ),
                         crate::dialogs::MenuItem::Separator,

@@ -69,6 +69,8 @@ pub struct Choices {
     /// What every photo imported is given: keywords, a rating, a label.
     #[serde(skip_serializing_if = "Apply::is_empty")]
     pub apply: Apply,
+    /// RAW+JPEG pairs of one shot stacked, the raw on top.
+    pub stack_pairs: bool,
 }
 
 impl Default for Choices {
@@ -102,6 +104,7 @@ impl Choices {
             camera_look: flag("camera_look", true),
             filter: Filter::default(),
             apply: Apply::default(),
+            stack_pairs: flag("stack_pairs", true),
         }
     }
 
@@ -147,6 +150,9 @@ impl Choices {
         }
         if !self.apply.is_empty() {
             args["apply"] = json!(self.apply);
+        }
+        if !self.stack_pairs {
+            args["stack_pairs"] = json!(false);
         }
         if copy {
             args["layout"] = json!(self.layout.as_str());
@@ -697,5 +703,27 @@ mod tests {
         assert_eq!(contract.keys.len(), Choices::KEYS.len());
         // The default is the contract's.
         assert_eq!(Choices::default().values(), contract.defaults());
+    }
+
+    #[test]
+    fn import_profile_raw_jpeg_pairs_are_stacked_unless_the_profile_says_not() {
+        let on = Choices::default();
+        assert!(on.stack_pairs);
+        assert!(on.args(&[], false).get("stack_pairs").is_none());
+        // Kept before the option existed: on.
+        let old: Choices = serde_json::from_value(json!({ "rename": "{stem}" })).unwrap();
+        assert!(old.stack_pairs);
+        let off = Choices {
+            stack_pairs: false,
+            ..Choices::default()
+        };
+        let kept: Choices = serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
+        assert_eq!(kept, off);
+        let args = off.args(&[], true);
+        assert_eq!(args["stack_pairs"], false);
+        // What the import makes of it.
+        let mut options = helios_library::import::Options::default();
+        helios_library::import_profile::read(&args, &mut options).unwrap();
+        assert!(!options.stack_pairs);
     }
 }

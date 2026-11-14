@@ -1,9 +1,10 @@
 //! Manual stacks in the Library (L11): Lightroom's "Group into Stack"
-//! (Ctrl+G), "Unstack" (Ctrl+Shift+G) and "Move to Top of Stack". Each
-//! is asked of the host, which sends it to the node
+//! (Ctrl+G), "Unstack" (Ctrl+Shift+G), "Move to Top of Stack", and
+//! "Stack RAW+JPEG Pairs" for photos imported before (an import stacks
+//! its own pairs). Each is asked of the host, which sends it to the node
 //! (`library.stacks.group`, `library.stacks.ungroup`,
-//! `library.stacks.top`) and records the step it answers in the
-//! library's history: Ctrl+Z takes it back.
+//! `library.stacks.top`, `library.stacks.pairs`) and records the step it
+//! answers in the library's history: Ctrl+Z takes it back.
 
 use super::{Batch, Library};
 
@@ -20,6 +21,10 @@ pub const UNGROUP_COMMAND: &str = "library.stack.ungroup";
 /// cursor).
 pub const STACK_TOP_COMMAND: &str = "library.stack.top";
 
+/// Stacks the RAW+JPEG pairs among photos (`images`, else the
+/// selection), the raw on top.
+pub const PAIRS_COMMAND: &str = "library.stack.pairs";
+
 /// What the commands asked of the stacks, for the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StackAsk {
@@ -32,6 +37,8 @@ pub enum StackAsk {
     Ungroup { images: Vec<String> },
     /// Put `image` on top of `stack`.
     Top { stack: String, image: String },
+    /// Stack the RAW+JPEG pairs among `images`.
+    Pairs { images: Vec<String> },
 }
 
 impl Library {
@@ -147,6 +154,25 @@ impl Library {
             crate::library_history::current_batch(),
         ));
         Ok(stack)
+    }
+
+    /// Asks the RAW+JPEG pairs among `images` (else the selection)
+    /// stacked, the raw on top; how many photos are looked at. Which are
+    /// pairs is the node's to say: it knows their files.
+    ///
+    /// # Errors
+    /// Fewer than two photos.
+    pub fn stack_pairs(&mut self, images: Option<Vec<String>>) -> Result<usize, String> {
+        let keys = self.named_or_targets(images)?;
+        if keys.len() < 2 {
+            return Err("a pair needs two photos".into());
+        }
+        let count = keys.len();
+        self.stack_asks.push((
+            StackAsk::Pairs { images: keys },
+            crate::library_history::current_batch(),
+        ));
+        Ok(count)
     }
 
     /// What was asked of the stacks since, each with its batch.
