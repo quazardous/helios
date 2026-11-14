@@ -71,6 +71,7 @@ impl ConnectorProvider for FakeProvider {
             interface: INTERFACE,
             // Three ways to browse, for the import window's switch.
             browsers: vec![Browser::Folder, Browser::Collections, Browser::Timeline],
+            setup: None,
             connect: vec![
                 ConnectStep {
                     id: "server".into(),

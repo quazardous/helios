@@ -322,12 +322,6 @@ struct Step {
 /// (a name typed letter by letter).
 const ONE_STEP: Duration = Duration::from_millis(1500);
 
-/// What the Choices column asked of the sources this frame.
-pub(super) enum SourceAsked {
-    Undo,
-    Reset,
-}
-
 /// The saved sources as last kept, for the commands that read them off
 /// the window (Settings > Accounts' "Used by").
 pub(crate) type SharedSources = std::sync::Arc<std::sync::Mutex<Vec<SavedSource>>>;
@@ -349,7 +343,6 @@ pub(crate) struct Sources {
     pub(crate) honours: Honours,
     /// The window's choices while a source's are shown.
     pub(crate) window: Choices,
-    pub(super) asked: Option<SourceAsked>,
     /// The cards mounted now, by volume ([`Sources::identify`]).
     pub(crate) mounted: Vec<MountedCard>,
     /// The account sources' own parameters, by account id, as last kept
@@ -828,6 +821,19 @@ impl ImportWindow {
             })
     }
 
+    /// Whether the connector `id` copies its photos unless told
+    /// otherwise: its source contract's `copy` default.
+    pub(super) fn connector_copies(&self, id: &str) -> bool {
+        self.connectors.provider(id).is_some_and(|p| {
+            p.config()
+                .source
+                .get("copy")
+                .and_then(|k| k.default.as_ref())
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        })
+    }
+
     pub(super) fn connector_of(&mut self, key: &SourceKey) -> String {
         if let Some(saved) = self.sources.get(key) {
             return saved.connector.clone();
@@ -870,11 +876,6 @@ impl ImportWindow {
             let connector = self.connector_of(&key);
             self.sources
                 .set(&key, &connector, Some(self.choices.clone()));
-        }
-        match self.sources.asked.take() {
-            Some(SourceAsked::Undo) => self.undo_source_choice(),
-            Some(SourceAsked::Reset) => self.reset_source_choices(),
-            None => {}
         }
     }
 
@@ -945,33 +946,6 @@ impl ImportWindow {
             self.choices = self.sources.window.clone();
             self.sources.showing = None;
         }
-    }
-
-    /// The source shown takes the window's choices again.
-    pub(super) fn reset_source_choices(&mut self) {
-        let Some(key) = self.sources.showing.clone() else {
-            return;
-        };
-        if self.sources.own(&key).is_none() {
-            return;
-        }
-        // Its own step: a change right after it is not joined to it.
-        let now = Instant::now();
-        self.sources.undo.push(Step {
-            key: Some(self.sources.resolve(&key)),
-            before: self.sources.before(&key),
-            memory: None,
-            at: now.checked_sub(ONE_STEP).unwrap_or(now),
-        });
-        let connector = self.connector_of(&key);
-        self.sources.set(&key, &connector, None);
-        self.choices = self.sources.window.clone();
-        self.custom = false;
-    }
-
-    /// Whether the column's Undo has a step.
-    pub(super) fn can_undo_source(&self) -> bool {
-        !self.sources.undo.is_empty()
     }
 }
 

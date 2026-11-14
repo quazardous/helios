@@ -144,6 +144,7 @@ impl SourceProvider {
                 .iter()
                 .filter_map(|b| helios_connect::Browser::from_name(b))
                 .collect(),
+            setup: None,
             id,
         };
         Some(Self {

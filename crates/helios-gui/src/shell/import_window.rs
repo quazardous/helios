@@ -6,10 +6,10 @@
 //!   ([`helios_connect::registry`]): the cards and cameras mounted (the
 //!   card connector, given the cards [`helios_storage`] polls off the
 //!   interface thread), first; then the recent folders and the favourites
-//!   (the folder connector's, added and removed here) and "Choose a
-//!   folder…" (egui-pop's folder chooser). Several can be
-//!   ticked. As it opens, the window ticks the first card, else the last
-//!   source used.
+//!   (the folder connector's, added and removed here). One "Add…" button
+//!   opens the wizard creating a source of any connector installed
+//!   ([`super::import_wizard`]). As it opens, the window ticks the first
+//!   card, else the last source used.
 //! - **Contents**, the middle column: what the sources ticked hold, read
 //!   off the interface thread ([`crate::import_scan`]), an offline
 //!   volume's as the image map recorded it, shown as it comes in egui-pop's
@@ -248,7 +248,7 @@ struct ShellWords {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 pub(crate) struct ImportWindow {
-    open: bool,
+    pub(super) open: bool,
     /// The imports running and ended during this run (the node's
     /// promises, [`crate::activity::Activity::imports`]), shown above the
     /// footer with their progress, outcome, Cancel and Retry.
@@ -719,7 +719,6 @@ enum Event {
     Profile(String),
     /// "Manage profiles…": the profile editor.
     ManageProfiles,
-    Choose,
     ChooseInto,
     Favourite(PathBuf, bool),
     /// An account pinned among the Favorites, or unpinned.
@@ -829,10 +828,13 @@ struct Words {
     folders: String,
     history: String,
     services: String,
-    add_source: String,
+    no_services: String,
+    no_folders: String,
+    /// The one "Add…" button, and what it does.
+    add: String,
+    add_hint: String,
     favourites: String,
     no_favourites: String,
-    choose: String,
     add_favourite: String,
     remove_favourite: String,
     forget: String,
@@ -1495,7 +1497,6 @@ impl Shell {
             }
             // Handled in the window's own pass.
             Event::Cancel
-            | Event::Choose
             | Event::ChooseInto
             | Event::Favourite(..)
             | Event::Pin(..)
@@ -1645,11 +1646,6 @@ fn window_title() -> Message {
 }
 
 impl ImportWindow {
-    /// Asks where copies go, through the folder chooser.
-    pub(super) fn choose_into(&mut self, pending: Pending) {
-        self.choosing_into = Some(pending);
-    }
-
     /// The folder the chooser gave: a recent source, ticked; or where
     /// copies go; or the library folder a picking asked for, the picking
     /// then started.
@@ -1659,11 +1655,7 @@ impl ImportWindow {
             if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
                 && let Some(p) = paths.into_iter().next()
             {
-                // The wizard's choices, while it shows them.
-                let wizard = self.wizard.as_mut();
-                if !wizard.is_some_and(|wz| wz.take_into(p.clone())) {
-                    self.choices.into = Some(p);
-                }
+                self.choices.into = Some(p);
             }
         }
         let Some(result) = self.choosing.as_ref().and_then(Pending::take) else {
@@ -1700,13 +1692,21 @@ impl ImportWindow {
             folders: t(Message::new("gui-import-window-folders", "Folders")),
             history: t(Message::new("gui-import-history", "History")),
             services: t(Message::new("gui-import-window-services", "Services")),
-            add_source: t(Message::new(
-                "gui-import-window-add-source",
-                "Add a source…",
+            no_services: t(Message::new(
+                "gui-import-window-no-services",
+                "No account yet",
+            )),
+            no_folders: t(Message::new(
+                "gui-import-window-no-folders",
+                "No folder yet",
+            )),
+            add: t(Message::new("gui-import-window-add", "Add…")),
+            add_hint: t(Message::new(
+                "gui-import-window-add-hint",
+                "Add a source: a folder, a card, an account…",
             )),
             favourites: t(Message::new("gui-import-window-favourites", "Favourites")),
             no_favourites: t(Message::new("gui-import-window-no-favourites", "None yet")),
-            choose: t(Message::new("gui-import-window-choose", "Choose a folder…")),
             add_favourite: t(Message::new(
                 "gui-import-window-add-favourite",
                 "Add to favourites",
@@ -1901,12 +1901,6 @@ impl ImportWindow {
                 // kept), the window gone at once.
                 return;
             }
-            Some(Event::Choose) => {
-                if let Some(f) = app.service(&FILES) {
-                    let request = FileRequest::folder(&words.choose).purpose("helios.import");
-                    self.choosing = Some(f.choose(&app, request));
-                }
-            }
             Some(Event::ChooseInto) => {
                 if let Some(f) = app.service(&FILES) {
                     let request =
@@ -2054,16 +2048,17 @@ impl ImportWindow {
         let ui = &mut ui;
         let reading = self.scans.iter().any(|(_, _, done)| !done);
         status_bar_ui(ui, &words.grid, reading);
-        // The wizard takes the columns' and the footer's room.
-        if self.wizard.is_some() {
-            self.wizard_ui(ui, app);
-            return event;
-        }
-        // So does the profile editor.
+        // The profile editor takes the columns' and the footer's room,
+        // over the wizard when its "Customise…" opened it.
         if self.manager.is_some() {
             if self.manager_ui(ui, &words.choices) {
                 event = Some(Event::ChooseInto);
             }
+            return event;
+        }
+        // So does the wizard.
+        if self.wizard.is_some() {
+            self.wizard_ui(ui, app);
             return event;
         }
         let w = self;
@@ -2274,8 +2269,6 @@ fn status_bar_ui(ui: &mut egui::Ui, words: &GridWords, reading: bool) {
         });
 }
 
-/// The Sources column: cards first, then recent folders, favourites and
-/// "Choose a folder…".
 /// The strategy line under the choices: "2 copies: Backup disk (plugged
 /// in), NAS (not seen for 3 days)", or "No backup set up:" with a button
 /// to the Storage page; whether it was pressed.

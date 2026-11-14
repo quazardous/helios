@@ -228,6 +228,8 @@ enum Action {
     /// Pause or resume the automatic imports
     /// (`library.importAutomatic.pause`'s arguments).
     PauseAutomaticImports(Value),
+    /// `import.sources.add`'s arguments.
+    AddImportSource(Value),
     /// Open the Calibration focus (`calibrate.open`'s arguments).
     Calibrate(Value),
     /// `import.addSource` or `import.reconnect`, with its arguments.
@@ -3327,6 +3329,14 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                import_wizard::ADD,
+                "Add an import source, as the import window's \"Add…\" wizard does: `connector` (its id) and what its setup asks (`path`: a folder, or a volume's mount point; `volume`: a mounted volume's id or label; `account`: an account of the connector), then `name` (else the folder's, volume's or account's), `profile` (an import profile's id; else the connector's default, else `everyday`), `auto` (true: the automatic import the connector offers) and `params` (the connector's own parameters); selected in the import window when it is open",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::AddImportSource(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 calibrate_focus::COMMAND,
                 "Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)",
                 "Calibration",
@@ -6301,6 +6311,7 @@ impl Shell {
             Action::InitApply(args) => return self.init_apply(&args),
             Action::InitChooseFolder => return self.init_choose_folder(),
             Action::PauseAutomaticImports(args) => return self.pause_automatic_imports(&args),
+            Action::AddImportSource(args) => return self.add_import_source(&args),
             Action::Calibrate(args) => {
                 self.open_calibration(&args);
                 return Ok(Value::Null);

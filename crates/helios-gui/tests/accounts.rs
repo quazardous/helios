@@ -1,4 +1,4 @@
-//! Import accounts: "Add a source…" in the import window's Sources
+//! Import accounts: "Add…" in the import window's Sources
 //! column offers the connectors that declare a connection process, runs
 //! their steps in the window's dialog (here a fake connector's form and
 //! test), and the account appears in the column with its state;
@@ -89,8 +89,8 @@ fn world() -> (World, Harness<'static, Shell>) {
 fn add_a_source_runs_the_connectors_form_and_test_and_lists_the_account_connected() {
     let (world, mut h) = world();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "Add a source…", |h| shown(h, "Add a source…"));
-    h.get_by_label("Add a source…").click();
+    until(&mut h, "Add…", |h| shown(h, "Add…"));
+    h.get_by_label("Add…").click();
     until(&mut h, "the connectors offered", |h| {
         shown(h, "Test server")
     });
@@ -434,8 +434,8 @@ fn click(h: &mut Harness<'_, Shell>, label: &str) {
 /// account signed in to there: the wizard picks it.
 fn wizard_signed_in(h: &mut Harness<'_, Shell>) {
     run(h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(h, "Add a source…", |h| shown(h, "Add a source…"));
-    click(h, "Add a source…");
+    until(h, "Add…", |h| shown(h, "Add…"));
+    click(h, "Add…");
     // The connector's line says what it does.
     until(h, "the kinds", |h| shown(h, "A server for tests"));
     click(h, "Test server");
@@ -461,28 +461,35 @@ fn wizard_signed_in(h: &mut Harness<'_, Shell>) {
     });
 }
 
-/// "Add a source…" for a connector reached through an account: its
-/// account signed in to in the wizard, the choices it cannot honour
-/// hidden and never kept on it, the source saved under its name and
-/// selected.
+/// "Add…" for a connector reached through an account: its setup step
+/// is the account's sign-in, its "how to import" step picks a profile
+/// and says its photos are always copied, the source is saved under its
+/// name, pointing at its profile, and selected.
 #[test]
-fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source_cannot_honour() {
+fn the_add_wizard_signs_in_to_an_account_and_says_a_remote_source_is_copied() {
     let (world, mut h) = world();
     let kept = keep_sources(&mut h);
-    // The window's choices add where they are and read darktable edits.
-    let mut start = h.state().import_choices();
-    start.copy_folders = false;
-    start.darktable = true;
-    h.state_mut().set_import_choices(start);
+    let keep_all = h
+        .state_mut()
+        .put_import_profile(helios_gui::shell::ImportProfile {
+            id: String::new(),
+            name: "Keep all".into(),
+            choices: helios_gui::shell::Choices {
+                duplicates: helios_library::import::Duplicates::Keep,
+                ..helios_gui::shell::Choices::default()
+            },
+        });
     wizard_signed_in(&mut h);
     click(&mut h, "Next");
-    until(&mut h, "the choices", |h| shown(h, "Duplicates"));
+    until(&mut h, "the profiles", |h| shown(h, "Everyday"));
     assert!(
-        !shown(&h, "Add where they are"),
+        shown(
+            &h,
+            "This source's photos are always copied into the Library: it cannot add them where they are."
+        ),
         "a remote source always copies"
     );
-    assert!(!shown(&h, "Read darktable edits"), "no sidecars there");
-    click(&mut h, "Keep");
+    click(&mut h, "Keep all");
     click(&mut h, "Next");
     // The name starts as the account's; the person makes it theirs.
     h.query_all_by_role(egui::accesskit::Role::TextInput)
@@ -499,10 +506,10 @@ fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source
     assert_eq!(source.connector, ID);
     assert_eq!(source.account.as_deref(), Some(accounts[0].id.as_str()));
     assert!(source.path.is_none());
+    assert_eq!(source.profile.as_deref(), Some(keep_all.as_str()));
     let name = source.name.clone().unwrap_or_default();
     assert!(name.contains("photos"), "the name typed: {name}");
-    let choices = source.choices.clone().expect("its own choices");
-    assert!(choices.copy_folders && !choices.darktable, "{choices:?}");
+    let choices = source.choices.clone().expect("its profile's choices");
     assert_eq!(choices.duplicates.as_str(), "keep");
     assert!(
         kept.borrow()
@@ -510,12 +517,10 @@ fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source
             .unwrap_or_default()
             .contains(&accounts[0].id)
     );
-    // Selected: the column shows its choices, under its name.
-    until(&mut h, "its choices shown", |h| {
-        shown(h, &format!("{name}: its own choices"))
+    // Selected; listed under Services by its name.
+    until(&mut h, "listed by its name", |h| {
+        shown(h, "Services") && shown(h, &name)
     });
-    // Listed under Services by its name.
-    assert!(shown(&h, "Services") && shown(&h, &name));
 }
 
 /// Cancel in the wizard leaves no source, wherever it is pressed; an
@@ -532,7 +537,7 @@ fn cancelling_the_add_a_source_wizard_after_signing_in_keeps_the_account_only() 
     // Again, to the choices and to the name: the account is offered, picked
     // by a click.
     for steps in [1, 2] {
-        click(&mut h, "Add a source…");
+        click(&mut h, "Add…");
         click(&mut h, "Test server");
         click(&mut h, "Next");
         click(&mut h, "ann@nas.local");
@@ -616,8 +621,8 @@ fn a_sign_in_opens_the_browser_at_once_without_waiting_for_a_frame() {
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "Add a source…", |h| shown(h, "Add a source…"));
-    h.get_by_label("Add a source…").click();
+    until(&mut h, "Add…", |h| shown(h, "Add…"));
+    h.get_by_label("Add…").click();
     until(&mut h, "the connectors offered", |h| {
         shown(h, "Test server")
     });
@@ -1383,7 +1388,7 @@ fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
         assert!(shown(&h, label), "{label}");
     }
     // The window stays usable: the Sources column still answers.
-    assert!(shown(&h, "Add a source…"));
+    assert!(shown(&h, "Add…"));
     h.run_steps(4);
     // The status line's Cancel, above the footer's.
     let cancel = h

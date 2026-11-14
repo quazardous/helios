@@ -132,10 +132,8 @@ fn closing_while_a_sources_connection_waits_gives_it_up_and_comes_back_at_once()
     h.state_mut()
         .run("library.importWindow", Value::Null, Origin::User)
         .unwrap();
-    until(&mut h, "Add a source…", |h| {
-        h.query_by_label("Add a source…").is_some()
-    });
-    h.get_by_label("Add a source…").click();
+    until(&mut h, "Add…", |h| h.query_by_label("Add…").is_some());
+    h.get_by_label("Add…").click();
     until(&mut h, "the connectors offered", |h| {
         h.query_by_label("Test server").is_some()
     });

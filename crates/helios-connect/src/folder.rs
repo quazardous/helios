@@ -56,6 +56,11 @@ impl ConnectorProvider for FolderProvider {
             interface: INTERFACE,
             connect: Vec::new(),
             browsers: vec![Browser::Folder, Browser::Tree, Browser::Timeline],
+            setup: Some(crate::Setup {
+                asks: crate::SetupAsks::Path,
+                icon: "folder".into(),
+                auto: Some(crate::AutoImport::NewFiles),
+            }),
         }
     }
 
