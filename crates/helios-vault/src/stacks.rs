@@ -563,15 +563,15 @@ mod tests {
         let (stack, changes, merged) = vault
             .group_stack(&[ids[0], ids[2], ids[3]], None, "user", 11)
             .unwrap();
-        assert_eq!(merged, [first.clone()]);
+        assert_eq!(merged, std::slice::from_ref(&first));
         assert_eq!(stack.members.len(), 4);
         assert_eq!(stack.top, ids[1].hex());
-        assert_eq!(vault.stacks().unwrap(), [stack.clone()]);
+        assert_eq!(vault.stacks().unwrap(), std::slice::from_ref(&stack));
         assert_eq!(changes.documents.len(), 2);
         vault.revert(&changes).unwrap();
-        assert_eq!(vault.stacks().unwrap(), [first.clone()]);
+        assert_eq!(vault.stacks().unwrap(), std::slice::from_ref(&first));
         vault.replay(&changes).unwrap();
-        assert_eq!(vault.stacks().unwrap(), [stack.clone()]);
+        assert_eq!(vault.stacks().unwrap(), std::slice::from_ref(&stack));
 
         let (moved, top) = vault.set_stack_top_step(&stack.id, &ids[3]).unwrap();
         assert_eq!(moved.top, ids[3].hex());
