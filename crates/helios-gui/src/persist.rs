@@ -187,7 +187,7 @@ enum Write {
     /// recorded in the library's history at `f64` (seconds) once done.
     Album(crate::library::AlbumEdit, f64),
     /// A step of the edit shown (`library.edit.add`).
-    Edit(EditStep),
+    Edit(Box<EditStep>),
     /// An image's snapshots kept (`library.snapshots.set`).
     Snapshots(ImageId, Vec<helios_vault::snapshots::Snapshot>),
 }
@@ -239,7 +239,7 @@ impl Write {
                 "library.snapshots.set",
                 json!({
                     "image": image.hex(),
-                    "snapshots": snapshots.iter().map(|s| s.to_json()).collect::<Vec<_>>(),
+                    "snapshots": snapshots.iter().map(helios_vault::snapshots::Snapshot::to_json).collect::<Vec<_>>(),
                 }),
             ),
         }
@@ -1095,7 +1095,7 @@ impl<S: Store + 'static> Persist<S> {
         answer: Result<Value, helios_inspect::rpc::Error>,
     ) {
         let write = match write {
-            Write::Edit(step) => return self.edit_written(shell, step, answer),
+            Write::Edit(step) => return self.edit_written(shell, *step, answer),
             other => other,
         };
         match (&write, answer) {
@@ -1833,11 +1833,11 @@ impl<S: Store + 'static> Persist<S> {
         // is picked up at a coming frame ([`Persist::written`]).
         e.unsaved = false;
         if let Some(version) = step {
-            self.writes.push_back(Write::Edit(EditStep {
+            self.writes.push_back(Write::Edit(Box::new(EditStep {
                 version,
                 in_progress: e.session.in_progress(),
                 after: e.session.clone(),
-            }));
+            })));
         }
     }
 
