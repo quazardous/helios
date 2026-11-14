@@ -1911,6 +1911,7 @@ fn main() -> Result<(), String> {
                 helios_core::jobs::Jobs::new(bus.clone()),
                 &instance,
             )
+            .with_promises(n.promises().clone())
             .with_windows(std::sync::Arc::new(window_commands.clone()));
             match helios_node_core::endpoint::advertise(
                 file,

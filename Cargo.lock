@@ -2809,6 +2809,7 @@ version = "0.88.0"
 dependencies = [
  "blake3",
  "helios-calibrate",
+ "helios-connect",
  "helios-core",
  "helios-export",
  "helios-health",

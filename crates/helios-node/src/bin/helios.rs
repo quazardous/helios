@@ -40,7 +40,8 @@
 //!     helios import-darktable --vault FILE|--node ADDRESS FOLDERS-OR-IMAGES...
 //!
 //!     helios import --vault FILE|--node ADDRESS [--reference | --copy [--into DIR]] [--rename PATTERN]
-//!                   [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+//!                   [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+//!                   FOLDERS-CARDS-OR-FILES...
 //!     helios stacks --vault FILE|--node ADDRESS list | create IMAGE... [--top IMAGE] | dissolve STACK
 //!                   | expand STACK | collapse STACK | top STACK IMAGE
 //!                   | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
@@ -193,7 +194,8 @@ const USAGE: &str = "usage:
                [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
   helios import-darktable --vault FILE|--node ADDRESS FOLDERS-OR-IMAGES...
   helios import --vault FILE|--node ADDRESS [--reference | --copy [--into DIR]] [--rename PATTERN]
-                [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+                [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+                FOLDERS-CARDS-OR-FILES...
   helios stacks --vault FILE|--node ADDRESS list | create IMAGE... [--top IMAGE] | dissolve STACK
                 | expand STACK | collapse STACK | top STACK IMAGE
                 | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
@@ -880,12 +882,21 @@ fn import_darktable(args: &[String]) -> ExitCode {
     }
 }
 
-/// The options of `helios import`: the vault, the node, and
-/// `library.import`'s params.
-fn import_options(
-    args: &[String],
-) -> Result<(Option<PathBuf>, Option<String>, serde_json::Value), String> {
+/// What `helios import` was asked: the vault, the node,
+/// `library.import`'s params, and whether to wait for the outcome.
+struct ImportArgs {
+    vault: Option<PathBuf>,
+    node: Option<String>,
+    params: serde_json::Value,
+    wait: bool,
+}
+
+/// The options of `helios import`. One folder or card is imported by
+/// rule (`all`, or `new` with `--new`); several sources, or files, as
+/// the rule's items.
+fn import_options(args: &[String]) -> Result<ImportArgs, String> {
     let (mut vault, mut node) = (None, None);
+    let (mut wait, mut new) = (false, false);
     let mut sources = Vec::new();
     let mut params = serde_json::Map::new();
     let mut args = args.iter();
@@ -922,6 +933,8 @@ fn import_options(
             "--no-signals" => {
                 params.insert("signals".into(), false.into());
             }
+            "--wait" => wait = true,
+            "--new" => new = true,
             flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
             _ => sources.push(serde_json::Value::from(absolute_text(arg)?)),
         }
@@ -932,14 +945,40 @@ fn import_options(
     if vault.is_none() && helios_node::connect::explicit(node.as_deref()).is_none() {
         return Err("import needs --vault FILE".into());
     }
-    params.insert("paths".into(), sources.into());
-    Ok((vault, node, serde_json::Value::Object(params)))
+    let one_place = match sources.as_slice() {
+        [one] => one
+            .as_str()
+            .is_some_and(|s| std::path::Path::new(s).is_dir()),
+        _ => false,
+    };
+    if one_place {
+        params.insert("source".into(), sources.remove(0));
+        params.insert("rule".into(), if new { "new" } else { "all" }.into());
+    } else {
+        if new {
+            params.insert("duplicates".into(), "skip".into());
+        }
+        params.insert("rule".into(), serde_json::json!({ "items": sources }));
+    }
+    Ok(ImportArgs {
+        vault,
+        node,
+        params: serde_json::Value::Object(params),
+        wait,
+    })
 }
 
 /// `helios import`: see `helios_library::import`, run by the vault's node
-/// (`library.import`).
+/// (`library.import`), which answers with a promise. Without `--wait`
+/// the promise is printed and the import goes on in the node; with it,
+/// the files that failed, then `{"report": ...}` once it is settled.
 fn import(args: &[String]) -> ExitCode {
-    let (vault, node, params) = match import_options(args) {
+    let ImportArgs {
+        vault,
+        node,
+        params,
+        wait,
+    } = match import_options(args) {
         Ok(p) => p,
         Err(e) => return usage(&e),
     };
@@ -947,25 +986,74 @@ fn import(args: &[String]) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    // Ctrl-C stops the import before its next file, a copy under way
-    // removed; the files done stay imported.
-    match on_node(&client, "library.import", params, true) {
-        Ok(answer) => {
-            for file in answer["files"].as_array().into_iter().flatten() {
-                line(file);
+    let promise = match on_node(&client, "library.import", params, false) {
+        Ok(answer) => answer["promise"].clone(),
+        Err(e) => {
+            eprintln!("helios: {}", e.message);
+            return ExitCode::from(1);
+        }
+    };
+    if !wait {
+        line(&serde_json::json!({ "promise": promise }));
+        return ExitCode::SUCCESS;
+    }
+    let id = promise["id"].clone();
+    // Ctrl-C cancels the import: it stops before its next file, a copy
+    // under way removed; the files done stay imported.
+    let mut cancelled = false;
+    let settled = loop {
+        let waited = on_node(
+            &client,
+            "promises.wait",
+            serde_json::json!({ "id": id, "timeout_ms": 600_000 }),
+            true,
+        );
+        match waited {
+            Ok(answer) if answer["settled"] == true => break answer["promise"].clone(),
+            Ok(_) => {}
+            Err(_) if !cancelled => {
+                cancelled = true;
+                if let Err(e) = on_node(
+                    &client,
+                    "promises.cancel",
+                    serde_json::json!({ "id": id }),
+                    false,
+                ) {
+                    eprintln!("helios: {}", e.message);
+                    return ExitCode::from(1);
+                }
             }
-            let report = &answer["report"];
-            line(&serde_json::json!({ "report": report }));
-            if report["cancelled"] == true {
-                ExitCode::from(130)
-            } else if report["failed"].as_u64().unwrap_or(0) == 0 {
+            Err(e) => {
+                eprintln!("helios: {}", e.message);
+                return ExitCode::from(1);
+            }
+        }
+    };
+    let result = &settled["result"];
+    for file in result["failed"].as_array().into_iter().flatten() {
+        line(file);
+    }
+    match settled["state"].as_str() {
+        Some("done") => {
+            let report = &result["report"];
+            line(&serde_json::json!({
+                "report": report, "promise": id, "history": result["history"],
+            }));
+            if report["failed"].as_u64().unwrap_or(0) == 0 {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(1)
             }
         }
-        Err(e) => {
-            eprintln!("helios: {}", e.message);
+        Some("cancelled") => {
+            line(&serde_json::json!({ "promise": settled }));
+            ExitCode::from(130)
+        }
+        _ => {
+            eprintln!(
+                "helios: import failed: {}",
+                settled["reason"].as_str().unwrap_or("unknown")
+            );
             ExitCode::from(1)
         }
     }
