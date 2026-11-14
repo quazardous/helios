@@ -1,1 +1,3 @@
-- fixed: clicking an import session under Library › Imports no longer fails with "the rules must be a group".
+kind: fixed
+
+Library: clicking an import session under Imports shows its photos again, instead of failing with "the rules must be a group".
