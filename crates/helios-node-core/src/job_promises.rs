@@ -6,7 +6,9 @@
 //! an agent's `promises.list`) sees it. The `job.*` events stay as they are.
 //!
 //! - **One promise per top-level job**: a job inside another (an export of
-//!   a batch) is its parent's progress; the background upkeep of
+//!   a batch) is its parent's progress, a job naming the promise it is the
+//!   work of (`promise` in `job.started`: an import by rule) is that
+//!   promise already; the background upkeep of
 //!   [`QUIET`] is left out (the image map's passes stand as one promise of
 //!   their own, [`Standing`]).
 //! - **Its progress** (`done` of `total`, the item at hand as `note`) is
@@ -175,7 +177,13 @@ impl<S: Store> Mirror<S> {
 
     fn started(&mut self, id: &str, d: &Value) {
         let kind = d["kind"].as_str().unwrap_or("job");
-        if d["parent"].is_string() || QUIET.contains(&kind) || self.jobs.contains_key(id) {
+        // A job naming its promise (an import by rule) is that promise's
+        // work: the promise already stands for it.
+        if d["parent"].is_string()
+            || d["promise"].is_string()
+            || QUIET.contains(&kind)
+            || self.jobs.contains_key(id)
+        {
             return;
         }
         // A job a promise's own work runs under is that promise already.
@@ -532,6 +540,20 @@ mod tests {
         mirror.stop();
         let all = vault.promises(&Filter::default()).unwrap();
         assert_eq!(all.len(), 1, "{all:?}");
+    }
+
+    #[test]
+    fn a_job_a_promise_stands_for_is_not_mirrored_twice() {
+        let (vault, jobs, mirror) = mirrored();
+        let by_rule = jobs.start(Start::new("import-7", "Import a card", "import").promise("p-1"));
+        let export = jobs.start(Start::new("export-2", "Export b", "export"));
+        by_rule.finished();
+        export.finished();
+        until(&vault, "export-2", |p| p.state.is_settled());
+        mirror.stop();
+        let all = vault.promises(&Filter::default()).unwrap();
+        assert_eq!(all.len(), 1, "{all:?}");
+        assert_eq!(all[0].request[JOB], "export-2");
     }
 
     #[test]

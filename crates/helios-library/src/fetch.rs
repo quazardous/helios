@@ -725,11 +725,11 @@ fn run_remote<S: Store>(
     let (root, staging, volume) = match prepared {
         Ok(p) => p,
         Err(e) => {
-            jobs.start(Start::new(&id, &title, KIND)).failed(&e);
+            jobs.start(options.job(&id, &title)).failed(&e);
             return Err(e);
         }
     };
-    let job = jobs.start(Start::new(&id, &title, KIND).total(total));
+    let job = jobs.start(options.job(&id, &title).total(total));
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = stop.clone();

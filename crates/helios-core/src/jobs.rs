@@ -10,7 +10,7 @@
 //!
 //! | Event | Data |
 //! |---|---|
-//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node` |
+//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node`, `promise` |
 //! | `job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
 //! | `job.item_failed` | `id`, `item`, `error` |
 //! | `job.log` | `id`, `text` |
@@ -179,6 +179,10 @@ pub struct Start {
     pub pausable: bool,
     /// The graph node it works for (an export: the node it renders).
     pub node: Option<String>,
+    /// The node's promise this job is the work of (an import by rule):
+    /// the promise already stands for it, so it is not mirrored as one
+    /// more ([`Start::promise`]).
+    pub promise: Option<String>,
 }
 
 impl Start {
@@ -193,6 +197,7 @@ impl Start {
             cancellable: true,
             pausable: false,
             node: None,
+            promise: None,
         }
     }
 
@@ -214,6 +219,13 @@ impl Start {
     /// The graph node it works for: its queue lists it.
     pub fn node(mut self, node: &str) -> Self {
         self.node = Some(node.into());
+        self
+    }
+
+    /// The promise it is the work of: a mirror of jobs as promises leaves
+    /// it out, the promise already standing for it.
+    pub fn promise(mut self, promise: &str) -> Self {
+        self.promise = Some(promise.into());
         self
     }
 
@@ -255,6 +267,9 @@ impl Start {
         }
         if let Some(node) = &self.node {
             d["node"] = json!(node);
+        }
+        if let Some(promise) = &self.promise {
+            d["promise"] = json!(promise);
         }
         d
     }
