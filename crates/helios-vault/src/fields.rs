@@ -48,6 +48,9 @@ pub const PICKED: &str = "picked";
 pub const TAGS: &str = "tags";
 /// A photo's title, a line of text.
 pub const TITLE: &str = "title";
+/// Quarter turns clockwise the user gave a photo, on top of its file's
+/// EXIF orientation ([`crate::rotation`]).
+pub const ROTATION: &str = "rotation";
 
 /// The fields of an image, declared once.
 pub const FIELDS: &[FieldSpec] = &[
@@ -93,6 +96,12 @@ pub const FIELDS: &[FieldSpec] = &[
         name: "description",
         kind: FieldKind::Text,
         about: "description",
+        read_only: false,
+    },
+    FieldSpec {
+        name: ROTATION,
+        kind: FieldKind::Int { min: 0, max: 3 },
+        about: "quarter turns clockwise the user gave the photo, on top of its EXIF orientation",
         read_only: false,
     },
     // What the file says of how it was taken (`docs/design/library.md`,

@@ -798,6 +798,16 @@ yet: a job resumed on its own at the node's start, cancelling a job.
 decide in the slice), Ctrl+[ and Ctrl+] (and darktable's equivalents in
 its profile), thumbnails and the loupe rotated without decoding again.
 Test: field commands, a snapshot of a rotated cell.
+Built (2026-11-14): the field is the image's (`rotation`, quarter
+turns clockwise over the EXIF orientation), not a version's: a turn is
+a library mark, as in Lightroom's catalogue, not an edit step.
+`library.rotateLeft` (Ctrl+[), `library.rotateRight` (Ctrl+]) and
+`library.resetRotation` on the selection, through the node's
+`library.images.rotate`, one library history step; the grid, the
+filmstrip and Compare turn their pictures at upload (a thumbnail read
+again from the cache, a head render made again). Not yet: the
+darkroom's image turned, a test snapshot of a turned cell, and the turn
+written to XMP sidecars (L14).
 
 **L10. Versions in the grid.** "Duplicate" makes a new head from the
 current or the original edit; the grid shows heads per L-C5 (badge and

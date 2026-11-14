@@ -141,6 +141,18 @@ pub fn defaults() -> Vec<(String, String, String)> {
         crate::library::REMOVE_COMMAND,
         &format!("{} && !textInputFocus", behind_no_picker(&library)),
     );
+    // Rotate Left and Right, as Lightroom's and darktable's Ctrl+[ and
+    // Ctrl+] in the library (darktable's package keeps them: its keys).
+    for (k, command) in [
+        ("Ctrl+OpenBracket", crate::library::ROTATE_LEFT_COMMAND),
+        ("Ctrl+CloseBracket", crate::library::ROTATE_RIGHT_COMMAND),
+    ] {
+        bind(
+            k,
+            command,
+            &format!("{} && !textInputFocus", behind_no_picker(&library)),
+        );
+    }
     // Move to Trash… and Delete Rejected…, as Lightroom's "Remove and
     // Delete from Disk" (Ctrl+Alt+Shift+Delete) and "Delete Rejected
     // Photos" (Ctrl+Backspace); both ask first.
