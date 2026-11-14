@@ -21,10 +21,11 @@ use crate::provider::{
     self, ChatReply, ChatRequest, ImageData, ModelInfo, ModelProvider, Parts, ProviderConfig,
     ProviderKind, SegmentReply, SegmentRequest,
 };
-use crate::routing::Route;
+use crate::routing::{Overrides, Route, RouteFrom};
 use crate::secrets::{KeySource, Secrets, SystemKeyring};
 use crate::store::{AiConfig, DEFAULT_PROVIDER, Paths};
 use crate::transport::{Transport, Ureq};
+use helios_extract::{Adjust, Answer, ExtractorDef};
 
 /// The scheduler resource model calls take.
 pub const AI_CALLS: &str = "ai_calls";
@@ -46,6 +47,13 @@ pub struct CallMeta {
     pub prompt_hash: Option<String>,
     /// Who asked: `try`, `bench`, `decision sky`, a feature's name.
     pub purpose: String,
+    /// Where the route came from, when an override chose it or the
+    /// caller asked to record it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_from: Option<RouteFrom>,
+    /// 1 for the first try, 2 for the corrective retry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
 }
 
 /// One model call, as logged and published (`ai.call`). Never the images,
@@ -69,6 +77,141 @@ pub struct CallRecord {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The model as the runtime named it in its answer (its exact
+    /// version or digest when it gives one).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answered: Option<String>,
+}
+
+/// A prompt run for a feature or a diagram: what to send, how to route
+/// it, and how to check the answer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PromptCall {
+    /// `id` or `id@version` (pin it for reproducible work).
+    pub reference: PromptRef,
+    pub input: Value,
+    pub images: Vec<Vec<u8>>,
+    /// Run, node and diagram overrides of the routing map.
+    pub overrides: Overrides,
+    /// When set, the answer is also checked against the extractor's keys
+    /// (values outside a finite list dropped or mapped, and counted).
+    pub extractor: Option<ExtractorDef>,
+    /// Who asks, for the call log.
+    pub purpose: String,
+}
+
+impl PromptCall {
+    pub fn new(reference: PromptRef, input: Value) -> Self {
+        PromptCall {
+            reference,
+            input,
+            images: Vec::new(),
+            overrides: Overrides::default(),
+            extractor: None,
+            purpose: "run".into(),
+        }
+    }
+}
+
+/// How many values the extractor check adjusted instead of refusing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct AnswerCounts {
+    /// Outside a finite list: dropped.
+    pub dropped: usize,
+    /// Outside a finite list that accepts `other`: kept as `other`.
+    pub mapped_to_other: usize,
+    /// Below the extractor's confidence floor: dropped.
+    pub below_floor: usize,
+    /// Outside a semi-finite list: kept as a new value.
+    pub new: usize,
+}
+
+impl AnswerCounts {
+    fn of(answer: &Answer) -> Self {
+        AnswerCounts {
+            dropped: answer.count(Adjust::Dropped),
+            mapped_to_other: answer.count(Adjust::MappedToOther),
+            below_floor: answer.count(Adjust::BelowFloor),
+            new: answer.count(Adjust::New),
+        }
+    }
+}
+
+/// A prompt that answered and fitted, with the route that answered.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PromptRun {
+    /// `id@version`.
+    pub prompt: String,
+    pub hash: String,
+    pub route: Route,
+    pub from: RouteFrom,
+    /// The model as the runtime named it (see [`CallRecord::answered`]);
+    /// the route's model when the runtime says nothing.
+    pub answered: String,
+    /// The answer, checked against the prompt's output schema.
+    pub value: Value,
+    /// The extractor's typed values, when [`PromptCall::extractor`] is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answer: Option<Answer>,
+    pub counts: AnswerCounts,
+    /// 1, or 2 when the corrective retry was needed.
+    pub attempts: u32,
+    pub ms: u64,
+}
+
+/// One try of a prompt: the raw reply (if any) and why it did not fit.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Attempt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<String>,
+    pub errors: Vec<String>,
+}
+
+/// A prompt that did not give a fitting answer, with every try.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct PromptFailure {
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<Route>,
+    pub attempts: Vec<Attempt>,
+}
+
+impl std::fmt::Display for PromptFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: ", self.prompt)?;
+        for (i, a) in self.attempts.iter().enumerate() {
+            if i > 0 {
+                f.write_str("; after the retry: ")?;
+            }
+            f.write_str(&a.errors.join("; "))?;
+        }
+        Ok(())
+    }
+}
+
+/// A capability (and prompt) a run will call, with its overrides, for
+/// the check before the run ([`Ai::check_needs`]).
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct Need {
+    pub capability: Capability,
+    /// `id` or `id@version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub overrides: Overrides,
+}
+
+/// What the check found for one [`Need`].
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NeedCheck {
+    pub need: Need,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<Route>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<RouteFrom>,
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// What [`Ai::try_prompt`] found: the raw answer and the validated one,
@@ -216,6 +359,11 @@ impl Core {
             ms: started.elapsed().as_millis() as u64,
             ok: result.is_ok(),
             error: result.as_ref().err().cloned(),
+            answered: result
+                .as_ref()
+                .ok()
+                .map(|r| r.model.clone())
+                .filter(|m| !m.is_empty()),
         });
         result
     }
@@ -244,6 +392,7 @@ impl Core {
             ms: started.elapsed().as_millis() as u64,
             ok: result.is_ok(),
             error: result.as_ref().err().cloned(),
+            answered: None,
         });
         result
     }
@@ -274,23 +423,178 @@ impl Core {
             ms: started.elapsed().as_millis() as u64,
             ok: result.is_ok(),
             error: result.as_ref().err().cloned(),
+            answered: None,
         });
         result
     }
 
     /// The route for a capability (or a prompt), or why there is none.
     fn route(&self, capability: Capability, prompt: Option<&str>) -> Result<Route, String> {
-        let routing = self.config().routing.clone();
-        routing
-            .route(capability, prompt)
+        self.resolve(capability, prompt, &Overrides::default())
             .map(|(r, _)| r)
-            .ok_or_else(|| {
+    }
+
+    /// The route once `overrides` are applied, and where it came from.
+    fn resolve(
+        &self,
+        capability: Capability,
+        prompt: Option<&str>,
+        overrides: &Overrides,
+    ) -> Result<(Route, RouteFrom), String> {
+        let routing = self.config().routing.clone();
+        routing.resolve(capability, prompt, overrides).map_err(|e| {
+            if e.starts_with("nothing is routed") {
                 format!(
-                    "nothing is routed for {capability}{}: set a route (helios_ai_routing_set) \
-                     or let the bench fill them (helios_ai_local_bench with apply)",
-                    prompt.map(|p| format!(" or `{p}`")).unwrap_or_default()
+                    "{e}: set a route (helios_ai_routing_set) or let the bench fill them \
+                         (helios_ai_local_bench with apply)"
                 )
+            } else {
+                e
+            }
+        })
+    }
+
+    /// The prompt's text and images, or why it cannot be sent.
+    fn prepare(
+        prompt: &Prompt,
+        input: &Value,
+        images: &[Vec<u8>],
+    ) -> Result<(String, Vec<ImageData>), String> {
+        let text = prompt.render(input)?;
+        if prompt.capability == Capability::Embeddings
+            || prompt.capability == Capability::Segmentation
+        {
+            return Err(format!(
+                "a {} prompt is not a chat: it is not tried",
+                prompt.capability
+            ));
+        }
+        let wanted = prompt.images as usize;
+        if images.len() < wanted {
+            return Err(format!(
+                "{} takes {wanted} image(s), {} given",
+                prompt.reference(),
+                images.len()
+            ));
+        }
+        let images = images[..wanted]
+            .iter()
+            .map(|b| ImageData {
+                mime: "image/png".into(),
+                bytes: b.clone(),
             })
+            .collect();
+        Ok((text, images))
+    }
+
+    fn request(
+        prompt: &Prompt,
+        route: &Route,
+        text: String,
+        images: Vec<ImageData>,
+    ) -> ChatRequest {
+        ChatRequest {
+            model: route.model.clone(),
+            system: (!prompt.system.is_empty()).then(|| prompt.system.clone()),
+            prompt: text,
+            images,
+            schema: prompt.output.clone(),
+            json: prompt.output.is_some(),
+            temperature: Some(prompt.temperature),
+            seed: prompt.seed,
+            max_tokens: 0,
+        }
+    }
+
+    /// A reply checked against the prompt's schema, then the extractor's
+    /// keys.
+    fn check(
+        prompt: &Prompt,
+        extractor: Option<&ExtractorDef>,
+        raw: &str,
+    ) -> Result<(Value, Option<Answer>), Vec<String>> {
+        let value = prompt.validate(raw)?;
+        match extractor {
+            None => Ok((value, None)),
+            Some(def) => helios_extract::validate(def, &value).map(|a| (value, Some(a))),
+        }
+    }
+
+    /// Runs a prompt through `route`; an answer that does not fit is sent
+    /// back once with its errors (helios-extract's `retry_note`).
+    fn run_prompt(
+        &self,
+        prompt: &Prompt,
+        call: &PromptCall,
+        (route, from): (Route, RouteFrom),
+        job: Option<u64>,
+    ) -> Result<PromptRun, PromptFailure> {
+        let mut failure = PromptFailure {
+            prompt: prompt.reference(),
+            route: Some(route.clone()),
+            attempts: Vec::new(),
+        };
+        let (text, images) = match Self::prepare(prompt, &call.input, &call.images) {
+            Ok(p) => p,
+            Err(e) => {
+                failure.attempts.push(Attempt {
+                    raw: None,
+                    errors: vec![e],
+                });
+                return Err(failure);
+            }
+        };
+        let started = Instant::now();
+        for attempt in 1..=2u32 {
+            let text = match failure.attempts.last() {
+                Some(last) => format!("{text}\n\n{}", helios_extract::retry_note(&last.errors)),
+                None => text.clone(),
+            };
+            let meta = CallMeta {
+                prompt: Some(prompt.reference()),
+                prompt_hash: Some(prompt.hash()),
+                purpose: call.purpose.clone(),
+                route_from: Some(from.clone()),
+                attempt: Some(attempt),
+            };
+            let request = Self::request(prompt, &route, text, images.clone());
+            let reply = match self.chat(&route, request, meta, job) {
+                Ok(r) => r,
+                Err(e) => {
+                    // Not a misfit: the provider failed, nothing to correct.
+                    failure.attempts.push(Attempt {
+                        raw: None,
+                        errors: vec![e],
+                    });
+                    return Err(failure);
+                }
+            };
+            match Self::check(prompt, call.extractor.as_ref(), &reply.text) {
+                Ok((value, answer)) => {
+                    return Ok(PromptRun {
+                        prompt: prompt.reference(),
+                        hash: prompt.hash(),
+                        answered: if reply.model.is_empty() {
+                            route.model.clone()
+                        } else {
+                            reply.model
+                        },
+                        route,
+                        from,
+                        value,
+                        counts: answer.as_ref().map(AnswerCounts::of).unwrap_or_default(),
+                        answer,
+                        attempts: attempt,
+                        ms: started.elapsed().as_millis() as u64,
+                    });
+                }
+                Err(errors) => failure.attempts.push(Attempt {
+                    raw: Some(reply.text),
+                    errors,
+                }),
+            }
+        }
+        Err(failure)
     }
 
     fn try_prompt(
@@ -310,31 +614,13 @@ impl Core {
         let input = input
             .or_else(|| prompt.example.clone())
             .unwrap_or_else(|| json!({}));
-        let text = match prompt.render(&input) {
-            Ok(t) => t,
+        let (text, images) = match Self::prepare(prompt, &input, images) {
+            Ok(p) => p,
             Err(e) => {
                 result.errors.push(e);
                 return result;
             }
         };
-        if prompt.capability == Capability::Embeddings
-            || prompt.capability == Capability::Segmentation
-        {
-            result.errors.push(format!(
-                "a {} prompt is not a chat: it is not tried",
-                prompt.capability
-            ));
-            return result;
-        }
-        let wanted = prompt.images as usize;
-        if images.len() < wanted {
-            result.errors.push(format!(
-                "{} takes {wanted} image(s), {} given",
-                prompt.reference(),
-                images.len()
-            ));
-            return result;
-        }
         let route = match route.map_or_else(|| self.route(prompt.capability, Some(&prompt.id)), Ok)
         {
             Ok(r) => r,
@@ -345,27 +631,12 @@ impl Core {
         };
         result.provider = Some(route.provider.clone());
         result.model = Some(route.model.clone());
-        let request = ChatRequest {
-            model: route.model.clone(),
-            system: (!prompt.system.is_empty()).then(|| prompt.system.clone()),
-            prompt: text,
-            images: images[..wanted]
-                .iter()
-                .map(|b| ImageData {
-                    mime: "image/png".into(),
-                    bytes: b.clone(),
-                })
-                .collect(),
-            schema: prompt.output.clone(),
-            json: prompt.output.is_some(),
-            temperature: Some(prompt.temperature),
-            seed: prompt.seed,
-            max_tokens: 0,
-        };
+        let request = Self::request(prompt, &route, text, images);
         let meta = CallMeta {
             prompt: Some(prompt.reference()),
             prompt_hash: Some(prompt.hash()),
             purpose: purpose.into(),
+            ..CallMeta::default()
         };
         let started = Instant::now();
         match self.chat(&route, request, meta, job) {
@@ -947,17 +1218,113 @@ impl Ai {
     /// Runs a prompt for a feature (`stacks.suggest`, `template.design`):
     /// the validated answer, or why there is none. Pin a version
     /// (`id@version`) for reproducible work.
+    ///
+    /// Routes from the map; an answer that does not fit is retried once
+    /// with its errors. [`Ai::run_prompt_with`] takes overrides and tells
+    /// which route answered.
     pub fn run_prompt(
         &self,
         reference: &PromptRef,
         input: Value,
         images: Vec<Vec<u8>>,
     ) -> Result<Value, String> {
-        let result = self.try_prompt(reference, Some(input), images, None)?;
-        match result.validated {
-            Some(v) if result.errors.is_empty() => Ok(v),
-            _ => Err(format!("{}: {}", result.prompt, result.errors.join("; "))),
+        let mut call = PromptCall::new(reference.clone(), input);
+        call.images = images;
+        call.purpose = "feature".into();
+        self.run_prompt_with(call)
+            .map(|r| r.value)
+            .map_err(|f| f.to_string())
+    }
+
+    /// Runs a prompt (as a job) with its run, node and diagram overrides
+    /// (in that order, before the routing map). The answer is checked
+    /// against the prompt's schema, and the extractor's keys when one is
+    /// given; one that does not fit is sent back once with its errors.
+    /// The result says which route answered and how many values were
+    /// adjusted; both tries are in the call log with their attempt.
+    pub fn run_prompt_with(&self, call: PromptCall) -> Result<PromptRun, PromptFailure> {
+        let prompt = self.prompt(&call.reference).map_err(|e| PromptFailure {
+            prompt: call.reference.id.clone(),
+            route: None,
+            attempts: vec![Attempt {
+                raw: None,
+                errors: vec![e],
+            }],
+        })?;
+        let fail = |e: String, route: Option<Route>| PromptFailure {
+            prompt: prompt.reference(),
+            route,
+            attempts: vec![Attempt {
+                raw: None,
+                errors: vec![e],
+            }],
+        };
+        let resolved = self
+            .core
+            .resolve(prompt.capability, Some(&prompt.id), &call.overrides)
+            .map_err(|e| fail(e, None))?;
+        let core = self.core.clone();
+        let route = resolved.0.clone();
+        let name = format!("ai run {}", prompt.reference());
+        let held = prompt.clone();
+        match self.job(
+            &name,
+            &[(AI_CALLS, 1)],
+            self.timeout_of(&route) * 2,
+            move |_, job| Ok(core.run_prompt(&held, &call, resolved, Some(job))),
+        ) {
+            Ok(run) => run,
+            Err(e) => Err(fail(e, Some(route))),
         }
+    }
+
+    /// Before a run: for each capability (and prompt) it will call, with
+    /// its overrides, the route it resolves to and whether that route can
+    /// serve (provider configured and answering, its key found, the model
+    /// present and doing the capability). Each provider is asked for its
+    /// models once.
+    pub fn check_needs(&self, needs: &[Need]) -> Vec<NeedCheck> {
+        let mut cache = BTreeMap::new();
+        needs
+            .iter()
+            .map(|need| {
+                let id = match need.prompt.as_deref().map(PromptRef::parse) {
+                    Some(Err(e)) => {
+                        return NeedCheck {
+                            need: need.clone(),
+                            route: None,
+                            from: None,
+                            available: false,
+                            reason: Some(e),
+                        };
+                    }
+                    Some(Ok(r)) => Some(r.id),
+                    None => None,
+                };
+                match self
+                    .core
+                    .resolve(need.capability, id.as_deref(), &need.overrides)
+                {
+                    Err(e) => NeedCheck {
+                        need: need.clone(),
+                        route: None,
+                        from: None,
+                        available: false,
+                        reason: Some(e),
+                    },
+                    Ok((route, from)) => {
+                        let check = self.check_route(need.capability, &route, &mut cache);
+                        NeedCheck {
+                            need: need.clone(),
+                            route: Some(route),
+                            from: Some(from),
+                            available: check.is_ok(),
+                            reason: check.err(),
+                        }
+                    }
+                }
+            })
+            .collect()
     }
 
     // The local runtime.

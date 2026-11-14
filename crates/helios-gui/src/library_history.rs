@@ -33,9 +33,19 @@
 //!   of changes undone in reverse order and redone in order, all or
 //!   nothing. A batch that changed nothing undoable leaves no step; the
 //!   user's own actions between two batches stay steps of their own.
+//! - **The user's walks run off the frame** ([`LibraryHistory::undo_later`]):
+//!   the line moves at once, the steps undone marked in progress, and the
+//!   node is asked on a thread of the history's; a second Ctrl+Z while one
+//!   is in flight queues behind it, the walks applied in the order asked.
+//!   A walk the node refuses is put back, with those queued behind it,
+//!   and its reason waits for the shell to show it
+//!   ([`LibraryHistory::take_refusals`]). Others' walks (an agent's, a
+//!   script's) wait for those in flight, then for their own answer.
 
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::collections::VecDeque;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use egui_pop::api::history::{
     Answer, Label, Line, Refusal, RefusalKind, Request, ScopeId, ScopeInfo, StepInfo, Walked,
@@ -88,12 +98,27 @@ pub fn within_batch<T>(batch: Option<Group>, f: impl FnOnce() -> T) -> T {
     out
 }
 
+#[derive(Clone)]
 struct Entry {
     info: StepInfo,
     /// The sets of changes, in the order made: undone in reverse.
     changes: Vec<Changes>,
     /// The batch it holds the changes of.
     group: Option<u64>,
+}
+
+/// A walk sent off the frame: its steps moved in the line already, the
+/// node not answered yet.
+struct Flight {
+    /// A redo (else an undo).
+    redo: bool,
+    /// The steps walked, in the order walked.
+    entries: Vec<Entry>,
+    /// Where they were in the list they left, to be put back there.
+    at: usize,
+    /// The redo list's clears when it left ([`Inner::cleared`]): a redo
+    /// refused after a new step cleared the list is not put back.
+    cleared: u64,
 }
 
 #[derive(Default)]
@@ -103,13 +128,32 @@ struct Inner {
     rev: u64,
     next: u64,
     apply: Option<Apply>,
+    /// The walks in flight, the first being applied.
+    flights: VecDeque<Flight>,
+    /// The thread applying them, while there are some.
+    worker: Option<std::thread::JoinHandle<()>>,
+    /// Whether the worker still takes flights.
+    working: bool,
+    /// How many times a new step cleared the redo list.
+    cleared: u64,
+    /// Why walks were refused, for the shell to show.
+    refusals: Vec<String>,
+    /// Wakes the window when a walk lands.
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+#[derive(Default)]
+struct Shared {
+    state: Mutex<Inner>,
+    /// Signalled when the last flight landed.
+    idle: Condvar,
 }
 
 /// The library's steps, shared by the history owner and whoever records
 /// an import (the import's thread).
 #[derive(Clone, Default)]
 pub struct LibraryHistory {
-    inner: Arc<Mutex<Inner>>,
+    inner: Arc<Shared>,
 }
 
 impl std::fmt::Debug for LibraryHistory {
@@ -143,6 +187,20 @@ pub fn batch_label(origin: &PopOrigin, count: usize) -> Label {
         key: Some(m.key),
         args: [("count".to_string(), count.to_string())].into(),
     }
+}
+
+/// Walks `entries` (in the order walked) through `apply`, all or
+/// nothing: on a failure, the steps already walked are walked back.
+fn apply_walk(apply: &Apply, entries: &[Entry], forward: bool) -> Result<(), String> {
+    for (done, entry) in entries.iter().enumerate() {
+        if let Err(e) = apply_entry(apply, entry, forward) {
+            for back in entries[..done].iter().rev() {
+                let _ = apply_entry(apply, back, !forward);
+            }
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 /// Takes `entry`'s sets of changes back (`forward` false: the last
@@ -304,9 +362,92 @@ pub fn album_label(
     }
 }
 
+/// Joins the thread walking a [`LibraryHistory`] off the frame when
+/// dropped: its shell holds it, so no walk outlives the shell.
+pub struct Walks(LibraryHistory);
+
+impl Drop for Walks {
+    fn drop(&mut self) {
+        self.0.join();
+    }
+}
+
 impl LibraryHistory {
+    /// What joins this history's thread when dropped (the shell's).
+    pub fn walks(&self) -> Walks {
+        Walks(self.clone())
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The window to wake when a walk sent off the frame lands.
+    pub fn set_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.lock().wake = Some(wake);
+    }
+
+    /// Whether a window is woken when a walk lands.
+    pub fn wakes(&self) -> bool {
+        self.lock().wake.is_some()
+    }
+
+    /// Why walks sent off the frame were refused since the last call
+    /// (their steps put back), for the shell to say.
+    pub fn take_refusals(&self) -> Vec<String> {
+        std::mem::take(&mut self.lock().refusals)
+    }
+
+    /// The steps of the walks in flight, the first being applied: each
+    /// with whether it is a redo.
+    pub fn in_flight(&self) -> Vec<(bool, Label)> {
+        self.lock()
+            .flights
+            .iter()
+            .flat_map(|f| f.entries.iter().map(|e| (f.redo, e.info.label.clone())))
+            .collect()
+    }
+
+    /// Waits until no walk is in flight, `within` at most; whether none
+    /// is.
+    pub fn wait_idle(&self, within: Duration) -> bool {
+        let end = Instant::now() + within;
+        let mut inner = self.lock();
+        while inner.working {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            inner = self
+                .inner
+                .idle
+                .wait_timeout(inner, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
+
+    /// Waits for the walks in flight to land and their thread to end:
+    /// none outlives its shell.
+    pub fn join(&self) {
+        let worker = {
+            let mut inner = self.lock();
+            while inner.working {
+                inner = self
+                    .inner
+                    .idle
+                    .wait(inner)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            inner.worker.take()
+        };
+        if let Some(w) = worker {
+            let _ = w.join();
+        }
     }
 
     /// Undo and redo go through `apply`.
@@ -336,6 +477,7 @@ impl LibraryHistory {
         }
         let mut inner = self.lock();
         inner.redo.clear();
+        inner.cleared += 1;
         inner.rev += 1;
         if let Some(g) = group
             && let Some(top) = inner.undo.last_mut()
@@ -382,15 +524,15 @@ impl LibraryHistory {
         }
     }
 
-    /// Undoes (`redo` false) or redoes `count` steps, all or nothing.
-    fn walk(
-        &self,
+    /// Checks a walk of `count` steps (a redo, else an undo) by
+    /// `origin`: the steps it walks, the newest first.
+    fn plan(
+        inner: &Inner,
         request: &Request,
         origin: &PopOrigin,
         redo: bool,
         count: usize,
-    ) -> Result<Walked, Refusal> {
-        let mut inner = self.lock();
+    ) -> Result<Vec<StepInfo>, Refusal> {
         request.check(inner.rev)?;
         let list = if redo { &inner.redo } else { &inner.undo };
         if count > list.len() {
@@ -410,55 +552,211 @@ impl LibraryHistory {
                 format!("“{}” is not this agent's step: the user undoes it", s.label),
             ));
         }
+        Ok(steps)
+    }
+
+    fn walked(inner: &Inner, steps: Vec<StepInfo>, dry_run: bool) -> Walked {
+        Walked {
+            scope: LIBRARY,
+            steps,
+            rev: inner.rev,
+            head: inner.undo.last().map_or(0, |e| e.info.id),
+            dry_run,
+        }
+    }
+
+    /// Undoes (`redo` false) or redoes `count` steps, all or nothing,
+    /// once the walks in flight have landed.
+    fn walk(
+        &self,
+        request: &Request,
+        origin: &PopOrigin,
+        redo: bool,
+        count: usize,
+    ) -> Result<Walked, Refusal> {
+        let mut inner = self.lock();
+        while inner.working && !request.dry_run {
+            inner = self
+                .inner
+                .idle
+                .wait(inner)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        let steps = Self::plan(&inner, request, origin, redo, count)?;
         if !request.dry_run && count > 0 {
             let apply = inner
                 .apply
                 .clone()
                 .ok_or_else(|| Refusal::new(RefusalKind::Owner, "no library to undo in"))?;
-            for done in 0..count {
-                let entry = if redo {
-                    inner.redo.pop()
-                } else {
-                    inner.undo.pop()
-                }
-                .expect("counted");
-                if let Err(e) = apply_entry(&apply, &entry, redo) {
-                    // Put back what was walked: all or nothing.
-                    let mut walked = vec![entry];
-                    for _ in 0..done {
-                        let back = if redo {
-                            inner.undo.pop()
-                        } else {
-                            inner.redo.pop()
-                        }
-                        .expect("walked");
-                        let _ = apply_entry(&apply, &back, !redo);
-                        walked.push(back);
+            let entries = Self::take(&mut inner, redo, count);
+            if let Err(e) = apply_walk(&apply, &entries, redo) {
+                // All or nothing: the steps stay where they were.
+                for e in entries.into_iter().rev() {
+                    if redo {
+                        inner.redo.push(e);
+                    } else {
+                        inner.undo.push(e);
                     }
-                    for w in walked {
-                        if redo {
-                            inner.redo.push(w);
-                        } else {
-                            inner.undo.push(w);
-                        }
-                    }
-                    return Err(Refusal::new(RefusalKind::Owner, e));
                 }
-                if redo {
-                    inner.undo.push(entry);
-                } else {
-                    inner.redo.push(entry);
+                return Err(Refusal::new(RefusalKind::Owner, e));
+            }
+            Self::land(&mut inner, redo, entries);
+            inner.rev += 1;
+        }
+        Ok(Self::walked(&inner, steps, request.dry_run))
+    }
+
+    /// Takes the `count` steps a walk walks off their list, in the order
+    /// walked.
+    fn take(inner: &mut Inner, redo: bool, count: usize) -> Vec<Entry> {
+        let list = if redo {
+            &mut inner.redo
+        } else {
+            &mut inner.undo
+        };
+        let at = list.len() - count;
+        list.drain(at..).rev().collect()
+    }
+
+    /// Puts walked steps on the other list, in the order walked.
+    fn land(inner: &mut Inner, redo: bool, entries: Vec<Entry>) {
+        let to = if redo {
+            &mut inner.undo
+        } else {
+            &mut inner.redo
+        };
+        to.extend(entries);
+    }
+
+    /// Undoes (`redo` false) or redoes `count` steps off the frame: the
+    /// line moves now, the node is asked on the history's thread, after
+    /// the walks already in flight.
+    fn walk_later(
+        &self,
+        request: &Request,
+        origin: &PopOrigin,
+        redo: bool,
+        count: usize,
+    ) -> Result<Walked, Refusal> {
+        let mut inner = self.lock();
+        let steps = Self::plan(&inner, request, origin, redo, count)?;
+        if request.dry_run || count == 0 {
+            return Ok(Self::walked(&inner, steps, request.dry_run));
+        }
+        if inner.apply.is_none() {
+            return Err(Refusal::new(RefusalKind::Owner, "no library to undo in"));
+        }
+        let entries = Self::take(&mut inner, redo, count);
+        let flight = Flight {
+            redo,
+            at: if redo {
+                inner.redo.len()
+            } else {
+                inner.undo.len()
+            },
+            cleared: inner.cleared,
+            entries: entries.clone(),
+        };
+        let marked = entries.into_iter().map(|mut e| {
+            e.info.in_progress = true;
+            e
+        });
+        let marked: Vec<Entry> = marked.collect();
+        Self::land(&mut inner, redo, marked);
+        inner.flights.push_back(flight);
+        inner.rev += 1;
+        if !inner.working {
+            if let Some(old) = inner.worker.take() {
+                // Ended: it took its last flight.
+                let _ = old.join();
+            }
+            let this = self.clone();
+            match std::thread::Builder::new()
+                .name("helios-library-undo".into())
+                .spawn(move || this.drain())
+            {
+                Ok(handle) => {
+                    inner.working = true;
+                    inner.worker = Some(handle);
+                }
+                Err(e) => {
+                    let flight = inner.flights.pop_back().expect("pushed");
+                    Self::put_back(&mut inner, flight);
+                    return Err(Refusal::new(RefusalKind::Owner, e.to_string()));
+                }
+            }
+        }
+        Ok(Self::walked(&inner, steps, false))
+    }
+
+    /// Puts a walk the node did not make back where it was.
+    fn put_back(inner: &mut Inner, flight: Flight) {
+        let ids: Vec<u64> = flight.entries.iter().map(|e| e.info.id).collect();
+        let (from, to) = if flight.redo {
+            (&mut inner.redo, &mut inner.undo)
+        } else {
+            (&mut inner.undo, &mut inner.redo)
+        };
+        to.retain(|e| !ids.contains(&e.info.id));
+        if flight.redo && flight.cleared != inner.cleared {
+            // A new step cleared the redo list since: nothing to redo.
+            return;
+        }
+        let at = flight.at.min(from.len());
+        for (i, e) in flight.entries.into_iter().rev().enumerate() {
+            from.insert(at + i, e);
+        }
+    }
+
+    /// The history's thread: applies the walks in flight in order; one
+    /// refused is put back with those queued behind it.
+    fn drain(&self) {
+        loop {
+            let (apply, entries, redo) = {
+                let mut inner = self.lock();
+                let Some(f) = inner.flights.front() else {
+                    inner.working = false;
+                    self.inner.idle.notify_all();
+                    return;
+                };
+                (inner.apply.clone(), f.entries.clone(), f.redo)
+            };
+            let result = apply.map_or_else(
+                || Err("no library to undo in".to_string()),
+                |a| apply_walk(&a, &entries, redo),
+            );
+            let mut inner = self.lock();
+            let flight = inner.flights.pop_front().expect("in flight");
+            match result {
+                Ok(()) => {
+                    let ids: Vec<u64> = flight.entries.iter().map(|e| e.info.id).collect();
+                    let to = if redo {
+                        &mut inner.undo
+                    } else {
+                        &mut inner.redo
+                    };
+                    for e in to.iter_mut().filter(|e| ids.contains(&e.info.id)) {
+                        e.info.in_progress = false;
+                    }
+                }
+                Err(e) => {
+                    // Those queued behind it were asked of a line that
+                    // is no more: put back too, the newest first.
+                    let mut back: Vec<Flight> = inner.flights.drain(..).collect();
+                    back.insert(0, flight);
+                    for f in back.into_iter().rev() {
+                        Self::put_back(&mut inner, f);
+                    }
+                    inner.refusals.push(e);
                 }
             }
             inner.rev += 1;
+            let wake = inner.wake.clone();
+            drop(inner);
+            if let Some(wake) = wake {
+                wake();
+            }
         }
-        Ok(Walked {
-            scope: LIBRARY,
-            steps,
-            rev: inner.rev,
-            head: inner.undo.last().map_or(0, |e| e.info.id),
-            dry_run: request.dry_run,
-        })
     }
 
     pub fn undo(&self, request: &Request, origin: &PopOrigin) -> Answer {
@@ -475,6 +773,37 @@ impl LibraryHistory {
         let line = self.line();
         Answer::Done(plan_jump(&line, to).and_then(|j| self.walk(request, origin, j.redo, j.count)))
     }
+
+    /// [`LibraryHistory::undo`] off the frame for the user (the menu,
+    /// Ctrl+Z): the step moves at once and is applied when the node
+    /// answers. Others' walks wait for their answer.
+    pub fn undo_later(&self, request: &Request, origin: &PopOrigin) -> Answer {
+        if *origin != PopOrigin::User {
+            return self.undo(request, origin);
+        }
+        let count = usize::from(!self.lock().undo.is_empty());
+        Answer::Done(self.walk_later(request, origin, false, count))
+    }
+
+    /// [`LibraryHistory::redo`] off the frame for the user.
+    pub fn redo_later(&self, request: &Request, origin: &PopOrigin) -> Answer {
+        if *origin != PopOrigin::User {
+            return self.redo(request, origin);
+        }
+        let count = usize::from(!self.lock().redo.is_empty());
+        Answer::Done(self.walk_later(request, origin, true, count))
+    }
+
+    /// [`LibraryHistory::jump`] off the frame for the user.
+    pub fn jump_later(&self, request: &Request, to: u64, origin: &PopOrigin) -> Answer {
+        if *origin != PopOrigin::User {
+            return self.jump(request, to, origin);
+        }
+        let line = self.line();
+        Answer::Done(
+            plan_jump(&line, to).and_then(|j| self.walk_later(request, origin, j.redo, j.count)),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -482,6 +811,7 @@ mod tests {
     use super::*;
     use helios_vault::Change;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
 
     fn changes() -> Changes {
         Changes {
@@ -607,5 +937,137 @@ mod tests {
         );
         // A user's batch is labelled without "Agent".
         assert_eq!(batch_label(&PopOrigin::User, 2).text, "2 commands");
+    }
+
+    /// An apply that waits on `held` (another writer of the vault),
+    /// noting each set walked, refusing set `fail_on`.
+    fn held_apply(
+        held: &Arc<Mutex<()>>,
+        walked: &Arc<Mutex<Vec<(u8, bool)>>>,
+        fail_on: &Arc<AtomicU64>,
+    ) -> Apply {
+        let (held, walked, fail_on) = (held.clone(), walked.clone(), fail_on.clone());
+        Arc::new(move |changes, forward| {
+            let _writer = held.lock().unwrap();
+            let n = changes.images[0].image.0.0[0];
+            if u64::from(n) == fail_on.load(Ordering::SeqCst) {
+                return Err(format!("{n} refused"));
+            }
+            walked.lock().unwrap().push((n, forward));
+            Ok(Replayed::default())
+        })
+    }
+
+    #[test]
+    fn the_user_s_walks_run_off_the_frame_queued_in_order() {
+        let h = LibraryHistory::default();
+        let (held, walked, fail_on) = (
+            Arc::new(Mutex::new(())),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(AtomicU64::new(0)),
+        );
+        h.set_apply(held_apply(&held, &walked, &fail_on));
+        let _walks = h.walks();
+        for n in 1..=3 {
+            h.record(import_label(1), changes_of(n), f64::from(n));
+        }
+        let writer = held.lock().unwrap();
+        // Two undos, then a redo: each answers at once, the line moved.
+        let start = std::time::Instant::now();
+        for _ in 0..2 {
+            let Answer::Done(Ok(_)) = h.undo_later(&Request::new(LIBRARY), &PopOrigin::User) else {
+                panic!("undone");
+            };
+        }
+        let Answer::Done(Ok(_)) = h.redo_later(&Request::new(LIBRARY), &PopOrigin::User) else {
+            panic!("redone");
+        };
+        assert!(start.elapsed() < Duration::from_millis(500));
+        let line = h.line();
+        assert_eq!((line.undo.len(), line.redo.len()), (2, 1));
+        assert!(line.redo[0].in_progress, "{line:?}");
+        assert_eq!(h.in_flight().len(), 3);
+        assert!(walked.lock().unwrap().is_empty());
+        // A dry run does not queue.
+        let mut dry = Request::new(LIBRARY);
+        dry.dry_run = true;
+        assert!(matches!(
+            h.undo_later(&dry, &PopOrigin::User),
+            Answer::Done(Ok(_))
+        ));
+        assert_eq!(h.in_flight().len(), 3);
+        drop(writer);
+        assert!(h.wait_idle(Duration::from_secs(10)));
+        assert_eq!(*walked.lock().unwrap(), [(3, false), (2, false), (2, true)]);
+        let line = h.line();
+        assert!(line.undo.iter().chain(&line.redo).all(|s| !s.in_progress));
+        assert!(h.take_refusals().is_empty());
+        // An agent's walk waits for its answer.
+        let agent = PopOrigin::Agent("mcp".into());
+        assert!(matches!(
+            h.undo_later(&Request::new(LIBRARY), &agent),
+            Answer::Done(Err(_))
+        ));
+    }
+
+    #[test]
+    fn a_refused_walk_is_put_back_with_those_queued_behind_it() {
+        let h = LibraryHistory::default();
+        let (held, walked, fail_on) = (
+            Arc::new(Mutex::new(())),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(AtomicU64::new(3)),
+        );
+        h.set_apply(held_apply(&held, &walked, &fail_on));
+        let _walks = h.walks();
+        // A batch of two sets, then a step of the user's.
+        let batch = Group {
+            id: 4,
+            origin: PopOrigin::User,
+        };
+        h.record_in(Some(&batch), import_label(1), changes_of(1), 1.0);
+        h.record_in(Some(&batch), import_label(1), changes_of(2), 2.0);
+        h.record(import_label(1), changes_of(3), 3.0);
+        let before = h.line();
+        let writer = held.lock().unwrap();
+        for _ in 0..2 {
+            let Answer::Done(Ok(_)) = h.undo_later(&Request::new(LIBRARY), &PopOrigin::User) else {
+                panic!("undone");
+            };
+        }
+        assert_eq!(h.line().undo.len(), 0);
+        drop(writer);
+        assert!(h.wait_idle(Duration::from_secs(10)));
+        // The first refused: both back, in their places; nothing walked.
+        let line = h.line();
+        assert_eq!(
+            line.undo.iter().map(|s| s.id).collect::<Vec<_>>(),
+            before.undo.iter().map(|s| s.id).collect::<Vec<_>>()
+        );
+        assert!(line.redo.is_empty());
+        assert!(line.undo.iter().all(|s| !s.in_progress));
+        assert!(walked.lock().unwrap().is_empty());
+        assert_eq!(h.take_refusals(), ["3 refused"]);
+        // The batch refused midway: its sets walked back, the step back.
+        fail_on.store(1, Ordering::SeqCst);
+        for _ in 0..2 {
+            h.undo_later(&Request::new(LIBRARY), &PopOrigin::User);
+            assert!(h.wait_idle(Duration::from_secs(10)));
+        }
+        assert_eq!(*walked.lock().unwrap(), [(3, false), (2, false), (2, true)]);
+        let line = h.line();
+        assert_eq!((line.undo.len(), line.redo.len()), (1, 1), "{line:?}");
+        assert_eq!(h.take_refusals(), ["1 refused"]);
+        // A redo refused after a new step cleared the redo list: gone.
+        fail_on.store(3, Ordering::SeqCst);
+        let writer = held.lock().unwrap();
+        h.redo_later(&Request::new(LIBRARY), &PopOrigin::User);
+        h.record(import_label(1), changes_of(7), 5.0);
+        drop(writer);
+        assert!(h.wait_idle(Duration::from_secs(10)));
+        let line = h.line();
+        assert!(line.redo.is_empty(), "{line:?}");
+        assert_eq!(line.undo.len(), 2, "{line:?}");
+        assert_eq!(h.take_refusals(), ["3 refused"]);
     }
 }

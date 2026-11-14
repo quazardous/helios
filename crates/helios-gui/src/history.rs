@@ -609,21 +609,21 @@ impl History for HeliosHistory {
 
     fn undo(&mut self, request: &Request, origin: &PopOrigin) -> Answer {
         if request.scope == LIBRARY {
-            return self.library.undo(request, origin);
+            return self.library.undo_later(request, origin);
         }
         self.answer(request, |s| walk(s, origin, false, request.dry_run))
     }
 
     fn redo(&mut self, request: &Request, origin: &PopOrigin) -> Answer {
         if request.scope == LIBRARY {
-            return self.library.redo(request, origin);
+            return self.library.redo_later(request, origin);
         }
         self.answer(request, |s| walk(s, origin, true, request.dry_run))
     }
 
     fn jump(&mut self, request: &Request, to: u64, origin: &PopOrigin) -> Answer {
         if request.scope == LIBRARY {
-            return self.library.jump(request, to, origin);
+            return self.library.jump_later(request, to, origin);
         }
         self.answer(request, |s| {
             let line = line_of(s);
