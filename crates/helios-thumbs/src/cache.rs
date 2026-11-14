@@ -28,12 +28,13 @@ pub const QUALITY: u8 = 80;
 
 /// The version of the reader whose thumbnails [`ThumbCache::put`] stores,
 /// written in each entry as a JPEG comment: 2 since a file's preview is
-/// turned by its EXIF orientation. An entry without it was read before
+/// turned by its EXIF orientation, 3 since a colour stream is read before
+/// a grey one (a phone's gain map). An entry without it was read before
 /// (see [`ThumbCache::get_marked`]).
-pub const READER: u32 = 2;
+pub const READER: u32 = 3;
 
 /// The comment that says an entry was stored by [`READER`].
-const MARK: &[u8] = b"helios-thumbs reader 2";
+const MARK: &[u8] = b"helios-thumbs reader 3";
 
 /// Whether a JPEG starts with [`MARK`], right after its start marker.
 fn marked(jpeg: &[u8]) -> bool {

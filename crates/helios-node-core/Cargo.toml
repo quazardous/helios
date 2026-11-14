@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-calibrate.workspace = true
+helios-connect.workspace = true
 helios-core.workspace = true
 helios-health.workspace = true
 helios-init.workspace = true

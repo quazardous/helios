@@ -262,6 +262,7 @@ pub struct LocalNode<S: Store + 'static> {
     bus: Arc<Bus>,
     link: Link,
     runner: Option<JoinHandle<()>>,
+    promises: Arc<crate::promises::Promises<S>>,
 }
 
 impl<S: Store + 'static> LocalNode<S> {
@@ -276,13 +277,16 @@ impl<S: Store + 'static> LocalNode<S> {
     /// from now on, and starts the node as [`LocalNode::open`] does.
     pub fn own(vault: Vault<S>, bus: Arc<Bus>, every: Duration) -> Self {
         let vault = Arc::new(vault.with_bus(bus.clone()));
-        // The promises a stop or a crash left unsettled: none has a
-        // runner yet, so each is failed `interrupted` (the kinds that
-        // resume register on the node's promises, crate::promises).
-        let promises = crate::promises::Promises::new(
-            vault.clone(),
-            helios_core::jobs::Jobs::new(bus.clone()),
-        );
+        // The node's promises, with the kinds it runs (imports by rule);
+        // those a stop or a crash left unsettled are taken up again when
+        // their kind resumes, else failed `interrupted` (crate::promises).
+        let promises = Arc::new(crate::import_promise::register(
+            crate::promises::Promises::new(
+                vault.clone(),
+                helios_core::jobs::Jobs::new(bus.clone()),
+            ),
+            bus.clone(),
+        ));
         if let Err(e) = promises.recover() {
             log::warn!(target: "helios::node", "promises not recovered: {e}");
         }
@@ -300,7 +304,14 @@ impl<S: Store + 'static> LocalNode<S> {
             bus,
             link,
             runner,
+            promises,
         }
+    }
+
+    /// The node's promises: what its endpoints answer `promises.*` and
+    /// an import by rule with.
+    pub fn promises(&self) -> &Arc<crate::promises::Promises<S>> {
+        &self.promises
     }
 
     /// Watches `volumes` (the machine's: `helios_storage::system()`) on a

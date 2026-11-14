@@ -61,15 +61,19 @@ use crate::head_render::HeadRender;
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 pub use helios_vault::fields::Op;
-use helios_vault::fields::{LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, TAGS, TITLE};
+use helios_vault::fields::{
+    LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, ROTATION, TAGS, TITLE,
+};
 use serde_json::Value;
 
 mod batch;
 pub use batch::{
     CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND,
-    PasteMode, REMOVE_COMMAND, SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND,
-    Similar, TRASH_COMMAND, TrashAsk,
+    PasteMode, REMOVE_COMMAND, RESET_ROTATION_COMMAND, ROTATE_LEFT_COMMAND, ROTATE_RIGHT_COMMAND,
+    SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar, TRASH_COMMAND,
+    TrashAsk, Turn,
 };
+pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
 
 /// The library's name in egui-pop's steps and commands (`library` in
 /// their arguments).
@@ -353,6 +357,10 @@ pub struct Entry {
     /// When its file was found changed by another application (seconds
     /// since 1970), until the user acknowledges it: a badge in the grid.
     pub changed_outside: Option<u64>,
+    /// Quarter turns clockwise the user gave it (the vault's `rotation`
+    /// field), on top of its file's orientation: its pictures are shown
+    /// turned.
+    pub rotation: u8,
     /// Its culling focus (the vault's `focus` field), once measured.
     pub focus: Option<f64>,
     /// The largest share of one channel blown white, once measured.
@@ -506,6 +514,7 @@ impl Entry {
                 self.captured = value.and_then(Value::as_f64);
                 self.day = self.captured.map(helios_vault::capture::day_text);
             }
+            ROTATION => self.rotation = helios_vault::rotation::quarter_turns(value),
             cull::FOCUS => self.focus = value.and_then(Value::as_f64),
             cull::CLIP_WHITE => self.clip_white = value.and_then(Value::as_f64),
             cull::CLIP_BLACK => self.clip_black = value.and_then(Value::as_f64),
@@ -1570,6 +1579,10 @@ pub struct Library {
     quick: Vec<String>,
     /// The same, for the grid's badge.
     quick_set: HashSet<String>,
+    /// How many heads each photo with more than one has (its versions:
+    /// copies made with [`DUPLICATE_COMMAND`], darktable duplicates), for
+    /// the grid's badge.
+    head_counts: HashMap<String, usize>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1641,6 +1654,12 @@ pub struct Library {
     /// The photos asked taken out of the Library ([`REMOVE_COMMAND`]),
     /// for the host.
     removals: Vec<Vec<String>>,
+    /// The photos asked turned ([`ROTATE_LEFT_COMMAND`] and the others),
+    /// for the host.
+    rotations: Vec<(Vec<String>, Turn)>,
+    /// The photos asked duplicated ([`DUPLICATE_COMMAND`],
+    /// [`DUPLICATE_ORIGINAL_COMMAND`]), for the host.
+    duplicates: Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)>,
     /// The photos whose files were asked moved to the trash
     /// ([`TRASH_COMMAND`], [`DELETE_REJECTED_COMMAND`]), for the host.
     trash_asks: Vec<TrashAsk>,
@@ -1724,6 +1743,7 @@ impl Default for Library {
             album_edits: Vec::new(),
             quick: Vec::new(),
             quick_set: HashSet::new(),
+            head_counts: HashMap::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -1762,6 +1782,8 @@ impl Default for Library {
             resort: None,
             copied: None,
             removals: Vec::new(),
+            rotations: Vec::new(),
+            duplicates: Vec::new(),
             trash_asks: Vec::new(),
         }
     }
@@ -1790,6 +1812,37 @@ pub fn small(image: &Image) -> Image {
 /// An 8-bit sRGB thumbnail as a picture for a texture.
 pub fn rgb_image(rgb: &helios_thumbs::Rgb8) -> ColorImage {
     ColorImage::from_rgb([rgb.width as usize, rgb.height as usize], &rgb.pixels)
+}
+
+/// A picture turned `turns` quarters clockwise (L9's rotation): its
+/// pixels moved, nothing decoded again.
+pub fn turned(image: ColorImage, turns: u8) -> ColorImage {
+    let [w, h] = image.size;
+    let at = |x: usize, y: usize| image.pixels[y * w + x];
+    match turns % 4 {
+        0 => image,
+        2 => {
+            let mut pixels = image.pixels.clone();
+            pixels.reverse();
+            ColorImage::new([w, h], pixels)
+        }
+        quarter => {
+            // The new picture is h wide and w high; its pixel (x, y)
+            // comes from (y, h - 1 - x) turned clockwise, from
+            // (w - 1 - y, x) turned counter-clockwise.
+            let mut pixels = Vec::with_capacity(w * h);
+            for y in 0..w {
+                for x in 0..h {
+                    pixels.push(if quarter == 1 {
+                        at(y, h - 1 - x)
+                    } else {
+                        at(w - 1 - y, x)
+                    });
+                }
+            }
+            ColorImage::new([h, w], pixels)
+        }
+    }
 }
 
 /// An image in the working space (linear Rec.2020) as an sRGB picture no
@@ -1834,6 +1887,7 @@ struct PresenceWords {
     blown: String,
     crushed: String,
     quick: String,
+    versions: String,
 }
 
 impl PresenceWords {
@@ -1871,6 +1925,10 @@ impl PresenceWords {
                 Message::new("gui-library-badge-crushed", "crushed shadows"),
             ),
             quick: crate::i18n::text(ctx, Message::new("gui-library-badge-quick", "quick")),
+            versions: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-versions", "versions"),
+            ),
         }
     }
 }
@@ -1887,6 +1945,8 @@ struct Items<'a> {
     backups: Option<&'a HashMap<String, BackupMark>>,
     /// The photos in the quick collection.
     quick: &'a HashSet<String>,
+    /// How many heads the photos with more than one have.
+    heads: &'a HashMap<String, usize>,
 }
 
 impl Items<'_> {
@@ -1943,6 +2003,11 @@ impl LibraryItems<String> for Items<'_> {
         }
         if self.quick.contains(&entry.id) {
             badges.push(Badge::new(self.words.quick.clone()).tone(BadgeTone::Info));
+        }
+        // Its versions (L10, L-C5 B): copies and darktable duplicates,
+        // counted, one cell for the photo.
+        if let Some(&n) = self.heads.get(&entry.id).filter(|n| **n > 1) {
+            badges.push(Badge::new(format!("{n} {}", self.words.versions)).tone(BadgeTone::Info));
         }
         if let Some(mark) = self.backups.and_then(|b| b.get(&entry.id)) {
             let w = self.words;
@@ -2233,6 +2298,33 @@ impl Library {
             .count()
     }
 
+    /// How many heads the photos with more than one have, as the node
+    /// counts them (`library.versions.heads`): the grid's badge follows.
+    pub fn set_heads(&mut self, heads: HashMap<String, usize>) {
+        if self.head_counts == heads {
+            return;
+        }
+        self.head_counts = heads;
+        self.revision += 1;
+    }
+
+    /// Sets one photo's head count, as a duplicate's answer gives it.
+    pub fn set_heads_of(&mut self, image: &str, heads: usize) {
+        let before = if heads > 1 {
+            self.head_counts.insert(image.to_string(), heads)
+        } else {
+            self.head_counts.remove(image)
+        };
+        if before != Some(heads).filter(|n| *n > 1) {
+            self.revision += 1;
+        }
+    }
+
+    /// How many heads a photo has, when more than one.
+    pub fn heads_of(&self, image: &str) -> Option<usize> {
+        self.head_counts.get(image).copied()
+    }
+
     /// The quick collection as the vault holds it: the grid's badges
     /// follow, and its photos are asked again when it is shown.
     pub fn set_quick(&mut self, images: Vec<String>) {
@@ -2364,7 +2456,7 @@ impl Library {
 
     /// The badges an image shows in the grid, in the interface's
     /// language: RAW, offline, missing, changed outside Helios, in the
-    /// quick collection, its backups when the library has a strategy,
+    /// quick collection, its versions counted, its backups when the library has a strategy,
     /// and its culling measures (soft focus, blown highlights, crushed
     /// shadows) once measured.
     pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
@@ -2381,6 +2473,7 @@ impl Library {
             words: &words,
             backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
             quick: &self.quick_set,
+            heads: &self.head_counts,
         };
         items.badges(0).into_iter().map(|b| b.text).collect()
     }
@@ -2423,12 +2516,15 @@ impl Library {
             .map(|e| e.id.clone());
         // A photo found changed outside Helios has a new thumbnail under
         // its key: its texture is read again.
+        // A photo turned (an undo, another writer) shows its pictures
+        // turned again.
         for e in &entries {
             let before = self.entry(&e.id).and_then(|old| old.changed_outside);
-            if e.changed_outside.is_some() && e.changed_outside != before {
-                self.textures.forget(&e.id);
-                self.large_textures.remove(&e.id);
-                self.large_asked.remove(&e.id);
+            let turned = self
+                .entry(&e.id)
+                .is_some_and(|old| old.rotation != e.rotation);
+            if (e.changed_outside.is_some() && e.changed_outside != before) || turned {
+                self.forget_pictures(&e.id);
             }
         }
         self.entries = entries;
@@ -2824,7 +2920,7 @@ impl Library {
         for (id, rgb) in found {
             let texture = ctx.load_texture(
                 format!("helios.library.{id}"),
-                rgb_image(&rgb),
+                turned(rgb_image(&rgb), self.turns(&id)),
                 egui::TextureOptions::LINEAR,
             );
             self.textures.insert(id, texture, false, pass);
@@ -2876,6 +2972,12 @@ impl Library {
             .or_else(|| name.and_then(|n| Path::new(n).extension()))
             .and_then(|e| e.to_str())
             .map_or_else(|| "?".to_string(), str::to_ascii_uppercase)
+    }
+
+    /// The size of the thumbnail an image's cell draws, turned as the
+    /// photo is (width, height), once received.
+    pub fn thumb_size(&self, id: &str) -> Option<[usize; 2]> {
+        self.textures.get(id).map(egui::TextureHandle::size)
     }
 
     /// Whether this image's cell shows the placeholder (no preview).
@@ -2938,7 +3040,7 @@ impl Library {
                 Ok(image) => {
                     let texture = ctx.load_texture(
                         format!("helios.library.head.{}", r.id),
-                        srgb(&image),
+                        turned(srgb(&image), self.turns(&r.id)),
                         egui::TextureOptions::LINEAR,
                     );
                     self.heads.renders.insert(
@@ -3348,11 +3450,32 @@ impl Library {
     /// after another writer changed it, or after a write failed.
     pub fn show_field(&mut self, image: &str, field: &str, value: Option<&Value>) {
         if let Some(i) = self.at(image) {
+            let turns = self.entries[i].rotation;
             self.entries[i].show(field, value);
+            if self.entries[i].rotation != turns {
+                self.forget_pictures(image);
+            }
             if field == TAGS {
                 self.reindex();
             }
         }
+    }
+
+    /// Drops an image's pictures (its thumbnail, its large preview, its
+    /// head's render): asked again when drawn, from the thumbnails' cache.
+    fn forget_pictures(&mut self, id: &str) {
+        self.textures.forget(id);
+        self.large_textures.remove(id);
+        self.large_asked.remove(id);
+        if self.heads.renders.remove(id).is_some() {
+            let generation = self.heads.generations.entry(id.to_string()).or_default();
+            *generation += 1;
+        }
+    }
+
+    /// An image's quarter turns clockwise, as its pictures are shown.
+    fn turns(&self, id: &str) -> u8 {
+        self.entry(id).map_or(0, |e| e.rotation)
     }
 
     fn receive(&mut self, ctx: &egui::Context) {
@@ -3390,7 +3513,7 @@ impl Library {
                     if !self.heads.renders.contains_key(&id) {
                         let texture = ctx.load_texture(
                             format!("helios.library.large.{id}"),
-                            rgb_image(&rgb),
+                            turned(rgb_image(&rgb), self.turns(&id)),
                             egui::TextureOptions::LINEAR,
                         );
                         self.large_textures.insert(id, texture);
@@ -3418,7 +3541,7 @@ impl Library {
             };
             let texture = ctx.load_texture(
                 format!("helios.library.{id}"),
-                picture,
+                turned(picture, self.turns(&id)),
                 egui::TextureOptions::LINEAR,
             );
             self.textures.insert(id, texture, false, pass);
@@ -3979,6 +4102,7 @@ impl Library {
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
                 quick: &self.quick_set,
+                heads: &self.head_counts,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -4017,6 +4141,41 @@ impl Library {
                         crate::dialogs::MenuItem::command("library.export"),
                         crate::dialogs::MenuItem::command("library.copyFiles"),
                         crate::dialogs::MenuItem::command("library.fitCameraLook"),
+                        crate::dialogs::MenuItem::Separator,
+                        crate::dialogs::MenuItem::command(ROTATE_LEFT_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-rotate-left", "Rotate Left"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(ROTATE_RIGHT_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-rotate-right", "Rotate Right"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(RESET_ROTATION_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-rotate-reset", "Reset Rotation"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::Separator,
+                        crate::dialogs::MenuItem::command(DUPLICATE_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-duplicate", "Duplicate"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(DUPLICATE_ORIGINAL_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new(
+                                    "gui-library-duplicate-original",
+                                    "Duplicate Original",
+                                ),
+                            ),
+                        ),
                         crate::dialogs::MenuItem::Separator,
                         crate::dialogs::MenuItem::command(REMOVE_COMMAND).labeled(
                             crate::i18n::text(
@@ -4092,6 +4251,7 @@ impl Library {
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
                 quick: &self.quick_set,
+                heads: &self.head_counts,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -4372,6 +4532,26 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 mod tests {
     use super::*;
     use egui_pop::views::library::filter::Candidate;
+
+    /// A picture 3 wide and 2 high turned each way: its corners land
+    /// where a quarter turn puts them, and four turns give it back.
+    #[test]
+    fn a_picture_turns_by_quarters() {
+        let px = |n: u8| Color32::from_rgb(n, 0, 0);
+        // 1 2 3
+        // 4 5 6
+        let picture = ColorImage::new([3, 2], (1..=6).map(px).collect());
+        let reds = |p: &ColorImage| p.pixels.iter().map(Color32::r).collect::<Vec<_>>();
+        let right = turned(picture.clone(), 1);
+        assert_eq!(right.size, [2, 3]);
+        assert_eq!(reds(&right), [4, 1, 5, 2, 6, 3]);
+        let left = turned(picture.clone(), 3);
+        assert_eq!(left.size, [2, 3]);
+        assert_eq!(reds(&left), [3, 6, 2, 5, 1, 4]);
+        assert_eq!(reds(&turned(picture.clone(), 2)), [6, 5, 4, 3, 2, 1]);
+        let back = (0..4).fold(picture.clone(), |p, _| turned(p, 1));
+        assert_eq!(reds(&back), reds(&picture));
+    }
 
     /// A date in the search field is a capture day: the vault query takes
     /// both ends whole, and an entry's day is its capture's by the

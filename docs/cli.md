@@ -343,7 +343,8 @@ drives a running node through either endpoint.
 
 ```bash
 helios import --vault library.db [--reference | --copy [--into DIR]] [--rename PATTERN]
-              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] [--new] [--wait]
+              FOLDERS-CARDS-OR-FILES...
 helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve STACK
               | expand STACK | collapse STACK | top STACK IMAGE
               | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
@@ -353,9 +354,15 @@ helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve
 `import` brings a folder, a file or a mounted card into the vault,
 referenced in place or copied into the library folder (renamed by a
 pattern, sidecars along), finds exact duplicates by content and handles
-them by policy, and measures each image's near-duplicate signals. One JSON
-line per file, then `{"report": ...}`; exit 1 when a file failed, 130
-when interrupted (Ctrl-C stops it before its next file and leaves no
+them by policy, and measures each image's near-duplicate signals. The
+node answers at once with a promise (docs/protocol.md, "Promises"),
+printed as `{"promise": ...}`: the import goes on in the node, and
+`helios run promises.wait --param id=…` waits for it. One folder or
+card is imported whole (`--new`: only what the library does not know);
+several sources, or files, as the items named. With `--wait` it waits:
+one JSON line per file that failed, then `{"report": ..., "promise":
+..., "history": ...}`; exit 1 when a file failed, 130 when interrupted
+(Ctrl-C cancels the import before its next file and leaves no
 half-written copy).
 
 `stacks` lists, makes and dissolves stacks, and asks for stack
@@ -420,6 +427,21 @@ helios batch-run --vault library.db --json '{"steps":[{"id":"theme.select","para
 about a hundred, for an agent whose context is short. Every command stays
 reachable through `helios_command_run`; a call to another tool is refused
 and says so. `--tools full`, the default, offers every tool.
+
+`helios-mcp --tools generated` adds to those five one tool per command of
+the registry, generated from it: `helios_cmd_<id>` (`.` turned into `_`:
+`helios_cmd_library_stacks_list`), described by the command's label and
+category, its params schema as the input schema, `readOnlyHint` and
+`title` as annotations. Its arguments are the command's params, plus the
+server's own, which start with `_`: `_vault`, `_node` and `_window` pick
+the node as `helios_command_run`'s do, `_request_id` keys a change. A call
+is checked against the schema first, then runs as `helios_command_run`
+would, with the same caps, roots, key and "outcome unknown". The list is
+the registries compiled in (the node's verbs and a vault's commands),
+sorted by name, at most 120; a desktop's window commands depend on its
+open windows and stay reached through `helios_command_run`. `full` stays
+the default: its hand-written tools document the processing node's verbs
+better than a schema alone.
 
 ## Through the vault's node
 

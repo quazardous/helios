@@ -934,6 +934,23 @@ mod control {
                 &Message::plain(format!("`{id}` is served over JSON-RPC only, as a method")),
             );
         }
+        if id == helios_node::library::IMPORT && helios_node::import_promise::by_rule(params) {
+            // An import by rule answers at once with its promise.
+            node.bus.publish(SOURCE, None, &CommandRan { id, origin });
+            let started = match &node.importer {
+                None => Err("the node keeps no vault: start it with --vault".to_string()),
+                Some(importer) => {
+                    helios_node::import_promise::start(importer.promises(), params, origin)
+                }
+            };
+            let mut answer = match started {
+                Ok(promise) => json!({ "ok": true, "promise": promise }),
+                Err(e) => refused(None, &Message::plain(e)),
+            };
+            answer["command"] = json!(id);
+            answer["origin"] = json!(origin);
+            return answer;
+        }
         if helios_node::calibrate::PROFILE_IDS.contains(&id) {
             node.bus.publish(SOURCE, None, &CommandRan { id, origin });
             let vault = node.importer.as_ref().map(|i| i.vault().as_ref());
@@ -1122,14 +1139,8 @@ mod control {
                 ));
             };
             let mut answer = if helios_node::promises::handles(id) {
-                // The vault keeps the promises and which have a runner
-                // here; no kind runs on this node yet, so a promise is
-                // read, waited on and cancelled, not retried.
-                helios_node::promises::Promises::new(
-                    importer.vault().clone(),
-                    self.node.jobs.clone(),
-                )
-                .run(id, &params, call)?
+                // The node's promises, with the kinds it runs (imports).
+                importer.promises().run(id, &params, call)?
             } else {
                 self.node.cursors.run(
                     importer.vault(),
@@ -1940,7 +1951,12 @@ fn owner_lock(file: &Path) -> Result<Option<helios_inspect::discovery::Lock>, St
 
 /// Stops the node and ends the process once, for `idle`, no client has
 /// been connected to any endpoint and no job has run.
-fn exit_when_idle(idle: Duration, jobs: Jobs, stopper: Stopper) {
+fn exit_when_idle(
+    idle: Duration,
+    jobs: Jobs,
+    promises: Option<Arc<helios_node::promises::Promises<helios_vault_sqlite::SqliteStore>>>,
+    stopper: Stopper,
+) {
     let started = Instant::now();
     let spawned = std::thread::Builder::new()
         .name("helios-node-idle".into())
@@ -1949,7 +1965,9 @@ fn exit_when_idle(idle: Duration, jobs: Jobs, stopper: Stopper) {
             loop {
                 std::thread::sleep(Duration::from_millis(100));
                 let activity = helios_inspect::activity();
-                if activity.open > 0 || !jobs.cancellable().is_empty() {
+                // A promise at work (an import by rule) keeps it up too.
+                let working = promises.as_ref().is_some_and(|p| p.working());
+                if activity.open > 0 || !jobs.cancellable().is_empty() || working {
                     quiet_since = Instant::now();
                     continue;
                 }
@@ -2264,7 +2282,8 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         stopper.rendezvous(path);
     }
     if let Some(idle) = args.idle_exit {
-        exit_when_idle(idle, node.jobs.clone(), stopper.clone());
+        let promises = node.importer.as_ref().map(|i| i.promises().clone());
+        exit_when_idle(idle, node.jobs.clone(), promises, stopper.clone());
     }
     let ready = bus.publish(
         SOURCE,

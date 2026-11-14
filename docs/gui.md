@@ -1031,6 +1031,8 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library | `Delete` | remove the selected photos from the Library, their files untouched (`library.remove`, Lightroom, darktable); Ctrl+Z puts them back; not while a text field is typed in |
 | library | `Ctrl+Alt+Shift+Delete` | Move to Trash…: the selected photos' files to the system trash, asked first (`library.trash`, Lightroom's "Remove and Delete from Disk"); not while a text field is typed in |
 | library | `Ctrl+Backspace` | Delete Rejected…: the rejected photos shown to the system trash, asked first (`library.deleteRejected`, Lightroom's "Delete Rejected Photos"); not while a text field is typed in |
+| library | `Ctrl+[`, `Ctrl+]` | Rotate Left, Rotate Right: the selected photos a quarter counter-clockwise or clockwise (`library.rotateLeft`, `library.rotateRight`, Lightroom, darktable); Ctrl+Z turns them back; not while a text field is typed in |
+| library | `Ctrl+'` | Duplicate: a new version of each selected photo from its current edit, beside the others (`library.duplicate`, Lightroom's "Create Virtual Copy"); the grid's badge counts the versions; not while a text field is typed in |
 | library | `Ctrl+Shift+K` | the recent and pinned filters and the smart albums, to apply one (`library.filter.switch`; darktable's Ctrl+K, which starts chords here); not while a text field is typed in |
 | Compare place | `Right`, `Left` | the next, previous photo active (`compare.next`, `compare.previous`) |
 | culling | `Space`, `Backspace` | next, previous image (in the grid `Space` selects) |
@@ -1059,8 +1061,10 @@ where they collide with nothing. The default map already holds `0`–`5`,
 `Ctrl+,`; the package adds `F1` for red (taken from the palette, which
 keeps `Ctrl+Shift+P`), `L` for the library, and `Ctrl+Shift+L`,
 `Ctrl+Shift+R`, `Ctrl+Shift+B` for the start and end side bars and the
-bottom panel, and `Ctrl+E` for the export (`library.export`, which
-`Ctrl+Shift+E` runs too, as in Lightroom). What it leaves out, and why (listed in the package too):
+bottom panel, `Ctrl+E` for the export (`library.export`, which
+`Ctrl+Shift+E` runs too, as in Lightroom), and `Ctrl+D` and
+`Ctrl+Shift+D` in the library for Duplicate and Duplicate Original
+(darktable's "duplicate" and "duplicate virgin"). What it leaves out, and why (listed in the package too):
 
 | darktable | What | Why not |
 |---|---|---|
@@ -1073,7 +1077,7 @@ bottom panel, and `Ctrl+E` for the export (`library.export`, which
 | `s`, `p`, `t`, `m` | slideshow, print, tethering, map | global letters, and views Helios does not have |
 | `Ctrl+S`, `Ctrl+W`, `Ctrl+F`, `Ctrl+H` | softproof, focus detection, filmstrip, header | save, close, find, replace |
 | `Ctrl+K`, `Ctrl+B`, `Ctrl+G` | collection history, colour assessment, gamut | the chord prefix, the side bar, group |
-| `Ctrl+D`, `Ctrl+T`, `Ctrl+C`, `Ctrl+V` | duplicate, tag, copy and paste edits | no such commands yet |
+| `Ctrl+T`, `Ctrl+C`, `Ctrl+V` | tag, copy and paste edits | no such commands yet |
 
 ## Jobs
 

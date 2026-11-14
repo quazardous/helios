@@ -51,6 +51,7 @@ pub mod connect;
 pub use helios_node_core::calibrate;
 /// Reads at scale through cursors (`helios_node_core::cursor`).
 pub use helios_node_core::cursor;
+pub use helios_node_core::import_promise;
 pub use helios_node_core::library;
 /// Durable handles to long work's results (`helios_node_core::promises`).
 pub use helios_node_core::promises;

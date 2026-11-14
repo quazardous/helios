@@ -1418,16 +1418,33 @@ pub fn import<S: Store>(
     now: u64,
     emit: &mut impl FnMut(&Value),
 ) -> Result<Report, String> {
+    import_recorded(vault, jobs, sources, options, now, emit).0
+}
+
+/// [`import`], with the id of the record it left in the import history
+/// (`None` when the record could not be written).
+pub fn import_recorded<S: Store>(
+    vault: &Vault<S>,
+    jobs: &Jobs,
+    sources: &[PathBuf],
+    options: &Options,
+    now: u64,
+    emit: &mut impl FnMut(&Value),
+) -> (Result<Report, String>, Option<String>) {
     let places = options.places();
     let ended = run_import(vault, jobs, sources, options, &places, now, emit);
     // Each import leaves its record, whoever ran it; a record that cannot
     // be written does not undo the import, it is said.
     let outcome = ended.as_ref().map_err(String::as_str);
-    if let Err(e) = crate::import_history::record_on(vault, sources, &places, options, now, outcome)
-    {
-        log::warn!("import history: {e}");
-    }
-    ended
+    let record =
+        match crate::import_history::record_on(vault, sources, &places, options, now, outcome) {
+            Ok(record) => Some(record.id),
+            Err(e) => {
+                log::warn!("import history: {e}");
+                None
+            }
+        };
+    (ended, record)
 }
 
 /// [`import`], before its record.

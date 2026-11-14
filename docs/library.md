@@ -134,7 +134,11 @@ helios import --vault library.db /media/card                      # a mounted ca
 helios import --vault library.db --copy --into ~/Photos /media/card
 helios import --vault library.db --copy --rename '{date}-{seq}' /media/card
 helios import --vault library.db --duplicates keep ~/Pictures/2024-06-trip
+helios import --vault library.db --new --wait /media/card           # only what is new, waited for
 ```
+
+The node answers at once with a promise and imports in the background;
+`--wait` waits for its outcome ([cli.md](cli.md)).
 
 **Sources.** A folder and its subfolders, a single file, or a mounted card:
 a folder holding `DCIM` is read from there. A phone speaking MTP is not a
@@ -492,6 +496,8 @@ each a command a profile or a template may rebind (the whole map is in
 | Delete | `library.remove` (Remove from Library; not while typing) |
 | Ctrl+Alt+Shift+Delete | `library.trash` (Move to Trash…; not while typing) |
 | Ctrl+Backspace | `library.deleteRejected` (Delete Rejected…; not while typing) |
+| Ctrl+[, Ctrl+] | `library.rotateLeft`, `library.rotateRight` (not while typing) |
+| Ctrl+' | `library.duplicate` (not while typing; Ctrl+D and Ctrl+Shift+D with the darktable keys) |
 | Left, Right | `vault.previous`, `vault.next` |
 | Backspace, Space (culling only) | `vault.previous`, `vault.next` |
 
@@ -535,6 +541,35 @@ file's outcome is kept as it goes, so a job stopped half way can be read
 an archive volume, nor in a `Helios Backup/` folder: those files stay,
 with the reason. The photos whose files went leave the Library; their
 backup copies stay.
+
+**Rotate** (2026-11-14): Ctrl+[ and Ctrl+] (as Lightroom and
+darktable), or the grid's context menu, turn the selected photos a
+quarter counter-clockwise or clockwise (`library.rotateLeft`,
+`library.rotateRight`, `images` else the selection), and "Reset
+Rotation" (`library.resetRotation`, darktable's) turns them back to
+their file's orientation. The turn is the photo's `rotation` field
+(quarter turns clockwise, on top of the file's EXIF orientation), not
+an edit: the file is not touched. It is one step of the library's
+history (Ctrl+Z turns them back), written through the node's
+`library.images.rotate` (docs/protocol.md). The grid, the filmstrip
+and Compare turn the pictures they show: a thumbnail is read again from
+the thumbnails' cache, not decoded from the file (a raw's render in
+Compare is made again); the darkroom does not turn the image yet.
+
+**Duplicate** (2026-11-14): Ctrl+' (Lightroom's "Create Virtual Copy"),
+Ctrl+D with the darktable keys, or the grid's context menu, make a new
+version of each selected photo (`library.duplicate`): a copy of its
+current edit, kept as a new head beside the others, with its own edit
+history from there. "Duplicate Original" (`library.duplicateOriginal`,
+darktable's "duplicate virgin", Ctrl+Shift+D with its keys) starts the
+copy from no edit. The copy is the newest head, so the darkroom opens
+it next. Marks (rating, labels, tags, rotation) stay the photo's, shared
+by its versions (L-C5). The grid keeps one cell per photo and counts its
+versions in a badge ("2 versions"), darktable's duplicates included.
+Written through the node's `library.images.duplicate`, read with
+`library.versions.heads` (docs/protocol.md). Not yet: the version strip
+in the photo's panel, versions as cells (a view option), and undoing or
+removing a copy.
 
 `vault.autoAdvance` (or the Auto-advance box) moves the cursor to the
 next image after each mark, as Lightroom's Caps Lock mode. The grid's
