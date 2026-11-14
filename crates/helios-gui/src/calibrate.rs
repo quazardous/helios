@@ -22,9 +22,9 @@
 //!   the jobs centre, written into each photo as one library step.
 //!
 //! When a raw opens for the first time, its camera's default profile is
-//! put on it, then its camera's default look ([`on_open`]); a default
-//! that picks none says why in the status bar and leaves the photo as it
-//! is.
+//! put on it ([`on_open`]); a default that picks none says why in the
+//! status bar and leaves the photo as it is. A camera's default look is
+//! put on its raws at import (`library.import`'s `camera_look`).
 //!
 //! Each run is announced on the node's bus with who ran it
 //! (`control.command`). A save, a deletion, a default set or an apply is
@@ -205,7 +205,7 @@ pub fn register<S: Store + Send + 'static>(
         ),
         (
             LOOK_SET_DEFAULT,
-            "Keeps a camera's default camera look, which its new photos open with (`camera`; `look`: the two nodes' parameters, or `image`: its edit's look), or clears it (`clear`)",
+            "Keeps a camera's default camera look, which its raws imported from now on start with (`camera`; `look`: the two nodes' parameters, or `image`: its edit's look), or clears it (`clear`)",
             false,
         ),
     ];
@@ -254,7 +254,7 @@ pub fn register<S: Store + Send + 'static>(
     })?;
     let spec = CommandSpec::new(
         LOOK_CHOOSE,
-        "Sets the open photo's camera look (`look`: `fit` to fit it to the camera's JPEG, `on` or `off`), one step of its edit",
+        "Sets the open photo's camera look (`look`: `fit` to fit it to the camera's JPEG, `camera` for the camera's default look or a fit when it has none, `on` or `off`), one step of its edit",
         "Calibration",
     );
     shell.register(spec, move |args, origin| match &look_node {
@@ -441,10 +441,9 @@ fn refresh_offer<S: Store>(vault: &Vault<S>, store: &std::sync::Mutex<helios_val
 /// A photo opened in the viewport (`graph`, its network built): the
 /// module's header offered the camera's profiles and, opened for the
 /// first time, the camera's default profile put on it
-/// ([`node::default_on_open`]), then the camera's default look
-/// ([`node::look::default_on_open`]). Answers what to tell: the profile
-/// and the look applied, or why the default picked none; never an error
-/// dialog.
+/// ([`node::default_on_open`]; the camera's default look came at import,
+/// [`node::look::default_on_import`]). Answers what to tell: the profile
+/// applied, or why the default picked none; never an error dialog.
 pub fn on_open<S: Store>(
     vault: &Vault<S>,
     image: helios_vault::ImageId,
@@ -457,8 +456,6 @@ pub fn on_open<S: Store>(
         set_refusal(store, "");
         return Vec::new();
     };
-    // Never edited before this opening: the camera's defaults apply.
-    let fresh = vault.versions(&image).is_ok_and(|v| v.is_empty());
     let light = photo.light.map_or(Value::Null, |l| serde_json::json!(l));
     let mut offered = offer(vault, &photo.camera, &make, &model, light);
     // The camera look's header fits this image, and compares its file's
@@ -494,18 +491,6 @@ pub fn on_open<S: Store>(
             .with("reason", reason.english),
         ),
         Ok(_) => {}
-        Err(e) => said.push(e),
-    }
-    match node::look::default_on_open(vault, image, &photo.camera, fresh, crate::persist::WHO, now)
-    {
-        Ok(Some(_)) => said.push(
-            Message::new(
-                "gui-look-default-applied",
-                "Camera look applied: the default of { $camera }",
-            )
-            .with("camera", photo.camera),
-        ),
-        Ok(None) => {}
         Err(e) => said.push(e),
     }
     said
@@ -822,9 +807,11 @@ fn is_fitted(store: &helios_values::Store, tone: &str) -> bool {
 
 /// [`LOOK_CHOOSE`]: the open photo's camera look fitted through the node
 /// (`look.camera.fit`, a dry run: the numbers come back and are written
-/// here, into the edit), turned on or off; one step of the edit's
-/// history, by `origin`. A refused fit writes nothing and is kept, in
-/// words, for the header ([`LOOK_REFUSAL`]).
+/// here, into the edit), turned on or off; `camera`, the "Camera look"
+/// preset, puts the camera's default look on (fits one when the camera
+/// has none). One step of the edit's history, by `origin`. A refused fit
+/// writes nothing and is kept, in words, for the header
+/// ([`LOOK_REFUSAL`]).
 fn look_choose<S: Store>(
     node: &Node<S>,
     store: &std::sync::Mutex<helios_values::Store>,
@@ -834,20 +821,34 @@ fn look_choose<S: Store>(
     use helios_calibrate::look::edit::{COLOUR, DISPLAY, TONE};
     use helios_values::{Change, Set, bypass_path, node_path};
     let asked = args["look"].as_str().unwrap_or_default();
-    let (tone, colour, display, charted, fitted, image) = {
+    let (tone, colour, display, charted, fitted, image, camera) = {
         let s = store.lock().expect("value store lock");
         let tone = look_node(&s).ok_or("the photo shown has no camera look module")?;
         let charted = chart_node(&s).is_some_and(|c| !is_bypassed(&s, &c));
         let fitted = is_fitted(&s, &tone);
-        let image = read_offer(&s).and_then(|o| o["image"].as_str().map(String::from));
+        let offer = read_offer(&s);
+        let text = |key: &str| {
+            offer
+                .as_ref()
+                .and_then(|o| o[key].as_str().map(String::from))
+        };
         (
             tone,
             module_node(&s, COLOUR),
             module_node(&s, DISPLAY),
             charted,
             fitted,
-            image,
+            text("image"),
+            text("camera"),
         )
+    };
+    // The "Camera look" preset: the camera's default look when it has
+    // one, else a fit, as "fit" does.
+    let kept = match (asked, &camera) {
+        ("camera", Some(camera)) => {
+            node::look::look_of_camera(&node.vault, camera).map_err(|m| m.english)?
+        }
+        _ => None,
     };
     // The switches turning the look on: the tone half in sigmoid's place,
     // the colour half unless a chart profile rules the colours.
@@ -862,8 +863,8 @@ fn look_choose<S: Store>(
     };
     let mut writes = Vec::new();
     let mut answer = serde_json::json!({ "node": tone, "look": asked });
-    let label = match asked {
-        "off" => {
+    let label = match (asked, kept) {
+        ("off", _) => {
             writes.push((bypass_path(&tone), helios_core::Value::Bool(true)));
             if let Some(c) = &colour {
                 writes.push((bypass_path(c), helios_core::Value::Bool(true)));
@@ -873,14 +874,26 @@ fn look_choose<S: Store>(
             }
             "Camera look off"
         }
-        "on" if !fitted => {
+        ("on", _) if !fitted => {
             return Err("the camera look is not fitted yet: fit it to the camera's JPEG".into());
         }
-        "on" => {
+        ("on", _) => {
             on(&mut writes);
             "Camera look on"
         }
-        "fit" => {
+        ("camera", Some((c, t))) => {
+            for (params, name) in [(&c, colour.as_ref()), (&t, Some(&tone))] {
+                let Some(name) = name else { continue };
+                for (param, value) in params.iter() {
+                    writes.push((node_path(name, param), value.clone()));
+                }
+            }
+            on(&mut writes);
+            set_refusal(store, "");
+            answer["default"] = Value::Bool(true);
+            "Camera look: the camera's default"
+        }
+        ("fit" | "camera", _) => {
             let image = image.ok_or("the photo shown is not one of the library's")?;
             let who = crate::persist::who(origin);
             let (fit, _) = helios_node_core::endpoint::command(
@@ -909,7 +922,11 @@ fn look_choose<S: Store>(
             set_refusal(store, "");
             "Camera look fitted to the camera's JPEG"
         }
-        other => return Err(format!("`look` is `fit`, `on` or `off`, not `{other}`")),
+        (other, _) => {
+            return Err(format!(
+                "`look` is `fit`, `camera`, `on` or `off`, not `{other}`"
+            ));
+        }
     };
     let mut s = store.lock().expect("value store lock");
     let group = s.begin_group(origin.clone(), label);
@@ -1155,11 +1172,43 @@ pub fn look_header_ui(
         if r.clicked() {
             run("fit");
         }
+        presets_ui(ui, image, &run);
     });
     compare_ui(ui, store, &compare);
     if let Some(default) = default {
         default_ui(ui, store, &default, on && fitted, fitted);
     }
+}
+
+/// The header's presets list, as raw editors list looks to start from:
+/// "Camera look" puts the camera's default look on, or fits one to the
+/// camera's JPEG when the camera has none ([`LOOK_CHOOSE`] with
+/// `camera`, one undoable step). Off for a photo outside the library.
+fn presets_ui(ui: &mut egui::Ui, enabled: bool, run: &dyn Fn(&str)) {
+    let ctx = ui.ctx().clone();
+    let text = |m: Message| crate::i18n::text(&ctx, m);
+    let presets = text(Message::new("gui-look-header-presets", "Presets"));
+    let camera = text(Message::new("gui-look-preset-camera", "Camera look"));
+    let about = text(Message::new(
+        "gui-look-preset-camera-about",
+        "The camera's default look, or a look fitted to the camera's JPEG when the camera has none",
+    ));
+    let r = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.menu_button(&presets, |ui| {
+                let r = ui.button(&camera).on_hover_text(&about);
+                egui_pop::core::a11y::name(&r, egui::Role::MenuItem, &camera);
+                crate::name_rect(&ctx, "helios.cameralook.preset.camera", r.rect);
+                if r.clicked() {
+                    run("camera");
+                    ui.close();
+                }
+            })
+            .response
+        })
+        .inner;
+    egui_pop::core::a11y::name(&r, egui::Role::Button, &presets);
+    crate::name_rect(&ctx, "helios.cameralook.presets", r.rect);
 }
 
 /// What the header knows of the camera's default look.
@@ -1222,7 +1271,7 @@ fn node_params(store: &helios_values::Store, node: &str) -> helios_core::Params 
 
 /// The header's per-camera default, as raw editors keep develop defaults
 /// per camera model: whether the open photo's look is the camera's
-/// default (new photos of the camera open with it), "Save as the
+/// default (its raws imported from now on start with it), "Save as the
 /// camera's default" (the look as the edit holds it now) and "Clear the
 /// default". Each is `look.camera.setDefault`, one step of the library's
 /// history.
@@ -1245,7 +1294,7 @@ fn default_ui(
         ui.weak(text(
             Message::new(
                 "gui-look-header-default-in-use",
-                "The default look of { $camera }: its new photos open with it",
+                "The default look of { $camera }: its raws are imported with it",
             )
             .with("camera", camera.clone()),
         ));
@@ -1253,7 +1302,7 @@ fn default_ui(
         ui.weak(text(
             Message::new(
                 "gui-look-header-default-other",
-                "{ $camera } has another default look: its new photos open with that one",
+                "{ $camera } has another default look: its raws are imported with that one",
             )
             .with("camera", camera.clone()),
         ));
@@ -1283,7 +1332,7 @@ fn default_ui(
         let r = r.on_hover_text(text(
             Message::new(
                 "gui-look-header-default-save-about",
-                "New photos of { $camera } open with this camera look; photos already edited keep theirs",
+                "Raws of { $camera } imported from now on start with this camera look; photos already in the library keep theirs",
             )
             .with("camera", camera.clone()),
         ));

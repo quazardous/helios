@@ -609,8 +609,6 @@ gui-library-badge-no-backup = sans sauvegarde
 gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
-gui-look-default-applied = Rendu boîtier appliqué : celui par défaut de { $camera }
-
 gui-look-fit-selection-done = Rendu boîtier de { $camera } ajusté sur { $fitted } photos sur { $photos } : Delta E { $held } (par défaut { $baseline })
 
 gui-look-fit-selection-job = Ajuster un rendu boîtier sur { $count } photos
@@ -629,13 +627,13 @@ gui-look-header-compare-not-raw = Aucun JPEG de l’appareil à comparer : la ph
 
 gui-look-header-default-clear = Effacer le défaut
 
-gui-look-header-default-in-use = Le rendu par défaut de { $camera } : ses nouvelles photos s’ouvrent avec lui
+gui-look-header-default-in-use = Le rendu par défaut de { $camera } : ses raws sont importés avec lui
 
-gui-look-header-default-other = { $camera } a un autre rendu par défaut : ses nouvelles photos s’ouvrent avec celui-là
+gui-look-header-default-other = { $camera } a un autre rendu par défaut : ses raws sont importés avec celui-là
 
 gui-look-header-default-save = Enregistrer comme défaut du boîtier
 
-gui-look-header-default-save-about = Les nouvelles photos de { $camera } s’ouvrent avec ce rendu boîtier ; les photos déjà retouchées gardent le leur
+gui-look-header-default-save-about = Les raws de { $camera } importés désormais partent de ce rendu boîtier ; les photos déjà dans la bibliothèque gardent le leur
 
 gui-look-header-fit = Ajuster au JPEG de l’appareil
 
@@ -645,11 +643,17 @@ gui-look-header-fitted = Ajusté au JPEG de l’appareil : Delta E { $held } (pa
 
 gui-look-header-none = Pas encore ajusté : le rendu part du JPEG de l’appareil lui-même
 
+gui-look-header-presets = Préréglages
+
 gui-look-header-refit = Réajuster
 
 gui-look-header-refused = Non ajusté : { $reason }
 
 gui-look-header-switch = Rendu boîtier
+
+gui-look-preset-camera = Rendu boîtier
+
+gui-look-preset-camera-about = Le rendu par défaut du boîtier, ou un rendu ajusté au JPEG de l’appareil quand le boîtier n’en a pas
 
 gui-mask-display = Afficher le masque
 
@@ -1544,6 +1548,10 @@ gui-import-window-add-favourite = Ajouter aux favoris
 gui-import-window-all-types = Tous les types
 
 gui-import-window-add-source = Ajouter une source…
+
+gui-import-window-camera-look = Appliquer le rendu par défaut du boîtier
+
+gui-import-window-camera-look-help = Les raws d’un boîtier qui a un rendu boîtier par défaut partent de lui, comme première version
 
 gui-import-window-cancel = Annuler
 

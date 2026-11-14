@@ -384,6 +384,10 @@ impl helios_gui::shell::LibraryFolder for LibraryFolder {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         helios_library::import::set_library_root(self.0.as_ref(), &dir)
     }
+
+    fn has_camera_looks(&self) -> bool {
+        self.0.look_defaults().is_ok_and(|d| !d.is_empty())
+    }
 }
 
 fn seconds() -> u64 {
@@ -655,7 +659,7 @@ fn library_commands(
     shell.register(
         CommandSpec::new(
             helios_gui::shell::IMPORT_COMMAND,
-            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out; `camera_look`: false leaves the cameras' default looks off the raws)",
             "Library",
         ),
         move |args, origin| {
@@ -680,6 +684,12 @@ fn library_commands(
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
             let (lines, asked, history) = (lines.clone(), args.clone(), history.clone());
             let backed = after_import.clone();
+            // The import window's "Apply the camera's default look", on
+            // unless said otherwise.
+            let camera_look = args
+                .get("camera_look")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
             std::thread::spawn(move || {
                 // The job's events say how it went; the lines feed the
                 // Duplicates panel.
@@ -707,6 +717,22 @@ fn library_commands(
                 };
                 let end = match ended {
                     Ok(mut report) => {
+                        // The cameras' default looks on the raws brought
+                        // in, inside the import's own step.
+                        let looks = if camera_look {
+                            helios_node_core::calibrate::look::default_on_import(
+                                vault.as_ref(),
+                                &mut report.changes,
+                                seconds(),
+                                &helios_node_core::calibrate::look::raw_camera,
+                            )
+                            .unwrap_or_else(|m| {
+                                warn(&format!("import: camera look: {}", m.english));
+                                0
+                            })
+                        } else {
+                            0
+                        };
                         let label = helios_gui::library_history::import_label(
                             report.added + report.located,
                         );
@@ -720,7 +746,7 @@ fn library_commands(
                                 Some(report.clone()),
                             );
                         }
-                        json!({ "ended": report })
+                        json!({ "ended": report, "camera_looks": looks })
                     }
                     Err(e) => {
                         warn(&format!("import: {e}"));

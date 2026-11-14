@@ -681,7 +681,7 @@ fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
     h.run();
     assert_eq!(offered(&h)["preview"], "fitted-to");
     assert_eq!(history.line().undo.len(), 1);
-    h.get_by_label("The default look of Test Bayer: its new photos open with it");
+    h.get_by_label("The default look of Test Bayer: its raws are imported with it");
 
     // Cleared: another step, and the header says no more.
     h.get_by_role_and_label(egui::accesskit::Role::Button, "Clear the default")
@@ -691,9 +691,112 @@ fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
     assert_eq!(offered(&h), serde_json::Value::Null);
     assert_eq!(history.line().undo.len(), 2);
     assert!(
-        h.query_by_label("The default look of Test Bayer: its new photos open with it")
+        h.query_by_label("The default look of Test Bayer: its raws are imported with it")
             .is_none()
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_camera_look_preset_puts_the_camera_s_default_look_on_in_one_step() {
+    use egui_kittest::kittest::Queryable;
+    use helios_core::Value;
+
+    let (shell, _history, dir) = look_shell("look-preset");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    let set = |h: &egui_kittest::Harness<'_, Shell>, writes: Vec<(&str, Value)>| {
+        let values = h.state().values().clone();
+        let mut s = values.lock().unwrap();
+        for (path, value) in writes {
+            s.set(helios_values::Set::new(
+                path,
+                helios_values::Change::To(value),
+                Origin::User,
+            ))
+            .unwrap();
+        }
+    };
+    let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get(path)
+            .unwrap()
+            .value
+            .clone()
+    };
+    // A look fitted, kept as the camera's default.
+    set(
+        &h,
+        vec![
+            (
+                "node/cameratone/tone",
+                Value::List(vec![0.0, 0.0, 1.0, 1.0]),
+            ),
+            ("node/cameratone/preview", Value::Text("fitted-to".into())),
+        ],
+    );
+    h.run();
+    h.get_by_role_and_label(
+        egui::accesskit::Role::Button,
+        "Save as the camera's default",
+    )
+    .click();
+    h.run();
+    h.run();
+    // The photo's own look changed and turned off since.
+    set(
+        &h,
+        vec![
+            (
+                "node/cameratone/tone",
+                Value::List(vec![0.0, 0.0, 1.0, 0.8]),
+            ),
+            ("node/cameratone/preview", Value::Text("another".into())),
+        ],
+    );
+    h.state_mut()
+        .run(
+            calibrate::LOOK_CHOOSE,
+            json!({ "look": "off" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    // Presets, then "Camera look": the camera's default, turned on.
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Presets")
+        .click();
+    h.run();
+    h.get_by_role_and_label(egui::accesskit::Role::MenuItem, "Camera look")
+        .click();
+    h.run();
+    h.run();
+    assert_eq!(
+        read(&h, "node/cameratone/preview"),
+        Value::Text("fitted-to".into())
+    );
+    assert_eq!(
+        read(&h, "node/cameratone/tone"),
+        Value::List(vec![0.0, 0.0, 1.0, 1.0])
+    );
+    assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(false));
+    assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(true));
+    // One step of the edit: undone, the photo's own look is back, off.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    assert_eq!(
+        read(&h, "node/cameratone/preview"),
+        Value::Text("another".into())
+    );
+    assert_eq!(read(&h, "bypass/cameratone"), Value::Bool(true));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

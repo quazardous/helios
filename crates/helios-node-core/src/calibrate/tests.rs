@@ -506,6 +506,17 @@ fn a_raw_opened_the_first_time_gets_its_camera_s_default_once() {
         OnOpen::NoDefault
     ));
     assert_eq!(head(&vault, image), None);
+    // The camera's default look put on it at import is no edit of the
+    // person's: the photo still counts as never edited.
+    let tone =
+        helios_core::Params::new().with("tone", helios_core::Value::List(vec![0.0, 0.0, 1.0, 1.0]));
+    let looked =
+        helios_calibrate::look::edit::with_params(&Value::Null, &helios_core::Params::new(), &tone);
+    helios_vault::EditSession::open(&vault, image)
+        .unwrap()
+        .0
+        .save(&vault, looked, "look", look::IMPORT_ORIGIN, 40)
+        .unwrap();
     run(
         Some(&vault),
         SET_DEFAULT,
@@ -525,6 +536,10 @@ fn a_raw_opened_the_first_time_gets_its_camera_s_default_once() {
         apply::applied(&head(&vault, image).unwrap()).as_deref(),
         Some("daylight")
     );
+    // On top of the look, kept.
+    assert!(helios_calibrate::look::edit::applied(
+        &head(&vault, image).unwrap()
+    ));
     // Opened again: the edit is the user's now, left alone.
     let tungsten = Photo {
         light: Some(TUNGSTEN),
@@ -534,7 +549,7 @@ fn a_raw_opened_the_first_time_gets_its_camera_s_default_once() {
         default_on_open(&vault, image, &tungsten, "user", 60).unwrap(),
         OnOpen::Edited
     ));
-    assert_eq!(vault.versions(&image).unwrap().len(), 1);
+    assert_eq!(vault.versions(&image).unwrap().len(), 2);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
