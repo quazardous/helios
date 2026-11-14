@@ -59,6 +59,7 @@ category-calibration d5712217d9cafdaf
 category-decisions b5763e317b887036
 category-developer 3bef768f6a95f10d
 category-experimental d683fc9d31620457
+category-helios 28daeae8a505789f
 category-masks 6849246780dae374
 category-node-graph d36686706dbe1885
 category-preferences 0f02ef52eedd2e4d
@@ -129,6 +130,7 @@ command-helios-scopes-detach.title 3ba293bd2eec43d1
 command-helios-scopes-dock.title 7175267febd284e6
 command-helios-scopes-float.title 0b0f989dbadd007e
 command-helios-scopes-moveTo.title 569403a6f679a3e6
+command-helios-setUp.title a2c0ce85e94f0134
 command-helios-stacks-detach.title 99d0b137f0d71d8d
 command-helios-stacks-dock.title bc15738203dc146a
 command-helios-stacks-moveTo.title 0ae0a96fd725e09a
@@ -143,6 +145,9 @@ command-helios-workshops-detach.title bdb5ee6f7681dbec
 command-helios-workshops-dock.title a77e0846c01395e5
 command-helios-workshops-moveTo.title 06334f8399557153
 command-help-health.title f0b3089eccbece31
+command-init-apply.title b5d8e2de17f580f1
+command-init-chooseFolder.title d39c0d41a5f31271
+command-init-libraryFolder.title 28a9f48aafc689ff
 command-keymap-package-remove.title 09c89d2776f3a70e
 command-keymap-package.title dafef66dd3b9bf88
 command-library-chooseFolder.title 3f79579939a31f09
@@ -176,6 +181,7 @@ command-library-pasteFiles.title 409587651f782f9a
 command-library-quick-clear.title 1c4b266b7b1ccc5c
 command-library-quick-saveAs.title 81d31076888b75b1
 command-library-quick-toggle.title 1b2258b0758413c4
+command-library-remove.title cf5cd12b2502cc36
 command-library-scanFolder.title 65e0df53774b720b
 command-library-select-invert.title 9fabaf6253c7fd7d
 command-library-select-none.title cf5dfbd241a5672e
@@ -612,6 +618,7 @@ gui-history-calibration-off dcaad546e81ba1b9
 gui-history-calibration-save 40e060e250f7ee04
 gui-history-camera-look-fit 632c8f5dace2095e
 gui-history-import 54b5fc5f7ff45a8e
+gui-history-library-remove 316eba503a12d95b
 gui-history-preview-applied e4ec2cb3e00f5ea8
 gui-history-preview-bypassed 02942dd0aa53a222
 gui-history-preview-param e503ef0b7a4a3ed8
@@ -679,6 +686,7 @@ gui-import-form-title 1bab6c9d205270b1
 gui-import-metadata 4527af2f3dee5442
 gui-import-no-library 8616507b955eb56d
 gui-import-no-library-error 20cc542909de7d21
+gui-import-no-library-folder 44f14e63119f12da
 gui-import-path 54572ccc6f105c66
 gui-import-remember 75f1f4460d6a89ec
 gui-import-remember-help e20b1b9d5a401bc1
@@ -771,6 +779,11 @@ gui-importer-form-title c057dbad928a7616
 gui-importer-refused 1e1ed0715ed2b65f
 gui-importer-scanned da651acfeeecce9b
 gui-importer-warning 48ec8d182f072be9
+gui-init-library-folder-choose 7d571608b37851ba
+gui-init-library-folder-help a60c7feef0a81f7f
+gui-init-wizard ceb08e552bf4c794
+gui-init-wizard-about 425eaaefa856dbeb
+gui-init-wizard-finish 99be14717ae2bf40
 gui-job-backup-done b8a19b2e17dff3eb
 gui-job-backup-failed 61c02dd09386a6ba
 gui-job-batch-done ccc1a6756b4cc887
@@ -847,6 +860,7 @@ gui-library-keep-best be4edb21d1e2e2fa
 gui-library-missing-note 02e4f67d1be418c9
 gui-library-no-cursor 581a49943aeb231e
 gui-library-none d2ff532108cdfbd6
+gui-library-not-removed 6b58bff8c497ba91
 gui-library-not-saved 48d930d6f5a75dc9
 gui-library-offline-on 98daffdf1242288a
 gui-library-offline-unknown c646373072f8d849
@@ -861,6 +875,7 @@ gui-library-quick-tip 121d5529fa55b98f
 gui-library-quick-toggle 58f2469f03174d34
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
+gui-library-remove 7408ac1339c30e8a
 gui-library-search fddceff6dbd31d81
 gui-library-set-delete 40f1e74389fd36cc
 gui-library-set-delete-all ef418a379bdaeaa0
@@ -1505,6 +1520,8 @@ health-library-folder-none 637121fb60326e93
 health-library-folder-none-detail 6c8890153af58c1a
 health-library-folder-ok a9ef3ec19731b8d7
 health-library-folder-ok-detail d9e113c5e8150755
+health-library-folder-unwritable 2e5759b2e7f6d5e0
+health-library-folder-unwritable-detail d8a76e615b385993
 health-library-no-room 733d55e8e094a5dd
 health-library-no-room-detail 1cdd96a1db3eecbd
 health-library-ok c5056df052b42d90
@@ -1556,6 +1573,9 @@ health-vault-unreadable f3d10565cbc6623e
 health-vault-unreadable-detail 61f97265649bdc9f
 init-library-folder bc7222a2b755bc22
 init-library-folder-why cf5d28f6c17c73e0
+library-folder-no-room aab5b5fce722190d
+library-folder-not-absolute 8060bb9edb0931ff
+library-folder-not-writable 5f10012968604dda
 look-load-failed fb5b6895ff118a7d
 look-render-failed 1464794c5194db67
 menu-helios-file-importFrom.label 2605aaed9c91a322

@@ -435,7 +435,7 @@ as data, like its settings and health checks (`helios-init`):
 
 - a step has an id (`library.folder`), a title, why it is asked, the
   settings it fills (its fields, drawn by the declarative forms), the
-  command that may fill it instead (`library.chooseFolder`), whether it is
+  command that may fill it instead (`init.libraryFolder`), whether it is
   required or optional, and the steps it comes after;
 - it is **done** when the settings its `done` test names are set and not
   empty, read from the settings each time: a folder later cleared makes
@@ -451,8 +451,20 @@ on the first launch, maybe opening on one, and answers its caller `done`,
 or `cancelled` with the required steps still missing. The steps say what
 they ask; the host decides where they are drawn: a first-run focus screen,
 a wizard bound to a window, or an agent filling the settings headless
-through `init.steps` and `init.status` ([protocol.md](protocol.md)). The
-outcome is read from the settings, never taken from the host.
+through `init.steps`, `init.status` and `init.set`
+([protocol.md](protocol.md)). The outcome is read from the settings,
+never taken from the host.
+
+On the desktop the host is the Settings app's wizard kit, which fills
+its whole page while it runs: one step per page, Back / Next / Finish,
+the stepper as the progress line, "Later" (Skip) on optional steps only.
+Each step's fields are the settings it fills, declared once
+(`helios_config::KEPT_ELSEWHERE` for those a component keeps, such as
+the library folder). It opens on the first launch and whenever a
+required step is not done, from the Helios menu ("Set up Helios…"), and
+in partial runs: opening the import window with no library folder asks
+that step alone, then opens the window (or, left, the window says why it
+cannot import yet).
 
 ## How a module is tested
 

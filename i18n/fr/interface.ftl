@@ -149,3 +149,5 @@ setting-import-automatic-ask-gb =
 setting-import-automatic-paused =
     .description = Activé, aucune source n’importe d’elle-même : les cartes branchées et les nouveaux fichiers des dossiers surveillés attendent qu’il soit désactivé.
     .label = Suspendre les imports automatiques
+
+category-helios = Helios

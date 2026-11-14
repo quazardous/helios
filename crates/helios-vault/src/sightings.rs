@@ -238,7 +238,7 @@ impl FolderState {
 }
 
 /// Whether an image is in the Library, since when and by what.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LibraryFlag {
     pub in_library: bool,
     /// When the flag was last set or cleared.
@@ -467,6 +467,7 @@ impl<S: Store> Vault<S> {
         })?;
         if !changes.is_empty() {
             self.catalog.lock().expect("catalog lock").version += 1;
+            self.library_changed(changes.images.len());
         }
         Ok(changes)
     }

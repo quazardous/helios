@@ -491,6 +491,7 @@ gui-history-album-new-smart = Nouvel album dynamique « { $name } »
 gui-history-set-new = Nouvel ensemble d’albums « { $name } »
 gui-history-album-move = Déplacer « { $name } » dans un ensemble
 gui-history-album-move-out = Sortir « { $name } » de son ensemble
+gui-history-library-remove = Retirer { $count } photos de la bibliothèque
 gui-history-quick-add = Ajouter { $count } photos à la collection rapide
 gui-history-quick-remove = Retirer { $count } photos de la collection rapide
 gui-history-quick-clear = Vider la collection rapide
@@ -603,6 +604,7 @@ gui-library-badge-backup-unverified = non vérifiée
 
 gui-library-badge-no-backup = sans sauvegarde
 
+gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
 gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
@@ -1315,6 +1317,7 @@ gui-library-albums-none = Aucun album pour l’instant
 gui-library-quick = Collection rapide
 gui-library-quick-tip = B ajoute les photos sélectionnées ou les retire
 gui-library-quick-toggle = Ajouter ou retirer les photos sélectionnées
+gui-library-remove = Retirer de la bibliothèque
 gui-library-quick-save = Enregistrer comme album…
 gui-library-quick-clear = Vider la collection rapide
 gui-library-quick-save-title = Enregistrer la collection rapide comme album
@@ -2500,3 +2503,25 @@ gui-import-auto-resume = Reprendre
 gui-import-auto-resumed = Imports automatiques repris
 
 gui-settings-automatic-imports = Imports automatiques
+
+gui-import-no-library-folder = Choisissez d'abord un dossier de bibliothèque : les imports y copient les photos (menu Helios › Configurer Helios…).
+
+gui-init-library-folder-choose = Choisir…
+
+gui-init-library-folder-help = Un dossier sur un disque qui a de la place pour vos photos ; il est créé s'il manque.
+
+gui-init-wizard = Configurer Helios
+
+gui-init-wizard-about = Quelques choix avant les premières photos : chacun se change plus tard.
+
+gui-init-wizard-finish = Terminer
+
+health-library-folder-unwritable = Le dossier de la bibliothèque n'est pas accessible en écriture
+
+health-library-folder-unwritable-detail = { $folder } manque ou est en lecture seule : les imports ne peuvent pas y copier les photos.
+
+library-folder-no-room = Ce disque a { $free } Mio libres : choisissez un dossier qui a de la place pour les photos.
+
+library-folder-not-absolute = Donnez le chemin complet du dossier.
+
+library-folder-not-writable = Helios ne peut pas écrire dans ce dossier : { $why }

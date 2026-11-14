@@ -65,8 +65,14 @@ are read on a vault's endpoint:
   `missing`, by module, the required steps (with their dependencies) not
   done yet. An unknown `module` is refused.
 
-An agent fills a step by setting its settings, or by running its command
-(`library.chooseFolder` with a `path`, on a desktop), then reads
+- `init.set` (`values`: setting to value): fills steps by setting the
+  settings they fill, each checked as its keeper does
+  (`{"values": {"library.folder": "/home/me/Pictures/Helios"}}`: a full
+  path, made if missing, written in, with room left); answers the steps
+  with `done`. A setting no step fills, or a value refused, is an error.
+
+An agent fills a step with `init.set`, or by running its command
+(`init.libraryFolder` with a `path`, on a desktop), then reads
 `init.status` again.
 
 ## Events
@@ -224,6 +230,14 @@ the colour labels, the others kept). `library.fields.get` (`images`,
 `fields`, `locations`) reads those fields as stored: `rows` (`id`,
 `fields`, and `locations` when asked), in the order asked.
 
+`library.images.remove` (`images`) takes photos out of the Library
+(Lightroom's "Remove from Catalog"): their Library flag only, set by
+the call's origin; their files, fields, versions and sightings stay,
+and an import finds them again by their hash. It answers `removed` (how
+many were in it) and `changes`, the step as the vault records it, which
+its revert puts back: the desktop's Ctrl+Z. Announced as
+`vault.library_changed`, as an undo or a redo of a library step is.
+
 `library.documents.get` (`ns`, `key`) reads a library document
 (`document`, null when there is none), such as the Library's pinned and
 recent filters; `library.documents.set` (`ns`, `key`, `document`) keeps
@@ -235,8 +249,31 @@ entry per volume (`volume`, null for files on no known volume) with its
 (`sessions`: `id`, `record`), and `library.workshop.sessions.set` (`id`,
 `record`) keeps one, a null `record` dropping it.
 
+`library.albums.list` reads the albums, smart albums and album sets
+(`albums`: `kind`, `id`, `name`, `images`, a smart album's `rules`, the
+`set` it is in, and for a smart album or a set the `count` of photos it
+selects) and the quick collection (`quick`, image ids).
+`library.albums.edit` makes one change, named by `op`: `create` (`id`,
+`name`, `images`), `rename` (`id`, `name`), `delete` (`id`, `members`:
+a set's albums forgotten too), `createSet` (`id`, `name`, `set`),
+`move` (`id`, `set`, null for the top), `add` and `remove` (`id`,
+`images`), `createSmart` (`id`, `name`, `rules`), `rules` (`id`,
+`rules`), `quickToggle` (`images`), `quickClear` and `quickSave` (`id`,
+`name`, `clear`). It answers what the step changed, as an undo history
+keeps it (`changes`: the `images` with their rows `before` and `after`,
+and the `documents` with theirs), the album's `name` (the new one for a
+creation, the one it had otherwise), the `count` of photos the step put
+in or took out and, for `quickToggle`, whether it put them in
+(`added`).
+
+```json
+{"jsonrpc": "2.0", "id": 4, "method": "library.albums.edit", "params": {"op": "rename", "id": "trip-2024", "name": "Summer 2024"}}
+{"jsonrpc": "2.0", "id": 4, "result": {"name": "Trip 2024", "count": 0, "added": true, "changes": {"images": [], "documents": [{"ns": "library/collections", "key": "trip-2024", "before": {"kind": "album", "name": "Trip 2024", "images": []}, "after": {"kind": "album", "name": "Summer 2024", "images": []}}]}}}
+```
+
 The desktop's library writes its fields, its stacks' expansion, its
-filter history and its workshop sessions' records this
+filter history, its workshop sessions' records, its albums and its photos
+taken out this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
 answers are picked up at the next frames. Its grid reads the same way:
@@ -263,7 +300,7 @@ reads), keyed by method and params, and follows the node's events
 | `vault.field_changed`, `vault.version_added`, `edit.saved` | the reads naming its `image` |
 | `vault.stack_changed`, `library.decision` | the stacks' reads |
 | `settings.layerChanged` | the settings' reads |
-| `library.imported`, `vault.locations_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
+| `library.imported`, `vault.locations_changed`, `vault.library_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
 
 - An answer read at a sequence older than an event already heard is
   checked against that event before it is kept.

@@ -690,6 +690,8 @@ command-library-collection-list =
     .title = Lister les albums : `id`, `name`, `kind` (album, dynamique ou ensemble), l’ensemble `set` où il est, combien de photos chacun contient (un ensemble : celles de ses albums réunies), les `rules` d’un album dynamique ; et le nombre `quick` de la collection rapide
 command-library-quick-toggle =
     .title = Mettre des photos dans la collection rapide (`images` : identifiants, sinon la sélection), ou les en retirer quand elle les contient toutes ; restreindre la bibliothèque à elle avec la collection `quick`
+command-library-remove =
+    .title = Retirer de la bibliothèque : en sortir les photos (`images` : identifiants, sinon la sélection), leurs fichiers intacts ; Ctrl+Z les y remet
 command-library-quick-clear =
     .title = Vider la collection rapide ; ses photos restent dans la bibliothèque
 command-library-quick-saveAs =
@@ -721,3 +723,15 @@ command-helios-window-main =
 
 command-library-importAutomatic-pause =
     .title = Suspendre les imports automatiques, ou les reprendre (`on` : true suspend, false reprend ; sans lui, bascule)
+
+command-helios-setUp =
+    .title = Configurer Helios…
+
+command-init-apply =
+    .title = Écrire les réglages de la configuration (`library.folder` : le dossier de la bibliothèque)
+
+command-init-chooseFolder =
+    .title = Choisir le dossier de la bibliothèque pour la configuration
+
+command-init-libraryFolder =
+    .title = Choisir le dossier de la bibliothèque dans la configuration (`path` : réglé aussitôt)
