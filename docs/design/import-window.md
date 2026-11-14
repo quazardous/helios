@@ -50,7 +50,10 @@ or folders on Helios (the window opens with them as its source).
     (egui-pop's folder chooser);
   - **Cards and cameras**: removable volumes holding `DCIM`, named by
     label and capacity, refreshed when one appears or goes;
-  - **Services**: the accounts, then "Add a source…".
+  - **Services**: the accounts, then "Add a source…". The account
+    selected whose service lists its albums (`caps.collections`) shows
+    them under it, page by page ("More albums"); an album clicked is the
+    source alone (built 2026-11-14).
 
   **One source at a time**: a click selects an item alone (no
   checkboxes, no multi-select), highlighted wherever it is listed; the

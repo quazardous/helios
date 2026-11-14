@@ -15,9 +15,9 @@
 //!   ("Choose photos in Google Photos…",
 //!   [`super::import_accounts::choose_ui`]); the photos chosen there then
 //!   fill the grid ([`super::import_chosen`]).
-//! - **Albums** (`collections`): declared by connectors that will list a
-//!   service's albums; nothing lists an account's photos yet, so it says
-//!   so.
+//! - **Albums** (`collections`): a service's albums, listed under the
+//!   account in the Sources column ([`super::import_albums`]); the album
+//!   selected fills the grid.
 //!
 //! The browser chosen is remembered per source: on the saved source
 //! (`browser` in `user/import-sources`) when the sources are kept, a
@@ -64,6 +64,14 @@ pub(super) struct BrowseWords {
     picker: String,
     pub(super) not_listed: String,
     pub(super) every_folder: String,
+    /// A service's albums ([`super::import_albums`]).
+    pub(super) albums_reading: String,
+    pub(super) albums_more: String,
+    pub(super) albums_none: String,
+    pub(super) albums_failed: String,
+    pub(super) album_reading: String,
+    pub(super) album_failed: String,
+    pub(super) album_choose: String,
 }
 
 impl BrowseWords {
@@ -85,6 +93,28 @@ impl BrowseWords {
             every_folder: t(Message::new(
                 "gui-import-browse-every-folder",
                 "Every folder",
+            )),
+            albums_reading: t(Message::new(
+                "gui-import-albums-reading",
+                "Reading the albums…",
+            )),
+            albums_more: t(Message::new("gui-import-albums-more", "More albums")),
+            albums_none: t(Message::new("gui-import-albums-none", "No albums")),
+            albums_failed: t(Message::new(
+                "gui-import-albums-failed",
+                "Could not read the albums:",
+            )),
+            album_reading: t(Message::new(
+                "gui-import-album-reading",
+                "Reading the album…",
+            )),
+            album_failed: t(Message::new(
+                "gui-import-album-failed",
+                "Could not read the album:",
+            )),
+            album_choose: t(Message::new(
+                "gui-import-album-choose",
+                "Choose an album under the account, in Sources.",
             )),
         }
     }
@@ -206,6 +236,9 @@ pub(super) enum Shown {
     /// An account whose photos are chosen in its service's page (from
     /// the Detail column): the grid once they are chosen.
     Picker(String),
+    /// An account whose albums are listed under it in the Sources
+    /// column: the album selected's photos in the grid.
+    Albums,
     /// Nothing Helios lists.
     NotListed,
 }
@@ -235,8 +268,13 @@ pub(super) fn switch_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &BrowseW
         Some(SourceKey::Account(id)) => Some(id.clone()),
         _ => None,
     };
+    // An album selected is the source, whichever browser was shown.
+    if account.is_some() && w.album_shown().is_some() {
+        return Shown::Albums;
+    }
     match (w.browsing.current, account) {
         (Some(Browser::Picker), Some(id)) => Shown::Picker(id),
+        (Some(Browser::Collections), Some(id)) if w.lists_albums(&id) => Shown::Albums,
         (_, Some(_)) | (Some(Browser::Collections | Browser::Picker), None) => Shown::NotListed,
         _ => Shown::Grid,
     }

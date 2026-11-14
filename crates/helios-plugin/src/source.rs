@@ -124,6 +124,8 @@ impl SourceProvider {
                 accounts: !connect.is_empty(),
                 originals: Originals::Rendered,
                 picks: true,
+                // Not served to plugins yet: the manifest refuses `true`.
+                collections: false,
                 thumbnails: m.thumbnails,
                 limits: m.limits,
                 ..Caps::default()

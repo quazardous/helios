@@ -35,6 +35,9 @@ pub mod contract;
 /// A connector declaring a form and a test step, for tests.
 #[doc(hidden)]
 pub mod fake;
+/// A connector listing an account's albums page by page, for tests.
+#[doc(hidden)]
+pub mod fake_albums;
 pub mod folder;
 pub mod keyring;
 pub mod land;
@@ -100,6 +103,20 @@ pub trait Connector: Send + Sync {
         _account: Option<&AccountRef>,
         _cancel: &Cancel,
     ) -> Result<Probed, ConnectorError> {
+        Err(ConnectorError::Unsupported)
+    }
+
+    /// One page of at most `page` albums of an account, when
+    /// `caps.collections`: from the start (`from: None`) or after a
+    /// cursor, as opaque as a listing's. Each album is a source of its
+    /// own, its photos listed by [`Connector::list`].
+    fn collections(
+        &self,
+        _account: &AccountRef,
+        _from: Option<&Cursor>,
+        _page: usize,
+        _cancel: &Cancel,
+    ) -> Result<Collections, ConnectorError> {
         Err(ConnectorError::Unsupported)
     }
 
@@ -192,6 +209,11 @@ pub struct Caps {
     /// Its items are picked by the person in the service's own page
     /// ([`Connector::pick`]): the import window offers "Pick photos…".
     pub picks: bool,
+    /// It lists an account's albums ([`Connector::collections`]), each a
+    /// source the import window can select: the `collections` browser.
+    /// A service whose API keeps the albums to itself (Google Photos'
+    /// Picker) declares none.
+    pub collections: bool,
     /// What its service lets Helios ask, so reading ahead (glances of
     /// items not shown yet) stays within it.
     pub limits: Limits,
@@ -259,6 +281,24 @@ pub struct Pick {
     pub url: String,
     /// The source the picked items are listed under.
     pub source: SourceRef,
+}
+
+/// An album of an account's service ([`Connector::collections`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Collection {
+    /// The album as a source: its id the connector's, its label the
+    /// album's name; [`Connector::list`] lists its photos.
+    pub source: SourceRef,
+    /// How many items it holds, when the service says.
+    pub count: Option<u64>,
+}
+
+/// One page of an account's albums.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Collections {
+    pub collections: Vec<Collection>,
+    /// Where the next page starts: `None` once every album was listed.
+    pub next: Option<Cursor>,
 }
 
 /// What a connection's test found.
@@ -478,7 +518,8 @@ pub struct ConnectorManifest {
 impl ConnectorManifest {
     /// The browsers its sources are shown in: the ones declared, else
     /// the picker for a connector whose items are picked in the service's
-    /// own page, else one flat folder.
+    /// own page, else its albums for one that lists them, else one flat
+    /// folder.
     pub fn browsers(&self) -> Vec<Browser> {
         if !self.browsers.is_empty() {
             let mut seen = Vec::with_capacity(self.browsers.len());
@@ -491,6 +532,8 @@ impl ConnectorManifest {
         }
         if self.caps.picks {
             vec![Browser::Picker]
+        } else if self.caps.collections {
+            vec![Browser::Collections]
         } else {
             vec![Browser::Folder]
         }
