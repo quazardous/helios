@@ -321,3 +321,69 @@ fn a_card_without_a_uuid_is_known_by_its_label_and_size() {
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_card_is_one_favourite_and_one_history_entry_wherever_it_is_mounted() {
+    use helios_library::import_history::{Place, Record};
+    let dir = temp("panels");
+    let (first, second) = (
+        dir.join("media/EOS_DIGITAL"),
+        dir.join("media/EOS_DIGITAL1"),
+    );
+    card_dir(&first);
+    card_dir(&second);
+    let slot = Arc::new(Slot::default());
+    let mut h = shell(&Doc::default(), &slot);
+    // Imported from the card at its first mount point.
+    let record = Record {
+        id: "1".into(),
+        when: 1_700_000_000,
+        sources: vec![first.clone()],
+        places: [(
+            first.clone(),
+            Place {
+                volume: VolumeId("uuid:0b1f-2c3d".into()),
+                rel_path: PathBuf::new(),
+            },
+        )]
+        .into(),
+        ..Record::default()
+    };
+    h.state_mut()
+        .set_import_history(Arc::new(move || Ok(vec![record.clone()])));
+    // Pinned while there.
+    slot.plug(card("EOS_DIGITAL", &first, Some("0b1f-2c3d")));
+    until(&mut h, "the card seen", |s| !s.import_cards().is_empty());
+    h.state_mut().set_import_favourite(&first, true);
+    assert!(h.state().import_favourite(&first));
+    // Mounted elsewhere: one favourite, one history entry, both where it
+    // is now, with its last import.
+    slot.unplug();
+    until(&mut h, "the card unplugged", |s| {
+        s.import_cards().is_empty()
+    });
+    slot.plug(card("EOS_DIGITAL", &second, Some("0b1f-2c3d")));
+    until(&mut h, "the favourite followed the card", |s| {
+        s.import_favourites() == vec![second.clone()]
+    });
+    assert!(h.state().import_favourite(&second));
+    assert_eq!(h.state_mut().import_history_folders(), vec![second.clone()]);
+    assert_eq!(
+        h.state_mut().import_last_import_of(&second),
+        Some(1_700_000_000)
+    );
+    // Another card mounted where the first was: not the favourite, no
+    // last import of its own.
+    slot.unplug();
+    until(&mut h, "the card unplugged", |s| {
+        s.import_cards().is_empty()
+    });
+    slot.plug(card("OTHER", &second, Some("aaaa-1111")));
+    until(&mut h, "the other card seen", |s| {
+        s.import_cards().iter().any(|c| c.label == "OTHER")
+    });
+    assert!(!h.state().import_favourite(&second));
+    assert_eq!(h.state_mut().import_last_import_of(&second), None);
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}

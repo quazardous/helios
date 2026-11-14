@@ -1426,3 +1426,88 @@ fn cull_falls_back_to_the_card_then_says_missing() {
     let (done, read) = culled(&vault);
     assert_eq!((done.measured, done.missing, read.len()), (0, 1, 0));
 }
+
+/// A card's volume mounted at `root`, known by its filesystem's UUID.
+fn card_at(root: &Path, uuid: &str) -> helios_storage::Volume {
+    let mut v = helios_storage::Card {
+        label: "EOS_DIGITAL".into(),
+        root: root.to_path_buf(),
+        capacity: Some(64_000_000_000),
+    }
+    .volume();
+    v.id = helios_storage::VolumeId(format!("uuid:{uuid}"));
+    v.identified_by = helios_storage::Identity::Uuid;
+    v
+}
+
+#[test]
+fn a_card_copied_once_is_known_wherever_it_is_mounted_and_another_card_is_not() {
+    let p = Place::new("card-volume");
+    let (first, second) = (p.join("media/EOS_DIGITAL"), p.join("media/EOS_DIGITAL1"));
+    let photo = |root: &Path| root.join("DCIM/100CANON/a.png");
+    picture(&photo(&first), 0, 1.0, 0);
+    let library = p.join("library");
+    let vault = vault();
+    let copy = |mounted: helios_storage::Volume| Options {
+        placement: Placement::Copy {
+            into: Some(library.clone()),
+        },
+        mounted: Some(vec![mounted]),
+        ..Options::default()
+    };
+    let (report, _) = run(
+        &vault,
+        None,
+        &[first.clone()],
+        &copy(card_at(&first, "0b1f")),
+    );
+    assert_eq!(report.copied, 1);
+    let id = report.changes.images[0].image;
+    // The card's file is known by the card's volume and its path there.
+    let s = vault
+        .sighting_at(
+            Some(&helios_storage::VolumeId("uuid:0b1f".into())),
+            Some(Path::new("DCIM/100CANON/a.png")),
+            &photo(&first),
+        )
+        .unwrap()
+        .expect("the card's file recorded on its volume");
+    assert_eq!(s.image, Some(id));
+    // The history keeps the card's volume with its source.
+    let history = helios_library::import_history::list(&vault, None).unwrap();
+    let place = history[0].place_of(&first).expect("the card's place");
+    assert_eq!(place.volume.0, "uuid:0b1f");
+    assert_eq!(place.rel_path, PathBuf::new());
+
+    // The same card mounted elsewhere (its folder moved, its time kept):
+    // already seen, nothing read.
+    std::fs::rename(&first, &second).unwrap();
+    tamper(&photo(&second));
+    let (report, lines) = run(
+        &vault,
+        None,
+        &[second.clone()],
+        &copy(card_at(&second, "0b1f")),
+    );
+    assert_eq!(report.read, 0, "nothing read: {lines:?}");
+    assert_eq!((report.copied, report.added), (0, 0), "{lines:?}");
+    // Recorded where it is now: one sighting of it on the card.
+    let on_card: Vec<_> = vault
+        .sightings(&id)
+        .unwrap()
+        .into_iter()
+        .filter(|s| s.volume.is_some())
+        .collect();
+    assert_eq!(on_card.len(), 1, "{on_card:?}");
+    assert_eq!(on_card[0].path, photo(&second));
+
+    // Another card mounted at that same path, its file alike in size and
+    // time: not taken for the first card's, read.
+    let (report, lines) = run(
+        &vault,
+        None,
+        &[second.clone()],
+        &copy(card_at(&second, "aaaa")),
+    );
+    assert!(report.read > 0, "another card's file is read: {lines:?}");
+}
