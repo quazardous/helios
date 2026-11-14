@@ -818,6 +818,8 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
+gui-pick-choose-folder = Choisir le dossier de la bibliothèque…
+
 gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 
 gui-pointer-choice-darktable = Utiliser ceux de darktable
@@ -2224,6 +2226,10 @@ health-vault-damaged-detail = { $file } : { $first } ({ $count } erreurs). Resta
 health-vault-unreadable = Le catalogue ne peut pas être vérifié
 
 health-vault-unreadable-detail = { $file } : { $error }
+
+init-library-folder = Dossier de la bibliothèque
+
+init-library-folder-why = Les imports y copient les photos, et les photos choisies y vont.
 
 look-load-failed = impossible de lire la photo : { $error }
 

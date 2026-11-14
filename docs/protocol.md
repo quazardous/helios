@@ -51,6 +51,24 @@ Changes to the protocol are additive within a major version: a new
 method, a new optional field. A client reads `node.hello` to know what it
 talks to.
 
+## Init steps
+
+The setup steps modules declare (the library folder first, see
+[module-contract.md](module-contract.md#init-steps-what-a-module-asks-first))
+are read on a vault's endpoint:
+
+- `init.steps`: every step in order, each with its `id`, `owner`,
+  `title`, `why`, the settings it `fills`, its `command` when one fills
+  it, `required`, its `done` test (`{"set": [settings]}`) and the steps it
+  comes `after`; `requires` lists, by module, the steps it needs.
+- `init.status` (`module`, optional): each step with `done`, and
+  `missing`, by module, the required steps (with their dependencies) not
+  done yet. An unknown `module` is refused.
+
+An agent fills a step by setting its settings, or by running its command
+(`library.chooseFolder` with a `path`, on a desktop), then reads
+`init.status` again.
+
 ## Events
 
 After `events.subscribe` answers, the node sends, on the same connection

@@ -10,6 +10,7 @@ repository.workspace = true
 helios-calibrate.workspace = true
 helios-core.workspace = true
 helios-health.workspace = true
+helios-init.workspace = true
 helios-inspect.workspace = true
 helios-library.workspace = true
 helios-load.workspace = true
