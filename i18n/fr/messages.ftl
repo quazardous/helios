@@ -228,6 +228,8 @@ gui-caption-profile = Profil utilisé : { $name }
 
 gui-choose-about = { $service } s'ouvre dans votre navigateur. Choisissez vos photos, appuyez sur OK, puis revenez ici.
 
+gui-choose-chosen = Les photos choisies s'affichent au milieu : cochez celles à importer, puis appuyez sur Importer.
+
 gui-choose-closed = La page { $service } s'est fermée. Ouvrez-la à nouveau pour choisir vos photos.
 
 gui-choose-connect = Connecter { $service }
@@ -236,21 +238,16 @@ gui-choose-connecting = Connectez-vous dans votre navigateur, puis revenez ici.
 
 gui-choose-copy-link = Copier le lien
 
-gui-choose-done = { $count } photos importées.
 
-gui-choose-failed = Les photos n'ont pas été importées : { $why }
 
 gui-choose-identity = Reconnectez-vous une fois pour voir de quel compte il s'agit.
 
-gui-choose-importing = Import de { $count } photos…
 
-gui-choose-into = Choisir le dossier…
+gui-choose-more-hint = Rouvre la page : les photos choisies là-bas s'ajoutent à celles-ci
 
-gui-choose-known = { $count } étaient déjà dans votre bibliothèque.
+gui-choose-more-short = En choisir d'autres…
 
-gui-choose-more = Choisir d'autres photos…
 
-gui-choose-no-into = Choisissez d'abord où copier les photos : Dans, dans la colonne Choix.
 
 gui-choose-not-connected = Ce compte n'est pas connecté.
 
@@ -1560,6 +1557,8 @@ gui-import-window-change-into = Choisir où vont les copies
 
 gui-import-window-choices = Choix
 
+gui-import-window-choose-on-the-right = Choisissez les photos dans le panneau de droite : elles s'affichent ici.
+
 gui-import-window-choose = Choisir un dossier…
 
 gui-import-window-contents = Contenu
@@ -2536,3 +2535,25 @@ gui-import-auto-resume = Reprendre
 gui-import-auto-resumed = Imports automatiques repris
 
 gui-settings-automatic-imports = Imports automatiques
+
+gui-import-no-library-folder = Choisissez d'abord un dossier de bibliothèque : les imports y copient les photos (menu Helios › Configurer Helios…).
+
+gui-init-library-folder-choose = Choisir…
+
+gui-init-library-folder-help = Un dossier sur un disque qui a de la place pour vos photos ; il est créé s'il manque.
+
+gui-init-wizard = Configurer Helios
+
+gui-init-wizard-about = Quelques choix avant les premières photos : chacun se change plus tard.
+
+gui-init-wizard-finish = Terminer
+
+health-library-folder-unwritable = Le dossier de la bibliothèque n'est pas accessible en écriture
+
+health-library-folder-unwritable-detail = { $folder } manque ou est en lecture seule : les imports ne peuvent pas y copier les photos.
+
+library-folder-no-room = Ce disque a { $free } Mio libres : choisissez un dossier qui a de la place pour les photos.
+
+library-folder-not-absolute = Donnez le chemin complet du dossier.
+
+library-folder-not-writable = Helios ne peut pas écrire dans ce dossier : { $why }

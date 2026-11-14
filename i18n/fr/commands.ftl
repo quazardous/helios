@@ -725,3 +725,15 @@ command-helios-window-main =
 
 command-library-importAutomatic-pause =
     .title = Suspendre les imports automatiques, ou les reprendre (`on` : true suspend, false reprend ; sans lui, bascule)
+
+command-helios-setUp =
+    .title = Configurer Helios…
+
+command-init-apply =
+    .title = Écrire les réglages de la configuration (`library.folder` : le dossier de la bibliothèque)
+
+command-init-chooseFolder =
+    .title = Choisir le dossier de la bibliothèque pour la configuration
+
+command-init-libraryFolder =
+    .title = Choisir le dossier de la bibliothèque dans la configuration (`path` : réglé aussitôt)

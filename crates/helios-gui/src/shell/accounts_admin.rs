@@ -160,9 +160,15 @@ impl Shell {
 
     /// Imports the photos chosen in a service's page ("Choose photos in
     /// Google Photos…" on an account of a connector that picks), through
-    /// `import`.
+    /// `import`, when the import window's footer asks.
     pub fn set_import_remote(&mut self, import: super::import_accounts::ImportRemote) {
         self.import.get_mut().accounts.import = Some(import);
+    }
+
+    /// Tells which of the photos chosen in a service's page the Library
+    /// holds already: the import window marks them "in your Library".
+    pub fn set_import_remote_known(&mut self, known: super::import_accounts::KnownRemote) {
+        self.import.get_mut().accounts.known = Some(known);
     }
 
     /// The library folder chosen photos are copied into when the Choices

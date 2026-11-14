@@ -583,7 +583,8 @@ fn library_commands(
         }));
     }
     // The source plugins (`import.source`): their accounts in the import
-    // window, "Pick photos…" importing what was picked as fetched copies.
+    // window, the photos chosen in a service's page imported by the
+    // window's Import as fetched copies.
     for provider in helios_plugin::source::providers(plugins) {
         shell.add_import_connector(Arc::new(provider));
     }
@@ -591,24 +592,28 @@ fn library_commands(
         let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
         let history = history.clone();
         let backed = after_import.clone();
-        shell.set_import_remote(Arc::new(move |connector, source, items, into| {
+        shell.set_import_remote(Arc::new(move |job, mut emit| {
+            let mut options = helios_gui::importers::options(&job.args)?;
+            // A pick is the person's, in the import window, unless the
+            // job's arguments say who asked.
+            if options.origin.is_none() {
+                options.origin = Some("user".into());
+            }
             // The window asks for Into before the service's page opens
             // when there is no library folder; should it be gone since,
             // say so in the desktop's words, not the command line's.
-            if into.is_none() && helios_library::import::library_root(vault.as_ref())?.is_none() {
+            let into = matches!(
+                &options.placement,
+                helios_library::import::Placement::Copy { into: Some(_) }
+            );
+            if !into && helios_library::import::library_root(vault.as_ref())?.is_none() {
                 return Err("no folder to copy the photos into: set Into in the Choices".into());
             }
             let remote = helios_library::fetch::Remote {
-                connector,
-                source,
-                items,
+                connector: job.connector.as_ref(),
+                source: job.source,
+                items: job.items,
                 new_only: false,
-            };
-            let options = helios_library::import::Options {
-                placement: helios_library::import::Placement::Copy { into },
-                // A pick is the person's, in the import window.
-                origin: Some("user".into()),
-                ..helios_library::import::Options::default()
             };
             let mut report = helios_library::fetch::import_remote(
                 vault.as_ref(),
@@ -616,7 +621,7 @@ fn library_commands(
                 &remote,
                 &options,
                 seconds(),
-                &mut |_| {},
+                &mut emit,
             )?;
             let label = helios_gui::library_history::import_label(report.added + report.located);
             history.record(label, std::mem::take(&mut report.changes), seconds_f64());
@@ -629,14 +634,23 @@ fn library_commands(
             }
             done.store(true, Ordering::Relaxed);
             ctx.request_repaint();
-            // Picked before: known by its item id, never fetched again.
-            Ok(helios_gui::shell::PickImported {
-                added: report.added,
-                known: report.unfetched,
+            Ok(json!(report))
+        }));
+    }
+    {
+        // Which chosen photos the Library holds already: marked in the
+        // import window's grid.
+        let vault = vault.clone();
+        shell.set_import_remote_known(Arc::new(move |source, items| {
+            helios_library::fetch::in_library(vault.as_ref(), source, items).unwrap_or_else(|e| {
+                warn(&format!("chosen photos in the Library: {e}"));
+                vec![false; items.len()]
             })
         }));
     }
     shell.set_import_library_folder(Arc::new(LibraryFolder(vault.clone())));
+    // The first-run setup opens when a required step is not done.
+    shell.set_first_run(true);
     let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(
