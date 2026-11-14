@@ -24,6 +24,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.90.0] - 2026-11-14
+
+### Added
+
+- Cards and disks are recognised on macOS and Windows too: Helios lists the mounted volumes with their identity (the volume UUID on macOS, the filesystem's serial number on Windows), so a card's saved import choices and its automatic import follow it there as on Linux. A FAT or exFAT card has the same identity on Windows and Linux.
+- The Library in a window of its own: Window › Library (Ctrl+Alt+1) opens it, or brings it to the front. It is the same Library as the main window's (folders, albums, filters, grid, marks, versions, stacks): a photo selected there is the one commands act on, and a mark made there shows in both. Export and copying files work from it too. The Library and Activity windows open again at the next start, where they were.
+
+### Changed
+
+- Every background job now shows in the Activity focus: exports, the trash, backups, catalogue snapshots, calibrations, workshop runs and the capture and focus passes, beside imports, each with its progress bar (or none when it cannot say), its per-file outcome, and Cancel where it can stop. The image map and the thumbnail re-check show as ongoing work the status bar does not count. A finished job links to its result: "Open folder" for an export, a backup or a snapshot; "Show in Library" opens an import's photos; "Import history" opens the import window.
+- Undo and redo of library steps no longer freeze the window while the library is busy: the step moves at once, the status bar says "Undoing…" until the library answers, a second Ctrl+Z queues behind the first, and a refused step comes back with a toast saying why. The Calibration window likewise waits off the frame, saying it is waiting for the library, and shows each answer as it lands.
+- Helios's window now opens at once on its start splash: opening the library, reading the plugins and building the interface run while the splash shows them, each ticked as it ends, instead of before the window appears.
+- The import window's Sources column has one "Add…" button instead of "Choose a folder…" and "Add a source…". Its wizard lists the connectors installed, asks what the one chosen needs (a folder, a card, an account sign-in), then which import profile to use (Everyday preselected, "Customise…" opens the profile editor), with automatic import when offered. Agents add the same source with `import.sources.add`.
+
+### Fixed
+
+- `helios import` waits for the import and prints its report again (its progress on the terminal), exiting non-zero when it fails; `--no-wait` returns the promise at once. `helios run` waits likewise for a command answering with a promise. A closed output (a pipe whose reader is gone) no longer makes `helios` or `helios-gui --version` panic.
+
 ## [0.89.0] - 2026-11-14
 
 ### Added
