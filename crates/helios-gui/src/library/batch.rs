@@ -8,6 +8,11 @@
 //! too. A paste writes as the marks do: rating, labels and tags through
 //! egui-pop's library steps (a plugin may veto them), the title as a
 //! field, all queued for the host's `library.fields.set`.
+//!
+//! "Remove from Library" (L8) takes the selection out of the Library:
+//! the flag only, no file touched, through the node's
+//! `library.images.remove`; the host records the step it answers in the
+//! library's history, so Ctrl+Z puts the photos back.
 
 use egui_pop::views::library::{Change as Mark, ColorLabel};
 use serde_json::{Value, json};
@@ -28,6 +33,11 @@ pub const MARKS_COPY_COMMAND: &str = "library.marks.copy";
 /// Pastes the copied marks on photos (`images`, else the selection;
 /// `marks`, `mode`).
 pub const MARKS_PASTE_COMMAND: &str = "library.marks.paste";
+
+/// Takes photos out of the Library (`images`, else the selection), their
+/// files untouched (Lightroom's "Remove from Catalog", darktable's
+/// "remove"): one undoable step.
+pub const REMOVE_COMMAND: &str = "library.remove";
 
 /// The marks a copy holds and a paste may take.
 pub const MARK_KINDS: [&str; 4] = ["rating", "labels", "tags", "title"];
@@ -299,6 +309,33 @@ impl Library {
         }
         Ok(keys.len())
     }
+
+    /// Queues `images` (those shown), else the selection, to be taken out
+    /// of the Library by the host ([`Library::take_removals`]); how many.
+    ///
+    /// # Errors
+    /// No photo to take out.
+    pub fn remove_from_library(&mut self, images: Option<Vec<String>>) -> Result<usize, String> {
+        let keys = match images {
+            Some(ids) => {
+                let keys: Vec<String> = ids.into_iter().filter(|i| self.holds(i)).collect();
+                if keys.is_empty() {
+                    return Err("none of the `images` is in the library".into());
+                }
+                keys
+            }
+            None => self.targets()?,
+        };
+        let count = keys.len();
+        self.removals.push(keys);
+        Ok(count)
+    }
+
+    /// The photos asked taken out of the Library since, one list per
+    /// command.
+    pub fn take_removals(&mut self) -> Vec<Vec<String>> {
+        std::mem::take(&mut self.removals)
+    }
 }
 
 #[cfg(test)]
@@ -349,5 +386,25 @@ mod tests {
         assert!(lib.targets().is_err(), "no cursor left either");
         assert_eq!(lib.invert_selection(), 4);
         assert!(Similar::parse("week").is_err());
+    }
+
+    #[test]
+    fn remove_queues_the_selection_or_the_photos_named() {
+        let mut lib = library();
+        lib.select_none();
+        assert!(lib.remove_from_library(None).is_err(), "nothing selected");
+        lib.select_ids(&["a".into(), "c".into()]);
+        assert_eq!(lib.remove_from_library(None), Ok(2));
+        assert_eq!(
+            lib.remove_from_library(Some(vec!["d".into(), "zz".into()])),
+            Ok(1),
+            "a photo not shown is left out"
+        );
+        assert!(lib.remove_from_library(Some(vec!["zz".into()])).is_err());
+        assert_eq!(
+            lib.take_removals(),
+            [vec!["a".to_string(), "c".into()], vec!["d".to_string()]]
+        );
+        assert!(lib.take_removals().is_empty());
     }
 }

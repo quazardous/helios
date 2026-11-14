@@ -3143,6 +3143,10 @@ impl Shell {
                 "Copy a photo's marks: rating, colour labels, tags and title (`image`: an id, else the photo under the cursor). Answers them",
             ),
             (
+                crate::library::REMOVE_COMMAND,
+                "Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back",
+            ),
+            (
                 crate::library::MARKS_PASTE_COMMAND,
                 "Paste the copied marks (`images`: ids, else the selection; `marks`: some of rating, labels, tags, title, all by default; `mode`: merge, the default, adds labels and tags, overwrite makes each mark the copy's)",
             ),
@@ -5106,9 +5110,22 @@ impl Shell {
     fn library_batch(&mut self, command: &'static str, args: &Value) -> Result<Value, String> {
         use crate::library::{
             CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode,
-            SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
+            REMOVE_COMMAND, SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND,
+            Similar,
         };
         let text = |key: &str| args.get(key).and_then(Value::as_str);
+        let images = || -> Result<Option<Vec<String>>, String> {
+            match args.get("images") {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Array(list)) => Ok(Some(
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect(),
+                )),
+                Some(other) => Err(format!("`images`: {other} is not a list of ids")),
+            }
+        };
         let mut lib = self.focus.library.borrow_mut();
         match command {
             SELECT_NONE_COMMAND => {
@@ -5122,16 +5139,7 @@ impl Shell {
             }
             MARKS_COPY_COMMAND => lib.copy_marks(text("image")).map(CopiedMarks::to_json),
             MARKS_PASTE_COMMAND => {
-                let images = match args.get("images") {
-                    None | Some(Value::Null) => None,
-                    Some(Value::Array(list)) => Some(
-                        list.iter()
-                            .filter_map(Value::as_str)
-                            .map(String::from)
-                            .collect(),
-                    ),
-                    Some(other) => return Err(format!("`images`: {other} is not a list of ids")),
-                };
+                let images = images()?;
                 let kinds: Vec<&str> = match args.get("marks") {
                     None | Some(Value::Null) => MARK_KINDS.to_vec(),
                     Some(Value::Array(list)) => list.iter().filter_map(Value::as_str).collect(),
@@ -5141,6 +5149,7 @@ impl Shell {
                 let count = lib.paste_marks(images, &kinds, mode)?;
                 Ok(json!({ "images": count, "marks": kinds }))
             }
+            REMOVE_COMMAND => Ok(json!({ "removed": lib.remove_from_library(images()?)? })),
             other => Err(format!("`{other}` is not a selection command")),
         }
     }

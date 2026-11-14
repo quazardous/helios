@@ -74,7 +74,7 @@ pub enum Touched {
 /// | `vault.field_changed`, `vault.version_added`, `edit.saved` | the reads naming its `image` |
 /// | `vault.stack_changed`, `library.decision` | the stacks' reads |
 /// | `settings.layerChanged` | the settings' reads |
-/// | `library.imported`, `vault.locations_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
+/// | `library.imported`, `vault.locations_changed`, `vault.library_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
 pub fn touched_by(kind: &str, payload: &Value) -> Touched {
     match kind {
         "vault.field_changed" | "vault.version_added" | "edit.saved" => {
@@ -86,6 +86,7 @@ pub fn touched_by(kind: &str, payload: &Value) -> Touched {
         "settings.layerChanged" => Touched::Area(Area::Settings),
         "library.imported"
         | "vault.locations_changed"
+        | "vault.library_changed"
         | "vault.captures_set"
         | "vault.changed_outside"
         | "node.ready" => Touched::All,

@@ -133,6 +133,14 @@ pub fn defaults() -> Vec<(String, String, String)> {
             &format!("{} && !textInputFocus", behind_no_picker(&library)),
         );
     }
+    // Remove from Library, as Lightroom's and darktable's Delete in the
+    // grid: the flag only, undoable, so nothing is asked first. Delete
+    // is the image's own while a mask point is picked (above).
+    bind(
+        "Delete",
+        crate::library::REMOVE_COMMAND,
+        &format!("{} && !textInputFocus", behind_no_picker(&library)),
+    );
     bind("Right", "compare.next", &behind_no_picker(&comparison));
     bind("Left", "compare.previous", &behind_no_picker(&comparison));
     // Next and previous image while culling; in the grid Space selects.

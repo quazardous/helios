@@ -367,6 +367,9 @@ command-library-quick-saveAs =
 command-library-quick-toggle =
     .title = Put photos in the quick collection (`images`: ids, else the selection), or take them out when it holds them all; scope the library to it with the collection `quick`
 
+command-library-remove =
+    .title = Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back
+
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
 

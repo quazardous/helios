@@ -181,6 +181,7 @@ command-library-pasteFiles.title 409587651f782f9a
 command-library-quick-clear.title 1c4b266b7b1ccc5c
 command-library-quick-saveAs.title 81d31076888b75b1
 command-library-quick-toggle.title 1b2258b0758413c4
+command-library-remove.title cf5cd12b2502cc36
 command-library-scanFolder.title 65e0df53774b720b
 command-library-select-invert.title 9fabaf6253c7fd7d
 command-library-select-none.title cf5dfbd241a5672e
@@ -621,6 +622,7 @@ gui-history-calibration-off dcaad546e81ba1b9
 gui-history-calibration-save 40e060e250f7ee04
 gui-history-camera-look-fit 632c8f5dace2095e
 gui-history-import 54b5fc5f7ff45a8e
+gui-history-library-remove 316eba503a12d95b
 gui-history-preview-applied e4ec2cb3e00f5ea8
 gui-history-preview-bypassed 02942dd0aa53a222
 gui-history-preview-param e503ef0b7a4a3ed8
@@ -861,6 +863,7 @@ gui-library-keep-best be4edb21d1e2e2fa
 gui-library-missing-note 02e4f67d1be418c9
 gui-library-no-cursor 581a49943aeb231e
 gui-library-none d2ff532108cdfbd6
+gui-library-not-removed 6b58bff8c497ba91
 gui-library-not-saved 48d930d6f5a75dc9
 gui-library-offline-on 98daffdf1242288a
 gui-library-offline-unknown c646373072f8d849
@@ -875,6 +878,7 @@ gui-library-quick-tip 121d5529fa55b98f
 gui-library-quick-toggle 58f2469f03174d34
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
+gui-library-remove 7408ac1339c30e8a
 gui-library-search fddceff6dbd31d81
 gui-library-set-delete 40f1e74389fd36cc
 gui-library-set-delete-all ef418a379bdaeaa0

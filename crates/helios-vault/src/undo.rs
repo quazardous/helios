@@ -163,10 +163,24 @@ impl<S: Store> Vault<S> {
             }
             Ok(done)
         })?;
-        if done.removed + done.restored + done.changed > 0 {
+        let moved = done.removed + done.restored + done.changed;
+        if moved > 0 {
             self.placed(changes.images.iter().map(|c| c.image));
+            self.library_changed(usize::try_from(moved).unwrap_or(usize::MAX));
         }
         Ok(done)
+    }
+
+    /// Announces [`crate::LIBRARY_CHANGED`]: `count` photos moved.
+    pub(crate) fn library_changed(&self, count: usize) {
+        if let Some(bus) = &self.bus {
+            bus.publish_value(
+                "vault",
+                None,
+                crate::LIBRARY_CHANGED,
+                serde_json::json!({ "count": count }),
+            );
+        }
     }
 }
 
