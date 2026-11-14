@@ -23,7 +23,6 @@ const CLICKABLE: &[Role] = &[
     Role::CheckBox,
     Role::RadioButton,
     Role::Switch,
-    Role::ToggleButton,
     Role::Slider,
     Role::SpinButton,
     Role::ComboBox,
