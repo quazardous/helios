@@ -463,8 +463,22 @@ them (they survive a restart), and every client of the node sees them.
   what it stands for, its progress, then its outcome, with Cancel while
   it runs and Retry when it failed and may be retried.
 
-No command answers with a promise yet; the library's import will be the
-first ([design/import-slow-sources.md](design/import-slow-sources.md)).
+**The library's import by rule** answers with one
+([design/import-slow-sources.md](design/import-slow-sources.md)):
+`library.import` with a `source` (an absolute folder or card) and a
+`rule` (`all`, the default; `new`, what the library does not know; or
+`{"items": [absolute paths]}`), beside the import's choices (`copy`,
+`into`, `rename`, `layout`, `duplicates`, `signals`, `camera_look`),
+answers `{"promise": …}` of kind `import` at once. Its work lists the
+source through its connector (`note`: "listing: N found"), then imports
+each file (`done` of `total`, the file's name as `note`), and settles
+`done` with `{report, failed: [{path, error}], history, camera_looks}`:
+the import's report, the files that failed and why, the import
+history's record id. Cancelled, it stops before its next file and keeps
+what it imported. The kind resumes after a stop: the same import runs
+again and skips what the library already holds. `library.import` with
+`paths` still answers once done with its report (the desktop's import
+window and `import.history.again` use it).
 
 ## A client cache
 

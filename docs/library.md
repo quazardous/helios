@@ -134,7 +134,11 @@ helios import --vault library.db /media/card                      # a mounted ca
 helios import --vault library.db --copy --into ~/Photos /media/card
 helios import --vault library.db --copy --rename '{date}-{seq}' /media/card
 helios import --vault library.db --duplicates keep ~/Pictures/2024-06-trip
+helios import --vault library.db --new --wait /media/card           # only what is new, waited for
 ```
+
+The node answers at once with a promise and imports in the background;
+`--wait` waits for its outcome ([cli.md](cli.md)).
 
 **Sources.** A folder and its subfolders, a single file, or a mounted card:
 a folder holding `DCIM` is read from there. A phone speaking MTP is not a

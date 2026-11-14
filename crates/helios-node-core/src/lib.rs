@@ -15,6 +15,7 @@ pub mod commands;
 pub mod cursor;
 pub mod endpoint;
 pub mod health;
+pub mod import_promise;
 pub mod init;
 pub mod jobs;
 pub mod library;

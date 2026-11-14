@@ -58,7 +58,13 @@ fn a_folder_is_imported_then_stacked_and_dissolved() {
     picture(&roll.join("b.png"), 80);
     std::fs::copy(roll.join("a.png"), roll.join("z-again.png")).unwrap();
     let vault = p.s("vault.db");
-    let (code, out) = helios(&["import", "--vault", &vault, roll.to_str().unwrap()]);
+    let (code, out) = helios(&[
+        "import",
+        "--wait",
+        "--vault",
+        &vault,
+        roll.to_str().unwrap(),
+    ]);
     assert_eq!(code, 0, "{out}");
     let lines: Vec<Value> = out
         .lines()
@@ -67,6 +73,14 @@ fn a_folder_is_imported_then_stacked_and_dissolved() {
     let report = &lines.last().unwrap()["report"];
     assert_eq!(report["added"], 2, "{out}");
     assert_eq!(report["skipped"], 1, "{out}");
+    assert!(lines.last().unwrap()["history"].is_string(), "{out}");
+
+    // Without --wait, the node's promise of the import is printed at once.
+    let (code, out) = helios(&["import", "--new", "--vault", &vault, roll.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    let promise: Value = serde_json::from_str(out.lines().last().unwrap()).unwrap();
+    assert_eq!(promise["promise"]["kind"], "import", "{out}");
+    assert_eq!(promise["promise"]["request"]["rule"], "new", "{out}");
 
     // Renaming needs a copy.
     let (code, _) = helios(&[
