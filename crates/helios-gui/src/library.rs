@@ -66,8 +66,9 @@ use serde_json::Value;
 
 mod batch;
 pub use batch::{
-    CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND,
-    SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
+    CopiedMarks, DELETE_REJECTED_COMMAND, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND,
+    PasteMode, REMOVE_COMMAND, SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND,
+    Similar, TRASH_COMMAND, TrashAsk,
 };
 
 /// The library's name in egui-pop's steps and commands (`library` in
@@ -1640,6 +1641,9 @@ pub struct Library {
     /// The photos asked taken out of the Library ([`REMOVE_COMMAND`]),
     /// for the host.
     removals: Vec<Vec<String>>,
+    /// The photos whose files were asked moved to the trash
+    /// ([`TRASH_COMMAND`], [`DELETE_REJECTED_COMMAND`]), for the host.
+    trash_asks: Vec<TrashAsk>,
 }
 
 /// The library's sort when nothing chose one: by capture time, oldest
@@ -1758,6 +1762,7 @@ impl Default for Library {
             resort: None,
             copied: None,
             removals: Vec::new(),
+            trash_asks: Vec::new(),
         }
     }
 }
@@ -4017,6 +4022,18 @@ impl Library {
                             crate::i18n::text(
                                 ui.ctx(),
                                 Message::new("gui-library-remove", "Remove from Library"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(TRASH_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-trash", "Move to Trash…"),
+                            ),
+                        ),
+                        crate::dialogs::MenuItem::command(DELETE_REJECTED_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-delete-rejected", "Delete Rejected…"),
                             ),
                         ),
                     ],
