@@ -762,3 +762,9 @@ command-init-chooseFolder =
 
 command-init-libraryFolder =
     .title = Choisir le dossier de la bibliothèque dans la configuration (`path` : réglé aussitôt)
+
+command-library-importSession =
+    .title = Montrer une importation dans la bibliothèque (`id` : une importation de `import.history.list` ; null : toute la bibliothèque), toutes ses photos sélectionnées avec `select: true` ; elle se combine aux autres filtres, rien n’est copié ni déplacé. Sans `id`, dit l’importation montrée
+
+command-library-runWorkshop =
+    .title = Lancer l’atelier… sur la sélection de la bibliothèque (l’atelier appliqué, sur les photos sélectionnées, d’où que vienne la sélection : une importation, un album, un filtre)

@@ -937,6 +937,8 @@ gui-import-history-imports = Imports
 
 gui-import-history-none = No import yet
 
+gui-import-history-show = Show in Library
+
 gui-import-include = Include
 
 gui-import-include-all = All photos
@@ -986,6 +988,10 @@ gui-import-path = card or folder
 gui-import-remember = Remember for this workspace
 
 gui-import-remember-help = The workspace's import source: the next import does not ask
+
+gui-import-session-ended = The import ended: its photos are in the Library
+
+gui-import-session-show = Show in Library
 
 gui-import-verb = Import
 
@@ -1333,6 +1339,10 @@ gui-library-import = Import…
 
 gui-library-import-photos = Import photos…
 
+gui-library-imports = Imports
+
+gui-library-imports-none = No import yet
+
 gui-library-keep-best = Keep the best: pick it, reject the others
 
 gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
@@ -1384,6 +1394,8 @@ gui-library-rotate-left = Rotate Left
 gui-library-rotate-reset = Reset Rotation
 
 gui-library-rotate-right = Rotate Right
+
+gui-library-run-workshop = Run Workshop…
 
 gui-library-search = Search images
 
@@ -1999,6 +2011,10 @@ gui-rule-field-focus = sharpness (focus)
 
 gui-rule-field-folder = folder
 
+gui-rule-field-import = import session
+
+gui-rule-field-imported = import date
+
 gui-rule-field-iso = ISO
 
 gui-rule-field-label = colour label
@@ -2186,6 +2202,8 @@ gui-settings-health-check = Health check
 gui-settings-history = History
 
 gui-settings-image-map = Image map
+
+gui-settings-imports = Imports
 
 gui-settings-library = Library
 

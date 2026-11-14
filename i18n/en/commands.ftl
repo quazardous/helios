@@ -352,6 +352,9 @@ command-library-importAutomatic-pause =
 command-library-importFiles =
     .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`; `camera_look`: false leaves the cameras' default looks off the raws)
 
+command-library-importSession =
+    .title = Show an import session in the Library (`id`: an import of `import.history.list`; null: the whole library), its photos all selected with `select: true`; it works with the other filters, nothing is copied or moved. Without `id`, says the session shown
+
 command-library-importSource =
     .title = Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)
 
@@ -396,6 +399,9 @@ command-library-rotateLeft =
 
 command-library-rotateRight =
     .title = Rotate Right: turn the photos a quarter clockwise (`images`: ids, else the selection); Ctrl+Z turns them back
+
+command-library-runWorkshop =
+    .title = Run Workshop… on the Library's selection (the workshop applied, on the photos selected, whatever the selection comes from: an import session, an album, a filter)
 
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
