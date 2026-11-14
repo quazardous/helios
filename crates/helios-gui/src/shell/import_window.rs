@@ -1700,7 +1700,7 @@ impl ImportWindow {
                 "gui-import-window-no-folders",
                 "No folder yet",
             )),
-            add: t(Message::new("gui-import-window-add", "Add…")),
+            add: t(Message::new("gui-import-window-add-button", "Add…")),
             add_hint: t(Message::new(
                 "gui-import-window-add-hint",
                 "Add a source: a folder, a card, an account…",
