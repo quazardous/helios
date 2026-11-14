@@ -613,7 +613,7 @@ pub struct Setup {
     /// What a new source is: the one thing the wizard asks for it.
     pub asks: SetupAsks,
     /// Its icon in the wizard and the Sources column: a Phosphor icon's
-    /// name (`folder`, `sd-card`, `cloud`).
+    /// name (`folder`, `camera`, `cloud`).
     pub icon: String,
     /// The automatic import its sources are offered; `None`: none.
     #[serde(skip_serializing_if = "Option::is_none")]

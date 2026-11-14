@@ -262,6 +262,9 @@ command-import-history-list =
 command-import-reconnect =
     .title = Connect an import account again, from the step that failed (`account`)
 
+command-import-sources-add =
+    .title = Add an import source, as the import window's "Add…" wizard does: `connector` (its id) and what its setup asks (`path`: a folder, or a volume's mount point; `volume`: a mounted volume's id or label; `account`: an account of the connector), then `name` (else the folder's, volume's or account's), `profile` (an import profile's id; else the connector's default, else `everyday`), `auto` (true: the automatic import the connector offers) and `params` (the connector's own parameters); selected in the import window when it is open
+
 command-init-apply =
     .title = Write the setup's settings (`library.folder`: the library folder)
 

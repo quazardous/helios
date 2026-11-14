@@ -59,7 +59,7 @@ impl ConnectorProvider for CardProvider {
             browsers: vec![Browser::Folder, Browser::Timeline],
             setup: Some(crate::Setup {
                 asks: crate::SetupAsks::Volume,
-                icon: "sd-card".into(),
+                icon: "camera".into(),
                 auto: Some(crate::AutoImport::Plugged),
             }),
         }
