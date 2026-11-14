@@ -327,6 +327,102 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The edit's steps go through the desktop's node: while another writer
+/// holds the vault file locked, the frames that save them do not wait for
+/// it; once it lets go, they are written in order, one line of history.
+#[test]
+fn a_vault_held_locked_does_not_delay_the_frames_saving_the_edit() {
+    let dir = scratch("edit-held");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    set(&shell, 1.0, None);
+    persist.frame_settled(&mut shell, 1.0);
+
+    // Another writer holds the vault's file.
+    let mut other = SqliteStore::open(&path).unwrap();
+    other.begin().unwrap();
+    let mut slowest = Duration::ZERO;
+    for (i, ev) in [1.5, 2.0, 2.5].into_iter().enumerate() {
+        set(&shell, ev, None);
+        let started = std::time::Instant::now();
+        persist.frame(&mut shell, 2.0 + i as f64);
+        slowest = slowest.max(started.elapsed());
+    }
+    assert!(
+        persist.busy(),
+        "the steps wait for the vault, not the frame"
+    );
+    assert!(
+        slowest < Duration::from_secs(1),
+        "a frame waited {slowest:?} for the vault"
+    );
+
+    // Let go: every step written, each continuing the one before.
+    other.rollback().unwrap();
+    drop(other);
+    persist.settle(&mut shell);
+    let vault = persist.vault().clone();
+    assert_eq!(vault.versions(&id(1)).unwrap().len(), 4);
+    let heads = vault.heads(&id(1)).unwrap();
+    assert_eq!(heads.len(), 1, "one line of history");
+    assert_eq!(Some(heads[0].id), persist.session().unwrap().head());
+    drop((shell, persist, vault));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A step the node cannot write is said, and the session goes back to
+/// the head the vault holds: the next step continues it.
+#[test]
+fn an_edit_step_refused_is_said_and_the_next_continues_the_stored_head() {
+    let dir = scratch("edit-refused");
+    let path = vault_file(&dir);
+    let options = Options {
+        busy_timeout: Duration::from_millis(20),
+        ..Options::default()
+    };
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(
+        SqliteStore::open_with(&path, &options).unwrap(),
+        Arc::new(Bus::new()),
+    );
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    set(&shell, 1.0, None);
+    persist.frame_settled(&mut shell, 1.0);
+    let stored = persist.session().unwrap().head();
+
+    let mut blocker = SqliteStore::open(&path).unwrap();
+    blocker.begin().unwrap();
+    set(&shell, 2.0, None);
+    persist.frame_settled(&mut shell, 2.0);
+    let last = shell
+        .notices()
+        .last()
+        .expect("a notice says why")
+        .text
+        .clone();
+    assert!(last.contains("The edit was not saved"), "{last}");
+    assert_eq!(persist.session().unwrap().head(), stored);
+    blocker.rollback().unwrap();
+    drop(blocker);
+
+    set(&shell, 3.0, None);
+    persist.frame_settled(&mut shell, 3.0);
+    let heads = persist.vault().heads(&id(1)).unwrap();
+    assert_eq!(heads.len(), 1);
+    assert_eq!(heads[0].parents, stored.into_iter().collect::<Vec<_>>());
+    assert_eq!(persist.session().unwrap().head(), Some(heads[0].id));
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_it() {
     use egui::{Key, Modifiers};
