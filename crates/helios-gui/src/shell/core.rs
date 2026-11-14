@@ -92,6 +92,9 @@ pub(super) struct Core {
     pub(super) workshop_runner: Option<super::workshop_run::RunFn>,
     /// Where `workshop.review` reads and changes runs (the host's runner).
     pub(super) workshop_reviewer: Option<super::workshop_run::ReviewFn>,
+    /// The workshop dry runs and review actions the user asked, run off
+    /// the frame, their answers picked up at a coming one.
+    pub(super) workshop_waiting: Vec<super::workshop_run::Waiting>,
     /// What the exports the host runs say (`export_sink`).
     pub(super) export_lines: (
         std::sync::mpsc::Sender<helios_export::batch::Line>,

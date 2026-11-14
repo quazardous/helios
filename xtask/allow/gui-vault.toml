@@ -10,7 +10,3 @@ reason = "builds the desktop's node and hands its vault to the modules below, th
 [[allow]]
 path = "crates/helios-gui/src/persist.rs"
 reason = "builds the in-process node's client on the vault it is given; the vault() accessor still feeds main.rs"
-
-[[allow]]
-path = "crates/helios-gui/src/calibrate.rs"
-reason = "the calibration commands run through endpoint::command on the node's vault, and the camera look's fit reads it; to move to the client"

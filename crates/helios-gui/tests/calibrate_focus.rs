@@ -74,10 +74,17 @@ fn shell() -> (Shell, Setup) {
     }
     calibrate::register(
         &mut shell,
-        Some(calibrate::Node {
-            vault: vault.clone(),
-            bus: bus.clone(),
-        }),
+        Some(Arc::new(
+            helios_inspect::client::Client::in_process(Arc::new(
+                helios_node_core::endpoint::VaultService::new(
+                    vault.clone(),
+                    bus.clone(),
+                    helios_core::jobs::Jobs::new(bus.clone()),
+                    "test",
+                ),
+            ))
+            .with_origin("user"),
+        )),
         history.clone(),
     )
     .unwrap();

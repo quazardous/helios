@@ -190,6 +190,19 @@ fn run_on<S: Store>(
     library::run(vault, bus, id, params, origin).map(|answer| (answer, Changes::default()))
 }
 
+/// `answer` with the vault's `changes` in it, when there are any.
+fn with_changes(mut answer: Value, changes: &Changes) -> Value {
+    if !changes.is_empty()
+        && let Some(fields) = answer.as_object_mut()
+    {
+        fields.insert(
+            "changes".into(),
+            serde_json::to_value(changes).unwrap_or(Value::Null),
+        );
+    }
+    answer
+}
+
 /// Whether `origin` names who runs a call: `user`, `cli`, `control`,
 /// `midi`, `agent:NAME`, `script:NAME` or `remote:NAME`.
 fn is_origin(origin: &str) -> bool {
@@ -357,9 +370,29 @@ impl<S: Store + Send + 'static> VaultService<S> {
         let params = if id == library::AGAIN {
             again = library::again_params(&self.vault, params)?;
             &again
+        } else if id == calibrate::LOOK_FIT {
+            // A fit stops before its next photo once the call is
+            // cancelled.
+            let step = |_: usize, _: usize| !call.is_cancelled();
+            let done = calibrate::look::fit_with_progress(
+                &self.vault,
+                params,
+                &origin,
+                now(),
+                &calibrate::look::shot,
+                &step,
+            )
+            .map_err(|m| m.english)?;
+            return Ok(with_changes(done.answer, &done.changes));
         } else if id != library::IMPORT {
-            return run_on(&self.vault, &self.bus, id, params, origin_of(params))
-                .map(|(answer, _)| answer);
+            let (answer, changes) = run_on(&self.vault, &self.bus, id, params, origin_of(params))?;
+            // A calibration write answers what it changed, for a client's
+            // history to undo (a library write says it in its own answer).
+            return Ok(if calibrate::handles(id) {
+                with_changes(answer, &changes)
+            } else {
+                answer
+            });
         } else if crate::import_promise::by_rule(params) {
             // An import by rule answers at once with its promise.
             let promise = crate::import_promise::start(&self.promises, params, &origin)?;
@@ -500,11 +533,13 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
         }
     }
 
-    /// An import stops before its next file, a cursor window between
-    /// chunks of rows, a promise's wait at once.
+    /// An import stops before its next file, a camera look's fit before
+    /// its next photo, a cursor window between chunks of rows, a
+    /// promise's wait at once.
     fn cancellable(&self, method: &str) -> bool {
         method == library::IMPORT
             || method == library::AGAIN
+            || method == calibrate::LOOK_FIT
             || method == "cursor.window"
             || method == "promises.wait"
     }

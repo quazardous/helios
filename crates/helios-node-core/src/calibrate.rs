@@ -71,6 +71,9 @@ pub const OFFER: &str = "calibrate.offer";
 /// A photo opened: its camera's default profile put on it the first time
 /// ([`default_on_open`]), and the header's offer.
 pub const OPEN: &str = "calibrate.open";
+/// A camera's default camera look, as the "Camera look" preset puts it
+/// on a photo: the two nodes' parameters ([`look_default`]).
+pub const LOOK_DEFAULT: &str = "look.camera.default";
 
 pub mod look;
 
@@ -88,6 +91,7 @@ pub const PROFILE_IDS: &[&str] = &[
     LOOK_SET_DEFAULT,
     OFFER,
     OPEN,
+    LOOK_DEFAULT,
 ];
 
 /// Whether `id` is one of the commands run here.
@@ -229,6 +233,9 @@ pub fn profile_specs() -> Vec<CommandSpec> {
                 ),
             ]))
             .read_only(),
+        calibration(LOOK_DEFAULT, "A camera's default camera look")
+            .params(object(&[("camera", string(), true)]))
+            .read_only(),
         calibration(OPEN, "Open a photo: its camera's default profile the first time").params(
             object(&[
                 ("image", string(), true),
@@ -325,6 +332,9 @@ pub fn run_as<S: Store>(
     }
     if id == OFFER {
         return offer(vault.ok_or_else(needs_vault)?, params).map(Done::read);
+    }
+    if id == LOOK_DEFAULT {
+        return look_default(vault.ok_or_else(needs_vault)?, params).map(Done::read);
     }
     if id == OPEN {
         return open(vault.ok_or_else(needs_vault)?, params, origin, now);
@@ -871,6 +881,22 @@ pub fn offer<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, Messag
         "look_default": look_default,
         "path": path,
     }))
+}
+
+/// [`LOOK_DEFAULT`]: the default camera look of `camera`, as its two
+/// nodes' parameters (`look`: `cameracolour` and `cameratone`), null when
+/// the camera has none.
+///
+/// # Errors
+/// The vault cannot be read.
+pub fn look_default<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, Message> {
+    use helios_calibrate::look::edit::{COLOUR, TONE};
+    let camera = params["camera"].as_str().unwrap_or_default();
+    let look = look::look_of_camera(vault, camera)?.map_or(
+        Value::Null,
+        |(colour, tone)| json!({ COLOUR: colour, TONE: tone }),
+    );
+    Ok(json!({ "camera": camera, "look": look }))
 }
 
 /// [`OPEN`]: the camera's default profile put on `image` opened for the

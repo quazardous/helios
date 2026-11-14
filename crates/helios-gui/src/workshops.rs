@@ -256,6 +256,8 @@ pub struct Panel {
     pub last_run: Option<String>,
     /// The review shown (`workshop.review`'s answer).
     pub review: Option<serde_json::Value>,
+    /// The last dry run the user asked (`workshop.run`'s answer).
+    pub plan: Option<serde_json::Value>,
     /// The review shows only the photos to review.
     review_flagged_only: bool,
     /// The values typed in the review, by photo and slider.
@@ -279,6 +281,7 @@ impl Default for Panel {
             generalised: None,
             last_run: None,
             review: None,
+            plan: None,
             review_flagged_only: false,
             review_edits: BTreeMap::new(),
         }
