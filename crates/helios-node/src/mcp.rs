@@ -2320,6 +2320,25 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_ai_check",
+        endpoint: Endpoint::Ai,
+        cmd: "ai.check",
+        description: "The check before a run, calling no model: each model node's route resolved (run, node, diagram overrides, then the routing map) and checked (provider answering, model present, capability served); `ok` false with `refused` naming each node nothing serves and why; `leaves` says which nodes send images off this machine, to whom, and how many",
+        params: &[
+            Param {
+                name: "nodes",
+                schema: objects,
+                description: "The run's model nodes: each `capability`, and optionally `node` (its name), `prompt` (`id` or `id@version`) and `overrides` ({\"run\"|\"node\"|\"diagram\": {\"provider\", \"model\"}})",
+                default: None,
+            },
+            optional(
+                "items",
+                optional_integer,
+                "How many images the run takes, to count images and remote calls",
+            ),
+        ],
+    },
+    Tool {
         name: "helios_ai_prompts_list",
         endpoint: Endpoint::Ai,
         cmd: "ai.prompts.list",
@@ -4073,6 +4092,25 @@ mod tests {
             json!({ "capability": "vision", "provider": "ollama", "model": "qwen2.5vl:7b" }),
         );
         assert!(!failed);
+        let (failed, check) = tool(
+            &mut s,
+            "helios_ai_check",
+            json!({ "nodes": [
+                { "node": "caption", "capability": "vision", "prompt": "image.describe@1" },
+                { "node": "vectors", "capability": "embeddings" }
+            ], "items": 4 }),
+        );
+        assert!(!failed, "{check}");
+        assert_eq!(check["ok"], false, "{check}");
+        assert_eq!(check["nodes"][0]["available"], true, "{check}");
+        assert!(
+            check["refused"][0]
+                .as_str()
+                .unwrap()
+                .starts_with("node `vectors` (embeddings): nothing is routed"),
+            "{check}"
+        );
+        assert_eq!(check["leaves"], json!([]), "nothing leaves: all local");
         let card =
             std::env::temp_dir().join(format!("helios-mcp-ai-card-{}.png", std::process::id()));
         std::fs::write(&card, helios_ai::images::test_card(32)).unwrap();

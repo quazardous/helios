@@ -121,6 +121,8 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.duplicate", "phosphor:copy"),
     ("library.duplicateOriginal", "phosphor:file-dashed"),
     ("library.export", "phosphor:export"),
+    ("library.files.pair", "phosphor:link-simple"),
+    ("library.files.unpair", "phosphor:link-simple-break"),
     ("library.fitCameraLook", "phosphor:camera"),
     ("library.folder", "folder"),
     ("library.importFiles", "phosphor:tray-arrow-down"),

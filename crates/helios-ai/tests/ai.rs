@@ -18,6 +18,7 @@ use helios_ai::store::Paths;
 use helios_ai::{Ai, Capability, Need, PromptCall, images};
 use helios_extract::{ExtractorDef, KeyDecl, KeyType};
 use serde_json::{Value, json};
+use std::time::Instant;
 
 const CAPTION: &str =
     r#"{"caption": "A yellow disc on a gradient", "keywords": ["disc", "gradient"]}"#;
@@ -833,11 +834,13 @@ fn the_check_before_a_run_names_what_nothing_can_answer() {
     .unwrap();
     let needs = [
         Need {
+            node: None,
             capability: Capability::Vision,
             prompt: Some("image.describe@1".into()),
             overrides: Overrides::default(),
         },
         Need {
+            node: None,
             capability: Capability::Vision,
             prompt: None,
             overrides: Overrides {
@@ -846,11 +849,13 @@ fn the_check_before_a_run_names_what_nothing_can_answer() {
             },
         },
         Need {
+            node: None,
             capability: Capability::Embeddings,
             prompt: None,
             overrides: Overrides::default(),
         },
         Need {
+            node: None,
             capability: Capability::Vision,
             prompt: None,
             overrides: Overrides {
@@ -915,4 +920,228 @@ fn derived_extractor_schemas_stay_in_the_schema_subset() {
         json!({ "caption": "a disc", "keywords": ["disc"], "mood": { "value": "calm", "p": 0.8 } });
     assert!(helios_ai::schema::validate(&helios_extract::answer_schema(d), &good).is_empty());
     assert!(helios_extract::validate(d, &good).is_ok());
+}
+
+/// A setup whose `ai.toml` is `toml` before the service opens.
+fn setup_with(name: &str, runtime: FakeRuntime, toml: &str) -> Setup {
+    let dir = dir(name);
+    std::fs::write(dir.join("ai.toml"), toml).unwrap();
+    let runtime = Arc::new(runtime);
+    let secrets = Arc::new(MemorySecrets::default());
+    let ai = Ai::with_parts(
+        Paths::under(&dir),
+        runtime.clone(),
+        secrets.clone(),
+        Arc::new(machine()),
+    )
+    .unwrap();
+    Setup {
+        ai,
+        runtime,
+        secrets,
+        dir,
+    }
+}
+
+fn add_cloud(s: &Setup) {
+    let mut entry = ProviderConfig::new("cloud", ProviderKind::OpenAi);
+    entry.url = Some("https://models.example.com/v1".into());
+    s.ai.add_provider(entry, Some("sk-secret")).unwrap();
+}
+
+fn node(name: &str, capability: Capability, overrides: Overrides) -> Need {
+    Need {
+        node: Some(name.into()),
+        overrides,
+        ..Need::new(capability)
+    }
+}
+
+fn chats(s: &Setup) -> usize {
+    s.runtime
+        .calls()
+        .iter()
+        .filter(|c| c.path().ends_with("/chat") || c.path().ends_with("/completions"))
+        .count()
+}
+
+#[test]
+fn a_run_is_refused_before_anything_runs_naming_each_node_nothing_serves() {
+    let s = setup("run-check", vision_runtime(), machine());
+    add_cloud(&s);
+    s.ai.routing_set(
+        Some(Capability::Vision),
+        None,
+        Some(Route::new("ollama", "qwen2.5vl:7b")),
+    )
+    .unwrap();
+    let caption = Need {
+        prompt: Some("image.describe@1".into()),
+        ..node("caption", Capability::Vision, Overrides::default())
+    };
+    let remote = node(
+        "tags",
+        Capability::Vision,
+        Overrides {
+            node: Some(RouteOverride::route("cloud", "qwen2.5vl:7b")),
+            ..Overrides::default()
+        },
+    );
+    let missing = node(
+        "missing",
+        Capability::Vision,
+        Overrides {
+            node: Some(RouteOverride::model("llava:missing")),
+            ..Overrides::default()
+        },
+    );
+    let unserved = node(
+        "blind",
+        Capability::Vision,
+        Overrides {
+            run: Some(RouteOverride::route("ollama", "qwen3:8b")),
+            ..Overrides::default()
+        },
+    );
+    let unrouted = node("embed", Capability::Embeddings, Overrides::default());
+    let unknown_prompt = Need {
+        prompt: Some("image.nothing@1".into()),
+        ..node("ghost", Capability::Vision, Overrides::default())
+    };
+    let needs = [
+        caption.clone(),
+        remote.clone(),
+        missing,
+        unserved,
+        unrouted,
+        unknown_prompt,
+    ];
+    let check = s.ai.check_run(&needs, Some(10));
+    assert!(!check.ok);
+    assert_eq!(check.refused.len(), 4, "{:?}", check.refused);
+    for (name, why) in [
+        ("missing", "has no model `llava:missing`"),
+        ("blind", "does not do vision"),
+        ("embed", "nothing is routed for embeddings"),
+        ("ghost", "image.nothing"),
+    ] {
+        assert!(
+            check
+                .refused
+                .iter()
+                .any(|r| r.starts_with(&format!("node `{name}`")) && r.contains(why)),
+            "{name}: {:?}",
+            check.refused
+        );
+    }
+    let refusal = s.ai.check_submission(&needs, Some(10)).unwrap_err();
+    assert!(
+        refusal.starts_with("the run cannot start: ")
+            && refusal.contains("node `missing` (vision)")
+            && refusal.contains("AI settings"),
+        "{refusal}"
+    );
+    assert_eq!(chats(&s), 0, "a refused run calls no model");
+
+    // What leaves the machine: the remote node, to whom, how many images.
+    let ok =
+        s.ai.check_submission(&[caption.clone(), remote], Some(10))
+            .unwrap();
+    assert_eq!(ok.nodes[0].remote, Some(false));
+    assert_eq!(ok.nodes[1].remote, Some(true));
+    assert_eq!(ok.leaves.len(), 1, "{:?}", ok.leaves);
+    let leaving = &ok.leaves[0];
+    assert_eq!(leaving.node.as_deref(), Some("tags"));
+    assert_eq!(leaving.provider, "cloud");
+    assert_eq!(
+        leaving.url.as_deref(),
+        Some("https://models.example.com/v1")
+    );
+    assert_eq!((leaving.images_per_item, leaving.images), (1, Some(10)));
+    assert_eq!(leaving.image_side, 1024);
+    assert_eq!(ok.remote_calls, Some(10));
+    assert_eq!(ok.remote_ceiling, 500);
+
+    // A stopped provider is reported before the run.
+    s.runtime.set_down(true);
+    let down = s.ai.check_submission(&[caption], None).unwrap_err();
+    assert!(
+        down.contains("node `caption` (vision, image.describe@1): `ollama` does not answer"),
+        "{down}"
+    );
+}
+
+#[test]
+fn a_provider_at_its_limit_makes_the_next_call_wait_then_go() {
+    let s = setup_with(
+        "limit-wait",
+        vision_runtime(),
+        "[routing.capabilities]\nvision = { provider = \"ollama\", model = \"qwen2.5vl:7b\" }\n\
+         [limits.providers.ollama]\nparallel = 2\n",
+    );
+    s.runtime.hold(true);
+    std::thread::scope(|scope| {
+        let calls: Vec<_> = (0..3)
+            .map(|_| scope.spawn(|| s.ai.run_prompt_with(describe_call(Overrides::default()))))
+            .collect();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while s.runtime.chatting() < 2 {
+            assert!(Instant::now() < deadline, "two calls never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(s.runtime.chatting(), 2, "the third call waits for a slot");
+        s.runtime.hold(false);
+        for call in calls {
+            let run = call.join().unwrap();
+            assert!(run.is_ok(), "{run:?}");
+        }
+    });
+    assert_eq!(s.runtime.peak(), 2);
+    assert_eq!(
+        chats(&s),
+        3,
+        "the waiting call went on once a slot was free"
+    );
+}
+
+#[test]
+fn a_run_past_its_remote_ceiling_is_refused_and_local_calls_do_not_count() {
+    let s = setup_with(
+        "ceiling",
+        vision_runtime(),
+        "[routing.capabilities]\nvision = { provider = \"ollama\", model = \"qwen2.5vl:7b\" }\n\
+         [limits]\nrun_remote_calls = 2\n",
+    );
+    add_cloud(&s);
+    let call = |remote: bool| {
+        let mut c = describe_call(if remote {
+            Overrides {
+                run: Some(RouteOverride::route("cloud", "qwen2.5vl:7b")),
+                ..Overrides::default()
+            }
+        } else {
+            Overrides::default()
+        });
+        c.run = Some("run-1".into());
+        s.ai.run_prompt_with(c)
+    };
+    assert!(call(true).is_ok());
+    assert!(call(false).is_ok(), "a local call is not counted");
+    assert!(call(true).is_ok());
+    let refused = call(true).unwrap_err().to_string();
+    assert!(
+        refused.contains("the run `run-1` reached its ceiling of 2 remote calls"),
+        "{refused}"
+    );
+    assert_eq!(s.ai.run_remote_calls("run-1"), 2);
+    let remote_chats = s
+        .runtime
+        .calls()
+        .iter()
+        .filter(|c| c.path().ends_with("/completions"))
+        .count();
+    assert_eq!(remote_chats, 2, "the refused call never left");
+    s.ai.forget_run("run-1");
+    assert!(call(true).is_ok());
 }

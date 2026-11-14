@@ -1,7 +1,7 @@
 //! Helios's own checks: the free space where Helios writes, the vault's
 //! database integrity, the library opening with room to grow, a library
-//! folder chosen, and its photos changed outside Helios (the backup checks are in
-//! [`crate::backup`]).
+//! folder chosen, its photos changed outside Helios, and RAW+JPEG pairs
+//! shown as two photos (the backup checks are in [`crate::backup`]).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -25,13 +25,14 @@ pub fn storage() -> Vec<Arc<dyn Check>> {
 
 /// The library module's checks: the vault's integrity, the library
 /// opening with room, a library folder chosen, its photos changed
-/// outside Helios.
+/// outside Helios, RAW+JPEG pairs shown as two photos.
 pub fn library() -> Vec<Arc<dyn Check>> {
     vec![
         Arc::new(VaultIntegrity),
         Arc::new(Library::default()),
         Arc::new(FolderChosen),
         Arc::new(ChangedOutside),
+        Arc::new(RawJpegPairs),
     ]
 }
 
@@ -482,6 +483,62 @@ impl Check for ChangedOutside {
     }
 }
 
+pub const RAW_JPEG_PAIRS: &str = "library.raw-jpeg-pairs";
+
+/// The desktop command that pairs RAW+JPEG files ("Pair RAW+JPEG
+/// Files"); with `all`, the whole Library's pairs.
+pub const PAIR_FILES: &str = "library.files.pair";
+
+/// RAW+JPEG pairs the Library shows as two photos (imported before a
+/// pair was one photo, `docs/design/raw-jpeg-pairs.md`): offered to pair,
+/// never merged without the user's word, since the merge chooses between
+/// their marks.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RawJpegPairs;
+
+impl Check for RawJpegPairs {
+    fn id(&self) -> &str {
+        RAW_JPEG_PAIRS
+    }
+
+    fn title(&self) -> Message {
+        Message::new("health-raw-jpeg-pairs", "RAW+JPEG pairs")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("RAW+JPEG pairs the Library shows as two photos")
+            .levels(&[Level::Warning])
+            .fixes(&[PAIR_FILES])
+    }
+
+    fn run(&self, ctx: &Context) -> Vec<Finding> {
+        let Some(count) = ctx.raw_jpeg_pairs.filter(|c| *c > 0) else {
+            return Vec::new();
+        };
+        vec![
+            Finding::new(
+                RAW_JPEG_PAIRS,
+                "",
+                Level::Warning,
+                Message::new(
+                    "health-raw-jpeg-pairs-some",
+                    "{ $count } RAW+JPEG pairs are shown as two photos",
+                )
+                .with("count", count),
+                Message::new(
+                    "health-raw-jpeg-pairs-detail",
+                    "Pairing makes each one photo with two files: the RAW keeps its marks where both have one, labels, tags and albums are merged. One undo step.",
+                ),
+            )
+            .fix(Fix {
+                command: PAIR_FILES.into(),
+                args: json!({ "all": true }),
+                label: Message::new("health-fix-pair-files", "Pair them"),
+            }),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -566,6 +623,25 @@ mod tests {
         assert_eq!(found[0].level, Level::Warning);
         assert_eq!(found[0].id, CHANGED_OUTSIDE);
         assert_eq!(found[0].fix.as_ref().unwrap().command, ACKNOWLEDGE_CHANGED);
+    }
+
+    #[test]
+    fn raw_jpeg_pairs_shown_as_two_are_offered_to_pair() {
+        let run = |n| {
+            RawJpegPairs.run(&Context {
+                raw_jpeg_pairs: n,
+                ..Context::default()
+            })
+        };
+        assert!(run(None).is_empty(), "no vault: nothing to say");
+        assert!(run(Some(0)).is_empty(), "no pair: nothing to say");
+        let found = run(Some(4));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].level, Level::Warning);
+        assert_eq!(found[0].id, RAW_JPEG_PAIRS);
+        let fix = found[0].fix.as_ref().unwrap();
+        assert_eq!(fix.command, PAIR_FILES);
+        assert_eq!(fix.args, json!({ "all": true }));
     }
 
     #[test]

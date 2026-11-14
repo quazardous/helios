@@ -210,6 +210,10 @@ enum Write {
     /// (`library.stacks.group`, `.ungroup`, `.top`), asked at a time
     /// (seconds): one step of the library's history.
     Stack(crate::library::StackAsk, f64, crate::library::Batch),
+    /// RAW+JPEG files paired or unpaired (`library.pairs.pair`,
+    /// `.unpair`), asked at a time (seconds): one step of the library's
+    /// history.
+    Pair(crate::library::PairAsk, f64, crate::library::Batch),
     /// A library document kept, or removed when none
     /// (`library.documents.set`).
     Document {
@@ -291,6 +295,19 @@ impl Write {
                     ),
                 }
             }
+            Self::Pair(ask, ..) => {
+                use crate::library::PairAsk;
+                match ask {
+                    PairAsk::Pair { images, exact } => (
+                        helios_node_core::library::PAIRS_PAIR,
+                        json!({ "images": images, "exact": exact }),
+                    ),
+                    PairAsk::Unpair { images } => (
+                        helios_node_core::library::PAIRS_UNPAIR,
+                        json!({ "images": images }),
+                    ),
+                }
+            }
             Self::SwitchVersion(image, version, ..) => (
                 helios_node_core::library::VERSIONS_SWITCH,
                 json!({ "image": image, "version": version }),
@@ -341,6 +358,7 @@ impl Write {
             | Self::SwitchVersion(..)
             | Self::RemoveVersion(..)
             | Self::Stack(..)
+            | Self::Pair(..)
             | Self::Document { .. }
             | Self::Session(..)
             | Self::Album(..)
@@ -1436,6 +1454,45 @@ impl<S: Store + 'static> Persist<S> {
                     ),
                 }
             }
+            (Write::Pair(ask, at, batch), Ok(answer)) => {
+                // The step the node made, recorded so Ctrl+Z takes it
+                // back; the Library reads itself again on the vault's
+                // event. Marks the merge chose between are said.
+                match serde_json::from_value::<helios_vault::Changes>(answer["changes"].clone()) {
+                    Ok(changes) if changes.is_empty() => {}
+                    Ok(changes) => {
+                        let count = to_usize(&answer["paired"]).max(to_usize(&answer["unpaired"]));
+                        let label = crate::library_history::pair_label(ask, count);
+                        shell
+                            .library_history()
+                            .record_in(batch.as_ref(), label, changes, *at);
+                    }
+                    Err(e) => shell.notify(
+                        Level::Warning,
+                        format!("the pairing cannot be set back with undo: {e}"),
+                    ),
+                }
+                let conflicts = to_usize(&answer["conflicts"]);
+                if conflicts > 0 {
+                    shell.notify(
+                        Level::Info,
+                        Message::new(
+                            "gui-library-pair-conflicts",
+                            "{ $pairs } pairs made one photo; { $count } marks set differently kept the RAW's",
+                        )
+                        .with("pairs", to_usize(&answer["paired"]))
+                        .with("count", conflicts),
+                    );
+                }
+            }
+            (Write::Pair(..), Err(e)) => shell.notify(
+                Level::Warning,
+                Message::new(
+                    "gui-library-pair-not-changed",
+                    "The files were not paired or unpaired: { $error }",
+                )
+                .with("error", e.message),
+            ),
             (Write::Stack(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(
@@ -1583,7 +1640,11 @@ impl<S: Store + 'static> Persist<S> {
         }
         if matches!(
             write,
-            Write::Suggest(_) | Write::Accept(..) | Write::Decline(_) | Write::Stack(..)
+            Write::Suggest(_)
+                | Write::Accept(..)
+                | Write::Decline(_)
+                | Write::Stack(..)
+                | Write::Pair(..)
         ) {
             self.ask_stacks();
         }
@@ -2156,6 +2217,12 @@ impl<S: Store + 'static> Persist<S> {
             stack_asks
                 .into_iter()
                 .map(|(ask, batch)| Write::Stack(ask, now, batch)),
+        );
+        let pair_asks = shell.library_mut().take_pair_asks();
+        self.writes.extend(
+            pair_asks
+                .into_iter()
+                .map(|(ask, batch)| Write::Pair(ask, now, batch)),
         );
         let duplicates = shell.library_mut().take_duplicates();
         self.writes.extend(

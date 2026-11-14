@@ -169,6 +169,8 @@ command-library-deleteRejected.title 9b733bf20d4e0707
 command-library-duplicate.title e9d68fb1434cdb15
 command-library-duplicateOriginal.title 972872e3c27751da
 command-library-export.title c2dc933564069c87
+command-library-files-pair.title b5a280352c7e0f89
+command-library-files-unpair.title d626ff070b6343d4
 command-library-filter-apply.title 19abeee163bd677a
 command-library-filter-pin.title 62e6f0bcdff6f1ec
 command-library-filter-recent.title 5ea26540ae874ceb
@@ -650,6 +652,7 @@ gui-history-camera-look-default 9277e0c59d93ba27
 gui-history-camera-look-fit 632c8f5dace2095e
 gui-history-import 54b5fc5f7ff45a8e
 gui-history-library-remove 316eba503a12d95b
+gui-history-pair-files d4be8e17ae3ed040
 gui-history-preview-applied e4ec2cb3e00f5ea8
 gui-history-preview-bypassed 02942dd0aa53a222
 gui-history-preview-param e503ef0b7a4a3ed8
@@ -666,6 +669,7 @@ gui-history-stack-group dc99d5ac25f8faa1
 gui-history-stack-top 2fc730ecf55f9f1b
 gui-history-stack-ungroup 7fdaa277408e1d88
 gui-history-undo cc7022a2d9050a57
+gui-history-unpair-files 596bf434f7e677e9
 gui-history-user-batch d8f126e521da2cde
 gui-history-version-remove 138b18170ea40861
 gui-history-version-switch 6585bab26c3cbe1d
@@ -1010,6 +1014,9 @@ gui-library-not-rotated 6d65e48b0bc4c9cc
 gui-library-not-saved 48d930d6f5a75dc9
 gui-library-offline-on 98daffdf1242288a
 gui-library-offline-unknown c646373072f8d849
+gui-library-pair-conflicts 4799a36df65d0aa5
+gui-library-pair-files 2e9dd2658209ab45
+gui-library-pair-not-changed d5458e17dea5880f
 gui-library-plug-in 58e5adccf754ef76
 gui-library-quick 7d8a2d33871d5c6e
 gui-library-quick-clear 9b52b03e469d7bac
@@ -1057,6 +1064,7 @@ gui-library-stack-ungroup 7fdaa277408e1d88
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
 gui-library-trash 6cddaea29caba8b5
+gui-library-unpair-files 98598743ea22c609
 gui-library-version-copy 424486452ba52062
 gui-library-version-not-changed 5e359e73ab5dd059
 gui-library-versions-strip e2b7a3b085ebe75a
@@ -1682,6 +1690,7 @@ health-fix-choose-library-folder db696f6e530b1a77
 health-fix-gpu-docs e4a90238995c2ea0
 health-fix-library-folder 58938ce39af62bad
 health-fix-no-destination c0868aab0fc05629
+health-fix-pair-files 93f5b763f52bcdb9
 health-fix-plug-in 922ff9b39e006a71
 health-fix-plugin-disable 7c95abfab911c93a
 health-fix-plugin-folder 7d714e5ab3e06415
@@ -1738,6 +1747,9 @@ health-plugin-ok-detail 4e790b9a2170b38d
 health-plugin-unsupported d19acad799a00f45
 health-plugin-unsupported-detail 2b37eb07354a5f13
 health-plugins f4791889f7d7e08b
+health-raw-jpeg-pairs 40029e451188f799
+health-raw-jpeg-pairs-detail 92cb2029667e9148
+health-raw-jpeg-pairs-some 5a9600f578a3c5bc
 health-seen 4da1fa76529ec0a7
 health-seen-ok 6481f1fde6f41296
 health-seen-ok-detail a55bbedec5e4c7b1

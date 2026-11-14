@@ -329,6 +329,14 @@ Each slice is one PR, with its node command and its tests.
    `.unpair`, one history step each; the health check's offer. Tests:
    the rules table case by case; undo restores two photos with their
    marks, stacks and albums; Unpair brings back the JPEG's versions.
+   *Built 2026-11-14:* `helios_vault::pairs` (the rules, the vault's
+   `pair` and `unpair`), `helios_library::pairs` (detection, reused from
+   the stacking slice, HEIF included), the health check
+   `library.raw-jpeg-pairs` whose fix runs the desktop's
+   `library.files.pair` over the whole Library. A mark of no value (0
+   stars, no flag, rotation 0, an empty text) counts as unset; albums
+   and the quick collection follow the stacks' rule (the JPEG's place
+   goes to the RAW).
 3. **Pairing at import.** `pairs.rs` attaches instead of stacking;
    `pairs` replaces `stack_pairs` in the profile, the node schema,
    automatic and rule imports and the editor; HEIF; "left by choice".

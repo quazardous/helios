@@ -142,6 +142,11 @@ impl<S: Store + 'static> HealthInputs<S> {
                     .ok()
                     .map(|l| l.len())
             }),
+            raw_jpeg_pairs: self.vault.as_deref().and_then(|v| {
+                helios_library::pairs::count(v)
+                    .inspect_err(|e| log::warn!("health: RAW+JPEG pairs: {e}"))
+                    .ok()
+            }),
             database: file.map(|f| Database {
                 opens: helios_vault_sqlite::health::opens(f),
                 problems: helios_vault_sqlite::health::quick_check(f),
