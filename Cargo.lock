@@ -2433,6 +2433,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-extract"
+version = "0.89.0"
+dependencies = [
+ "blake3",
+ "helios-ai",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "helios-gpu"
 version = "0.89.0"
 dependencies = [

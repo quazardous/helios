@@ -1,0 +1,89 @@
+# Extractors Helios ships, declared with the same contract as a module's
+# `[[extractors]]` or a user's saved extractor. The built-in ones read
+# facts Helios already measures; nothing calls them yet.
+
+[[extractors]]
+id = "exif"
+version = 1
+title = "Capture metadata"
+description = "Camera, lens and exposure settings read from the file."
+keep = true
+builtin = { compute = "capture" }
+
+[[extractors.keys]]
+name = "camera"
+type = "label"
+
+[[extractors.keys]]
+name = "make"
+type = "label"
+
+[[extractors.keys]]
+name = "lens"
+type = "label"
+
+[[extractors.keys]]
+name = "iso"
+type = "integer"
+min = 1.0
+
+[[extractors.keys]]
+name = "aperture"
+type = "number"
+min = 0.0
+unit = "f/"
+
+[[extractors.keys]]
+name = "shutter"
+type = "number"
+min = 0.0
+unit = "s"
+
+[[extractors.keys]]
+name = "focal_length"
+type = "number"
+min = 0.0
+unit = "mm"
+
+[[extractors]]
+id = "cull"
+version = 1
+title = "Culling measures"
+description = "Focus and exposure measured on the thumbnail."
+keep = true
+builtin = { compute = "cull" }
+
+[[extractors.keys]]
+name = "focus"
+type = "number"
+min = 0.0
+
+[[extractors.keys]]
+name = "lum_mean"
+type = "number"
+min = 0.0
+max = 1.0
+
+[[extractors.keys]]
+name = "clip_white"
+type = "number"
+min = 0.0
+max = 1.0
+
+[[extractors]]
+id = "animals"
+version = 1
+title = "Animals in the photo"
+description = "A preset LLM extractor: duplicate it to edit the prompt or the list."
+
+[extractors.llm]
+capability = "vision"
+prompt = "Which animals are in this photo?"
+
+[[extractors.keys]]
+name = "animal"
+type = "label"
+values = ["dog", "cat", "bird", "horse"]
+multi = true
+confidence = true
+other = true

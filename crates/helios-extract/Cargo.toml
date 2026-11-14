@@ -1,0 +1,20 @@
+[package]
+name = "helios-extract"
+description = "Helios extractors: the contract of blocks that compute typed data about an image (declared keys, definitions and their uses), the answer schema derived from the keys, the validation of an answer, and the cache key"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+toml = "1"
+
+[dev-dependencies]
+# The derived schemas stay within helios-ai's JSON Schema subset.
+helios-ai.workspace = true
+
+[lints]
+workspace = true
