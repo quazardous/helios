@@ -410,3 +410,51 @@ impl<S: Store + Send + 'static> Promises<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::commands::validate;
+
+    use super::*;
+
+    /// Params each command takes, its optional fields given.
+    fn examples() -> Vec<(&'static str, Value)> {
+        vec![
+            ("promises.get", json!({ "id": "promise-3" })),
+            (
+                "promises.list",
+                json!({ "states": ["running", "failed"], "owner": "import-promise-3",
+                        "kind": "import", "limit": 50 }),
+            ),
+            ("promises.cancel", json!({ "id": "promise-3" })),
+            ("promises.retry", json!({ "id": "promise-3" })),
+            (
+                "promises.wait",
+                json!({ "id": "promise-3", "timeout_ms": 60_000 }),
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_promise_command_has_an_example_its_schema_takes() {
+        let specs = specs();
+        let ids: Vec<&str> = specs.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, IDS, "one spec per id");
+        let examples = examples();
+        let named: Vec<&str> = examples.iter().map(|(id, _)| *id).collect();
+        assert_eq!(named, IDS, "one example per command");
+        for (id, params) in examples {
+            let spec = specs.iter().find(|s| s.id == id).unwrap();
+            validate(&spec.params, &params).unwrap_or_else(|e| panic!("{id}: {e}"));
+        }
+        let wait = specs.iter().find(|s| s.id == "promises.wait").unwrap();
+        assert!(
+            validate(
+                &wait.params,
+                &json!({ "id": "p", "timeout_ms": MAX_WAIT_MS + 1 })
+            )
+            .is_err(),
+            "over the wait cap"
+        );
+    }
+}
