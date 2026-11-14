@@ -1287,6 +1287,12 @@ gui-jobs-filter-kind = Kind shown
 
 gui-jobs-filter-state = State shown
 
+gui-jobs-folder = Folder
+
+gui-jobs-import-record = Import history
+
+gui-jobs-items-done = Done
+
 gui-jobs-items-failed = Failed
 
 gui-jobs-kind = Kind
@@ -1300,6 +1306,8 @@ gui-jobs-log = Log
 gui-jobs-none = No background jobs
 
 gui-jobs-none-selected = No job selected
+
+gui-jobs-open-folder = Open folder
 
 gui-jobs-show-library = Show in Library
 
