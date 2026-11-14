@@ -1181,7 +1181,8 @@ fn a_copy_records_a_sighting_where_it_lands_and_an_add_in_place_none() {
     assert_eq!(sightings[0].path, here);
     assert!(!library.exists(), "nothing copied");
     // Copied into the Library: one copy, a sighting where it landed, seen
-    // by the import and verified.
+    // by the import and verified; the card's file, read whole while
+    // copied, is a sighting too.
     let options = Options {
         placement: Placement::Copy {
             into: Some(library.clone()),
@@ -1192,11 +1193,86 @@ fn a_copy_records_a_sighting_where_it_lands_and_an_add_in_place_none() {
     assert_eq!((copied.added, copied.copied), (1, 1));
     let b = copied.changes.images[0].image;
     let sightings = vault.sightings(&b).unwrap();
-    assert_eq!(sightings.len(), 1, "{sightings:?}");
-    assert!(sightings[0].path.starts_with(&library), "{sightings:?}");
-    assert_eq!(sightings[0].seen_by, "import");
-    assert!(sightings[0].last_verified.is_some());
+    assert_eq!(sightings.len(), 2, "{sightings:?}");
+    let landed = sightings
+        .iter()
+        .find(|s| s.path.starts_with(&library))
+        .expect("a sighting in the library folder");
+    assert_eq!(landed.seen_by, "import");
+    assert!(landed.last_verified.is_some());
+    assert!(sightings.iter().any(|s| s.path == there), "{sightings:?}");
     assert!(vault.in_library(&a).unwrap() && vault.in_library(&b).unwrap());
+}
+
+#[test]
+fn a_copy_import_run_again_reads_none_of_what_it_copied() {
+    let p = Place::new("copy-again");
+    let card = p.join("card/DCIM/100");
+    let (a, b) = (card.join("a.png"), card.join("b.png"));
+    picture(&a, 0, 1.0, 0);
+    picture(&b, 1, 1.0, 0);
+    let vault = vault();
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(p.join("library")),
+        },
+        ..Options::default()
+    };
+    let sources = [p.join("card")];
+    let (first, lines) = run(&vault, None, &sources, &options);
+    assert_eq!((first.added, first.copied), (2, 2), "{lines:?}");
+    assert!(first.read > 0);
+
+    // Run again (a resumed card, say): each file is known by its place,
+    // size and time, left out as already in the Library, nothing read.
+    // `a` now holds other bytes of the same size and time: a read would
+    // see another image.
+    tamper(&a);
+    let reads = vault.reads();
+    let (again, lines) = run(&vault, None, &sources, &options);
+    assert_eq!(
+        (again.skipped, again.added, again.copied, again.read),
+        (2, 0, 0, 0),
+        "{lines:?}"
+    );
+    assert_eq!(
+        (vault.reads().full_hashes, vault.reads().partial_hashes),
+        (reads.full_hashes, reads.partial_hashes)
+    );
+    assert_eq!(vault.images().unwrap().len(), 2);
+
+    // A file changed since (another time) is read and copied again.
+    picture(&b, 1, 0.5, 3);
+    std::fs::File::options()
+        .write(true)
+        .open(&b)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000_000))
+        .unwrap();
+    let (changed, lines) = run(&vault, None, &sources, &options);
+    assert_eq!(
+        (changed.added, changed.copied, changed.skipped),
+        (1, 1, 1),
+        "{lines:?}"
+    );
+    assert_eq!(status_of(&lines, &b), "added");
+    assert!(changed.read > 0);
+    let new_b = changed
+        .changes
+        .images
+        .iter()
+        .find(|c| c.before.is_none())
+        .unwrap()
+        .image;
+
+    // An image taken out of the Library is imported again, as an import in
+    // place does: its file is read and copied anew.
+    vault.set_in_library(&[new_b], false, "user", 1100).unwrap();
+    let (back, lines) = run(&vault, None, &sources, &options);
+    assert_eq!((back.added, back.skipped), (1, 1), "{lines:?}");
+    assert_eq!(status_of(&lines, &b), "added");
+    assert!(back.read > 0);
+    assert!(vault.in_library(&new_b).unwrap());
 }
 
 #[test]

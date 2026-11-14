@@ -839,6 +839,18 @@ fn copy_sidecars(
     Ok(copied)
 }
 
+/// The size and modification time (seconds since the epoch) of the file
+/// at `path`, when it can be read.
+fn stamp(path: &Path) -> Option<(u64, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    Some((meta.len(), modified))
+}
+
 /// A copy before it takes its name: removed when dropped, unless it
 /// took one.
 pub(crate) struct Part(pub(crate) PathBuf);
@@ -911,17 +923,12 @@ impl<S: Store> Run<'_, S> {
     /// since (the same size and modification time, its content hashed
     /// then): known without a read.
     fn seen_before(&self, path: &Path) -> Result<Option<ImageId>, String> {
-        let Ok(meta) = std::fs::metadata(path) else {
+        let Some((size, modified)) = stamp(path) else {
             return Ok(None);
         };
-        let modified = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_secs());
         let absolute = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(self.vault.at_path(&absolute)?.and_then(|(id, l)| {
-            (l.present() && l.size == meta.len() && l.modified == modified).then_some(id)
+            (l.present() && l.size == size && l.modified == modified).then_some(id)
         }))
     }
 
@@ -961,20 +968,48 @@ impl<S: Store> Run<'_, S> {
             .unwrap_or_default())
     }
 
-    /// Imports one file: its line, and what happened.
+    /// Imports one file: its line, and what happened. A file seen before,
+    /// unchanged since, is not read again: the map knows its content. A
+    /// copy notes its source in the map once it has read it, so a copy
+    /// import run again (resumed, say) reads none of what it copied.
     fn file(&mut self, path: &Path) -> Result<(Value, Status), String> {
         let copying = matches!(self.options.placement, Placement::Copy { .. });
-        // Added where it is, a file seen before is not read again: the
-        // map knows its content.
-        let seen = if copying {
-            None
-        } else {
-            self.seen_before(path)?
-        };
+        // Its size and time before any read: a file changed while it is
+        // read is read again next time.
+        let before = if copying { stamp(path) } else { None };
+        let seen = self.seen_before(path)?;
+        let outcome = self.file_known(path, copying, seen)?;
+        if let Some((size, modified)) = before
+            && seen.is_none()
+            && let Some(id) = self.hashes.get(path).copied()
+            && self.vault.image(&id)?.is_some()
+        {
+            self.vault.record_read(path, id, size, modified, self.now)?;
+        }
+        Ok(outcome)
+    }
+
+    /// [`Run::file`], `seen` the image the map knows the file holds.
+    fn file_known(
+        &mut self,
+        path: &Path,
+        copying: bool,
+        seen: Option<ImageId>,
+    ) -> Result<(Value, Status), String> {
+        // A copy of content already held (in the Library, or met earlier
+        // in this import) and not to be copied again is not read: the
+        // duplicate check below leaves it out. An image taken out of the
+        // Library is copied again, read as a new file is.
+        let unread = copying
+            && !matches!(self.options.duplicates, Duplicates::Keep)
+            && match seen {
+                Some(id) => self.seen.contains_key(&id) || self.vault.in_library(&id)?,
+                None => false,
+            };
         // A copy reads the source once, hashing it as it is copied; its
         // identity is known before the copy takes a name.
         let staged = match &self.staging {
-            Some(staging) => {
+            Some(staging) if !unread => {
                 let name = path
                     .file_name()
                     .ok_or_else(|| format!("{}: not a file name", path.display()))?;
@@ -983,7 +1018,7 @@ impl<S: Store> Run<'_, S> {
                 let id = stage(path, &part.0, &mut self.report.read, &stopped)?;
                 Some((part, id))
             }
-            None => None,
+            _ => None,
         };
         let id = match (&staged, seen) {
             (Some((_, id)), _) => *id,
