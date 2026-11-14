@@ -293,14 +293,10 @@ impl Options {
     /// The removable volumes mounted now, deepest mount point first:
     /// [`Options::mounted`], else the machine's.
     pub fn places(&self) -> Vec<Mounted> {
-        let read;
-        let volumes = match &self.mounted {
-            Some(v) => v,
-            None => {
-                read = helios_storage::Volumes::volumes(&*helios_storage::system());
-                &read
-            }
-        };
+        let volumes = self
+            .mounted
+            .clone()
+            .unwrap_or_else(|| helios_storage::Volumes::volumes(&*helios_storage::system()));
         let mut out: Vec<Mounted> = volumes
             .iter()
             .filter(|v| {

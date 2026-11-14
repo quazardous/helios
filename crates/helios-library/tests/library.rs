@@ -1458,7 +1458,7 @@ fn a_card_copied_once_is_known_wherever_it_is_mounted_and_another_card_is_not() 
     let (report, _) = run(
         &vault,
         None,
-        &[first.clone()],
+        std::slice::from_ref(&first),
         &copy(card_at(&first, "0b1f")),
     );
     assert_eq!(report.copied, 1);
@@ -1486,7 +1486,7 @@ fn a_card_copied_once_is_known_wherever_it_is_mounted_and_another_card_is_not() 
     let (report, lines) = run(
         &vault,
         None,
-        &[second.clone()],
+        std::slice::from_ref(&second),
         &copy(card_at(&second, "0b1f")),
     );
     assert_eq!(report.read, 0, "nothing read: {lines:?}");
@@ -1506,7 +1506,7 @@ fn a_card_copied_once_is_known_wherever_it_is_mounted_and_another_card_is_not() 
     let (report, lines) = run(
         &vault,
         None,
-        &[second.clone()],
+        std::slice::from_ref(&second),
         &copy(card_at(&second, "aaaa")),
     );
     assert!(report.read > 0, "another card's file is read: {lines:?}");
