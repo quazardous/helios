@@ -340,7 +340,8 @@ mod tests {
 
     #[derive(Default)]
     struct Host {
-        saved: bool,
+        /// The pass the window's step ran at.
+        saved_at: Option<u32>,
         frames: u32,
         outcome: Option<Ending>,
     }
@@ -370,17 +371,19 @@ mod tests {
             .then(
                 Message::new("test-saving", "Saving your changes"),
                 |h: &mut Host| {
-                    h.saved = true;
+                    h.saved_at = Some(h.frames);
                 },
             )
             .waiting_for(move || ended.load(Ordering::SeqCst));
         let mut h = end_harness(end);
-        h.run_steps(1);
+        h.run_steps(2);
         h.get_by_label("Closing Helios…");
         h.get_by_label("Saving your changes");
-        assert!(!h.state().1.saved, "the splash drawn before the step runs");
-        h.run_steps(1);
-        assert!(h.state().1.saved);
+        assert_eq!(
+            h.state().1.saved_at,
+            Some(2),
+            "the splash drawn at the first pass, the step run at the next"
+        );
         // The node's own step, declared off the thread.
         let closing = phase.begin(Message::new(
             "test-closing",
@@ -389,7 +392,8 @@ mod tests {
         h.run_steps(5);
         h.get_by_label("Saving and closing the library");
         assert_eq!(h.state().1.outcome, Some(Ending::Running));
-        assert!(h.state().1.frames >= 7, "frames keep coming");
+        let frames = h.state().1.frames;
+        assert!(frames >= 7, "frames keep coming: {frames}");
         drop(closing);
         off_thread.store(true, Ordering::SeqCst);
         h.run_steps(1);
