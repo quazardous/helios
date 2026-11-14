@@ -1,0 +1,1 @@
+- fixed: clicking an import session under Library › Imports no longer fails with "the rules must be a group".
