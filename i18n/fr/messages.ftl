@@ -2758,3 +2758,6 @@ gui-import-album-reading = Lecture de l’album…
 gui-import-album-failed = Impossible de lire l’album :
 
 gui-import-album-choose = Choisissez un album sous le compte, dans Sources.
+
+gui-library-window = Bibliothèque
+gui-library-window-elsewhere = La bibliothèque est ouverte dans sa propre fenêtre

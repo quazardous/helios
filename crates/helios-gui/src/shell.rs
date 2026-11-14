@@ -3395,11 +3395,9 @@ impl Shell {
             Box::new(|a, _| Ok(Action::Activity(a.clone()))),
         );
         add(
-            CommandSpec::new(
-                library_focus::COMMAND,
-                "Library: the Library in a window of its own, brought to the front when open",
-                "Window",
-            ),
+            // The Library in a window of its own, brought to the front
+            // when open.
+            CommandSpec::new(library_focus::COMMAND, "Library", "Window"),
             Box::new(|_, _| Ok(Action::LibraryWindow)),
         );
         // The main window's commands, greyed in the other windows' menus

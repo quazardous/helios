@@ -762,3 +762,6 @@ command-init-chooseFolder =
 
 command-init-libraryFolder =
     .title = Choisir le dossier de la bibliothèque dans la configuration (`path` : réglé aussitôt)
+
+command-library-window =
+    .title = Bibliothèque

@@ -427,6 +427,9 @@ command-library-storage =
 command-library-trash =
     .title = Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z
 
+command-library-window =
+    .title = Library
+
 command-macro-dissolve =
     .title = Give a macro way to its nodes, as ordinary ones (`node`; `dry_run`)
 
