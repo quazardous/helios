@@ -3036,8 +3036,11 @@ fn a_copy_is_picked_as_current_removed_and_brought_back<S: Store>(s: S) {
     assert_eq!(count, 2, "the copy and its edit");
     let left: Vec<_> = v.versions(&a).unwrap().iter().map(|x| x.id).collect();
     assert_eq!(left, vec![base.id]);
-    let field = v.fields_of(&[a], &[CURRENT_VERSION]).unwrap();
-    assert!(!field[0].contains_key(CURRENT_VERSION), "the pick goes too");
+    let rows = v.rows(&a).unwrap().unwrap();
+    assert!(
+        !rows.fields.contains_key(CURRENT_VERSION),
+        "the pick goes too"
+    );
     assert!(
         v.remove_head(&a, &base.id, "user", 9).is_err(),
         "a photo keeps one version"
