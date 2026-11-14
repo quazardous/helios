@@ -50,6 +50,8 @@
 //!     helios run ID [--vault FILE|--node ADDRESS] [--param KEY=VALUE]... [--json PARAMS] [--request-id KEY]
 //!                [--window W] [--scope node|window]
 //!     helios batch-run [--vault FILE|--node ADDRESS] --json '{"steps": [...]}' [--window W] [--request-id KEY]
+//!     helios run [--vault FILE|--node ADDRESS] 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...] | --file SCRIPT|-
+//!                [--keep-going] [--json] [--window W] [--request-id KEY]
 //!
 //!     helios doctor display
 //!     helios doctor ai
@@ -77,6 +79,13 @@
 //! param (its value read as JSON, else as text), `--json` gives them all.
 //! Both print the node's answer; a refusal (params against the schema, a
 //! greyed command's reason) goes to the standard error with exit code 1.
+//! With steps between `--`, or a script (`--file`, `-` for the standard
+//! input, one step per line), `run` chains them as one `command.batch`
+//! (`helios_node::chain`): one line per step (`--json`: one JSON object
+//! per step), the first failed step stopping the rest unless
+//! `--keep-going`; exit 1 when a step failed, 4 when the outcome is
+//! unknown. Each step is keyed after the chain's `--request-id`, so the
+//! same chain run again with it applies each step once.
 //!
 //! `calibrate-chart` measures a colour chart shot (a decoded picture or a
 //! raw) and solves its correction, a dry run that writes nothing: the
@@ -194,6 +203,8 @@ const USAGE: &str = "usage:
              [--window W] [--scope node|window]
   helios batch-run --vault FILE|--node ADDRESS --json '{\"steps\": [{\"id\": ID, \"params\": {...}}, ...]}'
              [--window W] [--request-id KEY]
+  helios run --vault FILE|--node ADDRESS 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...] | --file SCRIPT|-
+             [--keep-going] [--json] [--window W] [--request-id KEY]
   helios doctor display
   helios doctor ai";
 
@@ -1251,6 +1262,159 @@ fn commands(verb: &str, args: &[String]) -> ExitCode {
     }
 }
 
+/// Whether `helios run`'s words are a chain: steps between `--`, or a
+/// script (`--file`).
+fn is_chain(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--" || a == "--file")
+}
+
+/// The options and steps of a chain (`helios run STEP -- STEP…`).
+#[derive(Default)]
+struct ChainArgs {
+    vault: Option<PathBuf>,
+    node: Option<String>,
+    window: Option<String>,
+    request_id: Option<String>,
+    file: Option<String>,
+    keep_going: bool,
+    json_lines: bool,
+    groups: Vec<Vec<String>>,
+}
+
+fn chain_args(args: &[String]) -> Result<ChainArgs, String> {
+    let mut parsed = ChainArgs {
+        groups: vec![Vec::new()],
+        ..ChainArgs::default()
+    };
+    let mut words = args.iter();
+    while let Some(arg) = words.next() {
+        let mut value = || words.next().cloned().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--" => parsed.groups.push(Vec::new()),
+            "--vault" => parsed.vault = Some(PathBuf::from(value()?)),
+            "--node" => parsed.node = Some(value()?),
+            "--window" => parsed.window = Some(value()?),
+            "--request-id" => parsed.request_id = Some(value()?),
+            "--file" => parsed.file = Some(value()?),
+            "--keep-going" => parsed.keep_going = true,
+            "--json" => parsed.json_lines = true,
+            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
+            _ => parsed
+                .groups
+                .last_mut()
+                .expect("one group")
+                .push(arg.clone()),
+        }
+    }
+    Ok(parsed)
+}
+
+/// A chain's steps: from its words, or its script.
+fn chain_steps(parsed: &ChainArgs) -> Result<Vec<helios_node::chain::Step>, String> {
+    use helios_node::chain;
+    let steps = match &parsed.file {
+        Some(_) if parsed.groups.iter().any(|g| !g.is_empty()) => {
+            return Err("run takes its steps as words or from --file, not both".into());
+        }
+        Some(path) => {
+            let text = if path == "-" {
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut text).map(|_| text)
+            } else {
+                std::fs::read_to_string(path)
+            };
+            chain::script(&text.map_err(|e| format!("cannot read {path}: {e}"))?)?
+        }
+        None => chain::from_words(&parsed.groups)?,
+    };
+    if steps.is_empty() {
+        return Err("run's script holds no step".into());
+    }
+    if steps.len() > helios_inspect::batch::MAX_STEPS {
+        return Err(format!(
+            "run takes at most {} steps",
+            helios_inspect::batch::MAX_STEPS
+        ));
+    }
+    Ok(steps)
+}
+
+/// `helios run STEP -- STEP…` or `helios run --file SCRIPT|-`: the steps
+/// run in order as one `command.batch` (`helios_node::chain`), one line
+/// per step. Exit 1 when a step failed, 4 when the outcome is unknown,
+/// 130 when interrupted.
+fn run_chain(args: &[String]) -> ExitCode {
+    use helios_node::chain;
+    let parsed = match chain_args(args) {
+        Ok(p) => p,
+        Err(e) => return usage(&e),
+    };
+    if parsed.vault.is_none() && helios_node::connect::explicit(parsed.node.as_deref()).is_none() {
+        return usage("run needs --vault FILE or --node ADDRESS");
+    }
+    let steps = match chain_steps(&parsed) {
+        Ok(s) => s,
+        Err(e) => return usage(&e),
+    };
+    let key = parsed
+        .request_id
+        .clone()
+        .unwrap_or_else(helios_inspect::request_ids::new_request_id);
+    if key.is_empty() || key.len() > chain::LONGEST_KEY {
+        return usage(&format!(
+            "--request-id takes 1 to {} bytes",
+            chain::LONGEST_KEY
+        ));
+    }
+    let mut batch = chain::batch(&steps, parsed.keep_going, Some(&key));
+    if let Some(window) = &parsed.window {
+        batch["window"] = serde_json::json!(window);
+    }
+    let client = match vault_client(parsed.vault.as_deref(), parsed.node.as_deref()) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    // The steps are keyed, not the batch: run again with the same key,
+    // the steps that ran answer `already_applied` and the others run.
+    let answer = match on_node(&client, helios_inspect::batch::METHOD, batch, true) {
+        Ok(answer) => answer,
+        Err(e) if e.code == rpc::code::OUTCOME_UNKNOWN => {
+            eprintln!("helios: {}", e.message);
+            eprintln!(
+                "helios: or run the same steps again with --request-id {key}: the steps that ran answer \"already_applied\" and are not applied twice"
+            );
+            return ExitCode::from(4);
+        }
+        Err(e) => {
+            eprintln!("helios: {}", e.message);
+            return ExitCode::from(1);
+        }
+    };
+    let mut out = std::io::stdout().lock();
+    for (n, result) in answer["steps"].as_array().into_iter().flatten().enumerate() {
+        let line = if parsed.json_lines {
+            chain::json_line(n + 1, result)
+        } else {
+            chain::human_line(n + 1, result)
+        };
+        let _ = writeln!(out, "{line}");
+    }
+    if !parsed.json_lines {
+        let _ = writeln!(
+            out,
+            "{} ran, {} failed, {} skipped",
+            answer["ran"], answer["failed"], answer["skipped"]
+        );
+    }
+    if answer["cancelled"] == true {
+        ExitCode::from(130)
+    } else if answer["failed"].as_u64().is_some_and(|n| n > 0) {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 /// `helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR`.
 fn sandbox(args: &[String]) -> ExitCode {
     use helios_node::sandbox;
@@ -1362,6 +1526,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "stacks") {
         return stacks(&args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "run") && is_chain(&args[1..]) {
+        return run_chain(&args[1..]);
     }
     if let Some(verb) = args
         .first()
