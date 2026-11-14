@@ -1046,7 +1046,10 @@ fn picking_world_with(
             Box::new(|_| Ok(())),
         );
     }
-    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    // Tall enough for the Detail column to show the shared choices and
+    // the account's whole part (a status line, its links and Cancel)
+    // without scrolling.
+    let mut h = headless::harness(shell, vec2(1280.0, 1100.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
     until(&mut h, "the account listed", |h| {
@@ -1268,10 +1271,12 @@ fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
     assert!(shown(&h, "Add a source…"));
     h.run_steps(4);
     // The status line's Cancel, above the footer's.
-    h.query_all_by_label("Cancel")
+    let cancel = h
+        .query_all_by_label("Cancel")
         .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
-        .expect("the status line's Cancel")
-        .click();
+        .expect("the status line's Cancel");
+    cancel.scroll_to_me();
+    cancel.click();
     until(&mut h, "back to the primary action", |h| shown(h, CHOOSE));
     assert!(h.state().import_window_open(), "the window still open");
     assert!(imported.lock().unwrap().is_empty());
