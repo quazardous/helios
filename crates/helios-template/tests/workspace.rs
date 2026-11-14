@@ -395,7 +395,7 @@ fn parts_are_imported_as_a_copy_and_conflicts_are_picked() {
             "layout": serde_json::from_str::<Json>(&layout.to_json()).unwrap(),
             "tools": {
                 "toolbox": ["mask.add.path"],
-                "keymap": [{ "keys": "Mod+I", "command": "mask.add.path" }]
+                "keymap": [{ "keys": "P", "command": "mask.add.path", "when": "focusedPanel == 'helios.viewport'" }]
             }
         }))
         .unwrap();
@@ -404,12 +404,22 @@ fn parts_are_imported_as_a_copy_and_conflicts_are_picked() {
     let dry = workspace::import(&target, &source, &Part::ALL, &none, &catalogue()).unwrap();
     let mut unresolved: Vec<&str> = dry.unresolved().iter().map(|c| c.id.as_str()).collect();
     unresolved.sort_unstable();
-    assert_eq!(unresolved, ["key:Mod+I", "panel:helios.vault", "view"]);
+    assert_eq!(
+        unresolved,
+        [
+            "key:P@focusedPanel == 'helios.viewport'",
+            "panel:helios.vault",
+            "view"
+        ]
+    );
     // The network comes as one opened composite, its nodes renamed.
     assert_eq!(dry.renamed["exposure"], "import_cull_dedupe.exposure");
     let picks = BTreeMap::from([
         ("view".to_string(), Side::Ours),
-        ("key:Mod+I".to_string(), Side::Theirs),
+        (
+            "key:P@focusedPanel == 'helios.viewport'".to_string(),
+            Side::Theirs,
+        ),
         ("panel:helios.vault".to_string(), Side::Theirs),
     ]);
     let merged = workspace::import(&target, &source, &Part::ALL, &picks, &catalogue()).unwrap();
@@ -428,7 +438,7 @@ fn parts_are_imported_as_a_copy_and_conflicts_are_picked() {
         t.tools
             .keymap
             .iter()
-            .any(|b| b.keys == "Mod+I" && b.command == "library.importSource")
+            .any(|b| b.keys == "P" && b.command == "vault.flag.pick")
     );
     assert!(t.tools.toolbox.contains(&"vault.flag.pick".to_string()));
     assert!(t.library.is_some());

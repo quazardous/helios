@@ -189,6 +189,9 @@ command-library-importFiles =
 command-library-export =
     .title = Exporter… (`images` : des identifiants, sinon `scope` : `selected` ou `shown`, la sélection par défaut, sinon toutes les images montrées ; `format` : jpeg, png ou tiff ; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash` : number, overwrite ou skip ; `remember` ; demandé si `folder` manque ou si `ask` vaut true)
 
+command-library-chooseFolder =
+    .title = Choisir le dossier de la bibliothèque où les imports copient les photos (`path` ; demandé par le sélecteur de dossiers s'il manque)
+
 command-library-openFolder =
     .title = Ouvrir un dossier dans le gestionnaire de fichiers (`path`)
 
@@ -691,6 +694,21 @@ command-library-quick-clear =
     .title = Vider la collection rapide ; ses photos restent dans la bibliothèque
 command-library-quick-saveAs =
     .title = Enregistrer la collection rapide comme album (`name` ; `clear` : la vider aussi) ; sans `name`, le demande. Répond l’`id` de l’album
+
+command-library-select-none =
+    .title = Ne sélectionner aucune photo, le curseur retiré aussi
+
+command-library-select-invert =
+    .title = Inverser la sélection : les photos affichées qui n’étaient pas sélectionnées
+
+command-library-select-similar =
+    .title = Sélectionner les photos affichées semblables aux photos sélectionnées (`by` : day, prises le même jour, par défaut ; ou stack, dans la même pile)
+
+command-library-marks-copy =
+    .title = Copier les marques d’une photo : note, étiquettes de couleur, mots-clés et titre (`image` : un identifiant, sinon la photo sous le curseur). Les répond
+
+command-library-marks-paste =
+    .title = Coller les marques copiées (`images` : identifiants, sinon la sélection ; `marks` : parmi rating, labels, tags, title, toutes par défaut ; `mode` : merge, par défaut, ajoute étiquettes et mots-clés, overwrite rend chaque marque identique à la copie)
 
 command-library-scanFolder =
     .title = Analyser un dossier et ceux qu’il contient à la recherche de fichiers nouveaux ou modifiés (`path`), comme la carte des images analyse un volume

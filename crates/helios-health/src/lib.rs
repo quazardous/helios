@@ -111,6 +111,10 @@ pub struct Context {
     /// The library's folder, when known: the volume holding it is the
     /// library's.
     pub library: Option<PathBuf>,
+    /// The library folder chosen (where imports copy photos), read from
+    /// the vault: `None` when not read (no vault: the check says
+    /// nothing), `Some(None)` when none is chosen.
+    pub library_folder: Option<Option<PathBuf>>,
     /// The vault's database file, when there is one.
     pub vault: Option<PathBuf>,
     /// The library's backups, read from the vault; `None` without one
@@ -661,6 +665,7 @@ mod tests {
                     vec![
                         "vault.integrity",
                         "library.default",
+                        "library.folder",
                         "library.changed-outside"
                     ]
                 ),

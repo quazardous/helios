@@ -56,7 +56,7 @@ use helios_inspect::client::{Client, Pending};
 use helios_node_core::cursor::query_json;
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
-use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, TAGS};
+use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, TAGS, TITLE};
 use helios_vault::{
     EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version, edit,
 };
@@ -70,13 +70,14 @@ use crate::library::{Change, Entry};
 type Searched = (Vec<String>, helios_vault::Facets);
 
 /// The fields the library shows (the capture time gives the day the
-/// search field's dates match).
-const SHOWN: [&str; 9] = [
+/// search field's dates match; the title is copied with the marks).
+const SHOWN: [&str; 10] = [
     RATING,
     REJECTED,
     PICKED,
     LABELS,
     TAGS,
+    TITLE,
     CAPTURED,
     cull::FOCUS,
     cull::CLIP_WHITE,
