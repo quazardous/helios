@@ -11,6 +11,14 @@
 //! refused image is answered with its gate in words and left untouched.
 //! Every image written is one undoable step of the library together. With
 //! `dry_run`, nothing is written.
+//!
+//! With `together`, the photos (one camera's, refused otherwise) give one
+//! look ([`together`]): each fitted on its own, the looks that passed
+//! averaged and scored on every photo's held-out pairs, then written into
+//! every raw of the selection; with `default`, kept as the camera's
+//! default too. `look.camera.setDefault` keeps or clears a camera's
+//! default look, which the raws of that camera an import brings in start
+//! with ([`defaults`]).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -23,6 +31,13 @@ use serde_json::{Value, json};
 
 use super::{Done, at_hand, image_id, store_error};
 use crate::commands::{CommandSpec, Need, object};
+
+pub mod defaults;
+pub mod together;
+
+pub use defaults::{
+    IMPORT_ORIGIN, SET_DEFAULT, default_on_import, look_of_camera, raw_camera, set_default,
+};
 
 /// Fits a camera look to photos' embedded JPEG.
 pub const FIT: &str = "look.camera.fit";
@@ -42,6 +57,18 @@ pub fn spec() -> CommandSpec {
                 "dry_run",
                 json!({ "type": "boolean",
                         "description": "answer each fit or refusal, write nothing" }),
+                false,
+            ),
+            (
+                "together",
+                json!({ "type": "boolean",
+                        "description": "one look from all the photos, of one camera, written into each" }),
+                false,
+            ),
+            (
+                "default",
+                json!({ "type": "boolean",
+                        "description": "with `together`: keep the look as the camera's default too" }),
                 false,
             ),
         ]))
@@ -76,7 +103,7 @@ pub fn shot(path: &Path) -> Result<Option<Shot>, Message> {
 }
 
 /// A preview's hash: what the look was fitted to.
-fn preview_hash(preview: &Image) -> String {
+pub(crate) fn preview_hash(preview: &Image) -> String {
     let mut h = blake3::Hasher::new();
     for v in preview.data() {
         h.update(&v.to_le_bytes());
@@ -85,7 +112,7 @@ fn preview_hash(preview: &Image) -> String {
 }
 
 /// A refusal as answered: its gate, in words, and the numbers behind it.
-fn refused(r: &Refusal) -> Value {
+pub(crate) fn refused(r: &Refusal) -> Value {
     json!({
         "gate": r.gate,
         "words": r.gate.words(),
@@ -94,7 +121,7 @@ fn refused(r: &Refusal) -> Value {
 }
 
 /// A fitted look as answered: its kind, its scores and its notes.
-fn report(look: &Look) -> Value {
+pub(crate) fn report(look: &Look) -> Value {
     let notes: Vec<Value> = look
         .report
         .notes
@@ -125,9 +152,19 @@ fn chain_of(edit: &Value) -> Result<render::Chain, Message> {
     Ok(render::from_edit(&given))
 }
 
+/// A photo's look, fitted.
+pub(crate) struct Fit {
+    /// The look as the chain runs it.
+    pub look: Look,
+    /// The hash of the preview it was fitted to.
+    pub hash: String,
+    /// What it was fitted on, to score another look on the same pairs.
+    pub prepared: render::Prepared,
+}
+
 /// The look fitted to `shot`, rendered through `edit`'s chain, as the
 /// chain runs it; or the gate that refused it.
-fn fit_shot(shot: &Shot, edit: &Value) -> Result<Result<(Look, String), Refusal>, Message> {
+pub(crate) fn fit_shot(shot: &Shot, edit: &Value) -> Result<Result<Fit, Refusal>, Message> {
     let Some(preview) = &shot.preview else {
         return Ok(Err(Refusal {
             gate: Gate::PreviewTooSmall,
@@ -138,12 +175,23 @@ fn fit_shot(shot: &Shot, edit: &Value) -> Result<Result<(Look, String), Refusal>
     let prepared = render::prepare(&shot.mosaic, &shot.camera, preview, &chain).map_err(|e| {
         Message::new("look-render-failed", "cannot render the raw: { $error }").with("error", e)
     })?;
-    Ok(look::fit(&prepared.inputs()).map(|fitted| {
-        (
-            render::for_chain(&fitted, prepared.gain),
-            preview_hash(preview),
-        )
+    Ok(look::fit(&prepared.inputs()).map(|fitted| Fit {
+        look: render::for_chain(&fitted, prepared.gain),
+        hash: preview_hash(preview),
+        prepared,
     }))
+}
+
+/// A long fit's progress: told before each photo (`done` of `total`),
+/// it answers whether to go on (`false`: the job was cancelled).
+pub type Step<'a> = &'a dyn Fn(usize, usize) -> bool;
+
+/// The answer to a cancelled fit.
+pub(crate) fn cancelled() -> Message {
+    Message::new(
+        "look-fit-cancelled",
+        "the camera look's fit was cancelled: nothing was written",
+    )
 }
 
 /// `look.camera.fit`: each image's look fitted and, without `dry_run`,
@@ -161,14 +209,46 @@ pub fn fit_with<S: Store>(
     now: u64,
     shot_of: &dyn Fn(&Path) -> Result<Option<Shot>, Message>,
 ) -> Result<Done, Message> {
+    fit_with_progress(vault, params, origin, now, shot_of, &|_, _| true)
+}
+
+/// [`fit_with`], its progress told to `step` before each photo (a job's
+/// progress), which stops it when it answers `false`: nothing is written
+/// then.
+///
+/// # Errors
+/// As [`fit_with`]; with `together`, photos of several cameras; a fit
+/// cancelled.
+pub fn fit_with_progress<S: Store>(
+    vault: &Vault<S>,
+    params: &Value,
+    origin: &str,
+    now: u64,
+    shot_of: &dyn Fn(&Path) -> Result<Option<Shot>, Message>,
+    step: Step<'_>,
+) -> Result<Done, Message> {
     let dry_run = params["dry_run"].as_bool().unwrap_or(false);
     let mut ids: Vec<ImageId> = Vec::new();
     for named in params["images"].as_array().into_iter().flatten() {
         ids.push(image_id(vault, named.as_str().unwrap_or_default())?);
     }
+    if params["together"].as_bool().unwrap_or(false) {
+        let ask = together::Ask {
+            ids,
+            dry_run,
+            default: params["default"].as_bool().unwrap_or(false),
+            origin,
+            now,
+        };
+        return together::fit(vault, &ask, shot_of, step);
+    }
     let mut answers = Vec::new();
     let mut changes = Changes::default();
-    for id in ids {
+    let total = ids.len();
+    for (done, id) in ids.into_iter().enumerate() {
+        if !step(done, total) {
+            return Err(cancelled());
+        }
         let path = at_hand(vault, &id)?;
         let (mut session, head) =
             helios_vault::EditSession::open(vault, id).map_err(store_error)?;
@@ -184,7 +264,7 @@ pub fn fit_with<S: Store>(
             continue;
         };
         let (fitted, hash) = match fit_shot(&shot, &before_edit)? {
-            Ok(fitted) => fitted,
+            Ok(fit) => (fit.look, fit.hash),
             Err(r) => {
                 answer["refused"] = refused(&r);
                 answers.push(answer);
@@ -334,6 +414,201 @@ mod tests {
         let vault = Vault::new(MemoryStore::default());
         let id = vault.import_file(&path, 1).unwrap();
         (vault, dir, id)
+    }
+
+    /// A vault holding `n` photos (files at hand, each its own), and
+    /// their ids in order.
+    fn vault_of(name: &str, n: usize) -> (Vault<MemoryStore>, std::path::PathBuf, Vec<ImageId>) {
+        let (vault, dir, first) = vault(name);
+        let mut ids = vec![first];
+        for i in 1..n {
+            let image = Image::new(Region::sized(4, 4), 3, vec![0.1 * i as f32; 48]);
+            let path = dir.join(format!("shot-{i}.tif"));
+            std::fs::write(
+                &path,
+                helios_export::encode(&image, &helios_export::Format::Tiff).unwrap(),
+            )
+            .unwrap();
+            ids.push(vault.import_file(&path, 1).unwrap());
+        }
+        (vault, dir, ids)
+    }
+
+    /// The shot of every file: the synthetic raw, its camera's model
+    /// `model_of` the file's name says.
+    fn shots(
+        model_of: fn(&Path) -> &'static str,
+    ) -> impl Fn(&Path) -> Result<Option<Shot>, Message> {
+        let mosaic = mosaic();
+        let shown = preview(&mosaic, W);
+        move |path: &Path| {
+            let mut camera = camera();
+            camera.model = model_of(path).into();
+            Ok(Some(Shot {
+                mosaic: mosaic.clone(),
+                camera,
+                preview: Some(shown.clone()),
+            }))
+        }
+    }
+
+    #[test]
+    fn photos_fitted_together_give_one_look_written_into_each_and_kept_as_the_default() {
+        let (vault, dir, ids) = vault_of("together", 2);
+        let read = shots(|_| "Look");
+        let images: Vec<String> = ids.iter().map(ImageId::hex).collect();
+        let told = std::cell::RefCell::new(Vec::new());
+        let step = |done: usize, total: usize| {
+            told.borrow_mut().push((done, total));
+            true
+        };
+        let params = json!({ "images": images, "together": true, "default": true });
+        let done = fit_with_progress(&vault, &params, "user", 30, &read, &step).unwrap();
+        assert_eq!(*told.borrow(), vec![(0, 2), (1, 2), (2, 2)]);
+        let answer = &done.answer;
+        assert_eq!(answer["fitted"], 2, "{answer}");
+        assert_eq!(answer["camera"], "synthetic look");
+        let (held, base) = (
+            answer["look"]["held_out"]["mean"].as_f64().unwrap(),
+            answer["look"]["baseline"]["mean"].as_f64().unwrap(),
+        );
+        assert!(held < 0.7 * base, "{answer}");
+        // Both photos carry the one look, the camera keeps it: one step.
+        assert_eq!(done.changes.images.len(), 2);
+        assert_eq!(done.changes.documents.len(), 1);
+        let tone = |id: ImageId| {
+            head(&vault, id).unwrap()["modules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["name"] == edit::TONE)
+                .unwrap()["params"]
+                .clone()
+        };
+        assert_eq!(tone(ids[0]), tone(ids[1]));
+        let kept = vault.look_default("synthetic look").unwrap().unwrap();
+        assert_eq!(
+            defaults::preview_of(&kept).as_deref(),
+            answer["preview"].as_str()
+        );
+        vault.revert(&done.changes).unwrap();
+        assert_eq!(head(&vault, ids[0]), None);
+        assert_eq!(vault.look_default("synthetic look").unwrap(), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn photos_of_two_cameras_are_refused_together_and_nothing_is_written() {
+        let (vault, dir, ids) = vault_of("mixed", 2);
+        let read = shots(|p| {
+            if p.ends_with("shot.tif") {
+                "Look"
+            } else {
+                "Other"
+            }
+        });
+        let images: Vec<String> = ids.iter().map(ImageId::hex).collect();
+        let params = json!({ "images": images, "together": true });
+        let refused = fit_with(&vault, &params, "user", 30, &read).unwrap_err();
+        assert_eq!(refused.key, "look-mixed-cameras");
+        assert!(
+            refused.english.contains("synthetic other"),
+            "{}",
+            refused.english
+        );
+        assert_eq!(head(&vault, ids[0]), None);
+        // A cancelled fit writes nothing either.
+        let params = json!({ "images": [ids[0].hex()], "together": true });
+        let stopped =
+            fit_with_progress(&vault, &params, "user", 30, &read, &|_, _| false).unwrap_err();
+        assert_eq!(stopped.key, "look-fit-cancelled");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_camera_s_default_look_is_kept_put_on_its_imported_raws_and_cleared() {
+        let (vault, dir, ids) = vault_of("default", 4);
+        let read = shots(|_| "Look");
+        // The first photo fitted on its own, its look kept as the default.
+        fit_with(
+            &vault,
+            &json!({ "images": [ids[0].hex()] }),
+            "user",
+            10,
+            &read,
+        )
+        .unwrap();
+        let kept = set_default(
+            &vault,
+            &json!({ "camera": "synthetic look", "image": ids[0].hex() }),
+            20,
+        )
+        .unwrap();
+        assert_eq!(kept.answer["kept"], true);
+        assert_eq!(kept.changes.documents.len(), 1);
+        // An import bringing in photos 1 to 3: 1 a raw of that camera, 2 a
+        // raw of another, 3 a picture; photo 0 was in the vault before.
+        let camera_of = |p: &Path| {
+            let name = p.file_name()?.to_str()?;
+            match name {
+                "shot-1.tif" => Some("synthetic look".to_string()),
+                "shot-2.tif" => Some("another camera".to_string()),
+                _ => None,
+            }
+        };
+        let change = |id: ImageId, new: bool| helios_vault::undo::Change {
+            image: id,
+            before: if new { None } else { vault.rows(&id).unwrap() },
+            after: vault.rows(&id).unwrap(),
+        };
+        let mut imported = Changes {
+            images: vec![
+                change(ids[0], false),
+                change(ids[1], true),
+                change(ids[2], true),
+                change(ids[3], true),
+            ],
+            ..Changes::default()
+        };
+        let put = default_on_import(&vault, &mut imported, 30, &camera_of).unwrap();
+        assert_eq!(put, 1);
+        assert!(edit::applied(&head(&vault, ids[1]).unwrap()));
+        assert_eq!(head(&vault, ids[2]), None);
+        assert_eq!(head(&vault, ids[3]), None);
+        let versions = vault.versions(&ids[1]).unwrap();
+        assert_eq!(versions[0].origin, IMPORT_ORIGIN);
+        // Still untouched by hand: the first opening puts the camera's
+        // default profile on it.
+        assert!(defaults::untouched(&versions));
+        // The import's own change takes the version in: undone, it goes.
+        assert_eq!(imported.images[1].after, vault.rows(&ids[1]).unwrap());
+        // Imported again (known now), it is left as it is.
+        let mut again = Changes {
+            images: vec![change(ids[1], false)],
+            ..Changes::default()
+        };
+        assert_eq!(
+            default_on_import(&vault, &mut again, 40, &camera_of).unwrap(),
+            0
+        );
+        assert_eq!(vault.versions(&ids[1]).unwrap().len(), 1);
+        // A look never fitted is refused; `clear` clears.
+        let refused = set_default(
+            &vault,
+            &json!({ "camera": "synthetic look", "look": { "cameracolour": {}, "cameratone": {} } }),
+            50,
+        )
+        .unwrap_err();
+        assert_eq!(refused.key, "look-default-not-fitted");
+        let cleared = set_default(
+            &vault,
+            &json!({ "camera": "synthetic look", "clear": true }),
+            60,
+        )
+        .unwrap();
+        assert_eq!(cleared.answer["had"], true);
+        assert_eq!(vault.look_default("synthetic look").unwrap(), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn head(vault: &Vault<MemoryStore>, image: ImageId) -> Option<Value> {

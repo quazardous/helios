@@ -349,7 +349,7 @@ impl<S: Store + Send + 'static> VaultService<S> {
         let mut options = library::import_options(params, Some(call.cancel_flag()))?;
         options.origin = Some(origin);
         let mut files = Vec::new();
-        let report = helios_library::import::import(
+        let mut report = helios_library::import::import(
             &self.vault,
             &self.jobs,
             &paths,
@@ -357,9 +357,22 @@ impl<S: Store + Send + 'static> VaultService<S> {
             now(),
             &mut |line| files.push(line.clone()),
         )?;
+        // The cameras' default looks on the raws brought in, as the
+        // desktop's import puts them.
+        let looks = if params["camera_look"] == false {
+            0
+        } else {
+            crate::calibrate::look::default_on_import(
+                &self.vault,
+                &mut report.changes,
+                now(),
+                &crate::calibrate::look::raw_camera,
+            )
+            .map_err(|m| m.english)?
+        };
         self.bus
             .publish(SOURCE, None, &Imported { report: &report });
-        Ok(json!({ "report": report, "files": files }))
+        Ok(json!({ "report": report, "files": files, "camera_looks": looks }))
     }
 }
 

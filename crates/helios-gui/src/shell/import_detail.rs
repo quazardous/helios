@@ -4,7 +4,8 @@
 //! options on the right of the grid.
 //!
 //! - **At the top, the choices every source shares**: duplicates, the
-//!   darktable edits (when the connector honours them), More.
+//!   darktable edits (when the connector honours them), the camera's
+//!   default look (when the library keeps one), More.
 //! - **Below, the connector's own section**, under its name: what the
 //!   connector declares calls for each part ([`ImportWindow::detail`]),
 //!   one contract for every connector (folders, cards, Google Photos, the

@@ -11,6 +11,9 @@
 //!   example name from the same photo;
 //! - **Duplicates**: skip, keep or ask;
 //! - **Read darktable edits**;
+//! - **Apply the camera's default look**: shown when the library keeps a
+//!   camera's default look, on by default; the raws of that camera start
+//!   with it, as raw editors apply a camera's defaults at import;
 //! - **More**, folded: metadata and time offsets, to come.
 //!
 //! Into and Name apply to a copy only: "Add where they are" hides them.
@@ -55,6 +58,8 @@ pub struct Choices {
     pub rename: String,
     pub duplicates: Duplicates,
     pub darktable: bool,
+    /// The raws of a camera with a default camera look start with it.
+    pub camera_look: bool,
 }
 
 impl Default for Choices {
@@ -68,8 +73,9 @@ impl Default for Choices {
 impl Choices {
     /// The choices of a local source's values, by the contract's key
     /// names (`copy`, `into`, `layout`, `rename`, `duplicates`,
-    /// `darktable`); a value missing or not fitting gives the folder
-    /// default's (`{stem}`, by day, duplicates skipped, sidecars read).
+    /// `darktable`, `camera_look`); a value missing or not fitting gives
+    /// the folder default's (`{stem}`, by day, duplicates skipped,
+    /// sidecars read, the camera's default look applied).
     pub fn from_values(values: &serde_json::Map<String, Value>) -> Self {
         let text = |key: &str| values.get(key).and_then(Value::as_str);
         let flag = |key: &str, or: bool| values.get(key).and_then(Value::as_bool).unwrap_or(or);
@@ -84,6 +90,7 @@ impl Choices {
                 .and_then(|t| Duplicates::parse(t).ok())
                 .unwrap_or_default(),
             darktable: flag("darktable", true),
+            camera_look: flag("camera_look", true),
         }
     }
 
@@ -99,18 +106,20 @@ impl Choices {
         values.insert("rename".into(), json!(self.rename));
         values.insert("duplicates".into(), json!(self.duplicates.as_str()));
         values.insert("darktable".into(), json!(self.darktable));
+        values.insert("camera_look".into(), json!(self.camera_look));
         values
     }
 
     /// The keys of a source contract the choices stand for: the
     /// connector's other keys are its own parameters.
-    pub const KEYS: [&str; 6] = [
+    pub const KEYS: [&str; 7] = [
         "copy",
         "into",
         "layout",
         "rename",
         "duplicates",
         "darktable",
+        "camera_look",
     ];
 
     /// `library.importFiles`'s arguments for `paths`, copied or not.
@@ -120,6 +129,7 @@ impl Choices {
             "copy": copy,
             "duplicates": self.duplicates.as_str(),
             "darktable": self.darktable,
+            "camera_look": self.camera_look,
         });
         if copy {
             args["layout"] = json!(self.layout.as_str());
@@ -205,6 +215,8 @@ pub(super) struct ChoiceWords {
     pub ask: String,
     pub darktable: String,
     pub darktable_help: String,
+    pub camera_look: String,
+    pub camera_look_help: String,
     pub more: String,
     pub more_note: String,
     /// Whose choices the column shows: a source's, or the window's.
@@ -459,6 +471,14 @@ impl ImportWindow {
                 "gui-import-window-darktable-help",
                 "Each .xmp sidecar, duplicates included, becomes a version of its photo",
             )),
+            camera_look: t(Message::new(
+                "gui-import-window-camera-look",
+                "Apply the camera's default look",
+            )),
+            camera_look_help: t(Message::new(
+                "gui-import-window-camera-look-help",
+                "Raws of a camera with a default camera look start with it, as their first version",
+            )),
             more: t(Message::new("gui-import-window-more", "More")),
             more_note: t(Message::new(
                 "gui-import-window-more-note",
@@ -570,7 +590,8 @@ pub(super) fn header_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceW
 }
 
 /// The choices every source shares: duplicates, darktable edits (when
-/// the connector honours them), More.
+/// the connector honours them), the camera's default look (when the
+/// library keeps one), More.
 pub(super) fn shared_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceWords) {
     ui.horizontal_wrapped(|ui| {
         ui.label(&words.duplicates);
@@ -582,6 +603,11 @@ pub(super) fn shared_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ChoiceW
     if w.sources.honours.darktable {
         ui.checkbox(&mut w.choices.darktable, &words.darktable)
             .on_hover_text(&words.darktable_help);
+    }
+    // Only when the library keeps a camera's default look.
+    if w.camera_looks {
+        ui.checkbox(&mut w.choices.camera_look, &words.camera_look)
+            .on_hover_text(&words.camera_look_help);
     }
     egui::CollapsingHeader::new(&words.more)
         .id_salt("helios.import.more")
@@ -701,6 +727,7 @@ mod tests {
             rename: "{date}-{seq}".into(),
             duplicates: Duplicates::Keep,
             darktable: false,
+            camera_look: false,
         };
         let values = choices.values();
         contract
