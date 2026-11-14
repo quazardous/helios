@@ -458,12 +458,8 @@ impl ImportWindow {
     /// Reads the sources ticked (each on a thread of its own), forgets
     /// the ones unticked, and takes in what the reads sent.
     fn follow_scans(&mut self) {
+        self.forget_unticked();
         let ticked = self.ticked.clone();
-        let before = self.scans.len();
-        self.scans.retain(|(p, _, _)| ticked.contains(p));
-        if self.scans.len() != before {
-            self.contents.keep_sources(&ticked);
-        }
         for path in &ticked {
             if self.scans.iter().any(|(p, _, _)| p == path) {
                 continue;
@@ -551,6 +547,27 @@ impl ImportWindow {
                 }
             }
         }
+    }
+
+    /// The sources no longer ticked are forgotten at once: their scans
+    /// stopped (what they still send is dropped with them) and their
+    /// photos gone from the contents. Run before anything reads the
+    /// contents in a pass, the click that changed the source included:
+    /// the grid, the count and Import never show another source's.
+    fn forget_unticked(&mut self) {
+        let ticked = &self.ticked;
+        self.scans.retain(|(p, _, _)| ticked.contains(p));
+        // The photos chosen in a service's page are no folder's.
+        if self.chosen.is_none() {
+            self.contents.keep_sources(ticked);
+        }
+    }
+
+    /// Whether every source ticked is read through.
+    fn read_through(&self) -> bool {
+        self.ticked
+            .iter()
+            .all(|t| self.scans.iter().any(|(p, _, done)| p == t && *done))
     }
 
     /// Asks a frame of the window from another thread: of its own OS
@@ -1093,8 +1110,7 @@ impl Shell {
 
     /// Whether every source ticked in the import window is read through.
     pub fn import_read(&self) -> bool {
-        let w = self.import.get();
-        w.scans.len() == w.ticked.len() && w.scans.iter().all(|(_, _, done)| *done)
+        self.import.get().read_through()
     }
 
     /// The import window's cells: name, day, probably in the Library, a
@@ -2645,6 +2661,9 @@ impl ImportWindow {
     /// scans found since (entries, marks, previews), on the first source
     /// ticked, its selection the photos ticked.
     fn sync_browser(&mut self, words: &GridWords) {
+        // The source clicked in this pass: the one before it is gone from
+        // the contents before they are published.
+        self.forget_unticked();
         let thumbs = self.thumbnails();
         // The previews read (sRGB pictures at the cell's size already) go
         // to the thumbnails, which make a few textures a frame.
@@ -2661,15 +2680,15 @@ impl ImportWindow {
             .map(Path::to_path_buf)
             .or_else(|| self.ticked.first().cloned())
             .unwrap_or_else(|| PathBuf::from(NOWHERE));
-        let done = self.chosen.is_some()
-            || self.scans.len() == self.ticked.len() && self.scans.iter().all(|s| s.2);
+        let done = self.chosen.is_some() || self.read_through();
         let sig = (
             self.contents.revision(),
             self.contents.new_only,
             place.clone(),
             done,
         );
-        if self.published.as_ref() != Some(&sig) {
+        let republished = self.published.as_ref() != Some(&sig);
+        if republished {
             let c = &mut self.contents;
             let shown = c.shown();
             let mut marks = std::collections::HashMap::with_capacity(shown.len());
@@ -2736,6 +2755,19 @@ impl ImportWindow {
             browser.open(place);
         }
         browser.pump();
+        // A listing that ended is told nothing more: one that missed what
+        // was just published (another source's photos gone, a filter's)
+        // lists again, never keeping photos the contents no longer show.
+        if republished && !browser.loading() {
+            let published = self.source.entries();
+            let listed: std::collections::HashSet<&Path> =
+                browser.entries().iter().map(|e| e.path.as_path()).collect();
+            if listed.len() != published.len()
+                || published.iter().any(|e| !listed.contains(e.path.as_path()))
+            {
+                browser.reload();
+            }
+        }
         // The selection is the photos ticked: the new ones come ticked.
         let key = (
             self.contents.revision(),
