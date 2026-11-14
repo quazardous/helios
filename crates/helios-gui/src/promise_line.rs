@@ -160,7 +160,8 @@ mod tests {
         let mut asked = promise(State::Pending);
         asked.cancel_asked = true;
         let mut h = harness(asked);
-        h.run();
+        // Its spinner repaints for ever: a few frames, not a settled run.
+        h.run_steps(3);
         h.get_by_label("Cancelling…");
         assert!(h.query_by_label("Cancel").is_none());
         // Failed, retryable: the reason and Retry, no Cancel.
