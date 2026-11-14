@@ -732,6 +732,48 @@ fn the_camera_look_header_saves_and_clears_the_camera_s_default() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The camera look's fit runs off the frame, on threads its shell owns:
+/// asked again and again, a shell dropped waits for them, so what they
+/// write has landed by then and none outlives the shell (the process
+/// once crashed at exit with one still running).
+#[test]
+fn the_camera_look_fits_asked_off_the_frame_end_with_their_shell() {
+    use egui_kittest::kittest::Queryable;
+
+    for round in 0..2 {
+        let (shell, _history, dir) = look_shell(&format!("look-threads-{round}"));
+        let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+        h.state_mut()
+            .run("helios.params.focus", json!(null), Origin::User)
+            .unwrap();
+        frames(&mut h);
+        for _ in 0..2 {
+            h.get_by_role_and_label(egui::accesskit::Role::Button, "Fit to the camera's JPEG")
+                .click();
+            h.step();
+        }
+        for _ in 0..2 {
+            let asked = h
+                .state_mut()
+                .run(
+                    calibrate::LOOK_CHOOSE,
+                    json!({ "look": "fit" }),
+                    Origin::User,
+                )
+                .unwrap();
+            assert_eq!(asked["pending"], true, "{asked}");
+        }
+        // No wait for the node: dropping the shell waits for its threads.
+        let values = h.state().values().clone();
+        drop(h);
+        assert!(
+            !calibrate::read_refusal(&values.lock().unwrap()).is_empty(),
+            "the fits ended before their shell"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 #[test]
 fn the_camera_look_preset_puts_the_camera_s_default_look_on_in_one_step() {
     use egui_kittest::kittest::Queryable;
