@@ -2476,6 +2476,10 @@ fn the_quick_collection_toggles_clears_and_saves<S: Store>(s: S) {
     let (added, out) = v.toggle_quick(&[id(2)]).unwrap();
     assert!(!added);
     assert_eq!(in_album(&v, QUICK), vec![id(1), id(3)]);
+    // As a node's client gets them: in JSON, read back whole.
+    let read: crate::Changes = serde_json::from_value(serde_json::to_value(&out).unwrap()).unwrap();
+    assert_eq!(read, out);
+    let out = read;
     v.revert(&out).unwrap();
     assert_eq!(in_album(&v, QUICK).len(), 3);
     v.replay(&out).unwrap();

@@ -1581,7 +1581,7 @@ fn the_library_read_again_is_read_off_the_frame() {
 /// not wait for it; once it lets go, the write is kept and the counts
 /// shown.
 #[test]
-fn a_vault_held_locked_does_not_delay_the_filter_history_or_the_folders() {
+fn a_vault_held_locked_does_not_delay_the_filter_history_the_folders_or_the_albums() {
     use helios_vault::Store as _;
     let root = temp("held");
     let path = vault_file(&root);
@@ -1605,6 +1605,11 @@ fn a_vault_held_locked_does_not_delay_the_filter_history_or_the_folders() {
         json!({ "query": "camera:R5", "pinned": true }),
     );
     h.get_by_label("Folders").click();
+    h.state_mut()
+        .library_mut()
+        .edit_album(helios_gui::library::AlbumEdit::QuickToggle {
+            images: vec![id(1).hex()],
+        });
     let mut slowest = std::time::Duration::ZERO;
     for i in 0..3 {
         let started = std::time::Instant::now();
@@ -1635,6 +1640,20 @@ fn a_vault_held_locked_does_not_delay_the_filter_history_or_the_folders() {
         .unwrap()
         .unwrap();
     assert!(kept.to_string().contains("camera:R5"), "{kept}");
+    // The quick collection changed once, one step of the history.
+    assert_eq!(persist.vault().quick_collection().unwrap(), [id(1).hex()]);
+    assert_eq!(h.state().library().quick().len(), 1);
+    assert_eq!(
+        h.state()
+            .library_history()
+            .line()
+            .undo
+            .last()
+            .unwrap()
+            .label
+            .text,
+        "Add 1 photos to the quick collection"
+    );
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
