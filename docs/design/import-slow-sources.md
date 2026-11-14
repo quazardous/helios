@@ -274,7 +274,11 @@ token bucket per account.
 1. **Copy imports skip what the map knows** (done). `Run::file` uses
    `seen_before` for copies too (the source file's sighting links to an
    image in the Library, unchanged): a resumed card copy reads nothing
-   already done.
+   already done. The card's file is then a second location of the image;
+   every reader of an image's file (export, cull, capture, a library
+   view's thumbnails, the darkroom, calibration) picks through
+   `helios_vault::ReadOrder`: the library folder's copy first, a card or
+   ingest source last.
 2. **Import by rule as a node job.** `library.import` takes `{source,
    rule}`; the job lists through the connector and imports page by page;
    "Import all" / "Import new" enabled at once; the window shows the job's

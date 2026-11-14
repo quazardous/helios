@@ -402,11 +402,9 @@ fn image_id<S: Store>(vault: &Vault<S>, named: &str) -> Result<ImageId, Message>
 /// An image's file at hand.
 fn at_hand<S: Store>(vault: &Vault<S>, id: &ImageId) -> Result<PathBuf, Message> {
     vault
-        .locations(id)
+        .file_to_read(id)
         .map_err(store_error)?
-        .into_iter()
         .map(|l| l.path)
-        .find(|p| p.exists())
         .ok_or_else(|| {
             Message::new(
                 "calibrate-image-not-at-hand",
@@ -825,11 +823,9 @@ fn shot<S: Store>(vault: Option<&Vault<S>>, params: &Value) -> Result<Shot, Mess
                     .ok_or_else(|| unknown_image(named))?,
             };
             let path = vault
-                .locations(&id)
+                .file_to_read(&id)
                 .map_err(store_error)?
-                .into_iter()
                 .map(|l| l.path)
-                .find(|p| p.exists())
                 .ok_or_else(|| {
                     Message::new(
                         "calibrate-image-not-at-hand",

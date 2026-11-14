@@ -337,13 +337,19 @@ impl<S: Store> Vault<S> {
         }
         let rows = self.read(|s| s.library_rows(ids, names))?;
         self.count_query();
+        // Each row's locations in the order they are read: a view takes
+        // the first present one (the library copy before a card's file).
+        let order = self.read_order()?;
         Ok(ids
             .iter()
             .zip(rows)
-            .map(|(id, (fields, locations))| LibraryRow {
-                id: *id,
-                fields,
-                locations,
+            .map(|(id, (fields, mut locations))| {
+                order.sort(&mut locations);
+                LibraryRow {
+                    id: *id,
+                    fields,
+                    locations,
+                }
             })
             .collect())
     }

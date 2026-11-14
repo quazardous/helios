@@ -461,13 +461,7 @@ pub fn on_open<S: Store>(
     // The camera look's header fits this image, and compares its file's
     // embedded JPEG.
     offered["image"] = Value::String(image.hex());
-    if let Some(path) = vault
-        .locations(&image)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|l| l.path)
-        .find(|p| p.exists())
-    {
+    if let Some(path) = vault.file_to_read(&image).ok().flatten().map(|l| l.path) {
         offered["path"] = Value::String(path.to_string_lossy().into_owned());
     }
     set_offer(store, Some(&offered));
