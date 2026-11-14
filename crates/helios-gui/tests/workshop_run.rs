@@ -717,7 +717,7 @@ fn a_vault_held_locked_does_not_delay_the_frame_that_starts_a_run() {
     // Let go: the run ends, its record kept.
     other.rollback().unwrap();
     drop(other);
-    let end = Instant::now() + Duration::from_secs(60);
+    let end = Instant::now() + Duration::from_mins(1);
     let record = loop {
         if let Some(record) = persist.vault().workshop_run(&run).unwrap() {
             break record;

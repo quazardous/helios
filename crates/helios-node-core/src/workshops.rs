@@ -185,7 +185,7 @@ mod tests {
         for (spec, example) in specs().iter().zip(examples) {
             assert_eq!(
                 spec.read_only,
-                spec.id.ends_with(".get") || spec.id == PHOTO
+                [PHOTO, BOOK_GET, RECORD_GET].contains(&spec.id.as_str())
             );
             validate(&spec.params, &example)
                 .unwrap_or_else(|e| panic!("{}: its example does not fit: {e}", spec.id));

@@ -226,7 +226,9 @@ impl Runner {
     }
 
     /// What enters the workshop on `image` (a proxy), the values it holds
-    /// there, and the graph with the photo's edit; with its head version.
+    /// there, and the graph with the photo's edit; with its head version
+    /// and its file's name.
+    #[allow(clippy::type_complexity)]
     fn input(
         &self,
         ask: &RunAsk,
