@@ -356,6 +356,9 @@ impl StorageLink for NodeStorage {
     }
 }
 
+/// The waiting cards checked again: each one's path and what it is now.
+type Checked = Vec<(std::path::PathBuf, Result<Card, String>)>;
+
 /// What the shell keeps of storage.
 #[derive(Default)]
 pub(crate) struct StoragePage {
@@ -373,7 +376,7 @@ pub(crate) struct StoragePage {
     seen: u64,
     /// The waiting cards checked again off the frame, once a backup
     /// ended: each one's path and what it is now.
-    checking: Option<Receiver<Vec<(std::path::PathBuf, Result<Card, String>)>>>,
+    checking: Option<Receiver<Checked>>,
 }
 
 impl Shell {
