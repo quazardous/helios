@@ -66,7 +66,7 @@ use serde_json::Value;
 
 mod batch;
 pub use batch::{
-    CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode,
+    CopiedMarks, MARK_KINDS, MARKS_COPY_COMMAND, MARKS_PASTE_COMMAND, PasteMode, REMOVE_COMMAND,
     SELECT_INVERT_COMMAND, SELECT_NONE_COMMAND, SELECT_SIMILAR_COMMAND, Similar,
 };
 
@@ -1637,6 +1637,9 @@ pub struct Library {
     resort: Option<helios_vault::Order>,
     /// The marks copied last ([`MARKS_COPY_COMMAND`]), to paste.
     copied: Option<CopiedMarks>,
+    /// The photos asked taken out of the Library ([`REMOVE_COMMAND`]),
+    /// for the host.
+    removals: Vec<Vec<String>>,
 }
 
 /// The library's sort when nothing chose one: by capture time, oldest
@@ -1754,6 +1757,7 @@ impl Default for Library {
             sort: DEFAULT_SORT,
             resort: None,
             copied: None,
+            removals: Vec::new(),
         }
     }
 }
@@ -4007,6 +4011,13 @@ impl Library {
                     items: vec![
                         crate::dialogs::MenuItem::command("library.export"),
                         crate::dialogs::MenuItem::command("library.copyFiles"),
+                        crate::dialogs::MenuItem::Separator,
+                        crate::dialogs::MenuItem::command(REMOVE_COMMAND).labeled(
+                            crate::i18n::text(
+                                ui.ctx(),
+                                Message::new("gui-library-remove", "Remove from Library"),
+                            ),
+                        ),
                     ],
                 },
             );

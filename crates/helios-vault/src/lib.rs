@@ -114,6 +114,11 @@ pub struct Image {
 /// ([`Vault::update_locations`]).
 pub const LOCATIONS_CHANGED: &str = "vault.locations_changed";
 
+/// The bus event of photos put in or taken out of the Library, or of a
+/// library step undone or redone ([`Vault::set_in_library`],
+/// [`Vault::revert`], [`Vault::replay`]): `count`, the photos it moved.
+pub const LIBRARY_CHANGED: &str = "vault.library_changed";
+
 /// Whether a location's file can be read now.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,

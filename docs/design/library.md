@@ -91,7 +91,7 @@ proposes the next slices.
 | Export | built (`library.export`, one or many) |
 | Remove from Library | in the vault (`Vault::set_in_library`, used by import undo); **no command** in the window |
 | Rename, move, copy on disk | none after import (import renames by pattern: `helios_library::rename`) |
-| Delete or trash | none |
+| Delete or trash | Remove from Library (L8, the flag, undoable); no trash yet |
 | Rotate | none in the library; EXIF orientation is read for display (`helios-load/src/colour.rs`) |
 | Copy and paste edits, marks | edits: the clipboard design ([clipboard.md](clipboard.md)); marks between photos: `library.marks.copy` and `.paste`, merge or overwrite (L7) |
 
@@ -772,6 +772,16 @@ Trash…" and "Delete rejected…" (L-C4) through a journaled job, refused
 on cards and backup volumes, the system trash per platform. Test: a
 temporary folder fixture, the journal replayed after a kill, refusals.
 Focus: a job tagged with its focus.
+
+Built, first part (2026-11-14): "Remove from Library",
+`library.remove` on the selection (Delete in the grid, as Lightroom and
+darktable, and the grid's context menu), through the node's new
+`library.images.remove`, which answers the vault's step; the desktop
+records it in the library's history (Ctrl+Z), and the vault announces
+`vault.library_changed` (also on a library step undone or redone) so
+the read cache and the grid follow. Not asked first: nothing is lost.
+Still to build: "Move to Trash…" and "Delete rejected…" as a journaled
+job with its refusals.
 
 **L9. Rotate.** An orientation field on the image (or the version, to
 decide in the slice), Ctrl+[ and Ctrl+] (and darktable's equivalents in

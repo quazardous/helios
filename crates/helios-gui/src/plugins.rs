@@ -129,6 +129,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.quick.clear", "phosphor:broom"),
     ("library.quick.saveAs", "phosphor:floppy-disk"),
     ("library.quick.toggle", "phosphor:lightning"),
+    ("library.remove", "phosphor:minus-circle"),
     ("library.scanFolder", "phosphor:arrows-clockwise"),
     ("library.select.invert", "phosphor:selection-inverse"),
     ("library.select.none", "phosphor:selection-slash"),

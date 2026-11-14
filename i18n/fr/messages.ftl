@@ -494,6 +494,7 @@ gui-history-album-new-smart = Nouvel album dynamique « { $name } »
 gui-history-set-new = Nouvel ensemble d’albums « { $name } »
 gui-history-album-move = Déplacer « { $name } » dans un ensemble
 gui-history-album-move-out = Sortir « { $name } » de son ensemble
+gui-history-library-remove = Retirer { $count } photos de la bibliothèque
 gui-history-quick-add = Ajouter { $count } photos à la collection rapide
 gui-history-quick-remove = Retirer { $count } photos de la collection rapide
 gui-history-quick-clear = Vider la collection rapide
@@ -606,6 +607,7 @@ gui-library-badge-backup-unverified = non vérifiée
 
 gui-library-badge-no-backup = sans sauvegarde
 
+gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
 gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
@@ -1318,6 +1320,7 @@ gui-library-albums-none = Aucun album pour l’instant
 gui-library-quick = Collection rapide
 gui-library-quick-tip = B ajoute les photos sélectionnées ou les retire
 gui-library-quick-toggle = Ajouter ou retirer les photos sélectionnées
+gui-library-remove = Retirer de la bibliothèque
 gui-library-quick-save = Enregistrer comme album…
 gui-library-quick-clear = Vider la collection rapide
 gui-library-quick-save-title = Enregistrer la collection rapide comme album

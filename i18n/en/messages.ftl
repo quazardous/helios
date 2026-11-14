@@ -729,6 +729,8 @@ gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
 
+gui-history-library-remove = Remove { $count } photos from the Library
+
 gui-history-preview-applied = applied
 
 gui-history-preview-bypassed = bypassed
@@ -1215,6 +1217,8 @@ gui-library-no-cursor = No image under the cursor
 
 gui-library-none = No images
 
+gui-library-not-removed = The photos were not removed from the Library: { $error }
+
 gui-library-not-saved = Not saved, the library shows what was saved last: { $error }
 
 gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
@@ -1242,6 +1246,8 @@ gui-library-quick-toggle = Add or remove the selected photos
 gui-library-read = { $count } images in the library
 
 gui-library-reading = Reading the library…
+
+gui-library-remove = Remove from Library
 
 gui-library-search = Search images
 
