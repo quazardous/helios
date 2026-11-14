@@ -411,3 +411,31 @@ fn the_grids_reads_carry_locations_facets_and_whole_queries() {
     };
     assert_eq!(query_of(&query_json(&query)).unwrap(), query);
 }
+
+/// A window asking no field is the cursor's ids, from its snapshot: the
+/// store is not asked, however many chunks the window spans (a library's
+/// refresh reads its order this way).
+#[test]
+fn a_window_of_ids_only_reads_no_store() {
+    let n = helios_node_core::cursor::CHUNK * 2 + 1;
+    let node = Node::new(with_photos(MemoryStore::default(), n));
+    let client = node.client("user");
+    let cursor = client.request("cursor.open", json!({})).unwrap()["cursor"].clone();
+    let queries = node.vault.reads().queries;
+    let window = client
+        .request(
+            "cursor.window",
+            json!({ "cursor": cursor, "offset": 0, "len": n, "fields": [] }),
+        )
+        .unwrap();
+    assert_eq!(node.vault.reads().queries, queries, "no store query");
+    let ids = ids_of(&window);
+    assert_eq!(ids.len(), n);
+    assert_eq!(ids[0], id(1).hex());
+    assert_eq!(
+        window["rows"][0]["fields"],
+        json!({}),
+        "{}",
+        window["rows"][0]
+    );
+}
