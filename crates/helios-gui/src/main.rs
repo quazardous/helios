@@ -574,13 +574,17 @@ fn library_commands(
     // Library is filled again.
     let history = shell.library_history();
     {
-        let (vault, done, ctx) = (vault.clone(), done.clone(), ctx.clone());
+        // Walked by the node (`library.changes.apply`): the step's rows
+        // all moved or none.
+        let (node, done, ctx) = (persist.node().clone(), done.clone(), ctx.clone());
         history.set_apply(Arc::new(move |changes, forward| {
-            let r = if forward {
-                vault.replay(changes)
-            } else {
-                vault.revert(changes)
-            };
+            let r = node
+                .request(
+                    "library.changes.apply",
+                    json!({ "changes": changes, "forward": forward }),
+                )
+                .map_err(|e| e.message)
+                .and_then(|walked| serde_json::from_value(walked).map_err(|e| e.to_string()));
             done.store(true, Ordering::Relaxed);
             ctx.request_repaint();
             r
@@ -1158,11 +1162,10 @@ impl App {
         let bundle = self.bundle();
         let persist = self.persist.as_mut().ok_or("no vault open")?;
         let image = helios_vault::ImageId::from_hex(id)?;
+        // The library's copy, a card's file only without one.
         let path = persist
             .vault()
-            .locations(&image)?
-            .into_iter()
-            .find(helios_vault::Location::present)
+            .file_to_read(&image)?
             .map(|l| l.path)
             .ok_or_else(|| {
                 // On a disk not plugged in: say which one.

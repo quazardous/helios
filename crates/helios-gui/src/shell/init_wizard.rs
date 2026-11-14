@@ -1,6 +1,8 @@
 //! The first-run setup (`helios_init`): the steps modules declare, drawn
-//! by the Settings app's wizard kit (egui-pop's `admin::wizard`), which
-//! fills the Settings app's whole page while it runs: one step per page,
+//! by the Settings app's wizard kit (egui-pop's `admin::wizard`) as a
+//! focus screen: the main window's whole page whatever the Settings app's
+//! window setting, nothing of the shell under it (its title bar alone, to
+//! quit), until it ends. One step per page,
 //! Back / Next / Finish, the stepper as the progress line, Skip ("Later")
 //! on an optional step only. The wizard is declared from the init
 //! registry ([`crate::config::init_wizard`]); each step's fields are the
@@ -17,7 +19,8 @@
 //! - **Partial runs**: before the import window opens, the steps import
 //!   requires that are not done ([`Shell::ensure_for_import`]); the window
 //!   opens when they are, and says why it cannot import when they were
-//!   left.
+//!   left. The steps out of the run are hidden ([`skip_key`]): the
+//!   stepper lists the run's alone.
 //! - [`FOLDER_STEP`] (`init.libraryFolder`): the library folder step
 //!   alone, the health warning's fix; with `path`, sets it at once.
 //! - [`APPLY`] (`init.apply`): the wizard's finish, the draft's settings
@@ -59,6 +62,12 @@ pub const CHOOSE: &str = "init.chooseFolder";
 
 /// The `validate` hook of the library folder field.
 pub const CHECK_FOLDER: &str = "init.libraryFolder.check";
+
+/// The draft value that hides a step out of a partial run: the step's
+/// `when` is `!form.<this>` ([`crate::config::init_wizard`]).
+pub fn skip_key(step: &str) -> String {
+    format!("init.skip.{step}")
+}
 
 /// What asked for a run, told its outcome.
 #[derive(Clone, Debug, PartialEq)]
@@ -129,9 +138,23 @@ impl helios_init::Host for SettingsHost<'_> {
             .or_else(helios_library::import::suggested_library_folder)
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        let values = [(LIBRARY_FOLDER_SETTING.to_owned(), json!(suggested))].into();
+        let mut values: egui_pop::api::admin::model::hooks::Values =
+            [(LIBRARY_FOLDER_SETTING.to_owned(), json!(suggested))].into();
+        // A partial run: the steps out of the plan hidden (the stepper
+        // lists the run's alone).
+        for id in Registry::builtin()
+            .ordered()
+            .unwrap_or_default()
+            .iter()
+            .map(|s| &s.id)
+            .filter(|id| !plan.steps.iter().any(|s| &s.id == *id))
+        {
+            values.insert(skip_key(id), json!(true));
+        }
         let finished_before = admin.last_finished();
-        match admin.open_wizard(self.app, WIZARD, start.as_deref(), values) {
+        // A focus screen: the main window's whole page, whatever the
+        // Settings app's window setting, nothing of the shell under it.
+        match admin.open_focus_wizard(self.app, WIZARD, start.as_deref(), values) {
             Ok(_) => {
                 self.running = Some(Running {
                     reply,
