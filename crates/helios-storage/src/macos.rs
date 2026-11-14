@@ -380,9 +380,8 @@ mod tests {
 
     #[test]
     fn a_volume_without_a_uuid_is_weak_and_system_volumes_are_skipped() {
-        let mut map = match record("card") {
-            Value::Dict(m) => m,
-            _ => unreachable!(),
+        let Value::Dict(mut map) = record("card") else {
+            unreachable!()
         };
         map.remove("VolumeUUID");
         let v = volume_of(&Value::Dict(map.clone()), "n").unwrap();
