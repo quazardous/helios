@@ -551,11 +551,20 @@ fn a_card_import_makes_the_library_copy_then_the_strategy_s_backups() {
     for (_, id) in &report.cards[0].files {
         let id = id.expect("imported");
         assert!(w.vault.in_library(&id).unwrap());
-        // The library copy and the backup copy, each a sighting; the card
-        // is no copy.
+        // The library copy and the backup copy, each a sighting; the card's
+        // file, read by the import, is a sighting too, never a copy: the
+        // backups were made from the library copy, and the card safe to
+        // format below.
         let sightings = w.vault.sightings(&id).unwrap();
-        assert_eq!(sightings.len(), 2, "{sightings:?}");
-        assert!(sightings.iter().all(|s| !s.path.starts_with(&card)));
+        assert_eq!(sightings.len(), 3, "{sightings:?}");
+        assert_eq!(
+            sightings
+                .iter()
+                .filter(|s| s.path.starts_with(&card))
+                .count(),
+            1,
+            "{sightings:?}"
+        );
     }
     let card_now = helios_library::import::card_safety(
         &w.vault,

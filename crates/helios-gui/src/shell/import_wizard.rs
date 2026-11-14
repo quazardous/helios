@@ -534,8 +534,7 @@ impl ImportWindow {
         match key {
             SourceKey::Folder(p) => {
                 self.sources.account = None;
-                self.ticked.retain(|t| *t != p);
-                self.ticked.push(p);
+                self.ticked = vec![p];
             }
             SourceKey::Account(id) => self.select_account(id),
         }

@@ -508,9 +508,8 @@ fn the_add_a_source_wizard_signs_in_to_an_account_and_hides_what_a_remote_source
     until(&mut h, "its choices shown", |h| {
         shown(h, &format!("{name}: its own choices"))
     });
-    // Listed once, under Services by its name, never under Saved sources.
+    // Listed under Services by its name.
     assert!(shown(&h, "Services") && shown(&h, &name));
-    assert!(!shown(&h, "Saved sources"));
 }
 
 /// Cancel in the wizard leaves no source, wherever it is pressed; an
@@ -1154,7 +1153,10 @@ fn from_a_fresh_profile_connect_choose_and_import_into_the_download_folder() {
     until(&mut h, connect, |h| shown(h, connect));
     // Pre-filled, editable; no Into nor Name for a download.
     assert!(shown(&h, "Download into"));
-    assert!(h.query_all_by_value(DOWNLOAD).next().is_some(), "pre-filled");
+    assert!(
+        h.query_all_by_value(DOWNLOAD).next().is_some(),
+        "pre-filled"
+    );
     assert!(!shown(&h, "Copy into the Library"));
     h.get_by_label(connect).click();
     until(&mut h, "the form", |h| connection(h)["state"] == "form");

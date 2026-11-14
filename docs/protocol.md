@@ -289,9 +289,34 @@ in or took out and, for `quickToggle`, whether it put them in
 {"jsonrpc": "2.0", "id": 4, "result": {"name": "Trip 2024", "count": 0, "added": true, "changes": {"images": [], "documents": [{"ns": "library/collections", "key": "trip-2024", "before": {"kind": "album", "name": "Trip 2024", "images": []}, "after": {"kind": "album", "name": "Summer 2024", "images": []}}]}}}
 ```
 
+`library.changes.apply` walks such `changes` back (`forward` false: an
+undo) or again (`forward` true: a redo), all or nothing, and answers
+what it did: images `removed`, `restored`, `changed`, and `kept` as they
+are (changed since, or gone).
+
+`library.edit.head` (`image`) reads an image's newest edit: `head`, the
+whole version (`id`, also as `version`, `image`, `parents`, `edit`,
+`origin`, `at`, `label`, `meta`), null for an image never edited.
+`library.edit.add` writes one step of an edit session a client keeps on
+its side (its versions' ids are computed from their content):
+`version`, in the form `head` has, `step`, the session's step number,
+and `inProgress`, a step saved during a gesture. It refuses a version
+whose parents are not written, and announces the step as `edit.saved`.
+`library.snapshots.get` (`image`) reads an image's snapshots, oldest
+first (`snapshots`: `id`, `name`, `origin`, `at`, the `version` each is
+pinned to, null for the image with no edit, and that version's `edit`,
+or an `error` when it cannot be read); `library.snapshots.set` (`image`,
+`snapshots` in that form, without `edit`) replaces them, an empty list
+removing them.
+
+```json
+{"jsonrpc": "2.0", "id": 5, "method": "library.edit.add", "params": {"version": {"id": "9f…", "image": "0a…", "parents": ["41…"], "edit": {"modules": []}, "origin": "user", "at": 1700000000, "label": "set exposure"}, "step": 2, "inProgress": false}}
+{"jsonrpc": "2.0", "id": 5, "result": {"image": "0a…", "version": "9f…"}}
+```
+
 The desktop's library writes its fields, its stacks' expansion, its
-filter history, its workshop sessions' records, its albums and its photos
-taken out this
+filter history, its workshop sessions' records, its albums, its photos
+taken out, the steps of the edit shown and its snapshots this
 way, on an in-process client of its embedded node: the calls run off
 the UI thread, one write after the other in the order made, and their
 answers are picked up at the next frames. Its grid reads the same way:
@@ -351,7 +376,7 @@ The desktop's embedded node does the same while it holds its library
 (`helios_node_core::endpoint::advertise`): it serves the library's
 commands (`library.import`, `library.importDarktable`,
 `library.keepSidecar`, `library.edit.head`, `library.edit.save`,
-`library.stacks.*`, plus `node.hello`, `commands.list` and
+`library.edit.add`, `library.snapshots.*`, `library.stacks.*`, plus `node.hello`, `commands.list` and
 `command.run`) on a private socket (loopback TCP behind a session token where there are no Unix
 sockets), writes the rendezvous file, whose `inspect` names that same
 endpoint, and removes it as Helios quits. The CLI and `helios-mcp` then

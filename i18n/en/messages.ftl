@@ -865,6 +865,8 @@ gui-import-history-counts = { $added } added, { $located } located, { $unchanged
 
 gui-import-history-failed = failed
 
+gui-import-history-imports = Imports
+
 gui-import-history-none = No import yet
 
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
@@ -949,6 +951,8 @@ gui-import-window-example = e.g. { $example }
 
 gui-import-window-favourites = Favourites
 
+gui-import-window-folders = Folders
+
 gui-import-window-forget = Forget this folder
 
 gui-import-window-forget-hint = Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it
@@ -964,6 +968,8 @@ gui-import-window-in-library = in your Library
 gui-import-window-into = Into
 
 gui-import-window-jpeg-only = JPEG only
+
+gui-import-window-last-import = Last import { $when }
 
 gui-import-window-layout-day = By day
 
@@ -1025,13 +1031,9 @@ gui-import-window-raw-only = Raw only
 
 gui-import-window-reading = Reading { $path }
 
-gui-import-window-recent = Recent
-
 gui-import-window-remove-favourite = Remove from favourites
 
 gui-import-window-save-preset = Save as preset…
-
-gui-import-window-saved = Saved sources
 
 gui-import-window-select = Select:
 

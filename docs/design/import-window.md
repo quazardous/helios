@@ -36,13 +36,26 @@ or folders on Helios (the window opens with them as its source).
 └────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Sources** (left):
-  - mounted cards and cameras, listed first: removable volumes holding
-    `DCIM`, named by label and capacity, refreshed when one appears or
-    goes;
-  - then recent folders, favourites, and "Choose a folder…" (egui-pop's
-    folder chooser);
-  - several sources can be ticked for one import.
+- **Sources** (left), after Lightroom's import source panel (owner's
+  design, 2026-11-14): collapsible panels, open at first, each holding
+  the same item for every source (an icon, the name, one detail line:
+  the path, the last import, the card's capacity, the account's address
+  and state), one size for all:
+  - **Favourites**: the folders and accounts the person pinned (the pin
+    at the end of every item);
+  - **History**: the folders imported from lately (from the import
+    history, with their last import), then the imports themselves, each
+    with "Import again";
+  - **Folders**: the folders saved or given, then "Choose a folder…"
+    (egui-pop's folder chooser);
+  - **Cards and cameras**: removable volumes holding `DCIM`, named by
+    label and capacity, refreshed when one appears or goes;
+  - **Services**: the accounts, then "Add a source…".
+
+  **One source at a time**: a click selects an item alone (no
+  checkboxes, no multi-select), highlighted wherever it is listed; the
+  middle and right zones follow it. Several folders given at once (a
+  drop) select the first, the others listed under Folders.
 
   When Helios starts, the window opens on the first card it finds, or
   else on the last source used.

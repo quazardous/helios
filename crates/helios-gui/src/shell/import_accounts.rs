@@ -724,7 +724,7 @@ impl Accounts {
                 .iter()
                 .find(|a| &a.id == id)
                 .map(|a| a.connector.clone()),
-            Asked::Manage | Asked::Select(_) => None,
+            Asked::Manage => None,
         }
     }
 
@@ -1026,9 +1026,6 @@ pub(crate) fn state_text(state: &AccountState) -> Message {
 /// asked.
 #[derive(Clone, Debug)]
 pub(crate) enum Asked {
-    /// The account clicked: its source selected, the Choices column
-    /// showing its choices.
-    Select(String),
     /// A new account of this connector ("Use another account…").
     Add(String),
     /// Choose photos in the service's page under this account.
@@ -1049,105 +1046,54 @@ pub(crate) fn header_of(account: &Account, name: Option<&str>) -> String {
     }
 }
 
-/// The accounts under "Services", each once: a mark (connected, or
-/// needing a reconnection), its name (its saved source's, from `saved`,
-/// else its own), and under it its address and, when it is not
-/// connected, why in a word. No buttons: a click selects it (the
-/// Contents column then shows its one action), and its menu offers
-/// "Choose photos…", "Reconnect", "Manage accounts…", then what `items`
-/// adds (a saved source's own items, given the account's id). An account
-/// is added through the "Add a source…" wizard
-/// ([`super::import_wizard`]). Nothing without a library, or when no
-/// account exists.
-pub(crate) fn accounts_ui(
-    ui: &mut egui::Ui,
+/// An account's menu in the Sources column: "Choose photos…" when its
+/// service's page chooses them, "Reconnect", "Manage accounts…", then
+/// what `items` adds (a saved source's own items).
+pub(crate) fn account_menu(
+    response: &egui::Response,
     accounts: &mut Accounts,
     connectors: &Connectors,
-    selected: Option<&str>,
-    saved: &BTreeMap<String, String>,
-    items: &mut dyn FnMut(&mut egui::Ui, &str),
+    id: &str,
+    items: &mut dyn FnMut(&mut egui::Ui),
     t: &dyn Fn(Message) -> String,
 ) -> Option<Asked> {
-    accounts.book.as_ref()?;
-    let listed = accounts.listed().to_vec();
-    if listed.is_empty() {
-        return None;
-    }
+    let picks = accounts.picks(id, connectors);
     let mut asked = None;
-    ui.separator();
-    ui.strong(t(Message::new("gui-import-window-services", "Services")));
-    for account in &listed {
-        let attention = matches!(account.state, AccountState::NeedsAttention { .. })
-            || accounts.identity_missing(account);
-        let (mark, colour) = match account.state {
-            _ if attention => ("▲", ui.visuals().warn_fg_color),
-            AccountState::Connected => ("●", ui.visuals().text_color()),
-            _ => ("○", ui.visuals().weak_text_color()),
-        };
-        let name = saved
-            .get(&account.id)
-            .cloned()
-            .unwrap_or_else(|| account.label.clone());
-        let row = ui
-            .horizontal(|ui| {
-                ui.label(egui::RichText::new(mark).color(colour));
-                let row = ui.selectable_label(selected == Some(account.id.as_str()), &name);
-                if row.clicked() {
-                    asked = Some(Asked::Select(account.id.clone()));
-                }
-                row
-            })
-            .inner;
-        // Why in a word, on the row itself: never in a tooltip only.
-        let word = match &account.state {
-            _ if attention => Some(Message::new(
-                "gui-account-needs-reconnecting",
-                "needs reconnecting",
-            )),
-            AccountState::Connected => None,
-            state => Some(state_text(state)),
-        };
-        let address = account.email().filter(|e| !name.contains(e));
-        if address.is_some() || word.is_some() {
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                if let Some(email) = address {
-                    ui.weak(email);
-                }
-                if let Some(word) = word {
-                    ui.label(egui::RichText::new(t(word)).color(colour).small());
-                }
-            });
+    response.context_menu(|ui| {
+        if picks
+            && ui
+                .button(t(Message::new("gui-account-choose", "Choose photos…")))
+                .clicked()
+        {
+            asked = Some(Asked::Pick(id.to_owned()));
+            ui.close();
         }
-        let picks = accounts.picks(&account.id, connectors);
-        row.context_menu(|ui| {
-            if picks
-                && ui
-                    .button(t(Message::new("gui-account-choose", "Choose photos…")))
-                    .clicked()
-            {
-                asked = Some(Asked::Pick(account.id.clone()));
-                ui.close();
-            }
-            if ui
-                .button(t(Message::new("gui-account-reconnect", "Reconnect")))
-                .clicked()
-            {
-                asked = Some(Asked::Reconnect(account.id.clone()));
-                ui.close();
-            }
-            if ui
-                .button(t(Message::new("gui-account-manage", "Manage accounts…")))
-                .clicked()
-            {
-                asked = Some(Asked::Manage);
-                ui.close();
-            }
-            items(ui, &account.id);
-        });
-    }
+        if ui
+            .button(t(Message::new("gui-account-reconnect", "Reconnect")))
+            .clicked()
+        {
+            asked = Some(Asked::Reconnect(id.to_owned()));
+            ui.close();
+        }
+        if ui
+            .button(t(Message::new("gui-account-manage", "Manage accounts…")))
+            .clicked()
+        {
+            asked = Some(Asked::Manage);
+            ui.close();
+        }
+        items(ui);
+    });
     asked
 }
+
+impl Accounts {
+    /// Whether accounts can be listed: a library is open.
+    pub(crate) fn has_book(&self) -> bool {
+        self.book.is_some()
+    }
+}
+
 /// The consent dialog, while a plugin's capabilities are asked for: the
 /// plugin's name and id, each capability it lacks with the reason its
 /// manifest gives, Allow and Don't allow. Allow grants them all off the
