@@ -25,6 +25,8 @@ title = "Testee disk"
 watches = "The testee's disk and fan"
 levels = ["ok", "warning"]
 fixes = ["testee.repair"]
+every_minutes = 30
+on = ["volumes"]
 
 [[health]]
 id = "crash"
@@ -144,6 +146,10 @@ fn a_plugin_declares_its_checks_and_they_run_through_its_process() {
             ]
         )]
     );
+    // When it runs, as declared.
+    let fine = check(&broker, "fine", Duration::from_secs(10)).declaration();
+    assert_eq!(fine.period(), Some(Duration::from_mins(30)));
+    assert_eq!(fine.on, [helios_health::Event::Volumes]);
 
     let found = run_one(
         &check(&broker, "fine", Duration::from_secs(10)),
@@ -231,6 +237,7 @@ title = " "
 watches = ""
 levels = []
 fixes = ["open folder"]
+every_minutes = 1
 
 [[health]]
 id = "twice"
@@ -251,6 +258,7 @@ levels = ["ok"]
             "health check `Disk Space`: `watches` says what it watches",
             "health check `Disk Space`: `levels` names at least one level",
             "health check `Disk Space`: fix `open folder`: a command id such as `library.storage`",
+            "health check `Disk Space`: `every_minutes` is 1: at least 5",
             "health check `Disk Space`: a title",
             "health check `twice`: `levels` names Ok twice",
             "health check `twice` is declared twice",

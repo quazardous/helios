@@ -911,3 +911,114 @@ fn with_a_chart_profile_on_the_look_s_colour_half_stays_off() {
     let bare = serde_json::json!({ "modules": [] });
     assert_eq!(edit::without_look(&bare), bare);
 }
+
+/// A saturated ramp through `look`'s own curves, its colour stages left
+/// out: 72 hues, channels within ±0.75 of the luminance, scene luminance
+/// from 0.02 to 2; with each pixel, its render before the gamut
+/// compression and the clamp. Only the pixels whose display luminance is
+/// between 0.3 and 0.7 are kept: below, nothing is over range; above,
+/// the shoulder takes over.
+fn saturated_ramp(look: &Look) -> Vec<([f64; 3], [f64; 3])> {
+    let mut out = Vec::new();
+    for h in 0..72 {
+        let hue = f64::from(h) * std::f64::consts::TAU / 72.0;
+        let c = [0.0, 2.094, 4.189].map(|o: f64| 1.0 + 0.75 * (hue + o).cos());
+        for l in 0..64 {
+            let s = 0.02 * 100f64.powf(f64::from(l) / 63.0);
+            let x = c.map(|v| v * s / luma(c));
+            let pre = toned(&IDENTITY, None, &look.tone, x);
+            let pre = look.chroma.as_ref().map_or(pre, |k| chroma_applied(k, pre));
+            if (0.3..=0.7).contains(&luma(pre)) {
+                out.push((x, pre));
+            }
+        }
+    }
+    out
+}
+
+/// The hue difference of two Lab colours as Delta E's ΔH*.
+fn hue_delta_e(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let (ca, cb) = (a[1].hypot(a[2]), b[1].hypot(b[2]));
+    let dh = table::hue_difference(a[2].atan2(a[1]).to_degrees(), b[2].atan2(b[1]).to_degrees());
+    2.0 * (ca * cb).sqrt() * (dh.to_radians() / 2.0).sin().abs()
+}
+
+#[test]
+fn a_fitted_look_renders_a_saturated_ramp_under_white_its_hue_kept() {
+    let fitted = standard().fit().unwrap();
+    assert!(fitted.chroma.is_some(), "{:?}", fitted.report);
+    let look = Look {
+        matrix: IDENTITY,
+        table: None,
+        ..fitted
+    };
+    let ramp = saturated_ramp(&look);
+    let over: Vec<_> = ramp
+        .iter()
+        .filter(|(_, pre)| pre.iter().any(|&v| v > 1.0))
+        .collect();
+    assert!(
+        over.len() > 100,
+        "{} over range of {}",
+        over.len(),
+        ramp.len()
+    );
+    let (mut ours, mut clamped) = (0.0f64, 0.0f64);
+    for &&(x, pre) in &over {
+        let o = apply(&look, x);
+        // Under the level the clips-highlights gate counts, the luminance
+        // kept.
+        assert!(!clipped_render(o), "{x:?}: {pre:?} -> {o:?}");
+        assert!((luma(o) - luma(pre)).abs() < 1e-9, "{pre:?} -> {o:?}");
+        ours = ours.max(hue_delta_e(lab(o), lab(pre)));
+        clamped = clamped.max(hue_delta_e(lab(pre.map(|v| v.clamp(0.0, 1.0))), lab(pre)));
+    }
+    // The hue within a few Delta E, where clipping each channel on its
+    // own turns it by many.
+    assert!(ours < 5.0, "ΔH* {ours}");
+    assert!(clamped > 2.0 * ours, "ΔH* {ours}, clamped {clamped}");
+    // Within range and short of the knee: the render is the curves' alone.
+    for &(x, pre) in &ramp {
+        if pre.iter().all(|&v| (0.0..0.6).contains(&v)) {
+            assert_eq!(apply(&look, x), pre);
+        }
+    }
+}
+
+#[test]
+fn the_modules_compress_a_saturated_ramp_as_the_reference() {
+    let look = standard().fit().unwrap();
+    let pixels: Vec<[f64; 3]> = saturated_ramp(&look).iter().map(|&(x, _)| x).collect();
+    let out = rendered_by_the_modules(&look, &pixels);
+    let mut worst = 0.0f64;
+    let mut compressed = 0;
+    for (p, o) in pixels.iter().zip(&out) {
+        let r = apply(&look, *p);
+        if r.iter().any(|&v| v > 0.9) {
+            compressed += 1;
+        }
+        for c in 0..3 {
+            worst = worst.max((r[c] - o[c]).abs());
+        }
+    }
+    assert!(compressed > 100, "{compressed} of {}", pixels.len());
+    assert!(worst < 1e-5, "worst {worst}");
+}
+
+#[test]
+fn a_saturated_scene_is_not_refused_for_clipping() {
+    // A camera compressing each channel on its own: a saturated, bright
+    // scene stays under white in its JPEG. The look's luminance-ratio
+    // tone curve, clamped alone, clipped its bright blues and reds.
+    let scene = Scene {
+        levels: (0.01, 0.5),
+        colour: 0.75,
+        ..Scene::new(192, 128)
+    };
+    let case = Case::drawn(&scene, |_, _, x| {
+        mat_apply(&CAMERA_MATRIX, x).map(|v| camera_curve(v).min(0.95))
+    });
+    if let Err(r) = case.fit() {
+        assert_ne!(r.gate, Gate::ClipsHighlights, "{r:?}");
+    }
+}

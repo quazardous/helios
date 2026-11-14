@@ -1,7 +1,11 @@
 //! `helios-mcp`: an MCP server (stdio) over a running node's endpoints.
 //!
 //!     helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE]
-//!                [--read-root DIR]... [--write-root DIR]
+//!                [--read-root DIR]... [--write-root DIR] [--tools full|compact]
+//!
+//! `--tools compact` offers only the generic pair over the command
+//! registry (`helios_commands_list`, `helios_command_run`) and the sandbox
+//! pair, for an agent with a short context; `full`, the default, every tool.
 //!
 //! With a root, the paths an agent gives a tool are confined: read under a
 //! read root or the write root, written under the write root, refused
@@ -26,7 +30,7 @@ use std::process::ExitCode;
 
 use helios_inspect::Address;
 use helios_node::caps::{Message, read_message, too_large};
-use helios_node::mcp::{Sockets, handle};
+use helios_node::mcp::{Sockets, ToolSet, handle};
 use helios_node::roots::Roots;
 use serde_json::{Value, json};
 
@@ -36,6 +40,7 @@ fn main() -> ExitCode {
     let mut token = std::env::var("HELIOS_TOKEN").ok();
     let mut read_roots = Vec::new();
     let mut write_root: Option<PathBuf> = None;
+    let mut tools = ToolSet::Full;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match (arg.as_str(), args.next()) {
@@ -44,6 +49,9 @@ fn main() -> ExitCode {
             ("--read-root", Some(d)) => read_roots.push(PathBuf::from(d)),
             ("--write-root", Some(d)) if write_root.is_none() => {
                 write_root = Some(PathBuf::from(d));
+            }
+            ("--tools", Some(set)) if ToolSet::parse(&set).is_some() => {
+                tools = ToolSet::parse(&set).unwrap_or_default();
             }
             ("--token-file", Some(f)) => match std::fs::read_to_string(&f) {
                 Ok(t) => token = Some(t.trim().to_string()),
@@ -54,7 +62,7 @@ fn main() -> ExitCode {
             },
             _ => {
                 eprintln!(
-                    "usage: helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE] [--read-root DIR]... [--write-root DIR]"
+                    "usage: helios-mcp [--socket ADDRESS] [--control ADDRESS] [--token-file FILE] [--read-root DIR]... [--write-root DIR] [--tools full|compact]"
                 );
                 return ExitCode::from(2);
             }
@@ -90,6 +98,7 @@ fn main() -> ExitCode {
         node_bin,
         ai: None,
         roots,
+        tools,
     };
     let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout();

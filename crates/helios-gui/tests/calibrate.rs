@@ -405,12 +405,21 @@ fn the_shell_fits_a_camera_look_through_the_node_and_says_why_not() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
-    use egui_kittest::kittest::Queryable;
-    use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
+/// A shell showing a raw's chain in short, as the camera look's tests
+/// open it: the chart profile (bypassed) with the camera's context, the
+/// look's two halves, then sigmoid; the photo a picture of the library
+/// in `name`'s folder. Answers the shell, the library's history and the
+/// folder.
+fn look_shell(
+    name: &str,
+) -> (
+    Shell,
+    helios_gui::library_history::LibraryHistory,
+    std::path::PathBuf,
+) {
+    use helios_core::{Graph, Image, ModuleRef, Params, Region};
 
-    let dir = std::env::temp_dir().join(format!("helios-look-header-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("helios-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let picture = dir.join("picture.tif");
@@ -423,8 +432,6 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let image = vault.import_file(&picture, 1).unwrap();
 
-    // A raw's chain in short: the chart profile (bypassed) with the
-    // camera's context, the look's two halves, then sigmoid.
     let camera = helios_photo::CameraInfo {
         maker: "Test".into(),
         model: "Bayer".into(),
@@ -496,6 +503,15 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
     assert!(calibrate::on_open(&vault, image, &g, shell.values()).is_none());
     shell.set_view_source(g, sigmoid, "output").unwrap();
 
+    (shell, history, dir)
+}
+
+#[test]
+fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
+    use egui_kittest::kittest::Queryable;
+    use helios_core::Value;
+
+    let (shell, history, dir) = look_shell("look-header");
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
@@ -607,5 +623,112 @@ fn the_camera_look_header_fits_says_why_not_and_its_switch_is_one_edit_step() {
         )
         .unwrap();
     assert_eq!(read(&h, "bypass/sigmoid"), Value::Bool(false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_camera_look_tone_amount_is_one_edit_step() {
+    use helios_core::Value;
+
+    let (shell, _history, dir) = look_shell("look-amount");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let read = |h: &egui_kittest::Harness<'_, Shell>| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get("node/cameratone/amount")
+            .unwrap()
+            .value
+            .clone()
+    };
+    // The tone half's amount: all of the fit to start with.
+    assert_eq!(read(&h), Value::Float(1.0));
+    {
+        let values = h.state().values().clone();
+        let mut s = values.lock().unwrap();
+        s.set(helios_values::Set::new(
+            "node/cameratone/amount",
+            helios_values::Change::To(Value::Float(0.5)),
+            Origin::User,
+        ))
+        .unwrap();
+    }
+    h.run();
+    assert_eq!(read(&h), Value::Float(0.5));
+    // One step of the edit: undone, all of the fit again.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    h.run();
+    assert_eq!(read(&h), Value::Float(1.0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_camera_look_compare_shows_the_camera_jpeg_left_of_the_split() {
+    use egui_kittest::kittest::Queryable;
+    use helios_core::{Image, Region, Value};
+
+    let (shell, history, dir) = look_shell("look-compare");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    let read = |h: &egui_kittest::Harness<'_, Shell>, path: &str| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get(path)
+            .unwrap()
+            .value
+            .clone()
+    };
+
+    // The photo is a picture, with no camera JPEG: the switch turns the
+    // compare off again and says why, in words; nothing is an edit step.
+    h.get_by_role_and_label(
+        egui::accesskit::Role::CheckBox,
+        "Compare with the camera's JPEG",
+    )
+    .click();
+    h.run();
+    h.run();
+    h.get_by_label("No camera JPEG to compare: the photo is not a raw");
+    assert_eq!(read(&h, calibrate::LOOK_COMPARE), Value::Bool(false));
+    assert_eq!(read(&h, "view/viewport/compare"), Value::Bool(false));
+    assert!(history.line().undo.is_empty());
+    assert!(
+        h.state().values().lock().unwrap().undo_steps().is_empty(),
+        "the compare is a view, not a step of the edit"
+    );
+
+    // A camera JPEG smaller than the render (as embedded previews are) is
+    // scaled to it, so the split lines the two up; "before" shows it.
+    let after = h.state().viewport().shown().unwrap().extent;
+    let jpeg = Image::from_fn(Region::sized(16, 12), 3, |x, _, c| {
+        if c == 0 { x as f32 / 16.0 } else { 0.25 }
+    });
+    h.state().viewport_mut().show_camera_jpeg(&jpeg).unwrap();
+    h.run();
+    let before = h.state().viewport().before_shown().unwrap();
+    assert_eq!(before.extent, after);
+    let node = before
+        .graph
+        .find(helios_gui::viewport::CAMERA_JPEG)
+        .unwrap();
+    let shown = before.graph.source_image(node).unwrap().unwrap();
+    assert_eq!(shown.region(), after);
+    assert_eq!(shown.channels(), 4);
+    // The right edge of the render shows the JPEG's right edge, opaque.
+    let right = shown.pixel(after.right() - 1, after.y);
+    assert!((right[0] - 15.0 / 16.0).abs() < 1e-6, "{right:?}");
+    assert_eq!(right[3], 1.0);
     let _ = std::fs::remove_dir_all(&dir);
 }

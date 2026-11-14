@@ -550,6 +550,14 @@ gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été 
 
 gui-look-header-chart = Moitié couleur désactivée : le profil de calibration décide des couleurs
 
+gui-look-header-compare = Comparer au JPEG de l’appareil
+
+gui-look-header-compare-about = Affiche le JPEG intégré de l’appareil à gauche de la séparation et le rendu à sa droite ; faites glisser la séparation pour la déplacer
+
+gui-look-header-compare-no-jpeg = Aucun JPEG de l’appareil à comparer : le raw n’en contient pas
+
+gui-look-header-compare-not-raw = Aucun JPEG de l’appareil à comparer : la photo n’est pas un raw
+
 gui-look-header-fit = Ajuster au JPEG de l’appareil
 
 gui-look-header-fit-about = Ajuste une matrice, une table teinte et saturation et des courbes de tons au JPEG intégré de l’appareil, vérifiés sur des pixels qui n’ont pas servi à l’ajustement
@@ -2413,6 +2421,20 @@ gui-settings-for-library-about = tant que cette bibliothèque est ouverte
 gui-settings-for-workspace = Cet espace de travail
 
 gui-settings-for-workspace-about = tant que cet espace de travail est ouvert
+
+gui-health-owner-storage = Stockage
+
+gui-health-owner-library = Bibliothèque
+
+gui-health-owner-backup = Sauvegardes
+
+gui-health-owner-gpu = GPU
+
+gui-health-owner-plugins = Extensions
+
+gui-health-owner-catalogue = Catalogue
+
+gui-health-owner-other = Autres vérifications
 
 gui-import-auto-ask = { $files } nouvelles photos ({ $size }) sur { $source } : plus qu’un import automatique n’en prend sans demander
 

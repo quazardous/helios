@@ -6,7 +6,9 @@
 //! - `import.history.list` (`limit`): the records, newest first.
 //! - `import.history.again` (`id`): the import run again with its
 //!   sources and choices, queued as `library.import` is, as whoever asks.
-//!   An importer plugin's import is run again from its menu entry.
+//!   An importer plugin's import is run again from its menu entry, an
+//!   import from a connector's source (a Google Photos pick) from that
+//!   source in the window.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -103,6 +105,9 @@ fn details(r: &Record, t: &dyn Fn(Message) -> String) -> String {
             .with("origin", r.origin.clone())));
     }
     out.extend(r.sources.iter().map(|s| s.display().to_string()));
+    if let Some(remote) = &r.remote {
+        out.push(format!("{} ({})", remote.label, remote.connector));
+    }
     if let Some(e) = &r.error {
         out.push(e.clone());
     } else {
@@ -139,8 +144,9 @@ pub(super) fn history_ui(
         let text = line(r, t);
         ui.horizontal(|ui| {
             ui.label(&text).on_hover_text(details(r, t));
-            // An importer's import is run again from its menu entry.
-            if r.importer.is_none() {
+            // An importer's import is run again from its menu entry, a
+            // connector's from its source (listed or picked anew).
+            if r.importer.is_none() && r.remote.is_none() {
                 let button = ui.small_button(&words.again);
                 // Each row's button says which import it runs again.
                 let name = format!("{}: {text}", words.again);
@@ -221,5 +227,20 @@ mod tests {
         };
         assert!(line(&r, &t).starts_with("EOS_DIGITAL (+1) · "));
         assert!(details(&r, &t).contains("/photos/b"));
+    }
+
+    #[test]
+    fn a_connector_import_says_its_source_and_connector() {
+        let t = |m: Message| m.english;
+        let r = Record {
+            remote: Some(helios_library::import_history::Remote {
+                connector: "google-photos".into(),
+                id: "me".into(),
+                label: "Google Photos".into(),
+            }),
+            ..Record::default()
+        };
+        assert!(line(&r, &t).starts_with("Google Photos · "));
+        assert!(details(&r, &t).contains("Google Photos (google-photos)"));
     }
 }
