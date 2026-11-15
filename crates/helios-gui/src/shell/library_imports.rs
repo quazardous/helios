@@ -74,11 +74,8 @@ pub fn sessions_of(records: &[Record]) -> Vec<ImportSession> {
             id: r.id.clone(),
             when: r.when,
             source: r.source_label(),
-            count: if r.images.is_empty() {
-                r.counts.added + r.counts.located
-            } else {
-                r.images.len() as u64
-            },
+            // Photos, as the Library counts them: a RAW+JPEG pair is one.
+            count: r.photos(),
         })
         .collect()
 }
@@ -194,11 +191,19 @@ impl Shell {
     }
 
     /// An import ended (its request, as asked, and its end line): the
-    /// sessions are read again; one the user started is shown in the
+    /// sessions and the import window's History are read again; one the user started is shown in the
     /// Library with its photos selected, or offered while the user edits
     /// a photo. Whether the Library changes its selection.
     pub(super) fn import_session_ended(&mut self, request: &Value, line: &Value) -> bool {
         self.focus.import_sessions.read_at = None;
+        // The import window's History lists it at once, whoever ran it:
+        // read again at the window's next frame, asked now (an open
+        // window otherwise draws again only when something moves in it).
+        {
+            let mut w = self.import.get_mut();
+            w.history.read_again();
+            w.waker()();
+        }
         let started_here = {
             let started = &mut self.focus.user_imports;
             match started.iter().position(|r| r == request) {
@@ -283,5 +288,47 @@ mod tests {
         assert_eq!(sessions[0].count, 4);
         assert_eq!(sessions[0].source, "EOS_DIGITAL");
         assert!(sessions[0].line().ends_with(" · EOS_DIGITAL · 4"));
+    }
+
+    /// A card of two RAW+JPEG pairs, a lone raw and a lone JPEG, its files
+    /// handed one by one: one session of four photos named by the card,
+    /// whether the listing kept its photos or left them out.
+    #[test]
+    fn a_session_counts_a_pair_once_and_is_named_by_the_card() {
+        let dcim = std::path::Path::new("/tmp/journey/card/DCIM/100HELIO");
+        let mut r = Record {
+            id: "a".into(),
+            when: 10,
+            sources: [
+                "IMG_0001.JPG",
+                "IMG_0001.NEF",
+                "IMG_0002.JPG",
+                "IMG_0002.PEF",
+                "IMG_0003.RW2",
+                "IMG_0004.JPG",
+            ]
+            .iter()
+            .map(|n| dcim.join(n))
+            .collect(),
+            counts: helios_library::import_history::Counts {
+                files: 6,
+                added: 6,
+                paired: 2,
+                ..Default::default()
+            },
+            ..Record::default()
+        };
+        let sessions = sessions_of(std::slice::from_ref(&r));
+        assert_eq!(
+            (sessions[0].count, sessions[0].source.as_str()),
+            (4, "card")
+        );
+        assert!(
+            sessions[0].line().ends_with(" · card · 4"),
+            "{}",
+            sessions[0].line()
+        );
+        r.images = vec!["1".into(), "2".into(), "3".into(), "4".into()];
+        assert_eq!(sessions_of(&[r])[0].count, 4);
     }
 }

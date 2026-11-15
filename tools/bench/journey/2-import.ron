@@ -25,6 +25,9 @@ Scenario(
         Wait(Event("library.imported")),
         Wait(Settled),
         Expect(Journal(has: "library.imported")),
+        // The window, still open, lists the import just made in its
+        // History at once.
+        Expect(Tree(lacks: (label: "No import yet"))),
         Window("main"),
         Wait(Settled),
         // Two pairs, a raw and a JPEG: four photos (a pair is one).
