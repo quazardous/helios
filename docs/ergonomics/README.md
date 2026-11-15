@@ -784,7 +784,7 @@ and "egui-pop wraps the application's kernel; it is not the kernel"
   lives in Helios's module contract (`helios-core`, next to `ParamHint`),
   because modules depend on it and it is photographic (colour statistics,
   ports, image coordinates). The English labels and hints join the
-  declarations (`helios-declarations`) so they are translated like
+  declarations (`helios-i18n-extract`) so they are translated like
   parameters.
 - **The machinery is generic and goes into egui-pop**: a `Ritual` trait,
   a session runner (one active ritual, Esc, steps as undo steps through the

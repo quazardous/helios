@@ -55,7 +55,7 @@ jobs:
         with:
           shared-key: workspace
           save-if: false
-      - run: cargo test --locked -p helios-declarations --test english
+      - run: cargo test --locked -p helios-i18n-extract --test english
 
   # The check to wait for, and the one to require: both jobs above passed.
   pr-lint:

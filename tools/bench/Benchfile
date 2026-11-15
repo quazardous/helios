@@ -722,7 +722,7 @@ mounts = { flatpak = "/flatpak" }
 timeout = "20m"
 
 # the translation catalogues regenerated on a branch: `i18n extract`
-# (helios-declarations, a headless desktop) then `i18n stamp fr`; the
+# (helios-i18n-extract, a headless desktop) then `i18n stamp fr`; the
 # changes as /out/i18n.patch, to apply on the branch (git apply --index)
 [jobs.i18n-extract]
 about = "the translation catalogues regenerated on a branch; the change as a patch"

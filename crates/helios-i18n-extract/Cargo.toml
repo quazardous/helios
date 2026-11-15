@@ -1,6 +1,6 @@
 [package]
-name = "helios-declarations"
-description = "Everything Helios declares with English text (the desktop's commands, panels and interface, the modules' parameters), gathered for tools: the English catalogue is generated from it"
+name = "helios-i18n-extract"
+description = "Extracts every English text Helios declares (the desktop's commands, panels and interface, the modules' parameters), for the English catalogue"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

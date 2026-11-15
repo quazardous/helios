@@ -2,7 +2,7 @@
 //! translation library (`egui-pop-i18n`: its extractor and its checks).
 //!
 //! - `extract`: writes `i18n/en/*.ftl` from Helios's declarations. They
-//!   are gathered by `helios-declarations` (a headless desktop and the
+//!   are gathered by `helios-i18n-extract` (a headless desktop and the
 //!   module registry), run as a separate binary so xtask does not build
 //!   the window's stack for its other tasks. Then, per locale, the keys
 //!   missing from it and the keys it has that English no longer has.
@@ -74,18 +74,18 @@ pub fn run(root: &Path, words: &[&str]) -> Option<ExitCode> {
 fn extract_english(root: &Path, dir: &Path) -> Result<usize, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let out = Command::new(cargo)
-        .args(["run", "--quiet", "--package", "helios-declarations"])
+        .args(["run", "--quiet", "--package", "helios-i18n-extract"])
         .current_dir(root)
         .output()
         .map_err(|e| format!("cargo run: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "helios-declarations failed:\n{}",
+            "helios-i18n-extract failed:\n{}",
             String::from_utf8_lossy(&out.stderr)
         ));
     }
     let declarations: Declarations = serde_json::from_slice(&out.stdout)
-        .map_err(|e| format!("helios-declarations' output: {e}"))?;
+        .map_err(|e| format!("helios-i18n-extract' output: {e}"))?;
     let files = declarations.english_files()?;
     let en = dir.join("en");
     std::fs::create_dir_all(&en).map_err(|e| e.to_string())?;

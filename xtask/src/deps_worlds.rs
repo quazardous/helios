@@ -4,7 +4,12 @@
 //! reach the screen through helios-ui over egui-pop, visual-module crates
 //! through helios-rack and `egui_hud`'s logic; declarations and the engine
 //! never touch egui or egui-pop's widgets; only the frameworks, the shell
-//! and the tools may.
+//! and the developer tools may.
+//!
+//! The developer tools (`dev-tool`: xtask, the controls gallery, the i18n
+//! extractor) have no UI rule, so they must stay out of what ships: a
+//! `dev-tool` crate is `publish = false`, and no crate of another world
+//! depends on one (a dev-dependency, for tests, may).
 //!
 //! It also refuses a `Cargo.lock` holding two versions of an egui-family
 //! crate (egui, eframe, every `egui-pop-*`, `egui_hud`, `egui_fit`…): two
@@ -46,8 +51,10 @@ pub enum World {
     VisualFramework,
     /// helios-gui: the application shell.
     Shell,
-    /// Developer tools, benches and generators: no rule.
-    Tool,
+    /// Developer tools, benches and generators, never shipped: no UI rule,
+    /// but `publish = false` and no crate of another world depends on one
+    /// (see [`dev_tool_problems`]).
+    DevTool,
 }
 
 impl World {
@@ -59,7 +66,7 @@ impl World {
             World::FormsFramework => "forms-framework",
             World::VisualFramework => "visual-framework",
             World::Shell => "shell",
-            World::Tool => "tool",
+            World::DevTool => "dev-tool",
         }
     }
 
@@ -84,13 +91,13 @@ impl World {
                 "egui-pop-model",
                 "egui-pop-i18n",
             ],
-            World::Tool => &[],
+            World::DevTool => &[],
         }
     }
 
     /// Whether `egui_hud`'s drawing features (`render`, `bench`) are allowed.
     fn hud_render_allowed(self) -> bool {
-        matches!(self, World::VisualFramework | World::Tool)
+        matches!(self, World::VisualFramework | World::DevTool)
     }
 
     /// Whether test harnesses are allowed as dev-dependencies.
@@ -118,7 +125,7 @@ impl World {
                 VisualFramework,
                 Shell,
             ],
-            World::Tool => &[],
+            World::DevTool => &[],
         }
     }
 }
@@ -131,10 +138,10 @@ const NAMED: &[(&str, World)] = &[
     ("helios-controls", World::Visual),
     // The i18n extractor: a binary that builds a headless shell to collect
     // every declared text.
-    ("helios-declarations", World::Tool),
+    ("helios-i18n-extract", World::DevTool),
     // egui_hud's bench, on Helios's controls.
-    ("helios-controls-gallery", World::Tool),
-    ("xtask", World::Tool),
+    ("helios-controls-gallery", World::DevTool),
+    ("xtask", World::DevTool),
 ];
 
 /// A crate's world: named in [`NAMED`], else by folder: `modules/` visual,
@@ -151,7 +158,7 @@ pub fn world_of(name: &str, rel_dir: &str) -> World {
     } else if rel_dir.starts_with("crates/") {
         World::Engine
     } else {
-        World::Tool
+        World::DevTool
     }
 }
 
@@ -178,6 +185,8 @@ pub struct Krate {
     pub name: String,
     /// Its folder, relative to the workspace root (`crates/helios-ui`).
     pub dir: String,
+    /// Whether it may be published (`publish = false` makes it `false`).
+    pub publishable: bool,
     pub deps: Vec<Dep>,
 }
 
@@ -222,7 +231,16 @@ pub fn parse_metadata(json: &str, root: &Path) -> Result<Vec<Krate>, String> {
                     .collect(),
             })
             .collect();
-        out.push(Krate { name, dir, deps });
+        // `publish = false` reads as an empty registry list; absent, `null`.
+        let publishable = p["publish"]
+            .as_array()
+            .is_none_or(|registries| !registries.is_empty());
+        out.push(Krate {
+            name,
+            dir,
+            publishable,
+            deps,
+        });
     }
     Ok(out)
 }
@@ -232,7 +250,7 @@ pub fn violations(krates: &[Krate]) -> Vec<Edge> {
     let mut out = Vec::new();
     for k in krates {
         let world = world_of(&k.name, &k.dir);
-        if world == World::Tool {
+        if world == World::DevTool {
             continue;
         }
         let mut push = |dep: &str, why: String| {
@@ -251,6 +269,11 @@ pub fn violations(krates: &[Krate]) -> Vec<Edge> {
                     continue;
                 }
                 let tw = world_of(&target.name, &target.dir);
+                // Edges to a developer tool are judged by `dev_tool_problems`,
+                // which no allow-list entry can cover.
+                if tw == World::DevTool {
+                    continue;
+                }
                 if !world.uses().contains(&tw) {
                     push(
                         &d.name,
@@ -294,6 +317,43 @@ pub fn violations(krates: &[Krate]) -> Vec<Edge> {
                         ),
                     );
                 }
+            }
+        }
+    }
+    out
+}
+
+/// The developer tools that could ship: a `dev-tool` crate that is not
+/// `publish = false`, and a crate of another world depending on one (a
+/// dev-dependency, for its tests, may). Not covered by the allow-list.
+pub fn dev_tool_problems(krates: &[Krate]) -> Vec<String> {
+    let is_dev_tool = |k: &Krate| world_of(&k.name, &k.dir) == World::DevTool;
+    let mut out = Vec::new();
+    for k in krates {
+        if is_dev_tool(k) {
+            if k.publishable {
+                out.push(format!(
+                    "`{}` is a dev-tool crate: it must be `publish = false`",
+                    k.name
+                ));
+            }
+            continue;
+        }
+        for d in &k.deps {
+            if d.kind.as_deref() == Some("dev") {
+                continue;
+            }
+            let on_tool = krates
+                .iter()
+                .any(|t| t.name == d.name && t.name != k.name && is_dev_tool(t));
+            let edge = format!(
+                "`{}` depends on `{}`: a {} crate may not depend on a dev-tool crate (a dev-dependency may)",
+                k.name,
+                d.name,
+                world_of(&k.name, &k.dir).name()
+            );
+            if on_tool && !out.contains(&edge) {
+                out.push(edge);
             }
         }
     }
@@ -571,6 +631,7 @@ pub fn problems(root: &Path) -> Vec<String> {
         Err(e) => return vec![format!("{ALLOW_LIST}: {e}")],
     };
     let mut problems = judge(&violations(&krates), &allow);
+    problems.extend(dev_tool_problems(&krates));
     problems.extend(snapshot_drift(root, &krates));
     match std::fs::read_to_string(root.join("Cargo.lock")) {
         Ok(lock) => problems.extend(lock_duplicates(&lock)),
@@ -623,6 +684,7 @@ mod tests {
         Krate {
             name: name.into(),
             dir: dir.into(),
+            publishable: false,
             deps,
         }
     }
@@ -739,13 +801,73 @@ mod tests {
     }
 
     #[test]
-    fn deps_worlds_tools_are_free() {
+    fn deps_worlds_dev_tools_are_free() {
         let ws = vec![krate(
             "xtask",
             "xtask",
             vec![dep("egui"), dep("egui_stack")],
         )];
         assert_eq!(violations(&ws), vec![]);
+    }
+
+    #[test]
+    fn deps_worlds_dev_tool_must_not_be_published() {
+        let mut gallery = krate(
+            "helios-controls-gallery",
+            "crates/helios-controls-gallery",
+            vec![],
+        );
+        assert!(dev_tool_problems(std::slice::from_ref(&gallery)).is_empty());
+        gallery.publishable = true;
+        let p = dev_tool_problems(&[gallery]);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].contains("`helios-controls-gallery`"), "{p:?}");
+        assert!(p[0].contains("publish = false"), "{p:?}");
+        // Another world's crate may be published.
+        let mut core = krate("helios-core", "crates/helios-core", vec![]);
+        core.publishable = true;
+        assert!(dev_tool_problems(&[core]).is_empty());
+    }
+
+    #[test]
+    fn deps_worlds_no_crate_depends_on_a_dev_tool() {
+        let extract = || krate("helios-i18n-extract", "crates/helios-i18n-extract", vec![]);
+        let ws = workspace(vec![
+            extract(),
+            krate(
+                "helios-module-x",
+                "modules/x",
+                vec![dep("helios-i18n-extract")],
+            ),
+            // Tests may use one.
+            krate(
+                "helios-node",
+                "crates/helios-node",
+                vec![dev("helios-i18n-extract")],
+            ),
+            // A dev tool may use another.
+            krate("xtask", "xtask", vec![dep("helios-i18n-extract")]),
+        ]);
+        let p = dev_tool_problems(&ws);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(
+            p[0].starts_with("`helios-module-x` depends on `helios-i18n-extract`"),
+            "{p:?}"
+        );
+        assert!(p[0].contains("a visual crate"), "{p:?}");
+        // Reported once, by this rule, out of the allow-list's reach.
+        assert_eq!(violations(&ws), vec![]);
+    }
+
+    #[test]
+    fn deps_worlds_parses_publish() {
+        let json = r#"{"packages":[
+            {"name":"a","manifest_path":"/ws/a/Cargo.toml","publish":[],"dependencies":[]},
+            {"name":"b","manifest_path":"/ws/b/Cargo.toml","publish":null,"dependencies":[]},
+            {"name":"c","manifest_path":"/ws/c/Cargo.toml","publish":["crates-io"],"dependencies":[]}]}"#;
+        let ks = parse_metadata(json, Path::new("/ws")).unwrap();
+        let publishable: Vec<bool> = ks.iter().map(|k| k.publishable).collect();
+        assert_eq!(publishable, vec![false, true, true]);
     }
 
     #[test]
