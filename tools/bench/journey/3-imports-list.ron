@@ -1,0 +1,17 @@
+// The first-user journey, step 3: the Library's Imports section opened,
+// the import just made listed in it ("<when> · <source> · <count>").
+// Run live by tools/bench/journey.py, which then reads that line from the
+// tree for step 4.
+Scenario(
+    name: "imports-list",
+    description: "The Library's Imports section opens on the import just made.",
+    steps: [
+        Window("main"),
+        Wait(Settled),
+        Ui(Click(label: "Imports")),
+        Wait(Settled),
+        Expect(Tree(lacks: (label: "No import yet"))),
+        Expect(NoError),
+        Shot("imports"),
+    ],
+)

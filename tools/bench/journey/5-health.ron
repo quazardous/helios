@@ -1,0 +1,20 @@
+// The first-user journey, step 5: the health check opened (Settings ›
+// Health › Health check) and run now on the new library. Run live by
+// tools/bench/journey.py, which then reads the findings (`health.findings`)
+// and applies each fix offered, one `6-health-fix.ron` each.
+Scenario(
+    name: "health",
+    description: "The health check opens and runs on a new library, without an error.",
+    steps: [
+        Wait(Settled),
+        Call("help.health", {}),
+        Wait(Settled),
+        Window("settings"),
+        Expect(Value("admin.scope", "health")),
+        Call("health.checkNow", {}),
+        Wait(Settled),
+        Expect(Tree(has: (role: "Button", label: "Check now"))),
+        Expect(NoError),
+        Shot("findings"),
+    ],
+)

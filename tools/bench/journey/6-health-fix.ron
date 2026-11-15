@@ -1,0 +1,23 @@
+// The first-user journey, step 6, once per fix the health check offers:
+// the finding `$fix`'s fix applied from the Health page (by its command:
+// every row's button is "Fix…"), then the main window must still draw
+// (the owner's window went black after a health fix). Run live by
+// tools/bench/journey.py, which sets `$fix` and checks the screen is not
+// black.
+Scenario(
+    name: "health-fix",
+    description: "A fix the health check offers is applied; the window keeps drawing.",
+    steps: [
+        Wait(Settled),
+        Call("help.health", {}),
+        Wait(Settled),
+        Window("settings"),
+        Call("health.fix", { "id": "$fix" }),
+        Wait(Settled),
+        Window("main"),
+        Wait(Settled),
+        // A shot is taken from the window's next frame: it must draw.
+        Shot("drawn"),
+        Expect(NoError),
+    ],
+)

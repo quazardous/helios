@@ -1,0 +1,27 @@
+// The first-user journey, step 7: Settings › Storage on the new library,
+// then Backup › Strategy. Their rows are read off the frame, after the
+// page settles: tools/bench/journey.py then waits for the volumes
+// (`library.volumes`: the library's disk, online) and reads the
+// strategy's line (`library.backupStrategy`, "No backup set up" on a new
+// library).
+Scenario(
+    name: "storage",
+    description: "Settings › Storage shows the library's disk, and the backup strategy its line, without an error.",
+    steps: [
+        Window("main"),
+        Wait(Settled),
+        Call("library.storage", {}),
+        Wait(Settled),
+        Window("settings"),
+        Expect(Value("admin.scope", "storage")),
+        Expect(Value("admin.section", "volumes")),
+        Expect(NoError),
+        Shot("volumes"),
+        Call("admin.open", { "path": "backup/strategy" }),
+        Wait(Settled),
+        Expect(Value("admin.scope", "backup")),
+        Expect(Value("admin.section", "strategy")),
+        Expect(NoError),
+        Shot("strategy"),
+    ],
+)
