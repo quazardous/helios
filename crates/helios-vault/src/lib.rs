@@ -50,6 +50,7 @@ pub mod fields;
 pub mod files;
 pub mod journal;
 pub mod keywords;
+pub mod meta;
 pub mod pairs;
 pub mod promises;
 pub mod read_order;

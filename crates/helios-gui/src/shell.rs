@@ -111,6 +111,7 @@ mod import_wizard;
 pub(crate) mod init_wizard;
 mod library_imports;
 mod library_keywords;
+mod library_meta;
 mod lifetime;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
@@ -324,6 +325,8 @@ enum Action {
     LibraryImports(&'static str, Value, Origin),
     /// The Library's keyword commands (`library_keywords`).
     LibraryKeywords(&'static str, Value),
+    /// The Library's metadata commands (`library_meta`).
+    LibraryMeta(&'static str, Value),
     /// Scopes the library to a collection (`id`; null: none), as whom;
     /// without `id`, says the collection.
     Collection(Value, Origin),
@@ -3104,6 +3107,13 @@ impl Shell {
             add(
                 CommandSpec::new(id, title, "Library"),
                 Box::new(move |a, _| Ok(Action::LibraryKeywords(id, a.clone()))),
+            );
+        }
+        for (id, title) in library_meta::COMMANDS {
+            let id: &'static str = id;
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, _| Ok(Action::LibraryMeta(id, a.clone()))),
             );
         }
         for (id, title) in library_imports::COMMANDS
@@ -6331,6 +6341,7 @@ impl Shell {
                 return self.library_imports_command(id, &args, &origin);
             }
             Action::LibraryKeywords(id, args) => return self.library_keywords_command(id, &args),
+            Action::LibraryMeta(id, args) => return self.library_meta_command(id, &args),
             Action::Collection(args, origin) => return self.collection_library(&args, &origin),
             Action::CollectionEdit(id, args) => return self.collection_edit(id, &args),
             Action::RecentFilters(id, args) => return self.recent_filters(id, &args),

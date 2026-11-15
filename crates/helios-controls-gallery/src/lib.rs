@@ -28,9 +28,13 @@
 //! controls dragged from a shelf onto a card laid out by the slot engine,
 //! composed into cases, and tried live; the `controls.bench.*` commands
 //! build it for agents and tests ([`Gallery::run_command`]).
+//!
+//! The third page, **Helios UI** ([`presets`]), shows every `helios_ui`
+//! preset in its states: the controls Helios's screens are made of.
 
 pub mod bench;
 pub mod bench_ui;
+pub mod presets;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -182,6 +186,8 @@ pub enum Page {
     Catalogue,
     /// The shelf and the bench.
     Bench,
+    /// Every `helios_ui` preset in its states ([`presets`]).
+    Presets,
 }
 
 /// The gallery's state: the registry, the store of live values, the
@@ -196,6 +202,7 @@ pub struct Gallery {
     commands: Shared,
     pub page: Page,
     pub bench: bench_ui::BenchPage,
+    pub presets: presets::PresetsPage,
 }
 
 impl Default for Gallery {
@@ -288,6 +295,7 @@ impl Gallery {
             last: BTreeMap::new(),
             commands,
             page: Page::default(),
+            presets: presets::PresetsPage::default(),
             bench,
         }
     }
@@ -397,11 +405,13 @@ impl Gallery {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.page, Page::Catalogue, "Catalogue");
             ui.selectable_value(&mut self.page, Page::Bench, "Bench");
+            ui.selectable_value(&mut self.page, Page::Presets, "Helios UI");
         });
         ui.separator();
         match self.page {
             Page::Catalogue => self.catalogue(ui),
             Page::Bench => self.bench.ui(ui),
+            Page::Presets => self.presets.ui(ui),
         }
     }
 

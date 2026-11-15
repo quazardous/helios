@@ -13,6 +13,7 @@ egui_hud = { workspace = true, features = ["render", "bench"] }
 helios-core.workspace = true
 helios-shell.workspace = true
 helios-values.workspace = true
+helios-ui.workspace = true
 # The curve editor and the colour wheel: the implicit card's own drawings.
 egui-pop = { workspace = true, features = ["viewport"] }
 serde_json.workspace = true
