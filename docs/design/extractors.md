@@ -145,7 +145,8 @@ beside the export runs, not yet behind a node verb:
   stays. Removing the run drops its run-only results.
 
 Left for the second part: the node verbs (`workflow.extract` or
-`diagrams.submit`) and the runner thread, the run as a job and an
+`diagrams.submit`) and the runner thread, the run document in
+`workflow/runs` (other runs read a run's results only while it is kept), the run as a job and an
 `extract` promise in the Activity focus, input nodes (selection, album,
 smart album, import session, query, whole library) resolved to image
 ids, reading the embedded preview from the library, the alter node, and

@@ -670,7 +670,16 @@ mod tests {
         again.work(&ai, &cache, &Cards, &bus, &stop, &clock());
         assert_eq!(chats(&runtime), 6);
 
-        // Another run over the same images reads the cache: no call.
+        // Another run over the same images reads the cache: no call. A
+        // run's results are read by others while its run document is
+        // kept (the runs layer writes it).
+        vault
+            .set_workflow_documents(&[(
+                "runs".into(),
+                "run-a".into(),
+                Some(json!({ "id": "run-a" })),
+            )])
+            .unwrap();
         let store = VaultJournal::new(vault.clone(), "run-b");
         let mut other = ExtractRun::open("run-b", nodes, &imgs, store, 3_000).unwrap();
         let cache_b = vault.extract_cache(Some("run-b"));
