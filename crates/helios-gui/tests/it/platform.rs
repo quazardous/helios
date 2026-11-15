@@ -56,7 +56,7 @@ fn a_second_launch_hands_over() {
         .build(&ctx)
         .unwrap();
     let status = Command::new(std::env::current_exe().unwrap())
-        .args(["second_launch_child", "--exact", "--nocapture"])
+        .args(["platform::second_launch_child", "--exact", "--nocapture"])
         .env(CHILD, &id)
         .status()
         .unwrap();

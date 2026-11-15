@@ -13,7 +13,8 @@ use egui::vec2;
 use egui_kittest::kittest::Queryable;
 use helios_gui::{Shell, headless, helios_panels};
 
-const CHILD: &str = "in_a_french_environment";
+/// The child test, by its full path in the `it` executable.
+const CHILD: &str = "english_on_a_french_system::in_a_french_environment";
 
 #[test]
 fn the_harness_speaks_english_on_a_french_system() {
