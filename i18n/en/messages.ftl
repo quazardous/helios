@@ -1503,6 +1503,12 @@ gui-library-imports-none = No import yet
 
 gui-library-keep-best = Keep the best: pick it, reject the others
 
+gui-library-key-date = Capture date
+
+gui-library-key-keyword = Keyword
+
+gui-library-key-tag = Tag
+
 gui-library-keyword-add = Add to the selected photos
 
 gui-library-keyword-drop = Tag { $count } photos with { $keyword }
