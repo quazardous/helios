@@ -251,9 +251,9 @@ pub(crate) fn merge_accounts(
         .chain(merge.dropped.iter().map(|a| a.id.as_str()))
         .collect();
     let rank = |s: &SavedSource| {
-        (s.connector == kept.connector)
-            .then(|| s.account.as_deref())
-            .flatten()
+        s.account
+            .as_deref()
+            .filter(|_| s.connector == kept.connector)
             .and_then(|a| ranked.iter().position(|r| *r == a))
     };
     let Some(best) = list

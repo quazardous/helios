@@ -2261,17 +2261,22 @@ fn one_source_per_account_refuses_a_second_and_offers_the_first() {
     assert_eq!(h.state().import_sources().len(), 1);
 }
 
-/// Two accounts of one connector signed in as one address, each with a
-/// source: what `merge_duplicate_accounts` is given.
-fn signed_in_twice(
-    provider: Arc<dyn helios_connect::ConnectorProvider>,
-) -> (
+/// The sources' document as kept, shared with the test.
+type KeptText = std::rc::Rc<std::cell::RefCell<Option<String>>>;
+
+/// What [`signed_in_twice`] sets up: the shell, the accounts, their
+/// secrets, the sources' document, the older and newer account.
+type SignedInTwice = (
     Shell,
     Arc<MemoryAccounts>,
     Arc<MemorySecrets>,
-    std::rc::Rc<std::cell::RefCell<Option<String>>>,
+    KeptText,
     [helios_connect::account::Account; 2],
-) {
+);
+
+/// Two accounts of one connector signed in as one address, each with a
+/// source: what `merge_duplicate_accounts` is given.
+fn signed_in_twice(provider: Arc<dyn helios_connect::ConnectorProvider>) -> SignedInTwice {
     use helios_connect::account::{Account, EMAIL};
     let book = Arc::new(MemoryAccounts::default());
     let secrets = Arc::new(MemorySecrets::default());
@@ -2324,7 +2329,7 @@ fn accounts_signed_in_twice_are_merged_once_keeping_their_imports() {
     assert_eq!(shell.merge_duplicate_accounts(&library), 1);
     assert_eq!(*moved.borrow(), [(old.id.clone(), new.id.clone())]);
     let ids: Vec<String> = book.accounts().unwrap().into_iter().map(|a| a.id).collect();
-    assert_eq!(ids, [new.id.clone()]);
+    assert_eq!(ids, std::slice::from_ref(&new.id));
     assert_eq!(secrets.get(&old.id, "refresh_token").unwrap(), None);
     assert_eq!(
         secrets.get(&new.id, "refresh_token").unwrap().as_deref(),
