@@ -84,6 +84,12 @@ or folders on Helios (the window opens with them as its source).
     - "New only" is on, and images already in the Library are dimmed
       with "in your Library" (a size and partial-hash prefilter, then
       confirmed by the full hash during the job);
+    - the source's import profile filter is previewed: a photo it skips
+      is dimmed with a funnel icon ("skipped by the import profile's
+      filter") and left out of the counts, by the import's own
+      predicate (`import_profile::Filter`), so the Import count is what
+      the import brings in; dimmed, not hidden, as Lightroom greys the
+      photos it will not import (2026-11-15);
     - a RAW+JPEG pair is one entry with a "RAW+JPG" badge;
     - folders or cards dropped on it from the system open as the
       sources.

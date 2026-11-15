@@ -961,3 +961,62 @@ fn the_cli_reaches_the_desktops_node_through_its_rendezvous() {
     assert!(!node_files.rendezvous.exists(), "the rendezvous is removed");
     assert!(!Lock::held(&node_files.lock).unwrap(), "the lock is let go");
 }
+
+/// The headless node's jobs are promises, as the desktop's are: a job of
+/// its own shows as one, and an import by rule as its own promise only,
+/// not a second one for the job it runs under.
+#[test]
+fn the_headless_node_mirrors_its_jobs_as_promises_without_doubles() {
+    use helios_core::jobs::Start;
+    use helios_vault::promises::Filter;
+
+    let p = Place::new("job-promises");
+    let file = p.0.join("vault.db");
+    let roll = p.0.join("roll");
+    std::fs::create_dir_all(&roll).unwrap();
+    photo(&roll.join("a.raf"), 1);
+    let bus = Arc::new(Bus::new());
+    let jobs = Jobs::new(bus.clone());
+    let node = VaultNode::start(
+        Vault::new(SqliteStore::open(&file).unwrap()),
+        &file,
+        bus,
+        &jobs,
+        Options {
+            volumes: Arc::new(Vec::<Volume>::new()),
+            // No health run while the test runs.
+            schedule: Schedule::new(
+                Instant::now(),
+                Duration::from_hours(1),
+                Duration::from_hours(1),
+            ),
+            clock: Duration::from_millis(20),
+        },
+    );
+    let job = jobs.start(Start::new("trash-1", "Move 1 file to the trash", "trash").total(1));
+    job.finished();
+    let import = helios_node_core::import_promise::start(
+        node.importer().promises(),
+        &serde_json::json!({ "source": roll, "rule": "all" }),
+        "agent:test",
+    )
+    .unwrap();
+    let all = || node.vault().promises(&Filter::default()).unwrap();
+    assert!(
+        until(Duration::from_secs(30), || {
+            let all = all();
+            all.iter().all(|p| p.state.is_settled())
+                && all.iter().any(|p| p.id == import.id)
+                && all.iter().any(|p| p.request["job"] == "trash-1")
+        }),
+        "the trash job's and the import's promises settled in 30 s: {:?}",
+        all()
+    );
+    let imports: Vec<_> = all().into_iter().filter(|p| p.kind == "import").collect();
+    assert_eq!(
+        imports.len(),
+        1,
+        "the import is its promise, no double: {imports:?}"
+    );
+    node.stop();
+}

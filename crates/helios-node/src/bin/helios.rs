@@ -1698,6 +1698,7 @@ fn resend_hint(request_id: Option<&str>) {
 }
 
 fn main() -> ExitCode {
+    helios_node::logger::install(log::LevelFilter::Warn);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [flag] = args.as_slice()
         && (flag == "--version" || flag == "-V")

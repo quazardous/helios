@@ -1367,10 +1367,13 @@ after every step, and shots and the journal kept.
 `Expect(Value(..))`: `helios.library` (`count`, `picked`, `rejected`,
 `selected`, `selection`, `current` with its `id`, `name` and `path`,
 `open_size`), `helios.values` (the image's parameters by path:
-`helios.values.node/exposure/exposure`) and `helios.jobs` (`idle`,
-`total`, `running`, `finished`, `failed`, `cancelled`, and `list`, each
-job's `id`, `kind`, `title` and `state`). egui-pop's `jobs` collector
-has the whole jobs centre.
+`helios.values.node/exposure/exposure`) and `helios.jobs`, read from
+the node's promises as the Activity focus lists them (`idle`, `total`,
+`running`, `finished`, `failed`, `cancelled`, and `list`, each one's `id`
+(the promise's), `job` (the job it mirrors, when it does), `kind`,
+`title` and `state`; work with no end, the image map, is listed but
+never counted as running). egui-pop's `jobs` collector has the whole
+jobs centre while it is there.
 
 ## Parameters
 

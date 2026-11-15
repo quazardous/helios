@@ -1029,7 +1029,8 @@ impl Shell {
         let engine = crate::viewport::engine();
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
-        agent_state.set(library.clone(), viewport.clone());
+        let activity = crate::activity::Activity::default();
+        agent_state.set(library.clone(), viewport.clone(), activity.followed());
         let system: crate::clipboard::system::Shared = Rc::new(RefCell::new(Box::new(
             crate::clipboard::system::Arboard::default(),
         )));
@@ -1073,7 +1074,7 @@ impl Shell {
             stack_review: Rc::default(),
             duplicates: Rc::default(),
             imports: Vec::new(),
-            activity: crate::activity::Activity::default(),
+            activity,
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
             init: init_wizard::InitState::default(),

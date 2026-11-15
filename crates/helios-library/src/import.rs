@@ -290,12 +290,26 @@ pub struct Options {
     /// What every photo imported is given: keywords, a rating, a colour
     /// label ([`crate::import_profile::Apply`]).
     pub apply: Option<crate::import_profile::Apply>,
+    /// The node's promise this import is the work of (an import by
+    /// rule): its job says so ([`helios_core::jobs::Start::promise`]), so
+    /// it is not mirrored as a second promise.
+    pub promise: Option<String>,
 }
 
 /// A removable volume mounted now: its mount point and its identity.
 pub type Mounted = (PathBuf, helios_storage::VolumeId);
 
 impl Options {
+    /// The start of an import job `id` titled `title`, naming the promise
+    /// it is the work of ([`Options::promise`]).
+    pub fn job(&self, id: &str, title: &str) -> Start {
+        let start = Start::new(id, title, KIND);
+        match &self.promise {
+            Some(promise) => start.promise(promise),
+            None => start,
+        }
+    }
+
     /// The removable volumes mounted now, deepest mount point first:
     /// [`Options::mounted`], else the machine's.
     pub fn places(&self) -> Vec<Mounted> {
@@ -342,6 +356,7 @@ impl Default for Options {
             mounted: None,
             filter: None,
             apply: None,
+            promise: None,
         }
     }
 }
@@ -1492,13 +1507,13 @@ fn run_import<S: Store>(
     let (root, sources) = match prepared {
         Ok(p) => p,
         Err(e) => {
-            jobs.start(Start::new(&id, &title, KIND)).failed(&e);
+            jobs.start(options.job(&id, &title)).failed(&e);
             return Err(e);
         }
     };
     let files = Files(sources);
     let total = files.len() as u64;
-    let job = jobs.start(Start::new(&id, &title, KIND).total(total));
+    let job = jobs.start(options.job(&id, &title).total(total));
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = stop.clone();
