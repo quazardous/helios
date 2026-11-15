@@ -1463,6 +1463,10 @@ gui-library-facet-type = Type
 
 gui-library-file = { $size } · modified { $day }
 
+gui-library-flag-pick-tip = Flag as pick
+
+gui-library-flag-reject-tip = Reject
+
 gui-library-folder-import = Import new photos here
 
 gui-library-folder-scan = Scan this folder
@@ -1512,6 +1516,18 @@ gui-library-keyword-toggle = Show or hide the keywords below { $name }
 gui-library-keywords = Keywords
 
 gui-library-keywords-none = No keyword yet: write levels with | (Animals|Dog)
+
+gui-library-label-blue-tip = Blue label
+
+gui-library-label-green-tip = Green label
+
+gui-library-label-purple-tip = Purple label
+
+gui-library-label-red-tip = Red label
+
+gui-library-label-yellow-tip = Yellow label
+
+gui-library-mark-keys = { $what } ({ $keys })
 
 gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
 

@@ -2857,3 +2857,12 @@ gui-library-keyword-rename-verb = Renommer
 gui-library-keyword-toggle = Afficher ou masquer les mots-clés sous { $name }
 gui-library-keywords = Mots-clés
 gui-library-keywords-none = Aucun mot-clé : écrivez les niveaux avec | (Animaux|Chien)
+
+gui-library-label-red-tip = Étiquette rouge
+gui-library-label-yellow-tip = Étiquette jaune
+gui-library-label-green-tip = Étiquette verte
+gui-library-label-blue-tip = Étiquette bleue
+gui-library-label-purple-tip = Étiquette violette
+gui-library-flag-pick-tip = Marquer comme retenue
+gui-library-flag-reject-tip = Rejeter
+gui-library-mark-keys = { $what } ({ $keys })
