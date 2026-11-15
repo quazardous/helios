@@ -60,7 +60,9 @@ impl CommandSpec {
     }
 }
 
-type Handler = Box<dyn Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync>;
+/// A command's handler, shared: [`Registry::reader`] hands a read-only
+/// one out, to be called away from the registry's lock.
+pub type Handler = std::sync::Arc<dyn Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync>;
 
 struct Entry {
     spec: CommandSpec,
@@ -103,10 +105,21 @@ impl Registry {
             Entry {
                 spec,
                 when,
-                handler: Box::new(handler),
+                handler: std::sync::Arc::new(handler),
             },
         );
         Ok(())
+    }
+
+    /// A read-only command's handler, to call without holding the
+    /// registry (a read that takes its time, on another thread); `None`
+    /// for an unknown command or one that changes something. The run is
+    /// not kept in the history.
+    pub fn reader(&self, id: &str) -> Option<Handler> {
+        self.commands
+            .get(id)
+            .filter(|e| e.spec.read_only)
+            .map(|e| e.handler.clone())
     }
 
     pub fn spec(&self, id: &str) -> Option<&CommandSpec> {
