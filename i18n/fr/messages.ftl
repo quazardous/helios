@@ -1800,6 +1800,7 @@ gui-import-window-favourites = Favoris
 gui-import-window-import = Importer { $count }
 
 gui-import-window-in-library = dans votre bibliothèque
+gui-import-window-filtered = écarté par le filtre du profil d'import
 
 gui-import-window-into = Dans
 
