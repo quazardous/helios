@@ -1,11 +1,12 @@
 name: winget manifest
 
-# Checks the winget manifests under packaging/winget/ on a Windows runner,
-# as the winget-pkgs submission checklist asks ("tested locally with
-# winget install --manifest"): `winget validate`, then `winget install
-# --manifest` of the installer it points at, then that the install is
-# registered. Runs when the manifests (or this workflow) change, and by
-# hand (docs/releases.md, "winget").
+# Checks the winget manifests under packaging/winget/ on a Windows runner:
+# `winget validate`, then the installer the manifest names, downloaded,
+# checked against the manifest's hash and run with the manifest's silent
+# switches, then that the install is registered under the manifest's
+# ProductCode. `winget install --manifest` itself hangs on the hosted runner
+# (see the step below), so the submission checklist's local install test is
+# still done by hand on Windows (docs/releases.md, "winget").
 on:
   push:
     branches: [next]
@@ -27,7 +28,7 @@ concurrency:
 
 jobs:
   manifest:
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -51,22 +52,24 @@ jobs:
             Write-Host "== $($dir.Name)"
             winget validate --manifest $dir.FullName
             if ($LASTEXITCODE -ne 0) { throw "winget validate failed for $($dir.Name)" }
-            # winget waits on the installer; a hang is cut after 10 minutes
-            # and both logs (winget's and the installer's) are printed.
-            # One argument string, so the installer override stays one value.
+            # `winget install --manifest` hangs on the hosted runner before it
+            # starts the installer (it never returns from listing the
+            # installed programs), so the installer the manifest names is
+            # downloaded, checked against its hash and run with the
+            # manifest's own silent switches instead.
+            $inst = Get-Content (Join-Path $dir.FullName 'Quazardous.Helios.installer.yaml') -Raw
+            $url = [regex]::Match($inst, 'InstallerUrl:\s*(\S+)').Groups[1].Value
+            $sha = [regex]::Match($inst, 'InstallerSha256:\s*(\S+)').Groups[1].Value
+            $silent = [regex]::Match($inst, 'Silent:\s*(.+)').Groups[1].Value.Trim()
+            $exe = Join-Path $env:RUNNER_TEMP 'setup.exe'
+            Invoke-WebRequest -Uri $url -OutFile $exe
+            if ((Get-FileHash $exe -Algorithm SHA256).Hash -ne $sha) { throw "installer hash differs from the manifest for $($dir.Name)" }
             $log = Join-Path $env:RUNNER_TEMP 'inno.log'
-            $line = "install --manifest `"$($dir.FullName)`" --silent --verbose-logs --accept-package-agreements --accept-source-agreements --disable-interactivity --override `"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG=$log`""
-            $p = Start-Process winget -PassThru -NoNewWindow -ArgumentList $line
-            if (-not $p.WaitForExit(600000)) {
-              Get-Process | Where-Object { $_.ProcessName -match 'helios|setup|winget|tmp' } | Format-Table Id, ProcessName, MainWindowTitle -AutoSize | Out-String | Write-Host
-              Stop-Process -Id $p.Id -Force
-              $hung = $true
-            }
-            Get-ChildItem "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir" -Filter *.log -ErrorAction SilentlyContinue |
-              Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { Write-Host "== winget log $($_.Name)"; Get-Content $_.FullName -Tail 60 }
-            if (Test-Path $log) { Write-Host "== installer log"; Get-Content $log -Tail 80 }
-            if ($hung) { throw "winget install hung for $($dir.Name)" }
-            if ($p.ExitCode -ne 0) { throw "winget install failed for $($dir.Name) (exit $($p.ExitCode))" }
+            $p = Start-Process $exe -PassThru -ArgumentList "$silent /LOG=`"$log`""
+            if (-not $p.WaitForExit(600000)) { Stop-Process -Id $p.Id -Force; $hung = $true }
+            if (Test-Path $log) { Write-Host "== installer log"; Get-Content $log -Tail 40 }
+            if ($hung) { throw "the installer hung for $($dir.Name)" }
+            if ($p.ExitCode -ne 0) { throw "the installer failed for $($dir.Name) (exit $($p.ExitCode))" }
             $installer = Get-Content (Join-Path $dir.FullName 'Quazardous.Helios.installer.yaml') -Raw
             $code = [regex]::Match($installer, "ProductCode:\s*'([^']+)'").Groups[1].Value
             $keys = @(

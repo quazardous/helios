@@ -237,9 +237,11 @@ opened by the coordinator once the owner agrees. Until it is merged, the
 until then the job leaves a notice and ends without failing.
 
 The `winget manifest` workflow (`.github/workflows/winget-manifest.yml`)
-does this on a Windows runner whenever the manifests change, and can be
-run by hand: `winget validate`, then `winget install --manifest`, then a
-check that the install is registered. By hand on Windows (once, as
+checks them on a Windows runner whenever they change (and by hand):
+`winget validate`, then the manifest's installer, hash-checked and run with
+the manifest's silent switches, then its uninstall entry.
+`winget install --manifest` itself hangs on the hosted runner, so that
+step stays a manual one on Windows. By hand on Windows (once, as
 administrator: `winget settings --enable LocalManifestFiles`):
 
 ```powershell
