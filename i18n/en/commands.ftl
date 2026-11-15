@@ -397,6 +397,24 @@ command-library-marks-copy =
 command-library-marks-paste =
     .title = Paste the copied marks (`images`: ids, else the selection; `marks`: some of rating, labels, tags, title, all by default; `mode`: merge, the default, adds labels and tags, overwrite makes each mark the copy's)
 
+command-library-metadata-get =
+    .title = Read the selection's metadata: each field's shared value, or `mixed`; the labels and keywords all or some photos have
+
+command-library-metadata-set =
+    .title = Set metadata on photos as a group (`fields`: title, description, creator, copyright, rating, flag; `keywords` and `labels`: `add`, `remove`; `images`: ids, else the selection); fields not named keep each photo's value; Ctrl+Z takes it back
+
+command-library-metadata-template-apply =
+    .title = Apply a metadata template (`name`) to photos (`images`: ids, else the selection); Ctrl+Z takes it back
+
+command-library-metadata-template-delete =
+    .title = Delete a metadata template (`name`)
+
+command-library-metadata-template-list =
+    .title = List the metadata templates, with their fields and keywords
+
+command-library-metadata-template-save =
+    .title = Save a metadata template (`name`), from `fields` and `keywords` when given, else from what the selected photos share
+
 command-library-openFolder =
     .title = Open a folder in the file manager (`path`)
 

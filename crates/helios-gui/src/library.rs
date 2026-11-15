@@ -50,7 +50,7 @@ use egui_pop::views::library::compare::{CompareView, Pane};
 use crate::comparison::Comparison;
 use egui_pop::views::library::filter::{Filter, SearchField, SearchState};
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
-use egui_pop::views::library::tags::{TagInput, TagInputState};
+use egui_pop::views::library::tags::TagInputState;
 use egui_pop::views::library::{
     Badge, Change as Mark, ColorLabel, CullAction, CullKeymap, Flag, LibraryItems, LibraryState,
     Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, Tone as BadgeTone, change,
@@ -62,13 +62,15 @@ use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 pub use helios_vault::fields::Op;
 use helios_vault::fields::{
-    LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, ROTATION, TAGS, TITLE,
+    COPYRIGHT, CREATOR, DESCRIPTION, LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED,
+    ROTATION, TAGS, TITLE,
 };
 use serde_json::Value;
 
 mod batch;
 mod grouping;
 mod keywords;
+mod metadata;
 mod pairing;
 mod versions;
 
@@ -87,6 +89,10 @@ pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use keywords::{
     DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
     KEYWORD_MERGE_COMMAND, KEYWORD_REMOVE_COMMAND, KEYWORD_RENAME_COMMAND, KeywordAsk,
+};
+pub use metadata::{
+    META_GET_COMMAND, META_SET_COMMAND, MetaEdit, TEMPLATE_APPLY_COMMAND, TEMPLATE_DELETE_COMMAND,
+    TEMPLATE_LIST_COMMAND, TEMPLATE_SAVE_COMMAND, Template,
 };
 pub use pairing::{PAIR_COMMAND, PairAsk, UNPAIR_COMMAND};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
@@ -351,6 +357,12 @@ pub struct Entry {
     pub tags: Vec<String>,
     /// Its title, when it has one.
     pub title: Option<String>,
+    /// Its description (caption), when it has one.
+    pub description: Option<String>,
+    /// Who made it, when said.
+    pub creator: Option<String>,
+    /// Its copyright notice, when it has one.
+    pub copyright: Option<String>,
     /// The file's size in bytes, when it is on disk.
     pub bytes: Option<u64>,
     /// When the file was last modified, in seconds since 1970 (UTC); shown
@@ -507,6 +519,14 @@ fn names(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A text field's value, none when empty.
+fn text(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|t| !t.is_empty())
+        .map(String::from)
+}
+
 impl Entry {
     /// Shows a field's stored value (`None`: the field is empty).
     pub fn show(&mut self, field: &str, value: Option<&Value>) {
@@ -520,12 +540,10 @@ impl Entry {
                     .sort_by_key(|l| LABELS.iter().position(|k| k == l));
             }
             TAGS => self.tags = names(value),
-            TITLE => {
-                self.title = value
-                    .and_then(Value::as_str)
-                    .filter(|t| !t.is_empty())
-                    .map(String::from);
-            }
+            TITLE => self.title = text(value),
+            DESCRIPTION => self.description = text(value),
+            CREATOR => self.creator = text(value),
+            COPYRIGHT => self.copyright = text(value),
             CAPTURED => {
                 self.captured = value.and_then(Value::as_f64);
                 self.day = self.captured.map(helios_vault::capture::day_text);
@@ -1708,6 +1726,17 @@ pub struct Library {
     /// What the commands asked of the keyword branches (rename, merge),
     /// for the host, each with its batch.
     keyword_asks: Vec<(KeywordAsk, Batch)>,
+    /// The group edits of metadata asked (`library.meta.set`), for the
+    /// host, each with its batch.
+    meta_edits: Vec<(MetaEdit, Batch)>,
+    /// The metadata templates, once read from the library.
+    templates: Option<Vec<Template>>,
+    /// Whether the host is to read the templates.
+    templates_wanted: Wanted,
+    /// The templates to write back, once changed.
+    templates_write: Option<Vec<Template>>,
+    /// The Metadata section's state.
+    meta_panel: metadata::MetaPanel,
     /// What the commands asked of RAW+JPEG pairs (pair, unpair), for the
     /// host, each with its batch.
     pair_asks: Vec<(PairAsk, Batch)>,
@@ -1882,6 +1911,11 @@ impl Default for Library {
             stack_asks: Vec::new(),
             keyword_counts: None,
             keyword_asks: Vec::new(),
+            meta_edits: Vec::new(),
+            templates: None,
+            templates_wanted: Wanted::Yes,
+            templates_write: None,
+            meta_panel: metadata::MetaPanel::default(),
             pair_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
@@ -4286,90 +4320,8 @@ impl Library {
         with_keys(ctx, what, &keys)
     }
 
-    /// The marks of the cursor's image, edited for the selection: stars,
-    /// labels, flag and tags.
-    fn marks_bar(&mut self, ui: &mut Ui) {
-        let Some(entry) = self.selected.and_then(|i| self.entries.get(i)).cloned() else {
-            ui.weak(crate::i18n::text(
-                ui.ctx(),
-                Message::new("gui-library-no-cursor", "No image under the cursor"),
-            ));
-            return;
-        };
-        let Ok(keys) = self.targets() else {
-            return;
-        };
-        let marks = entry.marks();
-        let mut asked = Vec::new();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(&entry.name);
-            if let Some(rating) = RatingStars::new(marks.rating).show(ui).changed {
-                asked.push(Mark::Rate {
-                    keys: keys.clone(),
-                    rating,
-                });
-            }
-            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
-                .size
-                .control_height;
-            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
-            let tips = ColorLabel::ALL.map(|l| {
-                let (what, command) = label_tip(l);
-                self.mark_tip(ui.ctx(), what, command)
-            });
-            toggle_tips(ui, &labels.response, side, &tips);
-            if let Some(labels) = labels.changed {
-                for label in ColorLabel::ALL {
-                    if labels.has(label) != marks.labels.has(label) {
-                        asked.push(Mark::Label {
-                            keys: keys.clone(),
-                            label,
-                            on: labels.has(label),
-                        });
-                    }
-                }
-            }
-            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
-            let tips = [
-                (
-                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
-                    "vault.flag.pick",
-                ),
-                (
-                    Message::new("gui-library-flag-reject-tip", "Reject"),
-                    "vault.flag.reject",
-                ),
-            ]
-            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
-            toggle_tips(ui, &flags.response, side, &tips);
-            if let Some(flag) = flags.changed {
-                asked.push(Mark::Flag {
-                    keys: keys.clone(),
-                    flag,
-                });
-            }
-        });
-        let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-tags", "Tags"));
-        let out = TagInput::new("helios.library.tags")
-            .label(label)
-            .source(&self.known_tags)
-            .show(ui, &mut self.tags, &entry.tags);
-        if !out.added.is_empty() || !out.removed.is_empty() {
-            asked.push(Mark::Tag {
-                keys,
-                add: out.added,
-                remove: out.removed,
-            });
-        }
-        self.versions_strip(ui, &entry.id);
-        for m in asked {
-            if let Err(e) = self.mark(m) {
-                self.notes.push(e);
-            }
-        }
-    }
-
-    /// The Library panel: the search field, the cursor's marks, and the
+    /// The Library panel: the search field, the sections (the Metadata
+    /// section edits the selection), and the
     /// thumbnail grid with the culling keys.
     pub fn grid(&mut self, ui: &mut Ui) {
         self.receive(ui.ctx());
@@ -4381,7 +4333,7 @@ impl Library {
         self.albums_section(ui);
         self.keywords_section(ui);
         self.imports_section(ui);
-        self.marks_bar(ui);
+        self.metadata_section(ui);
         if self.entries.is_empty() {
             let text = crate::i18n::text(
                 ui.ctx(),

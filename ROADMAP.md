@@ -128,10 +128,23 @@ Clippy's disallowed lists forbid raw egui widgets in the Helios workspace,
 an exception only with a stated reason. `helios-ui` is the goal of the
 presentation work (2026-11-15, decided); its design is in
 docs/design/visual-identity.md.
-In the same way, the controls of the photo workshops (handles, sliders
-and panels drawn over the image, the controls layer) come from egui_hud
-only (2026-11-15, decided): a control egui_hud lacks is added there
-first, and Clippy's disallowed lists hold the workshop crates to it.
+Two worlds, each with one source of controls (2026-11-15, decided): the
+form-like parts of Helios (settings and admin pages, the import window's
+panels, dialogs, lists) go through `helios-ui`; the visual module parts
+(the diagram and its toolboxes, the workshops' handles, sliders and
+panels drawn over the image, the controls layer) come from egui_hud only.
+A control either lacks is added to egui-pop or egui_hud first, and
+Clippy's disallowed lists hold each crate to its world.
+Refined the same day (2026-11-15, decided): the visual world has its
+own thin frame, `helios-rack` (name not decided), the counterpart of
+`helios-ui`: a module or tool declares its controls, handles, toolbox
+and states, and the frame lays them out; within Helios egui_hud keeps
+the HUD logic only and renders nothing itself, every widget, mark and
+handle being drawn by egui-pop, on the same egui-pop version as Helios.
+Recommended, not decided: all placement is egui-pop's (the layout layer
+grown out of its `UiPop` layout-by-role helpers; egui_stack and egui_fit
+stay separate solvers reached only through egui-pop). The analysis and
+its slices: docs/design/ui-responsibilities.md.
 Translation goes into egui-pop too (2026-10-11, decided): an official
 `egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
 extraction) built on egui-pop's public API, moved there from

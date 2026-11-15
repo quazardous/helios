@@ -68,6 +68,7 @@ pub const IDS: &[&str] = &[
     STACKS_UNGROUP,
     KEYWORDS_RENAME,
     KEYWORDS_MERGE,
+    META_SET,
     PAIRS_PAIR,
     PAIRS_UNPAIR,
     "library.stacks.suggest",
@@ -144,6 +145,14 @@ pub const KEYWORDS_RENAME: &str = "library.keywords.rename";
 /// Merges a keyword branch (`from`) into another one photos carry
 /// (`into`); answers how many photos and the step (`changes`).
 pub const KEYWORDS_MERGE: &str = "library.keywords.merge";
+
+/// Sets photos' metadata as a group (`docs/design/library.md`, L13): the
+/// fields named set on every photo (`fields`: title, description,
+/// creator, copyright, rating, labels, flag; null or "" clears), the
+/// fields not named kept as each photo has them, and keywords added or
+/// taken off per keyword (`keywords`: `add`, `remove`); answers how many
+/// photos changed and the step (`changes`) the vault's revert undoes.
+pub const META_SET: &str = "library.meta.set";
 /// Pairs RAW+JPEG files (`docs/design/raw-jpeg-pairs.md`): the pairs
 /// found among photos (the whole Library when `images` is absent), or two
 /// photos as they are (`exact`), each made one photo with the JPEG its
@@ -488,6 +497,43 @@ pub fn specs() -> Vec<CommandSpec> {
         .params(object(&[
             ("from", keyword_path("the branch merged"), true),
             ("into", keyword_path("the branch it goes into, carried by photos"), true),
+        ])),
+        library(
+            META_SET,
+            "Set metadata on photos as a group, the fields not named kept; undoable",
+        )
+        .params(object(&[
+            ("images", images(), true),
+            (
+                "fields",
+                json!({ "type": "object",
+                        "description": "a value per field set on every photo: title, description, creator, \
+                                        copyright (text; null or \"\" clears), rating (0 to 5), labels \
+                                        (a list of colours), flag (pick, reject or none)" }),
+                false,
+            ),
+            (
+                "keywords",
+                json!({ "type": "object",
+                        "properties": {
+                            "add": { "type": "array", "items": { "type": "string" } },
+                            "remove": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "description": "keyword paths (levels joined with `|`) added to every photo, \
+                                        or taken off with those below them" }),
+                false,
+            ),
+            (
+                "labels",
+                json!({ "type": "object",
+                        "properties": {
+                            "add": { "type": "array", "items": { "type": "string" } },
+                            "remove": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "description": "colour labels added to or taken off every photo, one by one, \
+                                        the others kept" }),
+                false,
+            ),
         ])),
         library(
             PAIRS_PAIR,
@@ -1363,6 +1409,62 @@ pub fn run<S: Store>(
             };
             moved.map(|m| json!({ "photos": m.photos, "changes": to_json(&m.changes) }))
         }
+        META_SET => {
+            let ids = named(vault, params, "images")?;
+            if ids.is_empty() {
+                return Err("`images` names no photo".into());
+            }
+            let list = |key: &str| -> Vec<String> {
+                params["keywords"][key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            };
+            let (add, remove) = (list("add"), list("remove"));
+            let fields = match &params["fields"] {
+                Value::Object(map) => map.clone(),
+                Value::Null => serde_json::Map::new(),
+                other => return Err(format!("`fields`: {other} is not an object")),
+            };
+            let tags = if remove.is_empty() {
+                Vec::new()
+            } else {
+                vault.fields_of(&ids, &[helios_vault::fields::TAGS])?
+            };
+            let tags_of = |id: &ImageId| -> Vec<String> {
+                ids.iter()
+                    .position(|i| i == id)
+                    .and_then(|at| tags.get(at))
+                    .and_then(|row| row.get(helios_vault::fields::TAGS))
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            };
+            let labels = |key: &str| -> Vec<String> {
+                params["labels"][key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            };
+            let labels = helios_vault::meta::Labels {
+                add: labels("add"),
+                remove: labels("remove"),
+            };
+            let commands =
+                helios_vault::meta::commands(&ids, &fields, &add, &remove, &labels, &tags_of)?;
+            vault.set_meta(&commands, origin, now()).map(
+                |changes| json!({ "changed": changes.images.len(), "changes": to_json(&changes) }),
+            )
+        }
         STACKS_UNGROUP => {
             let members = named(vault, params, "images")?;
             vault.ungroup_stacks(&members).map(|(gone, changes)| {
@@ -1616,6 +1718,9 @@ mod tests {
             json!({ "images": ["0a"] }),
             json!({ "from": "Animals", "to": "Fauna" }),
             json!({ "from": "Animals|Dog", "into": "Pets|Dog" }),
+            json!({ "images": ["0a", "0b"], "fields": { "creator": "Ann", "rating": 4, "flag": "pick" },
+                    "keywords": { "add": ["Trips|2026"], "remove": ["Animals"] },
+                    "labels": { "add": ["red"] } }),
             json!({ "images": ["/p/a.cr3", "/p/a.jpg"], "exact": true }),
             json!({ "images": ["/p/a.cr3"] }),
             json!({ "images": [], "resolver": null, "window": 3.0, "distance": 8 }),
@@ -1980,6 +2085,38 @@ mod tests {
                 json!({ "from": "Animals", "into": "Nowhere" })
             )
             .is_err()
+        );
+        // A group edit over both photos: one step, keywords per keyword.
+        let field = |i: usize, name: &str| {
+            call(
+                "library.fields.get",
+                json!({ "images": [ids[i]], "fields": [name] }),
+            )
+            .unwrap()["rows"][0]["fields"][name]
+                .clone()
+        };
+        let set = call(
+            META_SET,
+            json!({ "images": [ids[0], ids[1]],
+                    "fields": { "creator": "Ann", "flag": "pick" },
+                    "keywords": { "add": ["Trips"], "remove": ["Animals"] } }),
+        )
+        .unwrap();
+        assert_eq!(set["changed"], 2, "{set}");
+        assert_eq!(field(1, "creator"), json!("Ann"));
+        assert_eq!(field(0, "picked"), json!(true));
+        assert_eq!(tags(0), json!(["Trips"]));
+        assert_eq!(tags(1), json!(["Pets|Dog", "Trips"]));
+        undo(&set);
+        assert_eq!(field(0, "creator"), Value::Null);
+        assert_eq!(tags(1), json!(["Animals", "Pets|Dog"]));
+        assert!(
+            call(
+                META_SET,
+                json!({ "images": [ids[0]], "fields": { "lens": "x" } })
+            )
+            .is_err(),
+            "a field read from the file"
         );
     }
 

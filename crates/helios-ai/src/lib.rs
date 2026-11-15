@@ -28,6 +28,7 @@
 
 pub mod anthropic;
 pub mod command;
+pub mod extract;
 pub mod fake;
 pub mod images;
 pub mod limits;
