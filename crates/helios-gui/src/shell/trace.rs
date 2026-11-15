@@ -86,7 +86,7 @@ pub(super) fn event_line(name: &str, data: &Value) -> Option<(bool, String)> {
 pub(super) struct Screen {
     settings_open: bool,
     wizard: Option<String>,
-    focus_screen: bool,
+    focused: bool,
 }
 
 impl Screen {
@@ -98,7 +98,7 @@ impl Screen {
                 .as_ref()
                 .and_then(|a| a.wizard_flow())
                 .map(|f| f.wizard.clone()),
-            focus_screen: admin::focus_screen(app),
+            focused: admin::focus_screen(app),
         }
     }
 
@@ -111,7 +111,7 @@ impl Screen {
                 "screen: the Settings app is {}, wizard: {}, focus screen: {} (in its own window: {})",
                 if now.settings_open { "open" } else { "closed" },
                 now.wizard.as_deref().unwrap_or("none"),
-                now.focus_screen,
+                now.focused,
                 admin::in_window(app),
             );
             *self = now;

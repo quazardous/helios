@@ -377,7 +377,7 @@ impl Shell {
                 .map(|s| {
                     s.iter()
                         .filter(|s| s.required && !s.done)
-                        .map(|s| s.id.to_string())
+                        .map(|s| s.id.clone())
                         .collect()
                 })
                 .unwrap_or_default();
