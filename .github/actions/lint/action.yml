@@ -33,8 +33,11 @@ runs:
     - name: documentation without a warning
       if: ${{ !cancelled() }}
       shell: bash
+      # A link from public documentation to a private item is allowed:
+      # this is an application, read with its sources, not a published
+      # library.
       env:
-        RUSTDOCFLAGS: -D warnings
+        RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
       run: cargo doc --workspace --no-deps --locked --keep-going
     - name: docs/ui-index.md is current
       if: ${{ !cancelled() }}

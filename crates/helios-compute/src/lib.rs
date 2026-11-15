@@ -6,7 +6,7 @@
 //! wgpu sees ([`device`]); each has machine-scope settings (enabled, role,
 //! priority, budgets) kept in a local file that is never synced
 //! ([`settings`]), and a calibration: a short benchmark giving its speed
-//! per module family ([`bench`]).
+//! per module family ([`mod@bench`]).
 //!
 //! The [`Manager`] answers "which device for this job" ([`Manager::route`])
 //! and builds an engine for the answer ([`Route::engine`]): the chosen GPU

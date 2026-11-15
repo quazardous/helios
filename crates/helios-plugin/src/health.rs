@@ -3,7 +3,7 @@
 //! process.
 //!
 //! [`register`] adds each plugin's checks to a health
-//! [`Registry`](helios_health::Registry), owned by the plugin (its id),
+//! [`Registry`], owned by the plugin (its id),
 //! each as `<plugin id>.<check id>`; one the registry refuses is left out
 //! and its reasons returned (a manifest with an unsound declaration is
 //! refused before, with the plugin).

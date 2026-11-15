@@ -9,7 +9,7 @@
 //! | Helios's, the machine's or a library default | `app` | the machine's file ([`GLOBAL_FILE`], which `helios-node` reads too) |
 //! | Helios's, a library default | `library` | the node's `project/<folder>` layer |
 //! | the interface's own (egui-pop's) | `app` | [`INTERFACE_FILE`] in the configuration folder |
-//! | any | `workspace` | the workspace's [`WORKSPACE_FILE`] |
+//! | any | `workspace` | the workspace's `WORKSPACE_FILE` |
 //!
 //! A layer another client of the node changes is heard on the node's bus
 //! ([`NodeSettingsStore::follow`]) and told to egui-pop's watch: the

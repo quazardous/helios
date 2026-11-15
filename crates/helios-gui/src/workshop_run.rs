@@ -8,7 +8,7 @@
 //! [`helios_template::run::photo`]: zones, targets aimed, junctions
 //! answered from the workshop's decision book or by the AI within the
 //! run's budget, the limits' check. A photo the check applies gets a
-//! version continuing its head, labelled "workshop <name> (run <n>)",
+//! version continuing its head, labelled "workshop \<name\> (run \<n\>)",
 //! its metadata holding each value's provenance and the flags; a held
 //! photo is not written and is listed with its reasons; a stop ends the
 //! run there. A photo whose edit would not change gets no version, so a
