@@ -918,6 +918,17 @@ fn matched_sql(
         sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(t.value) WHERE json_each.value = ?)");
         args.push(Sql::Text(tag.clone()));
     }
+    // A keyword branch: the path, or one below it, found as the range
+    // of texts from `path|` up to `path}` (`}` follows `|`).
+    for branch in &query.keywords {
+        sql.push_str(
+            " AND EXISTS (SELECT 1 FROM json_each(t.value) WHERE json_each.value = ? \
+             OR (json_each.value >= ? AND json_each.value < ?))",
+        );
+        args.push(Sql::Text(branch.clone()));
+        args.push(Sql::Text(format!("{branch}|")));
+        args.push(Sql::Text(format!("{branch}}}")));
+    }
     // A capture range: the `(name, number)` index finds the images
     // taken in it, in the same statement.
     if query.captured_from.is_some() || query.captured_before.is_some() {

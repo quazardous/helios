@@ -36,7 +36,10 @@ pub enum StackAsk {
 
 impl Library {
     /// The photos named the library holds, else the selection.
-    fn named_or_targets(&self, images: Option<Vec<String>>) -> Result<Vec<String>, String> {
+    pub(super) fn named_or_targets(
+        &self,
+        images: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String> {
         match images {
             Some(ids) => {
                 let keys: Vec<String> = ids.into_iter().filter(|i| self.holds(i)).collect();
