@@ -2414,7 +2414,7 @@ fn main() -> Result<(), String> {
                 // Changed by another client: read again, so automatic
                 // imports follow it.
                 if let Some(p) = persist.as_ref() {
-                    shell.follow_import_sources(p.bus().subscribe(), move || again.read(doc));
+                    shell.follow_import_sources(p.bus(), move || again.read(doc));
                 }
             }
             if let Err(e) = shell.use_profile(&profile) {

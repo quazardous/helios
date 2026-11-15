@@ -1050,6 +1050,7 @@ impl Shell {
             viewport,
             controls,
         });
+        let shell_bus = jobs.bus().clone();
         let core = core::Core {
             app,
             registry,
@@ -1108,6 +1109,7 @@ impl Shell {
             library_history,
             status,
             ended: crate::jobs::Ended::default(),
+            node_events: crate::node_events::NodeEvents::new(shell_bus),
             relays,
             forgotten: crate::jobs::Forgotten::default(),
             pointer_choice: false,
@@ -7310,9 +7312,28 @@ impl Shell {
         timing: crate::relay::Timing,
     ) -> Result<(), String> {
         let name = link.name.clone();
-        let relay = crate::relay::Relay::start(link, self.core.jobs.bus().clone(), timing)?;
+        let relay = crate::relay::Relay::start(
+            link,
+            self.core.jobs.bus().clone(),
+            self.core.node_events.clone(),
+            timing,
+        )?;
         self.core.relays.borrow_mut().insert(name, relay);
         Ok(())
+    }
+
+    /// The events of the nodes the desktop is connected to, on the shell
+    /// bus: where windows and panels listen by kind
+    /// (`crate::node_events`), instead of subscribing to a node.
+    pub fn node_events(&self) -> &crate::node_events::NodeEvents {
+        &self.core.node_events
+    }
+
+    /// Follows the desktop's own node, in process, on its bus: the
+    /// events listeners ask for reach them as a remote node's do, from
+    /// node `local`.
+    pub fn follow_local_node(&self, bus: &Arc<Bus>) {
+        self.core.node_events.follow_local(bus);
     }
 
     /// Drops the link to a followed node, as a network failure would: it
