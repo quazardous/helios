@@ -442,6 +442,9 @@ command-library-select-none =
 command-library-select-similar =
     .title = Select the photos shown like the selected ones (`by`: day, taken the same day, the default; or stack, in the same stack)
 
+command-library-show =
+    .title = Show exactly these photos in the Library (`ids`: image ids, e.g. a job's), the filter cleared and all of them selected; the next filter set shows by it again. Without `ids`, says how many the set shown holds
+
 command-library-sort =
     .title = Sort the library (`by`: captured, imported, name, rating, edited, size or focus; `descending`); kept with the workspace. Without `by`, says how it is sorted
 
