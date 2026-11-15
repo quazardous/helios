@@ -22,9 +22,9 @@ its own, nothing answered beforehand) and fixtures only:
    healthy new library), then the main window must still draw, and the
    screen must not be black.
 6b. `health-close`: Settings › Health check opened in its own window,
-   then closed by its title bar's close button: the compositor lists the
-   main window alone, Helios lists `main` alone, and the screen is not
-   one flat colour.
+   then closed by its title bar's close button: the compositor and
+   Helios list the windows open before (no window left behind), and the
+   screen is not one flat colour.
 7. `storage`: Settings › Storage, then Backup › Strategy; the library's
    disk, when listed, must be online with the Library role, and the
    strategy must have its line.
@@ -554,21 +554,25 @@ class Journey:
             shutil.copy(path, self.args.out / f"{entry['step']}-flat.png")
             entry["why"] = "the screen is one flat colour after this step (a black window?)"
 
-    def windows_left(self, entry: dict) -> None:
-        """After the Settings window's close: the main window alone, as the
-        compositor and Helios list them, and a screen that is not one flat
-        colour."""
-        listed = [
+    def listed(self) -> list[str]:
+        """The Helios windows the compositor lists, by title."""
+        return sorted(
             w.get("title", "")
             for w in self.comp.list_windows().get("windows", [])
             if str(w.get("app_id", "")).startswith("helios")
-        ]
-        entry["listed"] = listed
-        entry["app_windows"] = self.windows()
-        if len(listed) != 1:
-            entry["why"] = f"the compositor lists {len(listed)} Helios windows: {listed}"
-        elif entry["app_windows"] != ["main"]:
-            entry["why"] = f"Helios lists {entry['app_windows']}, not the main window alone"
+        )
+
+    def windows_left(self, entry: dict, before: tuple[list[str], list[str]]) -> None:
+        """After the Settings window's close: the windows open before it
+        opened (the main window, and the import window the journey left
+        open), as the compositor and Helios list them, and a screen that is
+        not one flat colour."""
+        listed, apps = self.listed(), self.windows()
+        entry["listed"], entry["app_windows"] = listed, apps
+        if listed != before[0]:
+            entry["why"] = f"the compositor lists {listed}, {before[0]} before the Settings"
+        elif sorted(apps) != sorted(before[1]):
+            entry["why"] = f"Helios lists {apps}, {before[1]} before the Settings"
         else:
             self.painting(entry)
 
@@ -737,12 +741,13 @@ class Journey:
                     "workshop": {"photo": self.photo},
                     "export": {"image": self.image, "export": self.export},
                 }.get(step)
+                before = (self.listed(), self.windows()) if step == "health-close" else None
                 if "why" not in entry:
                     entry = {**entry, **self.scenario(step, file, extra)}
                 if "why" not in entry and step == "health-close":
                     # Past the paint guard's delay (2 s).
                     time.sleep(3)
-                    self.windows_left(entry)
+                    self.windows_left(entry, before)
                 if "why" not in entry and step == "imports-list":
                     self.find_session(entry)
                 if "why" not in entry and step == "storage":
