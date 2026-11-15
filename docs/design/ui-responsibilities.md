@@ -538,10 +538,10 @@ Checked by a `cargo xtask deps-worlds` test over `cargo metadata`
 | 12 | Screens migrate family by family, each slice adding its Clippy entry (visual-identity.md section 5) | Helios | 8 |
 | 13 | Plugin declarations for pages and controls over the protocol (controls.md slice 21) | Helios | 8, 9 |
 
-## Open questions (not decided)
+## Decisions (2026-11-15)
 
-- The name `helios-rack`.
-- Whether egui_fit moves into egui-pop's workspace now (merge) or only
-  if versions drift (the recommendation: only if they drift).
-- Whether the "use these" index lives in Helios only or is generated in
-  egui-pop and copied.
+- The name `helios-rack` is confirmed.
+- egui_fit merges into egui-pop's workspace now, not only if versions
+  drift; egui-pop then offers slot regions over it.
+- Where the generated "use these" index lives is still open: options on
+  the index slice.
