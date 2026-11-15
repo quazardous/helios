@@ -617,7 +617,10 @@ Every agent follows them.
   `egui-pop-test`. egui-pop-gallery's integration tests are modules of one
   executable, `it`: `test=<module>` (`test=keyboard_walk`) runs that module
   alone, `filter=` joined to its path, in `egui-pop-test` and
-  `egui-pop-test-1p` alike (`test=it` for them all).
+  `egui-pop-test-1p` alike (`test=it` for them all). `features=` turns on
+  the crate's features in both (`features=svg`, several joined by `+`), for
+  the tests a feature gates: `egui-pop-test crate=egui-pop-core
+  test=icon_set features=svg`.
 - The box does not repeat what CI runs. egui-pop and egui_stack pull
   requests go to their `next` branch, whose CI runs every test; the box
   serves what CI cannot: a fix loop's narrow runs and snapshots regenerated
