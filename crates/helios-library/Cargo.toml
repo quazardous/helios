@@ -26,6 +26,10 @@ serde.workspace = true
 serde_json.workspace = true
 # "Move to Trash": the system trash per platform (freedesktop.org on
 # Linux and the BSDs, the Recycle Bin, the Finder's Trash). MIT.
+# The platform's Pictures folder for the library offered first: the
+# Pictures known folder on Windows (OneDrive-redirected included), the XDG
+# pictures directory, ~/Pictures on macOS. MIT OR Apache-2.0.
+dirs = "6"
 trash = { version = "5.3", default-features = false, features = ["coinit_apartmentthreaded", "freedesktop"] }
 
 [dev-dependencies]

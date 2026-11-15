@@ -494,8 +494,15 @@ impl Library {
                 "gui-library-meta-labels-tip",
                 "Colour labels: a click adds or removes one label on every selected photo, the others kept",
             ));
-            let out = ColorLabels::new(marks.labels).show(ui);
-            out.response.clone().on_hover_text(&tip);
+            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
+                .size
+                .control_height;
+            let out = ColorLabels::new(marks.labels).size(side).show(ui);
+            let tips = ColorLabel::ALL.map(|l| {
+                let (what, command) = super::label_tip(l);
+                self.mark_tip(ui.ctx(), what, command)
+            });
+            super::toggle_tips(ui, &out.response, side, &tips);
             if let Some(labels) = out.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
@@ -519,8 +526,22 @@ impl Library {
                 "gui-library-meta-flag-tip",
                 "Flag: pick or reject every selected photo",
             ));
-            let out = FlagToggle::new(marks.flag).show(ui);
-            out.response.clone().on_hover_text(&tip);
+            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
+                .size
+                .control_height;
+            let out = FlagToggle::new(marks.flag).size(side).show(ui);
+            let tips = [
+                (
+                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
+                    "vault.flag.pick",
+                ),
+                (
+                    Message::new("gui-library-flag-reject-tip", "Reject"),
+                    "vault.flag.reject",
+                ),
+            ]
+            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
+            super::toggle_tips(ui, &out.response, side, &tips);
             if let Some(f) = out.changed {
                 edit.fields.insert("flag".into(), json!(flag_word(f)));
             }

@@ -17,6 +17,7 @@ use helios_gui::dialogs::Level;
 use helios_gui::shell::{Choices, ImportProfile};
 use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_library::import::{Duplicates, Layout, Options, import};
+use helios_library::import_profile::{Filter, Kind};
 use helios_shell::commands::Origin;
 use helios_storage::Card as Volume;
 use helios_template::workspace::Files;
@@ -325,6 +326,64 @@ fn the_import_grid_shows_a_card_by_day_greys_what_the_library_holds_and_pairs_ra
     h.get_by_label("New only").click();
     h.run_steps(3);
     let _ = h.get_by_label("IMG_0002.JPG · in your Library");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_grid_and_the_import_count_preview_the_import_profile_s_filter() {
+    let dir = temp("profile-filter");
+    let (dcim, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    assert_eq!(h.state().import_counts().selected, 2);
+    // A profile taking raws alone: the lone JPEG is greyed, marked and
+    // not counted; the pair stays, for its raw.
+    let mut choices = h.state().import_choices();
+    choices.filter = Filter {
+        kinds: vec![Kind::Raw],
+        ..Filter::default()
+    };
+    let raws = h.state_mut().put_import_profile(ImportProfile {
+        id: String::new(),
+        name: "Raws".into(),
+        choices,
+    });
+    assert!(h.state_mut().use_import_profile(&raws));
+    h.run_steps(3);
+    let counts = h.state().import_counts();
+    assert_eq!((counts.photos, counts.selected), (3, 1), "{counts:?}");
+    let _ = h.get_by_label("IMG_0001.JPG · skipped by the import profile's filter");
+    let _ = h.get_by_label("Import 1");
+
+    // Its filter edited in the profile editor: the grid and the count
+    // follow at once.
+    h.state_mut().open_import_profiles();
+    h.run_steps(3);
+    let mut edited = h.state().import_choices();
+    edited.filter = Filter {
+        names: vec!["IMG_000?.jpg".into()],
+        ..Filter::default()
+    };
+    h.state_mut().set_import_choices(edited);
+    h.run_steps(3);
+    assert_eq!(h.state().import_counts().selected, 2);
+    h.get_by_label("Done").click();
+    h.run_steps(3);
+    let counts = h.state().import_counts();
+    assert_eq!(counts.selected, 2, "{counts:?}");
+    let _ = h.get_by_label("Import 2");
+
+    // The import takes what the count said: the pair's JPEG alone, and
+    // the lone JPEG; the raw is left out, the filter passed on.
+    h.get_by_label("Import 2").click();
+    h.run_steps(3);
+    let imports = h.state_mut().take_imports();
+    assert_eq!(imports.len(), 1, "{imports:?}");
+    assert_eq!(
+        imports[0]["paths"],
+        json!([dcim.join("IMG_0001.JPG"), dcim.join("IMG_0003.JPG")]),
+        "{imports:?}"
+    );
+    assert_eq!(imports[0]["filter"]["names"], json!(["IMG_000?.jpg"]));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -293,3 +293,42 @@ fn an_import_by_rule_naming_a_profile_imports_with_its_choices() {
     assert!(refused.message.contains("gone"), "{refused:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_import_by_rule_naming_a_profile_skips_and_tags_as_its_filter_and_apply_say() {
+    let dir = scratch("profile-filter");
+    let roll = roll(&dir, 4);
+    let bus = Arc::new(Bus::new());
+    let vault = Arc::new(Vault::new(MemoryStore::default()).with_bus(bus.clone()));
+    let service = VaultService::new(vault.clone(), bus.clone(), Jobs::new(bus.clone()), "test");
+    let client = Client::in_process(Arc::new(service)).with_origin("agent:test");
+    // Added where they are, the first two raws alone, tagged and labelled.
+    let profile = json!({ "id": "picked", "name": "Picked", "choices": {
+        "copy_folders": false,
+        "filter": { "names": ["p000*", "p001*"] },
+        "apply": { "keywords": ["trip"], "label": "green" } } });
+    client
+        .request("import.profiles.set", json!({ "profile": profile }))
+        .unwrap();
+
+    let answer = client
+        .request(
+            "library.import",
+            json!({ "source": roll, "rule": "new", "profile": "picked", "signals": false }),
+        )
+        .unwrap();
+    let settled = wait(&client, &answer["promise"]["id"]);
+    assert_eq!(settled["state"], "done", "{settled}");
+    assert_eq!(
+        settled["result"]["report"]["added"], 2,
+        "the filter left two out: {settled}"
+    );
+    let images = vault.images().unwrap();
+    assert_eq!(images.len(), 2);
+    for image in &images {
+        let fields = vault.fields_of(&[image.id], &["labels", "tags"]).unwrap();
+        assert_eq!(fields[0]["tags"], json!(["trip"]), "{settled}");
+        assert_eq!(fields[0]["labels"], json!(["green"]), "{settled}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

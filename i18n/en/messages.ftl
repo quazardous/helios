@@ -1137,6 +1137,8 @@ gui-import-window-example = e.g. { $example }
 
 gui-import-window-favourites = Favourites
 
+gui-import-window-filtered = skipped by the import profile's filter
+
 gui-import-window-folders = Folders
 
 gui-import-window-forget = Forget this folder
@@ -1465,6 +1467,10 @@ gui-library-facet-type = Type
 
 gui-library-file = { $size } · modified { $day }
 
+gui-library-flag-pick-tip = Flag as pick
+
+gui-library-flag-reject-tip = Reject
+
 gui-library-folder-import = Import new photos here
 
 gui-library-folder-scan = Scan this folder
@@ -1576,6 +1582,17 @@ gui-library-meta-title = Title
 gui-library-meta-title-tip = The photos' title; Enter sets it on every selected photo
 
 gui-library-metadata = Metadata
+gui-library-label-blue-tip = Blue label
+
+gui-library-label-green-tip = Green label
+
+gui-library-label-purple-tip = Purple label
+
+gui-library-label-red-tip = Red label
+
+gui-library-label-yellow-tip = Yellow label
+
+gui-library-mark-keys = { $what } ({ $keys })
 
 gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
 
@@ -2495,6 +2512,8 @@ gui-settings-volume-scan = Scan now
 
 gui-settings-volume-seen = Seen
 
+gui-settings-volume-sources = Import sources
+
 gui-settings-volume-space = Space
 
 gui-settings-volume-state = State
@@ -2727,6 +2746,8 @@ gui-window-frame-error = window frame: { $error }
 
 gui-wizard-account = Account
 
+gui-wizard-account-has-source = This account already has a source, { $source }: one source per account is enough.
+
 gui-wizard-account-settings = Account settings
 
 gui-wizard-add = Add the source
@@ -2760,6 +2781,8 @@ gui-wizard-no-folder = No folder there
 gui-wizard-no-library = Open a library first: accounts are kept in it
 
 gui-wizard-no-volume = Insert a card or plug in a camera: it is listed here as soon as it is mounted.
+
+gui-wizard-open-source = Open that source
 
 gui-wizard-sign-in = Sign in to an account…
 
@@ -3069,11 +3092,15 @@ health-fix-plugin-disable = Disable it
 
 health-fix-plugin-folder = Open its folder
 
+health-fix-plugin-grant = Allow { $capability }
+
 health-fix-plugin-update = Update it: open its folder
 
 health-fix-set-strategy = Set up a backup strategy
 
 health-fix-show-volume = Show it on the Storage page
+
+health-fix-snapshot-now = Snapshot the catalogue now
 
 health-fix-snapshots-folder = Open the snapshots' folder
 
@@ -3173,6 +3200,10 @@ health-plugin-unsupported = { $plugin } does not suit this Helios
 
 health-plugin-unsupported-detail = { $problems }. Update it.
 
+health-plugin-unused = { $plugin } is not used yet
+
+health-plugin-unused-detail = It asks for { $capability } when a source first uses it.
+
 health-plugins = Plugins
 
 health-raw-jpeg-pairs = RAW+JPEG pairs
@@ -3197,6 +3228,10 @@ health-snapshots-broken = The last catalogue snapshot cannot be restored
 
 health-snapshots-file-detail = { $file }, { $days } days old
 
+health-snapshots-first = No catalogue snapshot yet
+
+health-snapshots-first-detail = Helios takes the first a few minutes after it starts, then on its schedule.
+
 health-snapshots-none-yet = No catalogue snapshots yet
 
 health-snapshots-none-yet-detail = Helios does not take catalogue snapshots yet; the backups keep the photos.
@@ -3205,9 +3240,9 @@ health-snapshots-ok = The last catalogue snapshot is recent and restorable
 
 health-snapshots-old = The last catalogue snapshot is { $days } days old
 
-health-snapshots-unverified = No catalogue snapshot is verified
+health-snapshots-unverified = No catalogue snapshot is verified yet
 
-health-snapshots-unverified-detail = { $count } snapshots, none read back yet.
+health-snapshots-unverified-detail = { $count } snapshots, none read back yet: a new one is verified as it is taken.
 
 health-strategy = Backup strategy
 

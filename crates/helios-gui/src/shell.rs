@@ -1053,6 +1053,7 @@ impl Shell {
             viewport,
             controls,
         });
+        let shell_bus = jobs.bus().clone();
         let core = core::Core {
             app,
             registry,
@@ -1111,6 +1112,7 @@ impl Shell {
             library_history,
             status,
             ended: crate::jobs::Ended::default(),
+            node_events: crate::node_events::NodeEvents::new(shell_bus),
             relays,
             forgotten: crate::jobs::Forgotten::default(),
             pointer_choice: false,
@@ -3366,7 +3368,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 storage::COMMAND,
-                "Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)",
+                "Storage… (`volume`: the volume to mark and scroll to)",
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::Storage(a.clone()))),
@@ -3572,18 +3574,13 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::FitCameraLook(a.clone(), origin.clone()))),
         );
         add(
-            CommandSpec::new(
-                "library.copyFiles",
-                "Copy files: the selected images' files, for a file manager or another application",
-                "Library",
-            )
-            .when(IN_LIBRARY),
+            CommandSpec::new("library.copyFiles", "Copy Files", "Library").when(IN_LIBRARY),
             Box::new(|_, origin| Ok(Action::CopyFiles(origin.clone()))),
         );
         add(
             CommandSpec::new(
                 "library.pasteFiles",
-                "Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)",
+                "Paste Files or Image (`dry_run`: only say what would be imported)",
                 "Library",
             ),
             Box::new(|a, origin| {
@@ -3592,12 +3589,8 @@ impl Shell {
             }),
         );
         add(
-            CommandSpec::new(
-                "viewport.copyImage",
-                "Copy the image: the edited image rendered whole, for another application (as PNG)",
-                "View",
-            )
-            .when(IN_MAIN_WINDOW),
+            CommandSpec::new("viewport.copyImage", "Copy Image as PNG", "View")
+                .when(IN_MAIN_WINDOW),
             Box::new(|_, origin| Ok(Action::CopyImage(origin.clone()))),
         );
         // A parameter copied: the item is the parameter with its type,
@@ -7321,9 +7314,28 @@ impl Shell {
         timing: crate::relay::Timing,
     ) -> Result<(), String> {
         let name = link.name.clone();
-        let relay = crate::relay::Relay::start(link, self.core.jobs.bus().clone(), timing)?;
+        let relay = crate::relay::Relay::start(
+            link,
+            self.core.jobs.bus().clone(),
+            self.core.node_events.clone(),
+            timing,
+        )?;
         self.core.relays.borrow_mut().insert(name, relay);
         Ok(())
+    }
+
+    /// The events of the nodes the desktop is connected to, on the shell
+    /// bus: where windows and panels listen by kind
+    /// (`crate::node_events`), instead of subscribing to a node.
+    pub fn node_events(&self) -> &crate::node_events::NodeEvents {
+        &self.core.node_events
+    }
+
+    /// Follows the desktop's own node, in process, on its bus: the
+    /// events listeners ask for reach them as a remote node's do, from
+    /// node `local`.
+    pub fn follow_local_node(&self, bus: &Arc<Bus>) {
+        self.core.node_events.follow_local(bus);
     }
 
     /// Drops the link to a followed node, as a network failure would: it
@@ -7421,7 +7433,8 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let pictures =
+        helios_library::import::pictures_folder().unwrap_or_else(|| PathBuf::from("Pictures"));
     let name: String = target
         .chars()
         .map(|c| {
@@ -7432,7 +7445,8 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
             }
         })
         .collect();
-    home.join("Pictures/Helios")
+    pictures
+        .join("Helios")
         .join(format!("{name}-{secs}.{extension}"))
 }
 

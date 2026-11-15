@@ -70,7 +70,7 @@ fn node_in(dir: &Path) -> (Node, Arc<helios_core::Bus>, Kept) {
 /// a file settled after 300 ms.
 fn shell_on(
     kept: &Kept,
-    bus: &helios_core::Bus,
+    bus: &Arc<helios_core::Bus>,
     setup: impl FnOnce(&mut Shell),
 ) -> Harness<'static, Shell> {
     let (read, write, again) = (kept.clone(), kept.clone(), kept.clone());
@@ -80,7 +80,7 @@ fn shell_on(
         Box::new(move || read.read(IMPORT_SOURCES)),
         Box::new(move |text| write.write(IMPORT_SOURCES, text)),
     );
-    shell.follow_import_sources(bus.subscribe(), move || again.read(IMPORT_SOURCES));
+    shell.follow_import_sources(bus, move || again.read(IMPORT_SOURCES));
     setup(&mut shell);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();

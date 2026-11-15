@@ -360,10 +360,25 @@ impl StorageLink for NodeStorage {
 /// The waiting cards checked again: each one's path and what it is now.
 type Checked = Vec<(std::path::PathBuf, Result<Card, String>)>;
 
+/// What names the owners of remote volumes, for the Storage page's rows:
+/// the import accounts and the saved sources using them, once the
+/// accounts are kept (`Shell::set_import_accounts`).
+pub(crate) type Owners = Arc<
+    Mutex<
+        Option<(
+            Arc<dyn helios_connect::account::AccountBook>,
+            super::import_sources::SharedSources,
+        )>,
+    >,
+>;
+
 /// What the shell keeps of storage.
 #[derive(Default)]
 pub(crate) struct StoragePage {
     link: Option<Arc<dyn StorageLink>>,
+    /// The accounts and sources behind remote volumes, read by
+    /// `library.volumes` to show one row per account.
+    pub(crate) owners: Owners,
     volumes: Vec<Volume>,
     /// The library's backup strategy, as last read.
     strategy: Option<Strategy>,

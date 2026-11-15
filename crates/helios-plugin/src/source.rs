@@ -116,7 +116,7 @@ impl SourceProvider {
             .collect();
         let declares = |c: &str| m.capabilities.iter().any(|d| d.name == c);
         let config = m.contracts();
-        let manifest = ConnectorManifest {
+        let mut manifest = ConnectorManifest {
             label: Text::new(&format!("connect-{id}"), title),
             description: Text::new(&format!("connect-{id}-about"), &m.description),
             version: m.version.clone(),
@@ -147,6 +147,12 @@ impl SourceProvider {
             setup: None,
             id,
         };
+        if m.one_source_per_account {
+            manifest.setup = manifest.setup().map(|s| helios_connect::Setup {
+                one_source_per_account: true,
+                ..s
+            });
+        }
         Some(Self {
             plugin: plugin.to_owned(),
             config,
