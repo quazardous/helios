@@ -115,12 +115,29 @@ pub fn scan_helios(root: &Path) -> Result<Vec<Entry>, String> {
     Ok(entries)
 }
 
+/// The host's target triple (`rustc -vV`).
+fn host() -> Result<String, String> {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    let out = Command::new(rustc)
+        .arg("-vV")
+        .output()
+        .map_err(|e| format!("cannot run rustc: {e}"))?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("host: "))
+        .map(str::to_owned)
+        .ok_or_else(|| "rustc -vV: no host line".into())
+}
+
 /// The egui-pop crates `Cargo.lock` resolves, as `cargo metadata` gives
-/// them: (name, version, directory).
+/// them: (name, version, directory). Filtered to the host's platform, so
+/// a machine that built only for itself has every source it needs.
 fn egui_pop_packages(root: &Path) -> Result<Vec<(String, String, PathBuf)>, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let host = host()?;
     let out = Command::new(cargo)
         .args(["metadata", "--format-version", "1", "--locked"])
+        .args(["--filter-platform", &host])
         .current_dir(root)
         .output()
         .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
