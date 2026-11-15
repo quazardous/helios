@@ -403,7 +403,17 @@ impl Library {
         egui::CollapsingHeader::new(word(Message::new("gui-library-metadata", "Metadata")))
             .id_salt("helios.library.metadata")
             .default_open(true)
-            .show(ui, |ui| self.metadata_body(ui));
+            .show(ui, |ui| {
+                // Its own scroll, a share of the panel's height: the grid
+                // below keeps its room, and the panel never scrolls the
+                // search field away.
+                let max = (ui.available_height() * 0.4).clamp(120.0, 320.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.library.metadata.scroll")
+                    .max_height(max)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.metadata_body(ui));
+            });
     }
 
     fn metadata_body(&mut self, ui: &mut Ui) {
