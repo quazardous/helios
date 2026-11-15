@@ -37,6 +37,7 @@ use helios_node::roots::Roots;
 use serde_json::{Value, json};
 
 fn main() -> ExitCode {
+    helios_node::logger::install(log::LevelFilter::Warn);
     let mut inspect = std::env::var("HELIOS_SOCKET").ok();
     let mut control = std::env::var("HELIOS_CONTROL_SOCKET").ok();
     let mut token = std::env::var("HELIOS_TOKEN").ok();

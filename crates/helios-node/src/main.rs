@@ -889,8 +889,28 @@ mod control {
 
     /// `command.run`: the command's params checked against its schema, then
     /// the request it names answered as the endpoint would, its change to
-    /// the edit saved under `origin`.
+    /// the edit saved under `origin`. A refusal is also said in the node's
+    /// log, for whoever reads it after the fact.
     fn run(
+        node: &Arc<Node>,
+        scope: Scope,
+        id: &str,
+        params: &Value,
+        origin: &str,
+        cancel: Option<Arc<AtomicBool>>,
+    ) -> Value {
+        let answer = run_checked(node, scope, id, params, origin, cancel);
+        if answer["ok"] == json!(false) {
+            log::warn!(
+                target: "helios::node",
+                "command `{id}` by {origin} refused: {}",
+                answer["error"].as_str().unwrap_or("no reason given")
+            );
+        }
+        answer
+    }
+
+    fn run_checked(
         node: &Arc<Node>,
         scope: Scope,
         id: &str,
@@ -1985,6 +2005,8 @@ fn exit_when_idle(
 }
 
 fn main() -> ExitCode {
+    // The node's `log` lines (its own and its crates') go to its log.
+    helios_node::logger::install(log::LevelFilter::Info);
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -2251,6 +2273,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     };
     // Whoever started the node may stop reading once it knows the node
     // serves: a closed stdout must not kill the node (`println!` panics).
+    log::info!(target: "helios::node", "helios-node {} serves on {address}", env!("CARGO_PKG_VERSION"));
     let mut out = std::io::stdout();
     let _ = writeln!(out, "ready {address}");
     if let Some(control) = &control_address {

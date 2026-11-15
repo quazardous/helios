@@ -46,6 +46,8 @@ helios-module-vkdt = { path = "../../modules/vkdt" }
 helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
+# MIT OR Apache-2.0: the `log` facade, its logger installed by each binary.
+log = "0.4"
 # The saved import sources' document (`user/import-sources`).
 toml = "1"
 helios-connect.workspace = true

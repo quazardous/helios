@@ -39,7 +39,10 @@ impl Node {
             .arg(dir.join("node.sock"))
             .arg("--batch-control")
             .arg(dir.join("batch.sock"))
-            .stdout(Stdio::piped());
+            .env_remove("HELIOS_LOG_LEVEL")
+            .stdout(Stdio::piped())
+            // Its log, as `connect` keeps a spawned node's.
+            .stderr(std::fs::File::create(dir.join("node.log")).unwrap());
         if cfg!(debug_assertions) {
             command
                 .arg("--control")
@@ -68,6 +71,11 @@ impl Node {
 
     fn batch(&self, args: &[&str]) -> Value {
         self.call("batch.sock", args)
+    }
+
+    /// What it wrote to its log so far.
+    fn log(&self) -> String {
+        std::fs::read_to_string(self.dir.join("node.log")).unwrap_or_default()
     }
 }
 
@@ -227,6 +235,29 @@ fn a_command_that_cannot_run_says_why() {
     assert_eq!(
         pause["message"]["key"], "node-command-debug-only",
         "{pause}"
+    );
+}
+
+/// The node's `log` lines reach its log file (its standard error), as
+/// its `eprintln!` lines do: its start at `info`, a refused command at
+/// `warn`.
+#[test]
+fn the_nodes_log_lines_reach_its_log_file() {
+    let node = Node::start("logged");
+    let import = node.batch(&["run", "library.import", r#"{"paths":["/photos"]}"#]);
+    assert_eq!(import["ok"], false, "{import}");
+    let log = node.log();
+    assert!(
+        log.lines()
+            .any(|l| l.contains(" INFO  helios::node: helios-node ") && l.contains(" serves on ")),
+        "{log}"
+    );
+    assert!(
+        log.lines().any(
+            |l| l.contains(" WARN  helios::node: command `library.import` by ")
+                && l.contains("refused: the node keeps no vault")
+        ),
+        "{log}"
     );
 }
 

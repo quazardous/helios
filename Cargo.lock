@@ -2830,6 +2830,7 @@ dependencies = [
  "helios-vault-sqlite",
  "helios-xmp",
  "image",
+ "log",
  "serde",
  "serde_json",
  "signal-hook",
