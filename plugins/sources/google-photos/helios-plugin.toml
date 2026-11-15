@@ -26,7 +26,7 @@ one_source_per_account = true
 limits = { per_minute = 120, per_day = 10000 }
 
 [compat]
-helios = ">=0.90.0, <0.91.0"
+helios = ">=0.91.0, <0.92.0"
 interfaces = { protocol = 1, "import.source" = 1, health = 1 }
 
 # Where the Picker API answers; only tests change it.
