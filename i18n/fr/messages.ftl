@@ -1255,6 +1255,8 @@ health-fix-plugin-folder = Ouvrir son dossier
 
 health-fix-plugin-update = Le mettre à jour : ouvrir son dossier
 
+health-fix-snapshot-now = Prendre un instantané du catalogue maintenant
+
 health-fix-snapshots-folder = Ouvrir le dossier des instantanés
 
 health-gpu-adapter = Le GPU
@@ -1311,6 +1313,10 @@ health-snapshots-broken = Le dernier instantané du catalogue ne peut pas être 
 
 health-snapshots-file-detail = { $file }, vieux de { $days } jours
 
+health-snapshots-first = Pas encore d’instantané du catalogue
+
+health-snapshots-first-detail = Helios prend le premier quelques minutes après son démarrage, puis selon son calendrier.
+
 health-snapshots-none-yet = Pas encore d’instantanés du catalogue
 
 health-snapshots-none-yet-detail = Helios ne prend pas encore d’instantanés du catalogue ; les sauvegardes gardent les photos.
@@ -1319,9 +1325,9 @@ health-snapshots-ok = Le dernier instantané du catalogue est récent et restaur
 
 health-snapshots-old = Le dernier instantané du catalogue a { $days } jours
 
-health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
+health-snapshots-unverified = Aucun instantané du catalogue n’est encore vérifié
 
-health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
+health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore : un nouveau est vérifié dès qu’il est pris.
 
 look-default-bad-params = les paramètres { $node } du rendu : { $error }
 
