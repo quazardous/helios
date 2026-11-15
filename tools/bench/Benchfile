@@ -621,6 +621,51 @@ env = { HELIOS_FLATPAK = "1", FLATPAK_USER_DIR = "/flatpak/user" }
 mounts = { flatpak = "/flatpak", registry = "/cargo/registry" }
 timeout = "90m"
 
+# the development Flatpak of a branch: the same build as the release
+# bundle's under the app id io.github.quazardous.Helios.Devel ("Helios
+# Dev", its own data), versioned X.Y.Z-dev.N+<commit> (build.sh version),
+# smoke-tested, kept as the outputs `bundle` (helios-devel.flatpak),
+# `sha256` and `version`, which `cargo xtask install-dev` installs on the
+# desktop with `flatpak install --user`; also kept in the flatpak storage
+# under devel/<branch> for `flatpak-devel-gui`
+[jobs.flatpak-devel]
+about = "the Devel Flatpak (Helios Dev) of a branch built and smoke-tested, kept for cargo xtask install-dev"
+checkouts = ["helios"]
+sandbox = true
+cores = 5
+memory = "8g"
+cwd = "/work/${src:-helios}"
+command = '''mkdir -p /tmp/w/flatpak /tmp/w/bundle "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && cp -r --preserve=mode . /tmp/w/flatpak/ && cd /tmp/w/flatpak && \
+v="$(packaging/flatpak/build.sh version)" && echo "$v" > /out/version.txt && \
+HELIOS_FLATPAK_DEVEL=1 packaging/flatpak/build.sh build "$v" /tmp/w/bundle /flatpak/work && \
+b="/tmp/w/bundle/io.github.quazardous.Helios.Devel-$v-x86_64.flatpak" && \
+packaging/flatpak/smoke.sh "$b" crates/helios-plugin/tests/fixtures/rated-photos/a.jpg && \
+cp "$b" /out/helios-devel.flatpak && (cd /out && sha256sum helios-devel.flatpak > helios-devel.flatpak.sha256) && \
+k="/flatpak/devel/${branch:-main}" && mkdir -p "$k" && cp /out/helios-devel.flatpak /out/version.txt "$k/"'''
+env = { HELIOS_FLATPAK = "1", FLATPAK_USER_DIR = "/flatpak/user" }
+mounts = { flatpak = "/flatpak", registry = "/cargo/registry" }
+outputs = { bundle = { path = "helios-devel.flatpak", kind = "file" }, sha256 = { path = "helios-devel.flatpak.sha256", kind = "file" }, version = { path = "version.txt", kind = "file" } }
+timeout = "90m"
+
+# the development Flatpak that `flatpak-devel` kept for a branch, run as a
+# user runs it, in a headless labwc through wbox, with only the manifest's
+# permissions: it starts, opens a library in its own data folder, the
+# import window lists a folder of Pictures (xdg-pictures), and importing it
+# runs through helios-node in the sandbox; in /out/flatpak-gui.md and
+# .jsonl, with a screenshot per step (tools/bench/flatpak-gui.py)
+[jobs.flatpak-devel-gui]
+about = "the Devel Flatpak of a branch run in a headless labwc: library, import window on Pictures, import via the node"
+checkouts = ["helios"]
+sandbox = true
+cores = 3
+memory = "4g"
+cwd = "/work/${src:-helios}"
+command = '''mkdir -p "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/bench/flatpak-gui.py --bundle "/flatpak/devel/${branch:-main}/helios-devel.flatpak" --out /out'''
+env = { FLATPAK_USER_DIR = "/flatpak/user", WLR_RENDERER = "pixman" }
+mounts = { flatpak = "/flatpak" }
+timeout = "20m"
+
 # the translation catalogues regenerated on a branch: `i18n extract`
 # (helios-declarations, a headless desktop) then `i18n stamp fr`; the
 # changes as /out/i18n.patch, to apply on the branch (git apply --index)

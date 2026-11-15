@@ -4,6 +4,9 @@
 #
 #   packaging/flatpak/smoke.sh io.github.quazardous.Helios-VERSION-x86_64.flatpak PICTURE.jpg
 #
+# (or the Devel app's bundle, io.github.quazardous.Helios.Devel-…: the app
+# id is the bundle's name up to its first `-`).
+#
 # Installs the bundle for the current user (its runtime from Flathub),
 # runs the command line in the sandbox as packaging/linux/smoke.sh runs
 # the tarball's (its version, an import of the picture into a new vault,
@@ -13,7 +16,8 @@ set -euo pipefail
 
 bundle="$1"
 picture="$2"
-id=io.github.quazardous.Helios
+id="$(basename "$bundle")"
+id="${id%%-*}"
 mkdir -p "$HOME"
 work="$(mktemp -d "$HOME/helios-flatpak-smoke.XXXXXX")"
 cleanup() {
