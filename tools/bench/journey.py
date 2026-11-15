@@ -28,6 +28,13 @@ its own, nothing answered beforehand) and fixtures only:
    exit with status 0.
 9. `restart`: helios-gui starts again on the same profile; no wizard, the
    Library holds the same photos.
+10. `workshop`: the first RAW+JPEG pair opened in the darkroom; its
+    render ends (the viewport has an image size) and the image region is
+    not one flat colour.
+11. `export`: that photo exported with the default settings to a folder
+    of the profile; the file is written, decodes, and has the raw's size
+    (its crop in the raw corpus's manifest).
+12. `quit-again`: closed as before, exit status 0.
 
 Each step is a scenario of `tools/bench/journey/` replayed over the
 agent socket by the `scenarios` example (egui-pop's scenario runner), its
@@ -61,6 +68,7 @@ from wbox.server import build_compositor
 
 HERE = Path(__file__).resolve().parent
 JPEGS = HERE.parents[1] / "crates/helios-plugin/tests/fixtures/rated-photos"
+CORPUS_MANIFEST = HERE.parents[1] / "tests/raw-corpus.toml"
 
 # CC0 raws of the raw corpus (tests/raw-corpus.toml), small and of three
 # makers; the volume names each `<id>.<ext>`.
@@ -80,6 +88,94 @@ OUTSIDE = ("links.open", "library.openFolder")
 # (`ERROR`, `[error]`, a leading `error:`), never the word in a message (an
 # INFO line quoting a refusal's `"error"`).
 BAD_LINE = re.compile(r"\bERROR\b|\[(?i:error)\]|^(?i:error):|panicked at")
+
+
+def raw_crop(raw_id: str) -> tuple[int, int]:
+    """A corpus raw's developed size: its crop (`3008x2000+15+7`) in the
+    raw corpus's manifest."""
+    # Read by its lines: the box's Python may predate `tomllib`.
+    entries = CORPUS_MANIFEST.read_text().split("[[file]]")
+    for entry in entries:
+        if f'id = "{raw_id}"' in entry:
+            crop = re.search(r'^crop = "(\d+)x(\d+)', entry, re.MULTILINE)
+            if crop:
+                return int(crop.group(1)), int(crop.group(2))
+    raise SystemExit(f"no crop for {raw_id} in {CORPUS_MANIFEST}")
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    """An exported image's size, its file read to the end (a JPEG's frame
+    and its end marker, a PNG's rows, a TIFF's first page); raises
+    `ValueError` when it does not decode."""
+    data = path.read_bytes()
+    if data[:2] == b"\xff\xd8":
+        return jpeg_size(data)
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return png_size(data)
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return tiff_size(data)
+    raise ValueError(f"not a JPEG, PNG or TIFF: starts with {data[:8]!r}")
+
+
+def jpeg_size(data: bytes) -> tuple[int, int]:
+    pos, size = 2, None
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            raise ValueError(f"no marker at {pos}")
+        marker = data[pos + 1]
+        length = int.from_bytes(data[pos + 2 : pos + 4], "big")
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+            h = int.from_bytes(data[pos + 5 : pos + 7], "big")
+            w = int.from_bytes(data[pos + 7 : pos + 9], "big")
+            size = (w, h)
+        if marker == 0xDA:
+            break
+        pos += 2 + length
+    if size is None:
+        raise ValueError("a JPEG with no frame header")
+    if not data.rstrip(b"\x00").endswith(b"\xff\xd9"):
+        raise ValueError("a JPEG cut short (no end marker)")
+    return size
+
+
+def png_size(data: bytes) -> tuple[int, int]:
+    w = int.from_bytes(data[16:20], "big")
+    h = int.from_bytes(data[20:24], "big")
+    bits, colour = data[24], data[25]
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[colour]
+    pos, idat = 8, b""
+    while pos < len(data):
+        size = int.from_bytes(data[pos : pos + 4], "big")
+        if data[pos + 4 : pos + 8] == b"IDAT":
+            idat += data[pos + 8 : pos + 8 + size]
+        pos += size + 12
+    rows = len(zlib.decompress(idat))
+    if rows != h * (1 + (w * channels * bits + 7) // 8):
+        raise ValueError(f"a PNG of {w}x{h} with {rows} bytes of rows")
+    return w, h
+
+
+def tiff_size(data: bytes) -> tuple[int, int]:
+    order = "little" if data[:2] == b"II" else "big"
+    ifd = int.from_bytes(data[4:8], order)
+    count = int.from_bytes(data[ifd : ifd + 2], order)
+    tags = {}
+    for i in range(count):
+        at = ifd + 2 + 12 * i
+        tag = int.from_bytes(data[at : at + 2], order)
+        kind = int.from_bytes(data[at + 2 : at + 4], order)
+        value = data[at + 8 : at + 12]
+        tags[tag] = int.from_bytes(value[:2] if kind == 3 else value, order)
+    if 256 not in tags or 257 not in tags:
+        raise ValueError("a TIFF with no width or height")
+    return tags[256], tags[257]
+
+
+def same_size(got: tuple[int, int], want: tuple[int, int]) -> bool:
+    """The raw's size within 1 % a side (a demosaic's border), either way
+    up (the camera's orientation applied)."""
+    a, b = sorted(got), sorted(want)
+    return all(abs(x - y) <= max(2, y // 100) for x, y in zip(a, b, strict=True))
 
 
 def scenarios_module():
@@ -195,6 +291,9 @@ class Journey:
         self.launches = 0
         self.steps: list[dict] = []
         self.session = ""
+        self.photo = ""
+        self.image = ""
+        self.export = self.work / "profile" / "export"
 
     def log_files(self) -> list[Path]:
         state = Path(self.env["XDG_STATE_HOME"])
@@ -489,6 +588,97 @@ class Journey:
         elif not entry["strategy"]:
             entry["why"] = "the backup strategy has no line"
 
+    def collector(self, name: str) -> dict:
+        snapshot = self.rpc("snapshot", {"collector": name})
+        if isinstance(snapshot, dict) and isinstance(snapshot.get(name), dict):
+            return snapshot[name]
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def find_photo(self, entry: dict) -> None:
+        """The first pair's cell in the grid, for `workshop`."""
+        try:
+            tree = self.rpc("ui", {"action": "tree", "window": "main"})
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry["why"] = f"the tree could not be read: {exc}"
+            return
+        cells = sorted({x for x in labels(tree) if x.startswith("IMG_0001.")})
+        entry["cells"] = cells
+        if not cells:
+            entry["why"] = "the first RAW+JPEG pair (IMG_0001) is not in the grid"
+            return
+        self.photo = cells[0]
+
+    def darkroom(self, entry: dict) -> None:
+        """The photo opened: its render ends, the image region is drawn."""
+        try:
+            end = time.monotonic() + 120
+            while True:
+                library = self.collector("helios.library")
+                if library.get("open_size") or time.monotonic() > end:
+                    break
+                time.sleep(1)
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry["why"] = f"helios.library: {exc}"
+            return
+        current = library.get("current") or {}
+        entry["open_size"] = library.get("open_size")
+        entry["image"] = {k: current.get(k) for k in ("id", "name")}
+        if not library.get("open_size"):
+            entry["why"] = "no render in the viewport within 120 s (no image size)"
+            return
+        if not str(current.get("name", "")).startswith("IMG_0001."):
+            entry["why"] = f"the image open is not the pair clicked: {current}"
+            return
+        self.image = current["id"]
+        picture = self.args.out / "workshop-viewport.png"
+        # `gui.snapshot` sometimes answers that the viewport is not shown
+        # while it is drawn (its target's rectangle missed at that frame):
+        # asked again a few times, the attempts recorded.
+        for attempt in range(1, 6):
+            entry["picture_attempts"] = attempt
+            try:
+                self.command("gui.snapshot", {"target": "viewport.display", "path": str(picture)})
+            except (OSError, RuntimeError, ValueError) as exc:
+                entry["why"] = f"gui.snapshot: {exc}"
+                return
+            end = time.monotonic() + 8
+            while not picture.exists() and time.monotonic() < end:
+                time.sleep(0.5)
+            if picture.exists():
+                break
+        if not picture.exists():
+            entry["why"] = "the viewport could not be pictured"
+        elif png_is_flat(picture):
+            entry["why"] = "the viewport's image is one flat colour"
+
+    def exported(self, entry: dict) -> None:
+        """The export's file: written, decoded, at the raw's size."""
+        end = time.monotonic() + 180
+        files: list[Path] = []
+        sizes: dict[Path, int] = {}
+        while time.monotonic() < end:
+            files = sorted(p for p in self.export.iterdir() if p.is_file())
+            now = {p: p.stat().st_size for p in files}
+            # Written once its size holds between two looks.
+            if files and now == sizes and all(now.values()):
+                break
+            sizes = now
+            time.sleep(1)
+        entry["files"] = [p.name for p in files]
+        if len(files) != 1:
+            entry["why"] = f"one file expected in the export folder, found {entry['files']}"
+            return
+        try:
+            got = image_size(files[0])
+        except (ValueError, KeyError, IndexError, zlib.error) as exc:
+            entry["why"] = f"{files[0].name} does not decode: {exc}"
+            return
+        want = raw_crop(RAWS[0])
+        entry["size"] = list(got)
+        entry["expected"] = list(want)
+        if not same_size(got, want):
+            entry["why"] = f"{files[0].name} is {got[0]}x{got[1]}, the raw {want[0]}x{want[1]}"
+
     def run(self) -> bool:
         plan = [
             ("launch", None),
@@ -502,6 +692,8 @@ class Journey:
             ("quit", None),
             ("relaunch", None),
             ("restart", "8-restart.ron"),
+            ("workshop", "9-workshop.ron"),
+            ("export", "10-export.ron"),
             ("quit-again", None),
         ]
         for step, file in plan:
@@ -516,12 +708,27 @@ class Journey:
                 if "error" in launched:
                     entry["why"] = f"launch: {launched['error']}"
             elif file is not None:
-                extra = {"session": self.session} if step == "import-session" else None
-                entry = self.scenario(step, file, extra)
+                entry = {"step": step}
+                if step == "workshop":
+                    self.find_photo(entry)
+                if step == "export":
+                    self.export.mkdir(parents=True, exist_ok=True)
+                # After `find_photo`: the cell's label is read from the tree.
+                extra = {
+                    "import-session": {"session": self.session},
+                    "workshop": {"photo": self.photo},
+                    "export": {"image": self.image, "export": self.export},
+                }.get(step)
+                if "why" not in entry:
+                    entry = {**entry, **self.scenario(step, file, extra)}
                 if "why" not in entry and step == "imports-list":
                     self.find_session(entry)
                 if "why" not in entry and step == "storage":
                     self.storage_probe(entry)
+                if "why" not in entry and step == "workshop":
+                    self.darkroom(entry)
+                if "why" not in entry and step == "export":
+                    self.exported(entry)
             else:
                 entry = self.quit()
                 entry["step"] = step

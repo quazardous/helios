@@ -1,0 +1,21 @@
+// The first-user journey, step 9: after the restart, one photo opened in
+// the darkroom: `$photo`, the RAW+JPEG pair's cell as the grid names it,
+// clicked (it takes the grid's focus) and opened with Enter (a double
+// click does the same). Run live by tools/bench/journey.py, which sets
+// `$photo` from the tree, then waits for the viewport's render
+// (`helios.library.open_size`) and checks the image region it pictures
+// is not one flat colour.
+Scenario(
+    name: "workshop",
+    description: "A RAW+JPEG pair opened in the darkroom after a restart, without an error.",
+    steps: [
+        Window("main"),
+        Wait(Settled),
+        Ui(Click(role: "Button", label: "$photo", nth: 0)),
+        Wait(Settled),
+        Ui(Key("Enter")),
+        Wait(Settled),
+        Expect(NoError),
+        Shot("darkroom"),
+    ],
+)

@@ -1,0 +1,18 @@
+// The first-user journey, step 10: the photo open in the darkroom
+// (`$image`, its library id) exported with the workspace's settings (the
+// defaults: a full-size JPEG) to `$export`, a folder of the journey's
+// profile, as the export dialog would once its folder is chosen. Run live
+// by tools/bench/journey.py, which sets both, then waits for the file and
+// checks it decodes at the raw's size.
+Scenario(
+    name: "export",
+    description: "The photo opened is exported with the default settings, without an error.",
+    steps: [
+        Window("main"),
+        Wait(Settled),
+        Call("library.export", { "images": ["$image"], "folder": "$export" }),
+        Wait(Settled),
+        Expect(NoError),
+        Shot("exported"),
+    ],
+)
