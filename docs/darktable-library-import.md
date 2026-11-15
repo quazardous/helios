@@ -642,7 +642,7 @@ points settled:
 
 Tests (`plugins/importers/darktable-library/tests/scan.rs`, the program
 run by the broker as Helios ships it, and
-`crates/helios-gui/tests/darktable_library.rs`) build darktable folders
+`crates/helios-gui/tests/it/darktable_library.rs`) build darktable folders
 with the plugin's `fixture` module (a Rust test helper, feature
 `fixture`) from the `CREATE TABLE` statements of `release-4.6.0` (library 47,
 data 10) and `release-5.2.0` (library 57, data 13), committed as

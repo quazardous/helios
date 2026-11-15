@@ -168,6 +168,33 @@ impl Record {
         self.places.get(source)
     }
 
+    /// The folder `source`, one of its sources, imported from: the source
+    /// itself, or its folder when it is a file (the import window hands
+    /// the files chosen on a card one by one), with that folder's place
+    /// on a removable volume.
+    pub fn folder_of(&self, source: &std::path::Path) -> (PathBuf, Option<Place>) {
+        let place = self.place_of(source).cloned();
+        let file = source.is_file()
+            || source.extension().is_some_and(|e| {
+                helios_vault::IMAGE_EXTENSIONS
+                    .contains(&e.to_string_lossy().to_ascii_lowercase().as_str())
+            });
+        if !file {
+            return (source.to_path_buf(), place);
+        }
+        let folder = source
+            .parent()
+            .map_or_else(PathBuf::new, std::path::Path::to_path_buf);
+        let place = place.map(|p| Place {
+            rel_path: p
+                .rel_path
+                .parent()
+                .map_or_else(PathBuf::new, std::path::Path::to_path_buf),
+            volume: p.volume,
+        });
+        (folder, place)
+    }
+
     /// The params of `library.import` that run this import again, or why
     /// it cannot be: an importer plugin's import is run again from the
     /// import window, its plugin listing the files anew, and so is an
@@ -414,6 +441,35 @@ mod tests {
             skipped: 1,
             ..Report::default()
         }
+    }
+
+    /// Files chosen one by one are their folder's import, on a card too.
+    #[test]
+    fn a_file_source_is_imported_from_its_folder() {
+        let volume = VolumeId("uuid:card".into());
+        let file = PathBuf::from("/media/CARD/DCIM/100HELIO/IMG_0001.NEF");
+        let folder = PathBuf::from("/media/CARD/DCIM");
+        let r = Record {
+            sources: vec![file.clone(), folder.clone()],
+            places: BTreeMap::from([(
+                file.clone(),
+                Place {
+                    volume: volume.clone(),
+                    rel_path: "DCIM/100HELIO/IMG_0001.NEF".into(),
+                },
+            )]),
+            ..Record::default()
+        };
+        let (from, place) = r.folder_of(&file);
+        assert_eq!(from, PathBuf::from("/media/CARD/DCIM/100HELIO"));
+        assert_eq!(
+            place,
+            Some(Place {
+                volume,
+                rel_path: "DCIM/100HELIO".into()
+            })
+        );
+        assert_eq!(r.folder_of(&folder), (folder, None));
     }
 
     #[test]

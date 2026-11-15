@@ -2375,6 +2375,7 @@ name = "helios-controls-gallery"
 version = "0.90.0"
 dependencies = [
  "eframe",
+ "egui",
  "egui-pop",
  "egui_hud",
  "egui_kittest",
@@ -2538,6 +2539,7 @@ dependencies = [
  "helios-storage",
  "helios-template",
  "helios-thumbs",
+ "helios-ui",
  "helios-values",
  "helios-vault",
  "helios-vault-sqlite",

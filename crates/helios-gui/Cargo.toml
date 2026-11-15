@@ -30,6 +30,8 @@ helios-scopes.workspace = true
 helios-values.workspace = true
 # Business controls (exposure) and the implicit ones of other parameters.
 helios-controls = { workspace = true, features = ["render"] }
+# GPLv3 (this workspace): the intent presets screens draw with.
+helios-ui.workspace = true
 helios-core.workspace = true
 # The edit's decisions, answered in the Decisions panel.
 helios-decision.workspace = true
