@@ -173,8 +173,11 @@ characters): a few seconds here instead of a failed job on the box.
 It also refuses a job missing a parameter its command needs. Before any job
 that builds, the box itself runs the short `check` job (`egui-pop-check` for
 egui-pop's jobs), declared as the job's `first` in the Benchfile and run
-once per commit: `cargo clippy --tests --keep-going` on the crate the job
-names, else the workspace, with no code generated and no link. Lints are
+once per commit: `cargo clippy --tests --keep-going` on the workspace,
+with no code generated and no link. The `first` passes no `crate=`, so
+every job on a branch head shares one check: the box runs one identical
+check for jobs queued together, and one that already passed on that commit
+(the branch's own `check branch=<branch>` included) ends at once. Lints are
 warnings rather than errors, so one pass shows every lint of every crate,
 dependents and tests included; any warning or compile error makes the
 check red. The job itself is queued only if that check passes:
