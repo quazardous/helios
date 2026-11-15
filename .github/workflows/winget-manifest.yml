@@ -53,10 +53,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "winget validate failed for $($dir.Name)" }
             # winget waits on the installer; a hang is cut after 10 minutes
             # and both logs (winget's and the installer's) are printed.
-            $p = Start-Process winget -PassThru -NoNewWindow -ArgumentList @(
-              'install', '--manifest', $dir.FullName, '--silent', '--verbose-logs',
-              '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity',
-              '--override', "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG=$env:RUNNER_TEMP\\inno.log")
+            # One argument string, so the installer override stays one value.
+            $log = Join-Path $env:RUNNER_TEMP 'inno.log'
+            $line = "install --manifest `"$($dir.FullName)`" --silent --verbose-logs --accept-package-agreements --accept-source-agreements --disable-interactivity --override `"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG=$log`""
+            $p = Start-Process winget -PassThru -NoNewWindow -ArgumentList $line
             if (-not $p.WaitForExit(600000)) {
               Get-Process | Where-Object { $_.ProcessName -match 'helios|setup|winget|tmp' } | Format-Table Id, ProcessName, MainWindowTitle -AutoSize | Out-String | Write-Host
               Stop-Process -Id $p.Id -Force
@@ -64,7 +64,7 @@ jobs:
             }
             Get-ChildItem "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir" -Filter *.log -ErrorAction SilentlyContinue |
               Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { Write-Host "== winget log $($_.Name)"; Get-Content $_.FullName -Tail 60 }
-            if (Test-Path "$env:RUNNER_TEMP\inno.log") { Write-Host "== installer log"; Get-Content "$env:RUNNER_TEMP\inno.log" -Tail 80 }
+            if (Test-Path $log) { Write-Host "== installer log"; Get-Content $log -Tail 80 }
             if ($hung) { throw "winget install hung for $($dir.Name)" }
             if ($p.ExitCode -ne 0) { throw "winget install failed for $($dir.Name) (exit $($p.ExitCode))" }
             $installer = Get-Content (Join-Path $dir.FullName 'Quazardous.Helios.installer.yaml') -Raw
