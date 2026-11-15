@@ -120,6 +120,7 @@ pub use lifetime::{Closing, LastWindow};
 mod reads;
 mod storage;
 mod storage_admin;
+mod trace;
 pub use storage_admin::{
     MARK_VOLUME as MARK_VOLUME_COMMAND, SET_STRATEGY as SET_STRATEGY_COMMAND,
     SET_UP_STRATEGY as SET_UP_STRATEGY_COMMAND, STRATEGY as BACKUP_STRATEGY_COMMAND,
@@ -7084,7 +7085,14 @@ impl Shell {
         }
         let events = h.events_since(self.core.seen);
         self.core.seen = h.last_event();
+        // What holds the screen, in the log when it changes.
+        self.focus.screen.follow(&h);
         for e in events {
+            match trace::event_line(&e.name, &e.data) {
+                Some((true, line)) => log::warn!(target: "helios", "{line}"),
+                Some((false, line)) => log::info!(target: "helios", "{line}"),
+                None => {}
+            }
             // egui-pop's Quit (Ctrl+Q, File > Quit), from any window: it
             // closes the window it ran in, the application quits.
             if e.name == "command.done"

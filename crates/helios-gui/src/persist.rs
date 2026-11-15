@@ -1503,6 +1503,13 @@ impl<S: Store + 'static> Persist<S> {
                 }
             }
             (Write::Pair(ask, at, batch), Ok(answer)) => {
+                log::info!(
+                    target: "helios",
+                    "library pairing ({ask:?}): paired {}, unpaired {}, conflicts {}",
+                    answer["paired"],
+                    answer["unpaired"],
+                    answer["conflicts"]
+                );
                 // The step the node made, recorded so Ctrl+Z takes it
                 // back; the Library reads itself again on the vault's
                 // event. Marks the merge chose between are said.
@@ -1533,14 +1540,17 @@ impl<S: Store + 'static> Persist<S> {
                     );
                 }
             }
-            (Write::Pair(..), Err(e)) => shell.notify(
-                Level::Warning,
-                Message::new(
-                    "gui-library-pair-not-changed",
-                    "The files were not paired or unpaired: { $error }",
-                )
-                .with("error", e.message),
-            ),
+            (Write::Pair(ask, ..), Err(e)) => {
+                log::warn!(target: "helios", "library pairing ({ask:?}) refused: {}", e.message);
+                shell.notify(
+                    Level::Warning,
+                    Message::new(
+                        "gui-library-pair-not-changed",
+                        "The files were not paired or unpaired: { $error }",
+                    )
+                    .with("error", e.message),
+                );
+            }
             (Write::Stack(..), Err(e)) => shell.notify(
                 Level::Warning,
                 Message::new(

@@ -2802,3 +2802,120 @@ fn the_metadata_section_edits_a_mixed_selection_as_one_step_with_templates() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Whether the window paints its bars and the grid's cells: the main
+/// menu, the status bar's zone and a cell per name are in the
+/// accessibility tree.
+fn paints(h: &Harness<'_, Shell>, cells: &[&str]) -> Result<(), String> {
+    let button = |name: &str| {
+        h.query_by(|n| {
+            n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.contains(name))
+        })
+        .is_some()
+    };
+    if h.query_all_by_label_contains("File").next().is_none() {
+        return Err("no main menu".into());
+    }
+    let named = h
+        .query_all_by(|n| n.label().is_some_and(|l| !l.is_empty()))
+        .count();
+    if named < 12 {
+        return Err(format!("{named} named nodes only: the bars are not drawn"));
+    }
+    for name in cells {
+        if !button(name) {
+            return Err(format!("no cell for {name}"));
+        }
+    }
+    Ok(())
+}
+
+/// The health check's fix for RAW+JPEG pairs (`library.files.pair` with
+/// `all`) on a Library of three pairs and a lone photo, a paired JPEG
+/// selected: the JPEGs leave the grid, and the window keeps painting its
+/// bars and cells; a second window on the same workspace and vault (the
+/// next launch) paints them too.
+#[test]
+fn the_window_keeps_painting_once_every_pair_is_made_and_on_the_next_launch() {
+    let root = temp("pairs-all");
+    let path = root.join("vault.db");
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        let photos: [(u8, &str, &str); 7] = [
+            (1, "p1.nef", "nef"),
+            (2, "p1.jpg", "jpg"),
+            (3, "p2.nef", "nef"),
+            (4, "p2.jpg", "jpg"),
+            (5, "p3.nef", "nef"),
+            (6, "p3.jpg", "jpg"),
+            (7, "lone.jpg", "jpg"),
+        ];
+        for (n, name, kind) in photos {
+            store
+                .add_to_library(&Image {
+                    id: id(n),
+                    size: 10,
+                    partial: ContentHash([n; 32]),
+                })
+                .unwrap();
+            store
+                .put_location(&id(n), &Location::seen(root.join(name), 10, 1, 1))
+                .unwrap();
+            for (field, value) in [
+                (CAPTURED, json!(u64::from(n) * 100)),
+                (CAMERA_MODEL, json!("Z 8")),
+                (FILE_TYPE, json!(kind)),
+            ] {
+                store.set_field(&id(n), field, Some(&value)).unwrap();
+            }
+        }
+    }
+    let (config, workspace) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &workspace, &path);
+    let mut clock = 1.0;
+    let mut refill = |h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>| {
+        for _ in 0..3 {
+            settle(h, persist, clock);
+            clock += 4.0;
+        }
+        let _ = persist.take_locations_changed();
+        persist.ask_fill(h.state(), true);
+        for _ in 0..3 {
+            settle(h, persist, clock);
+            clock += 4.0;
+        }
+    };
+    refill(&mut h, &mut persist);
+    assert_eq!(grid(&h).len(), 7, "{:?}", grid(&h));
+    paints(&h, &["p1.nef", "p1.jpg", "lone.jpg"]).unwrap();
+
+    // A JPEG about to leave the Library is selected.
+    h.state_mut().library_mut().select_ids(&[id(2).hex()]);
+    let out = answer(&mut h, "library.files.pair", json!({ "all": true }));
+    assert!(out.get("asked").is_some(), "{out}");
+    refill(&mut h, &mut persist);
+    for n in [2, 4, 6] {
+        assert!(
+            persist.vault().photo_of(&id(n)).unwrap().is_some(),
+            "JPEG {n} is its RAW's file"
+        );
+    }
+    let mut left = grid(&h);
+    left.sort();
+    assert_eq!(left, ["lone.jpg", "p1.nef", "p2.nef", "p3.nef"]);
+    paints(&h, &["p1.nef", "p2.nef", "p3.nef", "lone.jpg"]).unwrap();
+    drop(h);
+    drop(persist);
+
+    // The next launch: the same workspace and vault.
+    let (mut h, mut persist) = open(&config, &workspace, &path);
+    let mut clock = 100.0;
+    for _ in 0..4 {
+        settle(&mut h, &mut persist, clock);
+        clock += 4.0;
+    }
+    let mut left = grid(&h);
+    left.sort();
+    assert_eq!(left, ["lone.jpg", "p1.nef", "p2.nef", "p3.nef"]);
+    paints(&h, &["p1.nef", "p2.nef", "p3.nef", "lone.jpg"]).unwrap();
+}
