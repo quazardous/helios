@@ -641,9 +641,9 @@ command = '''mkdir -p /tmp/w/flatpak /tmp/w/bundle "$HOME" "$XDG_RUNTIME_DIR" &&
 v="$(packaging/flatpak/build.sh version)" && echo "$v" > /out/version.txt && \
 HELIOS_FLATPAK_DEVEL=1 packaging/flatpak/build.sh build "$v" /tmp/w/bundle /flatpak/work && \
 b="/tmp/w/bundle/io.github.quazardous.Helios.Devel-$v-x86_64.flatpak" && \
-packaging/flatpak/smoke.sh "$b" crates/helios-plugin/tests/fixtures/rated-photos/a.jpg && \
 cp "$b" /out/helios-devel.flatpak && (cd /out && sha256sum helios-devel.flatpak > helios-devel.flatpak.sha256) && \
-k="/flatpak/devel/${branch:-main}" && mkdir -p "$k" && cp /out/helios-devel.flatpak /out/version.txt "$k/"'''
+k="/flatpak/devel/${branch:-main}" && mkdir -p "$k" && cp /out/helios-devel.flatpak /out/version.txt "$k/" && \
+packaging/flatpak/smoke.sh "$b" crates/helios-plugin/tests/fixtures/rated-photos/a.jpg'''
 env = { HELIOS_FLATPAK = "1", FLATPAK_USER_DIR = "/flatpak/user" }
 mounts = { flatpak = "/flatpak", registry = "/cargo/registry" }
 outputs = { bundle = { path = "helios-devel.flatpak", kind = "file" }, sha256 = { path = "helios-devel.flatpak.sha256", kind = "file" }, version = { path = "version.txt", kind = "file" } }

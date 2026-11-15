@@ -215,7 +215,16 @@ def main() -> int:
     home = Path(os.environ["HOME"])
     results: list[dict] = []
 
-    got = flatpak("install", "--user", "-y", "--noninteractive", "--reinstall", str(args.bundle))
+    got = flatpak(
+        # the box is offline: its runtime is installed by the flatpak jobs
+        "install",
+        "--user",
+        "-y",
+        "--noninteractive",
+        "--reinstall",
+        "--no-deps",
+        str(args.bundle),
+    )
     (args.out / "install.log").write_text(got.stdout + got.stderr)
     if got.returncode != 0:
         results.append({"step": "install", "ok": False, "seen": got.stderr.strip()[-300:]})

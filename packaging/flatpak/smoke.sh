@@ -31,7 +31,11 @@ echo "== install"
 # bench box runs this offline, after `build.sh fetch`).
 flatpak remotes --user | grep -q '^flathub' ||
   flatpak remote-add --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user -y --noninteractive "$bundle"
+# Offline (the bench box), the runtime is installed already and Flathub
+# cannot be reached to read the bundle's runtime repository: no deps then.
+deps=()
+getent hosts dl.flathub.org >/dev/null 2>&1 || deps=(--no-deps)
+flatpak install --user -y --noninteractive "${deps[@]}" "$bundle"
 flatpak info --user "$id"
 flatpak info --user --show-permissions "$id"
 
