@@ -3,11 +3,7 @@
 //! screens look, and the place UI bugs are reported from.
 
 use egui_pop::egui::{self, Ui};
-use helios_ui::{Action, Empty, Loading, Search, Section, Value};
-
-/// When the work behind the gallery's busy values started, in motion
-/// clock seconds: long enough ago that their delayed spinners show.
-const LONG_AGO: f64 = -10.0;
+use helios_ui::{Action, Empty, Loading, Search, Section};
 
 /// The page's state: the search fields' queries and the last preset
 /// clicked.
@@ -19,27 +15,6 @@ pub struct PresetsPage {
 }
 
 impl PresetsPage {
-    /// The values shown, one per state.
-    pub fn values() -> [(&'static str, Value<String>); 4] {
-        [
-            ("Fresh", Value::Fresh("12.4 GB".to_string())),
-            ("Pending", Value::Pending { since: LONG_AGO }),
-            (
-                "Refreshing",
-                Value::Refreshing {
-                    value: "12.1 GB".to_string(),
-                    since: LONG_AGO,
-                },
-            ),
-            (
-                "Failed",
-                Value::Failed {
-                    reason: "The disk did not answer".to_string(),
-                },
-            ),
-        ]
-    }
-
     pub fn ui(&mut self, ui: &mut Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| self.content(ui));
     }
@@ -73,18 +48,6 @@ impl PresetsPage {
                 if helios_ui::action(ui, kind, kind.name()).clicked() {
                     self.last = Some(format!("action {}", kind.name()));
                 }
-            }
-        });
-
-        helios_ui::section(
-            ui,
-            &Section::new("Values").description("A value that arrives late, in each state."),
-        );
-        egui::Grid::new("helios_ui.values").show(ui, |ui| {
-            for (label, value) in Self::values() {
-                ui.label(label);
-                helios_ui::value(ui, label, &value);
-                ui.end_row();
             }
         });
 

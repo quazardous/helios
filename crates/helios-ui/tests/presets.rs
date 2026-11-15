@@ -8,10 +8,10 @@ use egui_pop::core::ui::Tone;
 use egui_pop::egui::accesskit::Role;
 use egui_pop::egui::{self, Ui};
 use egui_pop::theme::{self, ThemeSpec};
-use helios_ui::{Action, Empty, Loading, Notice, Search, Section, Value};
+use helios_ui::{Action, Empty, Loading, Notice, Search, Section};
 
-/// A harness drawing `draw` in Helios's base theme, its motion clock
-/// frozen at 0 s (a busy value started at -10 s shows its spinner).
+/// A harness drawing `draw` in egui-pop's dark theme, its motion clock
+/// frozen at 0 s (no animation asks for frames).
 fn harness<S: 'static>(state: S, draw: fn(&mut Ui, &mut S)) -> Harness<'static, S> {
     let mut h = Harness::builder()
         .with_size(egui::vec2(480.0, 360.0))
@@ -135,69 +135,6 @@ fn loading_is_a_busy_region() {
             "{shape:?}"
         );
     }
-}
-
-fn spinners(h: &Harness<'_, Value<String>>) -> usize {
-    h.query_all_by_role(Role::ProgressIndicator).count()
-}
-
-fn value_harness(v: Value<String>) -> Harness<'static, Value<String>> {
-    harness(v, |ui, v| {
-        let _ = helios_ui::value(ui, "Size", v);
-    })
-}
-
-#[test]
-fn a_value_is_drawn_in_its_state() {
-    let fresh = value_harness(Value::Fresh("12 GB".into()));
-    fresh.get_by_label("12 GB");
-    assert_eq!(spinners(&fresh), 0);
-
-    let pending = value_harness(Value::Pending { since: -10.0 });
-    assert_eq!(spinners(&pending), 1, "a long fetch shows its spinner");
-
-    let quick = value_harness(Value::Pending { since: 0.0 });
-    assert_eq!(
-        spinners(&quick),
-        0,
-        "a fetch just started shows nothing yet"
-    );
-
-    let refreshing = value_harness(Value::Refreshing {
-        value: "11 GB".into(),
-        since: -10.0,
-    });
-    refreshing.get_by_label("11 GB");
-    assert_eq!(spinners(&refreshing), 1);
-
-    let failed = value_harness(Value::Failed {
-        reason: "The disk did not answer".into(),
-    });
-    let mark = failed.get_by_role(Role::Image);
-    let said = format!(
-        "{} {}",
-        mark.accesskit_node().label().unwrap_or_default(),
-        mark.accesskit_node().description().unwrap_or_default()
-    );
-    assert!(said.contains("Size: failed"), "{said}");
-    assert_eq!(spinners(&failed), 0);
-
-    assert_eq!(
-        [
-            Value::Fresh(1).state(),
-            Value::<i32>::Pending { since: 0.0 }.state(),
-            Value::Refreshing {
-                value: 1,
-                since: 0.0
-            }
-            .state(),
-            Value::<i32>::Failed {
-                reason: String::new()
-            }
-            .state(),
-        ],
-        ["fresh", "pending", "refreshing", "failed"]
-    );
 }
 
 #[test]

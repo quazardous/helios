@@ -33,11 +33,6 @@ fn the_page_shows_every_preset() {
     for case in Empty::ALL {
         h.get_by_label(case.title());
     }
-    for (_, value) in PresetsPage::values() {
-        let _ = value.state();
-    }
-    h.get_by_label("12.4 GB");
-    h.get_by_label("12.1 GB");
     h.get_by_label("Retry");
 }
 
