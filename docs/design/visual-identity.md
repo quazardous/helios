@@ -26,8 +26,9 @@ The owner's asks, on the same thread:
   drawn from the theme's kit. Helios's desktop calls almost none of them:
   `EmptyState`, `Skeleton`, `Sections`, `ToggleChip`, `Fault`,
   `DataTable`, `CommandButton`, `Toolbar` and the `UiPop` text and space
-  roles have **zero** uses; the shell draws with **504 raw egui widget
-  calls in 39 files** instead. The look varies because every screen
+  roles have **zero** uses; the shell draws with **942 raw egui widget
+  calls in 42 files** instead (`cargo xtask raw-egui`, 2026-11-15; the
+  first `grep`, on one line and a shorter list, saw 504 in 39). The look varies because every screen
   rebuilds its controls from egui primitives.
 - **Divergence counted** (section 1): 3 search fields built 3 ways;
   section headers in 5 styles (`heading`, `strong`, collapsing, a text
@@ -76,6 +77,23 @@ of writing; they are a measure of spread, not exact call graphs.
 `ui.add_space`, `ui.separator`, `ui.spinner` and `egui::{Button,
 TextEdit, Label, Checkbox, ComboBox, Slider, DragValue, Grid,
 RichText, Frame, Spinner, ProgressBar, CollapsingHeader, Modal}::`.
+
+Since 2026-11-15 the count is a tool, `cargo xtask raw-egui`, and a
+ratchet (`xtask/allow/raw-egui.toml`: a file's count only goes down; see
+ui-responsibilities.md, "The raw egui ratchet"). It reads the code
+without comments, strings and tests, follows calls split over lines
+(`ui` on one line, `.button(..)` on the next: 59 of the 80 `ui.button`),
+and counts more kinds (`ui.weak`, `ui.strong`, `ui.colored_label`,
+hover texts, `egui::ScrollArea`…), so it finds **942 calls in 42 files**
+where the `grep` below found 539. Its first kinds: `ui.label` 135,
+`ui.weak` 121, hover texts 115, `ui.button` 80, `ui.separator` 49,
+`ui.small_button` 39, `ui.add_space` 37, `egui::Button` 36,
+`ui.selectable_label` 36, `egui::RichText` 34. Its first files:
+`shell/import_accounts.rs` 78, `shell/activity_focus.rs` 63,
+`workshops.rs` 61, `shell/import_window.rs` 53, `shell/import_wizard.rs`
+53, `macro_interface.rs` 52, `shell/calibrate_focus.rs` 48, `library.rs`
+46, `shell/import_profile_editor.rs` 38, `rule_editor_ui.rs` 34. The
+tables below keep the first `grep`'s numbers.
 
 Snapshots: the existing headless snapshots under
 `crates/helios-gui/tests/snapshots/` (pop-dark, 1x and 2x) are enough to
