@@ -2396,6 +2396,7 @@ dependencies = [
  "helios-controls",
  "helios-core",
  "helios-shell",
+ "helios-ui",
  "helios-values",
  "serde_json",
  "wasm-bindgen-futures",
@@ -3063,6 +3064,14 @@ dependencies = [
  "jpeg-decoder",
  "memchr",
  "rawler",
+]
+
+[[package]]
+name = "helios-ui"
+version = "0.90.0"
+dependencies = [
+ "egui-pop",
+ "egui_kittest",
 ]
 
 [[package]]
