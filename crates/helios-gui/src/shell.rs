@@ -418,9 +418,27 @@ type ActionOf = Box<dyn Fn(&Value, &Origin) -> Result<Action, String> + Send + S
 
 /// A picture asked of the window, waiting for egui's screenshot.
 enum Shot {
-    Save { target: String, path: PathBuf },
+    Save(Picture),
     Frame,
 }
+
+/// A picture of a target asked by `gui.snapshot`: taken from a frame
+/// that drew the target, which may come a few frames after the ask (a
+/// place being entered, a panel shown), and given up at `until` (the
+/// window's time, see [`PICTURE_WAIT`]).
+struct Picture {
+    target: String,
+    path: PathBuf,
+    until: f64,
+}
+
+/// How long, in seconds of the window's time, a picture waits for its
+/// target to be drawn before it fails as not shown.
+pub const PICTURE_WAIT: f64 = 3.0;
+
+/// How often a window that would sleep draws again while a picture waits
+/// for its target.
+const PICTURE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// What a window (eframe) or a test harness draws with: the process's one
 /// GPU device (`helios_gpu::shared`), which the engine computes on too.
@@ -6667,8 +6685,14 @@ impl Shell {
                 );
             }
             Action::Snapshot { target, path } => {
-                self.focus.shots.push_back(Shot::Save { target, path });
-                self.request_screenshot(ctx);
+                // Taken at the end of a frame that drew the target
+                // (`take_pictures`), not from whatever this frame shows.
+                self.focus.pictures.push(Picture {
+                    target,
+                    path,
+                    until: self.core.now + PICTURE_WAIT,
+                });
+                ctx.request_repaint();
             }
             Action::RecordStart { target, path, fps } => {
                 self.focus.recording = Some((target, Recorder::new(path, fps)));
@@ -6724,6 +6748,40 @@ impl Shell {
         self.target_rect(target)
     }
 
+    /// The pictures whose target this frame drew ask for the window's
+    /// screenshot; the others wait for a frame that draws it, the window
+    /// kept drawing, and fail as not shown once their time is out.
+    fn take_pictures(&mut self, ctx: &Egui) {
+        if self.focus.pictures.is_empty() {
+            return;
+        }
+        let now = self.core.now;
+        let mut waiting = Vec::new();
+        for picture in std::mem::take(&mut self.focus.pictures) {
+            if self.focus.rects.contains_key(&picture.target) {
+                // One screenshot per shot: each answers the oldest.
+                self.focus.shots.push_back(Shot::Save(picture));
+                self.request_screenshot(ctx);
+            } else if now >= picture.until {
+                self.note(
+                    Message::new("gui-snapshot-failed", "snapshot failed: { $error }").with(
+                        "error",
+                        format!(
+                            "nothing named `{}` is shown (waited {PICTURE_WAIT} s)",
+                            picture.target
+                        ),
+                    ),
+                );
+            } else {
+                waiting.push(picture);
+            }
+        }
+        self.focus.pictures = waiting;
+        if !self.focus.pictures.is_empty() {
+            ctx.request_repaint_after(PICTURE_POLL);
+        }
+    }
+
     /// Asks the window for a screenshot of its next frame; it comes back
     /// through `screenshots`, read at the start of a frame.
     fn request_screenshot(&self, ctx: &Egui) {
@@ -6741,7 +6799,15 @@ impl Shell {
             return;
         };
         match shot {
-            Shot::Save { target, path } => {
+            Shot::Save(picture) => {
+                // Drawn when asked, gone from the frame pictured (a rare
+                // turn of the screen in between): it waits again.
+                if !self.focus.rects.contains_key(&picture.target) && self.core.now < picture.until
+                {
+                    self.focus.pictures.push(picture);
+                    return;
+                }
+                let Picture { target, path, .. } = picture;
                 let note = self
                     .pictured_rect(&target)
                     .map(|r| snapshot::crop(&full, r, self.focus.pixels_per_point))
@@ -6956,6 +7022,7 @@ impl Shell {
             self.focus.rects.insert(name, rect);
         }
         self.overlay_rects();
+        self.take_pictures(&ctx);
 
         if self.focus.recording.is_some() {
             self.focus.shots.push_back(Shot::Frame);
