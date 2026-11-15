@@ -36,6 +36,7 @@ fn the_page_shows_every_preset() {
         h.get_by_label(case.title());
     }
     h.get_by_label("Retry");
+    h.get_by_label("Album: Trip");
     // The late values, one per state.
     for name in ["Photos", "Free space", "Last backup", "Archive size"] {
         h.get_by_role_and_label(egui::accesskit::Role::Status, name);

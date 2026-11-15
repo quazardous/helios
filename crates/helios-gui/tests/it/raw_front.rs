@@ -602,11 +602,11 @@ fn develop_v2() -> Bundle {
     Bundle::from_files(&[
         (
             "template.json",
-            include_str!("data/develop-v2.template.json"),
+            include_str!("../data/develop-v2.template.json"),
         ),
         (
             "layout.json",
-            include_str!("../../../templates/develop.helios-template/layout.json"),
+            include_str!("../../../../templates/develop.helios-template/layout.json"),
         ),
     ])
     .expect("version 2 still reads")
@@ -664,11 +664,11 @@ fn develop_v3() -> Bundle {
     Bundle::from_files(&[
         (
             "template.json",
-            include_str!("data/develop-v3.template.json"),
+            include_str!("../data/develop-v3.template.json"),
         ),
         (
             "layout.json",
-            include_str!("../../../templates/develop.helios-template/layout.json"),
+            include_str!("../../../../templates/develop.helios-template/layout.json"),
         ),
     ])
     .expect("version 3 still reads")

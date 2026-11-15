@@ -1822,6 +1822,20 @@ pub struct Library {
     trash_asks: Vec<TrashAsk>,
 }
 
+/// What can limit the photos the Library shows
+/// ([`Library::restrictions`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Restriction {
+    /// An album (`collection:`), maybe opened by the workspace.
+    Album,
+    /// A folder (`folder:`).
+    Folder,
+    /// An import session (`import:`).
+    Import,
+    /// A set shown alone (a job's photos).
+    Set,
+}
+
 /// The library's sort when nothing chose one: by capture time, oldest
 /// first (`docs/design/library.md`, L-C1).
 pub const DEFAULT_SORT: helios_vault::Order =
@@ -2648,7 +2662,7 @@ impl Library {
     }
 
     /// Why an image cannot be opened, when a disk would help: "Plug in
-    /// <volume> to open this photo", with its last-seen date. `None` for
+    /// \<volume\> to open this photo", with its last-seen date. `None` for
     /// a present or missing image.
     pub fn unavailable(&self, id: &str) -> Option<Message> {
         let v = self.offline_volume(id)?;
@@ -4328,6 +4342,7 @@ impl Library {
         // The search field (with the import button) and the marks bar
         // stay in place while the library is empty.
         self.toolbar(ui);
+        self.restrictions_line(ui);
         self.facets_bar(ui);
         self.folders_section(ui);
         self.albums_section(ui);
@@ -4344,6 +4359,19 @@ impl Library {
             );
             ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
             self.import_button(ui);
+            return;
+        }
+        if self.order.is_empty() && self.answered() {
+            // Photos there, none shown: say why, with the way out (a
+            // workspace may open on an empty album).
+            let case = if self.collection().is_some() {
+                helios_ui::Empty::EmptyAlbum
+            } else {
+                helios_ui::Empty::NoMatch
+            };
+            if helios_ui::empty(ui, case) {
+                self.show_all();
+            }
             return;
         }
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
@@ -4500,6 +4528,93 @@ impl Library {
         }
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
+    }
+
+    /// Whether what is shown is final: no filter, or the vault answered
+    /// it, or a set is shown alone.
+    fn answered(&self) -> bool {
+        self.only.is_some() || self.filter.is_empty() || self.matches.is_some()
+    }
+
+    /// Every photo of the Library: no album, folder, import, set or
+    /// filter.
+    pub fn show_all(&mut self) {
+        self.set_filter(Filter::default());
+    }
+
+    /// What limits the photos shown, each with how to lift it: the
+    /// album, the folder, the import session, a set shown alone.
+    pub fn restrictions(&self, ctx: &egui::Context) -> Vec<(String, Restriction)> {
+        let mut out = Vec::new();
+        if let Some(id) = self.collection() {
+            let name = self
+                .albums
+                .as_deref()
+                .and_then(|albums| albums.iter().find(|a| a.id == id))
+                .map_or(id.clone(), |a| a.name.clone());
+            let text =
+                Message::new("gui-library-scope-album", "Album: { $name }").with("name", name);
+            out.push((crate::i18n::text(ctx, text), Restriction::Album));
+        }
+        if let Some(path) = self.folder() {
+            let text =
+                Message::new("gui-library-scope-folder", "Folder: { $path }").with("path", path);
+            out.push((crate::i18n::text(ctx, text), Restriction::Folder));
+        }
+        if let Some(id) = self.import_session() {
+            let line = self
+                .imports
+                .iter()
+                .find(|s| s.id == id)
+                .map_or(id.clone(), ImportSession::line);
+            let text =
+                Message::new("gui-library-scope-import", "Import: { $line }").with("line", line);
+            out.push((crate::i18n::text(ctx, text), Restriction::Import));
+        }
+        if let Some(only) = &self.only {
+            let text = Message::new("gui-library-scope-set", "{ $count } photos shown alone")
+                .with("count", only.len());
+            out.push((crate::i18n::text(ctx, text), Restriction::Set));
+        }
+        out
+    }
+
+    /// Lifts one restriction.
+    pub fn lift(&mut self, restriction: Restriction) {
+        match restriction {
+            Restriction::Album => self.set_collection(None),
+            Restriction::Folder => self.set_folder(None),
+            Restriction::Import => self.show_import(None, false),
+            Restriction::Set => self.clear_shown_set(),
+        }
+    }
+
+    /// Under the search: what limits the photos shown, each removable,
+    /// and "All photos" while anything limits them.
+    fn restrictions_line(&mut self, ui: &mut Ui) {
+        let restrictions = self.restrictions(ui.ctx());
+        if restrictions.is_empty() && self.filter.is_empty() {
+            return;
+        }
+        let all = crate::i18n::text(
+            ui.ctx(),
+            Message::new("gui-library-all-photos", "All photos"),
+        );
+        let mut lift = None;
+        let mut all_asked = false;
+        ui.horizontal_wrapped(|ui| {
+            for (text, restriction) in restrictions {
+                if helios_ui::restriction(ui, &text) {
+                    lift = Some(restriction);
+                }
+            }
+            all_asked = helios_ui::action(ui, helios_ui::Action::Secondary, &all).clicked();
+        });
+        if all_asked {
+            self.show_all();
+        } else if let Some(r) = lift {
+            self.lift(r);
+        }
     }
 
     /// While the grid or the filmstrip has the focus, the Edit commands

@@ -2919,3 +2919,65 @@ fn the_window_keeps_painting_once_every_pair_is_made_and_on_the_next_launch() {
     assert_eq!(left, ["lone.jpg", "p1.nef", "p2.nef", "p3.nef"]);
     paints(&h, &["p1.nef", "p2.nef", "p3.nef", "lone.jpg"]).unwrap();
 }
+
+/// A workspace kept on an empty album opens on it (the owner's
+/// "0 photos" of 2026-11-15): what limits the grid shows as a chip by
+/// the search, the empty grid says the album is empty, and its action
+/// or the chip's removal shows every photo again.
+#[test]
+fn a_workspace_on_an_empty_album_says_so_and_shows_all_in_one_click() {
+    let root = temp("empty-album");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    h.state_mut().library_mut().select_ids(&[]);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "test" }),
+    );
+    settle(&mut h, &mut persist, 1.0);
+    run(&mut h, "library.collection", json!({ "id": "test" }));
+    settle(&mut h, &mut persist, 2.0);
+    assert_eq!(kept_collection(&config, &ws).as_deref(), Some("test"));
+    drop((h, persist));
+
+    for lift in ["Show all photos", "Remove Album: test", "All photos"] {
+        let (mut h, mut persist) = open(&config, &ws, &path);
+        settle(&mut h, &mut persist, 3.0);
+        assert!(grid(&h).is_empty(), "{lift}: the album holds no photo");
+        h.get_by_label("Album: test");
+        h.get_by_label("This album is empty");
+        h.get_by_label(lift).click();
+        settle(&mut h, &mut persist, 4.0);
+        assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"], "{lift}");
+        assert!(h.query_by_label("Album: test").is_none(), "{lift}");
+        assert_eq!(h.state().library().collection(), None, "{lift}");
+        drop((h, persist));
+        // Opened on the album again for the next way out.
+        let (mut h, mut persist) = open(&config, &ws, &path);
+        run(&mut h, "library.collection", json!({ "id": "test" }));
+        settle(&mut h, &mut persist, 5.0);
+        drop((h, persist));
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A workspace kept on an album that is no longer there still opens,
+/// with the same hint and way out.
+#[test]
+fn a_workspace_on_a_missing_album_opens_with_the_hint() {
+    let root = temp("missing-album");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    h.state_mut().library_mut().set_collection(Some("gone"));
+    settle(&mut h, &mut persist, 1.0);
+    assert!(grid(&h).is_empty());
+    h.get_by_label("Album: gone");
+    h.get_by_label("Show all photos").click();
+    settle(&mut h, &mut persist, 2.0);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

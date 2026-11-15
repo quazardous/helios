@@ -8,7 +8,11 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-egui-pop.workspace = true
+# The library views: the removable tag chip `restriction` draws.
+# `phosphor`: the presets' icons (magnifier, empty-state pictures, a
+# failed value's mark) are the app's Phosphor glyphs wherever they are
+# drawn, not the painted fallbacks a build without the feature shows.
+egui-pop = { workspace = true, features = ["views", "phosphor"] }
 
 [dev-dependencies]
 # MIT OR Apache-2.0: the presets run headless, read through accesskit.

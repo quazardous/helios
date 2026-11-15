@@ -14,6 +14,8 @@ pub enum Empty {
     NoPhotos,
     /// A search matched no photo.
     NoMatch,
+    /// The album shown holds no photo (a workspace may open on one).
+    EmptyAlbum,
     /// No background job.
     NoJobs,
     /// Nothing waits in the queue.
@@ -23,9 +25,10 @@ pub enum Empty {
 }
 
 impl Empty {
-    pub const ALL: [Empty; 5] = [
+    pub const ALL: [Empty; 6] = [
         Empty::NoPhotos,
         Empty::NoMatch,
+        Empty::EmptyAlbum,
         Empty::NoJobs,
         Empty::NothingQueued,
         Empty::NoSource,
@@ -36,6 +39,7 @@ impl Empty {
         match self {
             Empty::NoPhotos => "no-photos",
             Empty::NoMatch => "no-match",
+            Empty::EmptyAlbum => "empty-album",
             Empty::NoJobs => "no-jobs",
             Empty::NothingQueued => "nothing-queued",
             Empty::NoSource => "no-source",
@@ -44,7 +48,7 @@ impl Empty {
 
     pub fn icon(self) -> Icon {
         match self {
-            Empty::NoPhotos | Empty::NoSource => Icon::Folder,
+            Empty::NoPhotos | Empty::NoSource | Empty::EmptyAlbum => Icon::Folder,
             Empty::NoMatch => Icon::Search,
             Empty::NoJobs | Empty::NothingQueued => Icon::History,
         }
@@ -54,6 +58,7 @@ impl Empty {
         match self {
             Empty::NoPhotos => "No photos yet",
             Empty::NoMatch => "No photo matches",
+            Empty::EmptyAlbum => "This album is empty",
             Empty::NoJobs => "No background jobs",
             Empty::NothingQueued => "Nothing queued",
             Empty::NoSource => "No source yet",
@@ -65,6 +70,7 @@ impl Empty {
         match self {
             Empty::NoPhotos => "Import photos to see them here.",
             Empty::NoMatch => "Try fewer words, or clear the search.",
+            Empty::EmptyAlbum => "The Library shows this album only, and it holds no photo.",
             Empty::NoJobs => "Imports, exports and previews show here while they run.",
             Empty::NothingQueued => "Edits waiting to be rendered show here.",
             Empty::NoSource => "Add a folder, a card or an account to import from.",
@@ -76,6 +82,7 @@ impl Empty {
         match self {
             Empty::NoPhotos => Some("Import photos…"),
             Empty::NoMatch => Some("Clear the search"),
+            Empty::EmptyAlbum => Some("Show all photos"),
             Empty::NoSource => Some("Add a source…"),
             Empty::NoJobs | Empty::NothingQueued => None,
         }
@@ -96,6 +103,7 @@ impl Empty {
 ///
 /// Need (state): an empty state, nothing here yet.
 /// Need (state): no results for a search or a filter.
+/// Need (state): an empty album, with the way back to all photos.
 pub fn empty(ui: &mut Ui, case: Empty) -> bool {
     case.state().show(ui)
 }
