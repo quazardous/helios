@@ -631,21 +631,16 @@ class Journey:
             return
         self.image = current["id"]
         picture = self.args.out / "workshop-viewport.png"
-        # `gui.snapshot` sometimes answers that the viewport is not shown
-        # while it is drawn (its target's rectangle missed at that frame):
-        # asked again a few times, the attempts recorded.
-        for attempt in range(1, 6):
-            entry["picture_attempts"] = attempt
-            try:
-                self.command("gui.snapshot", {"target": "viewport.display", "path": str(picture)})
-            except (OSError, RuntimeError, ValueError) as exc:
-                entry["why"] = f"gui.snapshot: {exc}"
-                return
-            end = time.monotonic() + 8
-            while not picture.exists() and time.monotonic() < end:
-                time.sleep(0.5)
-            if picture.exists():
-                break
+        # Taken from the first frame that draws the image region (the
+        # darkroom may be entered a frame after the render ends).
+        try:
+            self.command("gui.snapshot", {"target": "viewport.display", "path": str(picture)})
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry["why"] = f"gui.snapshot: {exc}"
+            return
+        end = time.monotonic() + 8
+        while not picture.exists() and time.monotonic() < end:
+            time.sleep(0.5)
         if not picture.exists():
             entry["why"] = "the viewport could not be pictured"
         elif png_is_flat(picture):

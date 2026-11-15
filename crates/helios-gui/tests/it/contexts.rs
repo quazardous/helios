@@ -344,3 +344,94 @@ fn the_workspace_comes_back_where_it_was_left_or_falls_back() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `gui.snapshot` by name, asked while its target is not drawn yet (the
+/// photo opened, the darkroom entered a frame later, as in the first-user
+/// journey), is taken from the first frame that draws it, round after
+/// round.
+#[test]
+fn a_picture_by_name_waits_for_its_target_to_be_drawn() {
+    let dir = temp("picture");
+    let mut h = window(&dir);
+    let photo = dir.join("photo.png");
+    std::fs::write(&photo, b"not read").unwrap();
+    for round in 0..3 {
+        run(&mut h, "view.library", json!(null));
+        assert!(
+            h.state().target_rect("viewport.display").is_err(),
+            "round {round}: the library does not show the image"
+        );
+        let path = dir.join(format!("viewport-{round}.png"));
+        h.state_mut()
+            .run(
+                "gui.snapshot",
+                json!({ "target": "viewport.display", "path": path }),
+                Origin::Agent("a1".into()),
+            )
+            .unwrap();
+        // Asked while the library shows: nothing pictured yet.
+        h.step();
+        h.step();
+        assert!(!path.exists(), "round {round}: pictured before it is shown");
+        contexts::open(
+            h.state().app().handle(),
+            &Opened::File(photo.clone()),
+            &PopOrigin::User,
+        );
+        for _ in 0..8 {
+            h.step();
+            if path.exists() {
+                break;
+            }
+        }
+        assert!(
+            path.exists(),
+            "round {round}: not pictured; the status line: {:?}",
+            h.state().status_text()
+        );
+        assert_eq!(key(&h, "place"), "helios.darkroom");
+        let rect = h.state().target_rect("viewport.display").unwrap();
+        let png = image::open(&path).unwrap();
+        let ppp = h.state().pixels_per_point();
+        let near = |got: u32, points: f32| got.abs_diff((points * ppp).round() as u32) <= 1;
+        assert!(
+            near(png.width(), rect.width()) && near(png.height(), rect.height()),
+            "round {round}: {}x{} pictured, the image's rectangle is {rect:?}",
+            png.width(),
+            png.height()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A name no frame draws fails as not shown, once its wait is out, and
+/// not before.
+#[test]
+fn a_picture_of_a_name_never_drawn_fails_after_its_wait() {
+    let dir = temp("picture-absent");
+    let mut h = window(&dir);
+    let path = dir.join("absent.png");
+    h.state_mut()
+        .run(
+            "gui.snapshot",
+            json!({ "target": "nothing.here", "path": path }),
+            Origin::Agent("a1".into()),
+        )
+        .unwrap();
+    let start = h.ctx.input(|i| i.time);
+    let failed = |h: &Harness<'_, Shell>| {
+        h.state()
+            .status_text()
+            .is_some_and(|t| t.contains("nothing named `nothing.here` is shown"))
+    };
+    while h.ctx.input(|i| i.time) - start < helios_gui::shell::PICTURE_WAIT - 0.5 {
+        h.step();
+        assert!(!failed(&h), "failed before its wait is out");
+    }
+    for _ in 0..8 {
+        h.step();
+    }
+    assert!(failed(&h), "the status line: {:?}", h.state().status_text());
+    assert!(!path.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

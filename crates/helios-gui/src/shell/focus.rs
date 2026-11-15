@@ -55,6 +55,9 @@ pub(super) struct Focus {
     /// The screen's own scale, as of the last frame (none before it).
     pub(super) native_scale: Option<f32>,
     pub(super) shots: VecDeque<Shot>,
+    /// The pictures asked by name, waiting for a frame that draws their
+    /// target (see `Shell::take_pictures`).
+    pub(super) pictures: Vec<super::Picture>,
     /// The screenshots asked for, as the window hands them back, oldest
     /// first: each answers the oldest of `shots`.
     pub(super) screenshots: Arc<Mutex<VecDeque<Arc<egui::ColorImage>>>>,
@@ -169,6 +172,7 @@ impl Focus {
             pixels_per_point: 1.0,
             native_scale: None,
             shots: VecDeque::new(),
+            pictures: Vec::new(),
             screenshots: Arc::default(),
             recording: None,
             title: String::new(),
