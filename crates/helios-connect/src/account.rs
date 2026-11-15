@@ -366,6 +366,44 @@ pub fn remove(book: &dyn AccountBook, secrets: &dyn Secrets, id: &str) -> Result
     book.remove(id)
 }
 
+/// Accounts of one connector signed in as one identity: the one kept
+/// and the ones merged into it ([`duplicates`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Merge {
+    pub kept: Account,
+    /// The others, most recently used first.
+    pub dropped: Vec<Account>,
+}
+
+/// The accounts saved twice on one identity ([`Account::identity`]),
+/// for the connectors `one_per_account` says take one source per
+/// account: by identity, the account used last kept (the first saved
+/// when none says), the others to merge into it. An identity not known
+/// yet (no address) is the account's own: never merged. Nothing here
+/// knows a connector.
+pub fn duplicates(accounts: &[Account], one_per_account: &dyn Fn(&str) -> bool) -> Vec<Merge> {
+    let mut groups: BTreeMap<String, Vec<&Account>> = BTreeMap::new();
+    for a in accounts {
+        if a.email().is_some() && one_per_account(&a.connector) {
+            groups.entry(a.identity()).or_default().push(a);
+        }
+    }
+    groups
+        .into_values()
+        .filter(|g| g.len() > 1)
+        .map(|mut g| {
+            // The latest used first; equal ones (never used) by id.
+            g.sort_by(|a, b| b.last_used.cmp(&a.last_used).then(a.id.cmp(&b.id)));
+            let mut g = g.into_iter().cloned();
+            let kept = g.next().expect("a group of two or more");
+            Merge {
+                kept,
+                dropped: g.collect(),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use helios_vault::MemoryStore;
@@ -412,6 +450,41 @@ mod tests {
         assert!(!a.identity_missing(true));
         a.label = "ann@example.com".into();
         assert_eq!(a.shown(), "ann@example.com");
+    }
+
+    #[test]
+    fn duplicates_keep_the_account_used_last_for_connectors_taking_one_source_each() {
+        let mut taken = Vec::new();
+        let mut add = |connector: &str, email: Option<&str>, used: Option<u64>| {
+            let mut a = Account::new(connector, connector, &taken);
+            if let Some(e) = email {
+                a.facts.insert(EMAIL.into(), e.into());
+            }
+            a.last_used = used;
+            taken.push(a.clone());
+            a
+        };
+        let old = add("svc", Some("me@example.org"), Some(10));
+        let new = add("svc", Some("Me@Example.org"), Some(20));
+        // Another address, no address yet, a connector taking several
+        // sources per account: never merged.
+        add("svc", Some("you@example.org"), None);
+        add("svc", None, None);
+        add("svc", None, None);
+        add("free", Some("me@example.org"), None);
+        add("free", Some("me@example.org"), None);
+        let one = |c: &str| c == "svc";
+        let merges = duplicates(&taken, &one);
+        assert_eq!(
+            merges,
+            [Merge {
+                kept: new.clone(),
+                dropped: vec![old.clone()],
+            }]
+        );
+        // Merged (the dropped account gone), nothing is left to merge.
+        let after: Vec<Account> = taken.into_iter().filter(|a| a.id != old.id).collect();
+        assert!(duplicates(&after, &one).is_empty());
     }
 
     #[test]

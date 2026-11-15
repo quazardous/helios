@@ -362,6 +362,39 @@ pub fn record_remote<S: Store>(
     write(vault, record)
 }
 
+/// Points the records of the connector's source `from` at `to`: two
+/// accounts found to be one identity, merged into `to`; the records keep
+/// every import's origin under the source that stays. Returns how many
+/// records changed.
+///
+/// # Errors
+/// The vault's.
+pub fn repoint_remote<S: Store>(
+    vault: &Vault<S>,
+    connector: &str,
+    from: &str,
+    to: &Remote,
+) -> Result<usize, String> {
+    let mut changed = 0;
+    for (key, doc) in vault.library_documents(NS)? {
+        let Ok(mut record) = serde_json::from_value::<Record>(doc) else {
+            continue;
+        };
+        let Some(remote) = record.remote.as_mut() else {
+            continue;
+        };
+        if remote.connector != connector || remote.id != from {
+            continue;
+        }
+        remote.clone_from(to);
+        record.id.clone_from(&key);
+        let doc = serde_json::to_value(&record).map_err(|e| e.to_string())?;
+        vault.set_library_document(NS, &key, Some(&doc))?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
 /// A new record's key: the time, the process and a number, so keys sort
 /// by time and two imports ending in the same second keep a record each.
 fn key(now: u64) -> String {
