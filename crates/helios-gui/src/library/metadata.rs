@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 
 use egui::Ui;
 use egui_pop::views::library::ColorLabel;
-use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
+use egui_pop::views::library::marks::RatingStars;
 use egui_pop::views::library::tags::TagInput;
 use egui_pop::views::library::{Flag, Marks};
 use helios_core::Message;
@@ -503,12 +503,7 @@ impl Library {
             let side = egui_pop::core::theme::Tokens::of(ui.ctx())
                 .size
                 .control_height;
-            let out = ColorLabels::new(marks.labels).size(side).show(ui);
-            let tips = ColorLabel::ALL.map(|l| {
-                let (what, command) = super::label_tip(l);
-                self.mark_tip(ui.ctx(), what, command)
-            });
-            super::toggle_tips(ui, &out.response, side, &tips);
+            let out = self.color_labels(ui.ctx(), marks.labels, side).show(ui);
             if let Some(labels) = out.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
@@ -535,19 +530,7 @@ impl Library {
             let side = egui_pop::core::theme::Tokens::of(ui.ctx())
                 .size
                 .control_height;
-            let out = FlagToggle::new(marks.flag).size(side).show(ui);
-            let tips = [
-                (
-                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
-                    "vault.flag.pick",
-                ),
-                (
-                    Message::new("gui-library-flag-reject-tip", "Reject"),
-                    "vault.flag.reject",
-                ),
-            ]
-            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
-            super::toggle_tips(ui, &out.response, side, &tips);
+            let out = self.flag_toggle(ui.ctx(), marks.flag, side).show(ui);
             if let Some(f) = out.changed {
                 edit.fields.insert("flag".into(), json!(flag_word(f)));
             }

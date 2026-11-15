@@ -21,9 +21,14 @@
 //! 5. The image-data jobs follow their inputs: [`RAW_CORPUS`] and
 //!    [`MASK_PARITY`] name the crates and paths each one reads.
 //!
+//! 6. A pull request's test manifest is narrower than the selection (a few
+//!    suites, not a whole crate): [`GUI_SUITES`] names, for the desktop's
+//!    sources, the suites that draw them, and the selection lists them as
+//!    manifest lines.
+//!
 //! The selection prints as JSON on stdout (`base`, `everything`, `reasons`,
-//! `changed`, `crates`, `nextest_filter`, `box_jobs`) and as a summary on
-//! stderr. `--filter` prints the nextest filter alone, for a shell;
+//! `changed`, `crates`, `nextest_filter`, `box_jobs`, `manifest`) and as a
+//! summary on stderr. `--filter` prints the nextest filter alone, for a shell;
 //! `--critical` prints the critical set's filter alone.
 //!
 //! `--crates LIST` takes the selection as given instead of computing it:
@@ -122,6 +127,43 @@ pub const MASK_PARITY: DataJob = DataJob {
 };
 
 pub const DATA_JOBS: [DataJob; 2] = [RAW_CORPUS, MASK_PARITY];
+
+/// The crate [`GUI_SUITES`] speaks of, and where its suites live: modules
+/// of one integration test executable, each run alone by
+/// `test-crate crate=helios-gui test=<module>`.
+pub const GUI_CRATE: &str = "helios-gui";
+#[cfg(test)]
+const GUI_SUITES_DIR: &str = "crates/helios-gui/tests/it";
+
+/// The desktop's sources (path prefixes) and the suites that draw them:
+/// what a pull request touching one runs on the box and lists in its test
+/// manifest (docs/next.md), beside the tests it wrote.
+///
+/// A manifest names the suites its author thought of; a suite that draws
+/// the same screen from another angle is the one that goes red on `next`.
+/// The Library's views are drawn by the Library window's suites and by
+/// the walk of every control's name, which looks for the marks bar in the
+/// Library window. Add a line when a red `next` shows a missed suite.
+pub const GUI_SUITES: [(&[&str], &[&str]); 1] = [(
+    &[
+        "crates/helios-gui/src/library",
+        "crates/helios-gui/src/shell/library_",
+    ],
+    &[
+        "control_names",
+        "library_filter",
+        "library_gallery",
+        "library_window",
+    ],
+)];
+
+/// The suites of [`GUI_SUITES`] that draw `path`.
+pub fn gui_suites(path: &str) -> impl Iterator<Item = &'static str> {
+    GUI_SUITES
+        .iter()
+        .filter(move |(prefixes, _)| prefixes.iter().any(|p| path.starts_with(p)))
+        .flat_map(|(_, suites)| suites.iter().copied())
+}
 
 /// What a path outside the workspace's crates means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -335,6 +377,8 @@ pub struct Selection {
     pub crates: BTreeSet<String>,
     /// The image-data jobs to run.
     pub data_jobs: BTreeSet<&'static str>,
+    /// The desktop's suites that draw what changed ([`GUI_SUITES`]).
+    pub suites: BTreeSet<&'static str>,
 }
 
 /// Maps changed paths to a selection.
@@ -342,7 +386,9 @@ pub fn select(graph: &Graph, paths: &[String]) -> Selection {
     let mut reasons = Vec::new();
     let mut changed = BTreeSet::new();
     let mut data_jobs = BTreeSet::new();
+    let mut suites = BTreeSet::new();
     for path in paths {
+        suites.extend(gui_suites(path));
         for job in DATA_JOBS {
             if job.paths.iter().any(|p| {
                 if p.ends_with('/') {
@@ -389,6 +435,7 @@ pub fn select(graph: &Graph, paths: &[String]) -> Selection {
         changed,
         crates,
         data_jobs,
+        suites,
     }
 }
 
@@ -448,6 +495,7 @@ impl Selection {
             changed: BTreeSet::new(),
             crates: BTreeSet::new(),
             data_jobs: BTreeSet::new(),
+            suites: BTreeSet::new(),
         };
         match value {
             "all" => {
@@ -468,6 +516,16 @@ impl Selection {
         Some(selection)
     }
 
+    /// The lines a pull request's test manifest must hold for what
+    /// changed, as `cargo xtask manifest check` reads them: the suites
+    /// that draw it.
+    pub fn manifest_lines(&self) -> Vec<String> {
+        self.suites
+            .iter()
+            .map(|s| format!("test-crate crate={GUI_CRATE} test={s}"))
+            .collect()
+    }
+
     pub fn to_json(&self, base: &str) -> Value {
         json!({
             "base": base,
@@ -477,6 +535,7 @@ impl Selection {
             "crates": self.crates,
             "nextest_filter": self.nextest_filter(),
             "box_jobs": self.box_jobs(),
+            "manifest": self.manifest_lines(),
         })
     }
 
@@ -509,6 +568,16 @@ impl Selection {
             );
         }
         let _ = writeln!(out, "  box jobs: {}", self.box_jobs().join(", "));
+        let lines = self.manifest_lines();
+        if !lines.is_empty() {
+            let _ = writeln!(
+                out,
+                "  a pull request's manifest lists the suites that draw what changed:"
+            );
+            for line in lines {
+                let _ = writeln!(out, "  - {line}");
+            }
+        }
         out
     }
 }
@@ -857,6 +926,55 @@ mod tests {
         );
         assert_eq!(j["everything"], false);
         assert!(s.summary("origin/main", 1).contains("helios-corpus"));
+    }
+
+    #[test]
+    fn a_library_change_lists_the_suites_that_draw_the_library() {
+        // The Library's views were split, its manifest ran the Library's
+        // own suites, and the walk of the control names went red on next:
+        // it looks for the marks bar in the Library window.
+        for path in [
+            "crates/helios-gui/src/library.rs",
+            "crates/helios-gui/src/library/gallery.rs",
+            "crates/helios-gui/src/library_history.rs",
+            "crates/helios-gui/src/shell/library_focus.rs",
+        ] {
+            let s = select(&graph(), &paths(&[path]));
+            assert!(
+                s.manifest_lines()
+                    .contains(&"test-crate crate=helios-gui test=control_names".to_string()),
+                "{path}: {:?}",
+                s.manifest_lines()
+            );
+            assert!(s.suites.contains("library_window"), "{path}");
+            assert_eq!(
+                s.to_json("origin/next")["manifest"][0],
+                s.manifest_lines()[0]
+            );
+            assert!(s.summary("origin/next", 1).contains("test=control_names"));
+        }
+        let s = select(&graph(), &paths(&["crates/helios-gui/src/masks.rs"]));
+        assert!(s.suites.is_empty(), "a source no line names lists nothing");
+        assert!(!s.summary("origin/next", 1).contains("manifest"));
+    }
+
+    #[test]
+    fn the_suites_and_sources_named_exist() {
+        let root = crate::root();
+        for (prefixes, suites) in GUI_SUITES {
+            for suite in suites {
+                let file = format!("{GUI_SUITES_DIR}/{suite}.rs");
+                assert!(root.join(&file).is_file(), "no suite {file}");
+            }
+            for prefix in prefixes {
+                let (dir, stem) = prefix.rsplit_once('/').unwrap();
+                let any = std::fs::read_dir(root.join(dir))
+                    .unwrap_or_else(|e| panic!("{dir}: {e}"))
+                    .flatten()
+                    .any(|f| f.file_name().to_string_lossy().starts_with(stem));
+                assert!(any, "no source under {prefix}");
+            }
+        }
     }
 
     #[test]
