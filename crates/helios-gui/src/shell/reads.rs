@@ -11,11 +11,12 @@
 //!   palette run the same).
 //! - Each read's policy ([`POLICIES`]): how long it stays fresh, and
 //!   which node events make it out of date.
-//! - Invalidation: the facts the shell sees reach the kernel through
-//!   [`Shell::read_fact`], today from the storage link's changes
-//!   (`storage.volumes.changed`). Once the node-event relay lands, its
-//!   listener (`reads`, on `storage.*` and `library.*`) calls the same
-//!   adapter, and only this module changes.
+//! - Invalidation: the node-event relay's listener `reads` (on
+//!   `storage.*`, `library.*`, `volume.*` and `cache.*`) hands each node
+//!   fact to the kernel at every frame; `node.resync` (a hole in a node's
+//!   events) makes every value out of date. The storage link's own
+//!   changes (an edit saved, a read after a scan) reach it as
+//!   `storage.volumes.changed` ([`Shell::read_fact`]).
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -89,6 +90,9 @@ pub fn kernel(registry: Arc<Mutex<Registry>>) -> Arc<ReadKernel> {
     Arc::new(k)
 }
 
+/// The node facts the reads listen to.
+pub const LISTENS: &[&str] = &["storage.*", "library.*", "volume.*", "cache.*"];
+
 /// The fact the shell gives the kernel when the storage link read
 /// something new (a disk came or went, a scan, an edit saved).
 pub const VOLUMES_CHANGED: &str = "storage.volumes.changed";
@@ -101,6 +105,26 @@ impl Shell {
         };
         if admin.reads().is_none() {
             admin.attach_reads(kernel(self.core.registry.clone()));
+        }
+        if self.core.storage.reads.is_none() {
+            self.core.storage.reads = Some(self.core.node_events.listen("reads", LISTENS));
+        }
+    }
+
+    /// Each frame: the node facts heard since reach the kernel.
+    pub(super) fn reads_frame(&self) {
+        let Some(listener) = &self.core.storage.reads else {
+            return;
+        };
+        let Some(k) = self.reads() else {
+            return;
+        };
+        for e in listener.try_iter() {
+            if e.is_resync() {
+                k.invalidate_all();
+            } else {
+                k.event(e.event.kind);
+            }
         }
     }
 

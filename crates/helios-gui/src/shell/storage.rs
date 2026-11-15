@@ -390,6 +390,8 @@ pub(crate) struct StoragePage {
     shared_waiting: Arc<Mutex<Vec<Card>>>,
     /// The link's [`StorageLink::seq`] last shown.
     seen: u64,
+    /// The node facts the read kernel follows ([`super::reads`]).
+    pub(super) reads: Option<crate::node_events::Listener>,
     /// The waiting cards checked again off the frame, once a backup
     /// ended: each one's path and what it is now.
     checking: Option<Receiver<Checked>>,
@@ -550,6 +552,7 @@ impl Shell {
     /// Each frame: what the link read since shows, and the cards checked
     /// since a backup ended say whether they are safe to format.
     pub(super) fn storage_frame(&mut self) {
+        self.reads_frame();
         if let Some(link) = &self.core.storage.link {
             let seq = link.seq();
             if seq != self.core.storage.seen {
