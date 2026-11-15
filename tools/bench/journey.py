@@ -369,12 +369,22 @@ class Journey:
         """Each fix the health check offers applied, a step each."""
         started = time.monotonic()
         entry: dict = {"step": "health-findings"}
+        rows = []
         try:
-            answer = self.command("health.findings")
+            # The run "Check now" started: its findings once it has ended.
+            end = time.monotonic() + 90
+            while True:
+                answer = self.command("health.findings")
+                if answer.get("ran") and not answer.get("running"):
+                    break
+                if time.monotonic() > end:
+                    entry["why"] = f"the health check did not end within 90 s: {answer}"
+                    break
+                time.sleep(1)
             rows = answer.get("findings", [])
+            entry["summary"] = (answer.get("summary") or {}).get("text")
         except (OSError, RuntimeError, ValueError, AttributeError) as exc:
             entry["why"] = f"health.findings: {exc}"
-            rows = []
         entry["findings"] = [
             {k: r.get(k) for k in ("id", "level", "title", "fixCommand", "ignored")} for r in rows
         ]
@@ -413,7 +423,13 @@ class Journey:
     def storage_probe(self, entry: dict) -> None:
         """The volumes hold the library's disk, online; the strategy a line."""
         try:
-            volumes = self.command("library.volumes").get("volumes", [])
+            # The volumes are read off the frame: given a moment.
+            end = time.monotonic() + 30
+            while True:
+                volumes = self.command("library.volumes").get("volumes", [])
+                if any(v.get("role_library") for v in volumes) or time.monotonic() > end:
+                    break
+                time.sleep(1)
             strategy = self.command("library.backupStrategy")
         except (OSError, RuntimeError, ValueError, AttributeError) as exc:
             entry["why"] = f"storage commands: {exc}"

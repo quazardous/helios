@@ -13,7 +13,7 @@ Scenario(
         Wait(Settled),
         Window("settings"),
         Expect(Value("admin.scope", "storage")),
-        Expect(Tree(has: (role: "CheckBox", label: "Library", nth: 0))),
+        Expect(Value("admin.section", "volumes")),
         Expect(NoError),
         Shot("volumes"),
         Call("admin.open", { "path": "backup/strategy" }),
