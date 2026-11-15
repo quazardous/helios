@@ -116,6 +116,7 @@ pub use import_history::{Reader as ImportHistoryReader, reader_of as import_hist
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
+mod reads;
 mod storage;
 mod storage_admin;
 pub use storage_admin::{
@@ -1126,6 +1127,9 @@ impl Shell {
             notes: Vec::new(),
         };
         shell.restore_focus_windows();
+        // The Settings app reads the Storage page's values through the
+        // read kernel, away from the frame.
+        shell.attach_reads();
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
         }

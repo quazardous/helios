@@ -556,6 +556,9 @@ impl Shell {
                 self.core.storage.seen = seq;
                 self.show_volumes();
                 self.show_backups();
+                // The Storage page's reads follow, their values kept
+                // while read again.
+                self.read_fact(super::reads::VOLUMES_CHANGED);
             }
         }
         let checked = match &self.core.storage.checking {

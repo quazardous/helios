@@ -29,12 +29,15 @@ use helios_vault::Vault;
 use helios_vault_sqlite::SqliteStore;
 use serde_json::json;
 
-/// Volumes plugged in and out by the test.
+/// Volumes plugged in and out by the test, read as slowly as it says
+/// (a network drive's free space).
 #[derive(Default)]
-struct Plugged(Mutex<Vec<Volume>>);
+struct Plugged(Mutex<Vec<Volume>>, Mutex<Duration>);
 
 impl Volumes for Plugged {
     fn volumes(&self) -> Vec<Volume> {
+        let slow = *self.1.lock().unwrap();
+        std::thread::sleep(slow);
         self.0.lock().unwrap().clone()
     }
 }
@@ -269,6 +272,108 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
         h.query_by_label("Forget what was seen on Backup?")
             .is_none()
     });
+}
+
+/// The page's values are read away from the frame (the read kernel):
+/// with the volumes slow to read, the labels are drawn at once, the rows
+/// fill in as they come, and a disk unplugged updates its row while the
+/// rows read before stay on the page.
+#[test]
+fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
+    let (mut world, shell) = World::new("kernel");
+    let mut h = headless::harness(shell, vec2(1600.0, 900.0));
+    h.run();
+    *world.plugged.1.lock().unwrap() = Duration::from_millis(1500);
+    let started = Instant::now();
+    h.state_mut()
+        .run(STORAGE_COMMAND, json!({}), Origin::User)
+        .unwrap();
+    h.step();
+    h.step();
+    assert!(
+        started.elapsed() < Duration::from_millis(1200),
+        "the frame waited for the volumes: {:?}",
+        started.elapsed()
+    );
+    // Frame 0: the labels, not yet the rows.
+    assert!(h.query_by_label("Volumes").is_some(), "the status's label");
+    assert!(h.query_by_label("Space").is_some(), "the table's columns");
+    assert!(
+        h.query_by_label("Studio").is_none(),
+        "read in the background"
+    );
+    until(&mut h, "the rows", |h| {
+        h.query_all_by_label_contains("Studio").next().is_some()
+            && h.query_by_label("2 online, 0 offline").is_some()
+    });
+    // The backup disk goes: its row says so, the page never blanks
+    // while the volumes are read again.
+    let studio = world.studio.clone();
+    world.plugged.set(&[&studio]);
+    scan::scan(
+        &world.vault,
+        &[studio.clone()],
+        "studio-pc",
+        FIRST + DAY,
+        None,
+    )
+    .unwrap();
+    world
+        .persist
+        .frame_settled(h.state_mut(), (FIRST + DAY) as f64);
+    assert!(world.persist.take_locations_changed());
+    h.state_mut().refresh_volumes();
+    assert!(world.link.settle(Duration::from_secs(10)));
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        h.step();
+        assert!(
+            h.query_all_by_label_contains("Studio").next().is_some(),
+            "a refresh blanked the volumes"
+        );
+        assert!(
+            h.query_by_label("Volumes").is_some(),
+            "nor its status's label"
+        );
+        if h.query_by_label("1 online, 1 offline").is_some() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the unplugged disk never showed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        h.query_by_label_contains("Last seen 1970-01-11 on studio-pc")
+            .is_some(),
+        "the backup disk's row is updated"
+    );
+    let reads = h.state().reads().expect("the read kernel");
+    assert!(reads.fetches() >= 2, "read again after the event");
+}
+
+/// The Caches page's "In use": its label at once, its value read by the
+/// kernel and kept fresh in the background.
+#[test]
+fn the_caches_in_use_fills_in_from_the_read_kernel() {
+    let (_world, shell) = World::new("in-use");
+    let mut shell = shell;
+    helios_gui::caches::register(&mut shell).unwrap();
+    let mut h = headless::harness(shell, vec2(1600.0, 900.0));
+    h.run();
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "storage/caches" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.step();
+    assert!(h.query_by_label("In use").is_some());
+    until(&mut h, "the caches' use", |h| {
+        h.query_by_label_contains("Caches hold").is_some()
+    });
+    let reads = h.state().reads().expect("the read kernel");
+    let r = reads.peek(helios_gui::caches::STATS_COMMAND, &json!({}));
+    assert!(r.value.is_some(), "kept by the kernel");
 }
 
 /// Backup › Strategy edits the strategy in place: turned on, then one
