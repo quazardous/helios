@@ -70,7 +70,7 @@ lands; "Lost" is what a person who looked away cannot get back.
 | 7 | egui-pop's own toasts | egui-pop `api/app.rs` (`workbench_refused`), `api/clipboard.rs`, `api/links.rs`, `platform/crash.rs` (crash report offered) | a toast, and egui-pop's journal (`gui.toast.shown` on the shell bus, kept with the bus's recent events; `Toasts::history`, 32 entries) | not in Helios's log file or Log panel; plain text, so it never changes language |
 | 8 | The Log panel | `helios-gui/src/log_panel.rs` (`Log`, `KEPT` = 1000, panel `helios.log`) | memory (1000 entries) and the log file | an entry keeps **no time, no source, no action, no details**; the panel holds only rows 4's reports (import outcomes, darktable edits not kept whole, exports, automatic imports, cards safe); emptied at quit |
 | 9 | `log::warn!` / `log::error!` in desktop crates (some 180 lines across the workspace; most in `shell/import_accounts.rs`, `main.rs`, `import_scan.rs`, `shell/storage.rs`) | `helios-gui/src/platform.rs` (`file_logs`: egui-pop's `Logs` installed as the `log` logger) | the rotated log file (`~/.local/state/helios/logs/helios.log` on Linux) and its 200-line tail (quoted by a crash report) | never shown: "cannot open the browser", "picking from Google: the source could not be reached" are silent unless an inline error says it too |
-| 10 | The node's `log::` lines | `helios-node-core/src/node.rs`, `health.rs`; `helios-storage`, `helios-library`, `helios-plugin` when they run in the node | **nowhere**: the `helios-node` binary installs no logger (no `set_logger`, no `Logs::install` in `helios-node`), so the `log` facade drops them | everything, including "catalogue restore refused" (`node.rs`) |
+| 10 | The node's `log::` lines | `helios-node-core/src/node.rs`, `health.rs`; `helios-storage`, `helios-library`, `helios-plugin` when they run in the node | **nowhere** until 2026-11-15: the `helios-node` binary installed no logger, so the `log` facade dropped them. Now its standard error, so the node's log file (row 11), as `helios_node::logger` writes it | as row 11 |
 | 11 | The node's `eprintln!` | `helios-node/src/main.rs`; `connect.rs` sends a spawned node's stderr to `.helios/NAME.node.log` beside the vault (`sandbox.rs`: `node.log`) | a file per node | not rotated by Helios, not shown, not relayed |
 | 12 | Node facts (`job.failed`, `state.failed`, `command.failed`, storage and volume facts) | `helios-core/src/jobs.rs` and the node's bus; journal read with `events --since` | the node's bus journal (recent, in memory); the desktop sees `job.*` through the jobs relay and promises through Activity | a node failure that is not a job reaches no person; the relay of other facts (`NodeEvents::listen`) is in progress |
 | 13 | Activity | `helios-gui/src/activity.rs`, `shell/activity_focus.rs` | the status bar indicator (a warning badge until seen), the Activity focus (each job's log lines, `LogLine`, its Retry and result links) | a job's log is kept with the job only; the failure is not in the log file unless the job wrote it |
@@ -417,10 +417,13 @@ either side.
 
 Each slice builds and passes its tests alone.
 
-**Before them, a bug fix:** the `helios-node` binary installs no logger
-(row 10), so the node's `log::` lines are dropped. Install egui-pop's
-`Logs` there (a `node.log` per vault in the state directory, rotated),
-independent of the rest.
+**Before them, a bug fix (done 2026-11-15):** the `helios-node` binary
+installed no logger (row 10), so the node's `log::` lines were dropped.
+Its binaries now install `helios_node::logger`, which writes each line,
+in the desktop's format, to standard error: the node's log file, beside
+its `eprintln!` lines and in their order. Not egui-pop's `Logs`: the node
+does not know where its host sends its log, and `Logs` would bring egui
+into a headless binary. Rotating that file stays to do.
 
 1. **(a) Every toast with its record first.** One function in the shell,
    `Shell::say(record)`, writes the Log panel's entry (so the file),
