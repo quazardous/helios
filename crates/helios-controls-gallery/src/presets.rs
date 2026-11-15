@@ -3,7 +3,7 @@
 //! screens look, and the place UI bugs are reported from.
 
 use egui_pop::egui::{self, Ui};
-use helios_ui::{Action, Empty, Loading, Search, Section};
+use helios_ui::{Action, Empty, Kind, Late, Loading, Search, Section, Value};
 
 /// The page's state: the search fields' queries and the last preset
 /// clicked.
@@ -57,6 +57,30 @@ impl PresetsPage {
         );
         helios_ui::loading(ui, Loading::Text(2));
         helios_ui::loading(ui, Loading::Rows(2));
+
+        helios_ui::section(
+            ui,
+            &Section::new("Late values")
+                .description("Pending, fresh, refreshing and failed, in the room of their kind."),
+        );
+        let values: [(&str, Kind, Late<&str>); 4] = [
+            ("Photos", Kind::Count, Late::Pending),
+            ("Free space", Kind::Size, Late::Fresh("412.7 GB")),
+            ("Last backup", Kind::Date, Late::Refreshing("12 Oct 2026")),
+            (
+                "Archive size",
+                Kind::Size,
+                Late::Failed("The disk did not answer.".into()),
+            ),
+        ];
+        for (name, kind, late) in values {
+            ui.horizontal(|ui| {
+                ui.label(format!("{name}:"));
+                if helios_ui::value(ui, Value::new(name, kind, late)) {
+                    self.last = Some(format!("value {name} retry"));
+                }
+            });
+        }
 
         helios_ui::section(
             ui,
