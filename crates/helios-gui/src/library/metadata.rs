@@ -413,6 +413,12 @@ impl Library {
                     .max_height(max)
                     .auto_shrink([false, true])
                     .show(ui, |ui| self.metadata_body(ui));
+                // The versions strip below the scroll, always in view.
+                if let Ok(keys) = self.targets()
+                    && let [one] = keys.as_slice()
+                {
+                    self.versions_strip(ui, one);
+                }
             });
     }
 
@@ -581,9 +587,6 @@ impl Library {
             run(ui.ctx(), META_SET_COMMAND, edit.params());
         }
         self.templates_row(ui);
-        if entries.len() == 1 {
-            self.versions_strip(ui, &first.id);
-        }
     }
 
     /// A text field's row: its label and its edit, "‹mixed›" as a hint
