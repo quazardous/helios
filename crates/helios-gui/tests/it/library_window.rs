@@ -121,7 +121,7 @@ fn the_library_window_s_selection_is_the_one_commands_act_on() {
     // in force.
     let at = in_window(&h, "b.jpg").rect().center();
     click_at(&mut h, at);
-    assert_eq!(h.state().library().selected, Some(1));
+    assert_eq!(h.state().library().selected(), Some(1));
     // A command, from wherever it comes, acts on that selection.
     run(&mut h, "vault.rate", json!({ "stars": 4 }));
     let library = h.state().library();
@@ -139,12 +139,12 @@ fn a_click_on_a_cell_of_the_library_window_selects_it() {
     // Through accesskit, as agents and screen readers click.
     in_window(&h, "a.jpg").click_accesskit();
     h.run_steps(2);
-    assert_eq!(h.state().library().selected, Some(0), "a, clicked");
+    assert_eq!(h.state().library().selected(), Some(0), "a, clicked");
     // With the pointer, the cell under it; the main window's filmstrip,
     // drawn under the window, does not take the click.
     let at = in_window(&h, "c.jpg").rect().center();
     click_at(&mut h, at);
-    assert_eq!(h.state().library().selected, Some(2), "c, clicked");
+    assert_eq!(h.state().library().selected(), Some(2), "c, clicked");
 }
 
 /// Each Library view's Metadata section shows the photo under its own

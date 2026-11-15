@@ -55,32 +55,40 @@ pub enum VersionAsk {
     },
 }
 
+/// How many photos' heads are held for the versions strips.
+const VERSIONS_HELD: usize = 8;
+
 impl Library {
     /// A photo's heads as the node listed them: the strip shows them.
     pub fn set_versions(&mut self, image: String, heads: Vec<VersionHead>) {
-        if self.versions_asked.as_deref() == Some(image.as_str()) {
-            self.versions_asked = None;
+        self.versions_asked.retain(|id| *id != image);
+        self.versions.retain(|(id, _)| *id != image);
+        self.versions.push((image, heads));
+        // Each view's strip shows the photo under its own cursor: one
+        // must not drive another's out.
+        if self.versions.len() > VERSIONS_HELD {
+            self.versions.remove(0);
         }
-        self.versions = Some((image, heads));
     }
 
     /// The heads listed for `image`, when they are.
     pub fn versions_of(&self, image: &str) -> Option<&[VersionHead]> {
         self.versions
-            .as_ref()
-            .filter(|(id, _)| id == image)
+            .iter()
+            .find(|(id, _)| id == image)
             .map(|(_, heads)| heads.as_slice())
     }
 
     /// Forgets the heads listed: read again when the strip shows.
     pub fn versions_changed(&mut self) {
-        self.versions = None;
-        self.versions_asked = None;
+        self.versions.clear();
+        self.versions_asked.clear();
     }
 
     /// The photo whose heads the strip wants listed, once.
     pub fn take_versions_wanted(&mut self) -> Option<String> {
-        self.versions_wanted.take()
+        let wanted = &mut self.versions_wanted;
+        (!wanted.is_empty()).then(|| wanted.remove(0))
     }
 
     /// Asks `version` made the current one of `image`, for the host.
@@ -117,7 +125,7 @@ impl Library {
             Some(id) if self.holds(id) => id.to_string(),
             Some(id) => return Err(format!("{id} is not in the library")),
             None => self
-                .selected
+                .selected()
                 .and_then(|i| self.entries.get(i))
                 .map(|e| e.id.clone())
                 .ok_or("no photo under the cursor")?,
@@ -157,9 +165,9 @@ impl Library {
             return;
         }
         let Some(heads) = self.versions_of(image).map(<[VersionHead]>::to_vec) else {
-            if self.versions_asked.as_deref() != Some(image) {
-                self.versions_asked = Some(image.to_string());
-                self.versions_wanted = Some(image.to_string());
+            if !self.versions_asked.iter().any(|id| id == image) {
+                self.versions_asked.push(image.to_string());
+                self.versions_wanted.push(image.to_string());
             }
             return;
         };
