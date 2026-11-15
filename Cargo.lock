@@ -2816,6 +2816,7 @@ dependencies = [
  "helios-decision",
  "helios-display",
  "helios-export",
+ "helios-extract",
  "helios-health",
  "helios-inspect",
  "helios-journal",
