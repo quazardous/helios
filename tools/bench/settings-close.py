@@ -29,6 +29,17 @@ main window alone (without a window list, on mutter: when the screen
 differs little from a shot of the main window alone), Helios lists only `main`, the Settings app is closed
 and the screen is not one flat colour.
 
+It also reads what the close wrote to helios-gui's logs and the bus
+(egui-pop ADR 0029). A way fails when:
+
+- a pass of the Settings window's viewport after its window went painted
+  nothing (egui-pop's "it paints nothing" line): the black window;
+- "the Settings app is closed" is not logged exactly once;
+- for a close the window asks (all ways but `admin`), that line did not
+  come from Helios's listener on `window.close` (`helios.screen`, placed
+  after `admin.window`), which runs in the same call that publishes
+  `window.closed`: not from a later pass that samples the app's state.
+
 One JSON line per way in `settings-close.jsonl`, a table in
 `settings-close.md`, the screenshots and helios-gui's logs in `--out`;
 the exit status is 1 when a way failed.
@@ -230,6 +241,63 @@ def changed_share(a: Path, b: Path) -> float | None:
     return differ / seen if seen else None
 
 
+# egui-pop's line for a pass of a viewport after its window went that
+# draws nothing (the system window shows the clear colour alone).
+PAINTS_NOTHING = "it paints nothing"
+CLOSED_LINE = "screen: the Settings app is closed"
+# Helios's listener on `window.close` (crates/helios-gui/src/shell/trace.rs).
+LISTENER = "helios.screen"
+ADMIN_LISTENER = "admin.window"
+
+
+def log_files(args, state: Path) -> list[Path]:
+    files = [args.out / "helios.stderr"]
+    if state.exists():
+        files += sorted(p for p in state.rglob("*") if p.is_file() and p.suffix == ".log")
+    return files
+
+
+def log_mark(files: list[Path]) -> dict[Path, int]:
+    """Where each log ends now."""
+    return {f: (f.stat().st_size if f.exists() else 0) for f in files}
+
+
+def log_since(files: list[Path], mark: dict[Path, int]) -> list[str]:
+    """The lines written to the logs since `mark`."""
+    lines = []
+    for f in files:
+        try:
+            with open(f, "rb") as h:
+                h.seek(mark.get(f, 0))
+                lines += h.read().decode(errors="replace").splitlines()
+        except OSError:
+            continue
+    return lines
+
+
+def close_listener(agent) -> dict:
+    """Helios's listener on `window.close` as the `bus` collector shows
+    it: whether it runs after `admin.window`, and its runs."""
+    try:
+        s = agent.request("snapshot", {"collector": "bus"}) or {}
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {"error": f"no bus collector: {exc}"}
+    s = s.get("bus", s) if isinstance(s, dict) else {}
+    for p in s.get("points", []) if isinstance(s, dict) else []:
+        if p.get("point") != "window.close":
+            continue
+        ids = [l.get("id") for l in p.get("listeners", [])]
+        for i, l in enumerate(p.get("listeners", [])):
+            if l.get("id") == LISTENER:
+                return {
+                    "after_admin": ADMIN_LISTENER in ids[:i],
+                    "runs": l.get("runs"),
+                    "failures": l.get("failures"),
+                }
+        return {"error": f"no `{LISTENER}` listener on window.close ({ids})"}
+    return {"error": "no window.close point on the bus"}
+
+
 def open_settings(args, agent) -> str | None:
     """Opens the Settings app in its own window on Health › Health check,
     as Help › Health check does; an error, or `None`."""
@@ -265,7 +333,7 @@ def import_window(args, comp, agent, keep: bool) -> str | None:
     return None
 
 
-def one(args, comp, agent, way: str, index: int, baseline: Path | None) -> dict:
+def one(args, comp, agent, way: str, index: int, baseline: Path | None, state: Path) -> dict:
     name = f"{index:02d}-{way}{'-checked' if args.check else ''}"
     r: dict = {"way": way, "name": name}
     # Xwayland's windows are not in labwc's list: as without one.
@@ -300,6 +368,9 @@ def one(args, comp, agent, way: str, index: int, baseline: Path | None) -> dict:
         time.sleep(args.settle * 2)
     r["close_buttons"] = len(closes(agent, "settings"))
     shot(comp, args.out, f"{name}-open")
+    logs = log_files(args, state)
+    mark = log_mark(logs)
+    listener_before = close_listener(agent)
     try:
         why = close(comp, agent, way, match, args.compositor)
     except (OSError, RuntimeError, ValueError) as exc:
@@ -331,6 +402,11 @@ def one(args, comp, agent, way: str, index: int, baseline: Path | None) -> dict:
     r["admin"] = admin_state(agent)
     screen = shot(comp, args.out, f"{name}-after")
     r["flat"] = screen is not None and png_is_flat(screen)
+    written = log_since(logs, mark)
+    r["painted_nothing"] = [l for l in written if PAINTS_NOTHING in l]
+    r["closed_lines"] = sum(CLOSED_LINE in l for l in written)
+    listener_after = close_listener(agent)
+    r["listener"] = listener_after
     if screen is not None and baseline is not None:
         share = changed_share(baseline, screen)
         r["changed_from_baseline"] = None if share is None else round(share, 3)
@@ -349,6 +425,25 @@ def one(args, comp, agent, way: str, index: int, baseline: Path | None) -> dict:
         problems.append("the Settings app is still open")
     if r["flat"]:
         problems.append("the screen is one flat colour")
+    if r["painted_nothing"]:
+        problems.append(
+            f"a pass of the closed Settings window painted nothing (a black window): "
+            f"{r['painted_nothing'][0].strip()}"
+        )
+    if r["closed_lines"] != 1:
+        problems.append(f"\"the Settings app is closed\" logged {r['closed_lines']} times, 1 expected")
+    if way != "admin":
+        if "error" in listener_after:
+            problems.append(listener_after["error"])
+        elif not listener_after.get("after_admin"):
+            problems.append(f"`{LISTENER}` does not run after `{ADMIN_LISTENER}`")
+        elif (listener_after.get("runs") or 0) <= (listener_before.get("runs") or 0):
+            problems.append(
+                f"`{LISTENER}` did not run for this close: the Settings app was not "
+                "closed in the call that publishes window.closed"
+            )
+        elif (listener_after.get("failures") or 0) > (listener_before.get("failures") or 0):
+            problems.append(f"`{LISTENER}` failed")
     r["ok"] = not problems
     if problems:
         r["why"] = "; ".join(problems)
@@ -440,7 +535,7 @@ def main() -> int:
                 baseline = shot(comp, args.out, "baseline")
                 for i, way in enumerate(args.ways.split("+")):
                     try:
-                        r = one(args, comp, agent, way, i, baseline)
+                        r = one(args, comp, agent, way, i, baseline, w["state"])
                     except Exception as exc:  # reported in the table
                         r = {"way": way, "ok": False, "why": repr(exc)}
                     print(json.dumps(r), flush=True)
