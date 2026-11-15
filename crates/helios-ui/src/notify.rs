@@ -34,6 +34,8 @@ impl Notice {
 
 /// Raises `text` at `level`: a toast of egui-pop's toasts service. Its
 /// id, or `None` when the application has no toasts.
+///
+/// Need (help): a toast, a short notice that fades.
 pub fn notify(app: &AppHandle, level: Notice, text: &str) -> Option<u64> {
     app.service(&TOASTS).map(|t| t.notify(level.toast(text)))
 }

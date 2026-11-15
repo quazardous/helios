@@ -93,6 +93,9 @@ impl Empty {
 /// The empty state of `case`: egui-pop's empty state (icon, title,
 /// sentence, action). Whether its action was clicked; the screen runs
 /// the command.
+///
+/// Need (state): an empty state, nothing here yet.
+/// Need (state): no results for a search or a filter.
 pub fn empty(ui: &mut Ui, case: Empty) -> bool {
     case.state().show(ui)
 }
@@ -108,6 +111,9 @@ pub enum Loading {
 
 /// What loads, shown in its shape: egui-pop's skeleton, busy for
 /// assistive technologies and named "Loading".
+///
+/// Need (state): a value or a list still loading.
+/// Need (state): placeholder shapes while content loads.
 pub fn loading(ui: &mut Ui, shape: Loading) -> Response {
     let skeleton = match shape {
         Loading::Text(lines) => Skeleton::text(lines),
@@ -118,6 +124,8 @@ pub fn loading(ui: &mut Ui, shape: Loading) -> Response {
 
 /// A place that failed to load: egui-pop's empty state in danger, with
 /// `title`, the `reason` and a Retry action. Whether Retry was clicked.
+///
+/// Need (state): a place that failed to load, with Retry.
 pub fn failed(ui: &mut Ui, title: &str, reason: &str) -> bool {
     EmptyState::new(Icon::Error, title)
         .text(reason)
