@@ -247,15 +247,36 @@ class Journey:
             raise RuntimeError(f"{method}: {answer['error']}")
         return answer.get("result")
 
-    def command(self, name: str, args: dict | None = None):
-        """A command's answer (its `data`), run as the agent."""
+    def journal(self, action: str, args: dict):
+        result = self.rpc("call", {"collector": "journal", "action": action, "args": args})
+        return result.get("data") if isinstance(result, dict) else result
+
+    def command(self, name: str, args: dict | None = None, within: float = 30.0):
+        """A command's answer, run as the agent: `commands.run` only queues
+        it, its answer is the journal's `command.done` (or `command.failed`)."""
+        snapshot = self.rpc("snapshot", {"collector": "journal"})
+        snapshot = snapshot.get("journal", snapshot) if isinstance(snapshot, dict) else {}
+        seq = snapshot.get("last", 0) if isinstance(snapshot, dict) else 0
         result = self.rpc(
             "call",
             {"collector": "commands", "action": "run", "args": {"id": name, "args": args or {}}},
         )
         if isinstance(result, dict) and result.get("ok") is False:
             raise RuntimeError(f"{name}: {result.get('message')}")
-        return result.get("data") if isinstance(result, dict) else result
+        end = time.monotonic() + within
+        while time.monotonic() < end:
+            for event in self.journal("since", {"seq": seq}) or []:
+                seq = max(seq, event.get("seq", seq))
+                data = event.get("data") or {}
+                kind = event.get("name") or event.get("event")
+                if data.get("command") != name:
+                    continue
+                if kind == "command.done":
+                    return data.get("result")
+                if kind == "command.failed":
+                    raise RuntimeError(f"{name} failed: {data}")
+            time.sleep(0.3)
+        raise RuntimeError(f"{name}: no answer within {within} s")
 
     def windows(self) -> list[str]:
         try:
