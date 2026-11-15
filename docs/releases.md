@@ -111,6 +111,10 @@ on `next`, each change explained, and only then runs the `release` job:
    coordinator's word, by regenerating it in the fixing pull request with
    the reason in its body.
 
+Only images past kittest's thresholds (`kittest.toml`: 400 pixels on
+Linux) are rewritten, as a test run would fail on them; a smaller drift
+stays in the committed image and in no report.
+
 The likely cause is a best effort, by suite and not by image: a pull
 request that touched any crate a suite draws with explains every image of
 that suite. It catches a change that comes from outside the code (the
