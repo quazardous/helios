@@ -21,8 +21,9 @@ its own, nothing answered beforehand) and fixtures only:
 6. `health-fix-<finding>`: each fix offered applied (none offered on a
    healthy new library), then the main window must still draw, and the
    screen must not be black.
-7. `storage`: Settings › Storage, then Backup › Strategy; the volumes
-   must hold the library's disk, online, and the strategy its line.
+7. `storage`: Settings › Storage, then Backup › Strategy; the library's
+   disk, when listed, must be online with the Library role, and the
+   strategy must have its line.
 8. `quit`: helios-gui is closed by its `workbench.quit` command and must
    exit with status 0.
 9. `restart`: helios-gui starts again on the same profile; no wizard, the
@@ -450,17 +451,34 @@ class Journey:
             end = time.monotonic() + 30
             while True:
                 volumes = self.command("library.volumes").get("volumes", [])
-                if any(v.get("role_library") for v in volumes) or time.monotonic() > end:
+                if volumes or time.monotonic() > end:
                     break
                 time.sleep(1)
             strategy = self.command("library.backupStrategy")
         except (OSError, RuntimeError, ValueError, AttributeError) as exc:
             entry["why"] = f"storage commands: {exc}"
             return
-        entry["volumes"] = [{k: v.get(k) for k in ("name", "roleText", "state")} for v in volumes]
+        entry["volumes"] = [
+            {k: v.get(k) for k in ("name", "mount", "roleText", "state")} for v in volumes
+        ]
         entry["strategy"] = (strategy.get("summary") or {}).get("text")
-        if not any(v.get("role_library") and v.get("online") for v in volumes):
-            entry["why"] = "no online volume with the Library role among the volumes"
+        # The library folder is in the profile's home: the volume mounted
+        # deepest above it holds it. In a container none may be listed (an
+        # overlay root): then there is no disk to check.
+        home = self.env["HOME"]
+        holders = [
+            v
+            for v in volumes
+            if v.get("mount") and (home + "/").startswith(v["mount"].rstrip("/") + "/")
+        ]
+        holder = max(holders, key=lambda v: len(v["mount"]), default=None)
+        entry["library_volume"] = holder and holder.get("name")
+        if not volumes:
+            entry["why"] = "Storage lists no volume"
+        elif holder is not None and not (holder.get("role_library") and holder.get("online")):
+            entry["why"] = (
+                f"the library's disk {holder.get('name')} is not online with the Library role"
+            )
         elif not entry["strategy"]:
             entry["why"] = "the backup strategy has no line"
 
