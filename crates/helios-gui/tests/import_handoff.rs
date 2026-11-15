@@ -301,3 +301,33 @@ fn import_again_goes_through_a_promise() {
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn import_pressed_twice_starts_one_import_until_it_settles() {
+    let dir = temp("twice");
+    let gate = Arc::new(Gate::default());
+    let mut h = card_window(&dir, node(&dir, &gate));
+    import(&mut h, &gate);
+    until(&mut h, "the import's line", |h| {
+        h.query_by_label("120 of 412").is_some()
+    });
+    // Pressed again while it runs: the button waits, no second import.
+    h.get_by_label("Import 1").click();
+    h.run_steps(3);
+    h.get_by_label("Import 1").click();
+    h.run_steps(3);
+    std::thread::sleep(Duration::from_millis(200));
+    h.run_steps(3);
+    assert_eq!(gate.requests.lock().unwrap().len(), 1, "one import");
+    // Settled: the button is the person's again.
+    *gate.end.lock().unwrap() = Some(End::Done);
+    until(&mut h, "the indicator gone", |h| {
+        shown(h, helios_gui::activity::MARK).is_none()
+    });
+    h.run_steps(3);
+    h.get_by_label("Import 1").click();
+    until(&mut h, "a second import once the first settled", |_| {
+        gate.requests.lock().unwrap().len() == 2
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -210,6 +210,9 @@ pub fn raw_camera(path: &Path) -> Option<String> {
         .map(|(make, model)| helios_calibrate::camera_key(&make, &model))
 }
 
+/// Held while [`default_on_import`] checks and puts the looks.
+static LOOKS_ON_IMPORT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The cameras' default looks put on the photos an import brought in, as
 /// raw editors apply a camera's develop defaults at import (Lightroom):
 /// each image new to the vault in `changes`, never edited, whose file is
@@ -236,6 +239,12 @@ pub fn default_on_import<S: Store>(
     if looks.is_empty() {
         return Ok(0);
     }
+    // Two imports of the same photos ending at once (Import pressed
+    // twice) both see them new: the check for a version and the save are
+    // one step, or each would put the look, two versions of one photo.
+    let _one_at_a_time = LOOKS_ON_IMPORT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut put = 0;
     for change in &mut changes.images {
         if change.before.is_some() || change.after.is_none() {

@@ -1799,6 +1799,7 @@ gui-import-window-favourites = Favoris
 
 gui-import-window-import = Importer { $count }
 
+gui-import-window-importing = Ces photos sont en cours d'import : suivez-le sur sa ligne ci-dessus ou dans l'Activité
 gui-import-window-in-library = dans votre bibliothèque
 gui-import-window-filtered = écarté par le filtre du profil d'import
 

@@ -1149,6 +1149,8 @@ gui-import-window-forget-source-hint = Takes it off this column, its name and ch
 
 gui-import-window-import = Import { $count }
 
+gui-import-window-importing = These photos are being imported: follow it on its line above or in Activity
+
 gui-import-window-in-library = in your Library
 
 gui-import-window-into = Into
