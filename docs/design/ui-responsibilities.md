@@ -491,8 +491,12 @@ the fallback.
 
 ### Dependency rules
 
-Checked by a `cargo xtask deps-worlds` test over `cargo metadata`
-(fails the check job):
+Checked by `cargo xtask deps-worlds` over `cargo metadata` (built
+2026-11-15, run by `cargo xtask lint` in CI's lint job; worlds in
+`xtask/src/deps_worlds.rs`, today's debts in
+`xtask/allow/deps-worlds.toml`). `helios-declarations` turned out to be
+the i18n extractor (it builds a headless shell), so it sits with the
+tools, not the declarations. The rules:
 
 - `modules/*`, `plugins/*`, `helios-controls`, `helios-declarations`:
   no `egui`, no `egui-pop` (except `egui-pop-model`), no `egui_hud`

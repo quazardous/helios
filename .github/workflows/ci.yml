@@ -191,7 +191,8 @@ jobs:
       - run: cargo clippy --locked --target wasm32-unknown-unknown -p helios-controls-gallery -- -D warnings
 
   # Every linter of `cargo xtask lint`, installed so none is skipped:
-  # rustfmt, clippy, cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.
+  # rustfmt, clippy, deps-worlds (each crate's UI dependencies, one egui-pop
+  # in Cargo.lock), cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.
   lint:
     # Our own pull requests (branches of this repository) run no CI: they
     # are tested on the bench box and merged into next, whose push run is
