@@ -11,7 +11,7 @@
 //! - a drag belongs to where it started, wherever it ends;
 //! - a double click resets a slider, never resets on the canvas, and
 //!   fits the image when the setting says so (darktable's leaves the
-//!   darkroom, `tests/contexts.rs`);
+//!   darkroom, `tests/it/contexts.rs`);
 //! - a held key repeats a step, never a command, and a held arrow is one
 //!   undo step;
 //! - nothing but the user moves the keyboard focus, and a field typed in

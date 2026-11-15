@@ -623,7 +623,8 @@ impl Shell {
         // Its cards short of their backups wait for a backup job.
         self.wait_for_backups(report);
         let count = |k: &str| report[k].as_u64().unwrap_or(0);
-        let photos = count("added") + count("located");
+        // A RAW+JPEG pair is one photo: its JPEG, added, is its raw's file.
+        let photos = (count("added") + count("located")).saturating_sub(count("paired"));
         if report["cancelled"] == true {
             let message = Message::new(
                 "gui-import-cancelled",

@@ -319,7 +319,7 @@ equal the last saved step.
 
 ### Tests to write
 
-Status: the survival scenarios run in `helios-gui/tests/survival.rs` and
+Status: the survival scenarios run in `helios-gui/tests/it/survival.rs` and
 `helios-node/tests/survival.rs` (`cargo survival`); the field-write
 contract tests in `helios-vault/src/contract.rs` and
 `helios-vault-sqlite/tests/durability.rs`. Not written yet: the decision

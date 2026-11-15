@@ -39,7 +39,7 @@ and the blank workspace (`helios_template::workspace::blank_network`,
 | Light table: Compare panel, culling, stacks | **embedded preview**: they draw the same thumbnails | `crates/helios-gui/src/library.rs:1334` (`compare_ui`) |
 | Light table: the loupe (an image of the library opened in the viewport) | the workspace's network: **sensor data** in a "Develop one image" workspace, **embedded preview** in every other | `main.rs:467` (`open_from_library`) → `main.rs:329` (`image_graph`) → `templates.rs:85` |
 | Opening a file in a workspace (darkroom) | the same rule | `main.rs:364` (`prepare`) → `image_graph` → `templates.rs:85` |
-| "Develop one image" | **sensor data**: the node's raw chain, the same pixels as the node's (`crates/helios-gui/tests/develop_raw.rs`); a picture is refused, a raw that is not a mosaic (sRAW, LinearRaw DNG) refused too | `templates.rs:87-107`, `templates/develop.helios-template/template.json` |
+| "Develop one image" | **sensor data**: the node's raw chain, the same pixels as the node's (`crates/helios-gui/tests/it/develop_raw.rs`); a picture is refused, a raw that is not a mosaic (sRAW, LinearRaw DNG) refused too | `templates.rs:87-107`, `templates/develop.helios-template/template.json` |
 | Saved edit reopened (darkroom) | the workspace's network, the version's edit applied; edit nodes the network has no place for are skipped | `crates/helios-gui/src/persist.rs:286`, `crates/helios-vault/src/edit.rs:136` |
 | Batch export from the library | the **workspace's** network: **sensor data** in a "Develop one image" workspace, **embedded preview** in any other, the "Batch export" template included | `crates/helios-gui/src/export.rs:40-63` (`render_item` → `templates::open_file`) |
 | Export from a workspace | the same (`library.export` is the only export; it takes the workspace's bundle) | `crates/helios-gui/src/shell/export.rs:208`, `main.rs:710-713` |
@@ -184,7 +184,7 @@ less, M a few days, L a week or more.
    `templates/schema/`, `crates/helios-gui/src/templates.rs:85-117`
    (`open_file` gives a raw's mosaic to an "image" source instead of its
    preview). Tests: `crates/helios-template/tests`, and
-   `crates/helios-gui/tests/develop_raw.rs` extended to a picture template.
+   `crates/helios-gui/tests/it/develop_raw.rs` extended to a picture template.
 2. **The built-in templates and the blank workspace read raws** (S). Their
    source becomes "image": "Develop (preview)", "Batch export", "Import,
    cull and dedupe", "Portrait retouch" (`templates/*/template.json`) and

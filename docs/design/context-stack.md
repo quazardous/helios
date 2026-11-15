@@ -306,7 +306,7 @@ UI   : projection of rev 10, then s1's view state: same crumb, chips,
        panels, zoom
 ```
 
-A survival scenario covers it in `crates/helios-gui/tests/survival.rs`,
+A survival scenario covers it in `crates/helios-gui/tests/it/survival.rs`,
 gating the release like the others; a node scenario does the same with
 a mode set through the control endpoint. If s1 was deleted meanwhile,
 the stack is cut at root, culling and compare stay, and a toast says
