@@ -612,7 +612,10 @@ Every agent follows them.
   gets a ticket and a fix, never a lasting place in the suite.
 - For egui-pop, a fix loop runs `egui-pop-test crate=<crate> test=<target>
   filter=<name>` (minutes); `test=lib` runs the crate's unit tests. A failure CI shows is reproduced with
-  `egui-pop-test`.
+  `egui-pop-test`. egui-pop-gallery's integration tests are modules of one
+  executable, `it`: `test=<module>` (`test=keyboard_walk`) runs that module
+  alone, `filter=` joined to its path, in `egui-pop-test` and
+  `egui-pop-test-1p` alike (`test=it` for them all).
 - The box does not repeat what CI runs. egui-pop and egui_stack pull
   requests go to their `next` branch, whose CI runs every test; the box
   serves what CI cannot: a fix loop's narrow runs and snapshots regenerated

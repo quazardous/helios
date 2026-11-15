@@ -855,6 +855,10 @@ timeout = "75m"
 # crate's lib and every test target), and a name filter (`filter=`: a
 # test path's `::` comes as `@` and a space as `+`, turned back here). Under nextest as on CI (each test in a process of
 # its own), stopped at the first failure. Minutes, not the gate's twenty.
+# egui-pop-gallery's integration tests are modules of one executable,
+# `it`: there `test=<module>` (the name of a former test target,
+# `test=keyboard_walk`) runs that module alone, and `filter=` is joined to
+# the module's path (a branch from before the change runs as it did)
 [jobs.egui-pop-test]
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
@@ -863,7 +867,9 @@ cores = 4
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; cargo nextest run --locked --fail-fast -p ${crate} $sel $f"""
+t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; x=""; \
+if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else x="test(/^$t::/)"; fi; fi; \
+cargo nextest run --locked --fail-fast -p ${crate} $sel ${x:+-E "$x"} $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
@@ -871,7 +877,9 @@ timeout = "30m"
 # egui-pop's single-process run: one crate's test target under `cargo test`
 # (every test of the binary in one process, as `cargo test` runs it
 # locally), for the leaks between tests that nextest's one process per
-# test hides; `filter=` narrows it
+# test hides; `filter=` narrows it. egui-pop-gallery's `test=<module>`
+# runs that module of its one executable `it`, as in egui-pop-test;
+# `test=it` runs every module in one process
 [jobs.egui-pop-test-1p]
 about = "egui-pop: one test target under cargo test, all its tests in one process (leaks between tests)"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
@@ -880,7 +888,9 @@ cores = 4
 memory = "5g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-t="${test}"; case "$t" in lib) sel="--lib";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; cargo test --locked -p ${crate} $sel -- $f"""
+t="${test}"; case "$t" in lib) sel="--lib";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; \
+if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else f="$t::"; fi; fi; \
+cargo test --locked -p ${crate} $sel -- $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
@@ -896,7 +906,8 @@ cores = 5
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery --test rerun_like --test inspect; rc=$?; \
+if [ -f crates/egui-pop-gallery/tests/it/main.rs ]; then sel="--test it -- gallery:: rerun_like:: inspect::"; else sel="--test gallery --test rerun_like --test inspect"; fi; \
+UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery $sel; rc=$?; \
 UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-app-template; rt=$?; [ $rc -eq 0 ] && rc=$rt; \
 mkdir -p /out/snapshots /out/snapshots/template && find crates/egui-pop-gallery/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 find templates/app/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/template/ {} + ; \
