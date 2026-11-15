@@ -65,8 +65,9 @@ static FRAME: FocusWindow = FocusWindow {
     max_default_size: egui::vec2(1100.0, 720.0),
     share: 0.8,
 };
-/// A row's height in the Jobs list.
-const ROW: f32 = 50.0;
+/// A row's height in the Jobs list: two lines, the second as high as the
+/// kit's button (Cancel).
+const ROW: f32 = 56.0;
 /// How many failed items the detail lists.
 const FAILED_SHOWN: usize = 20;
 /// How many lines of its console a job keeps.
