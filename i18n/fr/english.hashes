@@ -846,6 +846,7 @@ gui-import-window-forget-hint c993c16ae95c1288
 gui-import-window-forget-source a5f2cd948afc14b5
 gui-import-window-forget-source-hint 70720134381beb2d
 gui-import-window-import a96568bcea9b92b7
+gui-import-window-importing 32efd02d41964daf
 gui-import-window-in-library 8e2f7088b5da9f30
 gui-import-window-into 952ca2732019c6b3
 gui-import-window-jpeg-only 34a4b2b6c3e60873
