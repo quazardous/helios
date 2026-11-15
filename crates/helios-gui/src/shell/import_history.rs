@@ -126,6 +126,11 @@ impl History {
             .map(|r| r.when)
     }
 
+    /// Reads the records again at the next pass (an import ended).
+    pub(super) fn read_again(&mut self) {
+        self.read_at = None;
+    }
+
     /// Reads the records again when they are older than [`READ_EVERY`].
     pub(super) fn follow(&mut self) {
         let Some(reader) = &self.reader else { return };
@@ -170,8 +175,7 @@ fn line(r: &Record, t: &dyn Fn(Message) -> String) -> String {
     let what = if r.error.is_some() {
         t(Message::new("gui-import-history-failed", "failed"))
     } else {
-        t(Message::new("gui-import-history-added", "{ $count } added")
-            .with("count", r.counts.added + r.counts.located))
+        t(Message::new("gui-import-history-added", "{ $count } added").with("count", r.photos()))
     };
     format!("{} · {when} · {what}", r.source_label())
 }
