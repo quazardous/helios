@@ -481,8 +481,25 @@ jobs:
           msg="WINGET_TOKEN is not set: no winget-pkgs pull request for $TAG (docs/releases.md, \"winget\")"
           echo "::notice::$msg"
           echo "$msg" >> "$GITHUB_STEP_SUMMARY"
-      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main, 2026-10-07
+      # winget-releaser updates an existing package from the manifests of
+      # the version before; until the first submission is merged in
+      # winget-pkgs there is none, so the job says so and ends.
+      - name: listed
+        id: listed
         if: env.HAS_WINGET_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api repos/microsoft/winget-pkgs/contents/manifests/q/Quazardous/Helios --silent 2>/dev/null; then
+            echo "listed=true" >> "$GITHUB_OUTPUT"
+          else
+            msg="Quazardous.Helios is not in winget-pkgs yet: no update pull request for $TAG until the first submission is merged (docs/releases.md, \"winget\")"
+            echo "::notice::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "listed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # main, 2026-10-07
+        if: env.HAS_WINGET_TOKEN == 'true' && steps.listed.outputs.listed == 'true'
         with:
           identifier: Quazardous.Helios
           release-tag: ${{ env.TAG }}
