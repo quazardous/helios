@@ -6,6 +6,7 @@ use std::fmt::Display;
 use egui_pop::core::icon::Icon;
 use egui_pop::core::indicator::Indicator;
 use egui_pop::core::progress::Spinner;
+use egui_pop::core::theme::Tokens;
 use egui_pop::core::ui::{TextRole, Tone, UiPop as _};
 use egui_pop::egui::{Response, Ui};
 
@@ -39,12 +40,12 @@ impl<T> Value<T> {
 /// `value` in its state, `label` its name (the failed indicator's, and
 /// the spinner's id; the screen draws the label itself):
 /// the value in the body text role when fresh; a delayed spinner
-/// (egui-pop's, the size of the text) while pending; the old value in
+/// (egui-pop's, at the inline icon size `size.icon-inline`) while pending; the old value in
 /// the muted role and a delayed spinner while refreshing; a warning
 /// indicator with the reason as its tooltip when failed.
 pub fn value<T: Display>(ui: &mut Ui, label: &str, value: &Value<T>) -> Response {
     let id = ui.make_persistent_id(("helios_ui.value", label));
-    let size = ui.text_style_height(&egui_pop::egui::TextStyle::Body);
+    let size = Tokens::of(ui.ctx()).size.icon_inline;
     let busy = |since: f64| Spinner::new().size(size).delayed(id, since, true);
     match value {
         Value::Fresh(v) => ui.text_role(TextRole::Body, v.to_string()),

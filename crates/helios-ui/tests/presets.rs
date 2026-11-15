@@ -130,10 +130,10 @@ fn loading_is_a_busy_region() {
         let h = harness(shape, |ui, shape| {
             let _ = helios_ui::loading(ui, *shape);
         });
-        let busy = h
-            .query_all_by(egui_kittest::kittest::AccessKitNode::is_busy)
-            .count();
-        assert_eq!(busy, 1, "{shape:?}");
+        assert!(
+            h.get_by_label("Loading").accesskit_node().is_busy(),
+            "{shape:?}"
+        );
     }
 }
 
