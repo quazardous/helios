@@ -43,7 +43,9 @@ use std::rc::Rc;
 use egui::{Context as Egui, Rect, Sense};
 use egui_pop::api::windows::WindowId;
 use egui_pop::core::icon::{IconWidget, Source};
+use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
 use helios_core::Message;
+use helios_ui::{Progress, Scroll};
 use helios_vault::promises::{Promise, State};
 use serde_json::{Value, json};
 
@@ -246,13 +248,6 @@ fn text(ui: &egui::Ui, m: Message) -> String {
     crate::i18n::text(ui.ctx(), m)
 }
 
-/// Gives widget `r` its accessible name (a combo box has none).
-fn name(ui: &egui::Ui, r: &egui::Response, m: Message) {
-    let name = text(ui, m);
-    ui.ctx()
-        .accesskit_node_builder(r.id, |node| node.set_label(name));
-}
-
 /// A duration in seconds, short: "42 s", "3 min 05 s", "1 h 02 min".
 fn span(seconds: u64) -> String {
     match seconds {
@@ -327,14 +322,6 @@ fn state_message(s: &State) -> Message {
     }
 }
 
-fn state_colour(ui: &egui::Ui, s: &State) -> egui::Color32 {
-    match s {
-        State::Failed { .. } => ui.visuals().error_fg_color,
-        State::Cancelled => ui.visuals().weak_text_color(),
-        _ => ui.visuals().text_color(),
-    }
-}
-
 impl Jobs {
     /// The rows the list shows, in its order: running first, then the
     /// rest, newest first.
@@ -388,46 +375,44 @@ impl Jobs {
             ui.visuals().widgets.noninteractive.bg_stroke,
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("helios.activity.detail")
-                .show(ui, |ui| self.detail_ui(ui));
+            helios_ui::scroll(ui, "helios.activity.detail", Scroll::Region, |ui| {
+                self.detail_ui(ui);
+            });
         });
         ui.allocate_rect(full, Sense::hover());
     }
 
     /// The Jobs panel: its filters, then one row per job.
     fn list_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(text(ui, Message::new("gui-jobs-title", "Jobs")));
+        ui.text_role(
+            TextRole::Title,
+            text(ui, Message::new("gui-jobs-title", "Jobs")),
+        );
         ui.horizontal(|ui| {
             let mut kinds: Vec<String> = self.promises.iter().map(|p| p.kind.clone()).collect();
             kinds.sort();
             kinds.dedup();
             let all = text(ui, Message::new("gui-jobs-kind-all", "Every kind"));
-            let r = egui::ComboBox::from_id_salt("helios.activity.kind")
-                .selected_text(self.kind.clone().unwrap_or_else(|| all.clone()))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.kind, None, all);
-                    for k in kinds {
-                        ui.selectable_value(&mut self.kind, Some(k.clone()), k);
-                    }
-                })
-                .response;
-            name(ui, &r, Message::new("gui-jobs-filter-kind", "Kind shown"));
-            let r = egui::ComboBox::from_id_salt("helios.activity.state")
-                .selected_text(text(ui, self.state.message()))
-                .show_ui(ui, |ui| {
-                    for s in [
-                        StateFilter::All,
-                        StateFilter::Running,
-                        StateFilter::Done,
-                        StateFilter::Failed,
-                    ] {
-                        let label = text(ui, s.message());
-                        ui.selectable_value(&mut self.state, s, label);
-                    }
-                })
-                .response;
-            name(ui, &r, Message::new("gui-jobs-filter-state", "State shown"));
+            // A kind filtered on stays offered once its jobs are gone.
+            if let Some(k) = &self.kind
+                && !kinds.contains(k)
+            {
+                kinds.push(k.clone());
+            }
+            let kinds: Vec<(Option<String>, String)> = std::iter::once((None, all))
+                .chain(kinds.into_iter().map(|k| (Some(k.clone()), k)))
+                .collect();
+            let name = text(ui, Message::new("gui-jobs-filter-kind", "Kind shown"));
+            helios_ui::choice(ui, "helios.activity.kind", &name, &mut self.kind, &kinds);
+            let states = [
+                StateFilter::All,
+                StateFilter::Running,
+                StateFilter::Done,
+                StateFilter::Failed,
+            ]
+            .map(|s| (s, text(ui, s.message())));
+            let name = text(ui, Message::new("gui-jobs-filter-state", "State shown"));
+            helios_ui::choice(ui, "helios.activity.state", &name, &mut self.state, &states);
             let finished: Vec<String> = self
                 .promises
                 .iter()
@@ -435,10 +420,12 @@ impl Jobs {
                 .map(|p| p.id.clone())
                 .collect();
             let clear = text(ui, Message::new("gui-jobs-clear", "Clear finished"));
-            if ui
-                .add_enabled(!finished.is_empty(), egui::Button::new(clear))
-                .clicked()
-            {
+            let cleared = ui
+                .add_enabled_ui(!finished.is_empty(), |ui| {
+                    helios_ui::action(ui, helios_ui::Action::Secondary, &clear).clicked()
+                })
+                .inner;
+            if cleared {
                 self.cleared.extend(finished);
             }
         });
@@ -447,21 +434,19 @@ impl Jobs {
         let rows: Vec<Promise> = self.rows().into_iter().cloned().collect();
         self.drawn.clear();
         let mut hovered = None;
-        egui::ScrollArea::vertical()
-            .id_salt("helios.activity.jobs")
-            .show(ui, |ui| {
-                if rows.is_empty() {
-                    ui.weak(text(
-                        ui,
-                        Message::new("gui-jobs-none", "No background jobs"),
-                    ));
+        helios_ui::scroll(ui, "helios.activity.jobs", Scroll::Region, |ui| {
+            if rows.is_empty() {
+                ui.muted(text(
+                    ui,
+                    Message::new("gui-jobs-none", "No background jobs"),
+                ));
+            }
+            for p in &rows {
+                if self.row_ui(ui, p) {
+                    hovered = Some(p.id.clone());
                 }
-                for p in &rows {
-                    if self.row_ui(ui, p) {
-                        hovered = Some(p.id.clone());
-                    }
-                }
-            });
+            }
+        });
         self.hovered = hovered;
     }
 
@@ -495,16 +480,18 @@ impl Jobs {
                 )));
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(&p.label);
+                        ui.text_role(TextRole::Body, &p.label);
                         if let Some(s) = source(p) {
-                            ui.weak(s);
+                            ui.muted(s);
                         }
                     });
                     ui.horizontal(|ui| {
                         self.progress_ui(ui, p, bar);
                         if actions && cancellable(p) {
                             let cancel = text(ui, Message::new("gui-promise-cancel", "Cancel"));
-                            if ui.small_button(cancel).clicked() {
+                            if helios_ui::action(ui, helios_ui::Action::Secondary, &cancel)
+                                .clicked()
+                            {
                                 self.events.push(Event::Ask(Action::Cancel, p.id.clone()));
                             }
                         }
@@ -521,30 +508,37 @@ impl Jobs {
     fn progress_ui(&self, ui: &mut egui::Ui, p: &Promise, bar: Option<f32>) {
         match (&p.state, bar) {
             (State::Running { done, total, .. }, Some(f)) => {
-                ui.add(
-                    egui::ProgressBar::new(f)
-                        .desired_width(140.0)
-                        .desired_height(10.0),
+                helios_ui::progress(ui, Progress::Row, &p.label, Some(f));
+                ui.text_role(
+                    TextRole::Body,
+                    text(
+                        ui,
+                        Message::new("gui-promise-counts", "{ $done } of { $total }")
+                            .with("done", *done)
+                            .with("total", total.unwrap_or(0)),
+                    ),
                 );
-                ui.label(text(
-                    ui,
-                    Message::new("gui-promise-counts", "{ $done } of { $total }")
-                        .with("done", *done)
-                        .with("total", total.unwrap_or(0)),
-                ));
             }
             (s, _) if !s.is_settled() => {
-                ui.spinner();
-                ui.weak(span(self.now.saturating_sub(p.created)));
+                helios_ui::progress(ui, Progress::Row, &p.label, None);
+                ui.muted(span(self.now.saturating_sub(p.created)));
                 if p.cancel_asked {
-                    ui.weak(text(
+                    ui.muted(text(
                         ui,
                         Message::new("gui-promise-cancelling", "Cancelling…"),
                     ));
                 }
             }
+            (s @ State::Failed { .. }, _) => {
+                // egui-pop has no text in a tone yet: the failure's red
+                // stays egui's.
+                ui.colored_label(ui.visuals().error_fg_color, text(ui, state_message(s)));
+            }
+            (State::Cancelled, _) => {
+                ui.muted(text(ui, state_message(&p.state)));
+            }
             (s, _) => {
-                ui.colored_label(state_colour(ui, s), text(ui, state_message(s)));
+                ui.text_role(TextRole::Body, text(ui, state_message(s)));
             }
         }
     }
@@ -595,9 +589,12 @@ impl Jobs {
         reason = "the detail's sections in their order"
     )]
     fn detail_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(text(ui, Message::new("gui-jobs-detail", "Job detail")));
+        ui.text_role(
+            TextRole::Title,
+            text(ui, Message::new("gui-jobs-detail", "Job detail")),
+        );
         let Some(p) = self.selected().cloned() else {
-            ui.weak(text(
+            ui.muted(text(
                 ui,
                 Message::new("gui-jobs-none-selected", "No job selected"),
             ));
@@ -609,71 +606,55 @@ impl Jobs {
                 kind_icon(&p.kind),
                 "activity detail",
             )));
-            ui.strong(&p.label);
+            ui.section_title(&p.label);
         });
-        let field = |ui: &mut egui::Ui, name: Message, value: String| {
-            ui.label(text(ui, name));
-            ui.label(value);
-            ui.end_row();
+        let mut fields: Vec<(String, String)> = Vec::new();
+        let mut field = |name: Message, value: String| fields.push((text(ui, name), value));
+        field(Message::new("gui-jobs-kind", "Kind"), p.kind.clone());
+        if let Some(s) = source(&p) {
+            field(Message::new("gui-jobs-source", "Source"), s);
+        }
+        let by = text(ui, started_by(&p));
+        field(Message::new("gui-jobs-started-by", "Started by"), by);
+        let state = text(ui, state_message(&p.state));
+        field(Message::new("gui-jobs-state", "State"), state);
+        let start = chrono::DateTime::from_timestamp(p.created.cast_signed(), 0)
+            .map(|t| {
+                t.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        field(Message::new("gui-jobs-started", "Started"), start);
+        let end = if p.state.is_settled() {
+            p.updated
+        } else {
+            self.now
         };
-        egui::Grid::new("helios.activity.fields")
-            .num_columns(2)
-            .spacing([12.0, 4.0])
-            .show(ui, |ui| {
-                field(ui, Message::new("gui-jobs-kind", "Kind"), p.kind.clone());
-                if let Some(s) = source(&p) {
-                    field(ui, Message::new("gui-jobs-source", "Source"), s);
-                }
-                let by = text(ui, started_by(&p));
-                field(ui, Message::new("gui-jobs-started-by", "Started by"), by);
-                let state = text(ui, state_message(&p.state));
-                field(ui, Message::new("gui-jobs-state", "State"), state);
-                let start = chrono::DateTime::from_timestamp(p.created.cast_signed(), 0)
-                    .map(|t| {
-                        t.with_timezone(&chrono::Local)
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string()
-                    })
-                    .unwrap_or_default();
-                field(ui, Message::new("gui-jobs-started", "Started"), start);
-                let end = if p.state.is_settled() {
-                    p.updated
-                } else {
-                    self.now
-                };
-                let elapsed = end.saturating_sub(p.created);
-                field(
-                    ui,
-                    Message::new("gui-jobs-elapsed", "Elapsed"),
-                    span(elapsed),
-                );
-                if let State::Running {
-                    done,
-                    total: Some(total),
-                    ..
-                } = &p.state
-                    && *done > 0
-                    && total > done
-                {
-                    let left = elapsed.saturating_mul(total - done) / done;
-                    field(ui, Message::new("gui-jobs-left", "Time left"), span(left));
-                }
-                if p.attempts > 1 {
-                    field(
-                        ui,
-                        Message::new("gui-jobs-attempts", "Attempts"),
-                        p.attempts.to_string(),
-                    );
-                }
-            });
-        ui.add_space(6.0);
+        let elapsed = end.saturating_sub(p.created);
+        field(Message::new("gui-jobs-elapsed", "Elapsed"), span(elapsed));
+        if let State::Running {
+            done,
+            total: Some(total),
+            ..
+        } = &p.state
+            && *done > 0
+            && total > done
+        {
+            let left = elapsed.saturating_mul(total - done) / done;
+            field(Message::new("gui-jobs-left", "Time left"), span(left));
+        }
+        if p.attempts > 1 {
+            field(
+                Message::new("gui-jobs-attempts", "Attempts"),
+                p.attempts.to_string(),
+            );
+        }
+        helios_ui::details(ui, "helios.activity.fields", &fields);
+        ui.space_role(Space::Group);
         match &p.state {
             State::Running { done, total, note } => {
-                if let Some(f) = fraction(&p.state) {
-                    ui.add(egui::ProgressBar::new(f).show_percentage());
-                } else {
-                    ui.spinner();
-                }
+                helios_ui::progress(ui, Progress::Block, &p.label, fraction(&p.state));
                 let counts = match total {
                     Some(total) => Message::new("gui-promise-counts", "{ $done } of { $total }")
                         .with("done", *done)
@@ -682,11 +663,14 @@ impl Jobs {
                         Message::new("gui-promise-so-far", "{ $done } so far").with("done", *done)
                     }
                 };
-                ui.label(text(ui, counts));
+                ui.text_role(TextRole::Body, text(ui, counts));
                 if let Some(note) = note {
                     ui.horizontal(|ui| {
-                        ui.label(text(ui, Message::new("gui-jobs-step", "Now")));
-                        ui.weak(note);
+                        ui.text_role(
+                            TextRole::Body,
+                            text(ui, Message::new("gui-jobs-step", "Now")),
+                        );
+                        ui.muted(note);
                     });
                 }
             }
@@ -694,11 +678,12 @@ impl Jobs {
             // The state's line above says the rest.
             _ => {}
         }
-        ui.add_space(6.0);
+        ui.space_role(Space::Group);
         ui.horizontal(|ui| {
+            let secondary = helios_ui::Action::Secondary;
             if cancellable(&p) {
                 let cancel = text(ui, Message::new("gui-promise-cancel", "Cancel"));
-                if ui.button(cancel).clicked() {
+                if helios_ui::action(ui, secondary, &cancel).clicked() {
                     self.events.push(Event::Ask(Action::Cancel, p.id.clone()));
                 }
             }
@@ -708,25 +693,28 @@ impl Jobs {
                     retryable: true,
                     ..
                 }
-            ) && ui
-                .button(text(ui, Message::new("gui-promise-retry", "Retry")))
-                .clicked()
-            {
-                self.events.push(Event::Ask(Action::Retry, p.id.clone()));
+            ) {
+                let retry = text(ui, Message::new("gui-promise-retry", "Retry"));
+                if helios_ui::action(ui, secondary, &retry).clicked() {
+                    self.events.push(Event::Ask(Action::Retry, p.id.clone()));
+                }
             }
             for (label, said, command, args) in links(&p) {
                 let label = said.unwrap_or_else(|| text(ui, label));
-                if ui.button(label).clicked() {
+                if helios_ui::action(ui, secondary, &label).clicked() {
                     self.events.push(Event::Link(command, args));
                 }
             }
         });
-        ui.add_space(6.0);
-        ui.label(text(ui, Message::new("gui-jobs-log", "Log")));
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.space_role(Space::Group);
+        ui.text_role(
+            TextRole::Body,
+            text(ui, Message::new("gui-jobs-log", "Log")),
+        );
+        ui.card(Tone::Neutral, |ui| {
             ui.set_min_width(ui.available_width());
             if self.log.is_empty() {
-                ui.weak("—");
+                ui.muted("—");
             }
             for line in &self.log {
                 let at = chrono::DateTime::from_timestamp(line.at.cast_signed(), 0)
@@ -758,7 +746,8 @@ impl Jobs {
                     },
                 };
                 ui.horizontal(|ui| {
-                    ui.weak(at);
+                    ui.meta(at);
+                    // egui-pop has no monospace text role yet.
                     ui.monospace(said);
                 });
             }
@@ -767,19 +756,19 @@ impl Jobs {
         // console, newest at the bottom.
         let console = self.console(&p);
         if !console.is_empty() {
-            ui.add_space(6.0);
-            ui.label(text(ui, Message::new("gui-jobs-console", "Console")));
-            egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.space_role(Space::Group);
+            ui.text_role(
+                TextRole::Body,
+                text(ui, Message::new("gui-jobs-console", "Console")),
+            );
+            ui.card(Tone::Neutral, |ui| {
                 ui.set_min_width(ui.available_width());
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.activity.console")
-                    .max_height(160.0)
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        for line in console {
-                            ui.monospace(line);
-                        }
-                    });
+                helios_ui::scroll(ui, "helios.activity.console", Scroll::Tail, |ui| {
+                    for line in console {
+                        // egui-pop has no monospace text role yet.
+                        ui.monospace(line);
+                    }
+                });
             });
         }
     }
@@ -789,61 +778,62 @@ impl Jobs {
 /// that failed with their reasons.
 fn outcome_ui(ui: &mut egui::Ui, result: &Value) {
     let report = &result["report"];
+    let mut counts: Vec<(String, String)> = Vec::new();
     if report.is_object() {
         let count = |k: &str| report[k].as_u64().unwrap_or(0);
-        egui::Grid::new("helios.activity.outcome")
-            .num_columns(2)
-            .spacing([12.0, 2.0])
-            .show(ui, |ui| {
-                for (key, m) in [
-                    ("added", Message::new("gui-jobs-added", "Added")),
-                    ("skipped", Message::new("gui-jobs-skipped", "Skipped")),
-                    (
-                        "unchanged",
-                        Message::new("gui-jobs-unchanged", "Already there"),
-                    ),
-                    ("failed", Message::new("gui-jobs-items-failed", "Failed")),
-                ] {
-                    if key == "added" || count(key) > 0 {
-                        ui.label(text(ui, m));
-                        ui.label(count(key).to_string());
-                        ui.end_row();
-                    }
-                }
-            });
+        for (key, m) in [
+            ("added", Message::new("gui-jobs-added", "Added")),
+            ("skipped", Message::new("gui-jobs-skipped", "Skipped")),
+            (
+                "unchanged",
+                Message::new("gui-jobs-unchanged", "Already there"),
+            ),
+            ("failed", Message::new("gui-jobs-items-failed", "Failed")),
+        ] {
+            if key == "added" || count(key) > 0 {
+                counts.push((text(ui, m), count(key).to_string()));
+            }
+        }
     } else if let Some(done) = result["done"].as_u64() {
         // A job of the desktop's, mirrored: how many it did, skipped and
         // failed.
-        egui::Grid::new("helios.activity.outcome")
-            .num_columns(2)
-            .spacing([12.0, 2.0])
-            .show(ui, |ui| {
-                ui.label(text(ui, Message::new("gui-jobs-items-done", "Done")));
-                ui.label(match result["total"].as_u64() {
-                    Some(total) => format!("{done}/{total}"),
-                    None => done.to_string(),
-                });
-                ui.end_row();
-                let skipped = result["skipped"].as_u64().unwrap_or(0);
-                if skipped > 0 {
-                    ui.label(text(ui, Message::new("gui-jobs-skipped", "Skipped")));
-                    ui.label(skipped.to_string());
-                    ui.end_row();
-                }
-                let failed = result["failed"].as_array().map_or(0, Vec::len);
-                if failed > 0 {
-                    ui.label(text(ui, Message::new("gui-jobs-items-failed", "Failed")));
-                    ui.label(failed.to_string());
-                    ui.end_row();
-                }
-            });
+        counts.push((
+            text(ui, Message::new("gui-jobs-items-done", "Done")),
+            match result["total"].as_u64() {
+                Some(total) => format!("{done}/{total}"),
+                None => done.to_string(),
+            },
+        ));
+        let skipped = result["skipped"].as_u64().unwrap_or(0);
+        if skipped > 0 {
+            counts.push((
+                text(ui, Message::new("gui-jobs-skipped", "Skipped")),
+                skipped.to_string(),
+            ));
+        }
+        let failed = result["failed"].as_array().map_or(0, Vec::len);
+        if failed > 0 {
+            counts.push((
+                text(ui, Message::new("gui-jobs-items-failed", "Failed")),
+                failed.to_string(),
+            ));
+        }
     } else {
-        ui.label(text(ui, Message::new("gui-promise-done", "Done")));
+        ui.text_role(
+            TextRole::Body,
+            text(ui, Message::new("gui-promise-done", "Done")),
+        );
+    }
+    if !counts.is_empty() {
+        helios_ui::details(ui, "helios.activity.outcome", &counts);
     }
     if let Some(folder) = result["folder"].as_str() {
         ui.horizontal(|ui| {
-            ui.label(text(ui, Message::new("gui-jobs-folder", "Folder")));
-            ui.weak(folder);
+            ui.text_role(
+                TextRole::Body,
+                text(ui, Message::new("gui-jobs-folder", "Folder")),
+            );
+            ui.muted(folder);
         });
     }
     let failed = result["failed"].as_array().map_or(&[][..], Vec::as_slice);
@@ -853,7 +843,9 @@ fn outcome_ui(ui: &mut egui::Ui, result: &Value) {
             .file_name()
             .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned());
         ui.horizontal(|ui| {
-            ui.label(name);
+            ui.text_role(TextRole::Body, name);
+            // egui-pop has no text in a tone yet: the error's red stays
+            // egui's.
             ui.colored_label(
                 ui.visuals().error_fg_color,
                 f["error"].as_str().unwrap_or_default(),
