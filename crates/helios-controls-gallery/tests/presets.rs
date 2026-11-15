@@ -14,11 +14,13 @@ fn harness(theme_name: &str) -> Harness<'static, PresetsPage> {
         .with_size(egui::vec2(900.0, 1100.0))
         .build_ui_state(
             |ui, page: &mut PresetsPage| {
-                motion::freeze(ui.ctx(), 0.0);
                 page.content(ui);
             },
             PresetsPage::default(),
         );
+    // A given clock: no animation asks for frames (set once: setting it
+    // asks for a frame).
+    let _clock = motion::freeze(&h.ctx, 0.0);
     theme::install(&h.ctx, &ThemeSpec::new(theme_name));
     h.run();
     h

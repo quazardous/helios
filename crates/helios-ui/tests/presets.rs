@@ -17,11 +17,13 @@ fn harness<S: 'static>(state: S, draw: fn(&mut Ui, &mut S)) -> Harness<'static, 
         .with_size(egui::vec2(480.0, 360.0))
         .build_ui_state(
             move |ui, s: &mut S| {
-                motion::freeze(ui.ctx(), 0.0);
                 draw(ui, s);
             },
             state,
         );
+    // A given clock: no animation asks for frames (set once: setting it
+    // asks for a frame).
+    let _clock = motion::freeze(&h.ctx, 0.0);
     theme::install(&h.ctx, &ThemeSpec::new("pop-dark"));
     h.run();
     h
