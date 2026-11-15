@@ -751,6 +751,10 @@ gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
 
+gui-history-keyword-merge = Merge keyword { $from } into { $to }
+
+gui-history-keyword-rename = Rename keyword { $from } to { $to }
+
 gui-history-library-redoing = Redoing “{ $step }”…
 
 gui-history-library-refused = Undo refused: { $reason }
@@ -1480,6 +1484,34 @@ gui-library-imports = Imports
 gui-library-imports-none = No import yet
 
 gui-library-keep-best = Keep the best: pick it, reject the others
+
+gui-library-keyword-add = Add to the selected photos
+
+gui-library-keyword-drop = Tag { $count } photos with { $keyword }
+
+gui-library-keyword-merge = Merge into…
+
+gui-library-keyword-merge-none = No other keyword to merge it into
+
+gui-library-keyword-merge-title = Merge “{ $name }” into
+
+gui-library-keyword-not-changed = The keyword was not changed: { $error }
+
+gui-library-keyword-path = keyword
+
+gui-library-keyword-remove = Remove from the selected photos
+
+gui-library-keyword-rename = Rename…
+
+gui-library-keyword-rename-title = Rename “{ $name }”
+
+gui-library-keyword-rename-verb = Rename
+
+gui-library-keyword-toggle = Show or hide the keywords below { $name }
+
+gui-library-keywords = Keywords
+
+gui-library-keywords-none = No keyword yet: write levels with | (Animals|Dog)
 
 gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
 

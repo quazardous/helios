@@ -480,7 +480,7 @@ the node as `helios_command_run`'s do, `_request_id` keys a change. A call
 is checked against the schema first, then runs as `helios_command_run`
 would, with the same caps, roots, key and "outcome unknown". The list is
 the registries compiled in (the node's verbs and a vault's commands),
-sorted by name, at most 120; a desktop's window commands depend on its
+sorted by name, at most 200; a desktop's window commands depend on its
 open windows and stay reached through `helios_command_run`. `full` stays
 the default: its hand-written tools document the processing node's verbs
 better than a schema alone.

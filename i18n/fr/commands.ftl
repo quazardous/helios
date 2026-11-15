@@ -778,3 +778,15 @@ command-library-runWorkshop =
 
 command-library-window =
     .title = Bibliothèque
+command-library-keyword =
+    .title = Limiter la bibliothèque à une branche de mots-clés (`path`, niveaux séparés par `|` : les photos avec ce mot-clé ou un mot-clé en dessous ; null : aucune), avec les autres filtres. Sans `path`, dit la branche
+command-library-keyword-add =
+    .title = Ajouter un mot-clé à des photos (`keyword`, niveaux séparés par `|` ; `images` : identifiants, sinon la sélection), une marque comme celles de `library.tag`
+command-library-keyword-list =
+    .title = Lister les branches de mots-clés (`path`, niveaux séparés par `|`) avec le nombre de photos qui ont un mot-clé de chacune (`count`)
+command-library-keyword-merge =
+    .title = Fusionner une branche de mots-clés dans une autre que des photos ont, sur toutes les photos (`from`, `into`) ; sans `into`, la demande ; Ctrl+Z l’annule
+command-library-keyword-remove =
+    .title = Retirer un mot-clé de photos, avec ceux en dessous (`keyword` ; `images` : identifiants, sinon la sélection), une marque comme celles de `library.tag`
+command-library-keyword-rename =
+    .title = Renommer une branche de mots-clés sur toutes les photos, avec les mots-clés en dessous (`from`, `to` : un mot-clé qu’aucune photo n’a encore) ; sans `to`, le demande ; Ctrl+Z l’annule

@@ -244,7 +244,9 @@ never pulls a whole collection.
   chunks of rows and the cursor stays open.
 - **The query**, every term optional (none: the whole Library by id):
   `min_rating`, `label`, `labels`, `flags` (`pick`, `reject`, `none`),
-  `tags`, `captured_from`, `captured_before`, `words`, `cameras`,
+  `tags`, `keywords` (keyword branches, each held when a photo carries
+  the path or one below it: `Animals` takes `Animals|Dog`),
+  `captured_from`, `captured_before`, `words`, `cameras`,
   `lenses`, `file_types`, `folder`, `album`, `presence` (`present`,
   `offline`, `missing`), `cull`, and `order` (`{"by": "captured",
   "descending": true}`; `by` one of `captured`, `imported`, `name`,
@@ -360,6 +362,27 @@ Ctrl+Z); each change is announced as `vault.stack_changed`:
  "merged": 0, "changes": {…}}}
 {"id": 13, "method": "library.stacks.ungroup", "params": {"images": ["4f1c…"]}}
 {"id": 13, "result": {"ungrouped": 1, "stacks": ["c3d9…"], "changes": {…}}}
+```
+
+Keywords are photos' `tags` written as paths, levels joined with `|`
+(`Animals|Dog`, as darktable writes them). A branch is a path and every
+keyword below it. `library.keywords.rename` (`from`, `to`) renames a
+branch on every photo of the Library that carries a keyword of it, the
+keywords below it along (`Animals|Dog` becomes `Fauna|Dog`); a `to`
+that photos carry already is refused (a merge). `library.keywords.merge`
+(`from`, `into`) moves a branch into one photos carry, what both had
+becoming one keyword. A branch never goes inside itself. Both set each
+photo's `tags` by the call's origin with its audit row, answer how many
+`photos` changed and `changes`, the step the vault's revert undoes (the
+desktop's Ctrl+Z), and announce each photo as `vault.field_changed`:
+
+```json
+{"id": 14, "method": "library.keywords.rename",
+ "params": {"from": "Animals", "to": "Fauna"}}
+{"id": 14, "result": {"photos": 12, "changes": {…}}}
+{"id": 15, "method": "library.keywords.merge",
+ "params": {"from": "Fauna|Dog", "into": "Pets|Dog"}}
+{"id": 15, "result": {"photos": 3, "changes": {…}}}
 ```
 
 RAW+JPEG pairs ([design/raw-jpeg-pairs.md](design/raw-jpeg-pairs.md)): a
