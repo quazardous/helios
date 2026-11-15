@@ -206,6 +206,7 @@ command-library-scanFolder.title 65e0df53774b720b
 command-library-select-invert.title 9fabaf6253c7fd7d
 command-library-select-none.title cf5dfbd241a5672e
 command-library-select-similar.title 341f6a0f2b867360
+command-library-show.title dd85a206815c4d00
 command-library-sort.title ac723c2319de076f
 command-library-stack-group.title eb49ab3f0992e73e
 command-library-stack-top.title 86d66aed75468b70
@@ -393,6 +394,7 @@ gui-account-status-ok e055ee2a95ee5237
 gui-account-status-reconnect 46f1fc371bf4cfa9
 gui-account-status-refused 717c0d1ec961c487
 gui-activity-failed a31c4dc6b36a1ad5
+gui-activity-idle ce37a19190b32e1f
 gui-activity-importing 724ccbc427c4b08d
 gui-activity-importing-start ad3266023257d7d6
 gui-activity-percent 97220c481430cc33
@@ -919,6 +921,7 @@ gui-jobs-by-cli fde86492d87473a5
 gui-jobs-by-node 86db4bf6ca0fe4e2
 gui-jobs-by-user 6d21a8e4ae64b24a
 gui-jobs-clear d0723e8f345e9c2e
+gui-jobs-console ee8fbf755d1adce8
 gui-jobs-detail 7f36358b4c3c3015
 gui-jobs-elapsed 0b2f468ceb6ddadb
 gui-jobs-filter-kind b8f0171a1547e3b8

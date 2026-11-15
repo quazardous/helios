@@ -11,7 +11,10 @@
 //!   (`helios_node_core::job_promises`), so they show here beside the
 //!   imports; work with no end (the image map, the thumbnail re-check)
 //!   shows in the focus without counting as running ([`runs`]).
-//! - **The indicator** ([`indicator`]): while promises run, a spinner,
+//! - **The indicator** ([`indicator`]), always in the status bar: with
+//!   nothing running and no failure unseen, a quiet Activity icon ("no
+//!   background task running") whose click opens the focus on the
+//!   history (View › Activity…, Ctrl+Shift+J, do too); while promises run, a spinner,
 //!   their count and the main one's progress ("Importing 120/412"); a
 //!   promise that failed during this run, a warning badge until it is
 //!   seen. A click runs [`COMMAND`] with the job clicked (the main one,
@@ -127,6 +130,18 @@ impl Shared {
     }
 }
 
+/// The promises as last read, shared with readers off the shell (the
+/// agents' `helios.jobs` snapshot).
+#[derive(Clone)]
+pub struct Followed(Arc<Mutex<Shared>>);
+
+impl Followed {
+    /// The promises last read, newest first.
+    pub fn promises(&self) -> Vec<Promise> {
+        lock(&self.0).promises.clone()
+    }
+}
+
 /// The promises the desktop follows.
 pub struct Activity {
     node: Option<Arc<Client>>,
@@ -201,6 +216,11 @@ impl Activity {
     /// The promises last read, newest first.
     pub fn promises(&self) -> Vec<Promise> {
         lock(&self.shared).promises.clone()
+    }
+
+    /// A reader of the promises last read, for elsewhere.
+    pub fn followed(&self) -> Followed {
+        Followed(self.shared.clone())
     }
 
     /// Shows `promises` as if the node had answered them, their log
@@ -399,10 +419,35 @@ pub fn progress_text(ctx: &egui::Context, p: &Promise) -> String {
 /// tasks running and the main one's progress; the failures' badge. A
 /// click runs [`COMMAND`] on the job clicked: the main one, or the
 /// newest failure for the badge.
-pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: &Summary) {
+pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) {
     use egui_pop::core::indicator::{Indicator, Tone};
     let ctx = ui.ctx().clone();
     let text = |m: Message| crate::i18n::text(&ctx, m);
+    let Some(summary) = summary else {
+        // Nothing runs, nothing failed unseen: the quiet Activity icon,
+        // which opens the focus on the history.
+        let meaning = text(Message::new(
+            "gui-activity-idle",
+            "Activity: no background task running",
+        ));
+        let r = ui
+            .add(
+                egui_pop::core::icon::IconWidget::new(egui_pop::core::icon::Source::named(
+                    "phosphor:pulse",
+                    "status bar",
+                ))
+                .label(&meaning)
+                .sense_click(),
+            )
+            .on_hover_text(&meaning);
+        if r.clicked() {
+            app.run(
+                egui_pop::model::ids::CommandId::from_static(COMMAND),
+                serde_json::Value::Null,
+            );
+        }
+        return;
+    };
     let action = text(Message::new(
         "gui-activity-show",
         "Show the background tasks",

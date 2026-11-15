@@ -15,6 +15,9 @@
 //!   on (the default), the Library shows its session, its photos
 //!   selected; never for automatic imports, nor while the user edits a
 //!   photo, when the import's notice offers it instead.
+//! - **A set of photos** by [`SHOW_COMMAND`] (`ids`): the Library on
+//!   exactly those, all selected (a job's photos: the Activity focus's
+//!   "Show in Library").
 //! - **Run Workshop…** ([`RUN_WORKSHOP_COMMAND`]): `workshop.run` on the
 //!   Library's selection, whatever it comes from.
 
@@ -29,7 +32,7 @@ use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
 use super::Shell;
-use crate::library::{IMPORT_SESSION_COMMAND, ImportSession, RUN_WORKSHOP_COMMAND};
+use crate::library::{IMPORT_SESSION_COMMAND, ImportSession, RUN_WORKSHOP_COMMAND, SHOW_COMMAND};
 
 /// The setting: after an import the user started, the Library shows its
 /// session with its photos selected (on by default).
@@ -39,10 +42,16 @@ pub const SHOW_IMPORT_SETTING: &str = "import.show_in_library";
 const READ_EVERY: Duration = Duration::from_secs(10);
 
 /// The commands, with their titles (category Library).
-pub(super) const COMMANDS: &[(&str, &str)] = &[(
-    IMPORT_SESSION_COMMAND,
-    "Show an import session in the Library (`id`: an import of `import.history.list`; null: the whole library), its photos all selected with `select: true`; it works with the other filters, nothing is copied or moved. Without `id`, says the session shown",
-)];
+pub(super) const COMMANDS: &[(&str, &str)] = &[
+    (
+        IMPORT_SESSION_COMMAND,
+        "Show an import session in the Library (`id`: an import of `import.history.list`; null: the whole library), its photos all selected with `select: true`; it works with the other filters, nothing is copied or moved. Without `id`, says the session shown",
+    ),
+    (
+        SHOW_COMMAND,
+        "Show exactly these photos in the Library (`ids`: image ids, e.g. a job's), the filter cleared and all of them selected; the next filter set shows by it again. Without `ids`, says how many the set shown holds",
+    ),
+];
 
 /// The command running a workshop on the selection, with its title
 /// (refused with the switch's key while the workshops are off).
@@ -84,12 +93,42 @@ impl Shell {
     ) -> Result<Value, String> {
         match id {
             IMPORT_SESSION_COMMAND => self.show_import_session(args),
+            SHOW_COMMAND => self.show_photos(args),
             RUN_WORKSHOP_COMMAND => {
                 // Whatever the selection comes from.
                 self.workshop_command("workshop.run", &json!({ "set": "selection" }), origin)
             }
             other => Err(format!("no library command `{other}`")),
         }
+    }
+
+    /// `library.show`: the Library on exactly the photos `ids`, all
+    /// selected, shown where the Library is; answers how many it shows.
+    fn show_photos(&mut self, args: &Value) -> Result<Value, String> {
+        if let Some(ids) = args.get("ids") {
+            let ids: Vec<String> = ids
+                .as_array()
+                .ok_or_else(|| format!("`ids`: {ids} is not a list of image ids"))?
+                .iter()
+                .map(|id| {
+                    id.as_str()
+                        .map(String::from)
+                        .ok_or_else(|| format!("`ids`: {id} is not an image id"))
+                })
+                .collect::<Result<_, _>>()?;
+            {
+                let mut lib = self.focus.library.borrow_mut();
+                lib.show_ids(&ids);
+            }
+            let _ = crate::contexts::go(
+                self.core.app.handle(),
+                crate::contexts::LIBRARY,
+                Value::Null,
+                &egui_pop::model::commands::Origin::User,
+            );
+        }
+        let lib = self.focus.library.borrow();
+        Ok(json!({ "set": lib.shown_set(), "shown": lib.shown().len() }))
     }
 
     /// `library.importSession`: the Library scoped to the import session

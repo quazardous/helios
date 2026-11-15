@@ -517,6 +517,11 @@ pub struct ExtractorUse {
     /// cache key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
+    /// Keeps the results on the photo (`true`) or within the run
+    /// (`false`) instead of what the definition says. Not part of the
+    /// cache key: where a result is stored does not change it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep: Option<bool>,
 }
 
 impl ExtractorUse {
@@ -526,7 +531,14 @@ impl ExtractorUse {
             def: def.id.clone(),
             version: def.version,
             params: BTreeMap::new(),
+            keep: None,
         }
+    }
+
+    /// Whether this use keeps its results on the photo: its own word,
+    /// else the definition's.
+    pub fn keeps(&self, def: &ExtractorDef) -> bool {
+        self.keep.unwrap_or(def.keep)
     }
 }
 
