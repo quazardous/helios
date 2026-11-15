@@ -274,10 +274,10 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
     });
 }
 
-/// The page's values are read away from the frame (the read kernel):
-/// with the volumes slow to read, the labels are drawn at once, the rows
-/// fill in as they come, and a disk unplugged updates its row while the
-/// rows read before stay on the page.
+/// The page's values are read away from the frame (the read kernel, the
+/// storage link's thread): with the volumes slow to read, opening the
+/// page does not wait for them, and a disk unplugged updates its row
+/// while the rows read before stay on the page.
 #[test]
 fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
     let (mut world, shell) = World::new("kernel");
@@ -366,8 +366,9 @@ fn the_caches_in_use_fills_in_from_the_read_kernel() {
             Origin::User,
         )
         .unwrap();
-    h.step();
-    assert!(h.query_by_label("In use").is_some());
+    until(&mut h, "the label", |h| {
+        h.query_by_label("In use").is_some()
+    });
     until(&mut h, "the caches' use", |h| {
         h.query_by_label_contains("Caches hold").is_some()
     });
