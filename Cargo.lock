@@ -1514,7 +1514,8 @@ dependencies = [
 [[package]]
 name = "egui_hud"
 version = "0.4.0"
-source = "git+https://github.com/quazardous/egui_hud?rev=bf87fc7#bf87fc7fc6e8293cb79cd6a308b51006ac90d052"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fb80359ad191163d8f5310f2b647ef876a0e33d6c21a3c4424dcd77abb23b4c"
 dependencies = [
  "egui-pop",
  "egui-pop-model",
