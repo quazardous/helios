@@ -151,7 +151,7 @@ pub fn rules() -> &'static [(&'static str, Rule)] {
         (".config/", Everything),
         (".cargo/", Everything),
         // data the crates read
-        ("i18n/", Crates(&["helios-i18n", "helios-declarations"])),
+        ("i18n/", Crates(&["helios-i18n", "helios-i18n-extract"])),
         ("tests/masks/", Crates(&["helios-parity"])),
         ("tests/raw-corpus.toml", Crates(&["helios-corpus"])),
         ("tests/raw-corpus.thumbs.toml", Crates(&["helios-corpus"])),
@@ -834,8 +834,8 @@ mod tests {
     #[test]
     fn data_outside_the_crates_selects_its_readers() {
         let s = select(&graph(), &paths(&["i18n/fr/helios.ftl"]));
-        assert_eq!(s.changed, set(&["helios-i18n", "helios-declarations"]));
-        // helios-declarations is not in the fake graph: dropped from the
+        assert_eq!(s.changed, set(&["helios-i18n", "helios-i18n-extract"]));
+        // helios-i18n-extract is not in the fake graph: dropped from the
         // closure, xtask (a dependent of i18n) kept
         assert_eq!(s.crates, set(&["helios-i18n", "xtask"]));
     }

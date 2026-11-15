@@ -87,7 +87,7 @@ the same patterns as visual-identity.md's audit, on `next` of
 
 | Window | World | Today's source of controls | Raw |
 |---|---|---|---|
-| Settings, Storage, Health, Accounts admin, init wizard | forms | egui-pop's admin manifest (`egui_pop::api::admin`) from `helios-declarations` and `shell/storage.rs`, `health.rs`, `accounts_admin.rs`, `init_wizard.rs` | 0 to a few |
+| Settings, Storage, Health, Accounts admin, init wizard | forms | egui-pop's admin manifest (`egui_pop::api::admin`) from the shell's settings declarations (`config/`) and `shell/storage.rs`, `health.rs`, `accounts_admin.rs`, `init_wizard.rs` | 0 to a few |
 | Import window | mixed | frame and sources column hand-drawn (`shell/import_window.rs`, `import_window/source_list.rs`); the middle column is egui-pop's file browser over the photos; the detail zone partly the admin manifest, partly hand-drawn (`import_choices.rs`, `import_detail.rs`) | 48 + 25 + 11 |
 | Import wizard, profiles, profile editor, accounts, history | forms | hand-drawn (`import_wizard.rs` partly manifest) | 41, 26, 34, 55, 7 |
 | Activity (focus) and its detail | forms (a list and a detail), with live progress | hand-drawn `shell/activity_focus.rs`, egui-pop indicators in `activity.rs` | 60, 6 |
@@ -194,7 +194,7 @@ What egui-pop must provide so `render.rs` drops all of it:
 |---|---|---|---|
 | helios-gui | 771 | 42 of 141 | 17 |
 | helios-controls-gallery | 29 | 1 | (bench) |
-| helios-controls, helios-declarations, modules, plugins | 0 | 0 | 0 |
+| helios-controls, helios-i18n-extract, modules, plugins | 0 | 0 | 0 |
 
 (visual-identity.md counted 539 a few days earlier with a narrower
 pattern; the increase is new screens plus `strong`, `small`,
@@ -487,20 +487,26 @@ the fallback.
 | Forms framework | helios-ui | everything raw *except* at its crate root, under one `#[expect]` with a reason (it wraps egui-pop's widgets, never egui's) |
 | Visual framework | helios-rack | same as egui_hud: no widgets, no painter, no colours |
 | Shell | helios-gui | visual-identity.md's list (raw widgets, `add_space`, widths, literal colours, `egui::Modal`, `egui::Grid`…), plus `egui_hud::render::*` (go through helios-rack) |
-| Declarations | helios-controls, modules, plugins, helios-declarations | must not depend on egui at all (dependency rule below) |
+| Declarations | helios-controls, modules, plugins | must not depend on egui at all (dependency rule below) |
+| Developer tools (`dev-tool`) | xtask, helios-controls-gallery, helios-i18n-extract | none: never shipped (dependency rule below) |
 
 ### Dependency rules
 
 Checked by `cargo xtask deps-worlds` over `cargo metadata` (built
 2026-11-15, run by `cargo xtask lint` in CI's lint job; worlds in
 `xtask/src/deps_worlds.rs`, today's debts in
-`xtask/allow/deps-worlds.toml`). `helios-declarations` turned out to be
-the i18n extractor (it builds a headless shell), so it sits with the
-tools, not the declarations. The rules:
+`xtask/allow/deps-worlds.toml`). The i18n extractor
+(`helios-i18n-extract`) builds a headless shell to list every text, so it sits with the developer tools, not the
+declarations. The rules:
 
-- `modules/*`, `plugins/*`, `helios-controls`, `helios-declarations`:
+- `modules/*`, `plugins/*`, `helios-controls`:
   no `egui`, no `egui-pop` (except `egui-pop-model`), no `egui_hud`
   `render` feature;
+- the `dev-tool` world (`xtask`, `helios-controls-gallery`,
+  `helios-i18n-extract`) has no UI rule, so it must never ship: each of
+  its crates is `publish = false`, and no crate of another world depends
+  on one (a dev-dependency, for tests, may); the allow-list cannot cover
+  either;
 - `helios-ui`: `egui-pop` only among UI crates;
 - `helios-rack`: `egui_hud` (with `render`), `egui-pop`;
 - no Helios crate depends on `egui_stack`, and only `egui_hud`,
