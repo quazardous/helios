@@ -8,7 +8,9 @@ use egui_pop::core::ui::Tone;
 use egui_pop::egui::accesskit::Role;
 use egui_pop::egui::{self, Ui};
 use egui_pop::theme::{self, ThemeSpec};
-use helios_ui::{Action, Empty, Kind, Late, Loading, Notice, Search, Section, Value};
+use helios_ui::{
+    Action, Empty, Kind, Late, Loading, Notice, Progress, Scroll, Search, Section, Value,
+};
 
 /// A harness drawing `draw` in egui-pop's dark theme, its motion clock
 /// frozen at 0 s (no animation asks for frames).
@@ -208,4 +210,81 @@ fn a_late_value_keeps_its_room_and_says_its_state() {
 fn every_kind_has_its_own_room() {
     let samples: std::collections::BTreeSet<_> = Kind::ALL.iter().map(|k| k.sample()).collect();
     assert_eq!(samples.len(), Kind::ALL.len());
+}
+
+#[test]
+fn a_choice_is_a_combo_box_named_by_what_it_chooses() {
+    let options = [(1_u8, "One".to_string()), (2, "Two".to_string())];
+    let mut h = harness((2_u8, options), |ui, (current, options)| {
+        let _ = helios_ui::choice(ui, "test.choice", "Number shown", current, options);
+    });
+    let node = h.get_by_label("Number shown");
+    assert_eq!(node.accesskit_node().role(), Role::ComboBox);
+    node.click();
+    h.run();
+    h.get_by_label("One").click();
+    h.run();
+    assert_eq!(h.state().0, 1);
+}
+
+#[test]
+fn details_show_each_name_with_its_value() {
+    let rows = vec![
+        ("Kind".to_string(), "import".to_string()),
+        ("Elapsed".to_string(), "42 s".to_string()),
+    ];
+    let h = harness(rows, |ui, rows| {
+        helios_ui::details(ui, "test.details", rows);
+    });
+    for label in ["Kind", "import", "Elapsed", "42 s"] {
+        h.get_by_label(label);
+    }
+    let x = |label: &str| h.get_by_label(label).rect().min.x;
+    assert!(x("Kind") < x("import"), "the value after its name");
+    assert!(
+        (x("import") - x("42 s")).abs() < 0.5,
+        "the values in one column"
+    );
+}
+
+#[test]
+fn progress_is_a_bar_when_the_work_counts_and_a_spinner_when_it_does_not() {
+    for place in Progress::ALL {
+        let h = harness(place, |ui, place| {
+            let _ = helios_ui::progress(ui, *place, "Import 412 photos", Some(0.25));
+        });
+        let node = h.get_by_label("Import 412 photos");
+        let a = node.accesskit_node();
+        assert_eq!(a.role(), Role::ProgressIndicator, "{place:?}");
+        assert_eq!(a.numeric_value(), Some(25.0), "{place:?}");
+        let h = harness(place, |ui, place| {
+            let _ = helios_ui::progress(ui, *place, "Empty the trash", None);
+        });
+        let a = h.get_by_label("Empty the trash").accesskit_node();
+        assert_eq!(a.numeric_value(), None, "{place:?}: no fake bar");
+    }
+}
+
+#[test]
+fn a_scroll_shows_its_content_and_a_tail_stays_a_few_lines_high() {
+    for kind in Scroll::ALL {
+        let h = harness(kind, |ui, kind| {
+            let rect = helios_ui::scroll(ui, "test.scroll", *kind, |ui| {
+                for i in 0..100 {
+                    ui.label(format!("line {i}"));
+                }
+                ui.min_rect()
+            });
+            assert!(rect.height() > 360.0, "the content keeps its height");
+            if *kind == Scroll::Tail {
+                assert!(ui.min_rect().height() < 300.0, "a tail is bounded");
+            }
+        });
+        let shown = if kind == Scroll::Tail {
+            "line 99"
+        } else {
+            "line 0"
+        };
+        assert!(h.query_by_label(shown).is_some(), "{kind:?}");
+    }
 }

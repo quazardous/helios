@@ -37,10 +37,12 @@ egui-pop in the lock: 0.11.0.
 | Need | Use | What it is |
 |---|---|---|
 | a card, a framed group | `ui.card(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::card` | `add` inside the kit's `card` in a tone (`Tone::Neutral` for the plain card). |
-| a scrolling region | `ui.scroll_area(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
+| a scrolling region | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
+|  | `ui.scroll_area(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
 | collapsible sections in a panel | `Sections` (egui-pop)<br>`egui_pop::core::sections::Sections` | A stack of collapsible sections filling the room it is given (a panel's height), named for its memory and for agents. |
 | one of egui's own widgets, styled by the kit | `ui.scoped(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::scoped` | `add` in a scope where egui's own widgets of a `Stock` kind (buttons, combo boxes, text fields, buttons shown on or off) are drawn from the kit's component, in a tone: its states become egui's widget visuals, so egui keeps drawing the widget (`Kit::scope`). |
 | space between blocks, by intent (never a number of points) | `ui.space_role(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::space_role` | Space by intent along the layout's direction (`Space`); egui's own `add_space` takes points. |
+| the tail of a console, the newest line kept in view | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 
 ## Buttons and actions
 
@@ -58,10 +60,12 @@ egui-pop in the lock: 0.11.0.
 |---|---|---|
 | a checkbox | `widgets::checkbox(..)` (egui-pop)<br>`egui_pop::core::widgets::checkbox` | A checkbox (`Checkbox`): `ui.checkbox`, drawn through the kit. |
 | a colour picked on a wheel | `ColorWheel` (egui-pop)<br>`egui_pop::viewport::wheel::ColorWheel` | A colour wheel, with its luminance slider. |
-| a drop-down choice (combo box) | `ui.combo_box(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::combo_box` | Shows egui's combo box (`widgets::combo_box`, for the kit's arrow) with its box drawn from the kit's `combo-box` (`Stock::ComboBox`), `add` its list's content: `ComboBox::show_ui` in a scope. |
+| a drop-down choice (combo box) | **`helios_ui::choice(..)`** (Helios preset)<br>`helios_ui::choice` | A drop-down over `current`, one row per option (its value and the words shown for it): egui-pop's combo box and selectable rows. |
+|  | `ui.combo_box(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::combo_box` | Shows egui's combo box (`widgets::combo_box`, for the kit's arrow) with its box drawn from the kit's `combo-box` (`Stock::ComboBox`), `add` its list's content: `ComboBox::show_ui` in a scope. |
 | a file or folder path field | `Input::path(..)` (egui-pop)<br>`egui_pop::core::input::Input::path` | A path field. |
 | a filter box | **`helios_ui::search(..)`** (Helios preset)<br>`helios_ui::search` | A search field over `query` for `search`: egui-pop's search input (magnifier, clearable), named and hinted by its scope, as wide as the space given. |
 |  | `Input::search(..)` (egui-pop, under the preset)<br>`egui_pop::core::input::Input::search` | A search field: a magnifier before the query, clearable. |
+| a filter picked from a short list of options | **`helios_ui::choice(..)`** (Helios preset)<br>`helios_ui::choice` | A drop-down over `current`, one row per option (its value and the words shown for it): egui-pop's combo box and selectable rows. |
 | a number field with a unit | `Input::number(..)` (egui-pop)<br>`egui_pop::core::input::Input::number` | A number field: a number or an expression (`x * 2`, `1,5`), committed when it loses the focus. |
 | a number field with steps and limits | `NumberInput` (egui-pop)<br>`egui_pop::core::number::NumberInput` | A number input; see the module. |
 | a rotary knob | `Knob` (egui-pop)<br>`egui_pop::core::knob::Knob` | A rotary knob over an `f64`. |
@@ -79,8 +83,10 @@ egui-pop in the lock: 0.11.0.
 | Need | Use | What it is |
 |---|---|---|
 | a busy spinner | `Spinner` (egui-pop)<br>`egui_pop::core::progress::Spinner` | A spinner, with a label after it; `Spinner::delayed` shows it only after `motion.spinner.delay`, and keeps it `motion.spinner.min`. |
+| a job's progress, a bar when it counts and a spinner when it does not | **`helios_ui::progress(..)`** (Helios preset)<br>`helios_ui::progress` | The progress of the work named `name` (its accessible name): egui-pop's progress bar at `fraction` (0 to 1), or its spinner when the work does not say how far it is. |
 | a place that failed to load, with Retry | **`helios_ui::failed(..)`** (Helios preset)<br>`helios_ui::failed` | A place that failed to load: egui-pop's empty state in danger, with `title`, the `reason` and a Retry action. |
-| a progress bar | `ProgressBar` (egui-pop)<br>`egui_pop::core::progress::ProgressBar` | A progress bar. |
+| a progress bar | **`helios_ui::progress(..)`** (Helios preset)<br>`helios_ui::progress` | The progress of the work named `name` (its accessible name): egui-pop's progress bar at `fraction` (0 to 1), or its spinner when the work does not say how far it is. |
+|  | `ProgressBar` (egui-pop, under the preset)<br>`egui_pop::core::progress::ProgressBar` | A progress bar. |
 | a small circular progress | `Ring` (egui-pop)<br>`egui_pop::core::progress::Ring` | A small circular progress: determinate (an arc from the top) or indeterminate (a turning arc). |
 | a value or a list still loading | **`helios_ui::loading(..)`** (Helios preset)<br>`helios_ui::loading` | What loads, shown in its shape: egui-pop's skeleton, busy for assistive technologies and named "Loading". |
 |  | `Skeleton` (egui-pop, under the preset)<br>`egui_pop::core::placeholder::Skeleton` | Grey shapes standing in for content. |
@@ -136,12 +142,14 @@ egui-pop in the lock: 0.11.0.
 
 | Need | Use | What it is |
 |---|---|---|
+| a details grid, names and their values | **`helios_ui::details(..)`** (Helios preset)<br>`helios_ui::details` | A details grid: one line per `(name, value)`, the names in a column as wide as the widest, the values taking the rest: egui-pop's grid, its header cells and body text. |
 | a long list, virtualised | `ListView` (egui-pop)<br>`egui_pop::views::list::ListView` | The list widget. |
 | a row picked from a short list | `SelectableRow` (egui-pop)<br>`egui_pop::core::widgets::SelectableRow` | A row picked from a short list: its box is the kit's `selectable-row` component, `selected` for the chosen one (never `hover` then, so the choice stays visible under the pointer), its label in the state's `text`. |
 | a sortable column header | `SortHeader` (egui-pop)<br>`egui_pop::core::widgets::SortHeader` | A column's header: its box is the kit's `table-header-cell` component, `selected` while the rows are sorted by it, the direction the kit's `sort-ascending` or `sort-descending` glyph after the title. |
 | a table with sortable, resizable columns | `DataTable` (egui-pop)<br>`egui_pop::views::table::DataTable` | The data table widget. |
 | a tree, lazy and keyboard-driven | `TreeView` (egui-pop)<br>`egui_pop::views::tree::TreeView` | The tree widget. |
 | many rows of equal height, only the visible ones drawn | `ui.scroll_area_rows(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::scroll_area_rows` | `UiPop::scroll_area` for `rows` rows `row_height` high, the `Ui`'s item spacing apart: egui's `ScrollArea::show_rows`, `add` given the rows in view. |
+| the properties of one item, in two columns | **`helios_ui::details(..)`** (Helios preset)<br>`helios_ui::details` | A details grid: one line per `(name, value)`, the names in a column as wide as the widest, the values taking the rest: egui-pop's grid, its header cells and body text. |
 
 ## Images and imaging
 
