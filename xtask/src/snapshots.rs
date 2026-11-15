@@ -102,9 +102,15 @@ pub fn filter(suites: &[Suite]) -> String {
         .join(" | ")
 }
 
+fn is_png(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+}
+
 /// Whether a change to `path` may move the images of `suite`.
 pub fn draws(graph: &Graph, suite: &Suite, path: &str) -> bool {
-    if path.ends_with(".png") && path.contains("/tests/snapshots/") {
+    if is_png(path) && path.contains("/tests/snapshots/") {
         // an image regenerated draws nothing
         return false;
     }
@@ -369,7 +375,7 @@ fn changed_images(root: &Path, suite: &Suite) -> Result<Vec<String>, String> {
     )?);
     Ok(paths
         .into_iter()
-        .filter(|p| p.ends_with(".png") && !SCRATCH_SUFFIXES.iter().any(|s| p.ends_with(s)))
+        .filter(|p| is_png(p) && !SCRATCH_SUFFIXES.iter().any(|s| p.ends_with(s)))
         .filter(|p| root.join(p).exists())
         .collect())
 }
