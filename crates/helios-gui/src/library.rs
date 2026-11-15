@@ -636,8 +636,12 @@ pub fn query_of(filter: &Filter) -> Query {
         cull: terms.cull,
         // An import session: the photos it brought in, by the vault's
         // `import` rule (nothing copied or moved).
+        // The tree must be a group at its top (`Rule::parse` refuses a bare
+        // condition when the query crosses to the node).
         rules: terms.import.and_then(|id| {
-            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id)).ok()
+            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id))
+                .ok()
+                .map(|c| helios_vault::rules::Rule::group(helios_vault::rules::Match::All, vec![c]))
         }),
         ..Query::default()
     }
@@ -4776,6 +4780,20 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 mod tests {
     use super::*;
     use egui_pop::views::library::filter::Candidate;
+
+    /// An `import:` term's rule tree is a group, so it survives the trip
+    /// to the node, which parses the tree and refuses a bare condition
+    /// ("the rules must be a group").
+    #[test]
+    fn an_import_session_s_query_crosses_to_the_node() {
+        let filter = Filter {
+            text: "import:\"abc\"".into(),
+            ..Filter::default()
+        };
+        let rules = query_of(&filter).rules.expect("an import rule");
+        helios_vault::rules::Rule::parse(&rules.to_json())
+            .unwrap_or_else(|e| panic!("refused at the node: {e}"));
+    }
 
     /// A picture 3 wide and 2 high turned each way: its corners land
     /// where a quarter turn puts them, and four turns give it back.
