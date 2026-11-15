@@ -4438,6 +4438,46 @@ impl Library {
         with_keys(ctx, what, &keys)
     }
 
+    /// egui-pop's colour label buttons, each with Helios's tooltip: what
+    /// a click does and the keys bound to it now.
+    fn color_labels(
+        &self,
+        ctx: &egui::Context,
+        labels: egui_pop::views::library::Labels,
+        side: f32,
+    ) -> ColorLabels {
+        ColorLabel::ALL
+            .into_iter()
+            .fold(ColorLabels::new(labels).size(side), |buttons, label| {
+                let (what, command) = label_tip(label);
+                buttons.tooltip(label, self.mark_tip(ctx, what, command))
+            })
+    }
+
+    /// egui-pop's pick and reject buttons, each with Helios's tooltip:
+    /// what a click does and the keys bound to it now.
+    fn flag_toggle(&self, ctx: &egui::Context, flag: Flag, side: f32) -> FlagToggle {
+        [
+            (
+                Flag::Pick,
+                Message::new("gui-library-flag-pick-tip", "Flag as pick"),
+                "vault.flag.pick",
+            ),
+            (
+                Flag::Reject,
+                Message::new("gui-library-flag-reject-tip", "Reject"),
+                "vault.flag.reject",
+            ),
+        ]
+        .into_iter()
+        .fold(
+            FlagToggle::new(flag).size(side),
+            |buttons, (which, what, command)| {
+                buttons.tooltip(which, self.mark_tip(ctx, what, command))
+            },
+        )
+    }
+
     /// The Library panel: the search field, the sections (the Metadata
     /// section edits the selection), and the
     /// thumbnail grid with the culling keys.
@@ -4990,12 +5030,7 @@ impl Library {
             let side = egui_pop::core::theme::Tokens::of(ui.ctx())
                 .size
                 .control_height;
-            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
-            let tips = ColorLabel::ALL.map(|l| {
-                let (what, command) = label_tip(l);
-                self.mark_tip(ui.ctx(), what, command)
-            });
-            toggle_tips(ui, &labels.response, side, &tips);
+            let labels = self.color_labels(ui.ctx(), marks.labels, side).show(ui);
             if let Some(labels) = labels.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
@@ -5007,19 +5042,7 @@ impl Library {
                     }
                 }
             }
-            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
-            let tips = [
-                (
-                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
-                    "vault.flag.pick",
-                ),
-                (
-                    Message::new("gui-library-flag-reject-tip", "Reject"),
-                    "vault.flag.reject",
-                ),
-            ]
-            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
-            toggle_tips(ui, &flags.response, side, &tips);
+            let flags = self.flag_toggle(ui.ctx(), marks.flag, side).show(ui);
             if let Some(flag) = flags.changed {
                 asked.push(Mark::Flag {
                     keys: keys.clone(),
@@ -5116,43 +5139,6 @@ fn with_keys(ctx: &egui::Context, what: String, keys: &[String]) -> String {
     )
 }
 
-/// Where egui-pop's mark buttons sit in `row`: `n` squares of `side`,
-/// side by side from its left, the kit's small spacing between them,
-/// centred in its height (`ColorLabels` and `FlagToggle` lay them out so).
-fn toggle_rects(row: egui::Rect, n: usize, side: f32, gap: f32) -> Vec<egui::Rect> {
-    let top = row.center().y - side / 2.0;
-    (0..n)
-        .map(|i| {
-            egui::Rect::from_min_size(
-                egui::pos2(row.left() + i as f32 * (side + gap), top),
-                egui::vec2(side, side),
-            )
-        })
-        .collect()
-}
-
-/// Tooltips over egui-pop's mark buttons (its colour labels, its pick
-/// and reject), which show none of their own: a hover-only area over each
-/// button, in order, the click staying the button's. The buttons carry
-/// their accessible names themselves.
-// upstream: egui-pop's `ColorLabels` and `FlagToggle` take no tooltip;
-// drop this once they show their own.
-fn toggle_tips(ui: &Ui, row: &egui::Response, side: f32, tips: &[String]) {
-    let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.xs;
-    for (i, (rect, tip)) in toggle_rects(row.rect, tips.len(), side, gap)
-        .into_iter()
-        .zip(tips)
-        .enumerate()
-    {
-        ui.interact(
-            rect,
-            row.id.with(("helios.mark.tip", i)),
-            egui::Sense::hover(),
-        )
-        .on_hover_text(tip);
-    }
-}
-
 /// Where the Compare view puts `n` panes in `rect`, `gap` apart: side by
 /// side up to three, four in a square (egui-pop's `CompareView` layout).
 fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
@@ -5179,18 +5165,6 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 mod tests {
     use super::*;
     use egui_pop::views::library::filter::Candidate;
-
-    /// The mark buttons' tooltip areas: squares from the row's left, the
-    /// gap between them, centred in its height.
-    #[test]
-    fn mark_tips_cover_each_button_in_its_row() {
-        let row = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(120.0, 30.0));
-        let rects = toggle_rects(row, 3, 20.0, 4.0);
-        assert_eq!(rects.len(), 3);
-        assert_eq!(rects[0].min, egui::pos2(10.0, 5.0));
-        assert_eq!(rects[1].min, egui::pos2(34.0, 5.0));
-        assert_eq!(rects[2].max, egui::pos2(78.0, 25.0));
-    }
 
     /// A tooltip names its keys when the command has some, and only then.
     #[test]
