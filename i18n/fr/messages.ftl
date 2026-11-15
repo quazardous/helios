@@ -1253,6 +1253,8 @@ health-fix-plugin-disable = Le désactiver
 
 health-fix-plugin-folder = Ouvrir son dossier
 
+health-fix-plugin-grant = Autoriser { $capability }
+
 health-fix-plugin-update = Le mettre à jour : ouvrir son dossier
 
 health-fix-snapshot-now = Prendre un instantané du catalogue maintenant
@@ -1304,6 +1306,10 @@ health-plugin-ok-detail = Version { $version }, dans { $dir }
 health-plugin-unsupported = { $plugin } ne convient pas à cet Helios
 
 health-plugin-unsupported-detail = { $problems }. Mettez-le à jour.
+
+health-plugin-unused = { $plugin } n’est pas encore utilisé
+
+health-plugin-unused-detail = Il demandera { $capability } quand une source l’utilisera pour la première fois.
 
 health-plugins = Extensions
 
