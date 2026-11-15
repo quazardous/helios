@@ -469,7 +469,8 @@ impl Library {
                 "gui-library-meta-rating-tip",
                 "Rating of the selected photos; a click sets it on all of them",
             ));
-            let out = RatingStars::new(marks.rating).show(ui);
+            let name = word(Message::new("gui-library-meta-rating", "Rating"));
+            let out = RatingStars::new(marks.rating).label(name).show(ui);
             out.response.clone().on_hover_text(&tip);
             if let Some(r) = out.changed {
                 edit.fields.insert("rating".into(), json!(r));
@@ -500,6 +501,10 @@ impl Library {
             if some_labels {
                 ui.weak(&mixed).on_hover_text(&tip);
             }
+        });
+        // The flag on its own row: beside the labels it ran past a narrow
+        // Library panel's edge.
+        ui.horizontal_wrapped(|ui| {
             let tip = word(Message::new(
                 "gui-library-meta-flag-tip",
                 "Flag: pick or reject every selected photo",
