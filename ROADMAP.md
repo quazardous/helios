@@ -128,6 +128,10 @@ Clippy's disallowed lists forbid raw egui widgets in the Helios workspace,
 an exception only with a stated reason. `helios-ui` is the goal of the
 presentation work (2026-11-15, decided); its design is in
 docs/design/visual-identity.md.
+In the same way, the controls of the photo workshops (handles, sliders
+and panels drawn over the image, the controls layer) come from egui_hud
+only (2026-11-15, decided): a control egui_hud lacks is added there
+first, and Clippy's disallowed lists hold the workshop crates to it.
 Translation goes into egui-pop too (2026-10-11, decided): an official
 `egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
 extraction) built on egui-pop's public API, moved there from
