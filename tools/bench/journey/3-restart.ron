@@ -1,0 +1,14 @@
+// The first-user journey, step 3: Helios started again on the same
+// profile. No wizard this time, and the Library still holds the photos
+// imported before the quit. Run live by tools/bench/journey.py.
+Scenario(
+    name: "restart",
+    description: "After a quit and a restart, the Library still holds every photo, no wizard asked.",
+    steps: [
+        Wait(Settled),
+        Expect(Tree(lacks: (role: "Button", label: "Finish"))),
+        Expect(Value("helios.library.count", 4)),
+        Expect(NoError),
+        Shot("library"),
+    ],
+)
