@@ -1,7 +1,8 @@
 //! Every clickable control says what it does: walked through the
 //! accessibility tree of the main window (the Library panel with a photo
-//! under the cursor, its marks bar shown), the Library window, the import
-//! window and the Activity focus, a control without a name, or named by
+//! under the cursor, its marks bar shown), the Library window (a photo
+//! under its own cursor too: each Library view keeps its selection), the
+//! import window and the Activity focus, a control without a name, or named by
 //! a symbol alone ("+", "↓", "×"), fails the test with its place in the
 //! tree. An icon-only control carries a tooltip naming what it does and
 //! the same words as its accessible name.
@@ -10,7 +11,7 @@ use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use helios_gui::library::Entry;
+use helios_gui::library::{Entry, WINDOW_GALLERY};
 use helios_gui::shell::LIBRARY_WINDOW_COMMAND;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -87,7 +88,9 @@ fn assert_clear<S>(h: &Harness<'_, S>, what: &str) {
     );
 }
 
-/// Three photos, the first under the cursor: the marks bar shows.
+/// Three photos, the first under the cursor of each Library view (the
+/// main panel's and the Library window's, each with its own selection):
+/// the marks bar shows in both, as once a user clicked a photo there.
 fn shell() -> Shell {
     let entries = ["a", "b", "c"]
         .iter()
@@ -100,6 +103,9 @@ fn shell() -> Shell {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_library(entries);
     shell.library_mut().select(0);
+    shell
+        .library_mut()
+        .with_gallery(WINDOW_GALLERY, |lib| lib.select(0));
     shell
 }
 
@@ -120,6 +126,10 @@ fn the_library_window_s_controls_say_what_they_do() {
     let mut h = headless::harness(shell(), vec2(1600.0, 1000.0));
     h.run_steps(2);
     run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    // The marks bar is among the controls walked: without a photo under
+    // the window's cursor it is not drawn, and its names go unchecked.
+    h.get_by_role_and_label(Role::Window, "Library")
+        .get_by_role_and_label(Role::CheckBox, "Red label");
     assert_clear(&h, "the Library window");
 }
 
