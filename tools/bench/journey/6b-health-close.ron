@@ -1,0 +1,27 @@
+// The first-user journey, step 6b: Settings › Health check opened in its
+// own window (Help › Health check), then closed by its title bar's close
+// button. Run live by tools/bench/journey.py, which then checks that the
+// compositor lists the main window alone, that Helios lists `main` alone,
+// and that the screen is not one flat colour (the owner was once left
+// with a black window after closing the Settings).
+Scenario(
+    name: "health-close",
+    description: "The Settings window, opened on Health check, closes and leaves no window behind.",
+    steps: [
+        Window("main"),
+        Wait(Settled),
+        Call("help.health", {}),
+        Wait(Settled),
+        Window("settings"),
+        Expect(Value("admin.scope", "health")),
+        Shot("health-window"),
+        // The title bar's close comes first in the window's tree; the
+        // page's own Close comes after it.
+        Ui(Click(role: "Button", label: "Close", nth: 0)),
+        Window("main"),
+        Wait(Settled),
+        Expect(Value("admin.open", false)),
+        Expect(NoError),
+        Shot("health-closed"),
+    ],
+)

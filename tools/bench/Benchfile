@@ -323,6 +323,29 @@ env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "40m"
 
+# the Settings app's own window closed by every way (title bar, page,
+# Escape, window.close, admin.close, the compositor), each time on Health ›
+# Health check: the compositor must list the main window alone and the
+# screen must not be one flat colour; `compositor=mutter` runs it in wbox's
+# headless mutter, `ways=` picks ways (joined by `+`), `check=yes` runs the
+# health check first; in /out/settings-close.md and .jsonl, a screenshot
+# per way (tools/bench/settings-close.py)
+[jobs.settings-close]
+about = "the Settings app's own window closed by every way leaves no window behind (labwc or mutter)"
+first = [{ job = "check", pass = ["branch", "src"] }]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui --bin helios-gui && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/bench/settings-close.py --gui /target/release/helios-gui --out /out \
+  --compositor ${compositor:-labwc} --ways ${ways:-titlebar+page+escape+command+admin+compositor} --check ${check:-no}"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+timeout = "40m"
+
 # how long the desktop takes to start: helios-gui in release, in a headless
 # labwc through wbox, launched `runs=` times in turn bare (a workspace, as
 # the launcher starts it), on the raw corpus's vault, and on its first raw

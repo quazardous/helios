@@ -21,6 +21,10 @@ its own, nothing answered beforehand) and fixtures only:
 6. `health-fix-<finding>`: each fix offered applied (none offered on a
    healthy new library), then the main window must still draw, and the
    screen must not be black.
+6b. `health-close`: Settings › Health check opened in its own window,
+   then closed by its title bar's close button: the compositor lists the
+   main window alone, Helios lists `main` alone, and the screen is not
+   one flat colour.
 7. `storage`: Settings › Storage, then Backup › Strategy; the library's
    disk, when listed, must be online with the Library role, and the
    strategy must have its line.
@@ -548,7 +552,25 @@ class Journey:
             entry["why"] = f"no screenshot: {shot.get('error')}"
         elif png_is_flat(Path(path)):
             shutil.copy(path, self.args.out / f"{entry['step']}-flat.png")
-            entry["why"] = "the screen is one flat colour after the fix (a black window?)"
+            entry["why"] = "the screen is one flat colour after this step (a black window?)"
+
+    def windows_left(self, entry: dict) -> None:
+        """After the Settings window's close: the main window alone, as the
+        compositor and Helios list them, and a screen that is not one flat
+        colour."""
+        listed = [
+            w.get("title", "")
+            for w in self.comp.list_windows().get("windows", [])
+            if str(w.get("app_id", "")).startswith("helios")
+        ]
+        entry["listed"] = listed
+        entry["app_windows"] = self.windows()
+        if len(listed) != 1:
+            entry["why"] = f"the compositor lists {len(listed)} Helios windows: {listed}"
+        elif entry["app_windows"] != ["main"]:
+            entry["why"] = f"Helios lists {entry['app_windows']}, not the main window alone"
+        else:
+            self.painting(entry)
 
     def storage_probe(self, entry: dict) -> None:
         """The volumes hold the library's disk, online; the strategy a line."""
@@ -683,6 +705,7 @@ class Journey:
             ("import-session", "4-import-session.ron"),
             ("health", "5-health.ron"),
             ("health-fixes", None),
+            ("health-close", "6b-health-close.ron"),
             ("storage", "7-storage.ron"),
             ("quit", None),
             ("relaunch", None),
@@ -716,6 +739,10 @@ class Journey:
                 }.get(step)
                 if "why" not in entry:
                     entry = {**entry, **self.scenario(step, file, extra)}
+                if "why" not in entry and step == "health-close":
+                    # Past the paint guard's delay (2 s).
+                    time.sleep(3)
+                    self.windows_left(entry)
                 if "why" not in entry and step == "imports-list":
                     self.find_session(entry)
                 if "why" not in entry and step == "storage":
