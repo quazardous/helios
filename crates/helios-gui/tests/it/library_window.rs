@@ -147,6 +147,46 @@ fn a_click_on_a_cell_of_the_library_window_selects_it() {
     assert_eq!(h.state().library().selected, Some(2), "c, clicked");
 }
 
+/// Each Library view's Metadata section shows the photo under its own
+/// cursor: a in the main panel, b in the Library window, the capture
+/// details of each read as the host reads them (a camera named after the
+/// photo). Once, the cursor was one for both views, and one view's
+/// section showed the other's photo.
+#[test]
+fn each_view_s_metadata_shows_the_photo_under_its_own_cursor() {
+    use egui::accesskit::Role;
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    shell.library_mut().select(0);
+    shell
+        .library_mut()
+        .with_gallery(WINDOW_GALLERY, |lib| lib.select(1));
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    // The host's part: each photo's capture details as asked.
+    for _ in 0..8 {
+        loop {
+            let wanted = h.state_mut().library_mut().take_exif_wanted();
+            let Some(id) = wanted else { break };
+            let mut fields = serde_json::Map::new();
+            fields.insert("camera_model".into(), json!(format!("Cam-{id}")));
+            h.state_mut().library_mut().set_exif(id, fields);
+        }
+        h.run_steps(1);
+    }
+    let window = h.get_by_role_and_label(Role::Window, "Library");
+    window.get_by_label("Cam-b");
+    assert!(
+        window.query_by_label("Cam-a").is_none(),
+        "the window's section shows a, the main panel's photo"
+    );
+    let main = h.query_all_by_label("Cam-a").count();
+    assert_eq!(main, 1, "the main panel's section shows a");
+    let b = h.query_all_by_label("Cam-b").count();
+    assert_eq!(b, 1, "b's camera in the window alone");
+}
+
 #[test]
 fn the_library_window_open_at_the_last_quit_opens_again_at_the_start() {
     let dir = scratch("restore");
