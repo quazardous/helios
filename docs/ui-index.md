@@ -48,6 +48,8 @@ Its crates carry no `Need` lines yet: until the next egui-pop bump, see
 |---|---|---|
 | a place that failed to load, with Retry | **`helios_ui::failed(..)`** (Helios preset)<br>`helios_ui::failed` | A place that failed to load: egui-pop's empty state in danger, with `title`, the `reason` and a Retry action. |
 | a value or a list still loading | **`helios_ui::loading(..)`** (Helios preset)<br>`helios_ui::loading` | What loads, shown in its shape: egui-pop's skeleton, busy for assistive technologies and named "Loading". |
+| a value that refreshes, its last value kept meanwhile | **`helios_ui::value(..)`** (Helios preset)<br>`helios_ui::value` | The value in egui-pop's late-value cell: a skeleton sized for its kind while pending, the value, the last value with a small spinner while refreshing, the reason with Retry once failed. |
+| a value worked out late (a size, a count), with its waiting states | **`helios_ui::value(..)`** (Helios preset)<br>`helios_ui::value` | The value in egui-pop's late-value cell: a skeleton sized for its kind while pending, the value, the last value with a small spinner while refreshing, the reason with Retry once failed. |
 | an empty state, nothing here yet | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action). |
 | no results for a search or a filter | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action). |
 | placeholder shapes while content loads | **`helios_ui::loading(..)`** (Helios preset)<br>`helios_ui::loading` | What loads, shown in its shape: egui-pop's skeleton, busy for assistive technologies and named "Loading". |

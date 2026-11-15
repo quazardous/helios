@@ -1191,8 +1191,7 @@ dependencies = [
 [[package]]
 name = "egui-pop"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64c9a2978059f103b470b381f26f8d35881f615ec6e9794b10f6089dfe1396ff"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1210,8 +1209,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-agent"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28bd234ab96278e60aa84fdfd0b5338dacbc76132e9889fc363b1e0c00bf061b"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1225,8 +1223,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-api"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b04535d299ecdbc47a14b3c9fac4d5f79140e9d680492073d18d5b1704e7fc5"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "eframe",
  "egui",
@@ -1246,8 +1243,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-core"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598309161e16a7c962cc20fc06140756b85f0417fa7fb4100de2c87ae1876844"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1263,8 +1259,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-editors"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0dbb4d1cc2e688f7751cb0563984722e69926bf5a9371b7b8a0a1d4969ef9ce"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1281,8 +1276,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-i18n"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea628eac9a24975b704e87b9f041cfce63b7c22ea21c8040e8a000f690037add"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1302,8 +1296,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-imaging"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1426a9ccc7f5e8afba6daffe5a3b67e1916052bfcb788aaaf71aa0886215d18e"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1315,8 +1308,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-model"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343a3ceff1f1b029b7011a3b32e02c2e1e73cfe507b3cc0be9dc67026c51c778"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "idna",
  "log",
@@ -1337,8 +1329,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-platform"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcdce84cefdf780236249c4d77a79e299be6fd22b3a33711742f361d10a4d5ba"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "ashpd",
  "async-io",
@@ -1360,8 +1351,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-test"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf07ca810b18afe7148ff11f473a0dcd974bb2b3ad7481e4581282a6dcf9ed21"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1377,14 +1367,12 @@ dependencies = [
 [[package]]
 name = "egui-pop-test-macros"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "617953ab19292c0537b91a89113b9dfbd2a52acb1652901d475c2fd8f93f23fa"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 
 [[package]]
 name = "egui-pop-tokens"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9adcfbe6b466d0071cfb7dc51a7d7b53e0e1a6f94dc0493809ca0ea30fbd8831"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "serde-saphyr",
  "serde_json",
@@ -1393,8 +1381,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-viewport"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9bef783d6e00db1ae2216113990ec1e002b6632b4ee002c597d65311585849f"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-core",
@@ -1409,8 +1396,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-views"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "034ab8773f763bcd709b50b01d2abbfe4d368a7f80f163e105fcc485106bfee8"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1425,8 +1411,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-wayland"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa4e0643cc9831aade8b5c06337e2483e58c5e4d2ad13d60b05f1f6b5479def4"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "raw-window-handle",
  "wayland-backend",
@@ -1437,8 +1422,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-win32"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "761b532870296c14e9f0df76bad8a85597a3d2461422050cd326b0155fa609a9"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -4524,8 +4508,7 @@ dependencies = [
 [[package]]
 name = "ortho-router"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19e0fe04ea4a6498b8f70fdf6a68c6958f4785d753aa4cd8c2430b5d1101ea19"
+source = "git+https://github.com/quazardous/egui-pop?rev=ce5f54a5#ce5f54a52d1f25bf5aad44cf9571cbd9a0cd824c"
 
 [[package]]
 name = "os_pipe"

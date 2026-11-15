@@ -8,7 +8,7 @@ use egui_pop::core::ui::Tone;
 use egui_pop::egui::accesskit::Role;
 use egui_pop::egui::{self, Ui};
 use egui_pop::theme::{self, ThemeSpec};
-use helios_ui::{Action, Empty, Loading, Notice, Search, Section};
+use helios_ui::{Action, Empty, Kind, Late, Loading, Notice, Search, Section, Value};
 
 /// A harness drawing `draw` in egui-pop's dark theme, its motion clock
 /// frozen at 0 s (no animation asks for frames).
@@ -147,4 +147,52 @@ fn notices_map_to_toast_levels() {
         levels,
         [Level::Info, Level::Success, Level::Warning, Level::Error]
     );
+}
+
+#[test]
+fn a_late_value_keeps_its_room_and_says_its_state() {
+    let mut h = harness(
+        (Late::<String>::Pending, None, false),
+        |ui, (late, rect, retry)| {
+            let r = ui.horizontal(|ui| {
+                *retry |= helios_ui::value(ui, Value::new("Free space", Kind::Size, late.clone()));
+                ui.label("after").rect
+            });
+            *rect = Some(r.inner);
+        },
+    );
+    let cell = |h: &Harness<'static, (Late<String>, Option<egui::Rect>, bool)>| {
+        let node = h.get_by_role_and_label(Role::Status, "Free space");
+        let a = node.accesskit_node();
+        (a.value(), a.is_busy())
+    };
+    let pending_after = h.state().1;
+    assert_eq!(cell(&h), (Some("Loading".to_string()), true));
+
+    h.state_mut().0 = Late::Fresh("412.7 GB".into());
+    h.run();
+    assert_eq!(cell(&h), (Some("412.7 GB".to_string()), false));
+    assert_eq!(
+        h.state().1,
+        pending_after,
+        "nothing moved when the value landed"
+    );
+
+    h.state_mut().0 = Late::Refreshing("412.7 GB".into());
+    h.run();
+    assert_eq!(cell(&h), (Some("412.7 GB".to_string()), true));
+    assert_eq!(h.state().1, pending_after);
+
+    h.state_mut().0 = Late::Failed("The disk did not answer.".into());
+    h.run();
+    assert_eq!(cell(&h).0.as_deref(), Some("The disk did not answer."));
+    h.get_by_label("Retry Free space").click();
+    h.run();
+    assert!(h.state().2, "Retry is reported");
+}
+
+#[test]
+fn every_kind_has_its_own_room() {
+    let samples: std::collections::BTreeSet<_> = Kind::ALL.iter().map(|k| k.sample()).collect();
+    assert_eq!(samples.len(), Kind::ALL.len());
 }
