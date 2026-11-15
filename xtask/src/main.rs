@@ -40,10 +40,11 @@
 //!   prints the box's queue.
 //! - `affected [BASE] [--filter | --critical]`: the crates, tests and box
 //!   jobs a change since BASE touches (see `affected.rs`).
-//! - `install-dev [--branch B | --local | --from DIR] | --list | --uninstall`: a dev
-//!   build (the box's latest of a branch, or this checkout's) installed
-//!   outside the checkout with its "Helios Dev" launcher (see
-//!   `install_dev.rs`).
+//! - `install-dev [--branch B | --bundle FILE] | --home [--branch B] | --local |
+//!   --from DIR | --list | --uninstall [--home]`: a dev build, "Helios Dev",
+//!   installed outside the checkout: the box's development Flatpak of a
+//!   branch with `flatpak install --user`, or, with `--home`, the older
+//!   home folder install (see `install_dev.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, an optional line
@@ -729,7 +730,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local | --from DIR] | install-dev --list | install-dev --uninstall";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
