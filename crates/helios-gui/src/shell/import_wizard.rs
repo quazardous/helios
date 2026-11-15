@@ -43,7 +43,7 @@ use egui_pop::core::icon::{Icon, Size};
 use egui_pop::core::overlay::DialogLayout;
 use egui_pop::core::param::{self, Mode};
 use egui_pop::model::values::Value as PopValue;
-use helios_connect::account::AccountState;
+use helios_connect::account::{Account, AccountState};
 use helios_connect::{ConnectorManifest, Setup, SetupAsks};
 use helios_core::Message;
 use helios_core::config::{Contract, KeyType, Level};
@@ -1188,7 +1188,7 @@ impl ImportWindow {
             accounts
                 .iter()
                 .find(|a| a.id == id)
-                .map_or_else(|| format!("{connector}:#{id}"), |a| a.identity())
+                .map_or_else(|| format!("{connector}:#{id}"), Account::identity)
         };
         let wanted = identity(account);
         self.sources.list.iter().find_map(|s| {
@@ -1202,7 +1202,7 @@ impl ImportWindow {
                         accounts
                             .iter()
                             .find(|a| a.id == on)
-                            .map_or_else(|| on.to_owned(), |a| a.shown())
+                            .map_or_else(|| on.to_owned(), Account::shown)
                     });
                     (key, name)
                 })

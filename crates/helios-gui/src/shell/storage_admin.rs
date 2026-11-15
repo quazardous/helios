@@ -254,15 +254,15 @@ pub fn by_account(
     let mut places: Vec<Vec<Volume>> = Vec::new();
     let mut groups: HashMap<String, usize> = HashMap::new();
     for v in volumes {
-        match owner(&v).map(|o| o.identity.clone()) {
-            Some(identity) => match groups.get(&identity) {
-                Some(&i) => places[i].push(v),
-                None => {
-                    groups.insert(identity, places.len());
-                    places.push(vec![v]);
-                }
-            },
-            None => places.push(vec![v]),
+        let Some(identity) = owner(&v).map(|o| o.identity.clone()) else {
+            places.push(vec![v]);
+            continue;
+        };
+        if let Some(&i) = groups.get(&identity) {
+            places[i].push(v);
+        } else {
+            groups.insert(identity, places.len());
+            places.push(vec![v]);
         }
     }
     let mut out = Grouped::default();
@@ -278,7 +278,7 @@ pub fn by_account(
         for other in members {
             n += photos.remove(&other.id).unwrap_or(0);
             if seen(&other) > seen(&kept) {
-                kept.last_seen = other.last_seen.clone();
+                kept.last_seen.clone_from(&other.last_seen);
             }
             for s in owner(&other).map(|o| o.sources.clone()).unwrap_or_default() {
                 if !sources.contains(&s) {
