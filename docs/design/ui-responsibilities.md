@@ -490,6 +490,45 @@ the fallback.
 | Declarations | helios-controls, modules, plugins | must not depend on egui at all (dependency rule below) |
 | Developer tools (`dev-tool`) | xtask, helios-controls-gallery, helios-i18n-extract | none: never shipped (dependency rule below) |
 
+### The raw egui ratchet
+
+The shell's Clippy list cannot be switched on while helios-gui still
+draws with hundreds of raw egui widgets, and they cannot all move at
+once. Until they have, `cargo xtask raw-egui` holds the line (built
+2026-11-15, run by `cargo xtask lint`, so by `pr-lint`): **a pull
+request may not add a raw egui widget to helios-gui.**
+
+- It counts, per file of `crates/helios-gui/src`, the raw egui widget
+  calls: widget methods on a `ui` (`label`, `weak`, `strong`, `small`,
+  `monospace`, `code`, `heading`, `colored_label`, `button`,
+  `small_button`, `checkbox`, `radio`, `radio_value`,
+  `selectable_label`, `selectable_value`, `toggle_value`,
+  `text_edit_singleline`, `text_edit_multiline`, `add_space`,
+  `separator`, `spinner`, `hyperlink`, `hyperlink_to`, `link`,
+  `collapsing`, `menu_button`), hover texts (`on_hover_text`,
+  `on_hover_text_at_pointer`, `on_disabled_hover_text`) and the widget
+  types `egui::{Button, TextEdit, Label, Checkbox, RadioButton,
+  ComboBox, Slider, DragValue, Grid, RichText, Frame, Spinner,
+  ProgressBar, CollapsingHeader, Modal, ScrollArea, Separator,
+  Hyperlink}` (also by their bare name where the file imports them from
+  egui). The count is syntactic; comments, strings, `#[cfg(test)]` items
+  and test files are left out, and layout calls (`ui.horizontal`,
+  `ui.add`) are not counted. The lists live in `xtask/src/raw_egui.rs`.
+- The baseline is `xtask/allow/raw-egui.toml`: one total per file, a
+  file not listed has none (942 calls in 42 files on 2026-11-15).
+- `cargo xtask raw-egui --check` fails when a file's count goes up or a
+  new file has raw calls: draw through helios-ui (forms) or helios-rack
+  (visual modules) instead. It fails too when a count went down and the
+  baseline did not follow: run `cargo xtask raw-egui --update`, which
+  only lowers the baseline, and commit it. So the list only shrinks.
+- `cargo xtask raw-egui` alone prints the totals by kind and the ten
+  files with the most.
+- Moving raw calls from one file to another raises the second file's
+  count: migrate them on the way, or keep them where they are.
+
+A file at zero leaves the list; when the list is empty the Clippy list
+above takes over and this tool goes.
+
 ### Dependency rules
 
 Checked by `cargo xtask deps-worlds` over `cargo metadata` (built

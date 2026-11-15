@@ -1,0 +1,48 @@
+# Raw egui widget calls per file of crates/helios-gui/src (see `cargo xtask
+# raw-egui` and xtask/src/raw_egui.rs for what is counted). Helios makes no
+# widgets: a file's count may only go down, and a file not listed here has
+# none. Written by `cargo xtask raw-egui --update`, which only lowers it.
+
+[files]
+"activity.rs" = 6
+"calibrate.rs" = 22
+"caption.rs" = 4
+"decisions.rs" = 30
+"duplicates.rs" = 17
+"graph.rs" = 7
+"jobs.rs" = 10
+"library.rs" = 46
+"library/keywords.rs" = 7
+"library/metadata.rs" = 31
+"library/versions.rs" = 3
+"log_panel.rs" = 5
+"macro_interface.rs" = 52
+"mask_tree.rs" = 18
+"modules.rs" = 25
+"params.rs" = 27
+"plugins.rs" = 2
+"pointer_choice.rs" = 6
+"promise_line.rs" = 13
+"queue.rs" = 18
+"rule_editor_ui.rs" = 34
+"scopes.rs" = 4
+"shell.rs" = 5
+"shell/activity_focus.rs" = 63
+"shell/calibrate_focus.rs" = 48
+"shell/import_accounts.rs" = 78
+"shell/import_browsers.rs" = 7
+"shell/import_choices.rs" = 14
+"shell/import_detail.rs" = 1
+"shell/import_history.rs" = 8
+"shell/import_profile_editor.rs" = 38
+"shell/import_profiles.rs" = 28
+"shell/import_window.rs" = 53
+"shell/import_window/source_list.rs" = 29
+"shell/import_wizard.rs" = 53
+"shell/library_focus.rs" = 2
+"splash.rs" = 22
+"stack_review.rs" = 16
+"viewport.rs" = 2
+"workbench.rs" = 1
+"workshops.rs" = 61
+"workshops/review.rs" = 26
