@@ -21,6 +21,10 @@ its own, nothing answered beforehand) and fixtures only:
 6. `health-fix-<finding>`: each fix offered applied (none offered on a
    healthy new library), then the main window must still draw, and the
    screen must not be black.
+6b. `health-close`: Settings › Health check opened in its own window,
+   then closed by its title bar's close button: the compositor and
+   Helios list the windows open before (no window left behind), and the
+   screen is not one flat colour.
 7. `storage`: Settings › Storage, then Backup › Strategy; the library's
    disk, when listed, must be online with the Library role, and the
    strategy must have its line.
@@ -548,7 +552,29 @@ class Journey:
             entry["why"] = f"no screenshot: {shot.get('error')}"
         elif png_is_flat(Path(path)):
             shutil.copy(path, self.args.out / f"{entry['step']}-flat.png")
-            entry["why"] = "the screen is one flat colour after the fix (a black window?)"
+            entry["why"] = "the screen is one flat colour after this step (a black window?)"
+
+    def listed(self) -> list[str]:
+        """The Helios windows the compositor lists, by title."""
+        return sorted(
+            w.get("title", "")
+            for w in self.comp.list_windows().get("windows", [])
+            if str(w.get("app_id", "")).startswith("helios")
+        )
+
+    def windows_left(self, entry: dict, before: tuple[list[str], list[str]]) -> None:
+        """After the Settings window's close: the windows open before it
+        opened (the main window, and the import window the journey left
+        open), as the compositor and Helios list them, and a screen that is
+        not one flat colour."""
+        listed, apps = self.listed(), self.windows()
+        entry["listed"], entry["app_windows"] = listed, apps
+        if listed != before[0]:
+            entry["why"] = f"the compositor lists {listed}, {before[0]} expected"
+        elif sorted(apps) != sorted(before[1]):
+            entry["why"] = f"Helios lists {apps}, {before[1]} expected"
+        else:
+            self.painting(entry)
 
     def storage_probe(self, entry: dict) -> None:
         """The volumes hold the library's disk, online; the strategy a line."""
@@ -683,6 +709,7 @@ class Journey:
             ("import-session", "4-import-session.ron"),
             ("health", "5-health.ron"),
             ("health-fixes", None),
+            ("health-close", "6b-health-close.ron"),
             ("storage", "7-storage.ron"),
             ("quit", None),
             ("relaunch", None),
@@ -714,8 +741,22 @@ class Journey:
                     "workshop": {"photo": self.photo},
                     "export": {"image": self.image, "export": self.export},
                 }.get(step)
+                # The windows open before, the Settings aside (an earlier
+                # step may have left them open): what must be left after.
+                before = (
+                    (
+                        [t for t in self.listed() if t != "Settings"],
+                        [w for w in self.windows() if w != "settings"],
+                    )
+                    if step == "health-close"
+                    else None
+                )
                 if "why" not in entry:
                     entry = {**entry, **self.scenario(step, file, extra)}
+                if "why" not in entry and step == "health-close":
+                    # Past the paint guard's delay (2 s).
+                    time.sleep(3)
+                    self.windows_left(entry, before)
                 if "why" not in entry and step == "imports-list":
                     self.find_session(entry)
                 if "why" not in entry and step == "storage":
