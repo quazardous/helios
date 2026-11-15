@@ -59,6 +59,7 @@ mod keep_image_open;
 mod keymap;
 mod language;
 mod library_filter;
+mod library_gallery;
 mod library_imports;
 mod library_scale;
 mod library_sort;

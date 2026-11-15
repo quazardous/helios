@@ -102,14 +102,14 @@ impl Library {
 
     /// The keyword branch the filter is scoped to (its `keyword:` term).
     pub fn keyword(&self) -> Option<String> {
-        super::helios_terms(&self.filter.text).keywords.pop()
+        super::helios_terms(&self.view.filter.text).keywords.pop()
     }
 
     /// Scopes the library to a keyword branch (its `keyword:` term in the
     /// filter, in place of any other), or to none; the rest of the filter
     /// is kept.
     pub fn set_keyword(&mut self, path: Option<&str>) {
-        let mut words: Vec<String> = tokens(&self.filter.text)
+        let mut words: Vec<String> = tokens(&self.view.filter.text)
             .into_iter()
             .filter(|t| !t.to_lowercase().starts_with("keyword:"))
             .collect();
@@ -118,7 +118,7 @@ impl Library {
         }
         let filter = egui_pop::views::library::filter::Filter {
             text: words.join(" "),
-            ..self.filter.clone()
+            ..self.view.filter.clone()
         };
         self.set_filter(filter);
     }
@@ -399,7 +399,7 @@ impl Library {
         let Some(cell) = cell else {
             return;
         };
-        let selection = self.state.selection();
+        let selection = self.view.state.selection();
         let images = if selection.contains(&cell) {
             selection.keys().to_vec()
         } else {

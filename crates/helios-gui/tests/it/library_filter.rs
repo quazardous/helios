@@ -2981,3 +2981,101 @@ fn a_workspace_on_a_missing_album_opens_with_the_hint() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The photos a gallery shows, by name.
+fn gallery(h: &mut Harness<'static, Shell>, id: &str) -> Vec<String> {
+    h.state_mut().library_mut().with_gallery(id, |library| {
+        library
+            .shown()
+            .iter()
+            .map(|id| library.entry(id).unwrap().name.clone())
+            .collect()
+    })
+}
+
+/// Each Library view keeps its own scope (owner, 2026-11-15: the
+/// active filters of the Library views are apart). A workspace written
+/// before the views were apart, its album at the top of `library`,
+/// scopes the main window's panel only; a folder chosen in the Library
+/// window is kept under `library.views.window` and scopes that window
+/// only.
+#[test]
+fn an_old_workspace_s_album_scopes_the_main_panel_only_and_the_window_keeps_its_own() {
+    use helios_gui::library::{MAIN_GALLERY, WINDOW_GALLERY};
+    let root = temp("views-apart");
+    let path = vault_file(&root);
+    let (config, ws) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    h.state_mut().library_mut().select_ids(&[]);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "test" }),
+    );
+    settle(&mut h, &mut persist, 1.0);
+    run(&mut h, "library.collection", json!({ "id": "test" }));
+    settle(&mut h, &mut persist, 2.0);
+    // Chosen in the main panel: where a workspace has always kept it.
+    assert_eq!(kept_collection(&config, &ws).as_deref(), Some("test"));
+    drop((h, persist));
+
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 3.0);
+    assert!(grid(&h).is_empty(), "the main panel opens on the album");
+    assert_eq!(
+        gallery(&mut h, WINDOW_GALLERY),
+        ["a.jpg", "b.jpg", "c.nef"],
+        "the Library window shows every photo"
+    );
+
+    // In the Library window (its search field clicked: the input is
+    // there), a folder: the window's scope, kept as the window's.
+    run(&mut h, "library.window", Value::Null);
+    settle(&mut h, &mut persist, 4.0);
+    assert!(
+        h.query_by_label("Album: test").is_none(),
+        "not the window's"
+    );
+    h.get_by_role_and_label(egui::accesskit::Role::Window, "Library")
+        .get_by_label("Search images")
+        .click();
+    h.run();
+    let folder = folder_of(&root, 1).display().to_string();
+    run(&mut h, "library.folder", json!({ "path": folder }));
+    settle(&mut h, &mut persist, 5.0);
+    let kept = Files::new(&config, &ws)
+        .load()
+        .unwrap()
+        .bundle
+        .template
+        .library
+        .unwrap();
+    assert_eq!(
+        kept.collection.as_deref(),
+        Some("test"),
+        "the panel's stays"
+    );
+    assert_eq!(kept.folder, None, "the window's folder is not the panel's");
+    assert_eq!(
+        kept.views[WINDOW_GALLERY].folder.as_deref(),
+        Some(folder.as_str())
+    );
+    h.state_mut().library_mut().with_gallery(MAIN_GALLERY, |l| {
+        assert_eq!(l.collection().as_deref(), Some("test"));
+        assert_eq!(l.folder(), None);
+    });
+    drop((h, persist));
+
+    // Opened again: each view on its own scope.
+    let (mut h, mut persist) = open(&config, &ws, &path);
+    settle(&mut h, &mut persist, 6.0);
+    assert!(grid(&h).is_empty(), "the panel, on its album");
+    h.state_mut()
+        .library_mut()
+        .with_gallery(WINDOW_GALLERY, |l| {
+            assert_eq!(l.folder().as_deref(), Some(folder.as_str()));
+            assert_eq!(l.collection(), None);
+        });
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

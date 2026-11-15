@@ -6,7 +6,7 @@ use std::path::Path;
 #[test]
 fn the_english_catalog_matches_the_declarations() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../i18n/en");
-    let files = helios_declarations::collect()
+    let files = helios_i18n_extract::collect()
         .english_files()
         .expect("every stable id gives its own message");
     for (name, text) in &files {
@@ -34,7 +34,7 @@ fn the_english_catalog_matches_the_declarations() {
 
 #[test]
 fn the_declarations_cover_the_desktop_and_the_modules() {
-    let d = helios_declarations::collect();
+    let d = helios_i18n_extract::collect();
     assert!(d.commands.iter().any(|c| c.id == "workbench.palette"));
     assert!(d.commands.iter().any(|c| c.id == "helios.graph.detach"));
     // A panel's focus and toggle commands read texts egui-pop shares.

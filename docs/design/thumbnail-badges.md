@@ -192,7 +192,7 @@ First icons proposed (all in egui-phosphor 0.14):
 
 - **Declared, like commands.** An in-repo crate registers `BadgeDecl`s
   in the desktop's badge registry (as panels declare `PANEL_ICONS` and
-  commands their ids), so `helios-declarations` extracts their names
+  commands their ids), so `helios-i18n-extract` extracts their names
   for translation. An out-of-process plugin declares `[[badges]]` in
   `helios-plugin.toml`, beside `[[commands]]`, with its names in its
   `i18n/` folder. The icon must resolve in egui-pop's registry

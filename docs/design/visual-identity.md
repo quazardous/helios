@@ -88,7 +88,7 @@ page of every variant is the gallery's job (slice 1, section 5).
 |---|---|---|
 | helios-gui | 834 | 539 |
 | helios-controls-gallery | 13 | 24 |
-| helios-declarations | 6 | 0 |
+| helios-i18n-extract | 6 | 0 |
 | modules, plugins, other crates | 0 | 0 |
 
 Only the desktop draws. Most of its `egui_pop::` paths are framework

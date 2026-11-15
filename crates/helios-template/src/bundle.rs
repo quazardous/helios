@@ -511,6 +511,18 @@ impl Bundle {
                 "library.folder: `{folder}` is not an absolute path"
             ));
         }
+        for (id, view) in t.library.iter().flat_map(|l| &l.views) {
+            if let Some(query) = &view.query {
+                check_query(query, p);
+            }
+            if let Some(folder) = &view.folder
+                && !std::path::Path::new(folder).is_absolute()
+            {
+                p.push(format!(
+                    "library.views.{id}.folder: `{folder}` is not an absolute path"
+                ));
+            }
+        }
         if let Some(sort) = t.library.as_ref().and_then(|l| l.sort.as_ref())
             && !crate::format::SORTS.contains(&sort.by.as_str())
         {

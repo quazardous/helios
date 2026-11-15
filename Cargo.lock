@@ -2421,17 +2421,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "helios-declarations"
-version = "0.91.0"
-dependencies = [
- "egui-pop",
- "helios-gui",
- "helios-i18n",
- "helios-node",
- "serde_json",
-]
-
-[[package]]
 name = "helios-display"
 version = "0.91.0"
 dependencies = [
@@ -2578,6 +2567,17 @@ dependencies = [
  "helios-core",
  "helios-shell",
  "serde",
+]
+
+[[package]]
+name = "helios-i18n-extract"
+version = "0.91.0"
+dependencies = [
+ "egui-pop",
+ "helios-gui",
+ "helios-i18n",
+ "helios-node",
+ "serde_json",
 ]
 
 [[package]]

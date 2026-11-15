@@ -1501,7 +1501,7 @@ static registry, as `helios_node::registry()` lists image modules.
   ```
 
   and `helios_connect::registry()` lists it beside `folder` and `card`.
-  `helios-declarations` collects its texts as it collects modules', so
+  `helios-i18n-extract` collects its texts as it collects modules', so
   its label is translated like any other.
 - **Out of process (a plugin).** The manifest declares `[[sources]]`
   with the same fields as `ConnectorManifest`; when the plugin is
