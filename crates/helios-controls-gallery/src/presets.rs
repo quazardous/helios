@@ -60,6 +60,14 @@ impl PresetsPage {
 
         helios_ui::section(
             ui,
+            &Section::new("Restrictions").description("What limits a view, removed by its button."),
+        );
+        if helios_ui::restriction(ui, "Album: Trip") {
+            self.last = Some("restriction removed".to_string());
+        }
+
+        helios_ui::section(
+            ui,
             &Section::new("Empty and failed").description("Why a place is empty, and what to do."),
         );
         ui.columns(3, |cols| {
