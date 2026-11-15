@@ -181,3 +181,70 @@ fn library_window_snapshots() {
     h.run_steps(4);
     results.add(h.try_snapshot("library-window-pop-dark-1x"));
 }
+
+/// The Metadata section on one photo, then on two whose fields differ
+/// (‹mixed›), in the Library window.
+#[test]
+fn library_metadata_snapshots() {
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut list = entries();
+    for (e, title) in list.iter_mut().zip(["Harbour", "Market", "Dunes"]) {
+        e.title = Some(title.to_string());
+        e.creator = Some("Ann Lee".into());
+        e.rating = 3;
+        e.labels = vec!["green".into()];
+        e.tags = vec!["Trips|2026".into()];
+    }
+    list[1].rating = 5;
+    list[1].tags.push("Market".into());
+    shell.set_library(list);
+    shell.library_mut().select(0);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    h.run_steps(4);
+    results.add(h.try_snapshot("library-metadata-single"));
+    h.state_mut()
+        .library_mut()
+        .select_ids(&["a".to_string(), "b".to_string()]);
+    h.run_steps(4);
+    h.get_by_label("2 photos selected");
+    results.add(h.try_snapshot("library-metadata-mixed"));
+}
+
+/// The Metadata section in the main window's narrow Library panel: every
+/// control (stars, each colour label, pick and reject, the text fields)
+/// lies inside the panel, none under the viewport beside it.
+#[test]
+fn the_metadata_section_fits_the_narrow_library_panel() {
+    use egui::accesskit::Role;
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    shell.library_mut().select(0);
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.run_steps(4);
+    let panel = h.state().target_rect("helios.vault").unwrap();
+    assert!(panel.width() < 400.0, "the narrow side panel: {panel:?}");
+    let inside = |what: &str, r: egui::Rect| {
+        assert!(
+            r.min.x >= panel.min.x - 0.5 && r.max.x <= panel.max.x + 0.5,
+            "{what} at {r:?} runs past the Library panel {panel:?}"
+        );
+    };
+    let marks: Vec<(String, egui::Rect)> = h
+        .query_all_by_role(Role::CheckBox)
+        .map(|n| (format!("{n:?}"), n.rect()))
+        .collect();
+    assert!(marks.len() >= 7, "5 labels and 2 flags: {marks:?}");
+    for (name, r) in &marks {
+        inside(name, *r);
+    }
+    for label in ["Title", "Description", "Creator", "Copyright", "Rating"] {
+        let found: Vec<egui::Rect> = h.query_all_by_label(label).map(|n| n.rect()).collect();
+        assert!(!found.is_empty(), "no {label}");
+        for r in found {
+            inside(label, r);
+        }
+    }
+}

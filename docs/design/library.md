@@ -889,6 +889,16 @@ editable title, description, creator, copyright, keywords; templates
 (Photo Mechanic's stamp) applied on the selection and at import. Test:
 field commands; a template applied to many.
 
+Part 1 built (2026-11-15, the owner's word of 00:01: group update is
+the core): a Metadata section in the Library (it replaces the marks
+row of the search zone) shows the cursor's capture details and edits
+the selection as a group, each field its shared value or "‹mixed›";
+`library.meta.set` (node) sets the fields named on a set of photos,
+keywords and colour labels added or removed one by one, as one undoable
+step; templates are a library document (`meta`/`templates`). Left: a
+panel of its own (dockable), GPS (no field yet), templates at import
+(the import profile's Apply), the grid's mark keys as history steps.
+
 **L14. Writing back.** Per L-C3: "Save metadata to files", a sidecar
 writer in `helios-xmp`, conflicts with files changed outside shown with
 the existing badge, a read-back test against darktable's parser

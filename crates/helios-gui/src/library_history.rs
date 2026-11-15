@@ -20,6 +20,8 @@
 //! - **One step per keyword branch renamed or merged** (L12): every
 //!   photo's tags before and after, as the node's
 //!   `library.keywords.rename` and `.merge` answer them.
+//! - **One step per group edit of metadata** (L13): the photos' fields
+//!   before and after, as the node's `library.meta.set` answers them.
 //! - **One step per manual stack change** (L11): a group, an unstack, a
 //!   new top; the stacks' documents before and after, as the node's
 //!   `library.stacks.group`, `.ungroup` and `.top` answer them.
@@ -298,6 +300,20 @@ pub fn keyword_label(ask: &crate::library::KeywordAsk) -> Label {
             ("to".to_string(), to.to_string()),
         ]
         .into(),
+    }
+}
+
+/// A group edit's label: "Edit the metadata of 3 photos".
+pub fn meta_label(photos: usize) -> Label {
+    let m = Message::new(
+        "gui-history-meta-set",
+        "Edit the metadata of { $count } photos",
+    )
+    .with("count", photos);
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [("count".to_string(), photos.to_string())].into(),
     }
 }
 

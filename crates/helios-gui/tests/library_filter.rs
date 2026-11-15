@@ -2659,3 +2659,146 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A photo's field, as the vault holds it.
+fn field_of(persist: &Persist<SqliteStore>, n: u8, name: &str) -> Value {
+    let rows = persist.vault().fields_of(&[id(n)], &[name]).unwrap();
+    rows[0].get(name).cloned().unwrap_or(Value::Null)
+}
+
+#[test]
+fn the_metadata_section_edits_a_mixed_selection_as_one_step_with_templates() {
+    use egui_pop::api::history::{Answer, Request};
+    let root = temp("metadata");
+    let path = vault_file(&root);
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        for (n, title) in [(1, "one"), (2, "two"), (3, "three")] {
+            store
+                .set_field(&id(n), "title", Some(&json!(title)))
+                .unwrap();
+        }
+        store
+            .set_field(&id(1), "tags", Some(&json!(["Animals|Dog", "sea"])))
+            .unwrap();
+    }
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let request = Request::new(helios_gui::library_history::LIBRARY);
+    let user = egui_pop::model::commands::Origin::User;
+    let all: Vec<String> = (1..=3).map(|n| id(n).hex()).collect();
+    h.state_mut().library_mut().select_ids(&all);
+    settle(&mut h, &mut persist, 1.0);
+
+    // Three titles differ: mixed; no creator yet: shared (empty).
+    h.get_by_label("3 photos selected");
+    let got = answer(&mut h, "library.metadata.get", json!({}));
+    assert_eq!(got["title"], "mixed", "{got}");
+    assert_eq!(got["creator"], "", "{got}");
+    assert_eq!(got["keywords"]["some"], json!(["Animals|Dog", "sea"]));
+
+    // A creator typed for all, a keyword added and a branch taken off:
+    // one step, the mixed titles kept.
+    let before = steps(&h).len();
+    let out = answer(
+        &mut h,
+        "library.metadata.set",
+        json!({ "fields": { "creator": "Ann" },
+                "keywords": { "add": ["Trips|2026"], "remove": ["Animals"] } }),
+    );
+    assert_eq!(out["photos"], 3, "{out}");
+    settle(&mut h, &mut persist, 2.0);
+    for n in 1..=3 {
+        assert_eq!(field_of(&persist, n, "creator"), "Ann");
+    }
+    assert_eq!(field_of(&persist, 2, "title"), "two", "a mixed field kept");
+    assert_eq!(field_of(&persist, 1, "tags"), json!(["Trips|2026", "sea"]));
+    assert_eq!(field_of(&persist, 3, "tags"), json!(["Trips|2026"]));
+    assert_eq!(steps(&h).len(), before + 1, "{:?}", steps(&h));
+    assert_eq!(
+        steps(&h).last().map(String::as_str),
+        Some("Edit the metadata of 3 photos")
+    );
+    let got = answer(&mut h, "library.metadata.get", json!({}));
+    assert_eq!(got["creator"], "Ann", "the vault's events shown: {got}");
+    assert_eq!(got["keywords"]["all"], json!(["Trips|2026"]));
+
+    // Undone and redone as one step.
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    for n in 1..=3 {
+        assert_eq!(field_of(&persist, n, "creator"), Value::Null);
+    }
+    assert_eq!(field_of(&persist, 1, "tags"), json!(["Animals|Dog", "sea"]));
+    let redone = history.redo(&request, &user);
+    assert!(matches!(redone, Answer::Done(Ok(_))), "{redone:?}");
+    assert_eq!(field_of(&persist, 2, "creator"), "Ann");
+
+    // Templates: read from the library, saved from what the selection
+    // shares, applied to one photo as one step, deleted.
+    settle(&mut h, &mut persist, 4.0);
+    let listed = answer(&mut h, "library.metadata.template.list", json!({}));
+    assert_eq!(listed["templates"], json!([]), "{listed}");
+    let saved = answer(
+        &mut h,
+        "library.metadata.template.save",
+        json!({ "name": "Wedding" }),
+    );
+    assert_eq!(saved["templates"], 1, "{saved}");
+    let listed = answer(&mut h, "library.metadata.template.list", json!({}));
+    assert_eq!(
+        listed["templates"][0],
+        json!({ "name": "Wedding", "fields": { "creator": "Ann" }, "keywords": ["Trips|2026"] })
+    );
+    answer(
+        &mut h,
+        "library.metadata.template.save",
+        json!({ "name": "Rights", "fields": { "copyright": "© Ann" } }),
+    );
+    settle(&mut h, &mut persist, 5.0);
+    let kept = persist
+        .vault()
+        .library_document("meta", "templates")
+        .unwrap();
+    assert_eq!(
+        kept.as_ref()
+            .map(|d| d["templates"].as_array().map_or(0, Vec::len)),
+        Some(2),
+        "{kept:?}"
+    );
+    let out = answer(
+        &mut h,
+        "library.metadata.template.apply",
+        json!({ "name": "Rights", "images": [id(3).hex()] }),
+    );
+    assert_eq!(out["photos"], 1, "{out}");
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(field_of(&persist, 3, "copyright"), "© Ann");
+    assert_eq!(field_of(&persist, 2, "copyright"), Value::Null);
+    let undone = history.undo(&request, &user);
+    assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
+    assert_eq!(field_of(&persist, 3, "copyright"), Value::Null);
+    let left = answer(
+        &mut h,
+        "library.metadata.template.delete",
+        json!({ "name": "Rights" }),
+    );
+    assert_eq!(left["templates"], 1, "{left}");
+    assert!(answer_err(
+        &mut h,
+        "library.metadata.template.apply",
+        json!({ "name": "Rights" })
+    ));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
