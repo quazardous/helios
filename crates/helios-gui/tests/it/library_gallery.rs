@@ -37,7 +37,10 @@ fn library() -> Rc<RefCell<Library>> {
 
 fn harness(lib: &Rc<RefCell<Library>>, options: GalleryOptions) -> Harness<'static> {
     let lib = lib.clone();
+    // egui's default fonts lack the sort arrow (the shell installs
+    // Helios's); these tests read labels, not pixels.
     let mut h = Harness::builder()
+        .allow_missing_glyphs()
         .with_size(egui::vec2(480.0, 640.0))
         .build_ui(move |ui| lib.borrow_mut().show(ui, &options));
     h.run();
