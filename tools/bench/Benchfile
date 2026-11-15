@@ -223,7 +223,7 @@ flatpak = { about = "the flatpak job's Flatpak installation (the freedesktop run
 
 [jobs.build]
 about = "the whole workspace built, every target (debug), the build cache warmed"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -243,7 +243,7 @@ timeout = "1h"
 # `cargo xtask install-dev`, so no local build is needed
 [jobs.build-gui]
 about = "helios-gui and the plugins it ships built in release, kept as outputs for the desktop launcher"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -289,7 +289,7 @@ timeout = "1h"
 # (tools/bench/import-close.py)
 [jobs.import-close]
 about = "the import window closed by each way in a headless labwc, the main window's next frame timed"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -310,7 +310,7 @@ timeout = "40m"
 # and .jsonl, a screenshot per probe (tools/bench/window-audit.py)
 [jobs.window-audit]
 about = "what the import window opens lands in it: picker, Escape, palette, Storage…, close with a picker or a dialog open"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -377,7 +377,7 @@ timeout = "1h"
 # scenarios (tools/bench/scenarios.py)
 [jobs.scenarios]
 about = "Helios's scenarios replayed live on helios-gui in a headless labwc, with shots and journals"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -406,7 +406,7 @@ timeout = "1h"
 # (docs/next.md)
 [jobs.journey]
 about = "first-user journey, fresh profile, headless: wizard, import, session, health, Storage, restart, edit, export"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -426,7 +426,7 @@ timeout = "40m"
 # test executable (import_snapshots by default, `test=it` for all)
 [jobs.gui-snapshots]
 about = "helios-gui's snapshots regenerated, every PNG returned"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -462,7 +462,7 @@ timeout = "1h"
 # summary of the slowest tests in /out
 [jobs.test]
 about = "the whole test suite (CI profile), with its JUnit report and the slowest tests"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -477,8 +477,11 @@ timeout = "1h"
 
 # the code a job will build type-checks, tests included, and nothing more
 # (`cargo check --tests`: no code generated, no link; cargo stops at the
-# first crate that fails): `crate=` one crate, else the workspace. Sent by
-# `bench-remote` before each job; it warms the branch's target the job uses
+# first crate that fails): `crate=` one crate, else the workspace. The
+# `first` of every job runs it without `crate=`: one workspace check per
+# branch head, shared by every job queued on it and run once per commit
+# (per-crate checks queued one per job and serialised on the branch's
+# target). It warms the branch's target the jobs use
 [jobs.check]
 # Clippy (which checks too) runs here, never on the developer's machine:
 # a compile error or a lint stops a branch before any of its test jobs.
@@ -522,7 +525,7 @@ timeout = "20m"
 # from before the change, its tests still separate targets, runs as it did)
 [jobs.test-crate]
 about = "one crate's tests, one test target, a name filter (a fix loop's run)"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -545,7 +548,7 @@ timeout = "30m"
 # computes it and passes it
 [jobs.test-affected]
 about = "the tests a change affects since a base commit, plus the critical set"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -563,7 +566,7 @@ timeout = "1h"
 # quit, kill -9 and reopen: the scenarios that gate a release
 [jobs.survival]
 about = "quit, kill -9 and reopen: the survival scenarios that gate a release"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -583,7 +586,7 @@ timeout = "15m"
 # /out/many-clients.json
 [jobs.stability]
 about = "kill -9 in the node's own jobs and restart, many clients on one node: the stability scenarios, not run by CI"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -608,7 +611,7 @@ timeout = "20m"
 # in /out/soak.json, JUnit and a summary in /out
 [jobs.soak]
 about = "a moderate mix of clients on one headless node for an hour, sampled: nothing may grow; not run by CI"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -723,7 +726,7 @@ timeout = "20m"
 # changes as /out/i18n.patch, to apply on the branch (git apply --index)
 [jobs.i18n-extract]
 about = "the translation catalogues regenerated on a branch; the change as a patch"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -782,7 +785,7 @@ timeout = "2h"
 # /out/check-commits.md
 [jobs.check-commits]
 about = "every commit of a range builds, passes clippy and the tests it touches"
-first = [{ job = "check", pass = ["branch", "crate", "src"] }]
+first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -829,7 +832,7 @@ timeout = "30m"
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
 [jobs.egui-pop-gate]
 about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, the docs build, and the docs site's links"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "5g"
@@ -854,7 +857,7 @@ timeout = "75m"
 # its own), stopped at the first failure. Minutes, not the gate's twenty.
 [jobs.egui-pop-test]
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
@@ -871,7 +874,7 @@ timeout = "30m"
 # test hides; `filter=` narrows it
 [jobs.egui-pop-test-1p]
 about = "egui-pop: one test target under cargo test, all its tests in one process (leaks between tests)"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 4
 memory = "5g"
@@ -887,7 +890,7 @@ timeout = "30m"
 # /out/snapshots, to review and commit
 [jobs.egui-pop-snapshots]
 about = "egui-pop's snapshots regenerated (gallery, inspect, rerun-like, the app template), every PNG returned"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
@@ -989,7 +992,7 @@ timeout = "1h"
 # output `screenshots`
 [jobs.egui-pop-screenshots]
 about = "egui-pop's documentation screenshots in a headless labwc"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
@@ -1007,7 +1010,7 @@ timeout = "1h"
 # tools/bench/fetch-gallery.sh puts where the gallery's launcher points
 [jobs.egui-pop-gallery]
 about = "egui-pop's gallery built in release, kept as the output `gallery` for its desktop launcher"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
@@ -1026,7 +1029,7 @@ timeout = "1h"
 # mutter instead of labwc, for GNOME-only bugs
 [jobs.egui-pop-wbox]
 about = "egui-pop: a wbox scenario of tools/wbox (script=) on the gallery in release, in a headless labwc or mutter (compositor=)"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
@@ -1041,7 +1044,7 @@ timeout = "1h"
 
 [jobs.egui-pop-catalogues]
 about = "egui-pop's catalogue test: the English catalogues match the sources, the French stamped"
-first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate", "src"] }]
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "7g"

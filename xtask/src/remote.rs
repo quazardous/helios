@@ -2374,6 +2374,9 @@ mod tests {
         assert!(!firsts.is_empty());
         for l in firsts {
             assert!(l.contains("\"branch\"") && l.contains("\"src\""), "{l}");
+            // one check per branch head, shared by every job on it: a
+            // `crate` would queue one per job, serialised on the target
+            assert!(!l.contains("\"crate\""), "{l}");
         }
     }
 

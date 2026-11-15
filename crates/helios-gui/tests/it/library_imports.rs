@@ -291,3 +291,16 @@ fn run_workshop_on_the_selection_is_refused_while_the_workshops_are_off() {
         "{said:?}"
     );
 }
+
+/// The import window's History lists an import as it ends, not at its
+/// next reading: read just before, it shows the import at once.
+#[test]
+fn the_import_windows_history_lists_an_import_as_it_ends() {
+    let mut s = setup("history-at-end");
+    assert!(s.h.state_mut().import_history_folders().is_empty());
+    s.import("roll", 2, "user");
+    assert_eq!(
+        s.h.state_mut().import_history_folders(),
+        vec![s.dir.join("roll")]
+    );
+}
