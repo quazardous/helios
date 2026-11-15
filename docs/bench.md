@@ -91,6 +91,41 @@ crates into a registry cache shared by all branches. The target directory
 is a cache too, one per branch, used by one job at a time: a second job on
 the same branch waits for the first.
 
+### The target's budget
+
+Every branch's target counts in full against the project's 300 GB
+hard-disk quota, a new branch's copy of main's included, so its size
+decides how many branches the box serves at once. **A branch's target
+keeps to 15 GB** (the `max` of the `target` storage), which lets a dozen
+branches live side by side with egui-pop's targets.
+
+What fills a target is the test executables. Each test target links into
+an executable of its own that carries the whole GUI and GPU stack, and
+`helios-gui` alone has about a hundred test targets: building its tests
+on a fresh branch (2026-11-15) took the target from 0.7 GB, the crates
+seeded from main, to 28 GB, with the jobs already on line tables only
+(`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_DEBUG`, dependencies
+without debug info) and without incremental state (`CARGO_INCREMENTAL=0`).
+Full targets reached the 40 GB cap the storage then had, and were cut
+back to 36 GB after each job.
+
+So every job that mounts a branch's target ends with
+[`tools/bench/trim-target.sh`](../tools/bench/trim-target.sh) (an `EXIT`
+trap at the start of its command, so it also runs after a failure): past
+12 GB, it removes the debug profile's oldest test executables until the
+target is back under 12 GB. The compiled crates, the build scripts and
+the release builds stay, so the next job relinks only the tests it runs,
+which a change to the crate they test relinks anyway. The storage's
+15 GB `max` is the box's backstop: over it, the box removes the least
+recently written files, which cargo rebuilds (from sccache) when it
+misses them.
+
+Check it with `storage list` (each `target/<branch>`, its size and last
+use); each job's log ends with the trim's line, `target: N GB at the job's
+end, M GB of old test executables removed, budget 12 GB`. A target well
+over budget after a job means something new fills it: look before raising
+the budget.
+
 ## How to call it
 
 Tell the tooling where the box is, in the environment or in the untracked
