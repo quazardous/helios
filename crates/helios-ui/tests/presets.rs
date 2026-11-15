@@ -148,3 +148,16 @@ fn notices_map_to_toast_levels() {
         [Level::Info, Level::Success, Level::Warning, Level::Error]
     );
 }
+
+#[test]
+fn a_restriction_shows_its_text_and_lifts_by_its_remove_button() {
+    let mut h = harness(false, |ui, removed| {
+        if helios_ui::restriction(ui, "Album: Trip") {
+            *removed = true;
+        }
+    });
+    h.get_by_label("Album: Trip");
+    h.get_by_label("Remove Album: Trip").click();
+    h.run();
+    assert!(*h.state(), "the removal is reported");
+}
