@@ -107,7 +107,7 @@ run = [
  && dnf clean all""",
   # the flatpak jobs' user (tools/bench/as-flatpak-user): bwrap run by
   # root without CAP_SYS_ADMIN creates no namespace, by a user it does
-  "useradd --system --no-create-home --home-dir /tmp/flatpak-home flatpak",
+  "useradd --system --no-create-home --home-dir /tmp/flatpak-home helios-flatpak",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
@@ -608,7 +608,7 @@ timeout = "1h"
 # the command line in the sandbox imports and exports a picture, the
 # window's program says its version, uninstalled). `sandbox = true`:
 # flatpak-builder and flatpak run each step under bwrap, which mounts a
-# fresh /proc. Built, installed and run as the image's `flatpak` user
+# fresh /proc. Built, installed and run as the image's `helios-flatpak` user
 # (tools/bench/as-flatpak-user): run by the job's root, bwrap creates no
 # namespace. FLATPAK_BWRAP drops bwrap's --disable-userns, which the
 # job's container refuses (tools/bench/flatpak-bwrap), and
