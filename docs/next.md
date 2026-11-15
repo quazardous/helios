@@ -49,6 +49,13 @@ A pull request is merged only when its tests passed on the box and its
      (`filter=a+b`); a comma or a space between names is refused.
    - Never `test`, `test-affected` or `--affected`: the whole suite is
      `next`'s CI.
+   - The suites that draw what you touched are part of it, not only the
+     tests you wrote: `cargo xtask affected origin/next` prints them as
+     manifest lines (a change to the Library's sources lists
+     `control_names`, `library_filter`, `library_gallery` and
+     `library_window`). A suite that went red on `next` because a
+     manifest missed it gets its line in `GUI_SUITES`
+     (`xtask/src/affected.rs`).
    - A change with nothing to run says `Tests: none — <why>`.
    - `cargo xtask manifest check <file>` (or the body on stdin) checks it.
 4. **Prove it on the box yourself** (owner, 2026-11-13: the author who
