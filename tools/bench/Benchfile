@@ -462,7 +462,7 @@ mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/he
 { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 filter=$(cargo xtask snapshots filter) || exit 1; \
 UPDATE_SNAPSHOTS=1 cargo nextest run --workspace --locked --profile ci --test-threads 12 -E "$filter"; rc=$?; \
-cargo xtask snapshots report ${since:+--since $since} --out /out; r=$?; \
+s="${since:-}"; cargo xtask snapshots report ${s:+--since $s} --out /out; r=$?; \
 [ "$rc" -ne 0 ] && exit $rc; exit $r"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = {"target/${branch:-main}"="/target", registry="/cargo/registry", cargo-git="/cargo/git", sccache="/sccache"}
