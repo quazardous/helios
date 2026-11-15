@@ -144,7 +144,7 @@ impl Plugin for AgentState {
 fn library_snapshot(lib: &Library) -> Json {
     let (count, picked, rejected) = lib.counts();
     let selection = lib.selection();
-    let current = lib.selected.and_then(|i| lib.entries.get(i)).map_or(
+    let current = lib.selected().and_then(|i| lib.entries.get(i)).map_or(
         Json::Null,
         |e| json!({ "id": e.id, "name": e.name, "path": lib.file(&e.id) }),
     );

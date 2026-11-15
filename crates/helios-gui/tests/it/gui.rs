@@ -533,7 +533,7 @@ fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
         .unwrap();
     h.run();
     let s = h.state_mut();
-    assert_eq!(s.library().selected, Some(0));
+    assert_eq!(s.library().selected(), Some(0));
     // Rejected, with its stars kept beside the reject.
     assert_eq!(s.library().entries[1].rating, 3);
     assert!(s.library().entries[1].rejected);
@@ -560,7 +560,7 @@ fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
     let mut reordered = entries;
     reordered.reverse();
     s.set_library(reordered);
-    assert_eq!(s.library().selected, Some(2));
+    assert_eq!(s.library().selected(), Some(2));
     h.run();
     let shot = headless::snapshot(&mut h, "helios.library.strip").unwrap();
     assert!(shot.width() > 30, "{}", shot.width());

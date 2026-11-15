@@ -4,7 +4,7 @@ Vision, settled concepts, phases and open questions for Helios. This is a
 living document: decisions are dated, and an idea stays "not decided" until
 it says otherwise.
 
-Last updated: 2026-11-11.
+Last updated: 2026-11-15.
 
 ---
 
@@ -397,6 +397,27 @@ LightCraft. Design, steps and open questions:
   ready); image data travels on the graph edges and stays where it is
   computed (vkdt keeps it in GPU memory). Commands go to the owner of the
   state. Draft in [docs/architecture.md](docs/architecture.md).
+- (2026-11-15, decided) **If it is not on the bus, it does not exist.**
+  A module or component knows the central bus, not its neighbours: a
+  state change another part may care about is a request and an event on
+  the bus, and whoever cares listens. Nobody has to remember to tell the
+  others, and every part knows what it has to do. A change that is not on
+  the bus is a defect. This removes cascades of calls and "function
+  sandwiches" whose job is to notify several parts in an order only their
+  author knew. Listeners are named and declare their order (after /
+  before another), never registration order; the order run is printable,
+  and a check of invariants runs last. A request's listeners all run in
+  the same pass, so no part catches up later. Exceptions are listed with
+  their reason (per-frame painting, pixel and bulk data, private
+  internals nobody else reads, hot paths) and the list only shrinks.
+  The first application is the life of windows and popups: opening,
+  closing and re-parenting are bus requests, one window registry holds
+  the one truth, and invariants compare it with the windows that really
+  exist (a closed window left on screen, black, was the case that showed
+  the need). Then, each later: plugins connecting and disconnecting,
+  jobs, panels and layout, selection, settings changes. Decided and
+  sliced in egui-pop's ADR 0029, "What is not on the bus does not exist"
+  (github.com/quazardous/egui-pop, `docs/adr/0029-not-on-the-bus.md`).
 - (2026-10-11, decided) **Data access is a framework prerogative.** Modules
   and services declare what they need and never read or write data
   themselves; the framework batches, projects, caches by content, prefetches

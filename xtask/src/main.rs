@@ -47,6 +47,11 @@
 //!   prints the box's queue.
 //! - `affected [BASE] [--filter | --critical]`: the crates, tests and box
 //!   jobs a change since BASE touches (see `affected.rs`).
+//! - `snapshots filter | report [--since REF] [--out DIR] | apply DIR
+//!   [--version V]`: the snapshot suites regenerated before a release, each
+//!   changed image explained by a merged pull request or flagged
+//!   unexplained, and the pull request that commits them (see
+//!   `snapshots.rs`).
 //! - `install-dev [--branch B | --bundle FILE] | --home [--branch B] | --local |
 //!   --from DIR | --list | --uninstall [--home]`: a dev build, "Helios Dev",
 //!   installed outside the checkout: the box's development Flatpak of a
@@ -74,6 +79,7 @@ mod manifest;
 mod promote;
 mod raw_egui;
 mod remote;
+mod snapshots;
 mod test_times;
 mod ui_index;
 mod vault_access;
@@ -743,7 +749,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -859,6 +865,10 @@ fn main() -> ExitCode {
         }),
         ["affected", rest @ ..] => affected::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", affected::USAGE);
+            ExitCode::from(2)
+        }),
+        ["snapshots", rest @ ..] => snapshots::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", snapshots::USAGE);
             ExitCode::from(2)
         }),
         ["install-dev", rest @ ..] => install_dev::run(&root, rest).unwrap_or_else(|| {

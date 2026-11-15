@@ -121,7 +121,7 @@ fn the_library_window_s_selection_is_the_one_commands_act_on() {
     // in force.
     let at = in_window(&h, "b.jpg").rect().center();
     click_at(&mut h, at);
-    assert_eq!(h.state().library().selected, Some(1));
+    assert_eq!(h.state().library().selected(), Some(1));
     // A command, from wherever it comes, acts on that selection.
     run(&mut h, "vault.rate", json!({ "stars": 4 }));
     let library = h.state().library();
@@ -139,12 +139,65 @@ fn a_click_on_a_cell_of_the_library_window_selects_it() {
     // Through accesskit, as agents and screen readers click.
     in_window(&h, "a.jpg").click_accesskit();
     h.run_steps(2);
-    assert_eq!(h.state().library().selected, Some(0), "a, clicked");
+    assert_eq!(h.state().library().selected(), Some(0), "a, clicked");
     // With the pointer, the cell under it; the main window's filmstrip,
     // drawn under the window, does not take the click.
     let at = in_window(&h, "c.jpg").rect().center();
     click_at(&mut h, at);
-    assert_eq!(h.state().library().selected, Some(2), "c, clicked");
+    assert_eq!(h.state().library().selected(), Some(2), "c, clicked");
+}
+
+/// The host's part of the Metadata section: each photo's capture details
+/// as asked, a camera named after the photo, over a few frames.
+fn feed_exif(h: &mut Harness<'_, Shell>) {
+    for _ in 0..8 {
+        loop {
+            let wanted = h.state_mut().library_mut().take_exif_wanted();
+            let Some(id) = wanted else { break };
+            let mut fields = serde_json::Map::new();
+            fields.insert("camera_model".into(), json!(format!("Cam-{id}")));
+            h.state_mut().library_mut().set_exif(id, fields);
+        }
+        h.run_steps(1);
+    }
+}
+
+/// Each Library view's Metadata section shows the photo under its own
+/// cursor: a in the main panel, b in the Library window. Once, the cursor
+/// was one for both views: the photo selected last, in either view, was
+/// the one both sections showed.
+#[test]
+fn each_view_s_metadata_shows_the_photo_under_its_own_cursor() {
+    use egui::accesskit::Role;
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    shell.library_mut().select(0);
+    shell
+        .library_mut()
+        .with_gallery(WINDOW_GALLERY, |lib| lib.select(1));
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.run_steps(4);
+    feed_exif(&mut h);
+    // The main panel: a, though b was selected last, in the window.
+    assert_eq!(
+        h.query_all_by_label("Cam-a").count(),
+        1,
+        "the main panel shows a"
+    );
+    assert_eq!(
+        h.query_all_by_label("Cam-b").count(),
+        0,
+        "the window's b, in the main panel"
+    );
+    // The Library window: b.
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    feed_exif(&mut h);
+    let window = h.get_by_role_and_label(Role::Window, "Library");
+    window.get_by_label("Cam-b");
+    assert!(
+        window.query_by_label("Cam-a").is_none(),
+        "the window's section shows a, the main panel's photo"
+    );
 }
 
 #[test]

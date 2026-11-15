@@ -143,7 +143,8 @@ const GUI_SUITES_DIR: &str = "crates/helios-gui/tests/it";
 /// the same screen from another angle is the one that goes red on `next`.
 /// The Library's views are drawn by the Library window's suites and by
 /// the walk of every control's name, which looks for the marks bar in the
-/// Library window. Add a line when a red `next` shows a missed suite.
+/// Library window; the culling and shortcut suites move the cursor
+/// each view keeps. Add a line when a red `next` shows a missed suite.
 pub const GUI_SUITES: [(&[&str], &[&str]); 1] = [(
     &[
         "crates/helios-gui/src/library",
@@ -151,9 +152,11 @@ pub const GUI_SUITES: [(&[&str], &[&str]); 1] = [(
     ],
     &[
         "control_names",
+        "culling",
         "library_filter",
         "library_gallery",
         "library_window",
+        "shortcuts",
     ],
 )];
 

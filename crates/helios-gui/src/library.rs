@@ -1664,8 +1664,6 @@ pub struct Library {
     /// ([`Library::search_keys_mut`]).
     search_keys: SearchKeys,
     pub entries: Vec<Entry>,
-    /// The image under the cursor, by its place in `entries`.
-    pub selected: Option<usize>,
     /// Culling: after a mark, the cursor moves to the next image.
     pub auto_advance: bool,
     /// Marks a plugin refused, to say.
@@ -1711,13 +1709,13 @@ pub struct Library {
     /// copies made with [`DUPLICATE_COMMAND`], darktable duplicates), for
     /// the grid's badge.
     head_counts: HashMap<String, usize>,
-    /// The heads of the photo under the cursor, as the node listed them,
-    /// for the versions strip.
-    versions: Option<(String, Vec<VersionHead>)>,
-    /// The photo whose heads the strip wants listed, for the host.
-    versions_wanted: Option<String>,
-    /// The photo whose heads were asked, until they come.
-    versions_asked: Option<String>,
+    /// The heads of the photos under the views' cursors, as the node
+    /// listed them, for the versions strips; the latest last.
+    versions: Vec<(String, Vec<VersionHead>)>,
+    /// The photos whose heads the strips want listed, for the host.
+    versions_wanted: Vec<String>,
+    /// The photos whose heads were asked, until they come.
+    versions_asked: Vec<String>,
     /// What the strip and the commands asked of photos' versions, for
     /// the host, each with its batch.
     version_asks: Vec<(VersionAsk, Batch)>,
@@ -1895,7 +1893,6 @@ impl Default for Library {
             parked: Vec::new(),
             focused: GalleryOptions::MAIN_PANEL.id.to_string(),
             search_keys: SearchKeys::builtin(),
-            selected: None,
             auto_advance: false,
             notes: Vec::new(),
             drop_hover: std::cell::Cell::new(None),
@@ -1913,9 +1910,9 @@ impl Default for Library {
             quick: Vec::new(),
             quick_set: HashSet::new(),
             head_counts: HashMap::new(),
-            versions: None,
-            versions_wanted: None,
-            versions_asked: None,
+            versions: Vec::new(),
+            versions_wanted: Vec::new(),
+            versions_asked: Vec::new(),
             version_asks: Vec::new(),
             stack_asks: Vec::new(),
             keyword_counts: None,
@@ -2792,10 +2789,6 @@ impl Library {
     }
 
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
-        let selected = self
-            .selected
-            .and_then(|i| self.entries.get(i))
-            .map(|e| e.id.clone());
         // A photo found changed outside Helios has a new thumbnail under
         // its key: its texture is read again.
         // A photo turned (an undo, another writer) shows its pictures
@@ -2811,7 +2804,6 @@ impl Library {
         }
         self.entries = entries;
         self.reindex();
-        self.selected = selected.and_then(|id| self.index.get(&id).copied());
         // Photos came or went: the folders are counted again when shown.
         self.folders = FolderCounts::Unread;
         // Photos came or went: the vault answers the filter again.
@@ -3478,6 +3470,17 @@ impl Library {
         self.activated.take()
     }
 
+    /// The image under the gallery's cursor, by its place in `entries`:
+    /// the cursor is the gallery's own (with its selection), so each view
+    /// reads its own.
+    pub fn selected(&self) -> Option<usize> {
+        self.view
+            .state
+            .selection()
+            .cursor()
+            .and_then(|c| self.at(c))
+    }
+
     /// The images selected in the views, in order.
     pub fn selection(&self) -> Vec<String> {
         self.view.state.selection().keys().to_vec()
@@ -3489,7 +3492,6 @@ impl Library {
             let key = e.id.clone();
             self.view.state.set_selection([key.clone()], Some(key));
             self.view.state.reveal_cursor();
-            self.selected = Some(index);
         }
     }
 
@@ -3530,7 +3532,6 @@ impl Library {
             .cloned()
             .collect();
         let cursor = known.last().cloned();
-        self.selected = cursor.as_ref().and_then(|c| self.index.get(c).copied());
         self.view.state.set_selection(known, cursor);
         self.view.state.reveal_cursor();
     }
@@ -3542,7 +3543,7 @@ impl Library {
         }
         let last = self.view.order.len() as i64 - 1;
         let at = self
-            .selected
+            .selected()
             .and_then(|i| self.view.order.iter().position(|&o| o == i))
             .map_or(0, |p| (p as i64 + step).clamp(0, last));
         let index = self.view.order[at as usize];
@@ -3621,9 +3622,6 @@ impl Library {
         let mut marked = false;
         for s in signals {
             match s {
-                Signal::Select { cursor, .. } => {
-                    self.selected = cursor.and_then(|c| self.at(&c));
-                }
                 Signal::Rate { keys, rating } => {
                     for i in self.places(&keys) {
                         // As in darktable, a rating takes back a reject.
@@ -3673,7 +3671,9 @@ impl Library {
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
-                Signal::Zoom { .. } | Signal::DragOut { .. } => {}
+                // A selection: the gallery's state holds it, cursor
+                // included, already.
+                Signal::Select { .. } | Signal::Zoom { .. } | Signal::DragOut { .. } => {}
                 Signal::Vetoed { step, reason } => self.notes.push(format!("{step}: {reason}")),
             }
         }
@@ -3785,7 +3785,7 @@ impl Library {
             .filter(|_| LABELS.contains(&label))
             .ok_or_else(|| format!("`{label}` is not one of {}", LABELS.join(", ")))?;
         let keys = self.targets()?;
-        let first = self.selected.or_else(|| self.at(&keys[0]));
+        let first = self.selected().or_else(|| self.at(&keys[0]));
         let on = !first
             .and_then(|i| self.entries.get(i))
             .is_some_and(|e| e.labels.iter().any(|l| l == label));
@@ -3808,7 +3808,7 @@ impl Library {
 
     /// Expands or collapses the stack under the cursor.
     pub fn toggle_stack(&mut self) -> Result<(), String> {
-        let i = self.selected.ok_or("no image selected")?;
+        let i = self.selected().ok_or("no image selected")?;
         let s = self.entries[i]
             .stack
             .clone()

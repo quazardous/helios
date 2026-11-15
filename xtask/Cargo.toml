@@ -10,6 +10,8 @@ publish = false
 helios-i18n.workspace = true
 egui-pop-i18n.workspace = true
 serde_json.workspace = true
+# the snapshot report's pixel counts
+png = "0.18"
 
 [lints]
 workspace = true

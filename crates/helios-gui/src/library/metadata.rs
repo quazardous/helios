@@ -180,21 +180,33 @@ fn flag_word(flag: Flag) -> &'static str {
     }
 }
 
-/// The panel's state, kept across frames.
+/// How many photos' capture details are held: each Library view shows
+/// the photo under its own cursor, and one view must not drive another's
+/// out.
+const EXIF_HELD: usize = 8;
+
+/// The panel's state, kept across frames, one for every view.
 #[derive(Default)]
 pub struct MetaPanel {
-    /// The selection the drafts were made for.
-    keys: Vec<String>,
-    /// The text being typed in each field, by field.
-    drafts: BTreeMap<&'static str, String>,
     /// The template chosen in the list.
     template: Option<String>,
     /// The name a new template is saved under.
     new_template: String,
-    /// The photo whose capture details are shown, and them.
-    exif: Option<(String, Map<String, Value>)>,
-    /// A photo whose capture details the host is to read.
-    exif_wanted: Option<String>,
+    /// The photos whose capture details were asked, and them (empty until
+    /// they land), the latest last.
+    exif: Vec<(String, Map<String, Value>)>,
+    /// Photos whose capture details the host is to read, in order.
+    exif_wanted: Vec<String>,
+}
+
+/// What a view types in its Metadata section: each view its own, for its
+/// own selection.
+#[derive(Default)]
+pub(super) struct MetaDrafts {
+    /// The selection the drafts were made for.
+    keys: Vec<String>,
+    /// The text being typed in each field, by field.
+    drafts: BTreeMap<&'static str, String>,
 }
 
 impl Library {
@@ -387,12 +399,18 @@ impl Library {
 
     /// A photo whose capture details the host is to read, once.
     pub fn take_exif_wanted(&mut self) -> Option<String> {
-        self.meta_panel.exif_wanted.take()
+        let wanted = &mut self.meta_panel.exif_wanted;
+        (!wanted.is_empty()).then(|| wanted.remove(0))
     }
 
     /// Shows a photo's capture details, read by the host.
     pub fn set_exif(&mut self, image: String, fields: Map<String, Value>) {
-        self.meta_panel.exif = Some((image, fields));
+        let exif = &mut self.meta_panel.exif;
+        exif.retain(|(id, _)| *id != image);
+        exif.push((image, fields));
+        if exif.len() > EXIF_HELD {
+            exif.remove(0);
+        }
     }
 
     /// The Metadata section: the cursor photo's capture details, then the
@@ -432,9 +450,10 @@ impl Library {
             )));
             return;
         };
-        if keys != self.meta_panel.keys {
-            self.meta_panel.keys.clone_from(&keys);
-            self.meta_panel.drafts.clear();
+        let drafts = &mut self.view.meta;
+        if keys != drafts.keys {
+            drafts.keys.clone_from(&keys);
+            drafts.drafts.clear();
         }
         let entries: Vec<Entry> = keys.iter().filter_map(|k| self.entry(k).cloned()).collect();
         let Some(first) = entries.first() else {
@@ -450,7 +469,7 @@ impl Library {
             ));
         }
         let cursor = self
-            .selected
+            .selected()
             .and_then(|i| self.entries.get(i))
             .map_or_else(|| first.id.clone(), |e| e.id.clone());
         self.exif_rows(ui, &cursor);
@@ -620,7 +639,8 @@ impl Library {
             _ => String::new(),
         };
         let draft = self
-            .meta_panel
+            .view
+            .meta
             .drafts
             .entry(field)
             .or_insert_with(|| shown.clone());
@@ -662,15 +682,11 @@ impl Library {
     /// The capture details of `image`: asked once, shown once read.
     fn exif_rows(&mut self, ui: &mut Ui, image: &str) {
         use helios_vault::capture as c;
-        let held = self.meta_panel.exif.as_ref().filter(|(id, _)| id == image);
+        let held = self.meta_panel.exif.iter().find(|(id, _)| id == image);
         let Some((_, f)) = held else {
-            if self.meta_panel.exif.as_ref().map(|(id, _)| id.as_str()) != Some(image)
-                && self.meta_panel.exif_wanted.as_deref() != Some(image)
-            {
-                self.meta_panel.exif_wanted = Some(image.to_string());
-                // Not asked again until it lands.
-                self.meta_panel.exif = Some((image.to_string(), Map::new()));
-            }
+            self.meta_panel.exif_wanted.push(image.to_string());
+            // Not asked again until it lands.
+            self.set_exif(image.to_string(), Map::new());
             return;
         };
         let text = |k: &str| f.get(k).and_then(Value::as_str).map(String::from);
