@@ -166,10 +166,10 @@ devel_manifest() {
         mv "licenses/$rel" "licenses/$FLATPAK_ID"
 EOF
   } >"$devel"
-  grep -q "^app-id: $id$" "$devel" && grep -q "HELIOS_BUILD_VERSION: '$version'" "$devel" || {
+  if ! grep -q "^app-id: $id$" "$devel" || ! grep -q "HELIOS_BUILD_VERSION: '$version'" "$devel"; then
     echo "could not make $devel" >&2
     exit 1
-  }
+  fi
   manifest="$devel"
 }
 
