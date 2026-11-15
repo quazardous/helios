@@ -75,8 +75,10 @@ SESSION_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d · .+ · (\d+)$")
 # Fixes that leave Helios (a browser, the file manager): not applied.
 OUTSIDE = ("links.open", "library.openFolder")
 
-# A log line at error level, or a panic.
-BAD_LINE = re.compile(r"\bERROR\b|\[error\]|\berror:|panicked at", re.IGNORECASE)
+# A log line at error level, or a panic: the level as loggers write it
+# (`ERROR`, `[error]`, a leading `error:`), never the word in a message (an
+# INFO line quoting a refusal's `"error"`).
+BAD_LINE = re.compile(r"\bERROR\b|\[(?i:error)\]|^(?i:error):|panicked at")
 
 
 def scenarios_module():
