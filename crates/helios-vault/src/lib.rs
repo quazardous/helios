@@ -48,6 +48,7 @@ pub mod edit;
 pub mod fields;
 pub mod files;
 pub mod journal;
+pub mod keywords;
 pub mod pairs;
 pub mod promises;
 pub mod read_order;
@@ -638,6 +639,10 @@ impl MemoryStore {
             && (query.labels.is_empty()
                 || query.labels.iter().any(|l| labels.contains(&l.as_str())))
             && query.tags.iter().all(|t| tags.contains(&t.as_str()))
+            && query
+                .keywords
+                .iter()
+                .all(|k| tags.iter().any(|t| keywords::in_branch(t, k)))
             && (query.flags.is_empty() || query.flags.iter().any(|f| f == flag))
             && in_range
             && words_ok

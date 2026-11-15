@@ -135,14 +135,16 @@ fn state(h: &Harness<'_, Shell>) -> Value {
 }
 
 /// Frames until what the focus asked of the node has landed: within a
-/// minute (a deadline, not a count of frames).
+/// minute (a deadline, not a count of frames). While busy it steps one
+/// frame at a time: an answer landing asks for repaints, which a `run`
+/// counts against its few steps.
 fn settle(h: &mut Harness<'_, Shell>) {
     let end = std::time::Instant::now() + std::time::Duration::from_mins(1);
     h.run_steps(2);
     while state(h)["busy"] == true {
         assert!(std::time::Instant::now() < end, "still busy: {}", state(h));
         std::thread::sleep(std::time::Duration::from_millis(5));
-        h.run();
+        h.step();
     }
     h.run();
 }

@@ -55,10 +55,7 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
 
 /// The command running a workshop on the selection, with its title
 /// (refused with the switch's key while the workshops are off).
-pub(super) const RUN_WORKSHOP: (&str, &str) = (
-    RUN_WORKSHOP_COMMAND,
-    "Run Workshop… on the Library's selection (the workshop applied, on the photos selected, whatever the selection comes from: an import session, an album, a filter)",
-);
+pub(super) const RUN_WORKSHOP: (&str, &str) = (RUN_WORKSHOP_COMMAND, "Run Workshop on Selection…");
 
 /// What the shell keeps of the sessions.
 #[derive(Default)]

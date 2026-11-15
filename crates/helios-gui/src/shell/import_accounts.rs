@@ -509,6 +509,11 @@ impl Accounts {
     /// finds them when it answers within [`READ_WAIT`], else as last read
     /// (a vault held by another writer never holds a frame; the late
     /// answer asks for a pass).
+    /// The accounts as last read, without reading them again.
+    pub(crate) fn cached(&self) -> &[Account] {
+        &self.listed
+    }
+
     pub(crate) fn listed(&mut self) -> &[Account] {
         let _stall = crate::stall::section("import window: the accounts read");
         if let Some(book) = &self.book {

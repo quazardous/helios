@@ -1111,6 +1111,10 @@ fn volumes_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             &t(Message::new("gui-settings-volume-photos", "Photos")),
         )
         .column(
+            "sourcesText",
+            &t(Message::new("gui-settings-volume-sources", "Import sources")),
+        )
+        .column(
             "backupText",
             &t(Message::new("gui-settings-volume-backup", "Backup")),
         )

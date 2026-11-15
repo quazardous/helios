@@ -68,6 +68,7 @@ use serde_json::Value;
 
 mod batch;
 mod grouping;
+mod keywords;
 mod pairing;
 mod versions;
 
@@ -83,6 +84,10 @@ pub use batch::{
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
 pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
+pub use keywords::{
+    DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
+    KEYWORD_MERGE_COMMAND, KEYWORD_REMOVE_COMMAND, KEYWORD_RENAME_COMMAND, KeywordAsk,
+};
 pub use pairing::{PAIR_COMMAND, PairAsk, UNPAIR_COMMAND};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
@@ -596,6 +601,7 @@ pub fn query_of(filter: &Filter) -> Query {
         labels: filter.labels.iter().map(|l| l.name().to_string()).collect(),
         flags: filter.flags.iter().map(|f| f.name().to_string()).collect(),
         tags: filter.tags.clone(),
+        keywords: terms.keywords,
         captured_from: filter.from.as_deref().and_then(day_start),
         captured_before: filter.to.as_deref().and_then(day_start).map(|d| d + 86_400),
         words: terms.words,
@@ -612,8 +618,12 @@ pub fn query_of(filter: &Filter) -> Query {
         cull: terms.cull,
         // An import session: the photos it brought in, by the vault's
         // `import` rule (nothing copied or moved).
+        // The tree must be a group at its top (`Rule::parse` refuses a bare
+        // condition when the query crosses to the node).
         rules: terms.import.and_then(|id| {
-            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id)).ok()
+            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id))
+                .ok()
+                .map(|c| helios_vault::rules::Rule::group(helios_vault::rules::Match::All, vec![c]))
         }),
         ..Query::default()
     }
@@ -632,6 +642,9 @@ pub struct Terms {
     /// The import session the photos came in with (its id in the import
     /// history): the Library's Imports section.
     pub import: Option<String>,
+    /// The keyword branches the photos carry a keyword of (`Animals`
+    /// takes `Animals|Dog`): the Library's Keywords section.
+    pub keywords: Vec<String>,
     pub presence: Vec<helios_vault::Presence>,
     /// The backup states every `backup:` term allows (`None`: no term).
     pub backup: Option<Vec<helios_vault::BackupState>>,
@@ -690,7 +703,8 @@ pub fn quoted(value: &str) -> String {
 /// leaves): `camera:<model>`, `lens:<lens>`, `type:<cr3>` (each exact;
 /// several of one key take any of them), `folder:<path>` (a copy there
 /// or below), `collection:<id>` (in that album), `import:<id>` (brought
-/// in by that import session), `presence:present|offline|missing`,
+/// in by that import session), `keyword:<path>` (a keyword of that
+/// branch: the path or one below it), `presence:present|offline|missing`,
 /// `cull:sharp|soft|clipped|unmeasured` (several: any of them) and
 /// `backup:<state>` (several: every one holds). A key with a value it does not know stays
 /// a word, as before.
@@ -716,6 +730,8 @@ pub fn helios_terms(text: &str) -> Terms {
             t.collection = Some(v);
         } else if let Some(v) = value("import:") {
             t.import = Some(v);
+        } else if let Some(v) = value("keyword:") {
+            t.keywords.push(v);
         } else if let Some(p) = value("presence:").and_then(|v| match v.to_lowercase().as_str() {
             "present" => Some(helios_vault::Presence::Present),
             "offline" => Some(helios_vault::Presence::Offline),
@@ -1426,6 +1442,8 @@ pub enum DropOn {
     Quick,
     /// An album: they go in. A smart album or a set refuses them.
     Album(String),
+    /// A keyword branch of the Keywords section (its path): they take it.
+    Keyword(String),
 }
 
 /// Whether `album` takes photos dropped on it, else why not.
@@ -1481,11 +1499,22 @@ fn drop_target(
                 ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
                 crate::i18n::text(ctx, m.clone())
             }
-            None => crate::i18n::text(
-                ctx,
-                Message::new("gui-library-drop-add", "Add { $count } photos")
-                    .with("count", photos.0.len()),
-            ),
+            None => match &target {
+                DropOn::Keyword(path) => crate::i18n::text(
+                    ctx,
+                    Message::new(
+                        "gui-library-keyword-drop",
+                        "Tag { $count } photos with { $keyword }",
+                    )
+                    .with("count", photos.0.len())
+                    .with("keyword", path.as_str()),
+                ),
+                _ => crate::i18n::text(
+                    ctx,
+                    Message::new("gui-library-drop-add", "Add { $count } photos")
+                        .with("count", photos.0.len()),
+                ),
+            },
         };
         // The row's own tooltip, at the pointer: egui hides hover tooltips
         // while something is dragged, so it is shown here, not through
@@ -1513,6 +1542,7 @@ fn drop_target(
             COLLECTION_ADD_COMMAND,
             serde_json::json!({ "id": id, "images": photos.0 }),
         ),
+        DropOn::Keyword(path) => (KEYWORD_ADD_COMMAND, keywords::drop_args(&path, &photos)),
     };
     crate::dialogs::request(
         ctx,
@@ -1671,6 +1701,13 @@ pub struct Library {
     /// What the commands asked of the stacks (group, ungroup, top), for
     /// the host, each with its batch.
     stack_asks: Vec<(StackAsk, Batch)>,
+    /// How many photos carry a keyword of each branch (the Keywords
+    /// section), built from the photos' tags; none until built again
+    /// after they change.
+    keyword_counts: Option<std::collections::BTreeMap<String, u64>>,
+    /// What the commands asked of the keyword branches (rename, merge),
+    /// for the host, each with its batch.
+    keyword_asks: Vec<(KeywordAsk, Batch)>,
     /// What the commands asked of RAW+JPEG pairs (pair, unpair), for the
     /// host, each with its batch.
     pair_asks: Vec<(PairAsk, Batch)>,
@@ -1843,6 +1880,8 @@ impl Default for Library {
             versions_asked: None,
             version_asks: Vec::new(),
             stack_asks: Vec::new(),
+            keyword_counts: None,
+            keyword_asks: Vec::new(),
             pair_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
@@ -2689,6 +2728,8 @@ impl Library {
         tags.sort_unstable();
         tags.dedup();
         self.known_tags = tags;
+        // Built again when the Keywords section is drawn.
+        self.keyword_counts = None;
     }
 
     /// The vault's stacks: each member of one whose top image the library
@@ -4228,6 +4269,23 @@ impl Library {
         }
     }
 
+    /// A mark button's tooltip and name: what a click does, with the
+    /// keys `command` is bound to now (a key the user rebound shows as
+    /// rebound, none when it has none).
+    fn mark_tip(&self, ctx: &egui::Context, what: Message, command: &str) -> String {
+        let what = crate::i18n::text(ctx, what);
+        let keys = self
+            .app
+            .as_ref()
+            .and_then(|app| {
+                egui_pop::model::ids::CommandId::new(command)
+                    .ok()
+                    .map(|id| app.keys_for(&id))
+            })
+            .unwrap_or_default();
+        with_keys(ctx, what, &keys)
+    }
+
     /// The marks of the cursor's image, edited for the selection: stars,
     /// labels, flag and tags.
     fn marks_bar(&mut self, ui: &mut Ui) {
@@ -4251,7 +4309,16 @@ impl Library {
                     rating,
                 });
             }
-            if let Some(labels) = ColorLabels::new(marks.labels).show(ui).changed {
+            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
+                .size
+                .control_height;
+            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
+            let tips = ColorLabel::ALL.map(|l| {
+                let (what, command) = label_tip(l);
+                self.mark_tip(ui.ctx(), what, command)
+            });
+            toggle_tips(ui, &labels.response, side, &tips);
+            if let Some(labels) = labels.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
                         asked.push(Mark::Label {
@@ -4262,7 +4329,20 @@ impl Library {
                     }
                 }
             }
-            if let Some(flag) = FlagToggle::new(marks.flag).show(ui).changed {
+            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
+            let tips = [
+                (
+                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
+                    "vault.flag.pick",
+                ),
+                (
+                    Message::new("gui-library-flag-reject-tip", "Reject"),
+                    "vault.flag.reject",
+                ),
+            ]
+            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
+            toggle_tips(ui, &flags.response, side, &tips);
+            if let Some(flag) = flags.changed {
                 asked.push(Mark::Flag {
                     keys: keys.clone(),
                     flag,
@@ -4299,6 +4379,7 @@ impl Library {
         self.facets_bar(ui);
         self.folders_section(ui);
         self.albums_section(ui);
+        self.keywords_section(ui);
         self.imports_section(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
@@ -4346,6 +4427,7 @@ impl Library {
         let in_view = self.in_view.borrow().clone();
         self.feed_in_view(in_view, true);
         carry_out(ui.ctx(), &out.signals);
+        self.drop_keyword_on_grid(&out.response);
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell
@@ -4705,7 +4787,16 @@ impl Library {
                     rating,
                 });
             }
-            if let Some(labels) = ColorLabels::new(marks.labels).show(ui).changed {
+            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
+                .size
+                .control_height;
+            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
+            let tips = ColorLabel::ALL.map(|l| {
+                let (what, command) = label_tip(l);
+                self.mark_tip(ui.ctx(), what, command)
+            });
+            toggle_tips(ui, &labels.response, side, &tips);
+            if let Some(labels) = labels.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
                         asked.push(Mark::Label {
@@ -4716,7 +4807,20 @@ impl Library {
                     }
                 }
             }
-            if let Some(flag) = FlagToggle::new(marks.flag).show(ui).changed {
+            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
+            let tips = [
+                (
+                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
+                    "vault.flag.pick",
+                ),
+                (
+                    Message::new("gui-library-flag-reject-tip", "Reject"),
+                    "vault.flag.reject",
+                ),
+            ]
+            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
+            toggle_tips(ui, &flags.response, side, &tips);
+            if let Some(flag) = flags.changed {
                 asked.push(Mark::Flag {
                     keys: keys.clone(),
                     flag,
@@ -4771,6 +4875,84 @@ impl Library {
     }
 }
 
+/// What a click on a colour label's button does, and the command its
+/// keys are bound to.
+fn label_tip(label: ColorLabel) -> (Message, &'static str) {
+    match label {
+        ColorLabel::Red => (
+            Message::new("gui-library-label-red-tip", "Red label"),
+            "vault.label.red",
+        ),
+        ColorLabel::Yellow => (
+            Message::new("gui-library-label-yellow-tip", "Yellow label"),
+            "vault.label.yellow",
+        ),
+        ColorLabel::Green => (
+            Message::new("gui-library-label-green-tip", "Green label"),
+            "vault.label.green",
+        ),
+        ColorLabel::Blue => (
+            Message::new("gui-library-label-blue-tip", "Blue label"),
+            "vault.label.blue",
+        ),
+        ColorLabel::Purple => (
+            Message::new("gui-library-label-purple-tip", "Purple label"),
+            "vault.label.purple",
+        ),
+    }
+}
+
+/// `what`, with `keys` after it in brackets when there are any: "Red
+/// label (6)".
+fn with_keys(ctx: &egui::Context, what: String, keys: &[String]) -> String {
+    if keys.is_empty() {
+        return what;
+    }
+    crate::i18n::text(
+        ctx,
+        Message::new("gui-library-mark-keys", "{ $what } ({ $keys })")
+            .with("what", what)
+            .with("keys", keys.join(", ")),
+    )
+}
+
+/// Where egui-pop's mark buttons sit in `row`: `n` squares of `side`,
+/// side by side from its left, the kit's small spacing between them,
+/// centred in its height (`ColorLabels` and `FlagToggle` lay them out so).
+fn toggle_rects(row: egui::Rect, n: usize, side: f32, gap: f32) -> Vec<egui::Rect> {
+    let top = row.center().y - side / 2.0;
+    (0..n)
+        .map(|i| {
+            egui::Rect::from_min_size(
+                egui::pos2(row.left() + i as f32 * (side + gap), top),
+                egui::vec2(side, side),
+            )
+        })
+        .collect()
+}
+
+/// Tooltips over egui-pop's mark buttons (its colour labels, its pick
+/// and reject), which show none of their own: a hover-only area over each
+/// button, in order, the click staying the button's. The buttons carry
+/// their accessible names themselves.
+// upstream: egui-pop's `ColorLabels` and `FlagToggle` take no tooltip;
+// drop this once they show their own.
+fn toggle_tips(ui: &Ui, row: &egui::Response, side: f32, tips: &[String]) {
+    let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.xs;
+    for (i, (rect, tip)) in toggle_rects(row.rect, tips.len(), side, gap)
+        .into_iter()
+        .zip(tips)
+        .enumerate()
+    {
+        ui.interact(
+            rect,
+            row.id.with(("helios.mark.tip", i)),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(tip);
+    }
+}
+
 /// Where the Compare view puts `n` panes in `rect`, `gap` apart: side by
 /// side up to three, four in a square (egui-pop's `CompareView` layout).
 fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
@@ -4797,6 +4979,47 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 mod tests {
     use super::*;
     use egui_pop::views::library::filter::Candidate;
+
+    /// The mark buttons' tooltip areas: squares from the row's left, the
+    /// gap between them, centred in its height.
+    #[test]
+    fn mark_tips_cover_each_button_in_its_row() {
+        let row = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(120.0, 30.0));
+        let rects = toggle_rects(row, 3, 20.0, 4.0);
+        assert_eq!(rects.len(), 3);
+        assert_eq!(rects[0].min, egui::pos2(10.0, 5.0));
+        assert_eq!(rects[1].min, egui::pos2(34.0, 5.0));
+        assert_eq!(rects[2].max, egui::pos2(78.0, 25.0));
+    }
+
+    /// A tooltip names its keys when the command has some, and only then.
+    #[test]
+    fn a_mark_tip_names_its_keys_when_bound() {
+        let ctx = egui::Context::default();
+        let (what, command) = label_tip(ColorLabel::Red);
+        assert_eq!(command, "vault.label.red");
+        let red = crate::i18n::text(&ctx, what);
+        assert_eq!(with_keys(&ctx, red.clone(), &["6".into()]), "Red label (6)");
+        assert_eq!(
+            with_keys(&ctx, red.clone(), &["F1".into(), "6".into()]),
+            "Red label (F1, 6)"
+        );
+        assert_eq!(with_keys(&ctx, red, &[]), "Red label");
+    }
+
+    /// An `import:` term's rule tree is a group, so it survives the trip
+    /// to the node, which parses the tree and refuses a bare condition
+    /// ("the rules must be a group").
+    #[test]
+    fn an_import_session_s_query_crosses_to_the_node() {
+        let filter = Filter {
+            text: "import:\"abc\"".into(),
+            ..Filter::default()
+        };
+        let rules = query_of(&filter).rules.expect("an import rule");
+        helios_vault::rules::Rule::parse(&rules.to_json())
+            .unwrap_or_else(|e| panic!("refused at the node: {e}"));
+    }
 
     /// A picture 3 wide and 2 high turned each way: its corners land
     /// where a quarter turn puts them, and four turns give it back.

@@ -598,6 +598,23 @@ own keys (arrows, Shift and Ctrl with them, Space, Ctrl+A, Enter, + and
 taken away stays away; Enter or a double click opens the image
 in the viewport.
 
+**Keywords** (2026-11-14): the Keywords section of the sources panel
+draws the photos' tags as a tree, levels written with `|`
+(`Animals|Dog`, as darktable writes them and imports bring them), each
+branch with how many photos carry it or a keyword below it (a photo
+counts once per branch). A click shows a branch's photos, with the
+other filters (`keyword:Animals` in the search field, `library.keyword`
+for an agent); a click on it again shows them all. Drag a branch onto a
+photo of the grid to tag it (the selection, when the photo is in it),
+or photos onto a branch; the branch's menu adds it to the selected
+photos or takes it off them, with the keywords below it
+(`library.keyword.add`, `library.keyword.remove`). "Rename…" and "Merge
+into…" (or a branch dropped onto another) change the branch on every
+photo at once, through the node's `library.keywords.rename` and
+`.merge` (docs/protocol.md): one step of the Library's history, which
+Undo takes back. `library.keyword.list` lists the branches with their
+counts. Not yet: synonyms.
+
 **Stacks.** A stack shows collapsed in the grid and the filmstrip: its
 top image with a count and a chevron; the chevron, S or
 `vault.stack.toggle` expands it (its members follow the top image), and

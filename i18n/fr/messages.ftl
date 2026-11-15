@@ -1174,6 +1174,9 @@ gui-wizard-no-folder = Aucun dossier à cet endroit
 gui-wizard-no-library = Ouvrez d’abord une bibliothèque : les comptes y sont conservés
 
 gui-wizard-sign-in = Se connecter à un compte…
+gui-wizard-account-has-source = Ce compte a déjà une source, { $source } : une source par compte suffit.
+gui-wizard-open-source = Ouvrir cette source
+gui-settings-volume-sources = Sources d’import
 
 gui-wizard-title = Ajouter une source
 
@@ -1835,6 +1838,8 @@ gui-import-window-offline = hors ligne
 gui-import-window-open = Importer des photos…
 
 gui-import-window-pair = RAW+JPG
+
+gui-import-window-pair-short = R+J
 
 gui-import-window-raw-only = Raw seulement
 
@@ -2839,3 +2844,28 @@ gui-settings-imports = Importations
 
 gui-library-window = Bibliothèque
 gui-library-window-elsewhere = La bibliothèque est ouverte dans sa propre fenêtre
+gui-history-keyword-merge = Fusionner le mot-clé { $from } dans { $to }
+gui-history-keyword-rename = Renommer le mot-clé { $from } en { $to }
+gui-library-keyword-add = Ajouter aux photos sélectionnées
+gui-library-keyword-drop = Ajouter { $keyword } à { $count } photos
+gui-library-keyword-merge = Fusionner dans…
+gui-library-keyword-merge-none = Aucun autre mot-clé où le fusionner
+gui-library-keyword-merge-title = Fusionner « { $name } » dans
+gui-library-keyword-not-changed = Le mot-clé n’a pas été changé : { $error }
+gui-library-keyword-path = mot-clé
+gui-library-keyword-remove = Retirer des photos sélectionnées
+gui-library-keyword-rename = Renommer…
+gui-library-keyword-rename-title = Renommer « { $name } »
+gui-library-keyword-rename-verb = Renommer
+gui-library-keyword-toggle = Afficher ou masquer les mots-clés sous { $name }
+gui-library-keywords = Mots-clés
+gui-library-keywords-none = Aucun mot-clé : écrivez les niveaux avec | (Animaux|Chien)
+
+gui-library-label-red-tip = Étiquette rouge
+gui-library-label-yellow-tip = Étiquette jaune
+gui-library-label-green-tip = Étiquette verte
+gui-library-label-blue-tip = Étiquette bleue
+gui-library-label-purple-tip = Étiquette violette
+gui-library-flag-pick-tip = Marquer comme retenue
+gui-library-flag-reject-tip = Rejeter
+gui-library-mark-keys = { $what } ({ $keys })

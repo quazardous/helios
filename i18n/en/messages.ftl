@@ -751,6 +751,10 @@ gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
 gui-history-import = Import { $count } photos
 
+gui-history-keyword-merge = Merge keyword { $from } into { $to }
+
+gui-history-keyword-rename = Rename keyword { $from } to { $to }
+
 gui-history-library-redoing = Redoing “{ $step }”…
 
 gui-history-library-refused = Undo refused: { $reason }
@@ -1199,6 +1203,8 @@ gui-import-window-own-choices = Its own import choices
 
 gui-import-window-pair = RAW+JPG
 
+gui-import-window-pair-short = R+J
+
 gui-import-window-profile = Import profile
 
 gui-import-window-raw-only = Raw only
@@ -1457,6 +1463,10 @@ gui-library-facet-type = Type
 
 gui-library-file = { $size } · modified { $day }
 
+gui-library-flag-pick-tip = Flag as pick
+
+gui-library-flag-reject-tip = Reject
+
 gui-library-folder-import = Import new photos here
 
 gui-library-folder-scan = Scan this folder
@@ -1478,6 +1488,46 @@ gui-library-imports = Imports
 gui-library-imports-none = No import yet
 
 gui-library-keep-best = Keep the best: pick it, reject the others
+
+gui-library-keyword-add = Add to the selected photos
+
+gui-library-keyword-drop = Tag { $count } photos with { $keyword }
+
+gui-library-keyword-merge = Merge into…
+
+gui-library-keyword-merge-none = No other keyword to merge it into
+
+gui-library-keyword-merge-title = Merge “{ $name }” into
+
+gui-library-keyword-not-changed = The keyword was not changed: { $error }
+
+gui-library-keyword-path = keyword
+
+gui-library-keyword-remove = Remove from the selected photos
+
+gui-library-keyword-rename = Rename…
+
+gui-library-keyword-rename-title = Rename “{ $name }”
+
+gui-library-keyword-rename-verb = Rename
+
+gui-library-keyword-toggle = Show or hide the keywords below { $name }
+
+gui-library-keywords = Keywords
+
+gui-library-keywords-none = No keyword yet: write levels with | (Animals|Dog)
+
+gui-library-label-blue-tip = Blue label
+
+gui-library-label-green-tip = Green label
+
+gui-library-label-purple-tip = Purple label
+
+gui-library-label-red-tip = Red label
+
+gui-library-label-yellow-tip = Yellow label
+
+gui-library-mark-keys = { $what } ({ $keys })
 
 gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
 
@@ -2397,6 +2447,8 @@ gui-settings-volume-scan = Scan now
 
 gui-settings-volume-seen = Seen
 
+gui-settings-volume-sources = Import sources
+
 gui-settings-volume-space = Space
 
 gui-settings-volume-state = State
@@ -2629,6 +2681,8 @@ gui-window-frame-error = window frame: { $error }
 
 gui-wizard-account = Account
 
+gui-wizard-account-has-source = This account already has a source, { $source }: one source per account is enough.
+
 gui-wizard-account-settings = Account settings
 
 gui-wizard-add = Add the source
@@ -2662,6 +2716,8 @@ gui-wizard-no-folder = No folder there
 gui-wizard-no-library = Open a library first: accounts are kept in it
 
 gui-wizard-no-volume = Insert a card or plug in a camera: it is listed here as soon as it is mounted.
+
+gui-wizard-open-source = Open that source
 
 gui-wizard-sign-in = Sign in to an account…
 
