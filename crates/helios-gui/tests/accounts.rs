@@ -2169,3 +2169,94 @@ fn photos_chosen_are_imported_as_the_node_s_promise() {
     );
     assert!(h.state().import_window_open(), "the window stays");
 }
+
+/// The test server, declaring one source per account (as a service whose
+/// source is the account itself does).
+struct OnePerAccount;
+
+impl helios_connect::ConnectorProvider for OnePerAccount {
+    fn manifest(&self) -> helios_connect::ConnectorManifest {
+        let mut m = FakeProvider.manifest();
+        m.setup = m.setup().map(|s| helios_connect::Setup {
+            one_source_per_account: true,
+            ..s
+        });
+        m
+    }
+
+    fn create(
+        &self,
+        settings: &helios_connect::Settings,
+        services: &helios_connect::ConnectorServices,
+    ) -> Result<Box<dyn helios_connect::Connector>, helios_connect::ConnectorError> {
+        FakeProvider.create(settings, services)
+    }
+}
+
+/// A connector declaring one source per account refuses a second source
+/// on an account, and on another account signed in as the same identity,
+/// in `import.sources.add` and in the wizard, which offers the source
+/// already there instead. No connector is named by the window.
+#[test]
+fn one_source_per_account_refuses_a_second_and_offers_the_first() {
+    use helios_connect::account::{Account, EMAIL};
+    let book = Arc::new(MemoryAccounts::default());
+    let mut first = Account::new(ID, "Test server", &[]);
+    first.state = AccountState::Connected;
+    first.facts.insert(EMAIL.into(), "ann@example.com".into());
+    book.save(&first).unwrap();
+    let mut again = Account::new(ID, "Test server", std::slice::from_ref(&first));
+    again.state = AccountState::Connected;
+    again.facts.insert(EMAIL.into(), "Ann@example.com".into());
+    book.save(&again).unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(Arc::new(OnePerAccount));
+    shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    keep_sources(&mut h);
+    run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
+    until(&mut h, "Add…", |h| shown(h, "Add…"));
+    let add = |h: &mut Harness<'_, Shell>, account: &str, name: &str| {
+        h.state_mut()
+            .add_import_source(&json!({ "connector": ID, "account": account, "name": name }))
+    };
+    add(&mut h, &first.id, "Holidays").expect("the first source");
+    for account in [&first.id, &again.id] {
+        let e = add(&mut h, account, "Family").unwrap_err();
+        assert!(
+            e.contains("already has a source") && e.contains("Holidays"),
+            "{e}"
+        );
+    }
+    assert_eq!(h.state().import_sources().len(), 1);
+    // The wizard: the account picked says it has its source, Next waits,
+    // and "Open that source" closes the wizard on it.
+    click(&mut h, "Add…");
+    until(&mut h, "the kinds", |h| shown(h, "Test server"));
+    click(&mut h, "Test server");
+    click(&mut h, "Next");
+    until(&mut h, "the accounts", |h| {
+        h.query_all_by_label("Test server — Ann@example.com")
+            .next()
+            .is_some()
+    });
+    click(&mut h, "Test server — Ann@example.com");
+    until(&mut h, "the source already there", |h| {
+        shown(
+            h,
+            "This account already has a source, Holidays: one source per account is enough.",
+        )
+    });
+    assert!(
+        h.query_all_by_label("Next")
+            .next()
+            .is_some_and(|n| n.accesskit_node().is_disabled()),
+        "Next waits"
+    );
+    click(&mut h, "Open that source");
+    until(&mut h, "the wizard closed", |h| {
+        !h.state().import_wizard_open()
+    });
+    assert_eq!(h.state().import_sources().len(), 1);
+}

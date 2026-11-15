@@ -397,7 +397,11 @@ impl ImportWindow {
                 wz.params_fit()
                     && match wz.asks() {
                         Some(SetupAsks::Path | SetupAsks::Volume) => wz.folder().is_some(),
-                        Some(SetupAsks::Account) => wz.account.is_some(),
+                        Some(SetupAsks::Account) => wz.account.as_deref().is_some_and(|a| {
+                            let connector = wz.connector.as_ref().map_or("", |(id, _)| id);
+                            self.source_already_on(connector, a, wz.editing.as_ref())
+                                .is_none()
+                        }),
                         None => false,
                     }
             }
@@ -797,6 +801,36 @@ impl ImportWindow {
                 {
                     sign_in = true;
                 }
+                let picked = wz.account.clone();
+                let editing = wz.editing.clone();
+                let taken = picked
+                    .as_deref()
+                    .and_then(|a| self.source_already_on(&connector, a, editing.as_ref()));
+                let mut open = None;
+                if let Some((key, name)) = taken {
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::Label::new(t(Message::new(
+                            "gui-wizard-account-has-source",
+                            "This account already has a source, { $source }: one source per account is enough.",
+                        )
+                        .with("source", name)))
+                        .wrap(),
+                    );
+                    if ui
+                        .button(t(Message::new(
+                            "gui-wizard-open-source",
+                            "Open that source",
+                        )))
+                        .clicked()
+                    {
+                        open = Some(key);
+                    }
+                }
+                if let Some(key) = open {
+                    self.open_existing_source(key);
+                    return;
+                }
                 if sign_in {
                     // The connection's dialog runs over the wizard; a
                     // plugin's consent is asked first.
@@ -1129,6 +1163,60 @@ pub(super) fn refused_ui(
     }
 }
 
+impl ImportWindow {
+    /// The saved source a new source of `connector` on `account` would
+    /// repeat, when the connector takes one source per account
+    /// ([`Setup::one_source_per_account`]): one on that account, or on
+    /// another account signed in as the same identity. `editing`, the
+    /// source being edited, repeats none.
+    pub(crate) fn source_already_on(
+        &self,
+        connector: &str,
+        account: &str,
+        editing: Option<&SourceKey>,
+    ) -> Option<(SourceKey, String)> {
+        let one = self
+            .connectors
+            .provider(connector)
+            .and_then(|p| p.manifest().setup())
+            .is_some_and(|s| s.one_source_per_account);
+        if !one {
+            return None;
+        }
+        let accounts = self.accounts.cached();
+        let identity = |id: &str| {
+            accounts
+                .iter()
+                .find(|a| a.id == id)
+                .map_or_else(|| format!("{connector}:#{id}"), |a| a.identity())
+        };
+        let wanted = identity(account);
+        self.sources.list.iter().find_map(|s| {
+            let on = s.account.as_deref()?;
+            let key = s.key()?;
+            (s.connector == connector
+                && Some(&key) != editing
+                && (on == account || identity(on) == wanted))
+                .then(|| {
+                    let name = s.name.clone().unwrap_or_else(|| {
+                        accounts
+                            .iter()
+                            .find(|a| a.id == on)
+                            .map_or_else(|| on.to_owned(), |a| a.shown())
+                    });
+                    (key, name)
+                })
+        })
+    }
+
+    /// The wizard's account already has a source (one per account): the
+    /// wizard closes and that source is selected.
+    fn open_existing_source(&mut self, key: SourceKey) {
+        self.wizard = None;
+        self.select_new(key);
+    }
+}
+
 /// The command saving a new import source without the wizard.
 pub const ADD: &str = "import.sources.add";
 
@@ -1186,6 +1274,11 @@ impl ImportWindow {
                     .any(|a| a.id == id && a.connector == connector);
                 if !known {
                     return Err(format!("no account `{id}` of `{connector}`"));
+                }
+                if let Some((_, name)) = self.source_already_on(&connector, &id, None) {
+                    return Err(format!(
+                        "the account `{id}` already has a source, `{name}`: `{connector}` takes one source per account (select that one instead)"
+                    ));
                 }
                 (None, Some(id))
             }
