@@ -1,0 +1,20 @@
+// The first-user journey, step 1: a fresh profile's first start. The
+// init wizard opens as a focus screen and is finished on its defaults
+// (the library folder it suggests); the pointer notice keeps its default.
+// Run live by tools/bench/journey.py.
+Scenario(
+    name: "first-run",
+    description: "A fresh profile starts on the init wizard, finished with its defaults.",
+    steps: [
+        Wait(Settled),
+        Shot("wizard"),
+        Expect(Tree(has: (role: "Button", label: "Finish"))),
+        Ui(Click(role: "Button", label: "Finish")),
+        Wait(Settled),
+        Expect(Tree(lacks: (role: "Button", label: "Finish"))),
+        Ui(Click(role: "Button", label: "Keep Photoshop-style")),
+        Wait(Settled),
+        Expect(NoError),
+        Shot("ready"),
+    ],
+)

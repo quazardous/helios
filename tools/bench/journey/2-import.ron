@@ -1,0 +1,35 @@
+// The first-user journey, step 2: the empty Library's Import button opens
+// the import window on a fixture card (`$card`: raws, JPEGs and RAW+JPEG
+// pairs), imported with the window's defaults; the Library then holds one
+// photo per pair. Run live by tools/bench/journey.py, which sets `$card`
+// and `$photos` (how many photos the card holds, a pair counted once).
+Scenario(
+    name: "import",
+    description: "A card of raws, JPEGs and RAW+JPEG pairs imported with the window's defaults.",
+    steps: [
+        Wait(Settled),
+        Ui(Click(role: "Button", label: "Import photos…", nth: 0)),
+        Wait(Settled),
+        Window("import"),
+        Expect(Tree(has: (role: "Window", label: "Import photos"))),
+        // The folder chooser is the desktop's: the card is given to the
+        // window as a dropped folder would be.
+        Call("library.importWindow", { "source": "$card" }),
+        Wait(Settled),
+        Shot("picked"),
+        Expect(Tree(has: (role: "Button", label: "Import $photos"))),
+        Ui(Click(role: "Button", label: "Import $photos")),
+        // The window's import runs as the node's promise: its end is the
+        // Library's `library.imported` (a `job.finished` may be another
+        // job's, such as the health check's).
+        Wait(Event("library.imported")),
+        Wait(Settled),
+        Expect(Journal(has: "library.imported")),
+        Window("main"),
+        Wait(Settled),
+        // Two pairs, a raw and a JPEG: four photos (a pair is one).
+        Expect(Value("helios.library.count", 4)),
+        Expect(NoError),
+        Shot("imported"),
+    ],
+)
