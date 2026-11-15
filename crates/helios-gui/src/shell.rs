@@ -3356,7 +3356,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 storage::COMMAND,
-                "Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)",
+                "Storage… (`volume`: the volume to mark and scroll to)",
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::Storage(a.clone()))),
@@ -3562,18 +3562,13 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::FitCameraLook(a.clone(), origin.clone()))),
         );
         add(
-            CommandSpec::new(
-                "library.copyFiles",
-                "Copy files: the selected images' files, for a file manager or another application",
-                "Library",
-            )
-            .when(IN_LIBRARY),
+            CommandSpec::new("library.copyFiles", "Copy Files", "Library").when(IN_LIBRARY),
             Box::new(|_, origin| Ok(Action::CopyFiles(origin.clone()))),
         );
         add(
             CommandSpec::new(
                 "library.pasteFiles",
-                "Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)",
+                "Paste Files or Image (`dry_run`: only say what would be imported)",
                 "Library",
             ),
             Box::new(|a, origin| {
@@ -3582,12 +3577,8 @@ impl Shell {
             }),
         );
         add(
-            CommandSpec::new(
-                "viewport.copyImage",
-                "Copy the image: the edited image rendered whole, for another application (as PNG)",
-                "View",
-            )
-            .when(IN_MAIN_WINDOW),
+            CommandSpec::new("viewport.copyImage", "Copy Image as PNG", "View")
+                .when(IN_MAIN_WINDOW),
             Box::new(|_, origin| Ok(Action::CopyImage(origin.clone()))),
         );
         // A parameter copied: the item is the parameter with its type,

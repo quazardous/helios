@@ -207,7 +207,10 @@ winget-pkgs, swaps in the new setup.exe, its SHA-256 and the release notes
 link, and opens the pull request on microsoft/winget-pkgs from the
 `quazardous` fork. Microsoft's validation pipeline and moderators then
 merge it, usually within a few days. Without the `WINGET_TOKEN` secret the
-job leaves a notice in the run and does nothing; it never fails the
+job leaves a notice in the run and does nothing, and likewise while
+`Quazardous.Helios` is not in winget-pkgs yet (the first submission, made
+by hand, still waiting to be merged: there are no previous manifests to
+update); it never fails the
 release (the Release is already published when it runs). Its version of
 winget-releaser is bumped by hand, to a reviewed commit.
 

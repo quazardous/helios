@@ -442,6 +442,11 @@ pub struct Manifest {
     /// `per_day`): the read-ahead of glances pauses there.
     #[serde(default, skip_serializing_if = "no_limits")]
     pub limits: helios_connect::Limits,
+    /// Its source is the account itself: one source per account is
+    /// enough, a second one is refused and the existing one offered
+    /// (`helios_connect::Setup::one_source_per_account`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub one_source_per_account: bool,
     /// The plugin's own settings, each under its id (`<id>.<key>`): the
     /// configuration contract's first level.
     #[serde(default)]

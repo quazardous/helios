@@ -1174,6 +1174,9 @@ gui-wizard-no-folder = Aucun dossier à cet endroit
 gui-wizard-no-library = Ouvrez d’abord une bibliothèque : les comptes y sont conservés
 
 gui-wizard-sign-in = Se connecter à un compte…
+gui-wizard-account-has-source = Ce compte a déjà une source, { $source } : une source par compte suffit.
+gui-wizard-open-source = Ouvrir cette source
+gui-settings-volume-sources = Sources d’import
 
 gui-wizard-title = Ajouter une source
 
@@ -2869,3 +2872,12 @@ gui-library-keyword-rename-verb = Renommer
 gui-library-keyword-toggle = Afficher ou masquer les mots-clés sous { $name }
 gui-library-keywords = Mots-clés
 gui-library-keywords-none = Aucun mot-clé : écrivez les niveaux avec | (Animaux|Chien)
+
+gui-library-label-red-tip = Étiquette rouge
+gui-library-label-yellow-tip = Étiquette jaune
+gui-library-label-green-tip = Étiquette verte
+gui-library-label-blue-tip = Étiquette bleue
+gui-library-label-purple-tip = Étiquette violette
+gui-library-flag-pick-tip = Marquer comme retenue
+gui-library-flag-reject-tip = Rejeter
+gui-library-mark-keys = { $what } ({ $keys })

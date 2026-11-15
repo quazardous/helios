@@ -317,7 +317,7 @@ command-library-compare =
     .title = Compare photos side by side (`images`: ids, else the selection; two to four)
 
 command-library-copyFiles =
-    .title = Copy files: the selected images' files, for a file manager or another application
+    .title = Copy Files
 
 command-library-deleteRejected =
     .title = Delete Rejected…: the rejected photos shown to the system trash (`images`: of them, those named), asked first unless `confirmed`
@@ -401,7 +401,7 @@ command-library-openFolder =
     .title = Open a folder in the file manager (`path`)
 
 command-library-pasteFiles =
-    .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
+    .title = Paste Files or Image (`dry_run`: only say what would be imported)
 
 command-library-quick-clear =
     .title = Empty the quick collection; its photos stay in the library
@@ -428,7 +428,7 @@ command-library-rotateRight =
     .title = Rotate Right: turn the photos a quarter clockwise (`images`: ids, else the selection); Ctrl+Z turns them back
 
 command-library-runWorkshop =
-    .title = Run Workshop… on the Library's selection (the workshop applied, on the photos selected, whatever the selection comes from: an import session, an album, a filter)
+    .title = Run Workshop on Selection…
 
 command-library-scanFolder =
     .title = Scan a folder and those below it for new or changed files (`path`), as the image map scans a volume
@@ -455,7 +455,7 @@ command-library-stack-ungroup =
     .title = Unstack: ungroup the stacks the photos are in (`images`: ids, else the selection), the photos untouched; Ctrl+Z groups them again
 
 command-library-storage =
-    .title = Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)
+    .title = Storage… (`volume`: the volume to mark and scroll to)
 
 command-library-trash =
     .title = Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z
@@ -737,7 +737,7 @@ command-viewport-compare =
     .title = Image: before and after side by side
 
 command-viewport-copyImage =
-    .title = Copy the image: the edited image rendered whole, for another application (as PNG)
+    .title = Copy Image as PNG
 
 command-viewport-mask-display =
     .title = Image: show the mask (cycles overlay, grey, off; or `mode`)
