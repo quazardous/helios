@@ -909,7 +909,9 @@ timeout = "75m"
 # egui-pop-gallery's integration tests are modules of one executable,
 # `it`: there `test=<module>` (the name of a former test target,
 # `test=keyboard_walk`) runs that module alone, and `filter=` is joined to
-# the module's path (a branch from before the change runs as it did)
+# the module's path (a branch from before the change runs as it did).
+# `features=` turns on the crate's features (`features=svg`; several
+# joined by `+` or `,`), for the tests a feature gates
 [jobs.egui-pop-test]
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
@@ -920,7 +922,8 @@ cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; x=""; \
 if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else x="test(/^$t::/)"; fi; fi; \
-cargo nextest run --locked --fail-fast -p ${crate} $sel ${x:+-E "$x"} $f"""
+fe="${features:-}"; fe="${fe//+/,}"; case "$fe" in *[!A-Za-z0-9_,/-]*) echo "bad features=$fe" >&2; exit 2;; esac; \
+cargo nextest run --locked --fail-fast -p ${crate} ${fe:+--features "$fe"} $sel ${x:+-E "$x"} $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
@@ -930,7 +933,7 @@ timeout = "30m"
 # locally), for the leaks between tests that nextest's one process per
 # test hides; `filter=` narrows it. egui-pop-gallery's `test=<module>`
 # runs that module of its one executable `it`, as in egui-pop-test;
-# `test=it` runs every module in one process
+# `test=it` runs every module in one process; `features=` as in egui-pop-test
 [jobs.egui-pop-test-1p]
 about = "egui-pop: one test target under cargo test, all its tests in one process (leaks between tests)"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
@@ -941,7 +944,8 @@ cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 t="${test}"; case "$t" in lib) sel="--lib";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; \
 if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else f="$t::"; fi; fi; \
-cargo test --locked -p ${crate} $sel -- $f"""
+fe="${features:-}"; fe="${fe//+/,}"; case "$fe" in *[!A-Za-z0-9_,/-]*) echo "bad features=$fe" >&2; exit 2;; esac; \
+cargo test --locked -p ${crate} ${fe:+--features "$fe"} $sel -- $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
