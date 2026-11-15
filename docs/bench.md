@@ -101,9 +101,9 @@ branches live side by side with egui-pop's targets.
 
 What fills a target is the test executables. Each test target links into
 an executable of its own that carries the whole GUI and GPU stack, and
-`helios-gui` alone has about a hundred test targets: building its tests
-on a fresh branch (2026-11-15) took the target from 0.7 GB, the crates
-seeded from main, to 28 GB, with the jobs already on line tables only
+`helios-gui` alone had about a hundred test targets (now the modules of
+one, `it`): building its tests on a fresh branch (2026-11-15) took the
+target from 0.7 GB, the crates seeded from main, to 28 GB, with the jobs already on line tables only
 (`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_DEBUG`, dependencies
 without debug info) and without incremental state (`CARGO_INCREMENTAL=0`).
 Full targets reached the 40 GB cap the storage then had, and were cut
