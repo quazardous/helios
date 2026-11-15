@@ -1174,6 +1174,9 @@ gui-wizard-no-folder = Aucun dossier à cet endroit
 gui-wizard-no-library = Ouvrez d’abord une bibliothèque : les comptes y sont conservés
 
 gui-wizard-sign-in = Se connecter à un compte…
+gui-wizard-account-has-source = Ce compte a déjà une source, { $source } : une source par compte suffit.
+gui-wizard-open-source = Ouvrir cette source
+gui-settings-volume-sources = Sources d’import
 
 gui-wizard-title = Ajouter une source
 

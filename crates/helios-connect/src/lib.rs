@@ -534,6 +534,7 @@ impl ConnectorManifest {
             auto: None,
             placement: Placement::CopyOnly,
             naming: Vec::new(),
+            one_source_per_account: false,
         })
     }
 
@@ -629,6 +630,12 @@ pub struct Setup {
     /// `camera`…, as [`NAME_FIELDS`] lists them); empty: every one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub naming: Vec<String>,
+    /// One source per account is enough (a service whose source is the
+    /// account itself): a second source on an account, or on another
+    /// account signed in as the same identity, is refused and the
+    /// existing one offered instead.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub one_source_per_account: bool,
 }
 
 /// The fields of a copy's name pattern, as `{field}` in it.

@@ -2447,6 +2447,8 @@ gui-settings-volume-scan = Scan now
 
 gui-settings-volume-seen = Seen
 
+gui-settings-volume-sources = Import sources
+
 gui-settings-volume-space = Space
 
 gui-settings-volume-state = State
@@ -2679,6 +2681,8 @@ gui-window-frame-error = window frame: { $error }
 
 gui-wizard-account = Account
 
+gui-wizard-account-has-source = This account already has a source, { $source }: one source per account is enough.
+
 gui-wizard-account-settings = Account settings
 
 gui-wizard-add = Add the source
@@ -2712,6 +2716,8 @@ gui-wizard-no-folder = No folder there
 gui-wizard-no-library = Open a library first: accounts are kept in it
 
 gui-wizard-no-volume = Insert a card or plug in a camera: it is listed here as soon as it is mounted.
+
+gui-wizard-open-source = Open that source
 
 gui-wizard-sign-in = Sign in to an account…
 
