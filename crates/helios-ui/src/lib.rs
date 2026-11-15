@@ -28,16 +28,24 @@
 //! ```
 
 mod action;
+mod choice;
+mod details;
 mod notify;
+mod progress;
 mod restriction;
+mod scroll;
 mod search;
 mod section;
 mod state;
 mod value;
 
 pub use action::{Action, action};
+pub use choice::choice;
+pub use details::details;
 pub use notify::{Notice, notify};
+pub use progress::{Progress, progress};
 pub use restriction::restriction;
+pub use scroll::{Scroll, scroll};
 pub use search::{Scope, Search, search};
 pub use section::{Section, section};
 pub use state::{Empty, Loading, empty, failed, loading};

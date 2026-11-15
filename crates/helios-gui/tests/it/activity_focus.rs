@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use egui::{ViewportId, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::api::windows::WindowId;
 use egui_pop::core::indicator;
 use helios_core::jobs::{Jobs, Progress, Start};
@@ -176,7 +176,23 @@ fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&Harness<'_, Shel
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    panic!("never got there: {what}");
+    panic!("never got there: {what}\n{}", stuck(h));
+}
+
+/// Where a wait gave up: the focus, the pointer and the layer under it,
+/// every Cancel with its place, and the tree.
+fn stuck(h: &Harness<'_, Shell>) -> String {
+    let pointer = h.ctx.pointer_latest_pos();
+    let layer = pointer.and_then(|p| h.ctx.layer_id_at(p));
+    let cancels: Vec<String> = h
+        .query_all_by_label("Cancel")
+        .map(|n| format!("{:?} at {:?}", n.accesskit_node().role(), n.rect()))
+        .collect();
+    format!(
+        "focus: {}\npointer: {pointer:?} over {layer:?}\nCancel: {cancels:?}\n{}",
+        focus(h),
+        egui_pop_test::a11y_tree(h)
+    )
 }
 
 fn focus(h: &Harness<'_, Shell>) -> Value {
@@ -249,8 +265,11 @@ fn a_running_import_shows_with_its_bar_and_counts_and_a_job_without_progress_has
         gate.cancelled.lock().unwrap().contains(&trash.id)
     });
     // Cancel from the list, on the import's row hovered.
+    // Settled, not only asked to stop: its row then moves under the
+    // running import's, which must not happen between the hover and the
+    // click below.
     until(&mut h, "the trash settled", |h| {
-        h.query_all_by_label("Cancel").count() == 0
+        h.query_all_by_label("Cancel").count() == 0 && h.query_all_by_label("Cancelled").count() > 0
     });
     let row = in_list(&h, "Import 412 photos").rect().center();
     h.hover_at(row);
