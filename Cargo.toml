@@ -137,11 +137,6 @@ too_many_lines = "allow"
 # moved into threads or stored); changing them is an API decision.
 needless_pass_by_value = "allow"
 
-# egui_hud 0.4 (on egui-pop 0.11) ahead of its crates.io release: the
-# 0.3 on crates.io asks for egui-pop 0.10, which would put two egui-pops in
-# the graph. Drop this table once egui_hud 0.4.0 is published.
-[patch.crates-io]
-egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "bf87fc7" }
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
