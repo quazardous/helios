@@ -2,7 +2,7 @@
 //! forms, pickers, menus and notices. They never draw a window, a popup or
 //! a menu of their own: they ask the shell (`Shell::confirm`,
 //! `Shell::form`, `Shell::pick`, `Shell::notify`, or [`request`] from
-//! inside a panel), and a test fails if one does (`tests/normalized.rs`).
+//! inside a panel), and a test fails if one does (`tests/it/normalized.rs`).
 //!
 //! The shell hands them to egui-pop's components (its dialogs, toasts and
 //! menus, `egui_pop::api`), which draw them from the theme's tokens. Every

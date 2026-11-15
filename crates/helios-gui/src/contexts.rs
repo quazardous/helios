@@ -436,7 +436,7 @@ pub fn culling(app: &AppHandle, on: Option<bool>, origin: &Origin) -> Result<Jso
 
 /// Keeps the value store's place on the stack's place shown: the steps
 /// made from now on are made there (`helios_values::Step::place`), which
-/// egui-pop's undo toast reads to say "Undone in <place>" with Go there;
+/// egui-pop's undo toast reads to say "Undone in \<place\>" with Go there;
 /// and its scope on the sub-workspace shown, if one is: its nodes only
 /// may be written. Called each frame, once the interface's logic ran.
 pub fn follow_place(app: &AppHandle, values: &mut Store, subworkspaces: &Subworkspaces) {

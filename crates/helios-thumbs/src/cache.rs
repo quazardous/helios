@@ -1,8 +1,8 @@
 //! The thumbnail cache on disk: JPEG files under one folder, named by
 //! their key, with a size limit kept by evicting what was used least
 //! recently. Its entries are the cache service's kinds
-//! [`THUMB_SMALL`](helios_cache::THUMB_SMALL) and
-//! [`THUMB_LARGE`](helios_cache::THUMB_LARGE), in the library's scope (a
+//! [`THUMB_SMALL`] and
+//! [`THUMB_LARGE`], in the library's scope (a
 //! silo: a library's thumbnails stay beside its catalogue); attached to
 //! the service ([`ThumbCache::attach`]), it is counted and cleared with
 //! the other caches.

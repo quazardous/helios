@@ -12,7 +12,7 @@
 //!   of the image only when the user switched [`SEND_PROXY`] on.
 //! - `workshop.design`: the agent's draft, checked by Helios on the proxy
 //!   (`helios_template::draft::check_draft`) and, unless refused, applied
-//!   as one undo step ("design workshop: <words>"); a new draft in the same
+//!   as one undo step ("design workshop: \<words\>"); a new draft in the same
 //!   session replaces the former one, one more step.
 //! - `workshop.send_proxy`: the user's switch; an agent is refused.
 

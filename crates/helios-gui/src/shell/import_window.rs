@@ -50,7 +50,7 @@
 //! the sources, ticks, chooses folders and presets there; what needs the
 //! shell (Import, Forget, Storage…, sources dropped) waits in
 //! `ImportWindow::events` for the main window's next pass. The window has
-//! its own status bar ("Reading <path>" while the sources are read), and
+//! its own status bar ("Reading \<path\>" while the sources are read), and
 //! egui-pop gives it its own toasts, dialogs and palette. It shares the
 //! process's core: the thumbnails come from the library's one cache, so
 //! no photo is read twice. Closing the window closes the import focus;

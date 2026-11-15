@@ -87,7 +87,7 @@ impl NodeEvents {
     }
 
     /// The events of every node whose kind matches one of `patterns`
-    /// ([`matches`]), from now on, and every [`RESYNC`]; `id` names the
+    /// ([`matches()`]), from now on, and every [`RESYNC`]; `id` names the
     /// listener ([`NodeEvents::listeners`]).
     pub fn listen(&self, id: &str, patterns: &[&str]) -> Listener {
         let patterns: Vec<String> = patterns.iter().map(|p| (*p).to_string()).collect();

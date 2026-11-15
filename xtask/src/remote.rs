@@ -30,7 +30,7 @@
 //!
 //! Exit 75 (`EX_TEMPFAIL`) means the box could not serve the job: off,
 //! unreachable (ssh exits 255), in maintenance, its GPU gone, or restarted
-//! under the job. It prints "bench box unavailable: <reason>" and is never
+//! under the job. It prints `bench box unavailable: <reason>` and is never
 //! a test failure. Otherwise the exit code is the job's.
 //!
 //! With `--chain egui-pop` (catalogues, then snapshots, then the gate) or
@@ -903,7 +903,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         ["failures"] => return Some(ExitCode::from(failures(false))),
         ["failures", "--all"] => return Some(ExitCode::from(failures(true))),
         ["why", id, reason @ ..] if !reason.is_empty() => {
-            return Some(match why(id, &reason.join(" ")) {
+            return Some(match why(root, id, &reason.join(" ")) {
                 Ok(code) => ExitCode::from(code),
                 Err(e) => crate::fail(&[e]),
             });
@@ -1453,6 +1453,9 @@ fn finish(
                     all.extend(log.lines().map(str::to_string));
                 }
                 record_failure(req, id, c, &all, req.expect_fail);
+                if c == EX_DEPENDENCY {
+                    record_prerequisites(b, root, req, &all);
+                }
             }
             c
         }
@@ -1987,16 +1990,19 @@ pub fn failure_lines(lines: &[String]) -> Vec<String> {
     out
 }
 
-fn read_failures() -> Vec<Value> {
-    std::fs::read_to_string(failures_file())
+fn read_failures_in(path: &Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect()
 }
 
-fn write_failures(all: &[Value]) -> Result<(), String> {
-    let path = failures_file();
+fn read_failures() -> Vec<Value> {
+    read_failures_in(&failures_file())
+}
+
+fn write_failures_in(path: &Path, all: &[Value]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -2004,33 +2010,49 @@ fn write_failures(all: &[Value]) -> Result<(), String> {
         let _ = writeln!(t, "{v}");
         t
     });
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Records a failed job; an expected one (`expect=fail`) carries its reason.
-fn record_failure(req: &Request, id: &str, code: u8, lines: &[String], expected: bool) {
+/// A failed job's line in the failures file.
+pub fn failure_entry(
+    id: &str,
+    job: &str,
+    params: &[(String, String)],
+    code: u8,
+    lines: &[String],
+    expected: bool,
+) -> Value {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let params: serde_json::Map<String, Value> = req
-        .params
+    let params: serde_json::Map<String, Value> = params
         .iter()
         .map(|(k, v)| (k.clone(), Value::from(v.clone())))
         .collect();
-    let entry = serde_json::json!({
+    serde_json::json!({
         "id": id,
         "at": now,
-        "job": req.job,
+        "job": job,
         "params": params,
         "exit": code,
         "class": failure_class(code),
         "errors": failure_lines(lines),
         "reason": if expected { Value::from("expected: a reproduction before the fix (expect=fail)") } else { Value::Null },
-    });
-    let mut all = read_failures();
-    all.retain(|v| v["id"] != id);
+    })
+}
+
+/// Adds (or replaces) a job's line in the failures file.
+fn store_failure(path: &Path, entry: Value) -> Result<(), String> {
+    let mut all = read_failures_in(path);
+    all.retain(|v| v["id"] != entry["id"]);
     all.push(entry);
-    if let Err(e) = write_failures(&all) {
+    write_failures_in(path, &all)
+}
+
+/// Records a failed job; an expected one (`expect=fail`) carries its reason.
+fn record_failure(req: &Request, id: &str, code: u8, lines: &[String], expected: bool) {
+    let entry = failure_entry(id, &req.job, &req.params, code, lines, expected);
+    if let Err(e) = store_failure(&failures_file(), entry) {
         eprintln!("bench-remote: could not record the failure: {e}");
         return;
     }
@@ -2043,15 +2065,142 @@ fn record_failure(req: &Request, id: &str, code: u8, lines: &[String], expected:
     }
 }
 
-/// `why <id> <reason...>`: the reason a failed job failed.
-fn why(id: &str, reason: &str) -> Result<u8, String> {
-    let mut all = read_failures();
-    let entry = all
-        .iter_mut()
-        .find(|v| v["id"] == id)
-        .ok_or_else(|| format!("no failed job {id} in {}", failures_file().display()))?;
+/// A failed `first` prerequisite the box names in a job's output:
+/// `bench: first: check <id> failed (exit 1): not run (exit 79)` in its
+/// log, or `first: check <id> exit 1` in `status <id>`; its job, id and
+/// exit code.
+pub fn failed_first(line: &str) -> Option<(&str, &str, u8)> {
+    let t = line.trim();
+    let t = job_line(t).unwrap_or(t);
+    let t = t.strip_prefix("bench: ").unwrap_or(t);
+    let mut words = t.strip_prefix("first: ")?.split_whitespace();
+    let job = words.next()?;
+    let id = words.next()?;
+    let code = match words.next()? {
+        // `failed (exit 1): ...`
+        "failed" if words.next()? == "(exit" => words.next()?,
+        "exit" => words.next()?,
+        _ => return None,
+    };
+    let code: u8 = code.trim_end_matches([')', ':']).parse().ok()?;
+    (valid_id(id) && code != 0).then_some((job, id, code))
+}
+
+/// The exit code of a job that ended in failure, from the box's
+/// `status <id> --json` (`"state": "exit 1"`); `None` while it waits or
+/// runs, or when it succeeded.
+pub fn status_failure(status: &Value) -> Option<u8> {
+    let code: u8 = status["state"]
+        .as_str()?
+        .strip_prefix("exit ")?
+        .trim()
+        .parse()
+        .ok()?;
+    (code != 0).then_some(code)
+}
+
+/// A job's name and parameters, from the `request` file of its results.
+pub fn request_of(text: &str) -> Option<(String, Vec<(String, String)>)> {
+    let v: Value = serde_json::from_str(text).ok()?;
+    let job = v["name"].as_str()?.to_string();
+    let params = v["params"]
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some((job, params))
+}
+
+/// A failed job the client did not follow (a `first` prerequisite), as a
+/// failures-file line: its request and log fetched from the box when it
+/// can, else `job` and `params` as given.
+fn box_failure(
+    b: &Bench,
+    root: &Path,
+    id: &str,
+    job: &str,
+    params: &[(String, String)],
+    code: u8,
+) -> Value {
+    let dir = fetch(b, root, id).ok();
+    let read = |name: &str| {
+        dir.as_ref()
+            .and_then(|d| std::fs::read_to_string(d.join(name)).ok())
+    };
+    let (job, params) = read("request")
+        .and_then(|t| request_of(&t))
+        .unwrap_or_else(|| (job.to_string(), params.to_vec()));
+    let lines: Vec<String> = read("log")
+        .map(|l| l.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    failure_entry(id, &job, &params, code, &lines, false)
+}
+
+/// After a job ended with 79 (a step before it failed), records the failed
+/// `first` prerequisites its output names, which no client followed.
+fn record_prerequisites(b: &Bench, root: &Path, req: &Request, lines: &[String]) {
+    let mut seen: Vec<&str> = Vec::new();
+    for (job, id, code) in lines.iter().filter_map(|l| failed_first(l)) {
+        if seen.contains(&id) {
+            continue;
+        }
+        seen.push(id);
+        let branch: Vec<(String, String)> = req
+            .params
+            .iter()
+            .filter(|(k, _)| k == "branch")
+            .cloned()
+            .collect();
+        let entry = box_failure(b, root, id, job, &branch, code);
+        if let Err(e) = store_failure(&failures_file(), entry) {
+            eprintln!("bench-remote: could not record the failure: {e}");
+            continue;
+        }
+        eprintln!(
+            "bench-remote: its prerequisite {job} (job {id}) failed ({}). Record why: \
+             cargo xtask bench-remote why {id} \"<cause, and what you do about it>\"",
+            failure_class(code)
+        );
+    }
+}
+
+/// `why <id> <reason...>`: the reason a failed job failed. A job missing
+/// from the failures file (one no client followed) is asked of the box,
+/// and added when it really failed.
+fn why(root: &Path, id: &str, reason: &str) -> Result<u8, String> {
+    why_in(&failures_file(), id, reason, |id| {
+        let b = Bench::configure(root).ok()?;
+        let out = b
+            .ssh(10, &["status", id, "--json"])
+            .stdin(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        let failed = status_failure(&parse_json(&String::from_utf8_lossy(&out.stdout))?)?;
+        Some(box_failure(&b, root, id, "(unknown)", &[], failed))
+    })
+}
+
+/// `why` on a given failures file; `ask_box` gives the line of a failed job
+/// the file does not hold, `None` when the box knows of no such failure.
+fn why_in(
+    path: &Path,
+    id: &str,
+    reason: &str,
+    ask_box: impl FnOnce(&str) -> Option<Value>,
+) -> Result<u8, String> {
+    let mut all = read_failures_in(path);
+    if !all.iter().any(|v| v["id"] == id) {
+        let entry = ask_box(id)
+            .ok_or_else(|| format!("no failed job {id} in {}, nor on the box", path.display()))?;
+        all.push(entry);
+    }
+    let entry = all.iter_mut().find(|v| v["id"] == id).expect("present");
     entry["reason"] = Value::from(reason);
-    write_failures(&all)?;
+    write_failures_in(path, &all)?;
     Ok(0)
 }
 
@@ -2948,5 +3097,76 @@ mod tests {
         assert_eq!(read_env(env, "HELIOS_BENCH_KEY").as_deref(), Some("/k"));
         assert_eq!(read_env("#HELIOS_BENCH_HOST=x", "HELIOS_BENCH_HOST"), None);
         assert_eq!(read_env("HELIOS_BENCH_HOST=", "HELIOS_BENCH_HOST"), None);
+    }
+
+    #[test]
+    fn a_failed_prerequisite_is_read_from_the_box_output() {
+        let log = "bench: first: check 20261115-074045-6e62 failed (exit 1): not run (exit 79)";
+        assert_eq!(
+            failed_first(log),
+            Some(("check", "20261115-074045-6e62", 1))
+        );
+        // as the client sees it while following, and in `status <id>`
+        assert_eq!(
+            failed_first(&format!("mcu-job: {log}")),
+            Some(("check", "20261115-074045-6e62", 1))
+        );
+        assert_eq!(
+            failed_first("first: check 20261115-074045-6e62 exit 1"),
+            Some(("check", "20261115-074045-6e62", 1))
+        );
+        // a prerequisite that passed, or a line about something else
+        assert_eq!(
+            failed_first("first: check 20261115-074045-6e62 exit 0"),
+            None
+        );
+        assert_eq!(
+            failed_first("bench: waiting for 20261115-074045-6e62 (first)"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_failed_job_is_read_from_the_box_status() {
+        let failed = parse_json(r#"{"id": "x", "state": "exit 1", "first": null}"#).unwrap();
+        assert_eq!(status_failure(&failed), Some(1));
+        let ok = parse_json(r#"{"id": "x", "state": "exit 0"}"#).unwrap();
+        assert_eq!(status_failure(&ok), None);
+        let running = parse_json(r#"{"id": "x", "state": "running"}"#).unwrap();
+        assert_eq!(status_failure(&running), None);
+        let req = r#"{"kind": "job", "name": "check", "params": {"branch": "fix/x"}}"#;
+        assert_eq!(
+            request_of(req),
+            Some(("check".into(), vec![("branch".into(), "fix/x".into())]))
+        );
+    }
+
+    #[test]
+    fn why_asks_the_box_for_a_job_it_does_not_hold() {
+        let dir = std::env::temp_dir().join(format!("helios-why-{}", std::process::id()));
+        let path = dir.join("failures.jsonl");
+        let _ = std::fs::remove_dir_all(&dir);
+        let branch = [("branch".to_string(), "fix/x".to_string())];
+        // the box says it failed: added, with the reason
+        let lines = vec!["error: unused import".to_string()];
+        let asked = why_in(&path, "20261115-1-aaaa", "a lint, fixed", |id| {
+            Some(failure_entry(id, "check", &branch, 1, &lines, false))
+        });
+        assert_eq!(asked, Ok(0));
+        let all = read_failures_in(&path);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0]["job"], "check");
+        assert_eq!(all[0]["reason"], "a lint, fixed");
+        assert_eq!(all[0]["errors"][0], "error: unused import");
+        // known now: the box is not asked again
+        let again = why_in(&path, "20261115-1-aaaa", "a lint, fixed again", |_| {
+            panic!("asked the box for a job the file holds")
+        });
+        assert_eq!(again, Ok(0));
+        assert_eq!(read_failures_in(&path)[0]["reason"], "a lint, fixed again");
+        // the box knows of no such failure: refused, nothing added
+        assert!(why_in(&path, "20261115-2-bbbb", "?", |_| None).is_err());
+        assert_eq!(read_failures_in(&path).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

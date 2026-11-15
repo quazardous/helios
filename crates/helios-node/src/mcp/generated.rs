@@ -1,4 +1,4 @@
-//! Generated tools (`helios-mcp --tools generated`, [`ToolSet::Generated`]):
+//! Generated tools (`helios-mcp --tools generated`, `ToolSet::Generated`):
 //! one MCP tool per command of the node's registry, made from it rather
 //! than written by hand. A tool's name is `helios_cmd_` and the command's
 //! id with every character a tool name does not take turned into `_`

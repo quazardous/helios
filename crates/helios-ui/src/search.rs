@@ -51,6 +51,9 @@ impl Search {
 /// A search field over `query` for `search`: egui-pop's search input
 /// (magnifier, clearable), named and hinted by its scope, as wide as
 /// the space given.
+///
+/// Need (input): a search field.
+/// Need (input): a filter box.
 pub fn search(ui: &mut Ui, query: &mut String, search: Search) -> InputOutput {
     Input::search(query, search.label())
         .placeholder(search.placeholder())
