@@ -54,7 +54,8 @@ with the workflow's token starts no workflow, a dispatch does. Nobody tags
 by hand. Who decides is the coordinator, on the advice of the **release
 keeper**, a merger agent kept for the release cycle (owner, 2026-11-13):
 when `next`'s CI turns green with fragments waiting in `changelog.d/`, it
-runs the box's `release` job on `next` (`cargo xtask release`, checked
+brings the snapshot images up to date first (below, "Snapshots before a
+release"), then runs the box's `release` job on `next` (`cargo xtask release`, checked
 and the whole suite tested), says what a user would notice since the last
 release and recommends none, a patch or a minor one. A "yes" is a
 one-line fragment `kind: internal` with `release: patch` (or `minor`) in
@@ -63,6 +64,59 @@ the promotion to the tag and the published release. It also debugs a red CI on
 `next` first, before anything else (docs/next.md). Between releases the
 keeper merges any backlog of pull requests nobody merged
 (docs/next.md). Authors put no `release:` line in their own fragments.
+
+## Snapshots before a release
+
+The snapshot tests compare screens with reference images committed under
+each crate's `tests/snapshots/` (helios-gui, helios-controls-gallery).
+Each pull request regenerates the images of the suites it touches
+(docs/next.md), but a change to a shared piece (a widget, a colour, a
+font) also moves images of suites it did not run: each pull request is
+green alone and `next`'s `release` job turns red after the merges. So
+before every release, the **release keeper** brings the images up to date
+on `next`, each change explained, and only then runs the `release` job:
+
+1. `cargo xtask bench-remote snapshots-refresh branch=next`. The box runs
+   every snapshot suite (`cargo xtask snapshots filter`) with
+   `UPDATE_SNAPSHOTS=1` in a **workspace** build, the features CI and the
+   release build with (a crate drawn differently alone than in the
+   workspace cannot hide here; `cargo xtask deps-worlds` refuses such a
+   crate too), then `cargo xtask snapshots
+   report`. Its `out/` holds `snapshots.md`: each image that changed, its
+   pixels changed and its **likely cause**, the pull requests merged into
+   `next` since the last tag (`since=REF` for another base) that touched
+   what draws its suite (the suite's crate, the workspace crates it
+   depends on, the data they read, Cargo.lock, the toolchain,
+   kittest.toml); beside it `snapshots.json`, and under `snapshots/` the
+   new images with their former versions (`.old.png`) and kittest's
+   diffs (`.diff.png`).
+2. **No image changed** (green, `No image changed.`): run the `release`
+   job.
+3. **Every image explained** (green): look at the diffs against the pull
+   requests named, then `cargo xtask snapshots apply
+   target/bench-remote/<id>/out`. It makes the branch
+   `chore/snapshots-<version>` from the commit the job tested, in a
+   worktree of its own, commits the images with a `kind: internal`
+   fragment, pushes it and opens the pull request into `next` with the
+   list as its body and a test manifest (`test-crate crate=<suite>` per
+   suite). The keeper runs those jobs and merges it like any pull
+   request, then runs the `release` job.
+4. **An image unexplained** (red, exit 1): no pull request merged since
+   the last tag touched what draws it, so regenerating it would hide a
+   regression, and `apply` refuses the report. The release waits. Open its
+   `.diff.png` and `.old.png`: find the change that moved it (a
+   dependency, the box's image, a test that is not deterministic), file a
+   ticket and fix the cause in the code; run the job again once the fix is
+   on `next`. An image may be accepted unexplained only on the
+   coordinator's word, by regenerating it in the fixing pull request with
+   the reason in its body.
+
+The likely cause is a best effort, by suite and not by image: a pull
+request that touched any crate a suite draws with explains every image of
+that suite. It catches a change that comes from outside the code (the
+lock, the box, a flaky render) and names who to ask, not more.
+
+## The release workflow
 
 The release workflow checks the tag against the workspace version, then:
 

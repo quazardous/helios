@@ -7034,6 +7034,7 @@ version = "0.91.0"
 dependencies = [
  "egui-pop-i18n",
  "helios-i18n",
+ "png",
  "serde_json",
 ]
 
