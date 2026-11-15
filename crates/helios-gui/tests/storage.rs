@@ -274,6 +274,16 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
     });
 }
 
+/// The Studio disk's row: its name, edited in place.
+fn studio_row(h: &Harness<'_, Shell>) -> bool {
+    h.query(
+        By::new()
+            .role(egui::accesskit::Role::TextInput)
+            .value("Studio"),
+    )
+    .is_some()
+}
+
 /// The page's values are read away from the frame (the read kernel, the
 /// storage link's thread): with the volumes slow to read, opening the
 /// page does not wait for them, and a disk unplugged updates its row
@@ -301,8 +311,7 @@ fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
             && h.query_all_by_label("Space").next().is_some()
     });
     until(&mut h, "the rows", |h| {
-        h.query_all_by_label_contains("Studio").next().is_some()
-            && h.query_by_label("2 online, 0 offline").is_some()
+        studio_row(h) && h.query_by_label_contains("2 online, 0 offline").is_some()
     });
     // The backup disk goes: its row says so, the page never blanks
     // while the volumes are read again.
@@ -325,15 +334,12 @@ fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         h.step();
-        assert!(
-            h.query_all_by_label_contains("Studio").next().is_some(),
-            "a refresh blanked the volumes"
-        );
+        assert!(studio_row(&h), "a refresh blanked the volumes");
         assert!(
             h.query_all_by_label("Volumes").next().is_some(),
             "nor its status's label"
         );
-        if h.query_by_label("1 online, 1 offline").is_some() {
+        if h.query_by_label_contains("1 online, 1 offline").is_some() {
             break;
         }
         assert!(Instant::now() < deadline, "the unplugged disk never showed");
