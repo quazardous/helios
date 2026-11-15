@@ -171,7 +171,7 @@ impl PasteMode {
 impl Library {
     /// Selects nothing: no photo selected, no cursor.
     pub fn select_none(&mut self) {
-        self.state.set_selection(Vec::<String>::new(), None);
+        self.view.state.set_selection(Vec::<String>::new(), None);
         self.selected = None;
     }
 
@@ -179,8 +179,9 @@ impl Library {
     /// to the first of them. How many are selected.
     pub fn invert_selection(&mut self) -> usize {
         let selected: std::collections::HashSet<String> =
-            self.state.selection().keys().iter().cloned().collect();
+            self.view.state.selection().keys().iter().cloned().collect();
         let keys: Vec<String> = self
+            .view
             .order
             .iter()
             .map(|&i| self.entries[i].id.clone())
@@ -225,7 +226,8 @@ impl Library {
 
     /// The ids of the photos shown that `keep` takes, in order.
     pub(crate) fn shown_where(&self, keep: impl Fn(&super::Entry) -> bool) -> Vec<String> {
-        self.order
+        self.view
+            .order
             .iter()
             .map(|&i| &self.entries[i])
             .filter(|e| keep(e))
@@ -238,8 +240,8 @@ impl Library {
         let cursor = keys.first().cloned();
         self.selected = cursor.as_ref().and_then(|c| self.at(c));
         let count = keys.len();
-        self.state.set_selection(keys, cursor);
-        self.state.reveal_cursor();
+        self.view.state.set_selection(keys, cursor);
+        self.view.state.reveal_cursor();
         count
     }
 

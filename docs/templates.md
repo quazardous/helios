@@ -277,6 +277,15 @@ What the workspace sets for the library (optional):
   vault. Absent, the whole library. A click in the Library panel's
   Albums section and `library.collection` write it (one undo step); an
   album deleted since shows no photo.
+- `views` (2026-11-15) holds the other Library views' own query,
+  folder and collection, by view: `window` is the Library window's
+  (`{"views": {"window": {"collection": "trip-2024"}}}`). `query`,
+  `folder` and `collection` above are the main window's Library
+  panel's; a workspace written before the views were apart loads into
+  that panel only. The folder or album chosen in a view, and
+  `library.folder` and `library.collection` run while a view has the
+  input, are kept with that view; validation checks each view's query
+  and folder as above.
 - `export` (2026-11-07) is what the export dialog (`library.export`,
   File > Export…) starts from, written as `library.export` takes its
   arguments: `format` (`jpeg`, `png`, `tiff`), `quality` (JPEG, 1 to

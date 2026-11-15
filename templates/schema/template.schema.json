@@ -258,6 +258,19 @@
           "description": "The collection the library is scoped to (an album, by its id in the vault); the whole library when absent.",
           "type": "string",
           "minLength": 1
+        },
+        "views": {
+          "description": "The other Library views, by gallery id (window: the Library window), each with its own query and scope; query, folder and collection above are the main window's Library panel's.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": { "$ref": "#/$defs/query" },
+              "folder": { "type": "string", "minLength": 1 },
+              "collection": { "type": "string", "minLength": 1 }
+            }
+          }
         }
       }
     },

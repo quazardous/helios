@@ -186,6 +186,35 @@ pub struct LibraryDesc {
     /// vault; the Albums section's choice); the whole library when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
+    /// The other Library views, by gallery id (`window`: the Library
+    /// window), each with its own query and scope. `query`, `folder` and
+    /// `collection` above are the main window's Library panel's: a
+    /// workspace written before the views were apart loads into that
+    /// panel only.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub views: BTreeMap<String, ViewDesc>,
+}
+
+/// What one Library view opens on: its query, its folder, its album.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewDesc {
+    /// The view opens filtered on these images.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<QueryDesc>,
+    /// The folder the view is scoped to (an absolute path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// The album the view is scoped to (its id in the vault).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
+}
+
+impl ViewDesc {
+    /// Whether it sets nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == ViewDesc::default()
+    }
 }
 
 /// How the library orders its photos: what by ([`SORTS`]), and which way.

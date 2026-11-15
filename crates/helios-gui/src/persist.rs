@@ -143,9 +143,9 @@ pub struct Persist<S: Store> {
     /// Where the images of the library the host asked read can be read,
     /// once shown ([`Persist::take_filled`]).
     filled: Option<Files>,
-    /// The search filter's query being run: the photos it takes and the
-    /// facet counts.
-    searching: Option<Receiver<Result<Searched, String>>>,
+    /// The search filters' queries being run, by gallery: the photos
+    /// each takes and the facet counts.
+    searching: Vec<(String, Receiver<Result<Searched, String>>)>,
     /// The stacks and the proposals waiting being read again
     /// ([`Persist::ask_stacks`]).
     stacking: Option<Receiver<Result<Stacked, String>>>,
@@ -1275,7 +1275,7 @@ impl<S: Store + 'static> Persist<S> {
             filling: None,
             fill_again: None,
             filled: None,
-            searching: None,
+            searching: Vec::new(),
             stacking: None,
             stack_again: false,
             asked: Vec::new(),
@@ -1300,7 +1300,7 @@ impl<S: Store + 'static> Persist<S> {
             || !self.writes.is_empty()
             || !self.reading.is_empty()
             || self.filling.is_some()
-            || self.searching.is_some()
+            || !self.searching.is_empty()
             || self.stacking.is_some()
             || !self.asked.is_empty()
     }
@@ -1391,24 +1391,23 @@ impl<S: Store + 'static> Persist<S> {
                 }
             }
         }
-        if let Some(searching) = &self.searching {
-            let read = match searching.try_recv() {
+        let mut i = 0;
+        while i < self.searching.len() {
+            let read = match self.searching[i].1.try_recv() {
                 Ok(read) => Some(read),
                 Err(TryRecvError::Empty) => None,
                 Err(TryRecvError::Disconnected) => {
                     Some(Err("the search stopped (a panic)".to_string()))
                 }
             };
-            if let Some(read) = read {
-                self.searching = None;
-                match read {
-                    Ok((ids, facets)) => {
-                        let mut library = shell.library_mut();
-                        library.set_facets(facets);
-                        library.set_matches(ids);
-                    }
-                    Err(e) => unreadable(shell, e),
-                }
+            let Some(read) = read else {
+                i += 1;
+                continue;
+            };
+            let (gallery, _) = self.searching.swap_remove(i);
+            match read {
+                Ok((ids, facets)) => shell.library_mut().set_answer(&gallery, facets, ids),
+                Err(e) => unreadable(shell, e),
             }
         }
         if let Some(stacking) = &self.stacking {
@@ -2411,17 +2410,20 @@ impl<S: Store + 'static> Persist<S> {
             self.asked.push((Asked::Folders, pending));
         }
         self.edit_albums(shell, now);
-        let query = shell.library_mut().take_query();
-        if let Some(query) = query {
+        let queries = shell.library_mut().take_queries();
+        for (gallery, query) in queries {
             // How many photos carry each value of each facet, then the
             // photos it takes, read through the node on a thread of its
-            // own: a coming frame shows them. A newer query replaces one
-            // still running, whose answer is not shown.
+            // own: a coming frame shows them in the gallery that asked. A
+            // newer query of a gallery replaces one still running, whose
+            // answer is not shown.
             let rule = shell.library().facet_rule().cloned();
             let reader = self.reader.clone();
-            self.searching = Some(spawn("helios-library-search", move || {
+            let running = spawn("helios-library-search", move || {
                 search(&reader, &query, rule.as_ref())
-            }));
+            });
+            self.searching.retain(|(g, _)| *g != gallery);
+            self.searching.push((gallery, running));
         }
         self.hear(shell);
     }
