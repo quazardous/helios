@@ -669,7 +669,7 @@ pub fn suggested_library_folder() -> Option<PathBuf> {
 }
 
 /// The person's Pictures folder, as the platform names it: the Pictures
-/// known folder on Windows (wherever it was moved, OneDrive included),
+/// known folder on Windows (wherever it was moved, a synced cloud folder included),
 /// `XDG_PICTURES_DIR` on Linux and the BSDs, `~/Pictures` on macOS; else
 /// `Pictures` in the home folder. `None` without a home folder.
 pub fn pictures_folder() -> Option<PathBuf> {
