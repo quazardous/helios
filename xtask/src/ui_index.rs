@@ -13,6 +13,7 @@
 //! new `Need` line here or an egui-pop bump.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -396,9 +397,6 @@ fn owner_of(above: &[&str]) -> Option<Owner> {
             };
             return Some(Owner::Type(ident(ty.trim())));
         }
-        if l.starts_with('}') || l.starts_with("//") || l.starts_with('#') {
-            continue;
-        }
     }
     None
 }
@@ -595,7 +593,7 @@ pub fn render(helios: &[Entry], egui_pop: &[Entry], version: &str) -> String {
     );
     let keys: Vec<String> = GROUPS.iter().map(|(g, _)| format!("`{g}`")).collect();
     out.push_str(&keys.join(", "));
-    out.push_str(&format!(".\n\negui-pop in the lock: {version}.\n"));
+    let _ = write!(out, ".\n\negui-pop in the lock: {version}.\n");
     if egui_pop.is_empty() {
         out.push_str(
             "Its crates carry no `Need` lines yet: until the next egui-pop bump, see\n\
@@ -613,19 +611,21 @@ pub fn render(helios: &[Entry], egui_pop: &[Entry], version: &str) -> String {
         if needs.is_empty() {
             continue;
         }
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "\n## {title}\n\n| Need | Use | What it is |\n|---|---|---|\n"
-        ));
+        );
         for (need, (presets, widgets)) in needs {
             let mut first = true;
             let mut row = |call: String, e: &Entry| {
                 let shown = if first { cell(need) } else { String::new() };
                 first = false;
-                out.push_str(&format!(
-                    "| {shown} | {call}<br>`{}` | {} |\n",
+                let _ = writeln!(
+                    out,
+                    "| {shown} | {call}<br>`{}` | {} |",
                     cell(&e.path),
                     cell(&e.summary)
-                ));
+                );
             };
             for e in &presets {
                 row(format!("**`{}`** (Helios preset)", cell(&e.call)), e);
