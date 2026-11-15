@@ -127,6 +127,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.folder", "folder"),
     ("library.importFiles", "phosphor:tray-arrow-down"),
     ("library.importSession", "phosphor:clock-counter-clockwise"),
+    ("library.show", "phosphor:images"),
     ("library.importSource", "phosphor:tray-arrow-down"),
     ("library.importWindow", "phosphor:tray-arrow-down"),
     ("library.importAutomatic.pause", "phosphor:pause"),

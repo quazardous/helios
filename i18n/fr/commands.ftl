@@ -773,6 +773,9 @@ command-init-libraryFolder =
 command-library-importSession =
     .title = Montrer une importation dans la bibliothèque (`id` : une importation de `import.history.list` ; null : toute la bibliothèque), toutes ses photos sélectionnées avec `select: true` ; elle se combine aux autres filtres, rien n’est copié ni déplacé. Sans `id`, dit l’importation montrée
 
+command-library-show =
+    .title = Montrer exactement ces photos dans la bibliothèque (`ids` : des identifiants d’images, par exemple ceux d’une tâche), le filtre vidé et toutes sélectionnées ; le filtre suivant reprend la main. Sans `ids`, dit combien de photos l’ensemble montré contient
+
 command-library-runWorkshop =
     .title = Lancer l’atelier sur la sélection…
 

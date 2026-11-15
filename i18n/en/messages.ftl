@@ -201,6 +201,8 @@ gui-account-status-refused = Access refused
 
 gui-activity-failed = { $count } background tasks failed
 
+gui-activity-idle = Activity: no background task running
+
 gui-activity-importing = Importing { $done }/{ $total }
 
 gui-activity-importing-start = Importing…
@@ -1294,6 +1296,8 @@ gui-jobs-by-node = Automatic
 gui-jobs-by-user = You
 
 gui-jobs-clear = Clear finished
+
+gui-jobs-console = Console
 
 gui-jobs-detail = Job detail
 

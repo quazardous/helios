@@ -564,3 +564,122 @@ fn result_links_open_the_folder_the_library_and_the_import_history() {
     let linked: Vec<Value> = focus(&h)["linked"].as_array().unwrap().clone();
     assert_eq!(linked.len(), 2, "{linked:?}");
 }
+
+/// A finished job naming its photos (a batch, the trash) offers "Show in
+/// Library": the Library on exactly those photos (`library.show`).
+#[test]
+fn a_job_naming_its_photos_shows_exactly_them_in_the_library() {
+    let gate = Arc::new(Gate::default());
+    let Desktop {
+        client,
+        jobs,
+        vault,
+        _mirror,
+        ..
+    } = node_with_jobs(&gate);
+    let ids = ["a".repeat(64), "b".repeat(64)];
+    let batch = jobs.start(
+        Start::new("batch-export-1", "Export 2 photos", "batch")
+            .total(2)
+            .images(ids.clone()),
+    );
+    batch.finished();
+    let mut h = shell_on(client);
+    let p = promise_of(&mut h, &vault, "batch-export-1");
+    open(&mut h, &p.id);
+    until(&mut h, "the batch's link", |h| {
+        focus(h)["links"] == json!([{ "command": "activity.showPhotos", "args": { "ids": ids } }])
+    });
+    h.get_by_label("Show in Library").click();
+    until(&mut h, "the set shown", |h| {
+        h.state().library().shown_set() == Some(2)
+    });
+    // The command itself, as an agent runs it: the set shown; `ids` not
+    // a list is refused and changes nothing.
+    h.state_mut()
+        .run("library.show", json!({ "ids": [&ids[0]] }), Origin::User)
+        .unwrap();
+    until(&mut h, "the one-photo set shown", |h| {
+        h.state().library().shown_set() == Some(1)
+    });
+    let _ = h
+        .state_mut()
+        .run("library.show", json!({ "ids": "a" }), Origin::User);
+    h.run_steps(3);
+    assert_eq!(h.state().library().shown_set(), Some(1));
+}
+
+/// What a job of the desktop's writes as it goes (`job.log`) shows in
+/// its detail as its console.
+#[test]
+fn a_jobs_console_shows_in_its_detail() {
+    let gate = Arc::new(Gate::default());
+    let (client, promises) = node(&gate);
+    let mut h = shell_on(client);
+    let jobs = h.state().jobs();
+    promises.cancel_through(jobs.clone());
+    let vault = promises.vault().clone();
+    let _mirror = JobPromises::start(vault.clone(), jobs.bus().subscribe());
+    let job = jobs.start(Start::new("calibration-1", "Calibrate", "calibration").total(2));
+    job.log("gpu: 3 kernels timed");
+    let p = promise_of(&mut h, &vault, "calibration-1");
+    open(&mut h, &p.id);
+    until(&mut h, "the console", |h| {
+        focus(h)["console"] == json!(["gpu: 3 kernels timed"])
+    });
+    assert!(h.query_by_label("gpu: 3 kernels timed").is_some());
+    job.finished();
+}
+
+/// A connected node's job, relayed to the desktop, keeps its Cancel: its
+/// promise says it is cancelled on that node (`relayed`).
+#[test]
+fn a_relayed_jobs_promise_offers_cancel() {
+    let gate = Arc::new(Gate::default());
+    let Desktop {
+        client,
+        jobs,
+        vault,
+        _mirror,
+        ..
+    } = node_with_jobs(&gate);
+    let relayed = jobs.start(Start::new("node:studio/export-3", "Export c.jpg", "export"));
+    let snapshot =
+        jobs.start(Start::new("node:studio/snapshot-1", "Snapshot", "snapshot").not_cancellable());
+    let mut h = shell_on(client);
+    let p = promise_of(&mut h, &vault, "node:studio/export-3");
+    assert_eq!(p.request["relayed"], true, "{p:?}");
+    let q = promise_of(&mut h, &vault, "node:studio/snapshot-1");
+    assert!(q.request["relayed"].is_null(), "{q:?}");
+    open(&mut h, &p.id);
+    until(&mut h, "Cancel on the relayed job", |h| {
+        h.query_all_by_label("Cancel").count() > 0
+    });
+    // Asked, it goes to the node's relay: none is followed here, which is
+    // said, and the job runs on.
+    in_detail(&h, "Cancel").click();
+    h.run_steps(3);
+    assert!(!relayed.ended());
+    relayed.finished();
+    snapshot.finished();
+}
+
+/// With no job at all, the status bar still shows the quiet Activity
+/// icon, and its click opens the focus (the history); View › Activity…
+/// runs the same command.
+#[test]
+fn with_no_job_the_quiet_indicator_opens_the_focus() {
+    let gate = Arc::new(Gate::default());
+    let (client, _promises) = node(&gate);
+    let mut h = shell_on(client);
+    let idle = "Activity: no background task running";
+    until(&mut h, "the quiet indicator", |h| {
+        h.query_by_label(idle).is_some()
+    });
+    assert!(shown(&h, helios_gui::activity::MARK).is_none());
+    assert_eq!(focus(&h)["open"], false);
+    h.get_by_label(idle).click();
+    until(&mut h, "the focus open", |h| focus(h)["open"] == true);
+    let view = h.state_mut().menu_items("app.menu.view").to_string();
+    assert!(view.contains("activity.show"), "{view}");
+}

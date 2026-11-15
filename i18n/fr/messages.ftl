@@ -687,6 +687,8 @@ gui-jobs-items-failed = En échec
 gui-jobs-kind = Type
 gui-jobs-kind-all = Tous les types
 gui-jobs-left = Temps restant
+gui-jobs-console = Console
+
 gui-jobs-log = Journal
 gui-jobs-none = Aucune tâche de fond
 gui-jobs-none-selected = Aucune tâche sélectionnée
@@ -2329,6 +2331,8 @@ gui-activity-importing = Importation { $done }/{ $total }
 gui-activity-importing-start = Importation…
 
 gui-activity-percent = { $label } { $percent } %
+
+gui-activity-idle = Activité : aucune tâche de fond en cours
 
 gui-activity-show = Afficher les tâches de fond
 

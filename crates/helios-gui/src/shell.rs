@@ -117,6 +117,7 @@ pub use import_history::{Reader as ImportHistoryReader, reader_of as import_hist
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
+mod reads;
 mod storage;
 mod storage_admin;
 pub use storage_admin::{
@@ -1032,7 +1033,8 @@ impl Shell {
         let engine = crate::viewport::engine();
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
-        agent_state.set(library.clone(), viewport.clone());
+        let activity = crate::activity::Activity::default();
+        agent_state.set(library.clone(), viewport.clone(), activity.followed());
         let system: crate::clipboard::system::Shared = Rc::new(RefCell::new(Box::new(
             crate::clipboard::system::Arboard::default(),
         )));
@@ -1076,7 +1078,7 @@ impl Shell {
             stack_review: Rc::default(),
             duplicates: Rc::default(),
             imports: Vec::new(),
-            activity: crate::activity::Activity::default(),
+            activity,
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
             init: init_wizard::InitState::default(),
@@ -1131,6 +1133,9 @@ impl Shell {
             notes: Vec::new(),
         };
         shell.restore_focus_windows();
+        // The Settings app reads the Storage page's values through the
+        // read kernel, away from the frame.
+        shell.attach_reads();
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
         }
@@ -4112,7 +4117,7 @@ impl Shell {
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
-        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
+        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP, MENU_VIEW};
         use egui_pop::api::windows::MENU_WINDOW;
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
@@ -4159,6 +4164,9 @@ impl Shell {
                 3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
             ),
+            // View > Activity… (Ctrl+Shift+J): the background jobs, open
+            // whether one runs or not.
+            command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),
             // File > Storage: the disks and what each is for.
             command(MENU_FILE, "1_import", 3, storage::COMMAND),
             // Help > Health check.

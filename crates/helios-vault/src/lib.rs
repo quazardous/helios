@@ -45,6 +45,7 @@ pub mod contract;
 pub mod copies;
 pub mod cull;
 pub mod edit;
+pub mod extract;
 pub mod fields;
 pub mod files;
 pub mod journal;

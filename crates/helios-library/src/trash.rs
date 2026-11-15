@@ -341,6 +341,7 @@ pub fn work<S: Store>(
         j.start(
             Start::new(id, &format!("Move {total} files to the trash"), KIND)
                 .total(total)
+                .images(job.images.iter().cloned())
                 .not_cancellable(),
         )
     });
