@@ -4,10 +4,11 @@
 //! It shows the same Library as the main window's Library panel (the
 //! browse sections, the filter and facets, the albums and smart albums,
 //! the marks bar with its versions strip, the grid and its stacks), not a
-//! copy: one [`crate::library::Library`], so the selection, the
-//! collection shown and the marks are the same in both windows, and a
-//! command (a key, a menu, an agent's) acts on that selection whichever
-//! window it came from. The window is opened as the other foci's are
+//! copy: one [`crate::library::Library`], so the photos and their marks
+//! are the same in both windows. Each window draws its own gallery
+//! ([`crate::library::WINDOW_GALLERY`]): its search, filter, album or
+//! folder and selection are its own, and a command (a key, a menu, an
+//! agent's) acts on the gallery of the window with the input. The window is opened as the other foci's are
 //! ([`super::focus_window`]); its size and place are kept by egui-pop and
 //! it opens again at the next start when it was open at the last quit.
 

@@ -2,21 +2,63 @@
 //! section 6).
 //!
 //! [`Gallery`] holds what one view of the photos keeps for itself: its
-//! search field, filter, the order it shows, its sort, its selection and
-//! cursor, its facet counts. [`super::Library`] keeps what every view
-//! reads (the entries, albums, folders, thumbnails) and, for now, the one
-//! gallery every window draws, `main` (shared selection, decided
-//! 2026-11-14). The commander layout adds more galleries later.
+//! search field, filter, restriction (album, folder, import session, a
+//! set shown alone), the order it shows, its selection and cursor, its
+//! facet counts. [`super::Library`] keeps what every view reads (the
+//! entries, albums, folders, thumbnails, the sort the entries are read
+//! in) and one gallery per host, by id: the main window's Library panel
+//! (`main`) and the Library window (`window`) each have their own, so
+//! filtering or restricting one never changes the other (owner,
+//! 2026-11-15). The workspace keeps each one's restriction and query
+//! apart. The commander layout and the filmstrip add more later.
 //!
-//! [`GalleryOptions`] is what a host asks of the gallery it draws: one
-//! component, a more or less complete search depending on where it is
-//! hosted. The main window's Library panel and the Library window each
-//! give theirs.
+//! [`GalleryOptions`] is what a host asks of the gallery it draws: its
+//! id, and a more or less complete search depending on where it is
+//! hosted.
 
 use egui_pop::views::library::LibraryState;
 use egui_pop::views::library::filter::{Filter, SearchState};
+use helios_template::{LibraryDesc, ViewDesc};
 use helios_vault::fields::Query;
 use std::collections::HashSet;
+
+/// The main window's Library panel's gallery.
+pub const MAIN_GALLERY: &str = "main";
+
+/// The Library window's gallery.
+pub const WINDOW_GALLERY: &str = "window";
+
+/// What the workspace keeps for the gallery `id`: the main panel's at the
+/// top of `library` (where a workspace written before the views were
+/// apart has it), another's under `library.views`.
+pub fn view_of(library: Option<&LibraryDesc>, id: &str) -> ViewDesc {
+    let Some(l) = library else {
+        return ViewDesc::default();
+    };
+    if id == MAIN_GALLERY {
+        ViewDesc {
+            query: l.query.clone(),
+            folder: l.folder.clone(),
+            collection: l.collection.clone(),
+        }
+    } else {
+        l.views.get(id).cloned().unwrap_or_default()
+    }
+}
+
+/// Writes what the workspace keeps for the gallery `id` ([`view_of`]); an
+/// empty view of another gallery is none at all.
+pub fn set_view(library: &mut LibraryDesc, id: &str, view: ViewDesc) {
+    if id == MAIN_GALLERY {
+        library.query = view.query;
+        library.folder = view.folder;
+        library.collection = view.collection;
+    } else if view.is_empty() {
+        library.views.remove(id);
+    } else {
+        library.views.insert(id.to_string(), view);
+    }
+}
 
 /// How much search a gallery offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,8 +90,8 @@ pub enum SourcesPlace {
 /// What a host asks of the gallery it draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GalleryOptions {
-    /// The gallery's id, for its widgets and later its saved state
-    /// (`main`, `pane-1`, `filmstrip`).
+    /// The gallery's id: the state it draws and the workspace keeps
+    /// (`main`, `window`; later `pane-1`, `filmstrip`).
     pub id: &'static str,
     pub search: SearchMode,
     pub sources: SourcesPlace,
@@ -66,7 +108,7 @@ pub struct GalleryOptions {
 impl GalleryOptions {
     /// The main window's Library panel.
     pub const MAIN_PANEL: GalleryOptions = GalleryOptions {
-        id: "main",
+        id: MAIN_GALLERY,
         search: SearchMode::Compact,
         sources: SourcesPlace::Header,
         sort_count: true,
@@ -74,10 +116,10 @@ impl GalleryOptions {
         marks: true,
     };
 
-    /// The Library window: the same `main` gallery (one selection, one
-    /// filter in both windows), with the full search.
+    /// The Library window: a gallery of its own (its search, filter,
+    /// restriction and selection), with the full search.
     pub const LIBRARY_WINDOW: GalleryOptions = GalleryOptions {
-        id: "main",
+        id: WINDOW_GALLERY,
         search: SearchMode::Full,
         sources: SourcesPlace::Panel,
         sort_count: true,
@@ -162,10 +204,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_windows_draw_the_main_gallery() {
-        // One selection and one filter in both windows (2026-11-14): the
-        // two hosts name the same gallery.
-        assert_eq!(
+    fn each_window_draws_its_own_gallery() {
+        // Separate filters and restrictions per view (owner, 2026-11-15):
+        // the two hosts name different galleries.
+        assert_ne!(
             GalleryOptions::MAIN_PANEL.id,
             GalleryOptions::LIBRARY_WINDOW.id
         );
@@ -173,5 +215,30 @@ mod tests {
         assert_eq!(GalleryOptions::LIBRARY_WINDOW.search, SearchMode::Full);
         assert!(!GalleryOptions::BARE.has_search());
         assert!(!GalleryOptions::BARE.has_sources());
+    }
+
+    #[test]
+    fn an_old_workspace_s_scope_is_the_main_panel_s() {
+        // Written before the views were apart: `library.collection` alone.
+        let old: LibraryDesc =
+            serde_json::from_value(serde_json::json!({ "collection": "test" })).unwrap();
+        assert_eq!(
+            view_of(Some(&old), MAIN_GALLERY).collection.as_deref(),
+            Some("test")
+        );
+        assert!(view_of(Some(&old), WINDOW_GALLERY).is_empty());
+
+        // The window's scope goes under `views`, the panel's stays.
+        let mut l = old.clone();
+        let window = ViewDesc {
+            folder: Some("/photos".into()),
+            ..ViewDesc::default()
+        };
+        set_view(&mut l, WINDOW_GALLERY, window.clone());
+        assert_eq!(view_of(Some(&l), WINDOW_GALLERY), window);
+        assert_eq!(l.collection.as_deref(), Some("test"));
+        set_view(&mut l, WINDOW_GALLERY, ViewDesc::default());
+        assert!(l.views.is_empty(), "an empty view is none at all");
+        assert_eq!(l, old);
     }
 }

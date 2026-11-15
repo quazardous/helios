@@ -4850,14 +4850,23 @@ impl Shell {
         if let Some(sort) = crate::library::sort_of(l.sort.as_ref()) {
             lib.set_sort(sort);
         }
-        if let Some(q) = &l.query {
-            lib.set_filter(crate::library::filter_of(q));
-        }
-        if let Some(folder) = &l.folder {
-            lib.set_folder(Some(folder));
-        }
-        if let Some(collection) = &l.collection {
-            lib.set_collection(Some(collection));
+        // Each view its own: the main panel's at the top, the others'
+        // under `views`.
+        let ids = std::iter::once(crate::library::MAIN_GALLERY.to_string())
+            .chain(l.views.keys().cloned());
+        for id in ids {
+            let view = crate::library::view_of(Some(l), &id);
+            lib.with_gallery(&id, |lib| {
+                if let Some(q) = &view.query {
+                    lib.set_filter(crate::library::filter_of(q));
+                }
+                if let Some(folder) = &view.folder {
+                    lib.set_folder(Some(folder));
+                }
+                if let Some(collection) = &view.collection {
+                    lib.set_collection(Some(collection));
+                }
+            });
         }
     }
 
@@ -4902,8 +4911,8 @@ impl Shell {
         Ok(json!({ "by": sort.by.name(), "descending": sort.descending }))
     }
 
-    /// `library.folder`: scopes this window's library to a folder, and
-    /// keeps it with the workspace (one undo step) when one is open;
+    /// `library.folder`: scopes the Library view the user works in to a
+    /// folder, and keeps it with that view in the workspace (one undo step) when one is open;
     /// answers the folder in force.
     fn folder_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         if let Some(path) = args.get("path") {
@@ -4912,9 +4921,14 @@ impl Shell {
                 Value::String(p) if Path::new(p).is_absolute() => Some(p.clone()),
                 other => return Err(format!("`path`: {other} is not an absolute folder")),
             };
+            // Kept with the view the user works in (the main panel's or
+            // the Library window's).
+            let gallery = self.focus.library.borrow().gallery_id().to_string();
             if let Some(state) = self.workspace_state() {
                 let mut library = state.bundle.template.library.unwrap_or_default();
-                library.folder.clone_from(&folder);
+                let mut view = crate::library::view_of(Some(&library), &gallery);
+                view.folder.clone_from(&folder);
+                crate::library::set_view(&mut library, &gallery, view);
                 // An empty library section is none at all.
                 let library =
                     (library != helios_template::LibraryDesc::default()).then_some(library);
@@ -4933,8 +4947,8 @@ impl Shell {
         Ok(json!({ "path": self.focus.library.borrow().folder() }))
     }
 
-    /// `library.collection`: scopes this window's library to an album, and
-    /// keeps it with the workspace (one undo step) when one is open;
+    /// `library.collection`: scopes the Library view the user works in to
+    /// an album, and keeps it with that view in the workspace (one undo step) when one is open;
     /// answers the album in force.
     fn collection_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         if let Some(id) = args.get("id") {
@@ -4955,9 +4969,13 @@ impl Shell {
                 }
                 other => return Err(format!("`id`: {other} is not an album's id")),
             };
+            // Kept with the view the user works in.
+            let gallery = self.focus.library.borrow().gallery_id().to_string();
             if let Some(state) = self.workspace_state() {
                 let mut library = state.bundle.template.library.unwrap_or_default();
-                library.collection.clone_from(&id);
+                let mut view = crate::library::view_of(Some(&library), &gallery);
+                view.collection.clone_from(&id);
+                crate::library::set_view(&mut library, &gallery, view);
                 // An empty library section is none at all.
                 let library =
                     (library != helios_template::LibraryDesc::default()).then_some(library);

@@ -556,46 +556,59 @@ impl Shell {
             {
                 lib.set_sort(sort);
             }
-            // The images shown change with the query only: a typed
-            // search stays while the other settings change.
-            let query = |s: &State| {
+            // Each Library view (the main panel, the Library window) its
+            // own: what the workspace keeps for one changes that one only
+            // (`library.views`; the main panel's at the top, where an
+            // older workspace has it).
+            let views = |s: &State| -> Vec<String> {
                 s.bundle
                     .template
                     .library
-                    .as_ref()
-                    .and_then(|l| l.query.clone())
+                    .iter()
+                    .flat_map(|l| l.views.keys().cloned())
+                    .collect()
             };
-            let folder = |s: &State| {
-                s.bundle
-                    .template
-                    .library
-                    .as_ref()
-                    .and_then(|l| l.folder.clone())
-            };
-            let collection = |s: &State| {
-                s.bundle
-                    .template
-                    .library
-                    .as_ref()
-                    .and_then(|l| l.collection.clone())
-            };
-            let query_changed = changed(&|b| query(b) != query(next));
-            if query_changed {
-                lib.set_filter(
-                    query(next)
-                        .as_ref()
-                        .map(crate::library::filter_of)
-                        .unwrap_or_default(),
-                );
+            let mut ids = vec![crate::library::MAIN_GALLERY.to_string()];
+            for id in views(next)
+                .into_iter()
+                .chain(before.map(views).unwrap_or_default())
+            {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
             }
-            // The folders tree's choice, kept with the workspace (a
-            // new filter drops the folder: put back).
-            if query_changed || changed(&|b| folder(b) != folder(next)) {
-                lib.set_folder(folder(next).as_deref());
-            }
-            // And the collection, the Albums section's.
-            if query_changed || changed(&|b| collection(b) != collection(next)) {
-                lib.set_collection(collection(next).as_deref());
+            for id in ids {
+                let view =
+                    |s: &State| crate::library::view_of(s.bundle.template.library.as_ref(), &id);
+                let now = view(next);
+                // The images shown change with the query only: a typed
+                // search stays while the other settings change.
+                let query_changed = changed(&|b| view(b).query != now.query);
+                // The folders tree's choice, kept with the workspace (a
+                // new filter drops the folder: put back).
+                let folder_changed = query_changed || changed(&|b| view(b).folder != now.folder);
+                // And the collection, the Albums section's.
+                let collection_changed =
+                    query_changed || changed(&|b| view(b).collection != now.collection);
+                if !(query_changed || folder_changed || collection_changed) {
+                    continue;
+                }
+                lib.with_gallery(&id, |lib| {
+                    if query_changed {
+                        lib.set_filter(
+                            now.query
+                                .as_ref()
+                                .map(crate::library::filter_of)
+                                .unwrap_or_default(),
+                        );
+                    }
+                    if folder_changed {
+                        lib.set_folder(now.folder.as_deref());
+                    }
+                    if collection_changed {
+                        lib.set_collection(now.collection.as_deref());
+                    }
+                });
             }
         }
         if let Some(b) = before
@@ -1008,7 +1021,8 @@ impl Shell {
                     .workspace_state()
                     .and_then(|s| s.bundle.template.library)
                     .unwrap_or_default();
-                let library = library_of(args, export, sort, kept.folder, kept.collection)?;
+                let library =
+                    library_of(args, export, sort, kept.folder, kept.collection, kept.views)?;
                 self.edit_workspace(&json!({ "library": library }), origin)
             }
             "workspace.reset" => {
@@ -1504,6 +1518,7 @@ fn library_of(
     sort: Option<SortDesc>,
     folder: Option<String>,
     collection: Option<String>,
+    views: BTreeMap<String, helios_template::ViewDesc>,
 ) -> Result<Value, String> {
     let t = |k: &str, default: &str| text(args, k).unwrap_or(default).to_string();
     let source = t("source", "none");
@@ -1537,6 +1552,7 @@ fn library_of(
         && sort.is_none()
         && folder.is_none()
         && collection.is_none()
+        && views.is_empty()
     {
         return Ok(Value::Null);
     }
@@ -1549,6 +1565,7 @@ fn library_of(
         sort,
         folder,
         collection,
+        views,
     }))
 }
 

@@ -500,8 +500,10 @@ names.
    albums** in the UI (what photographers know), "virtual folder" in
    the docs' explanation.
 2. Does the main window's panel and the Library window's first pane
-   stay linked (today's decision), or does each window get its own
-   gallery? Default: linked, and "Add gallery" for independent ones.
+   stay linked, or does each window get its own gallery? *Decided
+   2026-11-15 (owner): apart.* Each Library view keeps its own search,
+   filters, restriction and selection; changing one never changes
+   another, and each is kept with its own view in the workspace.
 3. The quick attribute row (Lightroom's Attribute bar): off by default
    or on in the Lightroom profile? Default: on in the Lightroom
    profile, off otherwise.
@@ -524,9 +526,19 @@ Each slice is one PR with its tests; the order matters.
    that two hosts drawing `main` share selection and filter; snapshot
    of the panel unchanged.
 
-   *First part landed (2026-11-15):* `library::Gallery` holds the view
-   state (search, filter, order, sort, selection, facets) inside
-   `Library`, which keeps the shared data; `GalleryOptions` (`search`,
+   *Landed (2026-11-15), with the views apart (question 2):*
+   `library::Gallery` holds the view state (search, filter,
+   restriction, order, selection, facets) inside `Library`, which keeps
+   the shared data and one gallery per host by id (`main` for the main
+   window's panel, `window` for the Library window): `Library::show`
+   puts the host's gallery in force for its drawing, and the gallery of
+   the window with the input is the one commands act on. Each gallery's
+   vault query runs and is answered on its own. The sort stays one for
+   every gallery (the order the entries are read in) until the vault
+   sorts per gallery. The workspace keeps the main panel's query,
+   folder and collection at the top of `library`, where older
+   workspaces have them (they load into the main panel only), and the
+   other views' under `library.views.<id>`; `GalleryOptions` (`search`,
    `sources`, `sort_count`, `view_options`, `marks`) with
    `MAIN_PANEL`, `LIBRARY_WINDOW` and `BARE`, each host drawing
    `Library::show(ui, &options)`. The filter keys are declared
@@ -534,8 +546,8 @@ Each slice is one PR with its tests; the order matters.
    values, facet, term); the facets bar lists them. It is a typed
    registry until the hook kernel of [hooks.md](hooks.md) exists, then
    its declarations are collected through `library.search.keys`.
-   Still to do in G1: `Library` renamed `LibraryData` with galleries
-   owned by their hosts; the grid moved onto the import window's
+   Left for later slices (parked): `Library` renamed `LibraryData`; a
+   sort per gallery; the filmstrip's own gallery; the grid moved onto the import window's
    browser core (view modes, thumbnail size), egui-pop's `ThumbGrid`
    and file browser meeting there.
 2. **G2. Hosts switch, the zone is regrouped.** The gallery's bar

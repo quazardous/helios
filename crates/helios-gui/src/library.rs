@@ -87,7 +87,10 @@ pub use batch::{
     TrashAsk, Turn,
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
-pub use gallery::{Gallery, GalleryOptions, SearchMode, SourcesPlace};
+pub use gallery::{
+    Gallery, GalleryOptions, MAIN_GALLERY, SearchMode, SourcesPlace, WINDOW_GALLERY, set_view,
+    view_of,
+};
 pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use keywords::{
     DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
@@ -1645,9 +1648,18 @@ impl BackupMark {
 }
 
 pub struct Library {
-    /// The gallery every window draws, `main` (`gallery`): its search,
-    /// filter, order, sort and selection.
+    /// The gallery in force (`gallery`), `view_id`: its search, filter,
+    /// restriction, order and selection. Each host draws its own
+    /// ([`GalleryOptions::id`]); what does not name one acts on it.
     view: Gallery,
+    /// The id of the gallery in force.
+    view_id: String,
+    /// The other galleries, by id: each keeps its own state while
+    /// another is in force.
+    parked: Vec<(String, Gallery)>,
+    /// The gallery commands act on: the last one drawn in a pass with
+    /// input (the window the user works in).
+    focused: String,
     /// The filter keys, built-in and declared by modules
     /// ([`Library::search_keys_mut`]).
     search_keys: SearchKeys,
@@ -1879,6 +1891,9 @@ impl Default for Library {
         Library {
             entries: Vec::new(),
             view: Gallery::new(LIBRARY),
+            view_id: GalleryOptions::MAIN_PANEL.id.to_string(),
+            parked: Vec::new(),
+            focused: GalleryOptions::MAIN_PANEL.id.to_string(),
             search_keys: SearchKeys::builtin(),
             selected: None,
             auto_advance: false,
@@ -2340,6 +2355,62 @@ impl Library {
     /// The facet counts of the filter, as the vault counted them.
     pub fn set_facets(&mut self, facets: helios_vault::Facets) {
         self.view.facets = Some(facets);
+    }
+
+    /// The id of the gallery in force: the one the filter, restriction
+    /// and selection methods act on.
+    pub fn gallery_id(&self) -> &str {
+        &self.view_id
+    }
+
+    /// The galleries' ids, the one in force first.
+    pub fn gallery_ids(&self) -> Vec<String> {
+        std::iter::once(self.view_id.clone())
+            .chain(self.parked.iter().map(|(id, _)| id.clone()))
+            .collect()
+    }
+
+    /// Puts the gallery `id` in force, made showing everything the first
+    /// time. The sort is the entries' reading order: one for every
+    /// gallery, it follows to the gallery put in force.
+    pub fn activate(&mut self, id: &str) {
+        if self.view_id == id {
+            return;
+        }
+        let (incoming, made) = match self.parked.iter().position(|(g, _)| g == id) {
+            Some(i) => (self.parked.swap_remove(i).1, false),
+            None => (Gallery::new(&format!("{LIBRARY}.{id}")), true),
+        };
+        let sort = self.view.sort;
+        let out = std::mem::replace(&mut self.view, incoming);
+        let out_id = std::mem::replace(&mut self.view_id, id.to_string());
+        self.parked.push((out_id, out));
+        self.view.sort = sort;
+        if made {
+            self.reorder_view();
+        }
+    }
+
+    /// Runs `f` with the gallery `id` in force, then puts back the one
+    /// that was.
+    pub fn with_gallery<R>(&mut self, id: &str, f: impl FnOnce(&mut Self) -> R) -> R {
+        let before = self.view_id.clone();
+        self.activate(id);
+        let out = f(self);
+        self.activate(&before);
+        out
+    }
+
+    /// The gallery the user works in: commands without a gallery of
+    /// their own act on it.
+    pub fn focused_gallery(&self) -> &str {
+        &self.focused
+    }
+
+    /// Puts the gallery the user works in in force.
+    pub fn activate_focused(&mut self) {
+        let id = self.focused.clone();
+        self.activate(&id);
     }
 
     /// The filter keys the search knows.
@@ -2806,6 +2877,17 @@ impl Library {
     /// What the views show, in order: a stack's top image first, its
     /// other members right after it.
     fn reorder(&mut self) {
+        self.reorder_view();
+        // The entries changed for every gallery: each shows them again.
+        for i in 0..self.parked.len() {
+            std::mem::swap(&mut self.view, &mut self.parked[i].1);
+            self.reorder_view();
+            std::mem::swap(&mut self.view, &mut self.parked[i].1);
+        }
+    }
+
+    /// The gallery in force's order, from the entries and its filter.
+    fn reorder_view(&mut self) {
         let stacks = self.view.filter.is_empty() && self.view.only.is_none();
         let mut order = Vec::new();
         let mut placed: HashSet<&str> = HashSet::new();
@@ -2884,7 +2966,7 @@ impl Library {
             self.view.facets = None;
         }
         self.view.filter = filter;
-        self.reorder();
+        self.reorder_view();
     }
 
     /// The order the photos are read in: this focus's sort.
@@ -2909,7 +2991,11 @@ impl Library {
 
     /// Whether the photos must be read again in the sort, once.
     pub fn take_resort(&mut self) -> bool {
-        self.view.resort.take().is_some()
+        let mut any = self.view.resort.take().is_some();
+        for (_, g) in &mut self.parked {
+            any |= g.resort.take().is_some();
+        }
+        any
     }
 
     /// The filter in force used (applied, a facet, a folder or an album
@@ -2976,10 +3062,39 @@ impl Library {
         self.view.query.take()
     }
 
+    /// The vault queries the galleries need run, once each, with the
+    /// gallery each is for ([`Library::set_answer`]).
+    pub fn take_queries(&mut self) -> Vec<(String, Query)> {
+        let mut out = Vec::new();
+        if let Some(q) = self.view.query.take() {
+            out.push((self.view_id.clone(), q));
+        }
+        for (id, g) in &mut self.parked {
+            if let Some(q) = g.query.take() {
+                out.push((id.clone(), q));
+            }
+        }
+        out
+    }
+
+    /// The vault's answer to the query of the gallery `id`: the facet
+    /// counts and the images it matched.
+    pub fn set_answer(
+        &mut self,
+        id: &str,
+        facets: helios_vault::Facets,
+        ids: impl IntoIterator<Item = String>,
+    ) {
+        self.with_gallery(id, |lib| {
+            lib.set_facets(facets);
+            lib.set_matches(ids);
+        });
+    }
+
     /// The images the vault matched for the query last taken.
     pub fn set_matches(&mut self, ids: impl IntoIterator<Item = String>) {
         self.view.matches = Some(ids.into_iter().collect());
-        self.reorder();
+        self.reorder_view();
         // An import session shown with its photos selected: all of them,
         // once its query answered.
         if self.select_session.is_some() && self.select_session == self.import_session() {
@@ -3390,7 +3505,7 @@ impl Library {
     pub fn show_ids(&mut self, ids: &[String]) {
         self.set_filter(Filter::default());
         self.view.only = Some(ids.iter().cloned().collect());
-        self.reorder();
+        self.reorder_view();
         self.select_ids(ids);
     }
 
@@ -3403,7 +3518,7 @@ impl Library {
     /// Drops the set shown alone: the Library shows by its filter again.
     pub fn clear_shown_set(&mut self) {
         if self.view.only.take().is_some() {
-            self.reorder();
+            self.reorder_view();
         }
     }
 
@@ -3565,6 +3680,16 @@ impl Library {
         if marked && !self.view.filter.is_empty() {
             // The vault answers again; what no longer matches goes now.
             self.view.query = Some(self.query_for(&self.view.filter));
+        }
+        if marked {
+            // So do the other galleries' filters.
+            let asks: Vec<(usize, Query)> = (self.parked.iter().enumerate())
+                .filter(|(_, (_, g))| !g.filter.is_empty())
+                .map(|(i, (_, g))| (i, self.query_for(&g.filter)))
+                .collect();
+            for (i, q) in asks {
+                self.parked[i].1.query = Some(q);
+            }
             self.reorder();
         }
         marked
@@ -4325,6 +4450,21 @@ impl Library {
     /// sources, the sort and count, the view options and the current
     /// photo's marks each drawn when the options ask, then the grid.
     pub fn show(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+        // Each host draws its own gallery; a pass with input makes it the
+        // one commands act on, a pass without leaves that as it was.
+        let input = ui
+            .ctx()
+            .input(|i| !i.events.is_empty() || i.pointer.any_down());
+        if input {
+            self.focused = options.id.to_string();
+        }
+        self.activate(options.id);
+        self.show_view(ui, options);
+        self.activate_focused();
+    }
+
+    /// [`Library::show`], its gallery in force.
+    fn show_view(&mut self, ui: &mut Ui, options: &GalleryOptions) {
         self.receive(ui.ctx());
         // The search field (with the import button) and the marks bar
         // stay in place while the library is empty.
