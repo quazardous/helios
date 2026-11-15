@@ -2329,6 +2329,8 @@ gui-activity-importing-start = Importation…
 
 gui-activity-percent = { $label } { $percent } %
 
+gui-activity-idle = Activité : aucune tâche de fond en cours
+
 gui-activity-show = Afficher les tâches de fond
 
 gui-activity-running = { $count ->

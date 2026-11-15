@@ -209,6 +209,8 @@ gui-activity-percent = { $label } { $percent } %
 
 gui-activity-running = { $count } background tasks running
 
+gui-activity-idle = Activity: no background task running
+
 gui-activity-show = Show the background tasks
 
 gui-album-not-changed = The album was not changed: { $error }
