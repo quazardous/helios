@@ -3,6 +3,9 @@
 //! parent with its exports as children, kept consistent when the link
 //! drops and comes back, forgotten when the node stays away.
 //!
+//! Its other events reach the shell bus's listeners by kind, resumed
+//! after a reconnection, resynced after a hole (`node_events`).
+//!
 //! The node here is the real protocol over real sockets: a bus whose
 //! jobs an inspector shows and streams (as `helios-node` serves them),
 //! and a control endpoint answering `job.cancel`.
@@ -20,6 +23,7 @@ use egui_pop::api::jobs::JOBS;
 use egui_pop::model::jobs::{JobState, Request};
 use helios_core::jobs::{Jobs, Progress, Start};
 use helios_core::{Bus, Envelope};
+use helios_gui::node_events::{Listener, NodeEvent};
 use helios_gui::relay::{self, NodeLink, Timing};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_inspect::control::ControlRequest;
@@ -38,19 +42,25 @@ const FAST: Timing = Timing {
 /// A node: its bus and jobs, its inspect and control endpoints.
 struct Node {
     dir: PathBuf,
+    bus: Arc<Bus>,
     jobs: Jobs,
     inspector: Inspector,
 }
 
 impl Node {
     fn start(name: &str) -> Node {
+        Node::with_journal(name, helios_core::bus::JOURNAL)
+    }
+
+    /// A node whose bus keeps `journal` events.
+    fn with_journal(name: &str, journal: usize) -> Node {
         let dir =
             std::env::temp_dir().join(format!("helios-node-jobs-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let bus = Arc::new(Bus::new());
+        let bus = Arc::new(Bus::with_journal(journal));
         let jobs = Jobs::new(bus.clone());
-        let inspector = Inspector::new(bus).with_jobs();
+        let inspector = Inspector::new(bus.clone()).with_jobs();
         helios_inspect::serve(inspector.clone(), &dir.join("node.sock")).unwrap();
         let cancels = jobs.clone();
         helios_inspect::serve_at(
@@ -67,6 +77,7 @@ impl Node {
         .unwrap();
         Node {
             dir,
+            bus,
             jobs,
             inspector,
         }
@@ -362,4 +373,70 @@ fn cancel_from_the_centre_stops_it_on_the_node() {
         node.jobs.cancellable().is_empty(),
         "nothing else was cancelled"
     );
+}
+
+/// The next event `listener` hears, or a panic after [`LONG`].
+fn next_heard(listener: &Listener) -> NodeEvent {
+    listener
+        .recv_timeout(LONG)
+        .expect("a node event within the deadline")
+}
+
+#[test]
+fn a_node_s_events_reach_listeners_resumed_and_resynced() {
+    let node = Node::with_journal("events", 16);
+    let mut h = harness();
+    let shell_events = h.state().jobs().bus().subscribe();
+    let heard = h
+        .state()
+        .node_events()
+        .listen("test", &["storage.*", "import.*"]);
+    h.state_mut()
+        .follow_node_with(node.link("box"), FAST)
+        .unwrap();
+    // Followed once a job of the node shows.
+    let job = node.jobs.start(Start::new("scan-1", "Scan", "scan"));
+    wait_for(&shell_events, "job.started", "node:box/scan-1");
+    let says = |kind: &'static str, n: u64, cause: Option<u64>| {
+        node.bus
+            .publish_value("test", cause, kind, json!({ "n": n }))
+    };
+
+    // Several kinds: the ones asked for, in order, with their node and
+    // cause; the others not.
+    says("other.thing", 0, None);
+    let asked = says("storage.changed", 1, None);
+    says("import.done", 2, Some(asked));
+    let e = next_heard(&heard);
+    assert_eq!((e.node.as_str(), e.event.kind), ("box", "storage.changed"));
+    assert_eq!(e.event.payload["n"], 1);
+    let e = next_heard(&heard);
+    assert_eq!(e.event.kind, "import.done");
+    assert_eq!(e.event.cause, Some(asked), "the round trip's cause is kept");
+
+    // A reconnection resumes where it left off: what was said while away
+    // comes once, nothing comes twice, no resync.
+    node.go_away();
+    assert!(h.state().drop_node_link("box"));
+    says("storage.changed", 3, None);
+    node.come_back();
+    let e = next_heard(&heard);
+    assert!(!e.is_resync(), "resumed, not resynced: {e:?}");
+    assert_eq!(e.event.payload["n"], 3);
+    says("storage.changed", 4, None);
+    assert_eq!(next_heard(&heard).event.payload["n"], 4);
+
+    // A hole the node's journal no longer holds: a resync, then on.
+    node.go_away();
+    assert!(h.state().drop_node_link("box"));
+    for n in 10..50 {
+        says("storage.changed", n, None);
+    }
+    node.come_back();
+    let e = next_heard(&heard);
+    assert!(e.is_resync(), "a hole says resync: {e:?}");
+    assert_eq!(e.node, "box");
+    says("storage.changed", 100, None);
+    assert_eq!(next_heard(&heard).event.payload["n"], 100);
+    job.finished();
 }

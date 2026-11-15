@@ -268,8 +268,9 @@ pub(crate) struct ImportWindow {
     /// The node's volume watch the cards come from
     /// ([`Shell::follow_volumes`]).
     volumes: Option<VolumeWatch>,
-    /// Its events, read at each frame of the main window.
-    volume_events: Option<std::sync::mpsc::Receiver<helios_core::Envelope>>,
+    /// Its events (`volume.*` from the desktop's node, through the shell
+    /// bus), read at each frame of the main window.
+    volume_events: Option<crate::node_events::Listener>,
     /// Cards plugged in since the watch's first look, not toasted yet.
     inserted: Vec<Card>,
     /// The context the cards' and the scans' threads ask a frame of.
@@ -616,7 +617,11 @@ impl ImportWindow {
             return;
         };
         let mut mounted = self.sources.mounted.clone();
-        for change in events.try_iter().filter_map(|e| Change::of(&e)) {
+        for change in events
+            .try_iter()
+            .filter(|e| e.node == crate::node_events::LOCAL)
+            .filter_map(|e| Change::of(&e.event))
+        {
             let Some(card) = change.card() else { continue };
             self.cards.retain(|c| c.root != card.root);
             mounted.retain(|m| m.root != card.root);
@@ -897,11 +902,15 @@ impl Shell {
     /// reads the watch's events off the bus at each frame; the watch asks
     /// a frame of the windows when a volume comes or goes.
     pub fn follow_volumes(&mut self, watch: VolumeWatch) {
+        // Its events reach the window as every node's do: relayed on the
+        // shell bus, listened to by kind.
+        self.follow_local_node(watch.bus());
+        let listener = self.node_events().listen("import-window", &["volume.*"]);
         let mut w = self.import.get_mut();
         let (ctx, drawn_in) = (w.ctx.clone(), w.drawn_in.clone());
         // Subscribed before the list is read: a card in both is listed
         // once (by its root).
-        w.volume_events = Some(watch.subscribe());
+        w.volume_events = Some(listener);
         w.cards = watch.cards();
         let mounted = watch
             .mounted()

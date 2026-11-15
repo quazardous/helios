@@ -164,6 +164,9 @@ pub(super) struct Core {
     pub(super) ended: crate::jobs::Ended,
     /// The nodes followed, whose jobs show in the jobs centre.
     pub(super) relays: crate::jobs::Relays,
+    /// The nodes' events on the shell bus, by listener
+    /// (`crate::node_events`).
+    pub(super) node_events: crate::node_events::NodeEvents,
     /// The lost nodes' jobs to take out of the jobs centre.
     pub(super) forgotten: crate::jobs::Forgotten,
     /// The first run's "Coming from darktable?" is offered (the desktop

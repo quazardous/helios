@@ -192,7 +192,7 @@ events never cross from one desktop bus to another.
 
 | Bus | Created by | Published on it | Read by |
 |-----|------------|-----------------|---------|
-| Shell bus | `Shell::builder` | egui-pop's events through `HeliosHost` (`gui.command.*`, `gui.dialog.answered`, `gui.toast.shown`, `gui.edit.*`, `gui.history.changed` and `gui.history.refused`, and any other name as `gui.event` with `name` and `data`: egui-pop's context stack's `context.*` once Helios's egui-pop pin includes it, the parameter picker); `job.*` from `helios_core::jobs::Jobs` (`Shell::jobs`: an import, an export, the GPU calibration); the jobs relay of each connected node (source `relay`: the node's `job.*` with ids `node:<name>/<id>`, `node.link`, `node.jobs_forgotten`) | egui-pop, which reads it back as its journal (`since`, `last_seq`): the jobs centre and its consoles, `Forgotten`, every plugin reading `events_since`; the host's waker thread, which asks for a frame on an event not of kind `gui.*` |
+| Shell bus | `Shell::builder` | egui-pop's events through `HeliosHost` (`gui.command.*`, `gui.dialog.answered`, `gui.toast.shown`, `gui.edit.*`, `gui.history.changed` and `gui.history.refused`, and any other name as `gui.event` with `name` and `data`: egui-pop's context stack's `context.*` once Helios's egui-pop pin includes it, the parameter picker); `job.*` from `helios_core::jobs::Jobs` (`Shell::jobs`: an import, an export, the GPU calibration); the relay of each connected node (source `relay`: the node's `job.*` with ids `node:<name>/<id>`, `node.link`, `node.jobs_forgotten`; source `node:<name>`: the node's other events some listener asks for, and `node.resync`), and the desktop's own node's (`node:local`) | egui-pop, which reads it back as its journal (`since`, `last_seq`): the jobs centre and its consoles, `Forgotten`, every plugin reading `events_since`; the host's waker thread, which asks for a frame on an event not of kind `gui.*`; the listeners of `Shell::node_events` (the import window's `volume.*`, the import sources' `settings.layerChanged`) |
 | Vault bus | `main.rs`, handed to `Persist` when a vault is open | the vault (`vault.field_changed`, `vault.stack_changed`, `vault.version_added`, `edit.saved`); the stack commands (`library.decision`) | `Persist`, each frame: it refreshes the library's fields and stacks |
 | Viewport engine bus | `Viewport::default` | the viewport's engine (`engine.render_requested`, `engine.step_computed`, `engine.gpu_fell_back`, `engine.gpu_lost`, `engine.cache_settled`) | the shell's `engine_notices`, which turns a GPU fallback or loss into a toast |
 
@@ -203,6 +203,43 @@ data goes through the vault, on the vault bus; what the image's engine
 says stays on the viewport engine's bus. A node's events reach the
 desktop only through a relay, which republishes them on the shell bus
 as new envelopes (new `seq`, `mono_us` and `wall_ms`).
+
+#### Node events on the shell bus
+
+(2026-11-15, decided) Windows, panels and services never subscribe to a
+node themselves. The desktop follows each node it is connected to through
+**one relay** (`helios_gui::relay`, `helios_gui::node_events`): a remote
+node's relay holds one `events.subscribe` with every kind; the desktop's
+own node, which runs in its process, is followed on its bus
+(`Shell::follow_local_node`, node `local`). A relay republishes on the
+shell bus the events some listener asked for, with source `node:<name>`
+and the node's own envelope in the payload (`{"node", "event"}`); the
+node's `job.*` go only through the jobs relay, as before.
+
+- **Listening.** `Shell::node_events().listen(id, patterns)` gives a
+  `Listener` of the kinds matching its patterns (`storage.*`,
+  `volume.*`, an exact kind, or `*`): each heard event is a `NodeEvent`,
+  the node's name and its envelope. `NodeEvents::listeners` lists who
+  listens to what; a listener dropped is no longer listed nor asked for.
+- **Resume and resync.** After a dropped link, a remote relay resumes
+  after the last event it read: nothing twice, nothing missed. When it
+  cannot (the node restarted, or its journal no longer holds what was
+  missed), every listener hears `node.resync` for that node, and reads
+  the state again.
+- **Round trip.** A window sends a command to the node (commands, above);
+  the facts come back as events. The relayed envelope keeps the node's
+  `seq` and `cause` (in the node's numbering) and the payload keeps the
+  promise or job id the node puts there, so a window tells the change it
+  asked for from another client's by the promise id its command answered,
+  or by the `cause` chain from an event it already heard.
+- **What stays home.** The desktop's vault and viewport buses are
+  process-local and high rate: a local relay never forwards `vault.*`,
+  `edit.*` or `engine.*`; `Persist` and the shell read them directly.
+
+The listener API leaves room for a later event and hook model: listeners
+already have ids and patterns and can be listed; ordering between
+listeners, a context shared along one emit and error boundaries are not
+built (not decided).
 
 ### Queries: pure reads
 
