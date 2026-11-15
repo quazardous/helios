@@ -3622,8 +3622,6 @@ impl Library {
         let mut marked = false;
         for s in signals {
             match s {
-                // The gallery's state holds the cursor already.
-                Signal::Select { .. } => {}
                 Signal::Rate { keys, rating } => {
                     for i in self.places(&keys) {
                         // As in darktable, a rating takes back a reject.
@@ -3673,7 +3671,9 @@ impl Library {
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
-                Signal::Zoom { .. } | Signal::DragOut { .. } => {}
+                // A selection: the gallery's state holds it, cursor
+                // included, already.
+                Signal::Select { .. } | Signal::Zoom { .. } | Signal::DragOut { .. } => {}
                 Signal::Vetoed { step, reason } => self.notes.push(format!("{step}: {reason}")),
             }
         }
