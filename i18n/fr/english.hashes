@@ -839,6 +839,7 @@ gui-import-window-edit-source ab3bf326294210ac
 gui-import-window-empty fe07d84361c8a78d
 gui-import-window-example 3ee1ea9bdc5fbf23
 gui-import-window-favourites 7192206bcca57ec5
+gui-import-window-filtered 585a7d71ccaf0e2b
 gui-import-window-folders a4ab9b34eea3af48
 gui-import-window-forget b048c9b09ccf06b2
 gui-import-window-forget-hint c993c16ae95c1288
