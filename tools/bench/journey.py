@@ -570,9 +570,9 @@ class Journey:
         listed, apps = self.listed(), self.windows()
         entry["listed"], entry["app_windows"] = listed, apps
         if listed != before[0]:
-            entry["why"] = f"the compositor lists {listed}, {before[0]} before the Settings"
+            entry["why"] = f"the compositor lists {listed}, {before[0]} expected"
         elif sorted(apps) != sorted(before[1]):
-            entry["why"] = f"Helios lists {apps}, {before[1]} before the Settings"
+            entry["why"] = f"Helios lists {apps}, {before[1]} expected"
         else:
             self.painting(entry)
 
@@ -741,7 +741,16 @@ class Journey:
                     "workshop": {"photo": self.photo},
                     "export": {"image": self.image, "export": self.export},
                 }.get(step)
-                before = (self.listed(), self.windows()) if step == "health-close" else None
+                # The windows open before, the Settings aside (an earlier
+                # step may have left them open): what must be left after.
+                before = (
+                    (
+                        [t for t in self.listed() if t != "Settings"],
+                        [w for w in self.windows() if w != "settings"],
+                    )
+                    if step == "health-close"
+                    else None
+                )
                 if "why" not in entry:
                     entry = {**entry, **self.scenario(step, file, extra)}
                 if "why" not in entry and step == "health-close":
