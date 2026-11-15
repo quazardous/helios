@@ -976,6 +976,7 @@ gui-library-album-rules 300ce3a52ca3a3fb
 gui-library-album-smart-tip a349d5159847c73a
 gui-library-albums 8cb6d31ea8697f9d
 gui-library-albums-none 8c55aa302ba40c1b
+gui-library-all-photos 50a56f492c631ea1
 gui-library-auto-advance b947431b44afe299
 gui-library-badge-backed-up 66092309e2a740ca
 gui-library-badge-backup-short 8fac7f711ac4176d
@@ -1107,6 +1108,10 @@ gui-library-rotate-left 8b862d06602996bb
 gui-library-rotate-reset 3ec2f5c2dd0b5c1c
 gui-library-rotate-right 077a60d3d82ca7a2
 gui-library-run-workshop 858f2bdd5bedc811
+gui-library-scope-album fdc4340bdb9b74e7
+gui-library-scope-folder 7e6c253765de694e
+gui-library-scope-import d6b6d3a804970998
+gui-library-scope-set 93b27a643a28f669
 gui-library-search fddceff6dbd31d81
 gui-library-set-delete 40f1e74389fd36cc
 gui-library-set-delete-all ef418a379bdaeaa0

@@ -150,6 +150,19 @@ fn notices_map_to_toast_levels() {
 }
 
 #[test]
+fn a_restriction_shows_its_text_and_lifts_by_its_remove_button() {
+    let mut h = harness(false, |ui, removed| {
+        if helios_ui::restriction(ui, "Album: Trip") {
+            *removed = true;
+        }
+    });
+    h.get_by_label("Album: Trip");
+    h.get_by_label("Remove Album: Trip").click();
+    h.run();
+    assert!(*h.state(), "the removal is reported");
+}
+
+#[test]
 fn a_late_value_keeps_its_room_and_says_its_state() {
     let mut h = harness(
         (Late::<String>::Pending, None, false),
