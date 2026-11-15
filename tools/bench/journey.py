@@ -71,7 +71,7 @@ RAWS = (
 )
 
 # The import's line in the Library's Imports section: "<when> · <source> · <count>".
-SESSION_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d · .+ · (\d+)$")
+SESSION_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d · (.+) · (\d+)$")
 
 # Fixes that leave Helios (a browser, the file manager): not applied.
 OUTSIDE = ("links.open", "library.openFolder")
@@ -383,11 +383,18 @@ class Journey:
         if len(lines) != 1:
             entry["why"] = f"one import line expected in the Imports section, found {lines}"
             return
-        # Its count is recorded, not checked: it counts files, a pair twice,
-        # where the Library counts photos (a known bug, to check strictly
-        # once fixed).
-        entry["session_count"] = int(SESSION_LINE.match(lines[0]).group(1))
+        # It counts photos as the Library does (a pair is one) and names
+        # the card as the user picked it, not its first file.
+        source, count = SESSION_LINE.match(lines[0]).groups()
+        entry["session_count"] = int(count)
         self.session = lines[0]
+        card = (self.work / "card").name
+        if int(count) != self.card["photos"]:
+            entry["why"] = (
+                f"the import's line counts {count} photos, not {self.card['photos']}: {lines[0]}"
+            )
+        elif source != card:
+            entry["why"] = f"the import's line names {source!r}, not the card {card!r}: {lines[0]}"
 
     def health_fixes(self) -> bool:
         """Each fix the health check offers applied, a step each."""
