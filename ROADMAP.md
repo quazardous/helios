@@ -118,6 +118,23 @@ Until it provides their components, the GUI waits and the core goes on
 (2026-10-11, decided): new surfaces (graph editor, layouts, settings,
 tips) are built on egui-pop, not twice; the engine, the vault, modules,
 GPU and parity work continue in parallel.
+No widgets in Helios (2026-11-15, decided): every widget lives in
+egui-pop; a control Helios lacks is added to egui-pop first, then used.
+Helios screens go through one thin crate, `helios-ui`, which holds intent
+presets only (a search field for the Library, an empty state for "no
+photos", a section, a primary action, a value with its loading state)
+mapping to egui-pop widgets and tokens, with no drawing code of its own;
+Clippy's disallowed lists forbid raw egui widgets in the Helios workspace,
+an exception only with a stated reason. `helios-ui` is the goal of the
+presentation work (2026-11-15, decided); its design is in
+docs/design/visual-identity.md.
+Two worlds, each with one source of controls (2026-11-15, decided): the
+form-like parts of Helios (settings and admin pages, the import window's
+panels, dialogs, lists) go through `helios-ui`; the visual module parts
+(the diagram and its toolboxes, the workshops' handles, sliders and
+panels drawn over the image, the controls layer) come from egui_hud only.
+A control either lacks is added to egui-pop or egui_hud first, and
+Clippy's disallowed lists hold each crate to its world.
 Translation goes into egui-pop too (2026-10-11, decided): an official
 `egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
 extraction) built on egui-pop's public API, moved there from

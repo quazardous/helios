@@ -78,7 +78,9 @@ pub trait StorageLink: Send + Sync {
 }
 
 /// The link over the desktop's node and the volumes mounted
-/// (`library.storage.get` and the `storage.*` commands).
+/// (`library.storage.get` and the `storage.*` commands). The volumes
+/// mounted are read on the link's thread too, with the node's answers:
+/// asking each for its free space may take seconds (a network drive).
 ///
 /// Nothing here waits for the node on the caller's thread: the reads
 /// answer what was last read, and a thread of its own runs the writes in
@@ -87,7 +89,6 @@ pub trait StorageLink: Send + Sync {
 /// back moves [`StorageLink::seq`], so the shell shows it at a coming
 /// frame.
 pub struct NodeStorage {
-    mounted: Arc<dyn Volumes>,
     /// What a marker names as the library that wrote it.
     library: String,
     node: Weak<Client>,
@@ -111,6 +112,9 @@ struct Read {
     photos: HashMap<VolumeId, usize>,
     strategy: Option<Strategy>,
     statuses: HashMap<String, BackupStatus>,
+    /// The volumes mounted on this machine, as last read (their free
+    /// space asked of each: slow on a network drive).
+    mounted: Vec<Volume>,
     seq: u64,
 }
 
@@ -126,15 +130,14 @@ impl NodeStorage {
     pub fn new(node: &Arc<Client>, mounted: Arc<dyn Volumes>, library: impl Into<String>) -> Self {
         let (jobs, queue) = std::sync::mpsc::channel();
         let cached = Arc::new(Cached::default());
-        let (weak, c) = (Arc::downgrade(node), cached.clone());
+        let (weak, c, m) = (Arc::downgrade(node), cached.clone(), mounted.clone());
         let spawned = std::thread::Builder::new()
             .name("storage-node".into())
-            .spawn(move || work(&weak, &c, &queue));
+            .spawn(move || work(&weak, &*m, &c, &queue));
         if let Err(e) = spawned {
             log::warn!("storage: no thread to reach the node: {e}");
         }
         let link = Self {
-            mounted,
             library: library.into(),
             node: Arc::downgrade(node),
             cached,
@@ -201,7 +204,7 @@ impl Cached {
 
 /// The link's thread: each batch of jobs waiting, the writes in order,
 /// then one read of all the page shows.
-fn work(node: &Weak<Client>, cached: &Cached, queue: &Receiver<Job>) {
+fn work(node: &Weak<Client>, mounted: &dyn Volumes, cached: &Cached, queue: &Receiver<Job>) {
     while let Ok(first) = queue.recv() {
         let batch: Vec<Job> = std::iter::once(first).chain(queue.try_iter()).collect();
         let n = batch.len();
@@ -224,6 +227,7 @@ fn work(node: &Weak<Client>, cached: &Cached, queue: &Receiver<Job>) {
             }
             match read_all(&node) {
                 Ok(mut read) => {
+                    read.mounted = mounted.volumes();
                     let mut kept = cached.read.lock().unwrap_or_else(PoisonError::into_inner);
                     read.seq = kept.seq + 1;
                     *kept = read;
@@ -260,14 +264,15 @@ fn read_all(node: &Client) -> Result<Read, String> {
             .map(|(id, n)| (VolumeId(id), n))
             .collect(),
         statuses: from(field(&statuses, "statuses")?)?,
+        mounted: Vec::new(),
         seq: 0,
     })
 }
 
 impl StorageLink for NodeStorage {
     fn volumes(&self) -> Result<Vec<Volume>, String> {
-        let known = self.read().known.clone();
-        Ok(registry::merge(known, &self.mounted.volumes()))
+        let read = self.read();
+        Ok(registry::merge(read.known.clone(), &read.mounted))
     }
 
     fn photos(&self) -> Result<HashMap<VolumeId, usize>, String> {
@@ -390,6 +395,8 @@ pub(crate) struct StoragePage {
     shared_waiting: Arc<Mutex<Vec<Card>>>,
     /// The link's [`StorageLink::seq`] last shown.
     seen: u64,
+    /// The node facts the read kernel follows ([`super::reads`]).
+    pub(super) reads: Option<crate::node_events::Listener>,
     /// The waiting cards checked again off the frame, once a backup
     /// ended: each one's path and what it is now.
     checking: Option<Receiver<Checked>>,
@@ -550,12 +557,16 @@ impl Shell {
     /// Each frame: what the link read since shows, and the cards checked
     /// since a backup ended say whether they are safe to format.
     pub(super) fn storage_frame(&mut self) {
+        self.reads_frame();
         if let Some(link) = &self.core.storage.link {
             let seq = link.seq();
             if seq != self.core.storage.seen {
                 self.core.storage.seen = seq;
                 self.show_volumes();
                 self.show_backups();
+                // The Storage page's reads follow, their values kept
+                // while read again.
+                self.read_fact(super::reads::VOLUMES_CHANGED);
             }
         }
         let checked = match &self.core.storage.checking {
