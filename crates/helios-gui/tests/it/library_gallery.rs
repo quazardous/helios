@@ -149,13 +149,9 @@ fn a_module_s_filter_key_shows_in_the_facets_bar() {
         let mut lib = lib.borrow_mut();
         lib.search_keys_mut()
             .register(
-                SearchKey::new(
-                    "test-culling",
-                    "sharpness",
-                    Message::new("test-sharpness", "Sharpness"),
-                )
-                .facet("sharpness")
-                .finite(&["high", "low"]),
+                SearchKey::new("test-culling", "sharpness", Message::plain("Sharpness"))
+                    .facet("sharpness")
+                    .finite(&["high", "low"]),
             )
             .unwrap();
         lib.apply_filter(Filter::parse("rating>=1"));

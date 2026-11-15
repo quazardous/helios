@@ -146,39 +146,44 @@ impl SearchKeys {
     /// The built-in keys: what the search field and the facets bar know
     /// today, facets first in the bar's order.
     pub fn builtin() -> Self {
-        let key =
-            |key: &str, id: &str, label: &str| SearchKey::new(HELIOS, key, Message::new(id, label));
+        let key = |key: &str, label: Message| SearchKey::new(HELIOS, key, label);
         SearchKeys(vec![
-            key("rating", "gui-library-facet-rating", "Rating")
+            key("rating", Message::new("gui-library-facet-rating", "Rating"))
                 .facet("rating")
                 .values(Values::Stars)
                 .term(Term::AtLeast)
                 .value_text(ValueText::Stars),
-            key("label", "gui-library-facet-label", "Label")
+            key("label", Message::new("gui-library-facet-label", "Label"))
                 .facet("label")
                 .finite(&["red", "yellow", "green", "blue", "purple"]),
-            key("flag", "gui-library-facet-flag", "Flag")
+            key("flag", Message::new("gui-library-facet-flag", "Flag"))
                 .facet("flag")
                 .finite(&["pick", "reject", "none"]),
-            key("camera", "gui-library-facet-camera", "Camera").facet("camera"),
-            key("lens", "gui-library-facet-lens", "Lens").facet("lens"),
-            key("type", "gui-library-facet-type", "Type").facet("file_type"),
-            key("presence", "gui-library-facet-presence", "Presence")
-                .facet("presence")
-                .finite(&["present", "offline", "missing"]),
-            key("backup", "gui-library-facet-backup", "Backup")
+            key("camera", Message::new("gui-library-facet-camera", "Camera")).facet("camera"),
+            key("lens", Message::new("gui-library-facet-lens", "Lens")).facet("lens"),
+            key("type", Message::new("gui-library-facet-type", "Type")).facet("file_type"),
+            key(
+                "presence",
+                Message::new("gui-library-facet-presence", "Presence"),
+            )
+            .facet("presence")
+            .finite(&["present", "offline", "missing"]),
+            key("backup", Message::new("gui-library-facet-backup", "Backup"))
                 .facet("backup")
                 .finite(&["met", "short", "unverified", "none"]),
-            key("cull", "gui-library-facet-cull", "Culling")
+            key("cull", Message::new("gui-library-facet-cull", "Culling"))
                 .facet("cull")
                 .finite(&helios_vault::cull::STATES)
                 .value_text(ValueText::Words(super::cull_value)),
-            key("tag", "gui-library-key-tag", "Tag"),
-            key("keyword", "gui-library-key-keyword", "Keyword"),
-            key("date", "gui-library-key-date", "Capture date").values(Values::Date),
-            key("folder", "gui-library-folders", "Folders"),
-            key("collection", "gui-library-albums", "Albums"),
-            key("import", "gui-library-imports", "Imports"),
+            key("tag", Message::new("gui-library-key-tag", "Tag")),
+            key(
+                "keyword",
+                Message::new("gui-library-key-keyword", "Keyword"),
+            ),
+            key("date", Message::new("gui-library-key-date", "Capture date")).values(Values::Date),
+            key("folder", Message::new("gui-library-folders", "Folders")),
+            key("collection", Message::new("gui-library-albums", "Albums")),
+            key("import", Message::new("gui-library-imports", "Imports")),
         ])
     }
 
@@ -254,22 +259,18 @@ mod tests {
     #[test]
     fn a_module_adds_a_key_and_never_redefines_one() {
         let mut keys = SearchKeys::builtin();
-        let sharp = SearchKey::new(
-            "culling",
-            "sharpness",
-            Message::new("test-sharpness", "Sharpness"),
-        )
-        .facet("sharpness")
-        .finite(&["high", "low"]);
+        let sharp = SearchKey::new("culling", "sharpness", Message::plain("Sharpness"))
+            .facet("sharpness")
+            .finite(&["high", "low"]);
         keys.register(sharp).unwrap();
         let (last, facet) = keys.faceted().last().unwrap();
         assert_eq!((last.owner.as_str(), facet), ("culling", "sharpness"));
         assert_eq!(last.term_of("high"), "sharpness:high");
 
-        let again = SearchKey::new("other", "camera", Message::new("test-cam", "Cam"));
+        let again = SearchKey::new("other", "camera", Message::plain("Cam"));
         let err = keys.register(again).unwrap_err();
         assert!(err.contains("helios"), "{err}");
-        let bad = SearchKey::new("other", "a b", Message::new("test-ab", "AB"));
+        let bad = SearchKey::new("other", "a b", Message::plain("AB"));
         assert!(keys.register(bad).is_err());
     }
 }
