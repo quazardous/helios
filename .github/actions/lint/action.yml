@@ -35,7 +35,7 @@ runs:
       shell: bash
       env:
         RUSTDOCFLAGS: -D warnings
-      run: cargo doc --workspace --no-deps --locked
+      run: cargo doc --workspace --no-deps --locked --keep-going
     - name: docs/ui-index.md is current
       if: ${{ !cancelled() }}
       shell: bash

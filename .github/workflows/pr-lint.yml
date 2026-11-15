@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  pr-lint:
+  linters:
     if: github.event.pull_request.head.repo.full_name == github.repository
     # The image of ci.yml's test job, whose cache this job reads.
     runs-on: ubuntu-26.04
@@ -39,9 +39,34 @@ jobs:
       - uses: ./.github/actions/lint
         with:
           base: origin/${{ github.base_ref }}
-      # The English catalogue is the one the declarations give today
-      # (`cargo xtask i18n extract` when it is not): the one test built
-      # here, since a stale catalogue is found by nothing cheaper.
-      - name: English catalogue is current
-        if: ${{ !cancelled() }}
-        run: cargo test --locked -p helios-declarations --test english
+
+  # The English catalogue is the one the declarations give today (`cargo
+  # xtask i18n extract` when it is not): the one test built here, since a
+  # stale catalogue is found by nothing cheaper. Beside the linters, so the
+  # check lasts as long as the longer of the two.
+  catalogue:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          save-if: false
+      - run: cargo test --locked -p helios-declarations --test english
+
+  # The check to wait for, and the one to require: both jobs above passed.
+  pr-lint:
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [linters, catalogue]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            [ "$r" = success ] || { echo "a job ended with: $r"; exit 1; }
+          done

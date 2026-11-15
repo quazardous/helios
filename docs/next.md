@@ -67,7 +67,8 @@ A pull request is merged only when its tests passed on the box and its
    shellcheck, ruff), `cargo doc` without a warning, `cargo xtask
    ui-index --check`, `cargo xtask i18n check`, `cargo xtask check
    --base origin/next` (a changelog fragment) and the English catalogue
-   against the declarations. Look at it once, when the box jobs are
+   against the declarations. Its two jobs (`linters`, `catalogue`) run side by side and `pr-lint`
+   sums them up. Look at it once, when the box jobs are
    done: `gh pr checks <n> --watch --fail-fast` (it returns when the
    check ends), or a single `gh pr checks <n>`; that is all the CI an
    author watches. Red: fix it on the branch, as for a box job. The
