@@ -16,6 +16,8 @@
 //!   values dropped or mapped to `other` and counted, errors ready for
 //!   one corrective retry;
 //! - [`cache`]: the key of a result shared by every use;
+//! - [`result`]: a result for one image, kept on the photo or run-only,
+//!   and the cache seam the call path reads and writes;
 //! - [`builtins`]: the extractors Helios ships, declared.
 //!
 //! It depends on no other Helios crate, so carriers, the extractor
@@ -24,6 +26,7 @@
 pub mod answer;
 pub mod cache;
 pub mod decl;
+pub mod result;
 pub mod schema;
 
 pub use answer::{Adjust, Answer, Value, check_reply, parse_reply, retry_note, validate};
@@ -32,6 +35,7 @@ pub use decl::{
     BuiltinSpec, Capability, Catalog, ContextVar, DeclError, ExtractorDef, ExtractorUse, KeyDecl,
     KeyType, Kind, LlmSpec, Manifest, Values,
 };
+pub use result::{Extracted, MemoryCache, ResultCache};
 pub use schema::{answer_schema, key_instructions};
 
 /// The extractors Helios ships, declared (`builtins.toml`).

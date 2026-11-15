@@ -3068,6 +3068,7 @@ version = "0.90.0"
 dependencies = [
  "blake3",
  "helios-core",
+ "helios-extract",
  "helios-journal",
  "serde",
  "serde_json",

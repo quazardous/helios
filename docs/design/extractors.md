@@ -89,6 +89,30 @@ derived schemas stay in helios-ai's subset moved to helios-ai).
   `PromptCall::run` naming the run. "Stops and asks" is the runs
   layer's, on that refusal.
 
+### Slice 4 built (2026-11-15)
+
+- **Results** (`helios_extract::result`): `Extracted` is one
+  extractor's result for one image (cache key, image, `id@version`,
+  definition hash, the `provider/model` the key was made with, the
+  model as it answered, typed values, adjustments, when).
+  `ResultCache` is the seam the call path reads before a model call and
+  writes after; `MemoryCache` is the reference in memory. A use may
+  override where its results go (`ExtractorUse::keep`), outside the
+  cache key.
+- **In the vault** (`helios_vault::extract`): kept results in
+  `extract/<id>`, one document per image, the latest version winning (a
+  result of an older version goes with its run instead); run-only ones
+  in `workflow/<run>/extract` by cache key, removed with the run. A
+  lookup reads the image's kept document, then the run's results, then
+  those of the other runs still kept. `Vault::extract_cache(run)` is the
+  vault as a `ResultCache`; the contract checks it on both stores.
+- **Through the cache** (`Ai::run_extract`): the key is made from the
+  route the call resolves to (overrides applied), so another model is a
+  miss; a hit calls no model, a miss runs the prompt (one corrective
+  retry) and stores the answer; a failed call stores nothing. The
+  model's own digest, known only once it answered, is recorded in the
+  result, not in the key.
+
 In a manifest the kind is a table (`[extractors.llm]` or `builtin = {
 compute = "capture" }`), not a `kind = "llm"` field as the sketch in
 section 2 shows.

@@ -1071,6 +1071,17 @@ impl Ai {
         self.core.route(capability, prompt)
     }
 
+    /// The route a call would take once `overrides` are applied (run,
+    /// node, diagram, then the map), and where it came from.
+    pub fn resolve(
+        &self,
+        capability: Capability,
+        prompt: Option<&str>,
+        overrides: &Overrides,
+    ) -> Result<(Route, RouteFrom), String> {
+        self.core.resolve(capability, prompt, overrides)
+    }
+
     // Providers.
 
     fn key_state(&self, key: Option<&KeySource>) -> Value {
