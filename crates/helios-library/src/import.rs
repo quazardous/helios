@@ -51,6 +51,14 @@
 //!   copy, in the Library: no backup set up)". [`card_safety`] computes
 //!   it again from the card's files and their images, once a backup job
 //!   ends. Helios never formats a card.
+//! - **RAW+JPEG pairs.** The raws and JPEGs (or HEIFs) this import
+//!   brought into the Library that are pairs ([`crate::pairs`]: same
+//!   folder, same name or the same moment) are made one photo each, the
+//!   raw its master and the JPEG its `camera` file, inside the import's
+//!   own undo step ([`Report::paired`];
+//!   `docs/design/raw-jpeg-pairs.md` section 4). A file already a
+//!   photo's file is held by the Library: imported again, it is known,
+//!   never a photo of its own.
 //! - **A lost source** (a card taken out, a folder moved away) pauses the
 //!   job until it is back; it can still be cancelled.
 //! - **History.** Each import, ended, cancelled or refused, leaves a
@@ -415,6 +423,10 @@ pub struct Report {
     pub edits_failed: u64,
     /// Images whose fields took values an importer listed.
     pub metadata: u64,
+    /// RAW+JPEG pairs made one photo: each pair's JPEG is counted in
+    /// `added` but is its raw's file, not a photo of its own.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paired: u64,
     /// Bytes read from the sources: a copied file is read once, hashed
     /// as it is copied.
     pub read: u64,
@@ -530,8 +542,9 @@ pub fn card_safety<S: Store>(
     let (mut missing, mut short) = (0, 0);
     for (_, id) in &files {
         // A file whose image is not in the Library is not held by it.
+        // A photo's JPEG is held by the Library as its raw is.
         let id = match id {
-            Some(id) if vault.in_library(id)? => *id,
+            Some(id) if vault.holds(id)? => *id,
             _ => {
                 missing += 1;
                 continue;
@@ -961,6 +974,9 @@ struct Run<'a, S: Store> {
     stop: Arc<AtomicBool>,
     /// Each image this import touched, in order, with its rows before.
     touched: Vec<(ImageId, Option<ImageRows>)>,
+    /// The images it brought into the Library, in order: the ones its
+    /// pairing post-step looks at ([`Run::pair_brought`]).
+    brought: Vec<ImageId>,
     /// Its job's id: what sets the Library flag (`library_by`).
     by: String,
     /// The removable volumes mounted as it started ([`Options::places`]).
@@ -975,6 +991,20 @@ impl<S: Store> Run<'_, S> {
             self.touched.push((id, before));
         }
         Ok(())
+    }
+
+    /// The RAW+JPEG pairs among the images this import brought into the
+    /// Library made one photo each ([`crate::pairs`]): the vault's merge,
+    /// whose image rows the import's own step takes in (both images are
+    /// touched); answers the merge's changes for their documents.
+    fn pair_brought(&mut self) -> Result<Changes, String> {
+        let found = crate::pairs::find(&crate::pairs::candidates(self.vault, &self.brought)?);
+        if found.is_empty() {
+            return Ok(Changes::default());
+        }
+        let (paired, changes) = self.vault.pair(&found, "import", self.now)?;
+        self.report.paired = paired.len() as u64;
+        Ok(changes)
     }
 
     /// What this import changed, image by image: what it saw is kept by
@@ -1109,7 +1139,7 @@ impl<S: Store> Run<'_, S> {
         let unread = copying
             && !matches!(self.options.duplicates, Duplicates::Keep)
             && match seen {
-                Some(id) => self.seen.contains_key(&id) || self.vault.in_library(&id)?,
+                Some(id) => self.seen.contains_key(&id) || self.vault.holds(&id)?,
                 None => false,
             };
         // A copy reads the source once, hashing it as it is copied; its
@@ -1134,14 +1164,21 @@ impl<S: Store> Run<'_, S> {
         self.hashes.insert(path.to_path_buf(), id);
         self.touch(id)?;
         let mut line = json!({ "path": path, "id": id.hex() });
-        let in_library = self.vault.in_library(&id)?;
-        if !copying
+        // A photo's JPEG is held by the Library as its raw is: known, never
+        // flagged a photo of its own again.
+        let in_library = self.vault.holds(&id)?;
+        let companion = self.vault.photo_of(&id)?.is_some();
+        let unchanged = !copying
             && in_library
             && self
                 .vault
                 .at_path(path)?
-                .is_some_and(|(known, l)| known == id && l.present())
-        {
+                .is_some_and(|(known, l)| known == id && l.present());
+        if unchanged && companion {
+            self.seen.entry(id).or_insert_with(|| path.to_path_buf());
+            return Ok((line, Status::Unchanged));
+        }
+        if unchanged {
             self.vault
                 .import_known(path, id, self.now, Some(&self.by))?;
             self.seen.entry(id).or_insert_with(|| path.to_path_buf());
@@ -1172,6 +1209,9 @@ impl<S: Store> Run<'_, S> {
             match self.options.duplicates {
                 Duplicates::Skip => return Ok((line, Status::Skipped)),
                 Duplicates::Ask => return Ok((line, Status::Asked)),
+                // A photo's JPEG kept as one more copy would be flagged a
+                // photo of its own: left out.
+                Duplicates::Keep if companion => return Ok((line, Status::Skipped)),
                 Duplicates::Keep => {}
             }
         }
@@ -1546,6 +1586,7 @@ fn run_import<S: Store>(
         report: Report::default(),
         stop,
         touched: Vec::new(),
+        brought: Vec::new(),
         by: id.clone(),
         places: places.to_vec(),
     };
@@ -1595,6 +1636,12 @@ fn run_import<S: Store>(
             outcome.unwrap_or_else(|e| (json!({ "path": path, "error": e }), Status::Failed));
         line["status"] = json!(status);
         run.report.count(status);
+        // An image is added once: met again, it is a duplicate.
+        if status == Status::Added
+            && let Some(id) = line["id"].as_str().and_then(|h| ImageId::from_hex(h).ok())
+        {
+            run.brought.push(id);
+        }
         match status {
             Status::Failed => job.item_failed(&name, line["error"].as_str().unwrap_or("failed")),
             Status::Added | Status::Located | Status::Unchanged => {
@@ -1615,6 +1662,21 @@ fn run_import<S: Store>(
             Status::Skipped | Status::Asked => {}
         }
         emit(&line);
+    }
+    // Pairs before the cards are judged and the step is taken: a pair's
+    // JPEG is held as its raw's file, and the undo takes both back.
+    let documents = match run.pair_brought() {
+        Ok(changes) => changes.documents,
+        Err(e) => {
+            job.log(format!("RAW+JPEG pairs: {e}"));
+            Vec::new()
+        }
+    };
+    if run.report.paired > 0 {
+        job.log(format!(
+            "{} RAW+JPEG pairs made one photo each",
+            run.report.paired
+        ));
     }
     if run.root.is_some() {
         for source in files.0.iter().filter(|s| s.kind == "card") {
@@ -1637,6 +1699,7 @@ fn run_import<S: Store>(
     // What a cancelled import added is recorded too: its undo takes it
     // back.
     run.report.changes = run.changes();
+    run.report.changes.documents.extend(documents);
     if run.stopped() && run.report.files < total {
         run.report.cancelled = true;
         job.log(format!(

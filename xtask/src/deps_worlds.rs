@@ -10,6 +10,13 @@
 //! crate (egui, eframe, every `egui-pop-*`, `egui_hud`, `egui_fit`…): two
 //! egui-pops in one graph draw with two sets of tokens and two contexts.
 //!
+//! And it refuses a crate with committed snapshots (`tests/snapshots/*.png`)
+//! that resolves a drawing feature ([`RENDER_FEATURES`]: the icon font, the
+//! font sets) differently built alone (`cargo test -p`) and in the
+//! workspace (`--workspace`, where another crate's features unify in): its
+//! images would pass in one run and fail in the other. The crate names the
+//! feature itself.
+//!
 //! The edges that break their world today are listed, each with its
 //! reason, in `xtask/allow/deps-worlds.toml`; the list only shrinks (an
 //! entry whose edge is gone is reported).
@@ -423,6 +430,119 @@ fn quoted(line: &str, key: &str) -> Option<String> {
     Some(v.to_string())
 }
 
+/// The features that change what a frame draws: the icon font and the
+/// font sets, as `(package, feature)`.
+pub const RENDER_FEATURES: &[(&str, &str)] = &[
+    ("egui-pop-core", "phosphor"),
+    ("egui-pop-core", "bundled-fonts"),
+    ("egui-pop-core", "system-fonts"),
+    ("egui", "default_fonts"),
+    ("egui", "monochrome_emoji_fonts"),
+    ("epaint", "default_fonts"),
+    ("epaint", "monochrome_emoji_fonts"),
+];
+
+/// The [`RENDER_FEATURES`] a `cargo tree -e features --prefix none` output
+/// turns on, and the packages it holds.
+fn render_features(tree: &str) -> (Vec<(String, String)>, Vec<String>) {
+    let mut on = Vec::new();
+    let mut packages = Vec::new();
+    for line in tree.lines() {
+        let line = line.trim();
+        if let Some((pkg, rest)) = line.split_once(" feature \"") {
+            let feature = rest.split('"').next().unwrap_or_default();
+            if RENDER_FEATURES.contains(&(pkg, feature))
+                && !on
+                    .iter()
+                    .any(|(p, f): &(String, String)| p == pkg && f == feature)
+            {
+                on.push((pkg.to_string(), feature.to_string()));
+            }
+        } else if let Some((pkg, version)) = line.split_once(' ')
+            && version.starts_with('v')
+            && !packages.iter().any(|p| p == pkg)
+        {
+            packages.push(pkg.to_string());
+        }
+    }
+    (on, packages)
+}
+
+/// The drawing features `krate` resolves only in the workspace (or only
+/// alone), from the two `cargo tree -e features --prefix none` outputs.
+pub fn render_drift(krate: &str, alone: &str, workspace: &str) -> Vec<String> {
+    let (alone_on, packages) = render_features(alone);
+    let (ws_on, _) = render_features(workspace);
+    let mut out = Vec::new();
+    for (pkg, feature) in RENDER_FEATURES {
+        if !packages.iter().any(|p| p == pkg) {
+            continue;
+        }
+        let has = |on: &[(String, String)]| on.iter().any(|(p, f)| p == pkg && f == feature);
+        match (has(&alone_on), has(&ws_on)) {
+            (false, true) => out.push(format!(
+                "`{krate}` has snapshots but draws without `{pkg}/{feature}` built alone and with it in the workspace: name the feature in its Cargo.toml"
+            )),
+            (true, false) => out.push(format!(
+                "`{krate}` has snapshots and draws with `{pkg}/{feature}` built alone but without it in the workspace"
+            )),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `cargo tree -e features --prefix none` with `scope` (`-p x` or
+/// `--workspace`).
+fn feature_tree(root: &Path, scope: &[&str]) -> Result<String, String> {
+    let out = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(["tree", "-e", "features", "--prefix", "none"])
+        .args(scope)
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("cargo tree: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(format!(
+            "cargo tree failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
+}
+
+/// Whether the crate in `dir` commits snapshot images.
+fn has_snapshots(dir: &Path) -> bool {
+    std::fs::read_dir(dir.join("tests/snapshots"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| e.path().extension().is_some_and(|x| x == "png"))
+}
+
+/// The drawing-feature drift of every crate with snapshots.
+fn snapshot_drift(root: &Path, krates: &[Krate]) -> Vec<String> {
+    let with_snapshots: Vec<&Krate> = krates
+        .iter()
+        .filter(|k| has_snapshots(&root.join(&k.dir)))
+        .collect();
+    if with_snapshots.is_empty() {
+        return Vec::new();
+    }
+    let workspace = match feature_tree(root, &["--workspace"]) {
+        Ok(t) => t,
+        Err(e) => return vec![e],
+    };
+    let mut out = Vec::new();
+    for k in with_snapshots {
+        match feature_tree(root, &["-p", &k.name]) {
+            Ok(alone) => out.extend(render_drift(&k.name, &alone, &workspace)),
+            Err(e) => out.push(e),
+        }
+    }
+    out
+}
+
 /// Every problem of the workspace at `root`.
 pub fn problems(root: &Path) -> Vec<String> {
     let out = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
@@ -451,6 +571,7 @@ pub fn problems(root: &Path) -> Vec<String> {
         Err(e) => return vec![format!("{ALLOW_LIST}: {e}")],
     };
     let mut problems = judge(&violations(&krates), &allow);
+    problems.extend(snapshot_drift(root, &krates));
     match std::fs::read_to_string(root.join("Cargo.lock")) {
         Ok(lock) => problems.extend(lock_duplicates(&lock)),
         Err(e) => problems.push(format!("Cargo.lock: {e}")),
@@ -464,7 +585,9 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     }
     let problems = problems(root);
     Some(if problems.is_empty() {
-        println!("Dependency worlds and the single egui-pop OK.");
+        println!(
+            "Dependency worlds, the single egui-pop and the snapshot crates' drawing features OK."
+        );
         ExitCode::SUCCESS
     } else {
         for p in &problems {
@@ -707,5 +830,27 @@ mod tests {
         let lock = "[[package]]\nname = \"egui\"\nversion = \"0.37.0\"\n\n\
                     [[package]]\nname = \"egui-pop\"\nversion = \"0.11.0\"\n";
         assert!(lock_duplicates(lock).is_empty());
+    }
+
+    const ALONE: &str = "helios-x v0.1.0 (/w/crates/helios-x)\n\
+                         egui-pop-core v0.10.0\n\
+                         egui-pop-core feature \"bundled-fonts\"\n\
+                         egui v0.37.0\n\
+                         egui feature \"default_fonts\" (*)\n";
+
+    #[test]
+    fn deps_worlds_snapshot_crate_missing_a_workspace_render_feature_fails() {
+        let ws =
+            format!("{ALONE}egui-pop-core feature \"phosphor\" (*)\nfoo feature \"phosphor\"\n");
+        let d = render_drift("helios-x", ALONE, &ws);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("`egui-pop-core/phosphor`"), "{d:?}");
+    }
+
+    #[test]
+    fn deps_worlds_snapshot_crate_with_the_same_render_features_passes() {
+        let ws = format!("{ALONE}epaint feature \"monochrome_emoji_fonts\"\nfoo v1.0.0\n");
+        // epaint is not in the crate's own tree: its feature is not its pixels.
+        assert!(render_drift("helios-x", ALONE, &ws).is_empty());
     }
 }
