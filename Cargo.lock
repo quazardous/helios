@@ -2538,6 +2538,7 @@ dependencies = [
  "helios-storage",
  "helios-template",
  "helios-thumbs",
+ "helios-ui",
  "helios-values",
  "helios-vault",
  "helios-vault-sqlite",
