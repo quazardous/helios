@@ -178,6 +178,9 @@ pub struct Gallery {
     /// The sort the entries must be read again in, once it changed
     /// (`Library::take_resort`).
     pub(super) resort: Option<helios_vault::Order>,
+    /// What is typed in the Metadata section, for this gallery's
+    /// selection.
+    pub(super) meta: super::metadata::MetaDrafts,
 }
 
 impl Gallery {
@@ -195,6 +198,7 @@ impl Gallery {
             typed: None,
             sort: super::DEFAULT_SORT,
             resort: None,
+            meta: super::metadata::MetaDrafts::default(),
         }
     }
 }

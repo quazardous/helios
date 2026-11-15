@@ -178,7 +178,7 @@ fn auto_advance_moves_on_after_each_mark() {
     h.key_press(Key::X);
     h.run();
     let s = h.state_mut();
-    assert_eq!(s.library().selected, Some(2), "two marks, two steps");
+    assert_eq!(s.library().selected(), Some(2), "two marks, two steps");
     let changes = s.take_library_changes();
     let change = |image: &str, field: &str, op| Change {
         image: image.into(),
@@ -197,7 +197,7 @@ fn auto_advance_moves_on_after_each_mark() {
     h.key_press(Key::Num7);
     h.run();
     let s = h.state_mut();
-    assert_eq!(s.library().selected, Some(2));
+    assert_eq!(s.library().selected(), Some(2));
     assert_eq!(s.library().entries[2].labels, ["yellow"]);
 }
 

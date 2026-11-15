@@ -172,7 +172,6 @@ impl Library {
     /// Selects nothing: no photo selected, no cursor.
     pub fn select_none(&mut self) {
         self.view.state.set_selection(Vec::<String>::new(), None);
-        self.selected = None;
     }
 
     /// Selects the photos shown that were not selected; the cursor goes
@@ -238,7 +237,6 @@ impl Library {
     /// Selects `keys`, the cursor on the first; how many.
     pub(crate) fn set_selected(&mut self, keys: Vec<String>) -> usize {
         let cursor = keys.first().cloned();
-        self.selected = cursor.as_ref().and_then(|c| self.at(c));
         let count = keys.len();
         self.view.state.set_selection(keys, cursor);
         self.view.state.reveal_cursor();
@@ -260,7 +258,7 @@ impl Library {
             Some(id) => self
                 .at(id)
                 .ok_or_else(|| format!("the library has no photo {id}"))?,
-            None => match self.selected {
+            None => match self.selected() {
                 Some(i) => i,
                 None => match self.targets()?.as_slice() {
                     [one] => self.at(one).ok_or("no image selected")?,

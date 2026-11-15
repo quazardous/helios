@@ -55,7 +55,7 @@ impl Library {
 
     /// The photo under the cursor.
     fn cursor_id(&self) -> Option<String> {
-        self.selected
+        self.selected()
             .and_then(|i| self.entries.get(i))
             .map(|e| e.id.clone())
     }

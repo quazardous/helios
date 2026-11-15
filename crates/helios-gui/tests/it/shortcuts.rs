@@ -139,17 +139,17 @@ fn culling_keys_run_their_commands_in_the_library_and_nothing_in_the_darkroom() 
     );
     // While culling, Space and Backspace step through the images too.
     run(&mut h, "view.culling", json!({ "on": true }));
-    let at = h.state().library().selected;
+    let at = h.state().library().selected();
     assert_eq!(
         press(&mut h, "Space"),
         Some(Resolution::Run(CommandId::from_static("vault.next")))
     );
-    assert_ne!(h.state().library().selected, at);
+    assert_ne!(h.state().library().selected(), at);
     assert_eq!(
         press(&mut h, "Backspace"),
         Some(Resolution::Run(CommandId::from_static("vault.previous")))
     );
-    assert_eq!(h.state().library().selected, at);
+    assert_eq!(h.state().library().selected(), at);
     run(&mut h, "view.culling", json!({ "on": false }));
     // In the darkroom, on an image of the library: none of them.
     let photo = dir.join("photo.png");
@@ -162,7 +162,7 @@ fn culling_keys_run_their_commands_in_the_library_and_nothing_in_the_darkroom() 
     h.run();
     assert_eq!(key(&h, "place"), "helios.darkroom");
     let _ = h.state_mut().take_library_changes();
-    let at = h.state().library().selected;
+    let at = h.state().library().selected();
     for (k, command) in &keys {
         let culling = Resolution::Run(CommandId::new(command).unwrap());
         // Not even with the vault's grid focused there.
@@ -174,7 +174,7 @@ fn culling_keys_run_their_commands_in_the_library_and_nothing_in_the_darkroom() 
         );
     }
     assert!(h.state_mut().take_library_changes().is_empty());
-    assert_eq!(h.state().library().selected, at);
+    assert_eq!(h.state().library().selected(), at);
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }
