@@ -59,11 +59,14 @@ pub const DEFAULT_BASE: &str = "origin/main";
 ///
 /// `CRITICAL_TESTS` lists the test functions by file, and a unit test
 /// checks that each one still exists, so a rename cannot empty the set.
+/// helios-gui's integration tests are modules of one executable (`it`):
+/// a file there is named by its module path, not by a binary.
 pub const CRITICAL: &str = "(package(=helios-core) & binary(=engine) & test(=renders_a_chain)) \
 | (package(=helios-export) & binary(=export) & test(=every_format_decodes_to_the_right_size)) \
-| (package(=helios-gui) & binary(=persist) & test(=each_edit_step_is_a_version_and_reopening_loads_the_head)) \
+| (package(=helios-gui) & binary(=it) & test(=persist::each_edit_step_is_a_version_and_reopening_loads_the_head)) \
 | (package(=helios-vault-sqlite) & binary(=contract) & test(=a_sqlite_vault_survives_reopening)) \
-| ((package(=helios-gui) | package(=helios-node)) & binary(=survival))";
+| (package(=helios-gui) & binary(=it) & test(/^survival::/)) \
+| (package(=helios-node) & binary(=survival))";
 
 /// The files and test functions [`CRITICAL`] names (a whole binary for
 /// survival: `None`).
@@ -78,14 +81,14 @@ const CRITICAL_TESTS: [(&str, Option<&str>); 6] = [
         Some("every_format_decodes_to_the_right_size"),
     ),
     (
-        "crates/helios-gui/tests/persist.rs",
+        "crates/helios-gui/tests/it/persist.rs",
         Some("each_edit_step_is_a_version_and_reopening_loads_the_head"),
     ),
     (
         "crates/helios-vault-sqlite/tests/contract.rs",
         Some("a_sqlite_vault_survives_reopening"),
     ),
-    ("crates/helios-gui/tests/survival.rs", None),
+    ("crates/helios-gui/tests/it/survival.rs", None),
     ("crates/helios-node/tests/survival.rs", None),
 ];
 
@@ -862,15 +865,27 @@ mod tests {
         for (file, test) in CRITICAL_TESTS {
             let text =
                 std::fs::read_to_string(root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+            let stem = Path::new(file).file_stem().unwrap().to_string_lossy();
+            // A module of one integration test executable (`tests/it/`):
+            // the binary is `it`, the module prefixes the test's name.
+            let module = file.contains("/tests/it/").then(|| format!("{stem}::"));
             if let Some(test) = test {
                 assert!(
                     text.contains(&format!("fn {test}()")),
                     "{file}: no `{test}`"
                 );
-                assert!(CRITICAL.contains(&format!("test(={test})")), "{test}");
+                let path = format!("{}{test}", module.as_deref().unwrap_or(""));
+                assert!(CRITICAL.contains(&format!("test(={path})")), "{path}");
             }
-            let binary = Path::new(file).file_stem().unwrap().to_string_lossy();
-            assert!(CRITICAL.contains(&format!("binary(={binary})")), "{file}");
+            match &module {
+                Some(module) => {
+                    assert!(CRITICAL.contains("binary(=it)"), "{file}");
+                    if test.is_none() {
+                        assert!(CRITICAL.contains(&format!("test(/^{module}/)")), "{file}");
+                    }
+                }
+                None => assert!(CRITICAL.contains(&format!("binary(={stem})")), "{file}"),
+            }
         }
     }
 

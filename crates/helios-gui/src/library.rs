@@ -50,7 +50,7 @@ use egui_pop::views::library::compare::{CompareView, Pane};
 use crate::comparison::Comparison;
 use egui_pop::views::library::filter::{Filter, SearchField, SearchState};
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
-use egui_pop::views::library::tags::{TagInput, TagInputState};
+use egui_pop::views::library::tags::TagInputState;
 use egui_pop::views::library::{
     Badge, Change as Mark, ColorLabel, CullAction, CullKeymap, Flag, LibraryItems, LibraryState,
     Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, Tone as BadgeTone, change,
@@ -62,13 +62,15 @@ use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 pub use helios_vault::fields::Op;
 use helios_vault::fields::{
-    LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, ROTATION, TAGS, TITLE,
+    COPYRIGHT, CREATOR, DESCRIPTION, LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED,
+    ROTATION, TAGS, TITLE,
 };
 use serde_json::Value;
 
 mod batch;
 mod grouping;
 mod keywords;
+mod metadata;
 mod pairing;
 mod versions;
 
@@ -87,6 +89,10 @@ pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use keywords::{
     DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
     KEYWORD_MERGE_COMMAND, KEYWORD_REMOVE_COMMAND, KEYWORD_RENAME_COMMAND, KeywordAsk,
+};
+pub use metadata::{
+    META_GET_COMMAND, META_SET_COMMAND, MetaEdit, TEMPLATE_APPLY_COMMAND, TEMPLATE_DELETE_COMMAND,
+    TEMPLATE_LIST_COMMAND, TEMPLATE_SAVE_COMMAND, Template,
 };
 pub use pairing::{PAIR_COMMAND, PairAsk, UNPAIR_COMMAND};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
@@ -351,6 +357,12 @@ pub struct Entry {
     pub tags: Vec<String>,
     /// Its title, when it has one.
     pub title: Option<String>,
+    /// Its description (caption), when it has one.
+    pub description: Option<String>,
+    /// Who made it, when said.
+    pub creator: Option<String>,
+    /// Its copyright notice, when it has one.
+    pub copyright: Option<String>,
     /// The file's size in bytes, when it is on disk.
     pub bytes: Option<u64>,
     /// When the file was last modified, in seconds since 1970 (UTC); shown
@@ -507,6 +519,14 @@ fn names(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A text field's value, none when empty.
+fn text(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|t| !t.is_empty())
+        .map(String::from)
+}
+
 impl Entry {
     /// Shows a field's stored value (`None`: the field is empty).
     pub fn show(&mut self, field: &str, value: Option<&Value>) {
@@ -520,12 +540,10 @@ impl Entry {
                     .sort_by_key(|l| LABELS.iter().position(|k| k == l));
             }
             TAGS => self.tags = names(value),
-            TITLE => {
-                self.title = value
-                    .and_then(Value::as_str)
-                    .filter(|t| !t.is_empty())
-                    .map(String::from);
-            }
+            TITLE => self.title = text(value),
+            DESCRIPTION => self.description = text(value),
+            CREATOR => self.creator = text(value),
+            COPYRIGHT => self.copyright = text(value),
             CAPTURED => {
                 self.captured = value.and_then(Value::as_f64);
                 self.day = self.captured.map(helios_vault::capture::day_text);
@@ -1110,6 +1128,10 @@ fn folder_menu(row: &egui::Response, path: Option<&str>, at_hand: bool) {
 /// with `select: true`.
 pub const IMPORT_SESSION_COMMAND: &str = "library.importSession";
 
+/// The command showing exactly a set of photos in the Library (`ids`),
+/// all of them selected: a job's photos (an export, the trash, a batch).
+pub const SHOW_COMMAND: &str = "library.show";
+
 /// The command running the workshop applied on the Library's selection
 /// ("Run Workshop…": `workshop.run` on the selection).
 pub const RUN_WORKSHOP_COMMAND: &str = "library.runWorkshop";
@@ -1646,6 +1668,9 @@ pub struct Library {
     /// The images the vault matched for the filter, once the host ran its
     /// query.
     matches: Option<HashSet<String>>,
+    /// The set of photos shown alone ([`Library::show_ids`]: a job's
+    /// photos), whatever the filter; the next filter set drops it.
+    only: Option<HashSet<String>>,
     /// A query for the host to run.
     query: Option<Query>,
     /// What a backup state is measured against (`backup:` terms, the
@@ -1701,6 +1726,17 @@ pub struct Library {
     /// What the commands asked of the keyword branches (rename, merge),
     /// for the host, each with its batch.
     keyword_asks: Vec<(KeywordAsk, Batch)>,
+    /// The group edits of metadata asked (`library.meta.set`), for the
+    /// host, each with its batch.
+    meta_edits: Vec<(MetaEdit, Batch)>,
+    /// The metadata templates, once read from the library.
+    templates: Option<Vec<Template>>,
+    /// Whether the host is to read the templates.
+    templates_wanted: Wanted,
+    /// The templates to write back, once changed.
+    templates_write: Option<Vec<Template>>,
+    /// The Metadata section's state.
+    meta_panel: metadata::MetaPanel,
     /// What the commands asked of RAW+JPEG pairs (pair, unpair), for the
     /// host, each with its batch.
     pair_asks: Vec<(PairAsk, Batch)>,
@@ -1786,6 +1822,20 @@ pub struct Library {
     trash_asks: Vec<TrashAsk>,
 }
 
+/// What can limit the photos the Library shows
+/// ([`Library::restrictions`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Restriction {
+    /// An album (`collection:`), maybe opened by the workspace.
+    Album,
+    /// A folder (`folder:`).
+    Folder,
+    /// An import session (`import:`).
+    Import,
+    /// A set shown alone (a job's photos).
+    Set,
+}
+
 /// The library's sort when nothing chose one: by capture time, oldest
 /// first (`docs/design/library.md`, L-C1).
 pub const DEFAULT_SORT: helios_vault::Order =
@@ -1856,6 +1906,7 @@ impl Default for Library {
             search: SearchState::new(),
             filter: Filter::default(),
             matches: None,
+            only: None,
             backup_rule: helios_vault::Backups::default(),
             facets: None,
             folders: FolderCounts::Unread,
@@ -1874,6 +1925,11 @@ impl Default for Library {
             stack_asks: Vec::new(),
             keyword_counts: None,
             keyword_asks: Vec::new(),
+            meta_edits: Vec::new(),
+            templates: None,
+            templates_wanted: Wanted::Yes,
+            templates_write: None,
+            meta_panel: metadata::MetaPanel::default(),
             pair_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
@@ -2606,7 +2662,7 @@ impl Library {
     }
 
     /// Why an image cannot be opened, when a disk would help: "Plug in
-    /// <volume> to open this photo", with its last-seen date. `None` for
+    /// \<volume\> to open this photo", with its last-seen date. `None` for
     /// a present or missing image.
     pub fn unavailable(&self, id: &str) -> Option<Message> {
         let v = self.offline_volume(id)?;
@@ -2755,13 +2811,14 @@ impl Library {
     /// term runs in the vault's query). Until the vault answers a new
     /// filter, the last answer stands.
     fn passes(&self, e: &Entry) -> bool {
-        self.filter.is_empty() || self.matches.as_ref().is_none_or(|m| m.contains(&e.id))
+        self.only.as_ref().is_none_or(|o| o.contains(&e.id))
+            && (self.filter.is_empty() || self.matches.as_ref().is_none_or(|m| m.contains(&e.id)))
     }
 
     /// What the views show, in order: a stack's top image first, its
     /// other members right after it.
     fn reorder(&mut self) {
-        let stacks = self.filter.is_empty();
+        let stacks = self.filter.is_empty() && self.only.is_none();
         let mut order = Vec::new();
         let mut placed: HashSet<&str> = HashSet::new();
         for (i, e) in self.entries.iter().enumerate() {
@@ -2831,6 +2888,7 @@ impl Library {
     }
 
     fn filtered(&mut self, filter: Filter) {
+        self.only = None;
         self.query = (!filter.is_empty()).then(|| self.query_for(&filter));
         if filter.is_empty() {
             self.matches = None;
@@ -3334,6 +3392,30 @@ impl Library {
     /// Whether the Library holds the image `id`.
     pub fn holds(&self, id: &str) -> bool {
         self.index.contains_key(id)
+    }
+
+    /// Shows exactly the photos `ids` (what a job worked on: an export,
+    /// the trash, a batch), the filter cleared, all of them selected; an
+    /// id the Library does not hold is left out. The next filter set
+    /// (cleared included) shows by it again.
+    pub fn show_ids(&mut self, ids: &[String]) {
+        self.set_filter(Filter::default());
+        self.only = Some(ids.iter().cloned().collect());
+        self.reorder();
+        self.select_ids(ids);
+    }
+
+    /// How many photos the set shown alone holds ([`Library::show_ids`]),
+    /// while one is.
+    pub fn shown_set(&self) -> Option<usize> {
+        self.only.as_ref().map(HashSet::len)
+    }
+
+    /// Drops the set shown alone: the Library shows by its filter again.
+    pub fn clear_shown_set(&mut self) {
+        if self.only.take().is_some() {
+            self.reorder();
+        }
     }
 
     /// Selects images by id, the cursor on the last.
@@ -4252,102 +4334,21 @@ impl Library {
         with_keys(ctx, what, &keys)
     }
 
-    /// The marks of the cursor's image, edited for the selection: stars,
-    /// labels, flag and tags.
-    fn marks_bar(&mut self, ui: &mut Ui) {
-        let Some(entry) = self.selected.and_then(|i| self.entries.get(i)).cloned() else {
-            ui.weak(crate::i18n::text(
-                ui.ctx(),
-                Message::new("gui-library-no-cursor", "No image under the cursor"),
-            ));
-            return;
-        };
-        let Ok(keys) = self.targets() else {
-            return;
-        };
-        let marks = entry.marks();
-        let mut asked = Vec::new();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(&entry.name);
-            if let Some(rating) = RatingStars::new(marks.rating).show(ui).changed {
-                asked.push(Mark::Rate {
-                    keys: keys.clone(),
-                    rating,
-                });
-            }
-            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
-                .size
-                .control_height;
-            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
-            let tips = ColorLabel::ALL.map(|l| {
-                let (what, command) = label_tip(l);
-                self.mark_tip(ui.ctx(), what, command)
-            });
-            toggle_tips(ui, &labels.response, side, &tips);
-            if let Some(labels) = labels.changed {
-                for label in ColorLabel::ALL {
-                    if labels.has(label) != marks.labels.has(label) {
-                        asked.push(Mark::Label {
-                            keys: keys.clone(),
-                            label,
-                            on: labels.has(label),
-                        });
-                    }
-                }
-            }
-            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
-            let tips = [
-                (
-                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
-                    "vault.flag.pick",
-                ),
-                (
-                    Message::new("gui-library-flag-reject-tip", "Reject"),
-                    "vault.flag.reject",
-                ),
-            ]
-            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
-            toggle_tips(ui, &flags.response, side, &tips);
-            if let Some(flag) = flags.changed {
-                asked.push(Mark::Flag {
-                    keys: keys.clone(),
-                    flag,
-                });
-            }
-        });
-        let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-tags", "Tags"));
-        let out = TagInput::new("helios.library.tags")
-            .label(label)
-            .source(&self.known_tags)
-            .show(ui, &mut self.tags, &entry.tags);
-        if !out.added.is_empty() || !out.removed.is_empty() {
-            asked.push(Mark::Tag {
-                keys,
-                add: out.added,
-                remove: out.removed,
-            });
-        }
-        self.versions_strip(ui, &entry.id);
-        for m in asked {
-            if let Err(e) = self.mark(m) {
-                self.notes.push(e);
-            }
-        }
-    }
-
-    /// The Library panel: the search field, the cursor's marks, and the
+    /// The Library panel: the search field, the sections (the Metadata
+    /// section edits the selection), and the
     /// thumbnail grid with the culling keys.
     pub fn grid(&mut self, ui: &mut Ui) {
         self.receive(ui.ctx());
         // The search field (with the import button) and the marks bar
         // stay in place while the library is empty.
         self.toolbar(ui);
+        self.restrictions_line(ui);
         self.facets_bar(ui);
         self.folders_section(ui);
         self.albums_section(ui);
         self.keywords_section(ui);
         self.imports_section(ui);
-        self.marks_bar(ui);
+        self.metadata_section(ui);
         if self.entries.is_empty() {
             let text = crate::i18n::text(
                 ui.ctx(),
@@ -4358,6 +4359,19 @@ impl Library {
             );
             ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
             self.import_button(ui);
+            return;
+        }
+        if self.order.is_empty() && self.answered() {
+            // Photos there, none shown: say why, with the way out (a
+            // workspace may open on an empty album).
+            let case = if self.collection().is_some() {
+                helios_ui::Empty::EmptyAlbum
+            } else {
+                helios_ui::Empty::NoMatch
+            };
+            if helios_ui::empty(ui, case) {
+                self.show_all();
+            }
             return;
         }
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
@@ -4514,6 +4528,93 @@ impl Library {
         }
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
+    }
+
+    /// Whether what is shown is final: no filter, or the vault answered
+    /// it, or a set is shown alone.
+    fn answered(&self) -> bool {
+        self.only.is_some() || self.filter.is_empty() || self.matches.is_some()
+    }
+
+    /// Every photo of the Library: no album, folder, import, set or
+    /// filter.
+    pub fn show_all(&mut self) {
+        self.set_filter(Filter::default());
+    }
+
+    /// What limits the photos shown, each with how to lift it: the
+    /// album, the folder, the import session, a set shown alone.
+    pub fn restrictions(&self, ctx: &egui::Context) -> Vec<(String, Restriction)> {
+        let mut out = Vec::new();
+        if let Some(id) = self.collection() {
+            let name = self
+                .albums
+                .as_deref()
+                .and_then(|albums| albums.iter().find(|a| a.id == id))
+                .map_or(id.clone(), |a| a.name.clone());
+            let text =
+                Message::new("gui-library-scope-album", "Album: { $name }").with("name", name);
+            out.push((crate::i18n::text(ctx, text), Restriction::Album));
+        }
+        if let Some(path) = self.folder() {
+            let text =
+                Message::new("gui-library-scope-folder", "Folder: { $path }").with("path", path);
+            out.push((crate::i18n::text(ctx, text), Restriction::Folder));
+        }
+        if let Some(id) = self.import_session() {
+            let line = self
+                .imports
+                .iter()
+                .find(|s| s.id == id)
+                .map_or(id.clone(), ImportSession::line);
+            let text =
+                Message::new("gui-library-scope-import", "Import: { $line }").with("line", line);
+            out.push((crate::i18n::text(ctx, text), Restriction::Import));
+        }
+        if let Some(only) = &self.only {
+            let text = Message::new("gui-library-scope-set", "{ $count } photos shown alone")
+                .with("count", only.len());
+            out.push((crate::i18n::text(ctx, text), Restriction::Set));
+        }
+        out
+    }
+
+    /// Lifts one restriction.
+    pub fn lift(&mut self, restriction: Restriction) {
+        match restriction {
+            Restriction::Album => self.set_collection(None),
+            Restriction::Folder => self.set_folder(None),
+            Restriction::Import => self.show_import(None, false),
+            Restriction::Set => self.clear_shown_set(),
+        }
+    }
+
+    /// Under the search: what limits the photos shown, each removable,
+    /// and "All photos" while anything limits them.
+    fn restrictions_line(&mut self, ui: &mut Ui) {
+        let restrictions = self.restrictions(ui.ctx());
+        if restrictions.is_empty() && self.filter.is_empty() {
+            return;
+        }
+        let all = crate::i18n::text(
+            ui.ctx(),
+            Message::new("gui-library-all-photos", "All photos"),
+        );
+        let mut lift = None;
+        let mut all_asked = false;
+        ui.horizontal_wrapped(|ui| {
+            for (text, restriction) in restrictions {
+                if helios_ui::restriction(ui, &text) {
+                    lift = Some(restriction);
+                }
+            }
+            all_asked = helios_ui::action(ui, helios_ui::Action::Secondary, &all).clicked();
+        });
+        if all_asked {
+            self.show_all();
+        } else if let Some(r) = lift {
+            self.lift(r);
+        }
     }
 
     /// While the grid or the filmstrip has the focus, the Edit commands

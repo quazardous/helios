@@ -1582,3 +1582,165 @@ fn an_import_session_keeps_its_photos_and_a_rule_selects_them() {
     assert_eq!(selected(&records[1].id), records[1].images);
     assert!(selected(&records[0].id).is_empty());
 }
+
+/// Two imports of the same card, copied into one library at once (Import
+/// pressed twice): each photo is one image with one copy, on either store,
+/// and an import run again brings in nothing new and says so.
+fn two_imports_at_once<S: helios_vault::Store + Send + 'static>(name: &str, vault: Vault<S>) {
+    let p = Place::new(name);
+    let card = p.join("card/DCIM/100");
+    for i in 0..24u32 {
+        picture(
+            &card.join(format!("IMG_{i}.png")),
+            i % 2,
+            1.0 + i as f32 / 10.0,
+            i,
+        );
+    }
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(p.join("library")),
+        },
+        ..Options::default()
+    };
+    let vault = Arc::new(vault);
+    let sources = vec![p.join("card")];
+    let runs: Vec<_> = (0..2)
+        .map(|n| {
+            let (vault, sources, options) = (vault.clone(), sources.clone(), options.clone());
+            std::thread::spawn(move || {
+                let jobs = Jobs::new(Arc::default());
+                import::import(&*vault, &jobs, &sources, &options, 1000 + n, &mut |_| {}).unwrap()
+            })
+        })
+        .collect();
+    let reports: Vec<import::Report> = runs.into_iter().map(|r| r.join().unwrap()).collect();
+    assert_eq!(
+        reports.iter().map(|r| r.added).sum::<u64>(),
+        24,
+        "each photo added once: {reports:?}"
+    );
+    assert_eq!(vault.images().unwrap().len(), 24);
+    let cursor = vault.open_cursor(helios_vault::Query::default()).unwrap();
+    let mut listed = vault.cursor_ids(cursor.id, 0, 100).unwrap();
+    listed.dedup();
+    assert_eq!(
+        (cursor.count, listed.len()),
+        (24, 24),
+        "the Library lists each photo once"
+    );
+    let mut copies = Vec::new();
+    for entry in walk(&p.join("library")) {
+        if entry.extension().is_some_and(|e| e == "png") {
+            copies.push(entry);
+        }
+    }
+    assert_eq!(copies.len(), 24, "one copy each: {copies:?}");
+
+    // The card imported again: nothing new, each photo said to be in the
+    // Library already.
+    let jobs = Jobs::new(Arc::default());
+    let again = import::import(&*vault, &jobs, &sources, &options, 2000, &mut |_| {}).unwrap();
+    assert_eq!((again.added, again.skipped), (0, 24), "{again:?}");
+    assert_eq!(vault.images().unwrap().len(), 24);
+}
+
+/// Every file under `dir`, the staging folder left out.
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.file_name().is_some_and(|n| n == ".helios-part") {
+            continue;
+        }
+        if path.is_dir() {
+            files.extend(walk(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files
+}
+
+#[test]
+fn two_imports_of_one_card_at_once_make_each_photo_once_in_memory() {
+    two_imports_at_once("twice-memory", vault());
+}
+
+#[test]
+fn two_imports_of_one_card_at_once_make_each_photo_once_in_sqlite() {
+    let p = Place::new("twice-sqlite-db");
+    let store = helios_vault_sqlite::SqliteStore::open(&p.join("vault.db")).unwrap();
+    two_imports_at_once("twice-sqlite", Vault::new(store));
+}
+
+/// A card of two RAW+JPEG pairs, a lone raw and a lone JPEG, imported as
+/// the import window hands it (each file a source): four photos, each
+/// pair one photo with its JPEG as the `camera` file, nothing left for
+/// the health check's "Pair RAW+JPEG Files"; undone and redone as one
+/// step; imported again, the JPEGs stay their raws' files.
+#[test]
+fn raw_jpeg_pairs_of_a_card_are_imported_as_one_photo_each() {
+    use helios_library::pairs;
+    let p = Place::new("pairs");
+    let dcim = p.join("card/DCIM/100HELIO");
+    std::fs::create_dir_all(&dcim).unwrap();
+    for (name, bytes) in [
+        ("IMG_0001.NEF", "raw one"),
+        ("IMG_0002.PEF", "raw two"),
+        ("IMG_0003.RW2", "raw three"),
+    ] {
+        std::fs::write(dcim.join(name), bytes).unwrap();
+    }
+    picture(&dcim.join("IMG_0001.JPG"), 0, 1.0, 0);
+    picture(&dcim.join("IMG_0002.JPG"), 1, 1.0, 0);
+    picture(&dcim.join("IMG_0004.JPG"), 0, 0.5, 3);
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dcim)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    files.sort();
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(p.join("library")),
+        },
+        ..Options::default()
+    };
+    let vault = vault();
+    let (report, lines) = run(&vault, None, &files, &options);
+    assert_eq!((report.added, report.paired), (6, 2), "{lines:?}");
+    assert_eq!(pairs::library_photos(&vault).unwrap().len(), 4);
+    assert_eq!(pairs::count(&vault).unwrap(), 0, "no pair left to offer");
+    let id_of = |name: &str| {
+        let line = lines
+            .iter()
+            .find(|l| l["path"] == serde_json::json!(dcim.join(name)))
+            .unwrap();
+        ImageId::from_hex(line["id"].as_str().unwrap()).unwrap()
+    };
+    let (raw, jpeg) = (id_of("IMG_0001.NEF"), id_of("IMG_0001.JPG"));
+    assert_eq!(vault.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+    assert!(vault.holds(&jpeg).unwrap() && !vault.in_library(&jpeg).unwrap());
+    assert!(vault.photo_of(&id_of("IMG_0004.JPG")).unwrap().is_none());
+
+    // One step: undone, nothing is a photo nor a file of one; redone, the
+    // pairs are back.
+    vault.revert(&report.changes).unwrap();
+    assert!(pairs::library_photos(&vault).unwrap().is_empty());
+    assert!(vault.photo_of(&jpeg).unwrap().is_none());
+    vault.replay(&report.changes).unwrap();
+    assert_eq!(pairs::library_photos(&vault).unwrap().len(), 4);
+    assert_eq!(vault.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+
+    // Imported again, duplicates kept: the JPEGs are held, not photos of
+    // their own again.
+    let again = Options {
+        duplicates: Duplicates::Keep,
+        ..options
+    };
+    let (report, lines) = run(&vault, None, &files, &again);
+    assert_eq!(report.paired, 0, "{lines:?}");
+    assert_eq!(pairs::library_photos(&vault).unwrap().len(), 4, "{lines:?}");
+    assert_eq!(status_of(&lines, &dcim.join("IMG_0001.JPG")), "skipped");
+    assert_eq!(vault.photo_of(&jpeg).unwrap().unwrap().photo, raw);
+}

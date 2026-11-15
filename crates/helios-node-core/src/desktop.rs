@@ -244,6 +244,17 @@ impl<S: Store + 'static> Library<S> {
         helios_library::fetch::import_remote(&self.vault, jobs, remote, options, now, emit)
     }
 
+    /// Moves what the connector's source `from` imported to `to`: two
+    /// accounts found to be one identity
+    /// (`helios_library::fetch::merge_sources`).
+    pub fn merge_sources(
+        &self,
+        from: &helios_connect::SourceRef,
+        to: &helios_connect::SourceRef,
+    ) -> Result<usize, String> {
+        helios_library::fetch::merge_sources(&self.vault, from, to)
+    }
+
     /// Which of a service's `items` the library holds already.
     pub fn in_library(
         &self,

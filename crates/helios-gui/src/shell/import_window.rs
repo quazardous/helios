@@ -50,7 +50,7 @@
 //! the sources, ticks, chooses folders and presets there; what needs the
 //! shell (Import, Forget, Storage…, sources dropped) waits in
 //! `ImportWindow::events` for the main window's next pass. The window has
-//! its own status bar ("Reading <path>" while the sources are read), and
+//! its own status bar ("Reading \<path\>" while the sources are read), and
 //! egui-pop gives it its own toasts, dialogs and palette. It shares the
 //! process's core: the thumbnails come from the library's one cache, so
 //! no photo is read twice. Closing the window closes the import focus;
@@ -879,6 +879,8 @@ struct Words {
     profile_summary: String,
     nothing: String,
     none_ticked: String,
+    /// Import pressed again while the selection's import runs.
+    importing: String,
     /// Why nothing can be imported: no library open.
     no_library: Option<String>,
     /// The strategy line: what backups the photos will get.
@@ -1542,6 +1544,11 @@ impl Shell {
             self.warn(e);
             return;
         }
+        // Its photos are being imported already (Import pressed twice):
+        // a second import of them is never started.
+        if self.import.get_mut().importing_selection().is_some() {
+            return;
+        }
         // The grid shows the photos chosen in a service's page.
         if self.import.get().chosen.is_some() {
             self.import_chosen();
@@ -1796,6 +1803,10 @@ impl ImportWindow {
             none_ticked: t(Message::new(
                 "gui-import-window-none-ticked",
                 "Tick the photos to import",
+            )),
+            importing: t(Message::new(
+                "gui-import-window-importing",
+                "These photos are being imported: follow it on its line above or in Activity",
             )),
             no_library: self.shell_words.no_library.clone(),
             backup,
@@ -2237,8 +2248,11 @@ impl ImportWindow {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let count = w.contents.counts().selected;
                     let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
+                    let running = w.importing_selection().is_some();
                     let why = if let Some(e) = &words.no_library {
                         e
+                    } else if running {
+                        &words.importing
                     } else if w.ticked.is_empty() && w.chosen.is_none() {
                         &words.nothing
                     } else if let Some(e) = bad_name {
@@ -2248,7 +2262,10 @@ impl ImportWindow {
                     };
                     let import = ui
                         .add_enabled(
-                            count > 0 && bad_name.is_none() && words.no_library.is_none(),
+                            count > 0
+                                && !running
+                                && bad_name.is_none()
+                                && words.no_library.is_none(),
                             egui::Button::new(&words.import_count),
                         )
                         .on_disabled_hover_text(why);
@@ -2630,6 +2647,42 @@ fn entry_of(cell: &crate::import_scan::Cell) -> Option<SourceEntry> {
 }
 
 impl ImportWindow {
+    /// The running import (its promise's id) of a photo the Import button
+    /// would import: pressed again, the same photos would be imported
+    /// twice, so the button waits for it to settle.
+    pub(super) fn importing_selection(&mut self) -> Option<String> {
+        let running: Vec<(&str, Vec<PathBuf>)> = self
+            .promises
+            .iter()
+            .filter(|p| p.kind == "import" && !p.state.is_settled())
+            .map(|p| {
+                let items = p.request["rule"]["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(PathBuf::from)
+                    .collect();
+                (p.id.as_str(), items)
+            })
+            .filter(|(_, items): &(&str, Vec<PathBuf>)| !items.is_empty())
+            .collect();
+        if running.is_empty() {
+            return None;
+        }
+        let ticked = self.ticked.clone();
+        let contents = &mut self.contents;
+        ticked
+            .iter()
+            .flat_map(|source| contents.selected_files(source))
+            .find_map(|f| {
+                running
+                    .iter()
+                    .find(|(_, items)| items.iter().any(|i| f.starts_with(i)))
+                    .map(|(id, _)| (*id).to_string())
+            })
+    }
+
     /// Gives the grid each source's import profile filter, the one its
     /// Import runs with (as `Shell::import_ticked_sources` picks the
     /// choices): the photos it skips are greyed and not counted. Whether

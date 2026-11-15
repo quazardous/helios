@@ -592,6 +592,29 @@ mod tests {
             0
         );
         assert_eq!(vault.versions(&ids[1]).unwrap().len(), 1);
+        // Two imports of photo 3 ending at once (Import pressed twice),
+        // each seeing it new: one version, not one per import.
+        let camera_of_3 = |p: &Path| {
+            (p.file_name()?.to_str()? == "shot-3.tif").then(|| "synthetic look".to_string())
+        };
+        let racing = || Changes {
+            images: vec![change(ids[3], true)],
+            ..Changes::default()
+        };
+        let put: usize = std::thread::scope(|s| {
+            let runs: Vec<_> = (0..2)
+                .map(|_| {
+                    let mut changes = racing();
+                    let (vault, camera_of_3) = (&vault, &camera_of_3);
+                    s.spawn(move || {
+                        default_on_import(vault, &mut changes, 45, camera_of_3).unwrap()
+                    })
+                })
+                .collect();
+            runs.into_iter().map(|r| r.join().unwrap()).sum()
+        });
+        assert_eq!(put, 1);
+        assert_eq!(vault.versions(&ids[3]).unwrap().len(), 1);
         // A look never fitted is refused; `clear` clears.
         let refused = set_default(
             &vault,

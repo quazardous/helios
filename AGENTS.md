@@ -5,6 +5,12 @@ change reaches `next` (branch from `next`, local checks, a pull request
 with its test manifest, stop; the tester runs the box jobs and merges). It applies to every agent and every repository of the project
 (Helios, egui-pop, egui_stack, egui_fit, egui_hud).
 
+- **Before writing any UI code, read [docs/ui-index.md](docs/ui-index.md)**:
+  each need (a search field, an empty state, a section title, a value
+  still loading) mapped to the call to use, Helios's preset first, then
+  the egui-pop widget. Helios makes no widgets and writes no raw egui
+  where the index names a call. It is generated (`cargo xtask ui-index`)
+  from `/// Need (group): ...` doc lines: give a new preset its line.
 - Public project: everything written to files (code, comments, docs, commit
   messages) is in English, with no private paths, tracker IDs or links an
   outside reader cannot follow. The user chats in French: answer in French.

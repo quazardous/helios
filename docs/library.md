@@ -615,6 +615,25 @@ photo at once, through the node's `library.keywords.rename` and
 Undo takes back. `library.keyword.list` lists the branches with their
 counts. Not yet: synonyms.
 
+**Metadata** (2026-11-15): the Metadata section of the Library (the
+main window's panel and the Library window) replaces the marks row. It
+shows the capture details of the photo under the cursor (camera, lens,
+exposure, when it was taken) and edits the whole selection: title,
+description, creator, copyright, rating, colour labels, flag and
+keywords. A field the selected photos share shows its value, else
+"‹mixed›"; a value typed (Enter, or leaving the field) is set on every
+selected photo, and a "‹mixed›" field left alone keeps each photo's
+value. A colour label or a keyword is added or taken off alone, the
+others kept. Each edit is one step of the Library's history (Undo takes
+it back), made by the node's `library.meta.set` (docs/protocol.md);
+`library.metadata.set` and `library.metadata.get` do the same for an
+agent, and a `command.batch` of them is one step. Templates keep a
+description, creator, copyright and keywords under a name, per library:
+"Save as template" keeps what the selection shares, "Apply" sets it on
+the selection (one step), "Delete" forgets it
+(`library.metadata.template.save`, `.apply`, `.delete`, `.list`). The
+rating, label and flag keys of the grid stay marks outside the history.
+
 **Stacks.** A stack shows collapsed in the grid and the filmstrip: its
 top image with a count and a chevron; the chevron, S or
 `vault.stack.toggle` expands it (its members follow the top image), and

@@ -404,6 +404,28 @@ impl<S: Store> Vault<S> {
         self.transaction(|store| store.prune_sightings(limit, missing_before))
     }
 
+    /// Moves every sighting on the volume `from` to the same place on
+    /// `to` ([`Store::move_sightings`]), in one transaction: two volumes
+    /// found to be one (two accounts signed in as one identity). Returns
+    /// how many were moved.
+    pub fn move_sightings(&self, from: &VolumeId, to: &VolumeId) -> Result<usize, String> {
+        if from == to {
+            return Ok(0);
+        }
+        let (moved, images) = self.transaction(|store| {
+            let images: Vec<ImageId> = store
+                .sightings_under(Some(from), Path::new(""))?
+                .iter()
+                .filter_map(|s| s.image)
+                .collect();
+            Ok((store.move_sightings(from, to)?, images))
+        })?;
+        if !images.is_empty() {
+            self.placed(images);
+        }
+        Ok(moved)
+    }
+
     /// Every sighting of an image, in the Library or not.
     pub fn sightings(&self, id: &ImageId) -> Result<Vec<Sighting>, String> {
         self.read(|s| s.sightings_of(id))

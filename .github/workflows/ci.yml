@@ -9,6 +9,7 @@ on:
     # they only bump versions, and the next push tests them.
     branches: [main, next]
   # Pull requests: only a contributor's, from a fork (see each job's `if`).
+  # Our own run pr-lint.yml, the cheap checks alone.
   pull_request:
 
 # One run per branch at a time. A run on `next` is never cancelled: next
@@ -22,7 +23,8 @@ concurrency:
 
 jobs:
   test:
-    # Our own pull requests (branches of this repository) run no CI: they
+    # Our own pull requests (branches of this repository) run none of this,
+    # only their cheap checks (pr-lint.yml): they
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
@@ -93,7 +95,8 @@ jobs:
   # The workspace on Windows (MSVC): it builds, and its tests run. No GPU
   # on the runner: the GPU tests run on WARP (DX12 in software).
   windows:
-    # Our own pull requests (branches of this repository) run no CI: they
+    # Our own pull requests (branches of this repository) run none of this,
+    # only their cheap checks (pr-lint.yml): they
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
@@ -124,7 +127,8 @@ jobs:
   # `cargo xtask check-commits`, capped at 20 commits, stops at the first
   # broken one and names it in the job summary, with what each commit ran.
   commits:
-    # Our own pull requests (branches of this repository) run no CI: they
+    # Our own pull requests (branches of this repository) run none of this,
+    # only their cheap checks (pr-lint.yml): they
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
@@ -170,7 +174,8 @@ jobs:
 
   # The controls gallery builds for wasm32: its pages stay web-ready.
   gallery-web:
-    # Our own pull requests (branches of this repository) run no CI: they
+    # Our own pull requests (branches of this repository) run none of this,
+    # only their cheap checks (pr-lint.yml): they
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
@@ -190,12 +195,15 @@ jobs:
       - run: rustup target add wasm32-unknown-unknown
       - run: cargo clippy --locked --target wasm32-unknown-unknown -p helios-controls-gallery -- -D warnings
 
-  # Every linter of `cargo xtask lint`, installed so none is skipped:
-  # rustfmt, clippy, cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.
+  # Every cheap check, none building a test (.github/actions/lint): `cargo
+  # xtask lint` with every linter installed (rustfmt, clippy, deps-worlds,
+  # cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff), the
+  # documentation without a warning, the UI index, the catalogues.
   lint:
-    # Our own pull requests (branches of this repository) run no CI: they
-    # are tested on the bench box and merged into next, whose push run is
-    # the one that counts. A contributor's pull request from a fork runs
+    # Our own pull requests (branches of this repository) run these same
+    # steps as their one check, `pr-lint` (pr-lint.yml), and nothing else:
+    # they are tested on the bench box and merged into next, whose push run
+    # is the one that counts. A contributor's pull request from a fork runs
     # everything.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
@@ -204,12 +212,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95
         with:
           components: clippy, rustfmt
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny,cargo-machete,taplo,typos
-      - name: shellcheck and ruff
-        run: |
-          # The runner image ships shellcheck: apt only if it ever stops.
-          command -v shellcheck || { sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq shellcheck; }
-          pipx install ruff
-      - run: cargo xtask lint --require-all
+      - uses: ./.github/actions/lint

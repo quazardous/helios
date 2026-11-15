@@ -687,6 +687,8 @@ gui-jobs-items-failed = En échec
 gui-jobs-kind = Type
 gui-jobs-kind-all = Tous les types
 gui-jobs-left = Temps restant
+gui-jobs-console = Console
+
 gui-jobs-log = Journal
 gui-jobs-none = Aucune tâche de fond
 gui-jobs-none-selected = Aucune tâche sélectionnée
@@ -1503,6 +1505,11 @@ gui-library-badge-blown = hautes lumières brûlées
 gui-library-badge-crushed = ombres bouchées
 gui-library-sort-focus = Netteté
 gui-library-folders = Dossiers
+gui-library-all-photos = Toutes les photos
+gui-library-scope-album = Album : { $name }
+gui-library-scope-folder = Dossier : { $path }
+gui-library-scope-import = Import : { $line }
+gui-library-scope-set = { $count } photos affichées seules
 gui-library-folders-elsewhere = Autres dossiers
 gui-library-volume-offline = { $volume } { $count }, hors ligne, vu pour la dernière fois le { $date }
 gui-library-folder-show = Afficher dans le gestionnaire de fichiers
@@ -1799,6 +1806,7 @@ gui-import-window-favourites = Favoris
 
 gui-import-window-import = Importer { $count }
 
+gui-import-window-importing = Ces photos sont en cours d'import : suivez-le sur sa ligne ci-dessus ou dans l'Activité
 gui-import-window-in-library = dans votre bibliothèque
 gui-import-window-filtered = écarté par le filtre du profil d'import
 
@@ -2329,6 +2337,8 @@ gui-activity-importing = Importation { $done }/{ $total }
 gui-activity-importing-start = Importation…
 
 gui-activity-percent = { $label } { $percent } %
+
+gui-activity-idle = Activité : aucune tâche de fond en cours
 
 gui-activity-show = Afficher les tâches de fond
 
@@ -2874,6 +2884,38 @@ gui-library-keyword-toggle = Afficher ou masquer les mots-clés sous { $name }
 gui-library-keywords = Mots-clés
 gui-library-keywords-none = Aucun mot-clé : écrivez les niveaux avec | (Animaux|Chien)
 
+gui-history-meta-set = Modifier les métadonnées de { $count } photos
+gui-library-meta-camera = Appareil
+gui-library-meta-copyright = Copyright
+gui-library-meta-copyright-tip = La mention de copyright des photos ; Entrée la donne à toutes les photos sélectionnées
+gui-library-meta-creator = Auteur
+gui-library-meta-creator-tip = Qui a fait les photos ; Entrée le donne à toutes les photos sélectionnées
+gui-library-metadata = Métadonnées
+gui-library-meta-description = Description
+gui-library-meta-description-tip = La description (légende) des photos ; quitter le champ la donne à toutes les photos sélectionnées
+gui-library-meta-exposure = Exposition
+gui-library-meta-flag-tip = Drapeau : retenir ou rejeter toutes les photos sélectionnées
+gui-library-meta-labels-tip = Étiquettes de couleur : un clic ajoute ou retire une étiquette sur chaque photo sélectionnée, les autres gardées
+gui-library-meta-lens = Objectif
+gui-library-meta-mixed = ‹variable›
+gui-library-meta-not-set = Les métadonnées n’ont pas été modifiées : { $error }
+gui-library-meta-photos = { $count } photos sélectionnées
+gui-library-meta-rating = Note
+gui-library-meta-rating-tip = Note des photos sélectionnées ; un clic la donne à toutes
+gui-library-meta-some-keywords = Certaines photos ont aussi d’autres mots-clés : ils sont gardés
+gui-library-meta-taken = Prise le
+gui-library-meta-template-apply = Appliquer
+gui-library-meta-template-apply-tip = Appliquer le modèle aux photos sélectionnées (une seule annulation)
+gui-library-meta-template-delete = Supprimer
+gui-library-meta-template-delete-tip = Supprimer le modèle choisi
+gui-library-meta-template-name = Nom du modèle
+gui-library-meta-template-name-tip = Le nom du nouveau modèle
+gui-library-meta-template-none = Aucun modèle
+gui-library-meta-template-save = Enregistrer comme modèle
+gui-library-meta-template-save-tip = Garder comme modèle la description, l’auteur, le copyright et les mots-clés que partagent les photos sélectionnées
+gui-library-meta-template-tip = Modèles de métadonnées : des champs et mots-clés nommés, appliqués à la sélection
+gui-library-meta-title = Titre
+gui-library-meta-title-tip = Le titre des photos ; Entrée le donne à toutes les photos sélectionnées
 gui-library-label-red-tip = Étiquette rouge
 gui-library-label-yellow-tip = Étiquette jaune
 gui-library-label-green-tip = Étiquette verte

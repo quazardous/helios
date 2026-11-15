@@ -201,6 +201,8 @@ gui-account-status-refused = Access refused
 
 gui-activity-failed = { $count } background tasks failed
 
+gui-activity-idle = Activity: no background task running
+
 gui-activity-importing = Importing { $done }/{ $total }
 
 gui-activity-importing-start = Importing…
@@ -763,6 +765,8 @@ gui-history-library-remove = Remove { $count } photos from the Library
 
 gui-history-library-undoing = Undoing “{ $step }”…
 
+gui-history-meta-set = Edit the metadata of { $count } photos
+
 gui-history-pair-files = Pair { $count } RAW+JPEG files
 
 gui-history-preview-applied = applied
@@ -820,6 +824,8 @@ gui-image-not-reopened = The image left open could not be opened again: { $error
 gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
+
+gui-import-accounts-merged = { $count } { $connector } accounts signed in as one address merged into one: { $address }
 
 gui-import-album-choose = Choose an album under the account, in Sources.
 
@@ -1149,6 +1155,8 @@ gui-import-window-forget-source-hint = Takes it off this column, its name and ch
 
 gui-import-window-import = Import { $count }
 
+gui-import-window-importing = These photos are being imported: follow it on its line above or in Activity
+
 gui-import-window-in-library = in your Library
 
 gui-import-window-into = Into
@@ -1293,6 +1301,8 @@ gui-jobs-by-user = You
 
 gui-jobs-clear = Clear finished
 
+gui-jobs-console = Console
+
 gui-jobs-detail = Job detail
 
 gui-jobs-elapsed = Elapsed
@@ -1386,6 +1396,8 @@ gui-library-album-smart-tip = Smart album: its rules choose its photos
 gui-library-albums = Albums
 
 gui-library-albums-none = No album yet
+
+gui-library-all-photos = All photos
 
 gui-library-auto-advance = Auto-advance
 
@@ -1531,6 +1543,68 @@ gui-library-label-yellow-tip = Yellow label
 
 gui-library-mark-keys = { $what } ({ $keys })
 
+gui-library-meta-camera = Camera
+
+gui-library-meta-copyright = Copyright
+
+gui-library-meta-copyright-tip = The photos' copyright notice; Enter sets it on every selected photo
+
+gui-library-meta-creator = Creator
+
+gui-library-meta-creator-tip = Who made the photos; Enter sets it on every selected photo
+
+gui-library-meta-description = Description
+
+gui-library-meta-description-tip = The photos' description (caption); leaving the field sets it on every selected photo
+
+gui-library-meta-exposure = Exposure
+
+gui-library-meta-flag-tip = Flag: pick or reject every selected photo
+
+gui-library-meta-labels-tip = Colour labels: a click adds or removes one label on every selected photo, the others kept
+
+gui-library-meta-lens = Lens
+
+gui-library-meta-mixed = ‹mixed›
+
+gui-library-meta-not-set = The metadata was not set: { $error }
+
+gui-library-meta-photos = { $count } photos selected
+
+gui-library-meta-rating = Rating
+
+gui-library-meta-rating-tip = Rating of the selected photos; a click sets it on all of them
+
+gui-library-meta-some-keywords = Some photos have other keywords too: they are kept
+
+gui-library-meta-taken = Taken
+
+gui-library-meta-template-apply = Apply
+
+gui-library-meta-template-apply-tip = Apply the template to the selected photos (one undo step)
+
+gui-library-meta-template-delete = Delete
+
+gui-library-meta-template-delete-tip = Delete the template chosen
+
+gui-library-meta-template-name = Template name
+
+gui-library-meta-template-name-tip = The new template's name
+
+gui-library-meta-template-none = No template
+
+gui-library-meta-template-save = Save as template
+
+gui-library-meta-template-save-tip = Keep the description, creator, copyright and keywords the selected photos share as a template
+
+gui-library-meta-template-tip = Metadata templates: named fields and keywords applied to the selection
+
+gui-library-meta-title = Title
+
+gui-library-meta-title-tip = The photos' title; Enter sets it on every selected photo
+
+gui-library-metadata = Metadata
+
 gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
 
 gui-library-no-cursor = No image under the cursor
@@ -1589,6 +1663,14 @@ gui-library-rotate-right = Rotate Right
 
 gui-library-run-workshop = Run Workshop…
 
+gui-library-scope-album = Album: { $name }
+
+gui-library-scope-folder = Folder: { $path }
+
+gui-library-scope-import = Import: { $line }
+
+gui-library-scope-set = { $count } photos shown alone
+
 gui-library-search = Search images
 
 gui-library-set-delete = Delete the set, keep its albums
@@ -1645,7 +1727,7 @@ gui-library-stack-ungroup = Unstack
 
 gui-library-sync = Sync zoom and pan
 
-gui-library-tags = Tags
+gui-library-tags = Keywords
 
 gui-library-trash = Move to Trash…
 

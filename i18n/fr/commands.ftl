@@ -773,6 +773,9 @@ command-init-libraryFolder =
 command-library-importSession =
     .title = Montrer une importation dans la bibliothèque (`id` : une importation de `import.history.list` ; null : toute la bibliothèque), toutes ses photos sélectionnées avec `select: true` ; elle se combine aux autres filtres, rien n’est copié ni déplacé. Sans `id`, dit l’importation montrée
 
+command-library-show =
+    .title = Montrer exactement ces photos dans la bibliothèque (`ids` : des identifiants d’images, par exemple ceux d’une tâche), le filtre vidé et toutes sélectionnées ; le filtre suivant reprend la main. Sans `ids`, dit combien de photos l’ensemble montré contient
+
 command-library-runWorkshop =
     .title = Lancer l’atelier sur la sélection…
 
@@ -790,3 +793,15 @@ command-library-keyword-remove =
     .title = Retirer un mot-clé de photos, avec ceux en dessous (`keyword` ; `images` : identifiants, sinon la sélection), une marque comme celles de `library.tag`
 command-library-keyword-rename =
     .title = Renommer une branche de mots-clés sur toutes les photos, avec les mots-clés en dessous (`from`, `to` : un mot-clé qu’aucune photo n’a encore) ; sans `to`, le demande ; Ctrl+Z l’annule
+command-library-metadata-get =
+    .title = Lire les métadonnées de la sélection : la valeur partagée de chaque champ, ou `mixed` ; les étiquettes et mots-clés de toutes ou de certaines photos
+command-library-metadata-set =
+    .title = Modifier les métadonnées de photos en groupe (`fields` : title, description, creator, copyright, rating, flag ; `keywords` et `labels` : `add`, `remove` ; `images` : identifiants, sinon la sélection) ; les champs non nommés gardent la valeur de chaque photo ; Ctrl+Z l’annule
+command-library-metadata-template-apply =
+    .title = Appliquer un modèle de métadonnées (`name`) à des photos (`images` : identifiants, sinon la sélection) ; Ctrl+Z l’annule
+command-library-metadata-template-delete =
+    .title = Supprimer un modèle de métadonnées (`name`)
+command-library-metadata-template-list =
+    .title = Lister les modèles de métadonnées, avec leurs champs et mots-clés
+command-library-metadata-template-save =
+    .title = Enregistrer un modèle de métadonnées (`name`), depuis `fields` et `keywords` s’ils sont donnés, sinon depuis ce que partagent les photos sélectionnées

@@ -144,6 +144,18 @@ typos flags that is right (darktable or vkdt jargon) goes in `_typos.toml`.
 A license cargo-deny rejects needs a decision before it goes in
 `deny.toml`.
 
+Each workspace crate belongs to a world (docs/design/ui-responsibilities.md,
+section 9), and `cargo xtask deps-worlds` (part of `cargo xtask lint`)
+refuses a dependency outside it: modules, plugins and the engine never
+depend on egui or egui-pop's widgets; forms go through `helios-ui`, visual
+modules through `helios-rack` and egui_hud's logic (never its `render`
+feature); only the frameworks, `helios-gui` and the tools reach egui-pop.
+It also refuses a `Cargo.lock` holding two versions of egui or of an
+egui-pop-family crate. The worlds are declared in
+`xtask/src/deps_worlds.rs` (a crate under `crates/` is engine unless
+named there); the edges that still break them are listed, each with its
+reason, in `xtask/allow/deps-worlds.toml`, a list that only shrinks.
+
 Only the vault's SQLite driver (`helios-vault-sqlite`) and the node
 (`helios-node-core`) open the vault file or a raw SQLite connection;
 everything else reaches the data through the node. `cargo xtask check`

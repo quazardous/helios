@@ -60,23 +60,24 @@ helios-node-core = { path = "crates/helios-node-core" }
 helios-cache = { path = "crates/helios-cache" }
 helios-extract = { path = "crates/helios-extract" }
 helios-controls = { path = "crates/helios-controls" }
+helios-ui = { path = "crates/helios-ui" }
 # MIT: the UI library and application framework Helios is built on.
 # Its eframe support (the window's place) runs on the same eframe as
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.10.2", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.11", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
-egui-pop-agent = "0.4"
+egui-pop-agent = "0.5"
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
-egui-pop-i18n = "0.9"
+egui-pop-i18n = "0.10"
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
-egui-pop-model = "0.7"
+egui-pop-model = "0.8"
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = "0.10.1"
+egui-pop-test = "0.11"
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
 egui-pop-wayland = "0.2"
@@ -85,7 +86,7 @@ egui-pop-wayland = "0.2"
 egui_fit = { version = "0.1", features = ["serde"] }
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-egui_hud = "0.3"
+egui_hud = "0.4"
 blake3 = "1"
 # MIT OR Apache-2.0: the hashes connectors claim for their items (MD5,
 # SHA-1, SHA-256), checked while fetched bytes land.
@@ -136,36 +137,28 @@ too_many_lines = "allow"
 # moved into threads or stored); changing them is an API decision.
 needless_pass_by_value = "allow"
 
-# egui-pop's next ahead of its crates.io release: settings are app-wide
-# unless they opt into a value scope the host declares, dialogs have
-# a Copy button and optional technical details, the Settings app
-# keeps its values in a store the host provides, and a sensitive text
-# setting is typed masked, and the thumbnail grid carries images out
-# (drag_out), its agent hovers and secondary-clicks, and the Settings
-# app's window draws the main window's
-# bars, a number too wide to slide is typed in a spin box, and the agent
-# answers a `ui` request on another window while the main one is idle, and
-# the file browser marks entries with icons or short chips, and a settings
-# list read again keeps its rows until the new answer. Every crate of
-# the family comes from the same commit, so the graph holds one copy of
-# each. Drop this table once a release carries that change.
+
+# egui-pop's late-value cell (`late::LateValue`, behind `helios_ui::value`)
+# ahead of its crates.io release: every egui-pop crate from the same
+# commit of its `next`, so the graph holds one egui-pop. Drop this table
+# once egui-pop 0.12 is published and the versions above ask for it.
 [patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "3033f87c" }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.

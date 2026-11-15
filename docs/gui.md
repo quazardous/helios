@@ -849,7 +849,7 @@ cause, beside the engine's; events from elsewhere wake the window.
 never draw a window, a popup, a menu or a dialog: they ask the shell
 (`helios_gui::dialogs`), which hands them to egui-pop's components, the
 same everywhere, drawn from the theme's tokens. A test fails if anything
-else creates one (`crates/helios-gui/tests/normalized.rs`). Every open
+else creates one (`crates/helios-gui/tests/it/normalized.rs`). Every open
 dialog is also data: `dialog.current` describes it and `dialog.answer`
 answers it, so an agent sees and answers what a human would, its origin
 recorded.
@@ -965,7 +965,7 @@ them only when asked (`tips.show`). Their English is generated in
 tip against the commands the desktop declares.
 
 The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
--p helios-gui --test dialogs pictures` (and `--test params pictures`), from
+-p helios-gui --test it dialogs::pictures` (and `params::pictures`), from
 the repository's root: headless, never on the desktop.
 
 ## Keyboard shortcuts
@@ -1367,10 +1367,13 @@ after every step, and shots and the journal kept.
 `Expect(Value(..))`: `helios.library` (`count`, `picked`, `rejected`,
 `selected`, `selection`, `current` with its `id`, `name` and `path`,
 `open_size`), `helios.values` (the image's parameters by path:
-`helios.values.node/exposure/exposure`) and `helios.jobs` (`idle`,
-`total`, `running`, `finished`, `failed`, `cancelled`, and `list`, each
-job's `id`, `kind`, `title` and `state`). egui-pop's `jobs` collector
-has the whole jobs centre.
+`helios.values.node/exposure/exposure`) and `helios.jobs`, read from
+the node's promises as the Activity focus lists them (`idle`, `total`,
+`running`, `finished`, `failed`, `cancelled`, and `list`, each one's `id`
+(the promise's), `job` (the job it mirrors, when it does), `kind`,
+`title` and `state`; work with no end, the image map, is listed but
+never counted as running). egui-pop's `jobs` collector has the whole
+jobs centre while it is there.
 
 ## Parameters
 

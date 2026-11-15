@@ -385,6 +385,34 @@ desktop's Ctrl+Z), and announce each photo as `vault.field_changed`:
 {"id": 15, "result": {"photos": 3, "changes": {…}}}
 ```
 
+A group edit of metadata (`docs/design/library.md`, L13):
+`library.meta.set` sets fields on every photo of `images` in one step.
+`fields` holds a value per field set on all of them: `title`,
+`description`, `creator`, `copyright` (text; `null` or `""` clears),
+`rating` (0 to 5), `labels` (the whole set) and `flag` (`pick`,
+`reject` or `none`). A field not named keeps each photo's own value.
+`keywords` (`add`, `remove`: paths) adds a keyword to every photo or
+takes it off, with those below it; `labels` (`add`, `remove`) does the
+same for colour labels, one by one, each photo's others kept. Read-only
+fields (the capture's) are refused. It answers how many photos
+`changed` and `changes`, the step the vault's revert undoes, and
+announces each field as `vault.field_changed`. In a `command.batch`
+the desktop records the batch's steps as one:
+
+```json
+{"id": 16, "method": "library.meta.set",
+ "params": {"images": ["4f1c…", "77b0…", "a2e9…"],
+            "fields": {"creator": "Ann Lee", "copyright": "© 2026 Ann Lee", "rating": 4},
+            "keywords": {"add": ["Wedding|2026"], "remove": ["Draft"]},
+            "labels": {"add": ["green"]}}}
+{"id": 16, "result": {"changed": 3, "changes": {…}}}
+```
+
+Metadata templates are a library document (`library.documents.get` and
+`.set`, `ns` `meta`, `key` `templates`):
+`{"templates": [{"name", "fields", "keywords"}]}`; applying one is a
+`library.meta.set` with its `fields` and its `keywords` as `add`.
+
 RAW+JPEG pairs ([design/raw-jpeg-pairs.md](design/raw-jpeg-pairs.md)): a
 raw and the camera's JPEG or HEIF of one shot are one photo with two
 files. `library.pairs.pair` (`images`, `exact`) finds the pairs among the
@@ -665,16 +693,24 @@ them (they survive a restart), and every client of the node sees them.
   `attempts`; any other is settled `failed` with the reason
   `interrupted`, `retryable` when the node knows its kind. No promise
   stays running with nobody working on it.
-- **Every long job is one.** The desktop's jobs (`job.*`: an export, a
-  batch, the trash, a backup, a catalogue snapshot, a calibration, a
-  workshop run, the capture and cull passes) are mirrored as promises of
-  their node (`helios_node_core::job_promises`), owned by the job's id,
-  their `request` `{"job": id, "cancellable": bool}`: running with the
-  job's `done` of `total` and its item as `note`, settled `done` with
-  `{job, done, total, failed: [{path, error}], skipped}` and what the job
-  finished with (`folder`, `path`, `actions`), `failed` (not retryable) or
-  `cancelled`. `promises.cancel` cancels the job. A job inside another
-  (an export of a batch) and the background upkeep (`map`,
+- **Every long job is one.** The desktop's jobs and the headless
+  `helios-node`'s (`job.*`: an export, a batch, the trash, a backup, a
+  catalogue snapshot, a calibration, a workshop run, the capture and cull
+  passes, the health check) are mirrored as promises of their node
+  (`helios_node_core::job_promises`), owned by the job's id, their
+  `request` `{"job": id, "cancellable": bool}`: running with the job's
+  `done` of `total` and its item as `note`, settled `done` with
+  `{job, done, total, failed: [{path, error}], skipped}`, the photos the
+  job named as it started (`images`, image ids, at most 500: a batch's,
+  the trash's; what "Show in Library" shows, `library.show`) and what the
+  job finished with (`folder`, `path`, `actions`), `failed` (not
+  retryable) or `cancelled`. `promises.cancel` cancels the job. A job
+  relayed from a connected node (`node:<name>/<id>`) is not cancelled
+  through the promise (`cancellable: false`); when that node can cancel
+  it, its request says `"relayed": true` and the desktop sends the cancel
+  to that node. A job inside another (an export of a batch), a job naming
+  the promise it is the work of (`promise` in `job.started`: an import by
+  rule, already a promise) and the background upkeep (`map`,
   `stacks.suggest`, `importer.scan`) are left out. The newest 100 settled
   ones are kept.
 - **Work with no end** (the image map, kind `map`; the thumbnail

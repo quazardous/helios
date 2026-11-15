@@ -168,6 +168,33 @@ impl Record {
         self.places.get(source)
     }
 
+    /// The folder `source`, one of its sources, imported from: the source
+    /// itself, or its folder when it is a file (the import window hands
+    /// the files chosen on a card one by one), with that folder's place
+    /// on a removable volume.
+    pub fn folder_of(&self, source: &std::path::Path) -> (PathBuf, Option<Place>) {
+        let place = self.place_of(source).cloned();
+        let file = source.is_file()
+            || source.extension().is_some_and(|e| {
+                helios_vault::IMAGE_EXTENSIONS
+                    .contains(&e.to_string_lossy().to_ascii_lowercase().as_str())
+            });
+        if !file {
+            return (source.to_path_buf(), place);
+        }
+        let folder = source
+            .parent()
+            .map_or_else(PathBuf::new, std::path::Path::to_path_buf);
+        let place = place.map(|p| Place {
+            rel_path: p
+                .rel_path
+                .parent()
+                .map_or_else(PathBuf::new, std::path::Path::to_path_buf),
+            volume: p.volume,
+        });
+        (folder, place)
+    }
+
     /// The params of `library.import` that run this import again, or why
     /// it cannot be: an importer plugin's import is run again from the
     /// import window, its plugin listing the files anew, and so is an
@@ -335,6 +362,39 @@ pub fn record_remote<S: Store>(
     write(vault, record)
 }
 
+/// Points the records of the connector's source `from` at `to`: two
+/// accounts found to be one identity, merged into `to`; the records keep
+/// every import's origin under the source that stays. Returns how many
+/// records changed.
+///
+/// # Errors
+/// The vault's.
+pub fn repoint_remote<S: Store>(
+    vault: &Vault<S>,
+    connector: &str,
+    from: &str,
+    to: &Remote,
+) -> Result<usize, String> {
+    let mut changed = 0;
+    for (key, doc) in vault.library_documents(NS)? {
+        let Ok(mut record) = serde_json::from_value::<Record>(doc) else {
+            continue;
+        };
+        let Some(remote) = record.remote.as_mut() else {
+            continue;
+        };
+        if remote.connector != connector || remote.id != from {
+            continue;
+        }
+        remote.clone_from(to);
+        record.id.clone_from(&key);
+        let doc = serde_json::to_value(&record).map_err(|e| e.to_string())?;
+        vault.set_library_document(NS, &key, Some(&doc))?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
 /// A new record's key: the time, the process and a number, so keys sort
 /// by time and two imports ending in the same second keep a record each.
 fn key(now: u64) -> String {
@@ -414,6 +474,35 @@ mod tests {
             skipped: 1,
             ..Report::default()
         }
+    }
+
+    /// Files chosen one by one are their folder's import, on a card too.
+    #[test]
+    fn a_file_source_is_imported_from_its_folder() {
+        let volume = VolumeId("uuid:card".into());
+        let file = PathBuf::from("/media/CARD/DCIM/100HELIO/IMG_0001.NEF");
+        let folder = PathBuf::from("/media/CARD/DCIM");
+        let r = Record {
+            sources: vec![file.clone(), folder.clone()],
+            places: BTreeMap::from([(
+                file.clone(),
+                Place {
+                    volume: volume.clone(),
+                    rel_path: "DCIM/100HELIO/IMG_0001.NEF".into(),
+                },
+            )]),
+            ..Record::default()
+        };
+        let (from, place) = r.folder_of(&file);
+        assert_eq!(from, PathBuf::from("/media/CARD/DCIM/100HELIO"));
+        assert_eq!(
+            place,
+            Some(Place {
+                volume,
+                rel_path: "DCIM/100HELIO".into()
+            })
+        );
+        assert_eq!(r.folder_of(&folder), (folder, None));
     }
 
     #[test]

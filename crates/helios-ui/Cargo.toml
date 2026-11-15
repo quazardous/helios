@@ -1,0 +1,22 @@
+[package]
+name = "helios-ui"
+description = "Helios's controls by intent: presets (a library search, an empty state for no photos, a section, a primary action) mapped to egui-pop widgets and tokens, with no drawing of their own"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The library views: the removable tag chip `restriction` draws.
+# `phosphor`: the presets' icons (magnifier, empty-state pictures, a
+# failed value's mark) are the app's Phosphor glyphs wherever they are
+# drawn, not the painted fallbacks a build without the feature shows.
+egui-pop = { workspace = true, features = ["views", "phosphor"] }
+
+[dev-dependencies]
+# MIT OR Apache-2.0: the presets run headless, read through accesskit.
+egui_kittest = "0.37"
+
+[lints]
+workspace = true

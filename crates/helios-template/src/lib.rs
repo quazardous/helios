@@ -1,7 +1,7 @@
 //! Workspace templates: a ready-to-use combination of tools, network and
 //! panel layout for one known scenario (see `docs/templates.md`).
 //!
-//! - [`format`]: the files' shapes, `template.json` ([`Template`]) and a
+//! - [`mod@format`]: the files' shapes, `template.json` ([`Template`]) and a
 //!   composite file ([`CompositeFile`]), versioned from their first
 //!   format ([`FORMAT`]);
 //! - [`schema`]: their JSON schemas (`templates/schema/`) and a checker;

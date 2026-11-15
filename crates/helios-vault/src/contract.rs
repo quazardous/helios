@@ -45,6 +45,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     a_step_is_reverted_and_replayed_keeping_the_files(make(), &scratch("undo"));
     an_image_off_the_library_never_shows_in_a_library_read(make());
     sightings_are_kept_one_per_place(make());
+    sightings_move_to_another_volume_whole(make());
     listings_record_and_keep_what_was_read(make());
     the_map_reads_by_kind_newest_first(make());
     forgetting_and_pruning_never_touch_the_library(make());
@@ -62,6 +63,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     album_sets_nest_scope_the_union_and_move(make());
     culling_fields_filter_count_sort_and_rule(make());
     a_rotation_turns_resets_and_undoes(make());
+    a_group_edit_is_one_step_mixed_fields_kept(make());
     keyword_branches_filter_rename_merge_and_undo(make());
     a_duplicate_is_a_new_head_beside_its_source(make());
     a_copy_is_picked_as_current_removed_and_brought_back(make());
@@ -71,6 +73,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     files_attach_detach_hold_and_undo(make());
     two_photos_are_paired_unpaired_and_undone(make());
     pairing_refuses_what_is_no_pair(make());
+    extractor_results_are_kept_or_go_with_their_run(make());
 }
 
 /// For a store with read handles ([`Store::reader`]): a read that is not
@@ -238,6 +241,43 @@ fn on(volume: &str, rel: &str, size: u64, seen: u64) -> crate::Sighting {
         rel_path: Some(rel.into()),
         ..crate::Sighting::seen(PathBuf::from("/m").join(rel), size, 5, seen, "import")
     }
+}
+
+/// Two volumes found to be one: every sighting of the first moves to the
+/// same place on the second, Library ones included; a place the second
+/// holds already keeps its own.
+fn sightings_move_to_another_volume_whole<S: Store>(s: S) {
+    let v = Vault::new(s);
+    let a = image(1);
+    v.transaction(|s| s.add_to_library(&a).map(|_| ())).unwrap();
+    let (from, to) = (
+        VolumeId("remote:svc:svc-2".into()),
+        VolumeId("remote:svc:svc-1".into()),
+    );
+    let mut lib = on(from.as_str(), "item-a", 101, 10);
+    lib.image = Some(a.id);
+    v.record_sighting(&lib).unwrap();
+    v.record_sighting(&on(from.as_str(), "item-b", 102, 11))
+        .unwrap();
+    v.record_sighting(&on(from.as_str(), "item-c", 103, 12))
+        .unwrap();
+    let theirs = on(to.as_str(), "item-c", 999, 13);
+    v.record_sighting(&theirs).unwrap();
+    assert_eq!(v.move_sightings(&from, &to).unwrap(), 2);
+    assert!(
+        v.sightings_under(Some(&from), Path::new(""))
+            .unwrap()
+            .is_empty()
+    );
+    let moved = v.sightings_under(Some(&to), Path::new("")).unwrap();
+    assert_eq!(moved.len(), 3, "{moved:?}");
+    assert_eq!(v.sightings(&a.id).unwrap()[0].volume.as_ref(), Some(&to));
+    let c = moved
+        .iter()
+        .find(|s| s.rel_path.as_deref() == Some(Path::new("item-c")))
+        .unwrap();
+    assert_eq!(c.size, 999, "the place held keeps its own");
+    assert_eq!(v.move_sightings(&from, &to).unwrap(), 0, "once is enough");
 }
 
 /// A listing records each file at its place; listed again unchanged it
@@ -1076,6 +1116,13 @@ impl<S: Store> Store for FailingAudit<S> {
     fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {
         self.0.prune_sightings(limit, missing_before)
     }
+    fn move_sightings(
+        &mut self,
+        from: &crate::storage::VolumeId,
+        to: &crate::storage::VolumeId,
+    ) -> Result<usize, String> {
+        self.0.move_sightings(from, to)
+    }
     fn put_folder(&mut self, folder: &crate::Folder) -> Result<(), String> {
         self.0.put_folder(folder)
     }
@@ -1214,6 +1261,100 @@ fn a_batch_failing_at_its_audit_row_leaves_nothing<S: Store>(s: S) {
     // The store is usable again: the failed transaction is closed.
     v.store.lock().unwrap().begin().unwrap();
     v.store.lock().unwrap().rollback().unwrap();
+}
+
+fn extract_result(key: &str, image: &str, version: u32) -> helios_extract::Extracted {
+    helios_extract::Extracted {
+        key: key.into(),
+        image: image.into(),
+        extractor: "animals".into(),
+        version,
+        def_hash: "d".into(),
+        model: "ollama/qwen2.5vl:7b".into(),
+        answered: "qwen2.5vl:7b".into(),
+        values: std::collections::BTreeMap::from([(
+            "animal".to_owned(),
+            vec![helios_extract::Value::Label {
+                value: "dog".into(),
+                p: Some(0.9),
+            }],
+        )]),
+        adjustments: Vec::new(),
+        at: 1,
+    }
+}
+
+/// Extractor results (`extract`): kept ones by extractor and image, the
+/// latest version winning, outliving their run; run-only ones by cache
+/// key, found by another run while theirs is kept, gone with it.
+fn extractor_results_are_kept_or_go_with_their_run<S: Store>(s: S) {
+    use crate::extract::Stored;
+    use helios_extract::ResultCache as _;
+    let v = Vault::new(s);
+    v.set_workflow_documents(&[
+        ("runs".into(), "r1".into(), Some(json!({}))),
+        ("runs".into(), "r2".into(), Some(json!({}))),
+    ])
+    .unwrap();
+
+    let kept = extract_result("k1", "img-a", 2);
+    assert_eq!(
+        v.put_extract(&kept, true, Some("r1")).unwrap(),
+        Stored::Kept
+    );
+    let run_only = extract_result("k2", "img-b", 2);
+    assert_eq!(
+        v.put_extract(&run_only, false, Some("r1")).unwrap(),
+        Stored::Run
+    );
+    assert_eq!(
+        v.put_extract(&extract_result("k3", "img-c", 2), false, None)
+            .unwrap(),
+        Stored::Nowhere
+    );
+    // An older version never replaces the kept one: it goes with its run.
+    let older = extract_result("k0", "img-a", 1);
+    assert_eq!(
+        v.put_extract(&older, true, Some("r1")).unwrap(),
+        Stored::Run
+    );
+    assert_eq!(
+        v.kept_extract("animals", "img-a").unwrap(),
+        Some(kept.clone())
+    );
+    assert_eq!(
+        v.kept_extracts("animals").unwrap(),
+        std::slice::from_ref(&kept)
+    );
+
+    // Found by key: kept, the run's own, another run's; a key kept under
+    // another image or extractor is no hit.
+    assert_eq!(
+        v.cached_extract("k1", "img-a", "animals", Some("r2"))
+            .unwrap(),
+        Some(kept.clone())
+    );
+    assert_eq!(
+        v.cached_extract("k1", "img-a", "scene", None).unwrap(),
+        None
+    );
+    let cache = v.extract_cache(Some("r2"));
+    assert_eq!(
+        cache.cached("k2", "img-b", "animals").unwrap(),
+        Some(run_only.clone())
+    );
+    assert_eq!(cache.cached("k3", "img-c", "animals").unwrap(), None);
+    assert_eq!(v.run_extracts("r1").unwrap().len(), 2);
+
+    // Removing the run keeps what is kept and drops what is run-only.
+    v.workflow_transaction(|tx| tx.remove_run("r1")).unwrap();
+    assert!(v.run_extracts("r1").unwrap().is_empty());
+    assert_eq!(cache.cached("k2", "img-b", "animals").unwrap(), None);
+    assert_eq!(cache.cached("k0", "img-a", "animals").unwrap(), None);
+    assert_eq!(cache.cached("k1", "img-a", "animals").unwrap(), Some(kept));
+    assert!(v.forget_kept_extract("animals", "img-a").unwrap());
+    assert!(!v.forget_kept_extract("animals", "img-a").unwrap());
+    assert_eq!(v.kept_extract("animals", "img-a").unwrap(), None);
 }
 
 fn documents_round_trip_by_namespace<S: Store>(mut store: S) {
@@ -3036,6 +3177,71 @@ fn a_rotation_turns_resets_and_undoes<S: Store>(s: S) {
     let audit = v.audit(&b).unwrap();
     assert!(audit.iter().any(|e| e.field == ROTATION && e.who == "user"));
     assert!(v.rotate(&[image(9).id], Turn::Right, "user", 11).is_err());
+}
+
+/// A group edit (L13): a field set on three photos with mixed values,
+/// the others kept; keywords added and a branch taken off across them;
+/// one audited step, undone and done again.
+fn a_group_edit_is_one_step_mixed_fields_kept<S: Store>(s: S) {
+    use crate::meta::{CREATOR, TITLE, commands};
+    use serde_json::Value;
+    let mut s = with_images(s, 3);
+    let ids: Vec<ImageId> = (1..=3).map(|i| image(i).id).collect();
+    for (id, title) in ids.iter().zip(["a", "b", "c"]) {
+        s.set_field(id, TITLE, Some(&json!(title))).unwrap();
+    }
+    s.set_field(&ids[0], TAGS, Some(&json!(["Animals|Dog", "sea"])))
+        .unwrap();
+    let v = Vault::new(s);
+    let read = |v: &Vault<S>, field: &str| -> Vec<Option<Value>> {
+        v.fields_of(&ids, &[field])
+            .unwrap()
+            .into_iter()
+            .map(|f| f.get(field).cloned())
+            .collect()
+    };
+    let tags_now = |id: &ImageId| {
+        v.fields_of(&[*id], &[TAGS]).unwrap()[0]
+            .get(TAGS)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    let mut set = serde_json::Map::new();
+    set.insert(CREATOR.into(), json!("Ann"));
+    let edit = commands(
+        &ids,
+        &set,
+        &["Trips|2026".to_string()],
+        &["Animals".to_string()],
+        &crate::meta::Labels::default(),
+        &tags_now,
+    )
+    .unwrap();
+    let step = v.set_meta(&edit, "user", 5).unwrap();
+    assert_eq!(step.images.len(), 3, "one step over the three photos");
+    assert_eq!(read(&v, CREATOR), vec![Some(json!("Ann")); 3]);
+    assert_eq!(
+        read(&v, TITLE),
+        vec![Some(json!("a")), Some(json!("b")), Some(json!("c"))],
+        "a mixed field not named keeps each photo's value"
+    );
+    assert_eq!(tags_now(&ids[0]), vec!["Trips|2026", "sea"]);
+    assert_eq!(tags_now(&ids[2]), vec!["Trips|2026"]);
+    v.revert(&step).unwrap();
+    assert_eq!(read(&v, CREATOR), vec![None; 3], "undone");
+    assert_eq!(tags_now(&ids[0]), vec!["Animals|Dog", "sea"]);
+    assert!(tags_now(&ids[1]).is_empty());
+    v.replay(&step).unwrap();
+    assert_eq!(read(&v, CREATOR), vec![Some(json!("Ann")); 3], "redone");
+    assert!(
+        v.set_meta(&edit, "user", 6).unwrap().is_empty(),
+        "the same edit again changes nothing"
+    );
+    assert!(v.audit(&ids[1]).unwrap().iter().any(|e| e.field == CREATOR));
 }
 
 /// Hierarchical keywords (L12): a branch filters its path and those

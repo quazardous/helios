@@ -10,9 +10,11 @@
 //!   (`node/exposure/exposure`), what `param.get` reads.
 //! - `controls`: every node parameter and the control that edits it
 //!   (`helios_controls::commands::instances`).
-//! - `helios.jobs`: egui-pop's jobs centre counted by state (`running`,
-//!   `finished`, `failed`, `cancelled`, `total`, `idle`), and each job's
-//!   `id`, `kind`, `title` and `state` (`list`).
+//! - `helios.jobs`: the node's promises (every job, as the Activity focus
+//!   lists them) counted by state (`running`, `finished`, `failed`,
+//!   `cancelled`, `total`, `idle`), and each one's `id` (the promise's),
+//!   `job` (the job it mirrors, when it does), `kind`, `title` and
+//!   `state` (`list`).
 //! - `helios.cache`: the cache service's tiers and kinds
 //!   (`crate::caches::collector`).
 //!
@@ -40,8 +42,17 @@ pub struct Late(Rc<RefCell<Option<Sources>>>);
 
 impl Late {
     /// The shell's library and viewport, from now on.
-    pub fn set(&self, library: Rc<RefCell<Library>>, viewport: Rc<RefCell<Viewport>>) {
-        *self.0.borrow_mut() = Some(Sources { library, viewport });
+    pub fn set(
+        &self,
+        library: Rc<RefCell<Library>>,
+        viewport: Rc<RefCell<Viewport>>,
+        activity: crate::activity::Followed,
+    ) {
+        *self.0.borrow_mut() = Some(Sources {
+            library,
+            viewport,
+            activity,
+        });
     }
 }
 
@@ -49,6 +60,7 @@ impl Late {
 struct Sources {
     library: Rc<RefCell<Library>>,
     viewport: Rc<RefCell<Viewport>>,
+    activity: crate::activity::Followed,
 }
 
 /// Declares the collectors.
@@ -111,15 +123,17 @@ impl Plugin for AgentState {
             }),
         )?;
         ctx.collector(crate::caches::collector())?;
-        let app = ctx.app();
+        let late = self.late.clone();
         ctx.collector(
             FnCollector::new(
                 "helios.jobs",
-                "The jobs centre counted by state (running, finished, failed, cancelled, total, idle), and each job's id, kind, title and state.",
+                "The node's promises (every job: the Activity focus's list) counted by state (running, finished, failed, cancelled, total, idle), and each one's id (the promise), job (the job it mirrors, if any), kind, title and state.",
             )
             .snapshot(move |_| {
-                app.service(&egui_pop::api::jobs::JOBS)
-                    .map_or(Json::Null, |j| jobs_snapshot(&j.describe()))
+                late.0
+                    .borrow()
+                    .as_ref()
+                    .map_or(Json::Null, |s| jobs_snapshot(&s.activity.promises()))
             }),
         )?;
         Ok(())
@@ -155,23 +169,25 @@ fn values_snapshot(store: &helios_values::Store) -> Json {
     Json::Object(map)
 }
 
-/// `helios.jobs`'s snapshot from the jobs centre's description.
-fn jobs_snapshot(described: &Json) -> Json {
-    let jobs = described["jobs"].as_array().cloned().unwrap_or_default();
-    let count = |states: &[&str]| {
-        jobs.iter()
-            .filter(|j| states.contains(&j["state"].as_str().unwrap_or("")))
-            .count()
-    };
+/// `helios.jobs`'s snapshot from the node's promises: work with no end
+/// (the image map) is listed, never counted as running.
+fn jobs_snapshot(promises: &[helios_vault::promises::Promise]) -> Json {
+    use helios_vault::promises::State;
+    let count = |keep: &dyn Fn(&State) -> bool| promises.iter().filter(|p| keep(&p.state)).count();
+    let running = promises.iter().filter(|p| crate::activity::runs(p)).count();
     json!({
-        "idle": described["idle"],
-        "total": jobs.len(),
-        "running": count(&["running", "paused", "cancelling"]),
-        "finished": count(&["done"]),
-        "failed": count(&["failed"]),
-        "cancelled": count(&["cancelled"]),
-        "list": jobs.iter().map(|j| json!({
-            "id": j["id"], "kind": j["kind"], "title": j["title"], "state": j["state"],
+        "idle": running == 0,
+        "total": promises.len(),
+        "running": running,
+        "finished": count(&|s| matches!(s, State::Done { .. })),
+        "failed": count(&|s| matches!(s, State::Failed { .. })),
+        "cancelled": count(&|s| matches!(s, State::Cancelled)),
+        "list": promises.iter().map(|p| json!({
+            "id": p.id,
+            "job": p.request[helios_node_core::job_promises::JOB],
+            "kind": p.kind,
+            "title": p.label,
+            "state": p.state.name(),
         })).collect::<Vec<_>>(),
     })
 }
@@ -182,21 +198,45 @@ mod tests {
 
     #[test]
     fn jobs_are_counted_by_state() {
-        let d = json!({
-            "idle": false,
-            "jobs": [
-                { "id": "a", "kind": "import", "title": "Import", "state": "running" },
-                { "id": "b", "kind": "export", "title": "Export", "state": "done" },
-                { "id": "c", "kind": "export", "title": "Export", "state": "failed" },
-            ],
-        });
-        let s = jobs_snapshot(&d);
+        use helios_vault::promises::{Promise, State};
+        let promise = |id: &str, kind: &str, state: State| Promise {
+            id: id.into(),
+            owner: format!("{kind}-{id}"),
+            kind: kind.into(),
+            label: kind.into(),
+            request: json!({ "job": format!("{kind}-1") }),
+            state,
+            cancel_asked: false,
+            attempts: 1,
+            created: 1,
+            updated: 1,
+        };
+        let running = State::Running {
+            done: 1,
+            total: Some(3),
+            note: None,
+        };
+        let s = jobs_snapshot(&[
+            promise("a", "import", running),
+            promise("b", "export", State::Done { result: json!({}) }),
+            promise(
+                "c",
+                "export",
+                State::Failed {
+                    reason: "no room".into(),
+                    retryable: false,
+                },
+            ),
+        ]);
         assert_eq!(s["total"], 3);
         assert_eq!(s["running"], 1);
         assert_eq!(s["finished"], 1);
         assert_eq!(s["failed"], 1);
         assert_eq!(s["idle"], false);
         assert_eq!(s["list"][0]["kind"], "import");
+        assert_eq!(s["list"][0]["job"], "import-1");
+        assert_eq!(s["list"][0]["state"], "running");
+        assert_eq!(jobs_snapshot(&[])["idle"], true);
     }
 
     #[test]

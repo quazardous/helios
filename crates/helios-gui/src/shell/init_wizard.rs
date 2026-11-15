@@ -371,9 +371,23 @@ impl Shell {
             && let Some(values) = self.init_values()
         {
             self.core.init.checked = true;
-            let missing = Registry::builtin()
-                .status(&values)
-                .is_ok_and(|s| s.iter().any(|s| s.required && !s.done));
+            let status = Registry::builtin().status(&values);
+            let not_done: Vec<String> = status
+                .as_ref()
+                .map(|s| {
+                    s.iter()
+                        .filter(|s| s.required && !s.done)
+                        .map(|s| s.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let missing = !not_done.is_empty();
+            log::info!(
+                target: "helios",
+                "init: the first-run check: required steps not done: {not_done:?}; the setup \
+                 wizard {} as a focus screen",
+                if missing { "opens" } else { "does not open" }
+            );
             if missing && let Err(e) = self.init_ensure(&Request::all(), Then::Nothing, false) {
                 log::warn!("init: the first run: {e}");
             }

@@ -89,9 +89,68 @@ derived schemas stay in helios-ai's subset moved to helios-ai).
   `PromptCall::run` naming the run. "Stops and asks" is the runs
   layer's, on that refusal.
 
+### Slice 4 built (2026-11-15)
+
+- **Results** (`helios_extract::result`): `Extracted` is one
+  extractor's result for one image (cache key, image, `id@version`,
+  definition hash, the `provider/model` the key was made with, the
+  model as it answered, typed values, adjustments, when).
+  `ResultCache` is the seam the call path reads before a model call and
+  writes after; `MemoryCache` is the reference in memory. A use may
+  override where its results go (`ExtractorUse::keep`), outside the
+  cache key.
+- **In the vault** (`helios_vault::extract`): kept results in
+  `extract/<id>`, one document per image, the latest version winning (a
+  result of an older version goes with its run instead); run-only ones
+  in `workflow/<run>/extract` by cache key, removed with the run. A
+  lookup reads the image's kept document, then the run's results, then
+  those of the other runs still kept. `Vault::extract_cache(run)` is the
+  vault as a `ResultCache`; the contract checks it on both stores.
+- **Through the cache** (`Ai::run_extract`): the key is made from the
+  route the call resolves to (overrides applied), so another model is a
+  miss; a hit calls no model, a miss runs the prompt (one corrective
+  retry) and stores the answer; a failed call stores nothing. The
+  model's own digest, known only once it answered, is recorded in the
+  result, not in the key.
+
 In a manifest the kind is a table (`[extractors.llm]` or `builtin = {
 compute = "capture" }`), not a `kind = "llm"` field as the sketch in
 section 2 shows.
+
+### Slice 5, first part built (2026-11-15)
+
+The run engine for extractor nodes (`helios_node::workflow::extract`),
+beside the export runs, not yet behind a node verb:
+
+- **Library images as items:** `image:` and the content hash
+  (`image_item`), so a submission reads no image.
+- **Extractor nodes** (`ExtractNode`: a use of an LLM extractor, its
+  prompt's inputs, its route overrides, the nodes it waits for) are
+  queueing nodes of a journal; each (image, node) row concludes once.
+  A run opened again over its rows gives back the running ones and
+  goes on; with the cache, nothing concluded is called again.
+- **Submission** checks every node with `Ai::check_run` first: a node
+  nothing serves refuses it, naming the node, before anything is
+  entered.
+- **Each row** calls `Ai::run_extract` with the run's cache (for a
+  vault, `vault.extract_cache(Some(run))`); the caller's `ImageSource`
+  chooses the image sent (embedded preview, or a head version as
+  `image_version`). A reply that never fits fails for good; another
+  failure is retried twice (2 s, then 4 s).
+- **Facts on the bus:** `extract.run` (`submitted` with what leaves
+  the machine, `refused`, `progress` with the counts, `finished`,
+  `stopped`) and `extract.item` (one per concluded row: `done` with
+  `hit`, or `failed` with the error).
+- Cancel turns the rows not concluded into `cancelled`; what concluded
+  stays. Removing the run drops its run-only results.
+
+Left for the second part: the node verbs (`workflow.extract` or
+`diagrams.submit`) and the runner thread, the run document in
+`workflow/runs` (other runs read a run's results only while it is kept), the run as a job and an
+`extract` promise in the Activity focus, input nodes (selection, album,
+smart album, import session, query, whole library) resolved to image
+ids, reading the embedded preview from the library, the alter node, and
+the tests through the batch endpoint.
 
 It builds on [ai-models.md](../ai-models.md) (providers, routing,
 versioned prompts, the call log), [workflow-level.md](../workflow-level.md)

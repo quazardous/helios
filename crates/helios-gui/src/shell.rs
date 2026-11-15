@@ -102,6 +102,7 @@ mod import_auto;
 mod import_choices;
 mod import_detail;
 mod import_history;
+mod import_merge;
 mod import_profile_editor;
 mod import_profile_store;
 mod import_profiles;
@@ -111,13 +112,17 @@ mod import_wizard;
 pub(crate) mod init_wizard;
 mod library_imports;
 mod library_keywords;
+mod library_meta;
 mod lifetime;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
+pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
+mod reads;
 mod storage;
 mod storage_admin;
+mod trace;
 pub use storage_admin::{
     MARK_VOLUME as MARK_VOLUME_COMMAND, SET_STRATEGY as SET_STRATEGY_COMMAND,
     SET_UP_STRATEGY as SET_UP_STRATEGY_COMMAND, STRATEGY as BACKUP_STRATEGY_COMMAND,
@@ -323,6 +328,8 @@ enum Action {
     LibraryImports(&'static str, Value, Origin),
     /// The Library's keyword commands (`library_keywords`).
     LibraryKeywords(&'static str, Value),
+    /// The Library's metadata commands (`library_meta`).
+    LibraryMeta(&'static str, Value),
     /// Scopes the library to a collection (`id`; null: none), as whom;
     /// without `id`, says the collection.
     Collection(Value, Origin),
@@ -1029,7 +1036,8 @@ impl Shell {
         let engine = crate::viewport::engine();
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
-        agent_state.set(library.clone(), viewport.clone());
+        let activity = crate::activity::Activity::default();
+        agent_state.set(library.clone(), viewport.clone(), activity.followed());
         let system: crate::clipboard::system::Shared = Rc::new(RefCell::new(Box::new(
             crate::clipboard::system::Arboard::default(),
         )));
@@ -1073,7 +1081,7 @@ impl Shell {
             stack_review: Rc::default(),
             duplicates: Rc::default(),
             imports: Vec::new(),
-            activity: crate::activity::Activity::default(),
+            activity,
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
             init: init_wizard::InitState::default(),
@@ -1128,6 +1136,9 @@ impl Shell {
             notes: Vec::new(),
         };
         shell.restore_focus_windows();
+        // The Settings app reads the Storage page's values through the
+        // read kernel, away from the frame.
+        shell.attach_reads();
         if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
         }
@@ -3101,6 +3112,13 @@ impl Shell {
                 Box::new(move |a, _| Ok(Action::LibraryKeywords(id, a.clone()))),
             );
         }
+        for (id, title) in library_meta::COMMANDS {
+            let id: &'static str = id;
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, _| Ok(Action::LibraryMeta(id, a.clone()))),
+            );
+        }
         for (id, title) in library_imports::COMMANDS
             .iter()
             .chain(std::iter::once(&library_imports::RUN_WORKSHOP))
@@ -4102,7 +4120,7 @@ impl Shell {
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
-        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
+        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP, MENU_VIEW};
         use egui_pop::api::windows::MENU_WINDOW;
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
@@ -4149,6 +4167,9 @@ impl Shell {
                 3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
             ),
+            // View > Activity… (Ctrl+Shift+J): the background jobs, open
+            // whether one runs or not.
+            command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),
             // File > Storage: the disks and what each is for.
             command(MENU_FILE, "1_import", 3, storage::COMMAND),
             // Help > Health check.
@@ -6323,6 +6344,7 @@ impl Shell {
                 return self.library_imports_command(id, &args, &origin);
             }
             Action::LibraryKeywords(id, args) => return self.library_keywords_command(id, &args),
+            Action::LibraryMeta(id, args) => return self.library_meta_command(id, &args),
             Action::Collection(args, origin) => return self.collection_library(&args, &origin),
             Action::CollectionEdit(id, args) => return self.collection_edit(id, &args),
             Action::RecentFilters(id, args) => return self.recent_filters(id, &args),
@@ -7065,7 +7087,14 @@ impl Shell {
         }
         let events = h.events_since(self.core.seen);
         self.core.seen = h.last_event();
+        // What holds the screen, in the log when it changes.
+        self.focus.screen.follow(&h);
         for e in events {
+            match trace::event_line(&e.name, &e.data) {
+                Some((true, line)) => log::warn!(target: "helios", "{line}"),
+                Some((false, line)) => log::info!(target: "helios", "{line}"),
+                None => {}
+            }
             // egui-pop's Quit (Ctrl+Q, File > Quit), from any window: it
             // closes the window it ran in, the application quits.
             if e.name == "command.done"

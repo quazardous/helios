@@ -665,6 +665,12 @@ fn library_commands(
     for provider in helios_plugin::source::providers(plugins) {
         shell.add_import_connector(Arc::new(provider));
     }
+    // Accounts saved twice on one identity, for the connectors that take
+    // one source per account: merged once, their imports kept.
+    {
+        let library = library.clone();
+        shell.merge_duplicate_accounts(&move |from, to| library.merge_sources(from, to));
+    }
     {
         let (library, jobs, done, ctx) = (library.clone(), jobs.clone(), done.clone(), ctx.clone());
         let history = history.clone();
@@ -1266,6 +1272,10 @@ impl App {
             Opened::File(path) => self.open(Open::Image(path.clone())),
         };
         if let Err(e) = opening {
+            log::warn!(
+                target: "helios",
+                "the darkroom left open on {opened:?} is not restored, back to the place under it: {e}"
+            );
             contexts::leave_darkroom(
                 self.shell.app().handle(),
                 &egui_pop::model::commands::Origin::User,

@@ -50,7 +50,7 @@ use helios_connect::land::{Check, Landed, Landing};
 use helios_connect::{
     Access, Cancel, Caps, Connector, ConnectorError, HashAlgo, Item, ItemRef, Originals, SourceRef,
 };
-use helios_core::jobs::{Jobs, Progress, Start};
+use helios_core::jobs::{Jobs, Progress};
 use helios_storage::{Volume, registry};
 use helios_vault::{
     Capture, Changes, ImageId, ImageRows, Location, Presence, Sighting, Store, Vault,
@@ -58,7 +58,7 @@ use helios_vault::{
 use serde_json::{Value, json};
 
 use crate::import::{
-    Duplicates, KIND, NEXT, Options, Placement, Report, Status, facts_kept, library_root, place,
+    Duplicates, NEXT, Options, Placement, Report, Status, facts_kept, library_root, place,
     set_library_root,
 };
 use crate::rename::Naming;
@@ -85,6 +85,32 @@ pub struct Remote<'a> {
 /// The volume a connector's source is: one per account or source.
 pub fn volume_of(source: &SourceRef) -> Volume {
     Volume::remote(&source.connector, &source.id, &source.label)
+}
+
+/// Two sources of one connector found to be one (two accounts signed in
+/// as one identity), `from` merged into `to`: the items sighted on
+/// `from`'s volume move to `to`'s, the import history's records of
+/// `from` name `to`, and the volume record of `from` is forgotten (it
+/// becomes `to`'s when none is kept). Each photo keeps its origin. Run
+/// again it changes nothing. Returns how many sightings moved.
+///
+/// # Errors
+/// The vault's.
+pub fn merge_sources<S: Store>(
+    vault: &Vault<S>,
+    from: &SourceRef,
+    to: &SourceRef,
+) -> Result<usize, String> {
+    let (old, new) = (volume_of(from).id, volume_of(to).id);
+    let moved = vault.move_sightings(&old, &new)?;
+    crate::import_history::repoint_remote(
+        vault,
+        &from.connector,
+        &from.id,
+        &crate::import_history::Remote::from(to),
+    )?;
+    registry::merge_remote(vault, &old, &new)?;
+    Ok(moved)
 }
 
 /// A name for a file from an item's decorative path: its last part, with
@@ -725,11 +751,11 @@ fn run_remote<S: Store>(
     let (root, staging, volume) = match prepared {
         Ok(p) => p,
         Err(e) => {
-            jobs.start(Start::new(&id, &title, KIND)).failed(&e);
+            jobs.start(options.job(&id, &title)).failed(&e);
             return Err(e);
         }
     };
-    let job = jobs.start(Start::new(&id, &title, KIND).total(total));
+    let job = jobs.start(options.job(&id, &title).total(total));
     let stop = Arc::new(AtomicBool::new(false));
     {
         let stop = stop.clone();

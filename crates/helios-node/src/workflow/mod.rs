@@ -6,7 +6,7 @@
 //!   are the graph nodes that queue (the export, and the decision nodes
 //!   it depends on), each after its nearest queueing ancestors through any
 //!   number of process nodes, and after a root `submit` when it has none
-//!   ([`derive`]). Process nodes never queue: they are computed inside the
+//!   ([`derive()`]). Process nodes never queue: they are computed inside the
 //!   render of the export.
 //! - A run's id follows from the network and the export settings
 //!   ([`run_id`]), so submitting them again extends the same run.
@@ -24,6 +24,7 @@ use helios_journal::{Node as JournalNode, Workflow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub mod extract;
 pub mod lifecycle;
 pub mod runs;
 

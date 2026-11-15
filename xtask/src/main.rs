@@ -21,8 +21,12 @@
 //!   connection (see `vault_access.rs`).
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
 //!   catalogs of `i18n/` (see `i18n.rs`).
-//! - `lint [--fix] [--require-all]`: rustfmt, clippy and the optional
-//!   linters that are installed (see `lint.rs`).
+//! - `lint [--fix] [--require-all]`: rustfmt, clippy, `deps-worlds` and
+//!   the optional linters that are installed (see `lint.rs`).
+//! - `deps-worlds`: each workspace crate depends only on what its world
+//!   allows (no egui in modules, forms through helios-ui, visual modules
+//!   through helios-rack), and Cargo.lock holds one version of each
+//!   egui-family crate (see `deps_worlds.rs`).
 //! - `bench masks [--modules N] ...`: the masks bench, one JSON line per
 //!   render mode, recorded in `target/bench/masks.jsonl` (see `bench.rs`).
 //! - `test-times [--profile P] [--top N]`: run the tests under
@@ -45,6 +49,9 @@
 //!   installed outside the checkout: the box's development Flatpak of a
 //!   branch with `flatpak install --user`, or, with `--home`, the older
 //!   home folder install (see `install_dev.rs`).
+//! - `ui-index [--check]`: `docs/ui-index.md`, need to call, Helios's
+//!   presets first, from the `/// Need (group): ...` doc lines of Helios's
+//!   crates and of the egui-pop crates in the lock (see `ui_index.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, an optional line
@@ -55,6 +62,7 @@
 mod affected;
 mod bench;
 mod commits;
+mod deps_worlds;
 mod gate;
 mod i18n;
 mod install_dev;
@@ -63,6 +71,7 @@ mod manifest;
 mod promote;
 mod remote;
 mod test_times;
+mod ui_index;
 mod vault_access;
 
 use std::fmt::Write as _;
@@ -730,7 +739,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -820,6 +829,10 @@ fn main() -> ExitCode {
             eprintln!("usage: cargo xtask {}", lint::USAGE);
             ExitCode::from(2)
         }),
+        ["deps-worlds", rest @ ..] => deps_worlds::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", deps_worlds::USAGE);
+            ExitCode::from(2)
+        }),
         ["test-times", rest @ ..] => test_times::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", test_times::USAGE);
             ExitCode::from(2)
@@ -842,6 +855,10 @@ fn main() -> ExitCode {
         }),
         ["install-dev", rest @ ..] => install_dev::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", install_dev::USAGE);
+            ExitCode::from(2)
+        }),
+        ["ui-index", rest @ ..] => ui_index::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", ui_index::USAGE);
             ExitCode::from(2)
         }),
         ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
