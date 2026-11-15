@@ -237,6 +237,49 @@ pub(crate) fn find<'a>(
     list.iter().find(|s| s.ident().as_ref() == Some(&ident))
 }
 
+/// The sources of accounts merged into one ([`helios_connect::account::Merge`]):
+/// the one on the account used last stays, with its profile, choices and
+/// parameters, pointed at the kept account; the others go. Whether the
+/// list changed: merged again, it does not.
+pub(crate) fn merge_accounts(
+    list: &mut Vec<SavedSource>,
+    merge: &helios_connect::account::Merge,
+) -> bool {
+    let kept = &merge.kept;
+    // The accounts, the most recently used first.
+    let ranked: Vec<&str> = std::iter::once(kept.id.as_str())
+        .chain(merge.dropped.iter().map(|a| a.id.as_str()))
+        .collect();
+    let rank = |s: &SavedSource| {
+        (s.connector == kept.connector)
+            .then(|| s.account.as_deref())
+            .flatten()
+            .and_then(|a| ranked.iter().position(|r| *r == a))
+    };
+    let Some(best) = list
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| rank(s).map(|r| (r, i)))
+        .min()
+        .map(|(_, i)| i)
+    else {
+        return false;
+    };
+    let mut changed = false;
+    if list[best].account.as_deref() != Some(kept.id.as_str()) {
+        list[best].account = Some(kept.id.clone());
+        changed = true;
+    }
+    let mut i = 0;
+    list.retain(|s| {
+        let gone = i != best && rank(s).is_some();
+        i += 1;
+        changed |= gone;
+        !gone
+    });
+    changed
+}
+
 /// A card's volume id, briefly, as shown beside its label: a UUID's or
 /// serial's first characters; none for a weak id (its label and size are
 /// shown already).

@@ -742,8 +742,14 @@ whichever picking session chose the items). The wizard and
 `import.sources.add` then refuse a second source on an account, or on
 another account signed in as the same identity (`Account::identity`, the
 connector and the address), and offer to open the source already there
-(owner, 2026-11-15). Not decided yet: merging once the sources saved
-before, two on one identity.
+(owner, 2026-11-15). What was saved before is merged once at start
+(owner, 2026-11-15): for such a connector, the accounts signed in as one
+identity become the one used last; their sources become one, with the
+profile and choices of the most recently used; what the others imported
+moves to its remote volume (sightings, import history, volume record),
+so every photo keeps its origin; the other accounts are forgotten and
+their keyring secrets deleted, and the Log panel says so. Run again,
+nothing is left to merge.
 
 Built in, `folder` asks a path (`auto = "new-files"`, `placement =
 "add"`), `card` a volume (`auto = "plugged"`, `placement = "copy"`: a

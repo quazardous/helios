@@ -45,6 +45,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     a_step_is_reverted_and_replayed_keeping_the_files(make(), &scratch("undo"));
     an_image_off_the_library_never_shows_in_a_library_read(make());
     sightings_are_kept_one_per_place(make());
+    sightings_move_to_another_volume_whole(make());
     listings_record_and_keep_what_was_read(make());
     the_map_reads_by_kind_newest_first(make());
     forgetting_and_pruning_never_touch_the_library(make());
@@ -240,6 +241,43 @@ fn on(volume: &str, rel: &str, size: u64, seen: u64) -> crate::Sighting {
         rel_path: Some(rel.into()),
         ..crate::Sighting::seen(PathBuf::from("/m").join(rel), size, 5, seen, "import")
     }
+}
+
+/// Two volumes found to be one: every sighting of the first moves to the
+/// same place on the second, Library ones included; a place the second
+/// holds already keeps its own.
+fn sightings_move_to_another_volume_whole<S: Store>(s: S) {
+    let v = Vault::new(s);
+    let a = image(1);
+    v.transaction(|s| s.add_to_library(&a).map(|_| ())).unwrap();
+    let (from, to) = (
+        VolumeId("remote:svc:svc-2".into()),
+        VolumeId("remote:svc:svc-1".into()),
+    );
+    let mut lib = on(from.as_str(), "item-a", 101, 10);
+    lib.image = Some(a.id);
+    v.record_sighting(&lib).unwrap();
+    v.record_sighting(&on(from.as_str(), "item-b", 102, 11))
+        .unwrap();
+    v.record_sighting(&on(from.as_str(), "item-c", 103, 12))
+        .unwrap();
+    let theirs = on(to.as_str(), "item-c", 999, 13);
+    v.record_sighting(&theirs).unwrap();
+    assert_eq!(v.move_sightings(&from, &to).unwrap(), 2);
+    assert!(
+        v.sightings_under(Some(&from), Path::new(""))
+            .unwrap()
+            .is_empty()
+    );
+    let moved = v.sightings_under(Some(&to), Path::new("")).unwrap();
+    assert_eq!(moved.len(), 3, "{moved:?}");
+    assert_eq!(v.sightings(&a.id).unwrap()[0].volume.as_ref(), Some(&to));
+    let c = moved
+        .iter()
+        .find(|s| s.rel_path.as_deref() == Some(Path::new("item-c")))
+        .unwrap();
+    assert_eq!(c.size, 999, "the place held keeps its own");
+    assert_eq!(v.move_sightings(&from, &to).unwrap(), 0, "once is enough");
 }
 
 /// A listing records each file at its place; listed again unchanged it
@@ -1077,6 +1115,13 @@ impl<S: Store> Store for FailingAudit<S> {
     }
     fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {
         self.0.prune_sightings(limit, missing_before)
+    }
+    fn move_sightings(
+        &mut self,
+        from: &crate::storage::VolumeId,
+        to: &crate::storage::VolumeId,
+    ) -> Result<usize, String> {
+        self.0.move_sightings(from, to)
     }
     fn put_folder(&mut self, folder: &crate::Folder) -> Result<(), String> {
         self.0.put_folder(folder)

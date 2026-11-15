@@ -825,6 +825,8 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-accounts-merged = { $count } { $connector } accounts signed in as one address merged into one: { $address }
+
 gui-import-album-choose = Choose an album under the account, in Sources.
 
 gui-import-album-failed = Could not read the album:

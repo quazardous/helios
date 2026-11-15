@@ -360,6 +360,57 @@ fn an_import_from_a_connector_leaves_its_record_in_the_history() {
     assert!(r.params().is_err());
 }
 
+/// Two accounts found to be one identity: what the dropped one imported
+/// moves to the kept one, its sightings, its history records and its
+/// volume record; merged again, nothing changes.
+#[test]
+fn a_source_merged_into_another_keeps_every_photo_s_origin() {
+    let p = Place::new("merge");
+    let (a, b) = (png(5), png(6));
+    let fake = Fake::new(Originals::Exact, &[("a", a.clone()), ("b", b.clone())]);
+    let vault = Vault::new(MemoryStore::default());
+    run(
+        &vault,
+        &fake,
+        "fake-1",
+        vec![item("a", &a, None)],
+        true,
+        &options(&p.0),
+    );
+    run(
+        &vault,
+        &fake,
+        "fake-2",
+        vec![item("b", &b, None)],
+        true,
+        &options(&p.0),
+    );
+    let (from, to) = (source("fake-2"), source("fake-1"));
+    assert_eq!(fetch::merge_sources(&vault, &from, &to).unwrap(), 1);
+    let volumes = registry::known(&vault).unwrap();
+    assert_eq!(volumes.len(), 1, "{volumes:?}");
+    assert_eq!(volumes[0].id.as_str(), "remote:fake:fake-1");
+    let seen = vault
+        .sighting_at(Some(&volumes[0].id), Some(Path::new("b")), Path::new(""))
+        .unwrap()
+        .expect("b sighted on the kept volume");
+    assert_eq!(seen.image, Some(id_of(&b)));
+    let records = helios_library::import_history::list(&vault, None).unwrap();
+    assert_eq!(records.len(), 2, "every record kept");
+    assert!(
+        records
+            .iter()
+            .all(|r| r.remote.as_ref().is_some_and(|s| s.id == "fake-1")),
+        "{records:?}"
+    );
+    // Run again: nothing left to move.
+    assert_eq!(fetch::merge_sources(&vault, &from, &to).unwrap(), 0);
+    assert_eq!(
+        helios_library::import_history::list(&vault, None).unwrap(),
+        records
+    );
+}
+
 #[test]
 fn a_fetch_cut_halfway_goes_on_from_the_bytes_landed() {
     let p = Place::new("resume");

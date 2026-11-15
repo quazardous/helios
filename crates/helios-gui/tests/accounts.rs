@@ -2260,3 +2260,99 @@ fn one_source_per_account_refuses_a_second_and_offers_the_first() {
     });
     assert_eq!(h.state().import_sources().len(), 1);
 }
+
+/// Two accounts of one connector signed in as one address, each with a
+/// source: what `merge_duplicate_accounts` is given.
+fn signed_in_twice(
+    provider: Arc<dyn helios_connect::ConnectorProvider>,
+) -> (
+    Shell,
+    Arc<MemoryAccounts>,
+    Arc<MemorySecrets>,
+    std::rc::Rc<std::cell::RefCell<Option<String>>>,
+    [helios_connect::account::Account; 2],
+) {
+    use helios_connect::account::{Account, EMAIL};
+    let book = Arc::new(MemoryAccounts::default());
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut old = Account::new(ID, "Test server", &[]);
+    old.facts.insert(EMAIL.into(), "ann@example.com".into());
+    old.secrets.push("refresh_token".into());
+    old.last_used = Some(100);
+    let mut new = Account::new(ID, "Test server", std::slice::from_ref(&old));
+    new.facts.insert(EMAIL.into(), "Ann@example.com".into());
+    new.secrets.push("refresh_token".into());
+    new.last_used = Some(200);
+    for a in [&old, &new] {
+        book.save(a).unwrap();
+        secrets.set(&a.id, "refresh_token", &a.id).unwrap();
+    }
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.add_import_connector(provider);
+    shell.set_import_accounts(book.clone(), secrets.clone());
+    let text = format!(
+        "[[source]]\nconnector = \"{ID}\"\nname = \"Old\"\naccount = \"{}\"\n\n\
+         [[source]]\nconnector = \"{ID}\"\nname = \"New\"\naccount = \"{}\"\n",
+        old.id, new.id
+    );
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(Some(text)));
+    let (read, write) = (kept.clone(), kept.clone());
+    shell.keep_import_sources_with(
+        Box::new(move || Ok(read.borrow().clone())),
+        Box::new(move |text| {
+            *write.borrow_mut() = Some(text.to_string());
+            Ok(())
+        }),
+    );
+    (shell, book, secrets, kept, [old, new])
+}
+
+/// Accounts saved twice on one identity, for a connector taking one
+/// source per account, are merged once: the account used last stays with
+/// the source of the most recently used, the other's imports move to it
+/// (the library step), the other account is forgotten and its secret
+/// deleted. Merged again, nothing changes.
+#[test]
+fn accounts_signed_in_twice_are_merged_once_keeping_their_imports() {
+    let (mut shell, book, secrets, kept, [old, new]) = signed_in_twice(Arc::new(OnePerAccount));
+    assert_eq!(shell.import_sources().len(), 2);
+    let moved = std::cell::RefCell::new(Vec::new());
+    let library = |from: &helios_connect::SourceRef, to: &helios_connect::SourceRef| {
+        moved.borrow_mut().push((from.id.clone(), to.id.clone()));
+        Ok(3)
+    };
+    assert_eq!(shell.merge_duplicate_accounts(&library), 1);
+    assert_eq!(*moved.borrow(), [(old.id.clone(), new.id.clone())]);
+    let ids: Vec<String> = book.accounts().unwrap().into_iter().map(|a| a.id).collect();
+    assert_eq!(ids, [new.id.clone()]);
+    assert_eq!(secrets.get(&old.id, "refresh_token").unwrap(), None);
+    assert_eq!(
+        secrets.get(&new.id, "refresh_token").unwrap().as_deref(),
+        Some(new.id.as_str()),
+        "the kept account's secret stays"
+    );
+    let sources = shell.import_sources();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert_eq!(sources[0].name.as_deref(), Some("New"), "the most recent");
+    assert_eq!(sources[0].account.as_deref(), Some(new.id.as_str()));
+    let text = kept.borrow().clone().unwrap();
+    assert!(!text.contains(&old.id), "{text}");
+    // Once is enough.
+    assert_eq!(shell.merge_duplicate_accounts(&library), 0);
+    assert_eq!(moved.borrow().len(), 1);
+    assert_eq!(shell.import_sources(), sources);
+}
+
+/// A connector that takes several sources per account keeps its accounts
+/// and sources, even signed in twice as one address.
+#[test]
+fn accounts_signed_in_twice_stay_when_the_connector_takes_several_sources() {
+    let (mut shell, book, secrets, _kept, [old, _new]) = signed_in_twice(Arc::new(FakeProvider));
+    let library = |_: &helios_connect::SourceRef,
+                   _: &helios_connect::SourceRef|
+     -> Result<usize, String> { panic!("nothing to move") };
+    assert_eq!(shell.merge_duplicate_accounts(&library), 0);
+    assert_eq!(book.accounts().unwrap().len(), 2);
+    assert!(secrets.get(&old.id, "refresh_token").unwrap().is_some());
+    assert_eq!(shell.import_sources().len(), 2);
+}
