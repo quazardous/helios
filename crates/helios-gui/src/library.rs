@@ -48,12 +48,12 @@ use crate::thumb_textures::Resident;
 use egui_pop::views::library::compare::{CompareView, Pane};
 
 use crate::comparison::Comparison;
-use egui_pop::views::library::filter::{Filter, SearchField, SearchState};
+use egui_pop::views::library::filter::{Filter, SearchField};
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::TagInputState;
 use egui_pop::views::library::{
-    Badge, Change as Mark, ColorLabel, CullAction, CullKeymap, Flag, LibraryItems, LibraryState,
-    Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, Tone as BadgeTone, change,
+    Badge, Change as Mark, ColorLabel, CullAction, CullKeymap, Flag, LibraryItems, Marks, Signal,
+    Stack, Thumb, ThumbGrid, ThumbSource, Tone as BadgeTone, change,
 };
 use helios_core::{Image, Message, Region};
 
@@ -68,10 +68,12 @@ use helios_vault::fields::{
 use serde_json::Value;
 
 mod batch;
+mod gallery;
 mod grouping;
 mod keywords;
 mod metadata;
 mod pairing;
+mod search_keys;
 mod versions;
 
 /// The batch a change was asked in, if any
@@ -85,6 +87,7 @@ pub use batch::{
     TrashAsk, Turn,
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
+pub use gallery::{Gallery, GalleryOptions, SearchMode, SourcesPlace};
 pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use keywords::{
     DraggedKeyword, KEYWORD_ADD_COMMAND, KEYWORD_COMMAND, KEYWORD_LIST_COMMAND,
@@ -95,6 +98,7 @@ pub use metadata::{
     TEMPLATE_LIST_COMMAND, TEMPLATE_SAVE_COMMAND, Template,
 };
 pub use pairing::{PAIR_COMMAND, PairAsk, UNPAIR_COMMAND};
+pub use search_keys::{SearchKey, SearchKeys, Term as KeyTerm, ValueText, Values as KeyValues};
 pub use versions::{REMOVE_VERSION_COMMAND, VersionAsk, VersionHead};
 
 /// The library's name in egui-pop's steps and commands (`library` in
@@ -1641,6 +1645,12 @@ impl BackupMark {
 }
 
 pub struct Library {
+    /// The gallery every window draws, `main` (`gallery`): its search,
+    /// filter, order, sort and selection.
+    view: Gallery,
+    /// The filter keys, built-in and declared by modules
+    /// ([`Library::search_keys_mut`]).
+    search_keys: SearchKeys,
     pub entries: Vec<Entry>,
     /// The image under the cursor, by its place in `entries`.
     pub selected: Option<usize>,
@@ -1658,27 +1668,10 @@ pub struct Library {
     import_asked: bool,
     /// Each entry's place, by id.
     index: HashMap<String, usize>,
-    /// What the views show, in order: the filter's matches, a stack's
-    /// members right after its top image.
-    order: Vec<usize>,
     revision: u64,
-    state: LibraryState<String>,
-    search: SearchState,
-    filter: Filter,
-    /// The images the vault matched for the filter, once the host ran its
-    /// query.
-    matches: Option<HashSet<String>>,
-    /// The set of photos shown alone ([`Library::show_ids`]: a job's
-    /// photos), whatever the filter; the next filter set drops it.
-    only: Option<HashSet<String>>,
-    /// A query for the host to run.
-    query: Option<Query>,
     /// What a backup state is measured against (`backup:` terms, the
     /// backup facet): the library's strategy and backup volumes.
     backup_rule: helios_vault::Backups,
-    /// How many photos of the filter carry each value of each facet, as
-    /// the vault last counted them.
-    facets: Option<helios_vault::Facets>,
     /// The folders tree's counts (`docs/design/library.md`, L5): photos
     /// with a copy in each folder or below, for the whole Library, as the
     /// vault last counted them; none until the Folders section is open.
@@ -1749,9 +1742,6 @@ pub struct Library {
     used_early: Vec<Filter>,
     /// Whether the history changed, for the host to write.
     filter_history_write: Wanted,
-    /// A filter typed in the search field and when (the input's time):
-    /// it counts as used once it rests ([`crate::recent_filters::TYPED_REST`]).
-    typed: Option<(Filter, f64)>,
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
@@ -1801,11 +1791,6 @@ pub struct Library {
     map_feed: Option<helios_library::map_job::Feed>,
     /// The ids in view in the grid and in Compare, as last fed.
     fed: (Vec<String>, Vec<String>),
-    /// The order the vault reads the photos in: this focus's sort.
-    sort: helios_vault::Order,
-    /// The sort the entries must be read again in, once it changed
-    /// ([`Library::take_resort`]).
-    resort: Option<helios_vault::Order>,
     /// The marks copied last ([`MARKS_COPY_COMMAND`]), to paste.
     copied: Option<CopiedMarks>,
     /// The photos asked taken out of the Library ([`REMOVE_COMMAND`]),
@@ -1879,6 +1864,8 @@ impl Default for Library {
         let (sender, receiver) = channel();
         Library {
             entries: Vec::new(),
+            view: Gallery::new(LIBRARY),
+            search_keys: SearchKeys::builtin(),
             selected: None,
             auto_advance: false,
             notes: Vec::new(),
@@ -1886,15 +1873,8 @@ impl Default for Library {
             import_offered: false,
             import_asked: false,
             index: HashMap::new(),
-            order: Vec::new(),
             revision: 0,
-            state: LibraryState::new(LIBRARY),
-            search: SearchState::new(),
-            filter: Filter::default(),
-            matches: None,
-            only: None,
             backup_rule: helios_vault::Backups::default(),
-            facets: None,
             folders: FolderCounts::Unread,
             albums: None,
             albums_wanted: Wanted::Yes,
@@ -1921,8 +1901,6 @@ impl Default for Library {
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
             filter_history_write: Wanted::No,
-            typed: None,
-            query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
             app: None,
@@ -1951,8 +1929,6 @@ impl Default for Library {
             backup_badges: Shown::No,
             map_feed: None,
             fed: (Vec::new(), Vec::new()),
-            sort: DEFAULT_SORT,
-            resort: None,
             copied: None,
             removals: Vec::new(),
             rotations: Vec::new(),
@@ -2326,7 +2302,7 @@ impl Library {
         self.backups = backups;
         self.backup_badges = badges;
         // Backups changed: a `backup:` term may take other photos.
-        if self.filter.text.to_lowercase().contains("backup:") {
+        if self.view.filter.text.to_lowercase().contains("backup:") {
             self.ask_query();
         }
         self.reorder();
@@ -2349,12 +2325,23 @@ impl Library {
 
     /// The facet counts of the filter, as the vault counted them.
     pub fn set_facets(&mut self, facets: helios_vault::Facets) {
-        self.facets = Some(facets);
+        self.view.facets = Some(facets);
+    }
+
+    /// The filter keys the search knows.
+    pub fn search_keys(&self) -> &SearchKeys {
+        &self.search_keys
+    }
+
+    /// Where a module declares its filter keys (`library.search.keys`
+    /// once the hook kernel exists).
+    pub fn search_keys_mut(&mut self) -> &mut SearchKeys {
+        &mut self.search_keys
     }
 
     /// The facet counts shown, once counted.
     pub fn facets(&self) -> Option<&helios_vault::Facets> {
-        self.facets.as_ref()
+        self.view.facets.as_ref()
     }
 
     /// Whether the host must count the folders ([`Library::set_folders`]),
@@ -2385,14 +2372,14 @@ impl Library {
 
     /// The folder the filter is scoped to (its `folder:` term).
     pub fn folder(&self) -> Option<String> {
-        helios_terms(&self.filter.text).folder
+        helios_terms(&self.view.filter.text).folder
     }
 
     /// Scopes the library to a folder and below (its `folder:` term in
     /// the filter, in place of any other), or to no folder; the rest of
     /// the filter is kept.
     pub fn set_folder(&mut self, folder: Option<&str>) {
-        let mut words: Vec<String> = tokens(&self.filter.text)
+        let mut words: Vec<String> = tokens(&self.view.filter.text)
             .into_iter()
             .filter(|t| !t.to_lowercase().starts_with("folder:"))
             .collect();
@@ -2401,21 +2388,21 @@ impl Library {
         }
         let filter = Filter {
             text: words.join(" "),
-            ..self.filter.clone()
+            ..self.view.filter.clone()
         };
         self.set_filter(filter);
     }
 
     /// The collection the filter is scoped to (its `collection:` term).
     pub fn collection(&self) -> Option<String> {
-        helios_terms(&self.filter.text).collection
+        helios_terms(&self.view.filter.text).collection
     }
 
     /// Scopes the library to a collection (its `collection:` term in the
     /// filter, in place of any other), or to none; the rest of the filter
     /// is kept.
     pub fn set_collection(&mut self, id: Option<&str>) {
-        let mut words: Vec<String> = tokens(&self.filter.text)
+        let mut words: Vec<String> = tokens(&self.view.filter.text)
             .into_iter()
             .filter(|t| !t.to_lowercase().starts_with("collection:"))
             .collect();
@@ -2424,14 +2411,14 @@ impl Library {
         }
         let filter = Filter {
             text: words.join(" "),
-            ..self.filter.clone()
+            ..self.view.filter.clone()
         };
         self.set_filter(filter);
     }
 
     /// The import session the filter is scoped to (its `import:` term).
     pub fn import_session(&self) -> Option<String> {
-        helios_terms(&self.filter.text).import
+        helios_terms(&self.view.filter.text).import
     }
 
     /// Scopes the library to an import session (its `import:` term in
@@ -2439,7 +2426,7 @@ impl Library {
     /// filter is kept. With `select`, its photos are all selected once
     /// its query answers.
     pub fn show_import(&mut self, id: Option<&str>, select: bool) {
-        let mut words: Vec<String> = tokens(&self.filter.text)
+        let mut words: Vec<String> = tokens(&self.view.filter.text)
             .into_iter()
             .filter(|t| !t.to_lowercase().starts_with("import:"))
             .collect();
@@ -2448,7 +2435,7 @@ impl Library {
         }
         let filter = Filter {
             text: words.join(" "),
-            ..self.filter.clone()
+            ..self.view.filter.clone()
         };
         self.select_session = id.filter(|_| select).map(String::from);
         self.set_filter(filter);
@@ -2591,8 +2578,8 @@ impl Library {
     /// Asks the host to run the filter's query again (the photos or what
     /// it measures changed); nothing without a filter.
     fn ask_query(&mut self) {
-        if !self.filter.is_empty() {
-            self.query = Some(self.query_for(&self.filter));
+        if !self.view.filter.is_empty() {
+            self.view.query = Some(self.query_for(&self.view.filter));
         }
     }
 
@@ -2788,7 +2775,7 @@ impl Library {
                     count: held.len(),
                 });
             }
-            self.state.set_expanded(s.top.clone(), s.expanded);
+            self.view.state.set_expanded(s.top.clone(), s.expanded);
         }
         self.reorder();
     }
@@ -2797,14 +2784,15 @@ impl Library {
     /// term runs in the vault's query). Until the vault answers a new
     /// filter, the last answer stands.
     fn passes(&self, e: &Entry) -> bool {
-        self.only.as_ref().is_none_or(|o| o.contains(&e.id))
-            && (self.filter.is_empty() || self.matches.as_ref().is_none_or(|m| m.contains(&e.id)))
+        self.view.only.as_ref().is_none_or(|o| o.contains(&e.id))
+            && (self.view.filter.is_empty()
+                || self.view.matches.as_ref().is_none_or(|m| m.contains(&e.id)))
     }
 
     /// What the views show, in order: a stack's top image first, its
     /// other members right after it.
     fn reorder(&mut self) {
-        let stacks = self.filter.is_empty() && self.only.is_none();
+        let stacks = self.view.filter.is_empty() && self.view.only.is_none();
         let mut order = Vec::new();
         let mut placed: HashSet<&str> = HashSet::new();
         for (i, e) in self.entries.iter().enumerate() {
@@ -2829,14 +2817,15 @@ impl Library {
                 }
             }
         }
-        self.order = order;
+        self.view.order = order;
         self.revision += 1;
     }
 
     /// The ids the views show, in order (a collapsed stack's members
     /// included: the views fold them).
     pub fn shown(&self) -> Vec<String> {
-        self.order
+        self.view
+            .order
             .iter()
             .map(|&i| self.entries[i].id.clone())
             .collect()
@@ -2846,74 +2835,74 @@ impl Library {
     /// rejected (a reject wins over a pick).
     pub fn counts(&self) -> (usize, usize, usize) {
         let (mut picked, mut rejected) = (0, 0);
-        for &i in &self.order {
+        for &i in &self.view.order {
             match self.entries[i].flag() {
                 Flag::Pick => picked += 1,
                 Flag::Reject => rejected += 1,
                 Flag::None => {}
             }
         }
-        (self.order.len(), picked, rejected)
+        (self.view.order.len(), picked, rejected)
     }
 
     /// Whether the views show the stack topped by `top` expanded.
     pub fn is_expanded(&self, top: &str) -> bool {
-        self.state.is_expanded(&top.to_string())
+        self.view.state.is_expanded(&top.to_string())
     }
 
     /// The search field's filter in force.
     pub fn filter(&self) -> &Filter {
-        &self.filter
+        &self.view.filter
     }
 
     /// Filters the library: its vault query waits for the host
     /// ([`Library::take_query`]).
     pub fn set_filter(&mut self, filter: Filter) {
-        self.search.set_filter(filter.clone());
+        self.view.search.set_filter(filter.clone());
         self.filtered(filter);
     }
 
     fn filtered(&mut self, filter: Filter) {
-        self.only = None;
-        self.query = (!filter.is_empty()).then(|| self.query_for(&filter));
+        self.view.only = None;
+        self.view.query = (!filter.is_empty()).then(|| self.query_for(&filter));
         if filter.is_empty() {
-            self.matches = None;
-            self.facets = None;
+            self.view.matches = None;
+            self.view.facets = None;
         }
-        self.filter = filter;
+        self.view.filter = filter;
         self.reorder();
     }
 
     /// The order the photos are read in: this focus's sort.
     pub fn sort(&self) -> helios_vault::Order {
-        self.sort
+        self.view.sort
     }
 
     /// Sorts the library: the host reads it again in that order
     /// ([`Library::take_resort`]); the selection follows its photos.
     pub fn set_sort(&mut self, sort: helios_vault::Order) {
-        if sort != self.sort {
-            self.sort = sort;
-            self.resort = Some(sort);
+        if sort != self.view.sort {
+            self.view.sort = sort;
+            self.view.resort = Some(sort);
         }
     }
 
     /// Asks the host to read the photos again in the sort (they were read
     /// in another).
     pub fn ask_resort(&mut self) {
-        self.resort = Some(self.sort);
+        self.view.resort = Some(self.view.sort);
     }
 
     /// Whether the photos must be read again in the sort, once.
     pub fn take_resort(&mut self) -> bool {
-        self.resort.take().is_some()
+        self.view.resort.take().is_some()
     }
 
     /// The filter in force used (applied, a facet, a folder or an album
     /// chosen): first of the recent filters.
     pub fn record_filter(&mut self) {
-        self.typed = None;
-        let filter = self.filter.clone();
+        self.view.typed = None;
+        let filter = self.view.filter.clone();
         if let Some(h) = &mut self.filter_history {
             if h.record(&filter) {
                 self.filter_history_write = Wanted::Yes;
@@ -2970,12 +2959,12 @@ impl Library {
 
     /// The vault query the filter needs run, once.
     pub fn take_query(&mut self) -> Option<Query> {
-        self.query.take()
+        self.view.query.take()
     }
 
     /// The images the vault matched for the query last taken.
     pub fn set_matches(&mut self, ids: impl IntoIterator<Item = String>) {
-        self.matches = Some(ids.into_iter().collect());
+        self.view.matches = Some(ids.into_iter().collect());
         self.reorder();
         // An import session shown with its photos selected: all of them,
         // once its query answered.
@@ -3166,7 +3155,7 @@ impl Library {
             .collect();
         let mut first = usize::MAX;
         let mut last = 0;
-        for (pos, e) in self.order.iter().enumerate() {
+        for (pos, e) in self.view.order.iter().enumerate() {
             if shown.contains(e) {
                 first = first.min(pos);
                 last = last.max(pos);
@@ -3176,8 +3165,8 @@ impl Library {
             return Vec::new();
         }
         let m = in_view.len();
-        let after = self.order.iter().skip(last + 1).take(m);
-        let before = self.order[first.saturating_sub(m)..first].iter().rev();
+        let after = self.view.order.iter().skip(last + 1).take(m);
+        let before = self.view.order[first.saturating_sub(m)..first].iter().rev();
         after
             .chain(before)
             .map(|&e| self.entries[e].id.clone())
@@ -3362,15 +3351,15 @@ impl Library {
 
     /// The images selected in the views, in order.
     pub fn selection(&self) -> Vec<String> {
-        self.state.selection().keys().to_vec()
+        self.view.state.selection().keys().to_vec()
     }
 
     /// Selects one image, by its place in `entries`.
     pub fn select(&mut self, index: usize) {
         if let Some(e) = self.entries.get(index) {
             let key = e.id.clone();
-            self.state.set_selection([key.clone()], Some(key));
-            self.state.reveal_cursor();
+            self.view.state.set_selection([key.clone()], Some(key));
+            self.view.state.reveal_cursor();
             self.selected = Some(index);
         }
     }
@@ -3386,7 +3375,7 @@ impl Library {
     /// (cleared included) shows by it again.
     pub fn show_ids(&mut self, ids: &[String]) {
         self.set_filter(Filter::default());
-        self.only = Some(ids.iter().cloned().collect());
+        self.view.only = Some(ids.iter().cloned().collect());
         self.reorder();
         self.select_ids(ids);
     }
@@ -3394,12 +3383,12 @@ impl Library {
     /// How many photos the set shown alone holds ([`Library::show_ids`]),
     /// while one is.
     pub fn shown_set(&self) -> Option<usize> {
-        self.only.as_ref().map(HashSet::len)
+        self.view.only.as_ref().map(HashSet::len)
     }
 
     /// Drops the set shown alone: the Library shows by its filter again.
     pub fn clear_shown_set(&mut self) {
-        if self.only.take().is_some() {
+        if self.view.only.take().is_some() {
             self.reorder();
         }
     }
@@ -3413,28 +3402,28 @@ impl Library {
             .collect();
         let cursor = known.last().cloned();
         self.selected = cursor.as_ref().and_then(|c| self.index.get(c).copied());
-        self.state.set_selection(known, cursor);
-        self.state.reveal_cursor();
+        self.view.state.set_selection(known, cursor);
+        self.view.state.reveal_cursor();
     }
 
     /// Moves the cursor by `step` among the images shown, within bounds.
     pub fn step(&mut self, step: i64) {
-        if self.order.is_empty() {
+        if self.view.order.is_empty() {
             return;
         }
-        let last = self.order.len() as i64 - 1;
+        let last = self.view.order.len() as i64 - 1;
         let at = self
             .selected
-            .and_then(|i| self.order.iter().position(|&o| o == i))
+            .and_then(|i| self.view.order.iter().position(|&o| o == i))
             .map_or(0, |p| (p as i64 + step).clamp(0, last));
-        let index = self.order[at as usize];
+        let index = self.view.order[at as usize];
         self.select(index);
     }
 
     /// What a mark or a copy acts on: the selection, else the cursor's
     /// image.
     pub fn targets(&self) -> Result<Vec<String>, String> {
-        let sel = self.state.selection();
+        let sel = self.view.state.selection();
         let keys: Vec<String> = if sel.is_empty() {
             sel.cursor().cloned().into_iter().collect()
         } else {
@@ -3559,9 +3548,9 @@ impl Library {
                 Signal::Vetoed { step, reason } => self.notes.push(format!("{step}: {reason}")),
             }
         }
-        if marked && !self.filter.is_empty() {
+        if marked && !self.view.filter.is_empty() {
             // The vault answers again; what no longer matches goes now.
-            self.query = Some(self.query_for(&self.filter));
+            self.view.query = Some(self.query_for(&self.view.filter));
             self.reorder();
         }
         marked
@@ -3685,8 +3674,8 @@ impl Library {
             .stack
             .clone()
             .ok_or("the image is in no stack")?;
-        let expanded = !self.state.is_expanded(&s.top);
-        self.state.set_expanded(s.top.clone(), expanded);
+        let expanded = !self.view.state.is_expanded(&s.top);
+        self.view.state.set_expanded(s.top.clone(), expanded);
         self.expansions.push((s.id, expanded));
         Ok(())
     }
@@ -3805,7 +3794,7 @@ impl Library {
     /// The search field; the sort and the count; auto-advance and
     /// Compare. Each group on a line of its own, so a narrow panel does
     /// not wrap the count away from what it counts.
-    fn toolbar(&mut self, ui: &mut Ui) {
+    fn toolbar(&mut self, ui: &mut Ui, options: &GalleryOptions) {
         let ctx = ui.ctx().clone();
         let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
         let advance = crate::i18n::text(
@@ -3815,7 +3804,7 @@ impl Library {
         let count = crate::i18n::text(
             &ctx,
             Message::new("gui-library-count", "{ $shown } of { $total }")
-                .with("shown", self.order.len())
+                .with("shown", self.view.order.len())
                 .with("total", self.entries.len()),
         );
         let import = self
@@ -3829,57 +3818,66 @@ impl Library {
                 "The selected photos side by side (C)",
             ),
         );
-        let can_compare = self.state.selection().len() >= 2;
+        let can_compare = self.view.state.selection().len() >= 2;
         let mut asked = None;
         // Wrapped, the field no wider than what is left of the line: a
         // narrow panel takes the bar on several lines rather than widen
         // its content past its edge (and cut what comes under it).
-        ui.horizontal_wrapped(|ui| {
-            if let Some(import) = import
-                && ui.button(import).clicked()
-            {
-                self.import_asked = true;
-            }
-            // The field's box holds its icon and its "+" beside the text.
-            let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
-            let mut field = SearchField::new(LIBRARY).label(search).width(width);
-            if let Some(app) = &self.app {
-                field = field.app(app);
-            }
-            asked = field.show(ui, &mut self.search).changed;
-        });
-        ui.horizontal_wrapped(|ui| {
-            self.sort_menu(ui);
-            ui.weak(count);
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut self.auto_advance, advance);
-            if ui
-                .add_enabled(can_compare, egui::Button::new(compare))
-                .on_hover_text(compare_hint)
-                .clicked()
-            {
-                crate::dialogs::request(
-                    ui.ctx(),
-                    crate::dialogs::Request::Run(
-                        crate::comparison::COMMAND.into(),
-                        Value::Null,
-                        helios_shell::commands::Origin::User,
-                    ),
-                );
-            }
-        });
+        if options.has_search() || (import.is_some() && options.has_sources()) {
+            ui.horizontal_wrapped(|ui| {
+                if let Some(import) = import.filter(|_| options.has_sources())
+                    && ui.button(import).clicked()
+                {
+                    self.import_asked = true;
+                }
+                if !options.has_search() {
+                    return;
+                }
+                // The field's box holds its icon and its "+" beside the text.
+                let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
+                let mut field = SearchField::new(LIBRARY).label(search).width(width);
+                if let Some(app) = &self.app {
+                    field = field.app(app);
+                }
+                asked = field.show(ui, &mut self.view.search).changed;
+            });
+        }
+        if options.sort_count {
+            ui.horizontal_wrapped(|ui| {
+                self.sort_menu(ui);
+                ui.weak(count);
+            });
+        }
+        if options.view_options {
+            ui.horizontal_wrapped(|ui| {
+                ui.checkbox(&mut self.auto_advance, advance);
+                if ui
+                    .add_enabled(can_compare, egui::Button::new(compare))
+                    .on_hover_text(compare_hint)
+                    .clicked()
+                {
+                    crate::dialogs::request(
+                        ui.ctx(),
+                        crate::dialogs::Request::Run(
+                            crate::comparison::COMMAND.into(),
+                            Value::Null,
+                            helios_shell::commands::Origin::User,
+                        ),
+                    );
+                }
+            });
+        }
         let now = ctx.input(|i| i.time);
         if let Some(filter) = asked {
-            self.typed = Some((filter.clone(), now));
+            self.view.typed = Some((filter.clone(), now));
             self.filtered(filter);
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(
                 crate::recent_filters::TYPED_REST,
             ));
         }
         // A filter typed counts as used once it rests.
-        if self.typed.as_ref().is_some_and(|(f, at)| {
-            now - at >= crate::recent_filters::TYPED_REST && *f == self.filter
+        if self.view.typed.as_ref().is_some_and(|(f, at)| {
+            now - at >= crate::recent_filters::TYPED_REST && *f == self.view.filter
         }) {
             self.record_filter();
         }
@@ -3890,50 +3888,31 @@ impl Library {
     /// shown carry it; a click adds it to the filter. Shown while a filter
     /// is in force, once the vault counted.
     fn facets_bar(&mut self, ui: &mut Ui) {
-        if self.filter.is_empty() {
+        if self.view.filter.is_empty() {
             return;
         }
-        let Some(facets) = self.facets.clone() else {
+        let Some(facets) = self.view.facets.clone() else {
             return;
         };
         let ctx = ui.ctx().clone();
         let mut add = None;
-        for (facet, title) in [
-            ("rating", Message::new("gui-library-facet-rating", "Rating")),
-            ("label", Message::new("gui-library-facet-label", "Label")),
-            ("flag", Message::new("gui-library-facet-flag", "Flag")),
-            ("camera", Message::new("gui-library-facet-camera", "Camera")),
-            ("lens", Message::new("gui-library-facet-lens", "Lens")),
-            ("file_type", Message::new("gui-library-facet-type", "Type")),
-            (
-                "presence",
-                Message::new("gui-library-facet-presence", "Presence"),
-            ),
-            ("backup", Message::new("gui-library-facet-backup", "Backup")),
-            ("cull", Message::new("gui-library-facet-cull", "Culling")),
-        ] {
+        for (key, facet) in self.search_keys.faceted() {
             let values = facets.of(facet);
             if values.is_empty() {
                 continue;
             }
             ui.horizontal_wrapped(|ui| {
-                ui.weak(crate::i18n::text(&ctx, title));
+                ui.weak(crate::i18n::text(&ctx, key.label.clone()));
                 for (value, n) in values {
-                    let shown = if facet == "rating" {
-                        format!("{value}★")
-                    } else if facet == "cull" {
-                        crate::i18n::text(&ctx, cull_value(value))
-                    } else {
-                        value.to_string()
-                    };
+                    let shown = key.shown(&ctx, value);
                     if ui.small_button(format!("{shown} {n}")).clicked() {
-                        add = Some(facet_term(facet, value));
+                        add = Some(key.term_of(value));
                     }
                 }
             });
         }
         if let Some(term) = add {
-            let filter = self.filter.merged(&Filter::parse(&term));
+            let filter = self.view.filter.merged(&Filter::parse(&term));
             self.apply_filter(filter);
         }
     }
@@ -4239,18 +4218,18 @@ impl Library {
         use helios_vault::{Order, Sort};
         let ctx = ui.ctx().clone();
         let word = |m: Message| crate::i18n::text(&ctx, m);
-        let mut chosen = self.sort;
-        let current = word(sort_label(self.sort.by));
+        let mut chosen = self.view.sort;
+        let current = word(sort_label(self.view.sort.by));
         let tip = word(Message::new("gui-library-sort-tip", "Sort by"));
         let menu = egui::ComboBox::from_id_salt("helios.library.sort")
             .selected_text(current.clone())
             .show_ui(ui, |ui| {
                 for by in Sort::ALL.into_iter().filter(|s| *s != Sort::Id) {
                     // Sharpness starts with the sharpest.
-                    let descending = if by == Sort::Focus && self.sort.by != Sort::Focus {
+                    let descending = if by == Sort::Focus && self.view.sort.by != Sort::Focus {
                         true
                     } else {
-                        self.sort.descending
+                        self.view.sort.descending
                     };
                     ui.selectable_value(
                         &mut chosen,
@@ -4268,7 +4247,7 @@ impl Library {
             info.current_text_value = Some(current.clone());
             info
         });
-        let (arrow, tip) = if self.sort.descending {
+        let (arrow, tip) = if self.view.sort.descending {
             (
                 "↓",
                 Message::new(
@@ -4291,7 +4270,7 @@ impl Library {
         if flip.clicked() {
             chosen.descending = !chosen.descending;
         }
-        if chosen != self.sort {
+        if chosen != self.view.sort {
             crate::dialogs::request(
                 ui.ctx(),
                 crate::dialogs::Request::Run(
@@ -4324,16 +4303,30 @@ impl Library {
     /// section edits the selection), and the
     /// thumbnail grid with the culling keys.
     pub fn grid(&mut self, ui: &mut Ui) {
+        self.show(ui, &GalleryOptions::MAIN_PANEL);
+    }
+
+    /// The `main` gallery as a host asks for it
+    /// (`docs/design/library-search.md`, section 6): the search, the
+    /// sources, the sort and count, the view options and the current
+    /// photo's marks each drawn when the options ask, then the grid.
+    pub fn show(&mut self, ui: &mut Ui, options: &GalleryOptions) {
         self.receive(ui.ctx());
         // The search field (with the import button) and the marks bar
         // stay in place while the library is empty.
-        self.toolbar(ui);
-        self.facets_bar(ui);
-        self.folders_section(ui);
-        self.albums_section(ui);
-        self.keywords_section(ui);
-        self.imports_section(ui);
-        self.metadata_section(ui);
+        self.toolbar(ui, options);
+        if options.has_search() {
+            self.facets_bar(ui);
+        }
+        if options.has_sources() {
+            self.folders_section(ui);
+            self.albums_section(ui);
+            self.keywords_section(ui);
+            self.imports_section(ui);
+        }
+        if options.marks {
+            self.metadata_section(ui);
+        }
         if self.entries.is_empty() {
             let text = crate::i18n::text(
                 ui.ctx(),
@@ -4352,8 +4345,8 @@ impl Library {
         let out = {
             let items = Items {
                 entries: &self.entries,
-                order: &self.order,
-                stacks: self.filter.is_empty(),
+                order: &self.view.order,
+                stacks: self.view.filter.is_empty(),
                 revision: self.revision,
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
@@ -4373,7 +4366,7 @@ impl Library {
             if let Some(app) = &self.app {
                 grid = grid.app(app);
             }
-            grid.show(ui, &mut self.state, &items, &thumbs)
+            grid.show(ui, &mut self.view.state, &items, &thumbs)
         };
         self.after_pass(ui.ctx());
         let in_view = self.in_view.borrow().clone();
@@ -4544,8 +4537,8 @@ impl Library {
         let out = {
             let items = Items {
                 entries: &self.entries,
-                order: &self.order,
-                stacks: self.filter.is_empty(),
+                order: &self.view.order,
+                stacks: self.view.filter.is_empty(),
                 revision: self.revision,
                 words: &words,
                 backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
@@ -4565,7 +4558,7 @@ impl Library {
             if let Some(app) = &self.app {
                 strip = strip.app(app);
             }
-            strip.show(ui, &mut self.state, &items, &thumbs)
+            strip.show(ui, &mut self.view.state, &items, &thumbs)
         };
         self.after_pass(ui.ctx());
         carry_out(ui.ctx(), &out.signals);

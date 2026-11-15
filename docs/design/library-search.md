@@ -523,6 +523,21 @@ Each slice is one PR with its tests; the order matters.
    has no field, `sources: none` no sources); the existing library tests pass untouched; a test
    that two hosts drawing `main` share selection and filter; snapshot
    of the panel unchanged.
+
+   *First part landed (2026-11-15):* `library::Gallery` holds the view
+   state (search, filter, order, sort, selection, facets) inside
+   `Library`, which keeps the shared data; `GalleryOptions` (`search`,
+   `sources`, `sort_count`, `view_options`, `marks`) with
+   `MAIN_PANEL`, `LIBRARY_WINDOW` and `BARE`, each host drawing
+   `Library::show(ui, &options)`. The filter keys are declared
+   (`library::SearchKeys`, built-in and module keys alike: label,
+   values, facet, term); the facets bar lists them. It is a typed
+   registry until the hook kernel of [hooks.md](hooks.md) exists, then
+   its declarations are collected through `library.search.keys`.
+   Still to do in G1: `Library` renamed `LibraryData` with galleries
+   owned by their hosts; the grid moved onto the import window's
+   browser core (view modes, thumbnail size), egui-pop's `ThumbGrid`
+   and file browser meeting there.
 2. **G2. Hosts switch, the zone is regrouped.** The gallery's bar
    (field, filter button, sort, count, View menu); auto-advance and
    Compare into the View menu; sources into a Sources header (main) or

@@ -94,7 +94,9 @@ impl WindowFocus for LibraryWindow {
         self.touched = ui
             .ctx()
             .input(|i| !i.events.is_empty() || i.pointer.any_down());
-        ui.push_id("helios.library.window", |ui| library.grid(ui));
+        ui.push_id("helios.library.window", |ui| {
+            library.show(ui, &crate::library::GalleryOptions::LIBRARY_WINDOW)
+        });
     }
 
     fn asks_main_pass(&self) -> bool {

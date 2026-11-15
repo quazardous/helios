@@ -1366,7 +1366,7 @@ impl Shell {
                     }
                     let mut library = library.borrow_mut();
                     match view {
-                        0 => library.grid(ui),
+                        0 => library.show(ui, &crate::library::GalleryOptions::MAIN_PANEL),
                         1 => library.filmstrip(ui),
                         _ => library.compare_ui(ui, &mut comparison.borrow_mut()),
                     }
