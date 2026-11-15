@@ -30,7 +30,7 @@
 //!
 //! Exit 75 (`EX_TEMPFAIL`) means the box could not serve the job: off,
 //! unreachable (ssh exits 255), in maintenance, its GPU gone, or restarted
-//! under the job. It prints "bench box unavailable: <reason>" and is never
+//! under the job. It prints `bench box unavailable: <reason>` and is never
 //! a test failure. Otherwise the exit code is the job's.
 //!
 //! With `--chain egui-pop` (catalogues, then snapshots, then the gate) or

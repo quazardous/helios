@@ -41,7 +41,7 @@
 //!   in (the store's [`helios_values::Store::set_place`], which
 //!   `crate::contexts::follow_place` keeps on the place shown): an undo,
 //!   a redo or a jump that walks a step made out of sight makes egui-pop
-//!   say "Undone in <place>", with Go there.
+//!   say "Undone in \<place\>", with Go there.
 //! - **Snapshots** (`crate::edit_snapshots`): taking one saves nothing,
 //!   it records a name and the head step; the next save of the edit pins
 //!   it to that version, which the vault keeps. Until then it is

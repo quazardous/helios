@@ -19,7 +19,7 @@
 //!   or drive letter loses nothing.
 //!
 //! [`Scanner`] runs it on a thread of its own: at start, when poked (a
-//! volume appeared or went, see [`crate::Watch::on_volumes`]) and every
+//! volume appeared or went, see `Watch::on_volumes`) and every
 //! few minutes.
 
 use std::path::{Path, PathBuf};

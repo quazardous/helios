@@ -16,7 +16,7 @@
 //!   `developer.log_level` setting, set up as the process starts
 //!   ([`file_logs`]), and its crash reports, written by a
 //!   panic hook and offered on the next start, never sent. The About
-//!   dialog says where ([`about`]); so does the debug bridge's `logs`
+//!   dialog says where (`about`); so does the debug bridge's `logs`
 //!   collector.
 //!
 //! The [`Platform`] plugin is part of every shell: its hooks on the
