@@ -1255,17 +1255,6 @@ impl App {
         Ok(())
     }
 
-    /// Whether an image is still in the Library, as the vault holds it.
-    fn still_in_library(&self, id: &str) -> Result<(), String> {
-        let persist = self.persist.as_ref().ok_or("no library open")?;
-        let image = helios_vault::ImageId::from_hex(id)?;
-        if persist.vault().in_library(&image)? {
-            Ok(())
-        } else {
-            Err("it is no longer in the Library".into())
-        }
-    }
-
     /// The darkroom the workspace was left in, its image opened again;
     /// left, with a word, when the image cannot be.
     fn restore_darkroom(&mut self) {
@@ -1273,12 +1262,7 @@ impl App {
             return;
         };
         let opening = match &opened {
-            // An image that left the Library since (removed, or a JPEG
-            // paired into its RAW's photo) is not opened under a Library
-            // that no longer shows it.
-            Opened::Image(id) => self
-                .still_in_library(id)
-                .and_then(|()| self.open_from_library(id)),
+            Opened::Image(id) => self.open_from_library(id),
             Opened::File(path) => self.open(Open::Image(path.clone())),
         };
         if let Err(e) = opening {
