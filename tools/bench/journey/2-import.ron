@@ -19,11 +19,15 @@ Scenario(
         Shot("picked"),
         Expect(Tree(has: (role: "Button", label: "Import $photos"))),
         Ui(Click(role: "Button", label: "Import $photos")),
-        Wait(Event("job.finished")),
+        // The window's import runs as the node's promise: its end is the
+        // Library's `library.imported` (a `job.finished` may be another
+        // job's, such as the health check's).
+        Wait(Event("library.imported")),
         Wait(Settled),
-        Expect(Journal(has: "job.finished", data: { "kind": "import" })),
+        Expect(Journal(has: "library.imported")),
         Window("main"),
         Wait(Settled),
+        // Two pairs, a raw and a JPEG: four photos (a pair is one).
         Expect(Value("helios.library.count", 4)),
         Expect(NoError),
         Shot("imported"),
