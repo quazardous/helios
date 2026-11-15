@@ -694,16 +694,17 @@ class Journey:
                 if "error" in launched:
                     entry["why"] = f"launch: {launched['error']}"
             elif file is not None:
-                extra = {
-                    "import-session": {"session": self.session},
-                    "workshop": {"photo": self.photo},
-                    "export": {"image": self.image, "export": self.export},
-                }.get(step)
                 entry = {"step": step}
                 if step == "workshop":
                     self.find_photo(entry)
                 if step == "export":
                     self.export.mkdir(parents=True, exist_ok=True)
+                # After `find_photo`: the cell's label is read from the tree.
+                extra = {
+                    "import-session": {"session": self.session},
+                    "workshop": {"photo": self.photo},
+                    "export": {"image": self.image, "export": self.export},
+                }.get(step)
                 if "why" not in entry:
                     entry = {**entry, **self.scenario(step, file, extra)}
                 if "why" not in entry and step == "imports-list":
