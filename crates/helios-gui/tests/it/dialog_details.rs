@@ -17,7 +17,8 @@ use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::{CommandSpec, Origin};
 use serde_json::json;
 
-const CHILD: &str = "a_failing_command_in_an_environment_holding_a_secret";
+/// The child test, by its full path in the `it` executable.
+const CHILD: &str = "dialog_details::a_failing_command_in_an_environment_holding_a_secret";
 const CLIENT_ID: &str = "HELIOS_TESTING_PHOTOS_CLIENT_ID";
 const SECRET: &str = "4242-client-abcdef.apps.example";
 const HOME: &str = "/tmp/helios-dialog-details-home";

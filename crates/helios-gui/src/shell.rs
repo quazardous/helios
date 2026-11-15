@@ -102,6 +102,7 @@ mod import_auto;
 mod import_choices;
 mod import_detail;
 mod import_history;
+mod import_merge;
 mod import_profile_editor;
 mod import_profile_store;
 mod import_profiles;
@@ -114,12 +115,14 @@ mod library_keywords;
 mod library_meta;
 mod lifetime;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
+pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
 mod reads;
 mod storage;
 mod storage_admin;
+mod trace;
 pub use storage_admin::{
     MARK_VOLUME as MARK_VOLUME_COMMAND, SET_STRATEGY as SET_STRATEGY_COMMAND,
     SET_UP_STRATEGY as SET_UP_STRATEGY_COMMAND, STRATEGY as BACKUP_STRATEGY_COMMAND,
@@ -7084,7 +7087,14 @@ impl Shell {
         }
         let events = h.events_since(self.core.seen);
         self.core.seen = h.last_event();
+        // What holds the screen, in the log when it changes.
+        self.focus.screen.follow(&h);
         for e in events {
+            match trace::event_line(&e.name, &e.data) {
+                Some((true, line)) => log::warn!(target: "helios", "{line}"),
+                Some((false, line)) => log::info!(target: "helios", "{line}"),
+                None => {}
+            }
             // egui-pop's Quit (Ctrl+Q, File > Quit), from any window: it
             // closes the window it ran in, the application quits.
             if e.name == "command.done"

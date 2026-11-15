@@ -343,6 +343,13 @@ Each slice is one PR, with its node command and its tests.
    Tests: an import fixture (same name, renamed by time, HEIF, a lone
    JPEG), the import undone, the profile round trip, the node's
    rule-path import, a re-import counting the JPEG as known.
+   *Started 2026-11-15:* every import (the window, a folder, the node's
+   `library.import`, automatic and rule imports) makes the pairs among
+   the files it brought into the Library one photo each, in its own undo
+   step (`Report::paired`); a file already a photo's file is held, never
+   flagged a photo again; "safe to format" asks `holds`. The `pairs`
+   profile option (`raw_only`, `jpeg_only`), HEIF reading and "left by
+   choice" remain.
 4. **Library read and display.** `files` in the windowed read, the
    `roles` fact, the "R+J" badge, the `has:jpeg` filter, the files list.
    Tests: `library_scale`'s query counts unchanged; a badge snapshot; the

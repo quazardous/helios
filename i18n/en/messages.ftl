@@ -825,6 +825,8 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-accounts-merged = { $count } { $connector } accounts signed in as one address merged into one: { $address }
+
 gui-import-album-choose = Choose an album under the account, in Sources.
 
 gui-import-album-failed = Could not read the album:
@@ -1395,6 +1397,8 @@ gui-library-albums = Albums
 
 gui-library-albums-none = No album yet
 
+gui-library-all-photos = All photos
+
 gui-library-auto-advance = Auto-advance
 
 gui-library-badge-backed-up = backed up
@@ -1658,6 +1662,14 @@ gui-library-rotate-reset = Reset Rotation
 gui-library-rotate-right = Rotate Right
 
 gui-library-run-workshop = Run Workshop…
+
+gui-library-scope-album = Album: { $name }
+
+gui-library-scope-folder = Folder: { $path }
+
+gui-library-scope-import = Import: { $line }
+
+gui-library-scope-set = { $count } photos shown alone
 
 gui-library-search = Search images
 

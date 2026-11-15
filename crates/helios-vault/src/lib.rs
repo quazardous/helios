@@ -330,6 +330,11 @@ pub trait Store: Send {
     /// Drops sightings not in the Library: the ones missing since before
     /// `missing_before`, then the ones seen longest ago past `limit`.
     fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String>;
+    /// Moves every sighting on the volume `from` to the same place on
+    /// `to`, Library ones included; a place `to` already holds keeps its
+    /// own sighting and the one from `from` is dropped. Returns how many
+    /// were moved.
+    fn move_sightings(&mut self, from: &VolumeId, to: &VolumeId) -> Result<usize, String>;
     /// Records what is known of a folder, replacing what was.
     fn put_folder(&mut self, folder: &Folder) -> Result<(), String>;
     /// What is known of a folder.
@@ -1131,6 +1136,23 @@ impl Store for MemoryStore {
                 || !s.under(volume, rel_dir.unwrap_or(Path::new("")))
         });
         Ok(before - self.sightings.len())
+    }
+
+    fn move_sightings(&mut self, from: &VolumeId, to: &VolumeId) -> Result<usize, String> {
+        let (moving, mut kept): (Vec<Sighting>, Vec<Sighting>) =
+            std::mem::take(&mut self.sightings)
+                .into_iter()
+                .partition(|s| s.volume.as_ref() == Some(from));
+        let mut moved = 0;
+        for mut s in moving {
+            s.volume = Some(to.clone());
+            if !kept.iter().any(|k| k.same_place(&s)) {
+                kept.push(s);
+                moved += 1;
+            }
+        }
+        self.sightings = kept;
+        Ok(moved)
     }
 
     fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {

@@ -1,5 +1,6 @@
 //! `helios`: the command line of Helios.
 //!
+//! ```text
 //!     helios --version
 //!
 //!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
@@ -56,6 +57,7 @@
 //!
 //!     helios doctor display
 //!     helios doctor ai
+//! ```
 //!
 //! `batch` applies a network to many images, each exported to a file in
 //! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already

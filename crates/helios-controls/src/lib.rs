@@ -14,7 +14,7 @@
 //!   control patched to a store path, from a Helios descriptor.
 //!
 //! The framework's modules are re-exported as they are: [`model`],
-//! [`slot`], [`card`], [`context`], [`resolve`], [`registry`], [`value`], and
+//! [`slot`], [`card`], [`context`], [`mod@resolve`], [`registry`], [`value`], and
 //! `render` (feature `render`).
 
 pub mod catalogue;

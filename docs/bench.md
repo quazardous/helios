@@ -17,7 +17,7 @@ does with it.
 | Where | What |
 |-------|------|
 | Locally | `cargo fmt`, `cargo check --tests`, `cargo xtask check`; never clippy (the box lints first in every test job) |
-| CI (GitHub Actions) | the full gate on every push to `next` and `main`, and on contributors' pull requests from forks: lint, tests, doctests, survival, check-commits. Our own pull requests run none: the box tests them and `next`'s run decides |
+| CI (GitHub Actions) | the full gate on every push to `next` and `main`, and on contributors' pull requests from forks: lint, tests, doctests, survival, check-commits. Our own pull requests run one cheap check, `pr-lint` (every linter, `cargo doc` without a warning, the generated files: see [next.md](next.md)), and none of the rest: the box tests them and `next`'s run decides |
 | The bench box | the same jobs on demand, on a pushed branch or on uncommitted code, plus timings on an otherwise idle machine and the tests on a real GPU |
 
 Jobs of the Benchfile:
@@ -27,7 +27,7 @@ Jobs of the Benchfile:
 | `build` | `cargo build --workspace --all-targets` | 8 cores, 6 GB |
 | `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
-| `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target, `test=lib` for the crate's unit tests) and `filter=` (a name filter, a test path such as `filter=undo::tests::redo`, or several names separated by spaces), stopped at the first failure, in the branch's target | 4 cores, 4 GB |
+| `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target, `test=lib` for the crate's unit tests) and `filter=` (a name filter, a test path such as `filter=undo::tests::redo`, or several names separated by spaces), stopped at the first failure, in the branch's target. helios-gui's integration tests are modules of one executable, `it`: `test=library_filter` runs the `library_filter` module alone, `filter=` then joined to its path (`test=it` for them all) | 4 cores, 4 GB |
 | `test-affected` | the tests a change touches since `base=` (`origin/main` by default), or the `crates=` given (as `--push` does), and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `stability` | `cargo stability`: the headless node (`helios-node --vault`) killed with `kill -9` in the middle of its own jobs (a backup copying, an import, a health run, a settings layer write), then started again on the same vault; and many clients on one node at once (`clients=`, 32 by default, for `seconds=`, 60 by default, `seed=`): each a real client over the node's socket, mixing reads, saves, stacks made and undone, imports and cancelled imports, disconnections, while subscribers follow the bus, then the vault checked against every acknowledged write; JUnit and a summary in `out/`, where each kill landed in the log, the stress report (calls per second, p50 and p99 latency, errors, the node's memory, threads and descriptors) in `out/many-clients.json`. Not run by CI, which is for compatibility breaks: run it on demand and before a release (the tests sit behind the `helios-node` feature `stability`, which no CI run enables) | 4 cores, 4 GB |
@@ -36,7 +36,9 @@ Jobs of the Benchfile:
 | `i18n-extract` | the translation catalogues regenerated on a branch: `cargo xtask i18n extract`, then `i18n stamp fr`, then `i18n check` (its report in `out/i18n.txt`); the change as `out/i18n.patch`, applied on the branch with `git apply --index` and committed there | 5 cores, 6 GB |
 | `dt-asan-rgbcurve` | darktable at `dt_ref=<sha>` (the fork) built with AddressSanitizer (recovering) and Lua, then the rgbcurve scroll scenario (`tools/bench/rgbcurve`: a wheel step away from every node on R, and a wheel with the zoom key held over a node) in a headless labwc (wbox); per case the history before and after, the ASan reports and screenshots in `out/<case>/`, `out/SUMMARY.txt` | 8 cores, 10 GB |
 | `flatpak` | the Flatpak bundle (`packaging/flatpak/build.sh`) built from source with flatpak-builder, as the release workflow builds it, into `out/`, then installed and smoke-tested (`packaging/flatpak/smoke.sh`); the runtime, the SDK and the downloaded sources stay in the `flatpak` storage | 5 cores, 8 GB |
-| `build-gui` | `helios-gui` in release, kept as the output `gui`, with the programs of the plugins Helios ships (the outputs `darktable-library`, `lightroom-catalog`, `google-photos`); `cargo xtask install-dev [--branch B]` installs the latest (`--from DIR` the outputs a gate brought back) outside the checkout (`helios-gui` and the programs beside it) with the "Helios Dev" launcher (see CONTRIBUTING.md, "A dev build on the desktop") | 5 cores, 6 GB |
+| `flatpak-devel` | the development Flatpak `io.github.quazardous.Helios.Devel` ("Helios Dev", its own data) of a branch: the same build under its own id (`HELIOS_FLATPAK_DEVEL=1 packaging/flatpak/build.sh`), versioned `X.Y.Z-dev.N+<commit>`, smoke-tested, kept as the outputs `bundle`, `sha256` and `version` that `cargo xtask install-dev [--branch B]` installs with `flatpak install --user`; also kept under `devel/<branch>` in the `flatpak` storage | 5 cores, 8 GB |
+| `flatpak-devel-gui` | the bundle `flatpak-devel` kept for the branch, installed and run in a headless labwc through wbox with only its manifest's permissions (`tools/bench/flatpak-gui.py`): it starts, opens a library in its own data folder, the import window lists a folder of `~/Pictures`, and importing it runs through helios-node in the sandbox | 3 cores, 4 GB |
+| `build-gui` | `helios-gui` in release, kept as the output `gui`, with the programs of the plugins Helios ships (the outputs `darktable-library`, `lightroom-catalog`, `google-photos`); `cargo xtask install-dev --home [--branch B]` installs the latest (`--from DIR` the outputs a gate brought back) outside the checkout (`helios-gui` and the programs beside it) with the "Helios Dev (home)" launcher (see CONTRIBUTING.md, "A dev build on the desktop") | 5 cores, 6 GB |
 | `egui-pop-gallery` | egui-pop's gallery in release (`egui_pop=` picks the branch), kept as the output `gallery`; `tools/bench/fetch-gallery.sh [branch]` fetches the latest into `target/release/egui-pop-gallery`, where the gallery's launcher points | 5 cores, 6 GB |
 | `egui-pop-wbox` | egui-pop's gallery in release in a headless labwc (wbox), driven by a scenario of egui-pop's `tools/wbox` (`script=`, `titlebar.py` by default: hover after a move by the gallery's own title bar); its JSON lines in the log, its screenshots in `out/`. `compositor=mutter` runs the same scenario in a headless mutter (GNOME's compositor, egui-pop's `tools/wbox/mutter.py`: input through its RemoteDesktop D-Bus API, frames through ScreenCast and PipeWire), for bugs seen only on GNOME | 5 cores, 6 GB |
 | `egui-pop-perf` | a timing job, after `egui-pop-perf-build` (its `first`, which builds it): egui-pop's performance gate, the gallery's `perf` example headless and deterministic (fixed frames, fixed input) on six heavy pages (`pages=` picks some, comma-separated): frame build and tessellation times, vertices, allocations, the heap's peak, one JSON line per page in `out/perf.jsonl`. Each full run is kept per egui-pop branch in the `egui-pop-perf` storage (`latest.jsonl`, `history.jsonl`) and compared with next's latest: a figure beyond its threshold is a warning in `out/regressions.txt`, never a failure. Run it on egui-pop's `next` after a merge to move the baseline | 4 cores, 4 GB, timing (the machine alone) |
@@ -46,7 +48,8 @@ Jobs of the Benchfile:
 | `start-timing` | `helios-gui` in release in a headless labwc (wbox), launched `runs=` times in turn bare (a workspace alone, as the launcher starts it), on the raw corpus's vault and on its first raw (`kinds=`, joined by `+`); each step of the start it marks (`HELIOS_START_TRACE`), its first frame presented and its first input answered (the script moves the pointer over it), from the process's start, in `out/start-timing.md`; `budget=<ms>` and `interactive=<ms>` fail a run slower to its first frame or to interactive | 5 cores, 6 GB |
 | `masks-shots` | `helios-gui` in release in a headless labwc (wbox) at 1920×1080, the raw corpus's first image, driven through the command palette in each theme (`themes=`): the empty mask, then two parametric members and two shapes, then the mask display on the selected shape (`M`, then grey from the palette); the screenshots and each step's answers in `out/` (`tools/bench/masks-shots.py`). `doc=yes` draws the two masks pictures of [gui.md](gui.md) instead, at 1280×800 in the default theme on a synthetic picture: `out/masks-wbox.png` and `out/mask-tree-wbox.png`, to copy into `docs/gui/` | 5 cores, 6 GB |
 | `scenarios` | Helios's scenarios (`crates/helios-gui/tests/scenarios/*.ron`) replayed live: `helios-gui` in release in a headless labwc (wbox), each scenario on a throwaway library with a folder of known photos, driven over its agent socket by the `scenarios` example (egui-pop's scenario runner), the invariants checked after every step; the shots, journals, failure reports and helios-gui's logs in `out/`, one line per scenario in `out/scenarios.jsonl`; `only=<name>[,<name>]` picks scenarios (`tools/bench/scenarios.py`) | 5 cores, 6 GB |
-| `gui-snapshots` | helios-gui's snapshot tests (the import window's, or `test=<target>`'s) with `UPDATE_SNAPSHOTS=1`, on lavapipe (`update=force` rewrites every snapshot, not only those past their threshold); every PNG of `crates/helios-gui/tests/snapshots` in `out/snapshots/`, to review and commit | 5 cores, 6 GB |
+| `journey` | the first-user journey (`tools/bench/journey/*.ron`, driven by `tools/bench/journey.py`): `helios-gui` in release in a headless labwc (wbox) on a fresh profile (its own HOME and XDG folders), the init wizard finished on its defaults, a fixture card (two RAW+JPEG pairs, a raw and a JPEG alone: CC0 raws of the `raw-corpus` volume and the plugin tests' JPEGs) imported through the import window, the Library's count (a pair is one photo), a click on the import session in the Library's Imports section (the grid scoped to its photos), the health check run and each fix it offers applied (the screen must not go black after one), Settings › Storage (the library's disk online) and Backup › Strategy (its line), a quit that must exit 0, then a restart that still shows the photos, a RAW+JPEG pair opened in the darkroom (its render ends, the image region not one flat colour) and exported with the default settings (the file decodes, at the raw's size in the corpus manifest), and a last quit; after every step the scenario invariants and no error or panic line in helios-gui's stderr and logs. A failure names the step in `out/journey-failure.txt`, with its screen, each window's accessibility tree and the logs in `out/logs/`; one line per step in `out/journey.jsonl`. Run on every `next` and before a release | 5 cores, 6 GB |
+| `gui-snapshots` | helios-gui's snapshot tests (the import window's, or those of the `it` module `test=<module>` names; `test=it` for all) with `UPDATE_SNAPSHOTS=1`, on lavapipe (`update=force` rewrites every snapshot, not only those past their threshold); every PNG of `crates/helios-gui/tests/snapshots` in `out/snapshots/`, to review and commit | 5 cores, 6 GB |
 | `check-commits` | `cargo xtask check-commits <base>` (`base=`, `origin/main` by default): each commit but the head builds, passes clippy and the tests it touches; `full=yes` runs every fast test on each; the per-commit report in `out/check-commits.md` | 8 cores, 6 GB |
 | `gpu` | the GPU backend's tests on the box's NVIDIA GPU; the adapter used in `out/adapter.txt` | 4 cores, 4 GB, the GPU alone |
 | `bench-masks` | `cargo xtask bench masks`, `masks.jsonl` in `out/` | 8 cores, 6 GB, the machine alone |
@@ -90,6 +93,41 @@ without network: before each job, `cargo fetch --locked` downloads the
 crates into a registry cache shared by all branches. The target directory
 is a cache too, one per branch, used by one job at a time: a second job on
 the same branch waits for the first.
+
+### The target's budget
+
+Every branch's target counts in full against the project's 300 GB
+hard-disk quota, a new branch's copy of main's included, so its size
+decides how many branches the box serves at once. **A branch's target
+keeps to 15 GB** (the `max` of the `target` storage), which lets a dozen
+branches live side by side with egui-pop's targets.
+
+What fills a target is the test executables. Each test target links into
+an executable of its own that carries the whole GUI and GPU stack, and
+`helios-gui` alone had about a hundred test targets (now the modules of
+one, `it`): building its tests on a fresh branch (2026-11-15) took the
+target from 0.7 GB, the crates seeded from main, to 28 GB, with the jobs already on line tables only
+(`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_DEBUG`, dependencies
+without debug info) and without incremental state (`CARGO_INCREMENTAL=0`).
+Full targets reached the 40 GB cap the storage then had, and were cut
+back to 36 GB after each job.
+
+So every job that mounts a branch's target ends with
+[`tools/bench/trim-target.sh`](../tools/bench/trim-target.sh) (an `EXIT`
+trap at the start of its command, so it also runs after a failure): past
+12 GB, it removes the debug profile's oldest test executables until the
+target is back under 12 GB. The compiled crates, the build scripts and
+the release builds stay, so the next job relinks only the tests it runs,
+which a change to the crate they test relinks anyway. The storage's
+15 GB `max` is the box's backstop: over it, the box removes the least
+recently written files, which cargo rebuilds (from sccache) when it
+misses them.
+
+Check it with `storage list` (each `target/<branch>`, its size and last
+use); each job's log ends with the trim's line, `target: N GB at the job's
+end, M GB of old test executables removed, budget 12 GB`. A target well
+over budget after a job means something new fills it: look before raising
+the budget.
 
 ## How to call it
 
@@ -135,8 +173,11 @@ characters): a few seconds here instead of a failed job on the box.
 It also refuses a job missing a parameter its command needs. Before any job
 that builds, the box itself runs the short `check` job (`egui-pop-check` for
 egui-pop's jobs), declared as the job's `first` in the Benchfile and run
-once per commit: `cargo clippy --tests --keep-going` on the crate the job
-names, else the workspace, with no code generated and no link. Lints are
+once per commit: `cargo clippy --tests --keep-going` on the workspace,
+with no code generated and no link. The `first` passes no `crate=`, so
+every job on a branch head shares one check: the box runs one identical
+check for jobs queued together, and one that already passed on that commit
+(the branch's own `check branch=<branch>` included) ends at once. Lints are
 warnings rather than errors, so one pass shows every lint of every crate,
 dependents and tests included; any warning or compile error makes the
 check red. The job itself is queued only if that check passes:
@@ -150,7 +191,10 @@ compile error.
 `$XDG_STATE_HOME/helios-bench/failures.jsonl` with its failing lines, and
 `bench-remote` asks for the cause: the agent that queued it records it at
 once with `cargo xtask bench-remote why <id> "<cause, and what is done
-about it>"`. `cargo xtask bench-remote failures` lists the ones still
+about it>"`. A `first` prerequisite that failed (the job itself then
+ends with 79) is recorded too, from the box's output; `why` on a job the
+file does not hold asks the box (`status <id>`) and adds it when it really
+failed. `cargo xtask bench-remote failures` lists the ones still
 unexplained (`--all` for every one). A run meant to fail (a reproduction
 before a fix) says so with `expect=fail` and is recorded as expected. With
 `--push`, the tracked and untracked files of the working tree (not the

@@ -5,7 +5,7 @@
 //! "Add…" wizard's steps
 //! (`tests/snapshots/`, thresholds in the workspace's `kittest.toml`).
 //! Regenerate with `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test
-//! import_snapshots` (the box's `gui-snapshots` job).
+//! it import_snapshots::` (the box's `gui-snapshots` job).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

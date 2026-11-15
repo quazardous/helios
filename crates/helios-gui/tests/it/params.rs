@@ -209,7 +209,7 @@ fn escape_gives_a_drag_up_without_a_trace() {
 
 /// On Helios's default pointer profile (Photoshop's), the wheel scrolls
 /// past a slider: it steps one only once focused (darktable's profile
-/// and its Alt are in `tests/input.rs`).
+/// and its Alt are in `tests/it/input.rs`).
 #[test]
 fn the_wheel_steps_a_slider_only_once_focused() {
     let mut h = harness();

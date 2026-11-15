@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# flatpak's icon check for the bench box's jobs, set with
+# FLATPAK_VALIDATE_ICON: flatpak runs it with `--sandbox`, which starts it
+# again under its own bwrap, and a box job's container refuses that
+# namespace ("Creating new namespace failed"), so exporting a build
+# failed. The icons checked are the app's own, from this repository:
+# this runs the same check without `--sandbox`.
+set -euo pipefail
+args=()
+for a in "$@"; do
+  [ "$a" = --sandbox ] || args+=("$a")
+done
+exec /usr/libexec/flatpak-validate-icon "${args[@]}"

@@ -13,11 +13,11 @@ Two branches, two writers:
 
 | Branch | Who writes it | What it holds |
 |---|---|---|
-| `next` | each **author** (its own pull request, after its box jobs), a merger for a backlog (`cargo xtask gate`), and the promotion bot | what passed the box tests; CI runs on each push |
+| `next` | each **author** (its own pull request, after its box jobs and its `pr-lint` check), a merger for a backlog (`cargo xtask gate`), and the promotion bot | what passed the box tests and the cheap checks; CI runs on each push |
 | `main` | the promotion bot only | what passed `next`'s CI, with its releases |
 
-A pull request is merged only when its tests passed on the box, so
-"merged" always means "on `next`".
+A pull request is merged only when its tests passed on the box and its
+`pr-lint` check is green, so "merged" always means "on `next`".
 
 ## For a change (an author's whole job)
 
@@ -58,7 +58,24 @@ A pull request is merged only when its tests passed on the box, so
    at once). Then each manifest job with `branch=<branch>`. Wait in the
    foreground with `jbx wait <id>`: a subagent's turn stays alive. Fix
    what is red on the branch and run that job again.
-5. **Merge it yourself** when every job is green: merge the pull request
+5. **Merge it yourself** when every job of the manifest is green on the
+   box **and** the pull request's `pr-lint` check is green (since
+   2026-11-15). `pr-lint` (`.github/workflows/pr-lint.yml`) is the one
+   GitHub check our own pull requests run, on every push, in a few
+   minutes: `cargo xtask lint` with every linter installed (rustfmt,
+   clippy, deps-worlds, cargo-deny, cargo-machete, taplo, typos,
+   shellcheck, ruff), `cargo doc` without a warning, `cargo xtask
+   ui-index --check`, `cargo xtask i18n check`, `cargo xtask check
+   --base origin/next` (a changelog fragment) and the English catalogue
+   against the declarations. Its two jobs (`linters`, `catalogue`) run side by side and `pr-lint`
+   sums them up. Look at it once, when the box jobs are
+   done: `gh pr checks <n> --watch --fail-fast` (it returns when the
+   check ends), or a single `gh pr checks <n>`; that is all the CI an
+   author watches. Red: fix it on the branch, as for a box job. The
+   box's `lint` job runs a part of it before a push (clippy,
+   `cargo xtask check`, `cargo xtask i18n check`); the linters, the
+   documentation and the generated files are checked by `pr-lint` alone. Then
+   merge the pull request
    into `next` (`gh pr merge <n> --merge --delete-branch`). If `next`
    moved meanwhile, merge `origin/next` into the branch, check it again
    locally, and merge. Post the step on the ticket. Delete the worktree
@@ -111,9 +128,11 @@ Every failed box job gets its reason at once:
 | Where | What | When |
 |---|---|---|
 | Local | fmt, check, typos | while coding |
-| Bench box, narrow | the manifests' jobs (clippy first) | the tester, per batch on a `gate/…` branch |
+| Bench box, narrow | the manifests' jobs (clippy first) | the author, per pull request; a merger, per batch on a `gate/…` branch |
+| The pull request's `pr-lint` | the cheap checks, no test but the English catalogue's: every linter, `cargo doc` without a warning, the UI index, the catalogues, the changelog fragment | every push of our own pull request into `next` |
 | `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, Windows | every push of `next` |
 | Bench box, wide | `test-affected`, `test`, GPU, timing, `stability` | daily, before a release, on demand |
+| Bench box, `journey` | the first-user journey: a fresh profile's wizard, a card imported, the Library's count, the import session, the health fixes, Settings › Storage, quit and restart, a photo opened in the darkroom and exported, headless ([bench.md](bench.md)) | every push of `next` (queued by the watcher of `next`), and before a release |
 
 CI looks for regressions and backward-compatibility breaks. Load, soak and
 stress runs (`stability`) never go into CI.

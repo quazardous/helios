@@ -138,6 +138,28 @@ too_many_lines = "allow"
 needless_pass_by_value = "allow"
 
 
+# egui-pop's late-value cell (`late::LateValue`, behind `helios_ui::value`)
+# ahead of its crates.io release: every egui-pop crate from the same
+# commit of its `next`, so the graph holds one egui-pop. Drop this table
+# once egui-pop 0.12 is published and the versions above ask for it.
+[patch.crates-io]
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "ccdd26e1" }
+
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
 # Dependencies build without debug info: the GPU and GUI stacks are large,

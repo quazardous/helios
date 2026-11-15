@@ -40,6 +40,9 @@ impl Action {
 
 /// A button for `kind` of action, labelled `label`: egui-pop's button in
 /// the action's tone.
+///
+/// Need (action): a button by tone (primary, danger, quiet).
+/// Need (action): the screen's primary or secondary action.
 pub fn action(ui: &mut Ui, kind: Action, label: &str) -> Response {
     ui.button_tone(kind.tone(), label)
 }

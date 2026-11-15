@@ -11,7 +11,7 @@
 //!   darktable build: field names, types, offsets, ranges, enums).
 //! - [`iop_order`] puts the history in darktable's pipe order, the order
 //!   its modules run in, which is not the order they were edited in.
-//! - [`import`] turns the effective history into Helios modules and
+//! - [`import()`] turns the effective history into Helios modules and
 //!   parameters, and reports everything it could not carry over: modules
 //!   Helios does not have, fields without a counterpart, versions it cannot
 //!   decode yet, blends it does not do, disabled items, and the modes it

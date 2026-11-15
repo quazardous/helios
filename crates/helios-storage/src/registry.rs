@@ -147,6 +147,32 @@ pub fn remember<S: Store>(vault: &Vault<S>, volume: &Volume, now: u64) -> Result
     })
 }
 
+/// Two remote volumes found to be one (two accounts signed in as one
+/// identity): the record of `from` is forgotten, and becomes `to`'s when
+/// the vault knows no `to` yet (what the user set on it kept). Whether
+/// `from` was known.
+pub fn merge_remote<S: Store>(
+    vault: &Vault<S>,
+    from: &VolumeId,
+    to: &VolumeId,
+) -> Result<bool, String> {
+    if from == to {
+        return Ok(false);
+    }
+    vault.storage_transaction(|tx| {
+        let Some(doc) = tx.volume(from.as_str())? else {
+            return Ok(false);
+        };
+        if tx.volume(to.as_str())?.is_none() {
+            let mut record = decode(from.as_str(), doc)?;
+            record.id = to.clone();
+            tx.set_volume(to.as_str(), Some(&encode(&record)?))?;
+        }
+        tx.set_volume(from.as_str(), None)?;
+        Ok(true)
+    })
+}
+
 /// Saves what the user set on a known volume: its name (its label when
 /// left blank), roles, off site and RAID flags. What a scan detects
 /// (kind, size, last seen) stays as recorded. Returns the volume as

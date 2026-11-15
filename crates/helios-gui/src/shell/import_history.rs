@@ -66,24 +66,27 @@ impl History {
     /// now among `mounted` (else where it was last).
     pub(super) fn recent_folders(&self, mounted: &[MountedCard]) -> Vec<std::path::PathBuf> {
         let mut out: Vec<std::path::PathBuf> = Vec::new();
-        let mut places: Vec<&Place> = Vec::new();
+        let mut places: Vec<Place> = Vec::new();
         for r in &self.records {
             if r.importer.is_some() || r.remote.is_some() {
                 continue;
             }
             for s in &r.sources {
-                let path = match r.place_of(s) {
+                // Files chosen one by one are listed by their folder.
+                let (folder, place) = r.folder_of(s);
+                let path = match place {
                     Some(place) => {
                         if places.contains(&place) {
                             continue;
                         }
-                        places.push(place);
-                        mounted
+                        let path = mounted
                             .iter()
                             .find(|m| m.id == place.volume.0)
-                            .map_or_else(|| s.clone(), |m| m.root.join(&place.rel_path))
+                            .map_or_else(|| folder.clone(), |m| m.root.join(&place.rel_path));
+                        places.push(place);
+                        path
                     }
-                    None => s.clone(),
+                    None => folder,
                 };
                 if !out.contains(&path) {
                     out.push(path);
@@ -113,14 +116,19 @@ impl History {
             .iter()
             .find(|r| {
                 r.error.is_none()
-                    && r.sources.iter().any(|s| match (on_card, r.place_of(s)) {
-                        (Some((id, rel)), Some(place)) => {
+                    && r.sources.iter().any(|s| match (on_card, r.folder_of(s)) {
+                        (Some((id, rel)), (_, Some(place))) => {
                             place.volume.0 == id && place.rel_path == rel
                         }
-                        (Some(_), None) | (None, _) => s == folder,
+                        (Some(_), (from, None)) | (None, (from, _)) => from == folder,
                     })
             })
             .map(|r| r.when)
+    }
+
+    /// Reads the records again at the next pass (an import ended).
+    pub(super) fn read_again(&mut self) {
+        self.read_at = None;
     }
 
     /// Reads the records again when they are older than [`READ_EVERY`].
@@ -167,8 +175,7 @@ fn line(r: &Record, t: &dyn Fn(Message) -> String) -> String {
     let what = if r.error.is_some() {
         t(Message::new("gui-import-history-failed", "failed"))
     } else {
-        t(Message::new("gui-import-history-added", "{ $count } added")
-            .with("count", r.counts.added + r.counts.located))
+        t(Message::new("gui-import-history-added", "{ $count } added").with("count", r.photos()))
     };
     format!("{} · {when} · {what}", r.source_label())
 }

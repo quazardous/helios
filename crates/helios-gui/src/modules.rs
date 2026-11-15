@@ -90,7 +90,7 @@ pub fn selected(store: &Store) -> Option<String> {
 
 /// Bypasses `node` (the selected module by default) when `on`, or brings
 /// it back; without `on`, the other way round. One undo step, labelled
-/// "bypass <node>" or "restore <node>"; nothing when it already is.
+/// "bypass \<node\>" or "restore \<node\>"; nothing when it already is.
 /// Returns the node and whether it is now bypassed.
 pub fn bypass(
     store: &mut Store,

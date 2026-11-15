@@ -44,6 +44,9 @@ pub(super) struct Focus {
     /// Why the tab dragged last frame may not go where it is, as the
     /// workbench's drop hint said it: said when the tab is let go there.
     pub(super) drag_refusal: Option<String>,
+    /// What held the screen last frame (the Settings app, its wizard,
+    /// the focus screen): logged when it changes.
+    pub(super) screen: super::trace::Screen,
     pub(super) rects: BTreeMap<String, Rect>,
     /// The window of each named rectangle drawn outside this one (a
     /// detached panel's).
@@ -160,6 +163,7 @@ impl Focus {
             window: seed.window,
             contents: seed.contents,
             drag_refusal: None,
+            screen: super::trace::Screen::default(),
             rects: BTreeMap::new(),
             rect_windows: BTreeMap::new(),
             pixels_per_point: 1.0,

@@ -55,6 +55,15 @@ pub struct Counts {
     pub failed: u64,
     pub copied: u64,
     pub cancelled: bool,
+    /// RAW+JPEG pairs made one photo: each pair's JPEG is counted in
+    /// `added` but is its raw's file, not a photo of its own.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paired: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's signature
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl From<&Report> for Counts {
@@ -69,6 +78,7 @@ impl From<&Report> for Counts {
             failed: r.failed,
             copied: r.copied,
             cancelled: r.cancelled,
+            paired: r.paired,
         }
     }
 }
@@ -168,6 +178,33 @@ impl Record {
         self.places.get(source)
     }
 
+    /// The folder `source`, one of its sources, imported from: the source
+    /// itself, or its folder when it is a file (the import window hands
+    /// the files chosen on a card one by one), with that folder's place
+    /// on a removable volume.
+    pub fn folder_of(&self, source: &std::path::Path) -> (PathBuf, Option<Place>) {
+        let place = self.place_of(source).cloned();
+        let file = source.is_file()
+            || source.extension().is_some_and(|e| {
+                helios_vault::IMAGE_EXTENSIONS
+                    .contains(&e.to_string_lossy().to_ascii_lowercase().as_str())
+            });
+        if !file {
+            return (source.to_path_buf(), place);
+        }
+        let folder = source
+            .parent()
+            .map_or_else(PathBuf::new, std::path::Path::to_path_buf);
+        let place = place.map(|p| Place {
+            rel_path: p
+                .rel_path
+                .parent()
+                .map_or_else(PathBuf::new, std::path::Path::to_path_buf),
+            volume: p.volume,
+        });
+        (folder, place)
+    }
+
     /// The params of `library.import` that run this import again, or why
     /// it cannot be: an importer plugin's import is run again from the
     /// import window, its plugin listing the files anew, and so is an
@@ -198,8 +235,49 @@ impl Record {
         Ok(params)
     }
 
-    /// Its sources as a person reads them: the first one's name, and how
-    /// many more.
+    /// How many photos it brought into the Library or found again, as
+    /// the Library counts them: a RAW+JPEG pair is one photo. Its
+    /// [`Record::images`] when they were kept (a listing may leave them
+    /// out), else its counts, each pair's JPEG taken off.
+    pub fn photos(&self) -> u64 {
+        if self.images.is_empty() {
+            (self.counts.added + self.counts.located).saturating_sub(self.counts.paired)
+        } else {
+            self.images.len() as u64
+        }
+    }
+
+    /// The folders and cards it imported from, as the person picked them,
+    /// each once, in order: a folder as given; files chosen one by one by
+    /// their folder ([`Record::folder_of`]), or by their card (the folder
+    /// holding `DCIM`) when they lie in its `DCIM`, as the import window
+    /// hands a card's files.
+    pub fn picked(&self) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = Vec::new();
+        for s in &self.sources {
+            let (folder, _) = self.folder_of(s);
+            let card = (folder != *s)
+                .then(|| {
+                    folder.ancestors().find(|a| {
+                        a.file_name()
+                            .is_some_and(|n| n.eq_ignore_ascii_case("DCIM"))
+                    })
+                })
+                .flatten()
+                .and_then(std::path::Path::parent)
+                .filter(|card| card.file_name().is_some())
+                .map(std::path::Path::to_path_buf);
+            let picked = card.unwrap_or(folder);
+            if !out.contains(&picked) {
+                out.push(picked);
+            }
+        }
+        out
+    }
+
+    /// Its sources as a person reads them: the connector's source, the
+    /// importer, else the first folder or card picked ([`Record::picked`])
+    /// by its name, and how many more.
     pub fn source_label(&self) -> String {
         let name = |p: &PathBuf| {
             p.file_name().map_or_else(
@@ -210,11 +288,14 @@ impl Record {
         if let Some(remote) = &self.remote {
             return remote.label.clone();
         }
-        match (self.sources.first(), &self.importer) {
-            (_, Some(importer)) => importer.clone(),
-            (None, None) => String::new(),
-            (Some(first), None) if self.sources.len() == 1 => name(first),
-            (Some(first), None) => format!("{} (+{})", name(first), self.sources.len() - 1),
+        if let Some(importer) = &self.importer {
+            return importer.clone();
+        }
+        let picked = self.picked();
+        match picked.as_slice() {
+            [] => String::new(),
+            [one] => name(one),
+            [first, more @ ..] => format!("{} (+{})", name(first), more.len()),
         }
     }
 }
@@ -335,6 +416,39 @@ pub fn record_remote<S: Store>(
     write(vault, record)
 }
 
+/// Points the records of the connector's source `from` at `to`: two
+/// accounts found to be one identity, merged into `to`; the records keep
+/// every import's origin under the source that stays. Returns how many
+/// records changed.
+///
+/// # Errors
+/// The vault's.
+pub fn repoint_remote<S: Store>(
+    vault: &Vault<S>,
+    connector: &str,
+    from: &str,
+    to: &Remote,
+) -> Result<usize, String> {
+    let mut changed = 0;
+    for (key, doc) in vault.library_documents(NS)? {
+        let Ok(mut record) = serde_json::from_value::<Record>(doc) else {
+            continue;
+        };
+        let Some(remote) = record.remote.as_mut() else {
+            continue;
+        };
+        if remote.connector != connector || remote.id != from {
+            continue;
+        }
+        remote.clone_from(to);
+        record.id.clone_from(&key);
+        let doc = serde_json::to_value(&record).map_err(|e| e.to_string())?;
+        vault.set_library_document(NS, &key, Some(&doc))?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
 /// A new record's key: the time, the process and a number, so keys sort
 /// by time and two imports ending in the same second keep a record each.
 fn key(now: u64) -> String {
@@ -414,6 +528,79 @@ mod tests {
             skipped: 1,
             ..Report::default()
         }
+    }
+
+    /// Files chosen one by one are their folder's import, on a card too.
+    #[test]
+    fn a_file_source_is_imported_from_its_folder() {
+        let volume = VolumeId("uuid:card".into());
+        let file = PathBuf::from("/media/CARD/DCIM/100HELIO/IMG_0001.NEF");
+        let folder = PathBuf::from("/media/CARD/DCIM");
+        let r = Record {
+            sources: vec![file.clone(), folder.clone()],
+            places: BTreeMap::from([(
+                file.clone(),
+                Place {
+                    volume: volume.clone(),
+                    rel_path: "DCIM/100HELIO/IMG_0001.NEF".into(),
+                },
+            )]),
+            ..Record::default()
+        };
+        let (from, place) = r.folder_of(&file);
+        assert_eq!(from, PathBuf::from("/media/CARD/DCIM/100HELIO"));
+        assert_eq!(
+            place,
+            Some(Place {
+                volume,
+                rel_path: "DCIM/100HELIO".into()
+            })
+        );
+        assert_eq!(r.folder_of(&folder), (folder, None));
+    }
+
+    /// A card's files handed one by one are its import: named by the
+    /// card, a RAW+JPEG pair counted once, whether its photos were kept
+    /// or a listing left them out.
+    #[test]
+    fn a_card_handed_file_by_file_is_named_by_the_card_and_counts_its_photos() {
+        let dcim = PathBuf::from("/tmp/journey/card/DCIM/100HELIO");
+        let names = [
+            "IMG_0001.JPG",
+            "IMG_0001.NEF",
+            "IMG_0002.JPG",
+            "IMG_0002.PEF",
+            "IMG_0003.RW2",
+            "IMG_0004.JPG",
+        ];
+        let mut r = Record {
+            sources: names.iter().map(|n| dcim.join(n)).collect(),
+            counts: Counts {
+                files: 6,
+                added: 6,
+                paired: 2,
+                ..Counts::default()
+            },
+            images: vec!["a".into(), "b".into(), "c".into(), "d".into()],
+            ..Record::default()
+        };
+        assert_eq!(r.picked(), vec![PathBuf::from("/tmp/journey/card")]);
+        assert_eq!(r.source_label(), "card");
+        assert_eq!(r.photos(), 4);
+        r.images.clear();
+        assert_eq!(r.photos(), 4, "the counts, each pair's JPEG taken off");
+
+        // A folder picked is named as given, even inside a DCIM; two
+        // places picked say how many more.
+        let r = Record {
+            sources: vec![dcim.clone(), "/photos/b/x.jpg".into()],
+            ..Record::default()
+        };
+        assert_eq!(r.source_label(), "100HELIO (+1)");
+        // A record written before pairs were counted keeps its count.
+        let old: Record =
+            serde_json::from_value(json!({ "counts": { "added": 3, "located": 1 } })).unwrap();
+        assert_eq!(old.photos(), 4);
     }
 
     #[test]

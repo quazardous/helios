@@ -4,6 +4,9 @@
 #
 #   packaging/flatpak/smoke.sh io.github.quazardous.Helios-VERSION-x86_64.flatpak PICTURE.jpg
 #
+# (or the Devel app's bundle, io.github.quazardous.Helios.Devel-…: the app
+# id is the bundle's name up to its first `-`).
+#
 # Installs the bundle for the current user (its runtime from Flathub),
 # runs the command line in the sandbox as packaging/linux/smoke.sh runs
 # the tarball's (its version, an import of the picture into a new vault,
@@ -13,7 +16,8 @@ set -euo pipefail
 
 bundle="$1"
 picture="$2"
-id=io.github.quazardous.Helios
+id="$(basename "$bundle")"
+id="${id%%-*}"
 mkdir -p "$HOME"
 work="$(mktemp -d "$HOME/helios-flatpak-smoke.XXXXXX")"
 cleanup() {
@@ -27,7 +31,11 @@ echo "== install"
 # bench box runs this offline, after `build.sh fetch`).
 flatpak remotes --user | grep -q '^flathub' ||
   flatpak remote-add --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user -y --noninteractive "$bundle"
+# Offline (the bench box), the runtime is installed already and Flathub
+# cannot be reached to read the bundle's runtime repository: no deps then.
+deps=()
+getent hosts dl.flathub.org >/dev/null 2>&1 || deps=(--no-deps)
+flatpak install --user -y --noninteractive "${deps[@]}" "$bundle"
 flatpak info --user "$id"
 flatpak info --user --show-permissions "$id"
 

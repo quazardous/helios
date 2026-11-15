@@ -33,6 +33,9 @@ impl Section {
 /// A section's header: the theme's section space, its title in the
 /// section text role, its description in the muted one. The title's
 /// response.
+///
+/// Need (text): a section title.
+/// Need (text): a heading over a group of fields.
 pub fn section(ui: &mut Ui, section: &Section) -> Response {
     ui.space_role(Space::Section);
     let title = ui.section_title(&section.title);

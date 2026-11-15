@@ -82,7 +82,7 @@ again zero times; only the source's pixels, which live on the host, go
 up once a render. The counters say so: the engine's `Counters::uploads`
 and `Counters::readbacks`, and the viewport's `ViewportState::transfers`
 (device tiles are `bound`, no byte copied). The test
-`crates/helios-gui/tests/zero_copy.rs` asserts them, and compares the
+`crates/helios-gui/tests/it/zero_copy.rs` asserts them, and compares the
 picture with the host path's.
 
 Each tile keeps its union's `DeviceImage` (`DeviceTile::keep`) while the

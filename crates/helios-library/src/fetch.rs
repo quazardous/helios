@@ -87,6 +87,32 @@ pub fn volume_of(source: &SourceRef) -> Volume {
     Volume::remote(&source.connector, &source.id, &source.label)
 }
 
+/// Two sources of one connector found to be one (two accounts signed in
+/// as one identity), `from` merged into `to`: the items sighted on
+/// `from`'s volume move to `to`'s, the import history's records of
+/// `from` name `to`, and the volume record of `from` is forgotten (it
+/// becomes `to`'s when none is kept). Each photo keeps its origin. Run
+/// again it changes nothing. Returns how many sightings moved.
+///
+/// # Errors
+/// The vault's.
+pub fn merge_sources<S: Store>(
+    vault: &Vault<S>,
+    from: &SourceRef,
+    to: &SourceRef,
+) -> Result<usize, String> {
+    let (old, new) = (volume_of(from).id, volume_of(to).id);
+    let moved = vault.move_sightings(&old, &new)?;
+    crate::import_history::repoint_remote(
+        vault,
+        &from.connector,
+        &from.id,
+        &crate::import_history::Remote::from(to),
+    )?;
+    registry::merge_remote(vault, &old, &new)?;
+    Ok(moved)
+}
+
 /// A name for a file from an item's decorative path: its last part, with
 /// nothing that could leave the folder it is put in.
 fn file_name(item: &Item) -> String {

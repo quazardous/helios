@@ -311,7 +311,7 @@ fn run_child_with(
 ) -> Vec<(u64, String)> {
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
-            "survival_child",
+            "survival::survival_child",
             "--exact",
             "--nocapture",
             "--test-threads=1",

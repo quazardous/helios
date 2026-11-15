@@ -24,7 +24,7 @@
 //! previews inside one gesture and commits as one undo step, Escape
 //! cancels with no trace.
 //!
-//! The gallery's second page is the **bench** ([`bench`], [`bench_ui`]):
+//! The gallery's second page is the **bench** ([`mod@bench`], [`bench_ui`]):
 //! controls dragged from a shelf onto a card laid out by the slot engine,
 //! composed into cases, and tried live; the `controls.bench.*` commands
 //! build it for agents and tests ([`Gallery::run_command`]).

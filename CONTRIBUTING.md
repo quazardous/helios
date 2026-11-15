@@ -84,19 +84,37 @@ GPU gone), never a test failure. See docs/bench.md.
 
 ### A dev build on the desktop
 
-`cargo xtask install-dev` installs the box's latest `build-gui` of `next`
-(`--branch B` for another branch, `--local` for this checkout's own
-build, `--from DIR` for a folder of `build-gui` outputs, such as the one
-`cargo xtask gate` brings back after a green round) outside the checkout, in
+`cargo xtask install-dev` installs "Helios Dev", the development
+Flatpak `io.github.quazardous.Helios.Devel`, for the user, with no root:
+the box's latest `flatpak-devel` bundle of `next` (`--branch B` for
+another branch, `--bundle FILE` for a bundle file). The bundle is checked
+against the SHA-256 the job wrote, then installed with `flatpak install
+--user --reinstall` (Flathub is added as a user remote for the runtime
+when missing). It sits beside the release Flatpak
+(`io.github.quazardous.Helios`) with its own data in
+`~/.var/app/io.github.quazardous.Helios.Devel`, and the same sandbox
+permissions (docs/releases.md, "The Flatpak"). The `HELIOS_*` variables
+of `~/.config/environment.d/helios.conf` (the Google OAuth client, see
+docs/google-photos.md) are given to the app with `flatpak override --user
+--env=…`; only their names are printed. When the box's bundle is not the
+branch's head, it says so and how to queue a fresh one (`cargo xtask
+bench-remote flatpak-devel branch=<B>`, about 40 minutes); `--list` says
+what is installed, `--uninstall` removes the Flatpak (its data stays).
+
+The home folder install it replaces stays behind `--home` until the
+Flatpak has proved itself on the desktop: `--home [--branch B]` installs
+the box's latest `build-gui`, `--local` this checkout's own build, and
+`--from DIR` a folder of `build-gui` outputs (the one `cargo xtask gate`
+brings back after a green round), in
 `${XDG_DATA_HOME:-~/.local/share}/helios-dev/<version>/` (`<version>` is
 the program's own, commit included: `0.79.1-dev.4+1a2b3c4d`), with the
 programs of the bundled plugins beside `helios-gui`. A `current` link
-points at it, and the "Helios Dev" launcher, named with the version,
-starts `current/helios-gui`: cleaning `target/` never breaks it. The
+points at it, and the "Helios Dev (home)" launcher
+(`io.github.quazardous.Helios.DevelHome.desktop`; an older one under the
+Flatpak's file name is moved there as it is, so it does not hide the
+Flatpak's), named with the version, starts `current/helios-gui`. The
 three latest installs stay; `--list` shows them (`*` marks the current
-one), `--uninstall` removes them and the launcher. When the box's build
-is not the branch's head, it says so and how to queue a fresh one
-(`cargo xtask bench-remote build-gui branch=<B>`). It never starts
+one), `--uninstall --home` removes them and the launcher. It never starts
 Helios.
 
 ## Linters and formatters

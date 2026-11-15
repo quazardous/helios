@@ -1614,6 +1614,23 @@ impl Store for SqliteStore {
         })
     }
 
+    fn move_sightings(&mut self, from: &VolumeId, to: &VolumeId) -> Result<usize, String> {
+        self.write(|db| {
+            let moved = db
+                .execute(
+                    "UPDATE OR IGNORE sightings SET volume = ?2 WHERE volume = ?1",
+                    params![from.as_str(), to.as_str()],
+                )
+                .map_err(err)?;
+            db.execute(
+                "DELETE FROM sightings WHERE volume = ?1",
+                params![from.as_str()],
+            )
+            .map_err(err)?;
+            Ok(moved)
+        })
+    }
+
     fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {
         self.write(|db| {
             let missing = db
