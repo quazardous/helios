@@ -48,6 +48,7 @@ pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).
 pub use helios_library::darktable;
 pub mod connect;
+pub mod logger;
 /// The calibration's commands (`helios_node_core::calibrate`).
 pub use helios_node_core::calibrate;
 /// Reads at scale through cursors (`helios_node_core::cursor`).

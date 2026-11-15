@@ -687,6 +687,8 @@ gui-jobs-items-failed = En échec
 gui-jobs-kind = Type
 gui-jobs-kind-all = Tous les types
 gui-jobs-left = Temps restant
+gui-jobs-console = Console
+
 gui-jobs-log = Journal
 gui-jobs-none = Aucune tâche de fond
 gui-jobs-none-selected = Aucune tâche sélectionnée
@@ -1800,6 +1802,7 @@ gui-import-window-favourites = Favoris
 gui-import-window-import = Importer { $count }
 
 gui-import-window-in-library = dans votre bibliothèque
+gui-import-window-filtered = écarté par le filtre du profil d'import
 
 gui-import-window-into = Dans
 
@@ -2328,6 +2331,8 @@ gui-activity-importing = Importation { $done }/{ $total }
 gui-activity-importing-start = Importation…
 
 gui-activity-percent = { $label } { $percent } %
+
+gui-activity-idle = Activité : aucune tâche de fond en cours
 
 gui-activity-show = Afficher les tâches de fond
 

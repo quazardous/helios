@@ -391,6 +391,7 @@ fn import<S: Store + Send + 'static>(
     let rule = Rule::of(request)?;
     let mut options = crate::library::import_options(request, Some(stop.clone()))?;
     options.origin = request["origin"].as_str().map(Into::into);
+    options.promise = Some(handle.id().to_string());
     if rule == Rule::New {
         options.duplicates = helios_library::import::Duplicates::Skip;
     }
