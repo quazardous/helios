@@ -143,6 +143,7 @@ fn manifest_round_trips_through_toml_and_json() {
         def: "animals".into(),
         version: 1,
         params: BTreeMap::from([("language".into(), json!("fr"))]),
+        keep: Some(true),
     };
     let back: ExtractorUse = toml::from_str(&toml::to_string(&u).unwrap()).unwrap();
     assert_eq!(back, u);
@@ -362,6 +363,7 @@ fn cache_key_is_stable_and_tracks_what_changes_the_answer() {
         def: "test".into(),
         version: 1,
         params: BTreeMap::from([("language".into(), json!("en")), ("n".into(), json!(2))]),
+        keep: None,
     };
     let inputs = BTreeMap::from([("keywords".to_owned(), "Kenya".to_owned())]);
     let base = CacheInput::new("img-1", &d, &u, "ollama/qwen2.5vl:7b", &inputs);

@@ -9,6 +9,8 @@ repository.workspace = true
 [dependencies]
 helios-journal.workspace = true
 helios-core.workspace = true
+# Extractor results kept on the photo or with their run.
+helios-extract.workspace = true
 blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true

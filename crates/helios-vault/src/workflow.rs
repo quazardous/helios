@@ -71,10 +71,16 @@ impl<S: Store> WorkflowTx<'_, S> {
     }
 
     /// Removes a run whole: its documents in `runs` and `owners`, its
-    /// item documents, and its journal's rows and meta.
+    /// item documents, its run-only extractor results, and its journal's
+    /// rows and meta.
     pub fn remove_run(&mut self, run: &str) -> Result<(), String> {
         let [rows, meta] = crate::journal::namespaces(run);
-        for ns in [namespace(&format!("{run}/items")), rows, meta] {
+        for ns in [
+            namespace(&format!("{run}/items")),
+            crate::extract::run_namespace(run),
+            rows,
+            meta,
+        ] {
             for (key, _) in self.store.documents(&ns)? {
                 self.store.set_document(&ns, &key, None)?;
             }

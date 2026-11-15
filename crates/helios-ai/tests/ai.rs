@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use helios_ai::extract::ExtractCall;
 use helios_ai::fake::{FakeRuntime, FakeSystem};
 use helios_ai::local::System;
 use helios_ai::prompts::PromptRef;
@@ -16,7 +17,7 @@ use helios_ai::routing::{Level, Overrides, Route, RouteFrom, RouteOverride};
 use helios_ai::secrets::{MemorySecrets, Secrets};
 use helios_ai::store::Paths;
 use helios_ai::{Ai, Capability, Need, PromptCall, images};
-use helios_extract::{ExtractorDef, KeyDecl, KeyType};
+use helios_extract::{ExtractorDef, ExtractorUse, KeyDecl, KeyType, MemoryCache};
 use serde_json::{Value, json};
 use std::time::Instant;
 
@@ -821,6 +822,98 @@ fn an_extractor_check_counts_the_values_it_dropped() {
     assert_eq!(answer.get("keywords").len(), 1, "{answer:?}");
     assert_eq!(run.counts.dropped, 1, "`gradient` is not in the list");
     assert_eq!(run.attempts, 1);
+}
+
+fn extract_call(def: &ExtractorDef, image: &str, model: &str) -> ExtractCall {
+    let mut call = describe_call(Overrides {
+        node: Some(RouteOverride::route("ollama", model)),
+        ..Overrides::default()
+    });
+    call.extractor = Some(def.clone());
+    ExtractCall {
+        call,
+        using: ExtractorUse::of(def),
+        image: image.into(),
+        image_version: None,
+        inputs: std::collections::BTreeMap::new(),
+    }
+}
+
+#[test]
+fn a_cached_extractor_result_calls_no_model_and_a_new_version_or_model_misses() {
+    let runtime = vision_runtime().model("llava:7b", &["completion", "vision"]);
+    let runtime = runtime.reply("llava:7b", CAPTION);
+    let s = setup("run-extract-cache", runtime, machine());
+    let cache = MemoryCache::default();
+    let def = caption_extractor();
+
+    let first =
+        s.ai.run_extract(extract_call(&def, "img-a", "qwen2.5vl:7b"), &cache)
+            .unwrap();
+    assert!(!first.hit);
+    assert_eq!(first.result.model, "ollama/qwen2.5vl:7b");
+    assert_eq!(first.result.pinned(), "caption@1");
+    assert_eq!(first.result.values["keywords"].len(), 1);
+    assert_eq!(chats(&s), 1);
+
+    // The same use again: from the cache, no call.
+    let again =
+        s.ai.run_extract(extract_call(&def, "img-a", "qwen2.5vl:7b"), &cache)
+            .unwrap();
+    assert!(again.hit);
+    assert_eq!(again.result, first.result);
+    assert_eq!(chats(&s), 1, "a second run calls no model");
+
+    // Another image, a new version, another model: each a miss.
+    let mut v2 = def.clone();
+    v2.version = 2;
+    for (d, image, model) in [
+        (&def, "img-b", "qwen2.5vl:7b"),
+        (&v2, "img-a", "qwen2.5vl:7b"),
+        (&def, "img-a", "llava:7b"),
+    ] {
+        let x =
+            s.ai.run_extract(extract_call(d, image, model), &cache)
+                .unwrap();
+        assert!(!x.hit, "{image} {} {model}", d.pinned());
+    }
+    assert_eq!(chats(&s), 4);
+
+    // A failed answer stores nothing: the next try calls again.
+    let failed =
+        s.ai.run_extract(extract_call(&def, "img-c", "gemma3:4b"), &cache);
+    assert!(failed.is_err());
+    assert!(
+        s.ai.run_extract(extract_call(&def, "img-c", "gemma3:4b"), &cache)
+            .is_err()
+    );
+    assert_eq!(chats(&s), 8, "two tries each, nothing cached");
+}
+
+#[test]
+fn kept_results_outlive_the_run_and_run_only_ones_do_not() {
+    let s = setup("run-extract-keep", vision_runtime(), machine());
+    let cache = MemoryCache::default();
+    let mut def = caption_extractor();
+    def.keep = true;
+    let mut run_only = extract_call(&def, "img-b", "qwen2.5vl:7b");
+    run_only.using.keep = Some(false);
+
+    s.ai.run_extract(extract_call(&def, "img-a", "qwen2.5vl:7b"), &cache)
+        .unwrap();
+    s.ai.run_extract(run_only.clone(), &cache).unwrap();
+    assert!(cache.kept("caption", "img-a").is_some());
+    assert!(cache.kept("caption", "img-b").is_none());
+    assert_eq!(chats(&s), 2);
+
+    cache.end_run();
+    let kept =
+        s.ai.run_extract(extract_call(&def, "img-a", "qwen2.5vl:7b"), &cache)
+            .unwrap();
+    assert!(kept.hit, "kept data survives the run");
+    let gone = s.ai.run_extract(run_only, &cache).unwrap();
+    assert!(!gone.hit, "run-only data went with its run");
+    assert_eq!(chats(&s), 3);
 }
 
 #[test]
