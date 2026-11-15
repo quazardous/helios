@@ -265,8 +265,11 @@ fn a_running_import_shows_with_its_bar_and_counts_and_a_job_without_progress_has
         gate.cancelled.lock().unwrap().contains(&trash.id)
     });
     // Cancel from the list, on the import's row hovered.
+    // Settled, not only asked to stop: its row then moves under the
+    // running import's, which must not happen between the hover and the
+    // click below.
     until(&mut h, "the trash settled", |h| {
-        h.query_all_by_label("Cancel").count() == 0
+        h.query_all_by_label("Cancel").count() == 0 && h.query_all_by_label("Cancelled").count() > 0
     });
     let row = in_list(&h, "Import 412 photos").rect().center();
     h.hover_at(row);
