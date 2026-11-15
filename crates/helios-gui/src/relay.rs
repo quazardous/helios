@@ -1,10 +1,19 @@
-//! The jobs of a connected node, followed on the desktop.
+//! A connected node's events, followed on the desktop: its jobs, and
+//! every other event a listener asks for.
 //!
 //! A [`Relay`] follows one node (a `helios-node` the desktop is told
-//! about, [`NodeLink`]) on a thread of its own, off the UI thread:
+//! about, [`NodeLink`]) on a thread of its own, off the UI thread, with
+//! one subscription to all its events:
 //!
-//! - it reads the node's jobs whole (`describe jobs`), then subscribes to
-//!   its `job.*` events after that point (`subscribe`, pushed by the node,
+//! - every event that is not a job's goes to
+//!   [`crate::node_events::NodeEvents`], which republishes the kinds
+//!   listeners want with source `node:<name>`. Once the link is back, the
+//!   relay resumes after the last event it read, so none is relayed
+//!   twice; when the node restarted or its journal no longer holds what
+//!   was missed, it starts over from the node's present and says
+//!   `node.resync` to the listeners;
+//! - it reads the node's jobs whole (`describe jobs`), then follows its
+//!   `job.*` events after that point (`subscribe`, pushed by the node,
 //!   see `helios_inspect`), and republishes each on the shell's bus with
 //!   the job's id (and its parent's) as `node:<name>/<id>`: the jobs
 //!   centre shows a node's batch as a parent with its exports as children,
@@ -35,6 +44,8 @@ use helios_core::jobs::{
 };
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Address, Client, Closer, Request};
+
+use crate::node_events::NodeEvents;
 use serde_json::{Value, json};
 
 /// What a node's job id starts with on the desktop.
@@ -150,14 +161,22 @@ pub struct Relay {
 }
 
 impl Relay {
-    /// Starts following `link`, republishing on `bus`.
-    pub fn start(link: NodeLink, bus: Arc<Bus>, timing: Timing) -> Result<Relay, String> {
+    /// Starts following `link`: its jobs republished on `bus`, its other
+    /// events handed to `events`.
+    pub fn start(
+        link: NodeLink,
+        bus: Arc<Bus>,
+        events: NodeEvents,
+        timing: Timing,
+    ) -> Result<Relay, String> {
         link.check()?;
         let (stop_tx, stop) = channel();
         let closer: Arc<Mutex<Option<Closer>>> = Arc::default();
         let mut follow = Follow {
             link: link.clone(),
             bus,
+            events,
+            resume: None,
             timing,
             stop,
             closer: closer.clone(),
@@ -238,6 +257,10 @@ struct Known {
 struct Follow {
     link: NodeLink,
     bus: Arc<Bus>,
+    events: NodeEvents,
+    /// The node's instance and the `seq` of the last event read from it:
+    /// where the next link resumes.
+    resume: Option<(String, u64)>,
     timing: Timing,
     stop: Receiver<()>,
     closer: Arc<Mutex<Option<Closer>>>,
@@ -304,11 +327,25 @@ impl Follow {
         }
         let jobs = &jobs["describe"];
         let seq = jobs["seq"].as_u64().unwrap_or(0);
-        let (ack, mut client) = helios_inspect::subscribe(&self.link.inspect, "job.", Some(seq))
-            .map_err(unreachable)?;
+        let instance = jobs["instance"].as_str().unwrap_or_default().to_string();
+        // Where the last link left off, when the same node still holds it.
+        let resume = self
+            .resume
+            .as_ref()
+            .filter(|(i, last)| *i == instance && *last <= seq)
+            .map(|(_, last)| *last);
+        let mut resync = self.resume.is_some() && resume.is_none();
+        let (mut ack, mut client) = self.subscribe(resume.unwrap_or(seq))?;
+        if resume.is_some() && ack["gap"] == true && ack["instance"] == jobs["instance"] {
+            // What was missed is gone: start over from the jobs' point.
+            drop(client);
+            resync = true;
+            (ack, client) = self.subscribe(seq)?;
+        }
         if ack["instance"] != jobs["instance"] || ack["gap"] == true {
             return Err("the node moved on while the desktop caught up".into());
         }
+        self.resume = Some((instance, resume.filter(|_| !resync).unwrap_or(seq)));
         client
             .set_read_timeout(Some(self.timing.silence))
             .map_err(unreachable)?;
@@ -324,15 +361,38 @@ impl Follow {
                 json!({ "node": self.link.name, "up": true }),
             );
         }
+        if resync {
+            self.events
+                .resync(&self.link.name, "the node's events were missed");
+        }
         loop {
             if self.stopped() {
                 return Ok(());
             }
             let line = client.read().map_err(unreachable)?;
             if let Some(event) = line.get("event") {
-                self.relay(event);
+                if let (Some(n), Some((_, last))) = (event["seq"].as_u64(), self.resume.as_mut()) {
+                    *last = n;
+                }
+                // The jobs as `describe jobs` gave them hold the job
+                // events up to `seq`.
+                if event["kind"]
+                    .as_str()
+                    .is_some_and(|k| k.starts_with("job."))
+                {
+                    if event["seq"].as_u64().is_none_or(|n| n > seq) {
+                        self.relay(event);
+                    }
+                } else {
+                    self.events.publish(&self.link.name, event);
+                }
             }
         }
+    }
+
+    /// Every event of the node after `since`, on a connection of its own.
+    fn subscribe(&self, since: u64) -> Result<(Value, Client), String> {
+        helios_inspect::subscribe(&self.link.inspect, "", Some(since)).map_err(|e| e.to_string())
     }
 
     /// Publishes a job event of the node on the shell's bus, its ids
