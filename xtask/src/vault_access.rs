@@ -282,7 +282,7 @@ pub fn scan(rel: &str, text: &str) -> Vec<Hit> {
 
 /// Replaces comments and string/char literals by spaces, keeping newlines
 /// so line numbers still hold.
-fn strip_comments_and_strings(text: &str) -> String {
+pub(crate) fn strip_comments_and_strings(text: &str) -> String {
     let c: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let blank = |ch: char| if ch == '\n' { '\n' } else { ' ' };
@@ -384,7 +384,7 @@ fn strip_comments_and_strings(text: &str) -> String {
 /// Blanks every item behind `#[cfg(test)]` (a module, a function, a
 /// `mod x;` declaration), keeping newlines. Expects comments and strings
 /// already removed, so braces are code braces.
-fn strip_tests(code: &str) -> String {
+pub(crate) fn strip_tests(code: &str) -> String {
     let mut out: Vec<char> = code.chars().collect();
     let text: String = code.to_string();
     let mut from = 0;

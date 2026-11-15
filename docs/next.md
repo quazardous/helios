@@ -63,7 +63,7 @@ A pull request is merged only when its tests passed on the box and its
    2026-11-15). `pr-lint` (`.github/workflows/pr-lint.yml`) is the one
    GitHub check our own pull requests run, on every push, in a few
    minutes: `cargo xtask lint` with every linter installed (rustfmt,
-   clippy, deps-worlds, cargo-deny, cargo-machete, taplo, typos,
+   clippy, deps-worlds, raw-egui, cargo-deny, cargo-machete, taplo, typos,
    shellcheck, ruff), `cargo doc` without a warning, `cargo xtask
    ui-index --check`, `cargo xtask i18n check`, `cargo xtask check
    --base origin/next` (a changelog fragment) and the English catalogue
@@ -71,7 +71,9 @@ A pull request is merged only when its tests passed on the box and its
    sums them up. Look at it once, when the box jobs are
    done: `gh pr checks <n> --watch --fail-fast` (it returns when the
    check ends), or a single `gh pr checks <n>`; that is all the CI an
-   author watches. Red: fix it on the branch, as for a box job. The
+   author watches. Red: fix it on the branch, as for a box job. A pull
+   request may not add raw egui widgets to helios-gui (`cargo xtask
+   raw-egui`; after removing some, `--update` lowers the baseline). The
    box's `lint` job runs a part of it before a push (clippy,
    `cargo xtask check`, `cargo xtask i18n check`); the linters, the
    documentation and the generated files are checked by `pr-lint` alone. Then
