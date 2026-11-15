@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Runs a command as the image's `flatpak` user, for the bench box's flatpak
+# jobs (`sandbox = true`):
+#
+#   tools/bench/as-flatpak-user COMMAND...
+#
+# Such a job runs as root without CAP_SYS_ADMIN: bwrap then takes itself
+# for privileged, creates no user namespace of its own, and every other
+# namespace flatpak asks for (pid, ipc, uts, net, cgroup) is refused
+# ("Creating new namespace failed"). As a user, bwrap starts in its own
+# user namespace and they all work.
+#
+# The user gets its own HOME and XDG_RUNTIME_DIR, the flatpak storage
+# (/flatpak: its installation and flatpak-builder's downloads, which the
+# root [fetch] wrote) and /tmp/w; OUT is a folder of its own, copied into
+# /out at the end, whatever the command's exit. The storage goes back to
+# root afterwards, for the next job's [fetch].
+set -uo pipefail
+
+user=flatpak
+home=/tmp/flatpak-home
+runtime=/tmp/flatpak-xdg
+out=/tmp/flatpak-out
+mkdir -p "$home" "$runtime" "$out" /tmp/w
+chmod 700 "$runtime"
+own() {
+  find "$@" ! -user "$owner" -exec chown -h "$owner:$owner" {} + 2>/dev/null || true
+}
+owner=$user own "$home" "$runtime" "$out" /tmp/w /flatpak
+
+setpriv --reuid="$user" --regid="$user" --init-groups \
+  env HOME="$home" XDG_RUNTIME_DIR="$runtime" OUT="$out" USER="$user" "$@"
+status=$?
+
+cp -r "$out/." /out/ || true
+owner=root own /flatpak
+exit "$status"
