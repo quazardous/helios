@@ -25,6 +25,10 @@ pub const SNAPSHOTS: &str = "catalogue.snapshots";
 /// default.
 pub const MAX_AGE_DAYS: u64 = 7;
 
+/// The desktop's command taking a snapshot now: the fix of a library
+/// with none yet, or none verified.
+pub const SNAPSHOT_NOW: &str = "library.catalogue.snapshot";
+
 /// One snapshot of the catalogue.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
@@ -56,8 +60,10 @@ impl Snapshots {
     }
 }
 
-/// The last verified snapshot: none, or not restorable, is a problem;
-/// older than `max_age_days`, a warning.
+/// The last verified snapshot: not restorable is a problem; older than
+/// `max_age_days`, or snapshots none of which is verified yet, a warning.
+/// A library with no snapshot yet (a new one: the desktop takes the first
+/// a few minutes after it starts) is fine, with "snapshot now" offered.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SnapshotsCheck;
 
@@ -73,7 +79,7 @@ impl Check for SnapshotsCheck {
     fn declaration(&self) -> Declaration {
         Declaration::new("The catalogue's last verified snapshot: present, restorable and recent")
             .levels(&[Level::Ok, Level::Warning, Level::Problem])
-            .fixes(&["library.openFolder"])
+            .fixes(&["library.openFolder", SNAPSHOT_NOW])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -92,21 +98,44 @@ impl Check for SnapshotsCheck {
                 ),
             )];
         };
-        let Some(last) = snapshots.last_verified() else {
-            return vec![Finding::new(
-                SNAPSHOTS,
-                "",
-                Level::Problem,
-                Message::new(
-                    "health-snapshots-unverified",
-                    "No catalogue snapshot is verified",
-                ),
-                Message::new(
-                    "health-snapshots-unverified-detail",
-                    "{ $count } snapshots, none read back yet.",
+        let snapshot_now = || Fix {
+            command: SNAPSHOT_NOW.into(),
+            args: json!({}),
+            label: Message::new("health-fix-snapshot-now", "Snapshot the catalogue now"),
+        };
+        if snapshots.list.is_empty() {
+            return vec![
+                Finding::new(
+                    SNAPSHOTS,
+                    "",
+                    Level::Ok,
+                    Message::new("health-snapshots-first", "No catalogue snapshot yet"),
+                    Message::new(
+                        "health-snapshots-first-detail",
+                        "Helios takes the first a few minutes after it starts, then on its schedule.",
+                    ),
                 )
-                .with("count", snapshots.list.len()),
-            )];
+                .fix(snapshot_now()),
+            ];
+        }
+        let Some(last) = snapshots.last_verified() else {
+            return vec![
+                Finding::new(
+                    SNAPSHOTS,
+                    "",
+                    Level::Warning,
+                    Message::new(
+                        "health-snapshots-unverified",
+                        "No catalogue snapshot is verified yet",
+                    ),
+                    Message::new(
+                        "health-snapshots-unverified-detail",
+                        "{ $count } snapshots, none read back yet: a new one is verified as it is taken.",
+                    )
+                    .with("count", snapshots.list.len()),
+                )
+                .fix(snapshot_now()),
+            ];
         };
         let file = last.file.display().to_string();
         let folder = last
@@ -202,23 +231,60 @@ mod tests {
         }
     }
 
+    fn run(list: Vec<Snapshot>) -> Finding {
+        SnapshotsCheck
+            .run(&ctx(Some(Snapshots {
+                list,
+                now: 30 * DAY,
+                max_age_days: MAX_AGE_DAYS,
+            })))
+            .remove(0)
+    }
+
     #[test]
     fn none_yet_is_one_info_line_and_phase_seven_fills_the_data() {
         let found = SnapshotsCheck.run(&ctx(None));
         assert_eq!(found[0].level, Level::Ok);
         assert_eq!(found[0].message.key, "health-snapshots-none-yet");
-        let level = |list: Vec<Snapshot>| {
-            SnapshotsCheck.run(&ctx(Some(Snapshots {
-                list,
-                now: 30 * DAY,
-                max_age_days: MAX_AGE_DAYS,
-            })))[0]
-                .level
-        };
+        let level = |list| run(list).level;
         assert_eq!(level(vec![snap(29 * DAY, true, true)]), Level::Ok);
         assert_eq!(level(vec![snap(10 * DAY, true, true)]), Level::Warning);
         assert_eq!(level(vec![snap(29 * DAY, true, false)]), Level::Problem);
-        assert_eq!(level(vec![snap(29 * DAY, false, true)]), Level::Problem);
         assert!(SnapshotsCheck.run(&Context::default()).is_empty());
+    }
+
+    #[test]
+    fn a_new_library_without_snapshots_is_fine_and_offers_one_now() {
+        let found = run(Vec::new());
+        assert_eq!(found.level, Level::Ok);
+        assert_eq!(found.message.key, "health-snapshots-first");
+        assert_eq!(found.fix.map(|f| f.command).as_deref(), Some(SNAPSHOT_NOW));
+    }
+
+    #[test]
+    fn snapshots_none_verified_yet_warn_with_snapshot_now() {
+        let found = run(vec![snap(29 * DAY, false, true)]);
+        assert_eq!(found.level, Level::Warning);
+        assert_eq!(found.message.key, "health-snapshots-unverified");
+        assert_eq!(found.fix.map(|f| f.command).as_deref(), Some(SNAPSHOT_NOW));
+    }
+
+    #[test]
+    fn a_verified_recent_snapshot_is_ok_and_every_finding_fits_the_declaration() {
+        let found = run(vec![snap(29 * DAY, true, true)]);
+        assert_eq!(found.level, Level::Ok);
+        assert_eq!(found.message.key, "health-snapshots-ok");
+        let declared = SnapshotsCheck.declaration();
+        for list in [
+            Vec::new(),
+            vec![snap(29 * DAY, false, true)],
+            vec![snap(29 * DAY, true, true)],
+            vec![snap(10 * DAY, true, true)],
+            vec![snap(29 * DAY, true, false)],
+        ] {
+            let found = run(list);
+            assert_eq!(declared.breach(SNAPSHOTS, &found), None);
+            assert!(found.level == Level::Ok || found.fix.is_some());
+        }
     }
 }

@@ -3027,11 +3027,15 @@ health-fix-plugin-disable = Disable it
 
 health-fix-plugin-folder = Open its folder
 
+health-fix-plugin-grant = Allow { $capability }
+
 health-fix-plugin-update = Update it: open its folder
 
 health-fix-set-strategy = Set up a backup strategy
 
 health-fix-show-volume = Show it on the Storage page
+
+health-fix-snapshot-now = Snapshot the catalogue now
 
 health-fix-snapshots-folder = Open the snapshots' folder
 
@@ -3131,6 +3135,10 @@ health-plugin-unsupported = { $plugin } does not suit this Helios
 
 health-plugin-unsupported-detail = { $problems }. Update it.
 
+health-plugin-unused = { $plugin } is not used yet
+
+health-plugin-unused-detail = It asks for { $capability } when a source first uses it.
+
 health-plugins = Plugins
 
 health-raw-jpeg-pairs = RAW+JPEG pairs
@@ -3155,6 +3163,10 @@ health-snapshots-broken = The last catalogue snapshot cannot be restored
 
 health-snapshots-file-detail = { $file }, { $days } days old
 
+health-snapshots-first = No catalogue snapshot yet
+
+health-snapshots-first-detail = Helios takes the first a few minutes after it starts, then on its schedule.
+
 health-snapshots-none-yet = No catalogue snapshots yet
 
 health-snapshots-none-yet-detail = Helios does not take catalogue snapshots yet; the backups keep the photos.
@@ -3163,9 +3175,9 @@ health-snapshots-ok = The last catalogue snapshot is recent and restorable
 
 health-snapshots-old = The last catalogue snapshot is { $days } days old
 
-health-snapshots-unverified = No catalogue snapshot is verified
+health-snapshots-unverified = No catalogue snapshot is verified yet
 
-health-snapshots-unverified-detail = { $count } snapshots, none read back yet.
+health-snapshots-unverified-detail = { $count } snapshots, none read back yet: a new one is verified as it is taken.
 
 health-strategy = Backup strategy
 

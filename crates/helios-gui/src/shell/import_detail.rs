@@ -64,12 +64,10 @@ pub(super) fn download_folder(pattern: &str, pictures: &Path, account: &str) -> 
     })
 }
 
-/// The person's pictures folder: `Pictures` in their home folder.
+/// The person's pictures folder, as the platform names it
+/// (`helios_library::import::pictures_folder`).
 pub(super) fn pictures() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
-        .join("Pictures")
+    helios_library::import::pictures_folder().unwrap_or_else(|| PathBuf::from("Pictures"))
 }
 
 /// One part of a connector's section, as its declarations call for it.

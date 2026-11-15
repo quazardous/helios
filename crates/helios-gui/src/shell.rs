@@ -7401,7 +7401,8 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let pictures =
+        helios_library::import::pictures_folder().unwrap_or_else(|| PathBuf::from("Pictures"));
     let name: String = target
         .chars()
         .map(|c| {
@@ -7412,7 +7413,8 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
             }
         })
         .collect();
-    home.join("Pictures/Helios")
+    pictures
+        .join("Helios")
         .join(format!("{name}-{secs}.{extension}"))
 }
 

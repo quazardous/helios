@@ -1256,7 +1256,11 @@ health-fix-plugin-disable = Le désactiver
 
 health-fix-plugin-folder = Ouvrir son dossier
 
+health-fix-plugin-grant = Autoriser { $capability }
+
 health-fix-plugin-update = Le mettre à jour : ouvrir son dossier
+
+health-fix-snapshot-now = Prendre un instantané du catalogue maintenant
 
 health-fix-snapshots-folder = Ouvrir le dossier des instantanés
 
@@ -1306,6 +1310,10 @@ health-plugin-unsupported = { $plugin } ne convient pas à cet Helios
 
 health-plugin-unsupported-detail = { $problems }. Mettez-le à jour.
 
+health-plugin-unused = { $plugin } n’est pas encore utilisé
+
+health-plugin-unused-detail = Il demandera { $capability } quand une source l’utilisera pour la première fois.
+
 health-plugins = Extensions
 
 health-snapshots = Instantanés du catalogue
@@ -1313,6 +1321,10 @@ health-snapshots = Instantanés du catalogue
 health-snapshots-broken = Le dernier instantané du catalogue ne peut pas être restauré
 
 health-snapshots-file-detail = { $file }, vieux de { $days } jours
+
+health-snapshots-first = Pas encore d’instantané du catalogue
+
+health-snapshots-first-detail = Helios prend le premier quelques minutes après son démarrage, puis selon son calendrier.
 
 health-snapshots-none-yet = Pas encore d’instantanés du catalogue
 
@@ -1322,9 +1334,9 @@ health-snapshots-ok = Le dernier instantané du catalogue est récent et restaur
 
 health-snapshots-old = Le dernier instantané du catalogue a { $days } jours
 
-health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
+health-snapshots-unverified = Aucun instantané du catalogue n’est encore vérifié
 
-health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
+health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore : un nouveau est vérifié dès qu’il est pris.
 
 look-default-bad-params = les paramètres { $node } du rendu : { $error }
 
