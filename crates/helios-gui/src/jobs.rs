@@ -229,10 +229,10 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
         // height (the viewport under it would move).
         ui.set_min_height(ui.spacing().interact_size.y);
         ui.horizontal_centered(|ui| {
-            if let Some(summary) = &line.activity {
-                crate::activity::indicator(ui, app, summary);
-                ui.separator();
-            }
+            // Always there: quiet while nothing runs, so the Activity
+            // focus (the history) opens from it at any time.
+            crate::activity::indicator(ui, app, line.activity.as_ref());
+            ui.separator();
             if let Some((level, count)) = line.health {
                 health_badge(ui, app, level, count);
                 ui.separator();

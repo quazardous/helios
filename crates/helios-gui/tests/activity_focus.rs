@@ -564,3 +564,23 @@ fn result_links_open_the_folder_the_library_and_the_import_history() {
     let linked: Vec<Value> = focus(&h)["linked"].as_array().unwrap().clone();
     assert_eq!(linked.len(), 2, "{linked:?}");
 }
+
+/// With no job at all, the status bar still shows the quiet Activity
+/// icon, and its click opens the focus (the history); View › Activity…
+/// runs the same command.
+#[test]
+fn with_no_job_the_quiet_indicator_opens_the_focus() {
+    let gate = Arc::new(Gate::default());
+    let (client, _promises) = node(&gate);
+    let mut h = shell_on(client);
+    let idle = "Activity: no background task running";
+    until(&mut h, "the quiet indicator", |h| {
+        h.query_by_label(idle).is_some()
+    });
+    assert!(shown(&h, helios_gui::activity::MARK).is_none());
+    assert_eq!(focus(&h)["open"], false);
+    h.get_by_label(idle).click();
+    until(&mut h, "the focus open", |h| focus(h)["open"] == true);
+    let view = h.state_mut().menu_items("app.menu.view").to_string();
+    assert!(view.contains("activity.show"), "{view}");
+}
