@@ -8,7 +8,7 @@
 //!
 //! The snapshots (`tests/snapshots/compare-*.png`, thresholds in the
 //! workspace's `kittest.toml`) are regenerated on the bench box:
-//! `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test compare_focus`
+//! `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test it compare_focus::`
 //! (the box's `gui-snapshots` job with `test=compare_focus`).
 
 use std::path::PathBuf;
