@@ -4,7 +4,7 @@
 //! lasts, its reason and "Quit now". egui's own dark style: the splash
 //! draws with whatever style the window has. A fixed version: the build's
 //! changes with each commit. Regenerate with
-//! `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test splash_snapshots`
+//! `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test it splash_snapshots::`
 //! (the box's `gui-snapshots` job).
 
 use std::time::{Duration, Instant};
