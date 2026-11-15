@@ -57,6 +57,16 @@ A pull request is merged only when its tests passed on the box and its
      manifest missed it gets its line in `GUI_SUITES`
      (`xtask/src/affected.rs`).
    - A change with nothing to run says `Tests: none — <why>`.
+   - **A change to a screen** (a widget, a colour, a font, a layout, a
+     text) regenerates the reference images of every snapshot suite it
+     touches on the box (`gui-snapshots` for helios-gui's,
+     `snapshots-refresh` for every suite, with the images it rewrote under
+     `out/snapshots/` at their paths), commits them, and lists those
+     suites in its manifest (`test-crate crate=<suite>`), so the images it
+     moves move in the same pull request. A suite missed here turns `next`'s
+     `release` job red later; the release keeper's `snapshots-refresh`
+     step catches it before the release, and names the pull request
+     (docs/releases.md, "Snapshots before a release").
    - `cargo xtask manifest check <file>` (or the body on stdin) checks it.
 4. **Prove it on the box yourself** (owner, 2026-11-13: the author who
    wrote the change runs its narrowest tests; it beat batching every pull

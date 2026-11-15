@@ -572,7 +572,7 @@ fn feature_tree(root: &Path, scope: &[&str]) -> Result<String, String> {
 }
 
 /// Whether the crate in `dir` commits snapshot images.
-fn has_snapshots(dir: &Path) -> bool {
+pub fn has_snapshots(dir: &Path) -> bool {
     std::fs::read_dir(dir.join("tests/snapshots"))
         .into_iter()
         .flatten()

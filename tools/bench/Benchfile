@@ -463,6 +463,34 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# the release step (docs/releases.md, "Snapshots before a release"): every
+# snapshot suite of the workspace (`cargo xtask snapshots filter`) run with
+# UPDATE_SNAPSHOTS=1 in a workspace build, the features CI and the release
+# build with; then `cargo xtask snapshots report`: each image changed with
+# its pixels and its likely cause, the pull requests merged since the last
+# tag (`since=` another ref) that touched what draws it. The images, their
+# former versions and diffs in /out/snapshots/, the list in
+# /out/snapshots.md and .json for `cargo xtask snapshots apply`. Red on an
+# unexplained image or a failing test
+[jobs.snapshots-refresh]
+about = "every snapshot suite regenerated in a workspace build; changed images, diffs and likely causes"
+first = [{ job = "check", pass = ["branch", "src"] }]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; \
+mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && \
+{ [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || \
+{ rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+filter=$(cargo xtask snapshots filter) || exit 1; \
+UPDATE_SNAPSHOTS=1 cargo nextest run --workspace --locked --profile ci --test-threads 12 -E "$filter"; rc=$?; \
+s="${since:-}"; cargo xtask snapshots report ${s:+--since $s} --out /out; r=$?; \
+[ "$rc" -ne 0 ] && exit $rc; exit $r"""
+env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
+mounts = {"target/${branch:-main}"="/target", registry="/cargo/registry", cargo-git="/cargo/git", sccache="/sccache"}
+timeout = "1h"
+
 [jobs.lint]
 about = "clippy with warnings denied, cargo xtask check and the i18n check"
 checkouts = ["helios", "vkdt", "egui-pop"]
