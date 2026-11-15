@@ -620,7 +620,7 @@ Every agent follows them.
   `egui-pop-test-1p` alike (`test=it` for them all). `features=` turns on
   the crate's features in both (`features=svg`, several joined by `+`), for
   the tests a feature gates: `egui-pop-test crate=egui-pop-core
-  test=icon_set features=svg`.
+  test=lib filter=icon_set features=svg`.
 - The box does not repeat what CI runs. egui-pop and egui_stack pull
   requests go to their `next` branch, whose CI runs every test; the box
   serves what CI cannot: a fix loop's narrow runs and snapshots regenerated
