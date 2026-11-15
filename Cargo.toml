@@ -60,6 +60,7 @@ helios-node-core = { path = "crates/helios-node-core" }
 helios-cache = { path = "crates/helios-cache" }
 helios-extract = { path = "crates/helios-extract" }
 helios-controls = { path = "crates/helios-controls" }
+helios-ui = { path = "crates/helios-ui" }
 # MIT: the UI library and application framework Helios is built on.
 # Its eframe support (the window's place) runs on the same eframe as
 # Helios; its icon font stays off. Its bundled font pair (Inter
