@@ -1,0 +1,47 @@
+name: pr-lint
+
+# The one check our own pull requests wait for (docs/next.md): what is
+# cheap and builds no test, so `next` does not go red an hour after a merge
+# on a lint, a rustdoc link or a stale generated file. Their tests run on
+# the bench box; the whole suite runs on `next` (ci.yml). A contributor's
+# pull request from a fork runs ci.yml instead, lint job included.
+on:
+  pull_request:
+    branches: [next]
+
+# One run per pull request: a new push cancels the run of the previous one.
+concurrency:
+  group: pr-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-lint:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # The image of ci.yml's test job, whose cache this job reads.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          components: clippy, rustfmt
+      # The dependencies ci.yml's test job built on `next`; read, never
+      # saved from a pull request.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          save-if: false
+      - uses: ./.github/actions/lint
+        with:
+          base: origin/${{ github.base_ref }}
+      # The English catalogue is the one the declarations give today
+      # (`cargo xtask i18n extract` when it is not): the one test built
+      # here, since a stale catalogue is found by nothing cheaper.
+      - name: English catalogue is current
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p helios-declarations --test english
