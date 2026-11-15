@@ -1,0 +1,21 @@
+# Dependency edges allowed outside their crate's world (see
+# `cargo xtask deps-worlds`, xtask/src/deps_worlds.rs and
+# docs/design/ui-responsibilities.md, section 9). Each entry is a tracked
+# debt: the list only shrinks, and an entry whose edge is gone is reported.
+
+# The shell still draws.
+[[allow]]
+crate = "helios-gui"
+dep = "egui"
+reason = "the eframe entry point, and the 771 raw egui widget calls that move to helios-ui and helios-rack screen by screen"
+
+[[allow]]
+crate = "helios-gui"
+dep = "egui_kittest"
+reason = "the shell's own pictures (snapshot.rs: a widget, a panel, the window) render headless through egui_kittest's wgpu renderer; that capture belongs behind egui-pop"
+
+# egui-pop-i18n pulls egui into a crate that should not see it.
+[[allow]]
+crate = "helios-i18n"
+dep = "egui-pop-i18n"
+reason = "Helios's catalogs load through egui-pop's translation plugin, which depends on egui; the catalog part belongs in an egui-free egui-pop crate"
