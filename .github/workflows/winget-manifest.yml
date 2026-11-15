@@ -1,0 +1,84 @@
+name: winget manifest
+
+# Checks the winget manifests under packaging/winget/ on a Windows runner:
+# `winget validate`, then the installer the manifest names, downloaded,
+# checked against the manifest's hash and run with the manifest's silent
+# switches, then that the install is registered under the manifest's
+# ProductCode. `winget install --manifest` itself hangs on the hosted runner
+# (see the step below), so the submission checklist's local install test is
+# still done by hand on Windows (docs/releases.md, "winget").
+on:
+  push:
+    branches: [next]
+    paths:
+      - 'packaging/winget/**'
+      - '.github/workflows/winget-manifest.yml'
+  pull_request:
+    paths:
+      - 'packaging/winget/**'
+      - '.github/workflows/winget-manifest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winget-manifest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifest:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: winget
+        shell: pwsh
+        run: |
+          # The runner image may lack winget; the WinGet client module
+          # installs or repairs it.
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -Force | Out-Null
+            Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
+            Repair-WinGetPackageManager -AllUsers -Latest
+          }
+          winget --version
+          winget settings --enable LocalManifestFiles
+      - name: validate and install each version
+        shell: pwsh
+        run: |
+          $versions = Get-ChildItem packaging/winget/manifests/q/Quazardous/Helios -Directory
+          foreach ($dir in $versions) {
+            Write-Host "== $($dir.Name)"
+            winget validate --manifest $dir.FullName
+            if ($LASTEXITCODE -ne 0) { throw "winget validate failed for $($dir.Name)" }
+            # `winget install --manifest` hangs on the hosted runner before it
+            # starts the installer (it never returns from listing the
+            # installed programs), so the installer the manifest names is
+            # downloaded, checked against its hash and run with the
+            # manifest's own silent switches instead.
+            $inst = Get-Content (Join-Path $dir.FullName 'Quazardous.Helios.installer.yaml') -Raw
+            $url = [regex]::Match($inst, 'InstallerUrl:\s*(\S+)').Groups[1].Value
+            $sha = [regex]::Match($inst, 'InstallerSha256:\s*(\S+)').Groups[1].Value
+            $silent = [regex]::Match($inst, 'Silent:\s*(.+)').Groups[1].Value.Trim()
+            $exe = Join-Path $env:RUNNER_TEMP 'setup.exe'
+            Invoke-WebRequest -Uri $url -OutFile $exe
+            if ((Get-FileHash $exe -Algorithm SHA256).Hash -ne $sha) { throw "installer hash differs from the manifest for $($dir.Name)" }
+            $log = Join-Path $env:RUNNER_TEMP 'inno.log'
+            $p = Start-Process $exe -PassThru -ArgumentList "$silent /LOG=`"$log`""
+            if (-not $p.WaitForExit(600000)) { Stop-Process -Id $p.Id -Force; $hung = $true }
+            if (Test-Path $log) { Write-Host "== installer log"; Get-Content $log -Tail 40 }
+            if ($hung) { throw "the installer hung for $($dir.Name)" }
+            if ($p.ExitCode -ne 0) { throw "the installer failed for $($dir.Name) (exit $($p.ExitCode))" }
+            $installer = Get-Content (Join-Path $dir.FullName 'Quazardous.Helios.installer.yaml') -Raw
+            $code = [regex]::Match($installer, "ProductCode:\s*'([^']+)'").Groups[1].Value
+            $keys = @(
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$code",
+              "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$code"
+            )
+            $found = $keys | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $found) { throw "installed, but no uninstall entry $code" }
+            $entry = Get-ItemProperty $found
+            Write-Host "registered: $($entry.DisplayName) $($entry.DisplayVersion) in $($entry.InstallLocation)"
+            "$($dir.Name): validated and installed ($($entry.DisplayName) $($entry.DisplayVersion))" >> $env:GITHUB_STEP_SUMMARY
+          }
