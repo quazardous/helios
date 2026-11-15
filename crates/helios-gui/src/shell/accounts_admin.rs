@@ -240,10 +240,17 @@ impl Shell {
         labels: &Labels,
         identity: &super::import_accounts::IdentityConnectors,
     ) {
+        let saved = self.import.get_mut().sources.shared.clone();
+        // The Storage page names remote volumes by the accounts behind.
+        *self
+            .core
+            .storage
+            .owners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((book.clone(), saved.clone()));
         if self.has_command(ACCOUNTS) {
             return;
         }
-        let saved = self.import.get_mut().sources.shared.clone();
         let (b, l, i18n) = (book.clone(), labels.clone(), self.core.i18n.clone());
         let asking = identity.clone();
         let listed = self.register(

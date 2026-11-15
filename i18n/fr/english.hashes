@@ -164,7 +164,7 @@ command-library-collection-rules-edit.title d274b6e5ffb58cd9
 command-library-collection-rules.title 91405fb1560b7c50
 command-library-collection.title 8c4621c0332ae0d9
 command-library-compare.title d0cb5f40dd939879
-command-library-copyFiles.title 47994437a8a0f5ba
+command-library-copyFiles.title deedc555cf326d6b
 command-library-deleteRejected.title 9b733bf20d4e0707
 command-library-duplicate.title e9d68fb1434cdb15
 command-library-duplicateOriginal.title 972872e3c27751da
@@ -192,7 +192,7 @@ command-library-keyword.title 5763bfe022f91409
 command-library-marks-copy.title 110f7a1c6333475d
 command-library-marks-paste.title d7524ecd5be40fab
 command-library-openFolder.title 79525ab3a42262e5
-command-library-pasteFiles.title 409587651f782f9a
+command-library-pasteFiles.title 32720099d2eaa870
 command-library-quick-clear.title 1c4b266b7b1ccc5c
 command-library-quick-saveAs.title 81d31076888b75b1
 command-library-quick-toggle.title 1b2258b0758413c4
@@ -201,7 +201,7 @@ command-library-removeVersion.title f43c144a3b82ca2b
 command-library-resetRotation.title fb146b4741145076
 command-library-rotateLeft.title c67b09b3051e86a1
 command-library-rotateRight.title f7027caee8e98de5
-command-library-runWorkshop.title 6fff6de48c6a92df
+command-library-runWorkshop.title 15e12bcf44446cfc
 command-library-scanFolder.title 65e0df53774b720b
 command-library-select-invert.title 9fabaf6253c7fd7d
 command-library-select-none.title cf5dfbd241a5672e
@@ -210,7 +210,7 @@ command-library-sort.title ac723c2319de076f
 command-library-stack-group.title eb49ab3f0992e73e
 command-library-stack-top.title 86d66aed75468b70
 command-library-stack-ungroup.title 9c5161dff0696632
-command-library-storage.title 72ca240c73a1c7aa
+command-library-storage.title 5a2f966a38856217
 command-library-trash.title 6fb6defb78678f5c
 command-library-window.title 6d7e88ea6aaf5346
 command-macro-dissolve.title e472cc526f105a70
@@ -304,7 +304,7 @@ command-view-endSideBar-toggle.title 7e1e38e1eef14830
 command-view-library.title 92a428c311a5277d
 command-view-network.title 302d61539ec3f628
 command-viewport-compare.title 27a11d0c9daaf86f
-command-viewport-copyImage.title 26349c0fe1312665
+command-viewport-copyImage.title fbe483bc0b662eaa
 command-viewport-mask-display-off.title f8dcd04c9ed5d30a
 command-viewport-mask-display.title 0fce58839d419c9d
 command-viewport-zoom-100.title be6c10eb69bafd7c
@@ -1002,6 +1002,8 @@ gui-library-facet-presence beeefaec1ce58ef2
 gui-library-facet-rating 36690a4e79cfa166
 gui-library-facet-type f97f51ee1be110cd
 gui-library-file f5342066f92b83c2
+gui-library-flag-pick-tip 7e8ed9ecb7939f38
+gui-library-flag-reject-tip 062b691eb88cd9cc
 gui-library-folder-import 10145b3d149f7903
 gui-library-folder-scan b7864987ea2b1016
 gui-library-folder-show 979529b4e076ad3a
@@ -1027,6 +1029,12 @@ gui-library-keyword-rename-verb 81224e15032bac73
 gui-library-keyword-toggle bfafd2c64d010b5a
 gui-library-keywords 3a2949d46a7b5995
 gui-library-keywords-none 43f670bbd66a8ef3
+gui-library-label-blue-tip 64bf2c9bb1f3ebc7
+gui-library-label-green-tip 19cb60a93b9e31a0
+gui-library-label-purple-tip 5f688e495b6aa435
+gui-library-label-red-tip 7f042a0506f39190
+gui-library-label-yellow-tip 62cc215e815f93c3
+gui-library-mark-keys 8c63c9f20182ce08
 gui-library-missing-note 02e4f67d1be418c9
 gui-library-no-cursor 581a49943aeb231e
 gui-library-none d2ff532108cdfbd6
@@ -1444,6 +1452,7 @@ gui-settings-plugin-refused 79efaad4cbe227a7
 gui-settings-plugin-settings 3b5b172596a8843e
 gui-settings-plugins f4791889f7d7e08b
 gui-settings-plugins-capabilities 83dd6669158d29a3
+gui-settings-volume-sources 615441e425400f64
 gui-size-bytes f7153bf939a9449c
 gui-size-gib 05df2d85b96c6970
 gui-size-kib 053b6d255ce6ae14
@@ -1549,6 +1558,7 @@ gui-version-remove-title 7119231ab84fbfe3
 gui-version-remove-verb 5f0a4345d90ede41
 gui-window-frame-error 72035247381882d2
 gui-wizard-account 4103a27ff07b58ca
+gui-wizard-account-has-source 3004f2e86571d706
 gui-wizard-account-settings 4e8adab3079a2601
 gui-wizard-add 8c5fb21c9d35ce76
 gui-wizard-back 5f409e65a5b970e0
@@ -1566,6 +1576,7 @@ gui-wizard-no-account 4bb2b1d39b510d97
 gui-wizard-no-folder 84f367f87175aada
 gui-wizard-no-library 5b1526a7cb139c51
 gui-wizard-no-volume 39332de10a53f065
+gui-wizard-open-source 30aa76d04b23eb93
 gui-wizard-sign-in 6f8ad2084116c666
 gui-wizard-title 756d6fb914845bbe
 gui-wizard-volume ede47e699ccafd23
