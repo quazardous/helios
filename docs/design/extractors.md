@@ -117,6 +117,40 @@ In a manifest the kind is a table (`[extractors.llm]` or `builtin = {
 compute = "capture" }`), not a `kind = "llm"` field as the sketch in
 section 2 shows.
 
+### Slice 5, first part built (2026-11-15)
+
+The run engine for extractor nodes (`helios_node::workflow::extract`),
+beside the export runs, not yet behind a node verb:
+
+- **Library images as items:** `image:` and the content hash
+  (`image_item`), so a submission reads no image.
+- **Extractor nodes** (`ExtractNode`: a use of an LLM extractor, its
+  prompt's inputs, its route overrides, the nodes it waits for) are
+  queueing nodes of a journal; each (image, node) row concludes once.
+  A run opened again over its rows gives back the running ones and
+  goes on; with the cache, nothing concluded is called again.
+- **Submission** checks every node with `Ai::check_run` first: a node
+  nothing serves refuses it, naming the node, before anything is
+  entered.
+- **Each row** calls `Ai::run_extract` with the run's cache (for a
+  vault, `vault.extract_cache(Some(run))`); the caller's `ImageSource`
+  chooses the image sent (embedded preview, or a head version as
+  `image_version`). A reply that never fits fails for good; another
+  failure is retried twice (2 s, then 4 s).
+- **Facts on the bus:** `extract.run` (`submitted` with what leaves
+  the machine, `refused`, `progress` with the counts, `finished`,
+  `stopped`) and `extract.item` (one per concluded row: `done` with
+  `hit`, or `failed` with the error).
+- Cancel turns the rows not concluded into `cancelled`; what concluded
+  stays. Removing the run drops its run-only results.
+
+Left for the second part: the node verbs (`workflow.extract` or
+`diagrams.submit`) and the runner thread, the run as a job and an
+`extract` promise in the Activity focus, input nodes (selection, album,
+smart album, import session, query, whole library) resolved to image
+ids, reading the embedded preview from the library, the alter node, and
+the tests through the batch endpoint.
+
 It builds on [ai-models.md](../ai-models.md) (providers, routing,
 versioned prompts, the call log), [workflow-level.md](../workflow-level.md)
 (runs, journal rows per item and graph node, choices),
