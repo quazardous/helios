@@ -234,10 +234,13 @@ is a manual pull request to microsoft/winget-pkgs adding
 `packaging/winget/manifests/q/Quazardous/Helios/0.77.0/` at the same path,
 opened by the coordinator once the owner agrees. Until it is merged, the
 `winget` job of a new release fails (no previous version to start from);
-that failure does not fail the release, and the job is rerun once 0.77.0
-is in.
+until then the job leaves a notice and ends without failing.
 
-To check a manifest set on Windows before submitting it:
+The `winget manifest` workflow (`.github/workflows/winget-manifest.yml`)
+does this on a Windows runner whenever the manifests change, and can be
+run by hand: `winget validate`, then `winget install --manifest`, then a
+check that the install is registered. By hand on Windows (once, as
+administrator: `winget settings --enable LocalManifestFiles`):
 
 ```powershell
 winget validate --manifest packaging\winget\manifests\q\Quazardous\Helios\0.77.0

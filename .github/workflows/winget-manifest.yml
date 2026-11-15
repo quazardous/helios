@@ -1,0 +1,66 @@
+name: winget manifest
+
+# Checks the winget manifests under packaging/winget/ on a Windows runner,
+# as the winget-pkgs submission checklist asks ("tested locally with
+# winget install --manifest"): `winget validate`, then `winget install
+# --manifest` of the installer it points at, then that the install is
+# registered. Runs when the manifests (or this workflow) change, and by
+# hand (docs/releases.md, "winget").
+on:
+  push:
+    branches: [next]
+    paths:
+      - 'packaging/winget/**'
+      - '.github/workflows/winget-manifest.yml'
+  pull_request:
+    paths:
+      - 'packaging/winget/**'
+      - '.github/workflows/winget-manifest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winget-manifest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifest:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: winget
+        shell: pwsh
+        run: |
+          # The runner image may lack winget; the WinGet client module
+          # installs or repairs it.
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -Force | Out-Null
+            Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
+            Repair-WinGetPackageManager -AllUsers -Latest
+          }
+          winget --version
+          winget settings --enable LocalManifestFiles
+      - name: validate and install each version
+        shell: pwsh
+        run: |
+          $versions = Get-ChildItem packaging/winget/manifests/q/Quazardous/Helios -Directory
+          foreach ($dir in $versions) {
+            Write-Host "== $($dir.Name)"
+            winget validate --manifest $dir.FullName
+            if ($LASTEXITCODE -ne 0) { throw "winget validate failed for $($dir.Name)" }
+            winget install --manifest $dir.FullName --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+            if ($LASTEXITCODE -ne 0) { throw "winget install failed for $($dir.Name)" }
+            $installer = Get-Content (Join-Path $dir.FullName 'Quazardous.Helios.installer.yaml') -Raw
+            $code = [regex]::Match($installer, "ProductCode:\s*'([^']+)'").Groups[1].Value
+            $keys = @(
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$code",
+              "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$code"
+            )
+            $found = $keys | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $found) { throw "installed, but no uninstall entry $code" }
+            $entry = Get-ItemProperty $found
+            Write-Host "registered: $($entry.DisplayName) $($entry.DisplayVersion) in $($entry.InstallLocation)"
+            "$($dir.Name): validated and installed ($($entry.DisplayName) $($entry.DisplayVersion))" >> $env:GITHUB_STEP_SUMMARY
+          }
