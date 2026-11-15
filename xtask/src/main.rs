@@ -21,8 +21,12 @@
 //!   connection (see `vault_access.rs`).
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
 //!   catalogs of `i18n/` (see `i18n.rs`).
-//! - `lint [--fix] [--require-all]`: rustfmt, clippy and the optional
-//!   linters that are installed (see `lint.rs`).
+//! - `lint [--fix] [--require-all]`: rustfmt, clippy, `deps-worlds` and
+//!   the optional linters that are installed (see `lint.rs`).
+//! - `deps-worlds`: each workspace crate depends only on what its world
+//!   allows (no egui in modules, forms through helios-ui, visual modules
+//!   through helios-rack), and Cargo.lock holds one version of each
+//!   egui-family crate (see `deps_worlds.rs`).
 //! - `bench masks [--modules N] ...`: the masks bench, one JSON line per
 //!   render mode, recorded in `target/bench/masks.jsonl` (see `bench.rs`).
 //! - `test-times [--profile P] [--top N]`: run the tests under
@@ -57,6 +61,7 @@
 mod affected;
 mod bench;
 mod commits;
+mod deps_worlds;
 mod gate;
 mod i18n;
 mod install_dev;
@@ -733,7 +738,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local | --from DIR] | install-dev --list | install-dev --uninstall | ui-index [--check]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local | --from DIR] | install-dev --list | install-dev --uninstall | ui-index [--check]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -821,6 +826,10 @@ fn main() -> ExitCode {
         }),
         ["lint", rest @ ..] => lint::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", lint::USAGE);
+            ExitCode::from(2)
+        }),
+        ["deps-worlds", rest @ ..] => deps_worlds::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", deps_worlds::USAGE);
             ExitCode::from(2)
         }),
         ["test-times", rest @ ..] => test_times::run(&root, rest).unwrap_or_else(|| {

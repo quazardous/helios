@@ -1,7 +1,8 @@
 //! `cargo xtask lint [--fix] [--require-all]`: every linter and formatter
 //! of the project in one command.
 //!
-//! rustfmt and clippy always run. The other tools run when installed and
+//! rustfmt, clippy and `deps-worlds` (see `deps_worlds.rs`) always run.
+//! The other tools run when installed and
 //! are reported as skipped otherwise: cargo-deny (licenses, advisories,
 //! sources), cargo-machete (unused dependencies), taplo (TOML formatting),
 //! typos (spelling), shellcheck (shell scripts) and ruff (Python). CI
@@ -153,6 +154,14 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             "warnings",
         ],
     );
+    println!("\n==> deps-worlds");
+    let worlds = crate::deps_worlds::problems(root);
+    for p in &worlds {
+        eprintln!("deps-worlds: {p}");
+    }
+    if !worlds.is_empty() {
+        lint.failed.push("deps-worlds".into());
+    }
     if lint.has(&CARGO_DENY) {
         lint.run("cargo-deny", &["cargo", "deny", "check"]);
     }

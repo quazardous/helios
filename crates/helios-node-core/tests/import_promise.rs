@@ -332,3 +332,41 @@ fn an_import_by_rule_naming_a_profile_skips_and_tags_as_its_filter_and_apply_say
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn two_imports_of_the_same_files_at_once_bring_each_photo_in_once() {
+    let dir = scratch("twice");
+    let roll = roll(&dir, 12);
+    let into = dir.join("library");
+    let bus = Arc::new(Bus::new());
+    let path = dir.join("vault.db");
+    let vault = Arc::new(Vault::new(SqliteStore::open(&path).unwrap()).with_bus(bus.clone()));
+    let service = VaultService::new(vault.clone(), bus.clone(), Jobs::new(bus.clone()), "test");
+    let client = Client::in_process(Arc::new(service)).with_origin("user");
+    let items: Vec<PathBuf> = ["a", "b"]
+        .iter()
+        .flat_map(|sub| std::fs::read_dir(roll.join(sub)).unwrap())
+        .map(|e| e.unwrap().path())
+        .collect();
+    // Import pressed twice: the same items, copied, twice at once.
+    let ask = json!({ "rule": { "items": items }, "copy": true, "into": into,
+                      "layout": "flat", "signals": false });
+    let first = client.request("library.import", ask.clone()).unwrap();
+    let second = client.request("library.import", ask).unwrap();
+    let a = wait(&client, &first["promise"]["id"]);
+    let b = wait(&client, &second["promise"]["id"]);
+    assert_eq!(
+        (a["state"].as_str(), b["state"].as_str()),
+        (Some("done"), Some("done"))
+    );
+    let added = a["result"]["report"]["added"].as_u64().unwrap()
+        + b["result"]["report"]["added"].as_u64().unwrap();
+    assert_eq!(added, 12, "each photo added once: {a} {b}");
+    assert_eq!(images(&*vault), 12);
+    let copies = std::fs::read_dir(&into)
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().path().is_file())
+        .count();
+    assert_eq!(copies, 12, "one copy each");
+    let _ = std::fs::remove_dir_all(&dir);
+}
