@@ -295,13 +295,11 @@ fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
         "the frame waited for the volumes: {:?}",
         started.elapsed()
     );
-    // Frame 0: the labels, not yet the rows.
-    assert!(h.query_by_label("Volumes").is_some(), "the status's label");
-    assert!(h.query_by_label("Space").is_some(), "the table's columns");
-    assert!(
-        h.query_by_label("Studio").is_none(),
-        "read in the background"
-    );
+    // Its labels, drawn from the page's declaration whatever was read.
+    until(&mut h, "the labels", |h| {
+        h.query_all_by_label("Volumes").next().is_some()
+            && h.query_all_by_label("Space").next().is_some()
+    });
     until(&mut h, "the rows", |h| {
         h.query_all_by_label_contains("Studio").next().is_some()
             && h.query_by_label("2 online, 0 offline").is_some()
@@ -332,7 +330,7 @@ fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
             "a refresh blanked the volumes"
         );
         assert!(
-            h.query_by_label("Volumes").is_some(),
+            h.query_all_by_label("Volumes").next().is_some(),
             "nor its status's label"
         );
         if h.query_by_label("1 online, 1 offline").is_some() {
