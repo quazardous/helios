@@ -4103,7 +4103,7 @@ impl Shell {
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
-        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
+        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP, MENU_VIEW};
         use egui_pop::api::windows::MENU_WINDOW;
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
@@ -4150,6 +4150,9 @@ impl Shell {
                 3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
             ),
+            // View > Activity… (Ctrl+Shift+J): the background jobs, open
+            // whether one runs or not.
+            command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),
             // File > Storage: the disks and what each is for.
             command(MENU_FILE, "1_import", 3, storage::COMMAND),
             // Help > Health check.
