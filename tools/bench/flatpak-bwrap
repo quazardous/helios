@@ -3,8 +3,9 @@
 # FLATPAK_BWRAP. Flatpak asks bwrap to forbid user namespaces inside its
 # sandbox (`--disable-userns`), which writes
 # /proc/sys/user/max_user_namespaces in the new namespace; a box job's
-# container type refuses that write, so every build step and `flatpak run`
-# failed. This drops that one option (on the command line and in an
+# container type refuses that write, so every build step
+# failed (`flatpak run` still fails there: its bwrap cannot create a
+# namespace). This drops that one option (on the command line and in an
 # `--args FD` list) and runs the real bwrap: the sandbox may then nest
 # user namespaces, inside the job's still confined container. The bundle
 # built is the same; what users run keeps flatpak's default.
