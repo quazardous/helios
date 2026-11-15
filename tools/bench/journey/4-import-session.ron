@@ -1,0 +1,18 @@
+// The first-user journey, step 4: a click on the import session in the
+// Library (`$session`, its line as the tree names it) scopes the grid to
+// that session's photos; the owner once got "the rules must be a group"
+// there; the card holds four photos. Run live by tools/bench/journey.py,
+// which sets `$session`.
+Scenario(
+    name: "import-session",
+    description: "A click on the import session shows that session's photos, without an error.",
+    steps: [
+        Window("main"),
+        Wait(Settled),
+        Ui(Click(label: "$session")),
+        Wait(Settled),
+        Expect(Value("helios.library.count", 4)),
+        Expect(NoError),
+        Shot("session"),
+    ],
+)

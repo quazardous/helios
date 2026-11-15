@@ -14,9 +14,18 @@ its own, nothing answered beforehand) and fixtures only:
    alone: CC0 raws of the raw corpus, `--corpus`, and the plugin tests'
    JPEG fixtures) is imported through the import window; the Library
    holds one photo per pair.
-3. `quit`: helios-gui is closed by its `workbench.quit` command and must
+3. `imports-list`: the Library's Imports section opened on that import.
+4. `import-session`: a click on the import's line (read from the tree)
+   scopes the Library to its photos, without an error.
+5. `health`: the health check opened and run now; its findings read.
+6. `health-fix-<finding>`: each fix offered applied (none offered on a
+   healthy new library), then the main window must still draw, and the
+   screen must not be black.
+7. `storage`: Settings › Storage, then Backup › Strategy; the volumes
+   must hold the library's disk, online, and the strategy its line.
+8. `quit`: helios-gui is closed by its `workbench.quit` command and must
    exit with status 0.
-4. `restart`: helios-gui starts again on the same profile; no wizard, the
+9. `restart`: helios-gui starts again on the same profile; no wizard, the
    Library holds the same photos.
 
 Each step is a scenario of `tools/bench/journey/` replayed over the
@@ -27,7 +36,8 @@ and log files: a line at error level or a panic fails the step.
 
 In `--out`: the shots, `journey.jsonl` (one line per step), and on a
 failure `journey-failure.txt` naming the step, with the screen at that
-moment (`<step>-screen.png`) and helios-gui's logs (`logs/`). The exit
+moment (`<step>-screen.png`), each window's accessibility tree
+(`<step>-tree-<window>.json`) and helios-gui's logs (`logs/`). The exit
 status is 1 when a step failed.
 """
 
@@ -39,9 +49,11 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
+import zlib
 from pathlib import Path
 
 from wbox.server import build_compositor
@@ -56,6 +68,12 @@ RAWS = (
     "pentax-k-r-pef-12bit-compressed-3-2",
     "panasonic-dmc-gf1-rw2-16-9",
 )
+
+# The import's line in the Library's Imports section: "<when> · <source> · <count>".
+SESSION_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d · .+ · (\d+)$")
+
+# Fixes that leave Helios (a browser, the file manager): not applied.
+OUTSIDE = ("links.open", "library.openFolder")
 
 # A log line at error level, or a panic.
 BAD_LINE = re.compile(r"\bERROR\b|\[error\]|\berror:|panicked at", re.IGNORECASE)
@@ -130,6 +148,36 @@ def bad_lines(files: list[Path], seen: dict[Path, int]) -> list[str]:
     return found
 
 
+def labels(tree) -> list[str]:
+    """Every node's label in a `ui` tree answer, whatever its nesting."""
+    found = []
+    if isinstance(tree, dict):
+        if isinstance(tree.get("label"), str):
+            found.append(tree["label"])
+        for v in tree.values():
+            if isinstance(v, (dict, list)):
+                found += labels(v)
+    elif isinstance(tree, list):
+        for v in tree:
+            found += labels(v)
+    return found
+
+
+def png_is_flat(path: Path) -> bool:
+    """Whether a PNG is one flat colour (a black window): its pixel bytes,
+    filters and all, hold almost no distinct values, where any drawn
+    interface (text, edges) holds many."""
+    data = path.read_bytes()
+    pos, idat = 8, b""
+    while pos < len(data):
+        size = int.from_bytes(data[pos : pos + 4], "big")
+        kind = data[pos + 4 : pos + 8]
+        if kind == b"IDAT":
+            idat += data[pos + 8 : pos + 8 + size]
+        pos += size + 12
+    return len(set(zlib.decompress(idat))) < 16
+
+
 class Journey:
     def __init__(self, args):
         self.args = args
@@ -143,6 +191,7 @@ class Journey:
         self.comp = None
         self.launches = 0
         self.steps: list[dict] = []
+        self.session = ""
 
     def log_files(self) -> list[Path]:
         state = Path(self.env["XDG_STATE_HOME"])
@@ -178,7 +227,53 @@ class Journey:
         if "path" in shot:
             shutil.copy(shot["path"], self.args.out / f"{step}-screen.png")
 
-    def scenario(self, step: str, file: str) -> dict:
+    def rpc(self, method: str, params: dict, within: float = 30.0):
+        """One request on the agent socket: its result, or raises."""
+        request = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(within)
+            s.connect(self.env["EGUI_POP_AGENT_SOCKET"])
+            s.sendall((json.dumps(request) + "\n").encode())
+            buf = b""
+            while not buf.endswith(b"\n"):
+                chunk = s.recv(1 << 16)
+                if not chunk:
+                    break
+                buf += chunk
+        answer = json.loads(buf)
+        if "error" in answer:
+            raise RuntimeError(f"{method}: {answer['error']}")
+        return answer.get("result")
+
+    def command(self, name: str, args: dict | None = None):
+        """A command's answer (its `data`), run as the agent."""
+        result = self.rpc(
+            "call",
+            {"collector": "commands", "action": "run", "args": {"id": name, "args": args or {}}},
+        )
+        if isinstance(result, dict) and result.get("ok") is False:
+            raise RuntimeError(f"{name}: {result.get('message')}")
+        return result.get("data") if isinstance(result, dict) else result
+
+    def windows(self) -> list[str]:
+        try:
+            described = self.rpc("describe", {})
+            return [w["id"] for w in described.get("windows", [])] or ["main"]
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+            return ["main"]
+
+    def trees(self, step: str) -> None:
+        """Each window's accessibility tree, for the failure report."""
+        if self.comp is None:
+            return
+        for window in self.windows():
+            try:
+                tree = self.rpc("ui", {"action": "tree", "window": window})
+            except (OSError, RuntimeError, ValueError) as exc:
+                tree = {"error": str(exc)}
+            (self.args.out / f"{step}-tree-{window}.json").write_text(json.dumps(tree, indent=1))
+
+    def scenario(self, step: str, file: str, extra: dict | None = None) -> dict:
         runner = [
             str(self.args.runner),
             "--socket",
@@ -189,6 +284,7 @@ class Journey:
             f"card={self.work / 'card'}",
             "--var",
             f"photos={self.card['photos']}",
+            *[a for k, v in (extra or {}).items() for a in ("--var", f"{k}={v}")],
             "--shot",
             "gui.snapshot",
             json.dumps({"target": "window", "path": "$path"}),
@@ -240,6 +336,7 @@ class Journey:
 
     def fail(self, entry: dict) -> None:
         self.screen(entry["step"])
+        self.trees(entry["step"])
         lines = [
             f"journey failed at step `{entry['step']}`",
             f"why: {entry.get('why')}",
@@ -250,17 +347,103 @@ class Journey:
         (self.args.out / "journey-failure.txt").write_text("\n".join(lines) + "\n")
         print("\n".join(lines), file=sys.stderr)
 
+    def find_session(self, entry: dict) -> None:
+        """The import's line in the Imports section, for `import-session`."""
+        try:
+            tree = self.rpc("ui", {"action": "tree", "window": "main"})
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry["why"] = f"the tree could not be read: {exc}"
+            return
+        lines = [x for x in labels(tree) if SESSION_LINE.match(x)]
+        entry["sessions"] = lines
+        if len(lines) != 1:
+            entry["why"] = f"one import line expected in the Imports section, found {lines}"
+            return
+        count = int(SESSION_LINE.match(lines[0]).group(1))
+        if count != self.card["photos"]:
+            entry["why"] = f"the import's line counts {count} photos, not {self.card['photos']}"
+        self.session = lines[0]
+
+    def health_fixes(self) -> bool:
+        """Each fix the health check offers applied, a step each."""
+        started = time.monotonic()
+        entry: dict = {"step": "health-findings"}
+        try:
+            answer = self.command("health.findings")
+            rows = answer.get("findings", [])
+        except (OSError, RuntimeError, ValueError, AttributeError) as exc:
+            entry["why"] = f"health.findings: {exc}"
+            rows = []
+        entry["findings"] = [
+            {k: r.get(k) for k in ("id", "level", "title", "fixCommand", "ignored")} for r in rows
+        ]
+        offered = [r for r in rows if r.get("fix") and not r.get("ignored")]
+        entry["offered"] = [r["id"] for r in offered]
+        entry["seconds"] = round(time.monotonic() - started, 1)
+        if not self.check(entry):
+            self.fail(entry)
+            return False
+        for row in offered:
+            if row.get("fixCommand") in OUTSIDE:
+                print(f"journey: fix of {row['id']} leaves Helios, not applied", flush=True)
+                continue
+            step = f"health-fix-{row['id']}"
+            started = time.monotonic()
+            entry = self.scenario(step, "6-health-fix.ron", {"fix": row["id"]})
+            entry["fix"] = row.get("fixCommand")
+            if "why" not in entry:
+                self.painting(entry)
+            entry["seconds"] = round(time.monotonic() - started, 1)
+            if not self.check(entry):
+                self.fail(entry)
+                return False
+        return True
+
+    def painting(self, entry: dict) -> None:
+        """The screen is not one flat colour (a black window)."""
+        shot = self.comp.screenshot(f"journey-{entry['step']}-check")
+        path = shot.get("path")
+        if path is None:
+            entry["why"] = f"no screenshot: {shot.get('error')}"
+        elif png_is_flat(Path(path)):
+            shutil.copy(path, self.args.out / f"{entry['step']}-flat.png")
+            entry["why"] = "the screen is one flat colour after the fix (a black window?)"
+
+    def storage_probe(self, entry: dict) -> None:
+        """The volumes hold the library's disk, online; the strategy a line."""
+        try:
+            volumes = self.command("library.volumes").get("volumes", [])
+            strategy = self.command("library.backupStrategy")
+        except (OSError, RuntimeError, ValueError, AttributeError) as exc:
+            entry["why"] = f"storage commands: {exc}"
+            return
+        entry["volumes"] = [{k: v.get(k) for k in ("name", "roleText", "state")} for v in volumes]
+        entry["strategy"] = (strategy.get("summary") or {}).get("text")
+        if not any(v.get("role_library") and v.get("online") for v in volumes):
+            entry["why"] = "no online volume with the Library role among the volumes"
+        elif not entry["strategy"]:
+            entry["why"] = "the backup strategy has no line"
+
     def run(self) -> bool:
         plan = [
             ("launch", None),
             ("first-run", "1-first-run.ron"),
             ("import", "2-import.ron"),
+            ("imports-list", "3-imports-list.ron"),
+            ("import-session", "4-import-session.ron"),
+            ("health", "5-health.ron"),
+            ("health-fixes", None),
+            ("storage", "7-storage.ron"),
             ("quit", None),
             ("relaunch", None),
-            ("restart", "3-restart.ron"),
+            ("restart", "8-restart.ron"),
             ("quit-again", None),
         ]
         for step, file in plan:
+            if step == "health-fixes":
+                if not self.health_fixes():
+                    return False
+                continue
             started = time.monotonic()
             if step in ("launch", "relaunch"):
                 launched = self.launch()
@@ -268,7 +451,12 @@ class Journey:
                 if "error" in launched:
                     entry["why"] = f"launch: {launched['error']}"
             elif file is not None:
-                entry = self.scenario(step, file)
+                extra = {"session": self.session} if step == "import-session" else None
+                entry = self.scenario(step, file, extra)
+                if "why" not in entry and step == "imports-list":
+                    self.find_session(entry)
+                if "why" not in entry and step == "storage":
+                    self.storage_probe(entry)
             else:
                 entry = self.quit()
                 entry["step"] = step
