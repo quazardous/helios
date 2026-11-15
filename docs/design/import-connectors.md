@@ -733,7 +733,17 @@ auto = "new-files"  # the automatic import offered: "plugged", "new-files"; abse
 placement = "add"   # "add": added in place unless the profile copies; "copy": copied
                     # unless the person adds in place; "copy-only": always copied
 naming = ["stem", "date", "seq"]  # the fields a copy's name may use; absent: every one
+one_source_per_account = true     # a source is the account itself: a second one is refused
 ```
+
+A plugin whose `setup` is derived says `one_source_per_account = true` at
+its manifest's top level (Google Photos does: its source is the account,
+whichever picking session chose the items). The wizard and
+`import.sources.add` then refuse a second source on an account, or on
+another account signed in as the same identity (`Account::identity`, the
+connector and the address), and offer to open the source already there
+(owner, 2026-11-15). Not decided yet: merging once the sources saved
+before, two on one identity.
 
 Built in, `folder` asks a path (`auto = "new-files"`, `placement =
 "add"`), `card` a volume (`auto = "plugged"`, `placement = "copy"`: a

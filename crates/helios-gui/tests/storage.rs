@@ -864,3 +864,47 @@ fn a_vault_held_locked_does_not_delay_the_storage_pages_frames() {
             .is_some()
     );
 }
+
+/// Read again (a change, a node's `storage.*` event), the Storage page
+/// never goes blank: frame by frame its rows stay, marked "Refreshing…"
+/// while they are read, and are replaced in place.
+#[test]
+fn a_refresh_never_blanks_the_page() {
+    let (world, shell) = World::new("refresh");
+    let mut h = headless::harness(shell, vec2(1600.0, 900.0));
+    world.settle(&mut h);
+    h.state_mut()
+        .run(STORAGE_COMMAND, json!({}), Origin::User)
+        .unwrap();
+    let rows = |h: &Harness<'_, Shell>| {
+        h.query(
+            By::new()
+                .role(egui::accesskit::Role::TextInput)
+                .value("Studio"),
+        )
+        .is_some()
+    };
+    until(&mut h, "the page", rows);
+    let admin = h
+        .state()
+        .app()
+        .handle()
+        .service(&egui_pop::api::admin::ADMIN)
+        .unwrap();
+    for round in 0..3 {
+        h.state_mut().refresh_volumes();
+        admin.refresh();
+        for frame in 0..8 {
+            h.step();
+            assert!(
+                rows(&h),
+                "round {round}, frame {frame}: the rows left the page"
+            );
+        }
+        world.settle(&mut h);
+        assert!(rows(&h));
+    }
+    until(&mut h, "the mark gone", |h| {
+        h.query_by_label_contains("Refreshing").is_none()
+    });
+}

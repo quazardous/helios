@@ -618,8 +618,12 @@ pub fn query_of(filter: &Filter) -> Query {
         cull: terms.cull,
         // An import session: the photos it brought in, by the vault's
         // `import` rule (nothing copied or moved).
+        // The tree must be a group at its top (`Rule::parse` refuses a bare
+        // condition when the query crosses to the node).
         rules: terms.import.and_then(|id| {
-            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id)).ok()
+            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id))
+                .ok()
+                .map(|c| helios_vault::rules::Rule::group(helios_vault::rules::Match::All, vec![c]))
         }),
         ..Query::default()
     }
@@ -4231,6 +4235,23 @@ impl Library {
         }
     }
 
+    /// A mark button's tooltip and name: what a click does, with the
+    /// keys `command` is bound to now (a key the user rebound shows as
+    /// rebound, none when it has none).
+    fn mark_tip(&self, ctx: &egui::Context, what: Message, command: &str) -> String {
+        let what = crate::i18n::text(ctx, what);
+        let keys = self
+            .app
+            .as_ref()
+            .and_then(|app| {
+                egui_pop::model::ids::CommandId::new(command)
+                    .ok()
+                    .map(|id| app.keys_for(&id))
+            })
+            .unwrap_or_default();
+        with_keys(ctx, what, &keys)
+    }
+
     /// The marks of the cursor's image, edited for the selection: stars,
     /// labels, flag and tags.
     fn marks_bar(&mut self, ui: &mut Ui) {
@@ -4254,7 +4275,16 @@ impl Library {
                     rating,
                 });
             }
-            if let Some(labels) = ColorLabels::new(marks.labels).show(ui).changed {
+            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
+                .size
+                .control_height;
+            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
+            let tips = ColorLabel::ALL.map(|l| {
+                let (what, command) = label_tip(l);
+                self.mark_tip(ui.ctx(), what, command)
+            });
+            toggle_tips(ui, &labels.response, side, &tips);
+            if let Some(labels) = labels.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
                         asked.push(Mark::Label {
@@ -4265,7 +4295,20 @@ impl Library {
                     }
                 }
             }
-            if let Some(flag) = FlagToggle::new(marks.flag).show(ui).changed {
+            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
+            let tips = [
+                (
+                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
+                    "vault.flag.pick",
+                ),
+                (
+                    Message::new("gui-library-flag-reject-tip", "Reject"),
+                    "vault.flag.reject",
+                ),
+            ]
+            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
+            toggle_tips(ui, &flags.response, side, &tips);
+            if let Some(flag) = flags.changed {
                 asked.push(Mark::Flag {
                     keys: keys.clone(),
                     flag,
@@ -4710,7 +4753,16 @@ impl Library {
                     rating,
                 });
             }
-            if let Some(labels) = ColorLabels::new(marks.labels).show(ui).changed {
+            let side = egui_pop::core::theme::Tokens::of(ui.ctx())
+                .size
+                .control_height;
+            let labels = ColorLabels::new(marks.labels).size(side).show(ui);
+            let tips = ColorLabel::ALL.map(|l| {
+                let (what, command) = label_tip(l);
+                self.mark_tip(ui.ctx(), what, command)
+            });
+            toggle_tips(ui, &labels.response, side, &tips);
+            if let Some(labels) = labels.changed {
                 for label in ColorLabel::ALL {
                     if labels.has(label) != marks.labels.has(label) {
                         asked.push(Mark::Label {
@@ -4721,7 +4773,20 @@ impl Library {
                     }
                 }
             }
-            if let Some(flag) = FlagToggle::new(marks.flag).show(ui).changed {
+            let flags = FlagToggle::new(marks.flag).size(side).show(ui);
+            let tips = [
+                (
+                    Message::new("gui-library-flag-pick-tip", "Flag as pick"),
+                    "vault.flag.pick",
+                ),
+                (
+                    Message::new("gui-library-flag-reject-tip", "Reject"),
+                    "vault.flag.reject",
+                ),
+            ]
+            .map(|(what, command)| self.mark_tip(ui.ctx(), what, command));
+            toggle_tips(ui, &flags.response, side, &tips);
+            if let Some(flag) = flags.changed {
                 asked.push(Mark::Flag {
                     keys: keys.clone(),
                     flag,
@@ -4776,6 +4841,84 @@ impl Library {
     }
 }
 
+/// What a click on a colour label's button does, and the command its
+/// keys are bound to.
+fn label_tip(label: ColorLabel) -> (Message, &'static str) {
+    match label {
+        ColorLabel::Red => (
+            Message::new("gui-library-label-red-tip", "Red label"),
+            "vault.label.red",
+        ),
+        ColorLabel::Yellow => (
+            Message::new("gui-library-label-yellow-tip", "Yellow label"),
+            "vault.label.yellow",
+        ),
+        ColorLabel::Green => (
+            Message::new("gui-library-label-green-tip", "Green label"),
+            "vault.label.green",
+        ),
+        ColorLabel::Blue => (
+            Message::new("gui-library-label-blue-tip", "Blue label"),
+            "vault.label.blue",
+        ),
+        ColorLabel::Purple => (
+            Message::new("gui-library-label-purple-tip", "Purple label"),
+            "vault.label.purple",
+        ),
+    }
+}
+
+/// `what`, with `keys` after it in brackets when there are any: "Red
+/// label (6)".
+fn with_keys(ctx: &egui::Context, what: String, keys: &[String]) -> String {
+    if keys.is_empty() {
+        return what;
+    }
+    crate::i18n::text(
+        ctx,
+        Message::new("gui-library-mark-keys", "{ $what } ({ $keys })")
+            .with("what", what)
+            .with("keys", keys.join(", ")),
+    )
+}
+
+/// Where egui-pop's mark buttons sit in `row`: `n` squares of `side`,
+/// side by side from its left, the kit's small spacing between them,
+/// centred in its height (`ColorLabels` and `FlagToggle` lay them out so).
+fn toggle_rects(row: egui::Rect, n: usize, side: f32, gap: f32) -> Vec<egui::Rect> {
+    let top = row.center().y - side / 2.0;
+    (0..n)
+        .map(|i| {
+            egui::Rect::from_min_size(
+                egui::pos2(row.left() + i as f32 * (side + gap), top),
+                egui::vec2(side, side),
+            )
+        })
+        .collect()
+}
+
+/// Tooltips over egui-pop's mark buttons (its colour labels, its pick
+/// and reject), which show none of their own: a hover-only area over each
+/// button, in order, the click staying the button's. The buttons carry
+/// their accessible names themselves.
+// upstream: egui-pop's `ColorLabels` and `FlagToggle` take no tooltip;
+// drop this once they show their own.
+fn toggle_tips(ui: &Ui, row: &egui::Response, side: f32, tips: &[String]) {
+    let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.xs;
+    for (i, (rect, tip)) in toggle_rects(row.rect, tips.len(), side, gap)
+        .into_iter()
+        .zip(tips)
+        .enumerate()
+    {
+        ui.interact(
+            rect,
+            row.id.with(("helios.mark.tip", i)),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(tip);
+    }
+}
+
 /// Where the Compare view puts `n` panes in `rect`, `gap` apart: side by
 /// side up to three, four in a square (egui-pop's `CompareView` layout).
 fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
@@ -4802,6 +4945,47 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 mod tests {
     use super::*;
     use egui_pop::views::library::filter::Candidate;
+
+    /// The mark buttons' tooltip areas: squares from the row's left, the
+    /// gap between them, centred in its height.
+    #[test]
+    fn mark_tips_cover_each_button_in_its_row() {
+        let row = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(120.0, 30.0));
+        let rects = toggle_rects(row, 3, 20.0, 4.0);
+        assert_eq!(rects.len(), 3);
+        assert_eq!(rects[0].min, egui::pos2(10.0, 5.0));
+        assert_eq!(rects[1].min, egui::pos2(34.0, 5.0));
+        assert_eq!(rects[2].max, egui::pos2(78.0, 25.0));
+    }
+
+    /// A tooltip names its keys when the command has some, and only then.
+    #[test]
+    fn a_mark_tip_names_its_keys_when_bound() {
+        let ctx = egui::Context::default();
+        let (what, command) = label_tip(ColorLabel::Red);
+        assert_eq!(command, "vault.label.red");
+        let red = crate::i18n::text(&ctx, what);
+        assert_eq!(with_keys(&ctx, red.clone(), &["6".into()]), "Red label (6)");
+        assert_eq!(
+            with_keys(&ctx, red.clone(), &["F1".into(), "6".into()]),
+            "Red label (F1, 6)"
+        );
+        assert_eq!(with_keys(&ctx, red, &[]), "Red label");
+    }
+
+    /// An `import:` term's rule tree is a group, so it survives the trip
+    /// to the node, which parses the tree and refuses a bare condition
+    /// ("the rules must be a group").
+    #[test]
+    fn an_import_session_s_query_crosses_to_the_node() {
+        let filter = Filter {
+            text: "import:\"abc\"".into(),
+            ..Filter::default()
+        };
+        let rules = query_of(&filter).rules.expect("an import rule");
+        helios_vault::rules::Rule::parse(&rules.to_json())
+            .unwrap_or_else(|e| panic!("refused at the node: {e}"));
+    }
 
     /// A picture 3 wide and 2 high turned each way: its corners land
     /// where a quarter turn puts them, and four turns give it back.

@@ -62,7 +62,7 @@ impl ConnectorProvider for CardProvider {
                 icon: "camera".into(),
                 auto: Some(crate::AutoImport::Plugged),
                 placement: crate::Placement::Copy,
-                naming: Vec::new(),
+                ..crate::Setup::default()
             }),
         }
     }
