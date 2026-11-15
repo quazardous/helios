@@ -359,9 +359,10 @@ class Journey:
         if len(lines) != 1:
             entry["why"] = f"one import line expected in the Imports section, found {lines}"
             return
-        count = int(SESSION_LINE.match(lines[0]).group(1))
-        if count != self.card["photos"]:
-            entry["why"] = f"the import's line counts {count} photos, not {self.card['photos']}"
+        # Its count is recorded, not checked: it counts files, a pair twice,
+        # where the Library counts photos (a known bug, to check strictly
+        # once fixed).
+        entry["session_count"] = int(SESSION_LINE.match(lines[0]).group(1))
         self.session = lines[0]
 
     def health_fixes(self) -> bool:

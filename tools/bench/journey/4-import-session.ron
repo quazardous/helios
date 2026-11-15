@@ -9,6 +9,11 @@ Scenario(
     steps: [
         Window("main"),
         Wait(Settled),
+        // The import just made may be shown already: a click on a shown
+        // session drops its scope, a second shows it again.
+        Ui(Click(label: "$session")),
+        Wait(Settled),
+        Expect(NoError),
         Ui(Click(label: "$session")),
         Wait(Settled),
         Expect(Value("helios.library.count", 4)),
