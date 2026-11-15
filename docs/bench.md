@@ -150,7 +150,10 @@ compile error.
 `$XDG_STATE_HOME/helios-bench/failures.jsonl` with its failing lines, and
 `bench-remote` asks for the cause: the agent that queued it records it at
 once with `cargo xtask bench-remote why <id> "<cause, and what is done
-about it>"`. `cargo xtask bench-remote failures` lists the ones still
+about it>"`. A `first` prerequisite that failed (the job itself then
+ends with 79) is recorded too, from the box's output; `why` on a job the
+file does not hold asks the box (`status <id>`) and adds it when it really
+failed. `cargo xtask bench-remote failures` lists the ones still
 unexplained (`--all` for every one). A run meant to fail (a reproduction
 before a fix) says so with `expect=fail` and is recorded as expected. With
 `--push`, the tracked and untracked files of the working tree (not the
