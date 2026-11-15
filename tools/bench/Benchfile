@@ -605,7 +605,8 @@ timeout = "1h"
 # the command line in the sandbox imports and exports a picture, the
 # window's program says its version, uninstalled). `sandbox = true`:
 # flatpak-builder and flatpak run each step under bwrap, which mounts a
-# fresh /proc
+# fresh /proc; FLATPAK_BWRAP drops bwrap's --disable-userns, which the
+# job's container refuses (tools/bench/flatpak-bwrap)
 [jobs.flatpak]
 about = "the Flatpak bundle built from source with flatpak-builder, installed and smoke-tested"
 checkouts = ["helios"]
@@ -613,7 +614,7 @@ sandbox = true
 cores = 5
 memory = "8g"
 cwd = "/work/${src:-helios}"
-command = '''mkdir -p /tmp/w/flatpak "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && cp -r --preserve=mode . /tmp/w/flatpak/ && cd /tmp/w/flatpak && \
+command = '''mkdir -p /tmp/w/flatpak "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && cp -r --preserve=mode . /tmp/w/flatpak/ && cd /tmp/w/flatpak && export FLATPAK_BWRAP="$PWD/tools/bench/flatpak-bwrap" && \
 v="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)" && \
 packaging/flatpak/build.sh build "$v" /out /flatpak/work && \
 packaging/flatpak/smoke.sh "/out/io.github.quazardous.Helios-$v-x86_64.flatpak" crates/helios-plugin/tests/fixtures/rated-photos/a.jpg'''
@@ -635,7 +636,7 @@ sandbox = true
 cores = 5
 memory = "8g"
 cwd = "/work/${src:-helios}"
-command = '''mkdir -p /tmp/w/flatpak /tmp/w/bundle "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && cp -r --preserve=mode . /tmp/w/flatpak/ && cd /tmp/w/flatpak && \
+command = '''mkdir -p /tmp/w/flatpak /tmp/w/bundle "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && cp -r --preserve=mode . /tmp/w/flatpak/ && cd /tmp/w/flatpak && export FLATPAK_BWRAP="$PWD/tools/bench/flatpak-bwrap" && \
 v="$(packaging/flatpak/build.sh version)" && echo "$v" > /out/version.txt && \
 HELIOS_FLATPAK_DEVEL=1 packaging/flatpak/build.sh build "$v" /tmp/w/bundle /flatpak/work && \
 b="/tmp/w/bundle/io.github.quazardous.Helios.Devel-$v-x86_64.flatpak" && \
@@ -660,7 +661,7 @@ sandbox = true
 cores = 3
 memory = "4g"
 cwd = "/work/${src:-helios}"
-command = '''mkdir -p "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && \
+command = '''mkdir -p "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && export FLATPAK_BWRAP="$PWD/tools/bench/flatpak-bwrap" && \
 "$WBOX_PYTHON" -I tools/bench/flatpak-gui.py --bundle "/flatpak/devel/${branch:-main}/helios-devel.flatpak" --out /out'''
 env = { FLATPAK_USER_DIR = "/flatpak/user", WLR_RENDERER = "pixman" }
 mounts = { flatpak = "/flatpak" }

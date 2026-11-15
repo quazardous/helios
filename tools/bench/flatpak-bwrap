@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# bwrap for flatpak and flatpak-builder in the bench box's jobs, set with
+# FLATPAK_BWRAP. Flatpak asks bwrap to forbid user namespaces inside its
+# sandbox (`--disable-userns`), which writes
+# /proc/sys/user/max_user_namespaces in the new namespace; a box job's
+# container type refuses that write, so every build step and `flatpak run`
+# failed. This drops that one option (on the command line and in an
+# `--args FD` list) and runs the real bwrap: the sandbox may then nest
+# user namespaces, inside the job's still confined container. The bundle
+# built is the same; what users run keeps flatpak's default.
+set -euo pipefail
+
+real=/usr/bin/bwrap
+drop=(-e --disable-userns -e --assert-userns-disabled)
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --disable-userns | --assert-userns-disabled)
+      shift
+      ;;
+    --args)
+      # NUL-separated arguments read from a file descriptor
+      tmp="$(mktemp)"
+      grep -z -v -x "${drop[@]}" <"/proc/self/fd/$2" >"$tmp" || true
+      exec {fd}<"$tmp"
+      rm -f "$tmp"
+      args+=(--args "$fd")
+      shift 2
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+exec "$real" "${args[@]}"
