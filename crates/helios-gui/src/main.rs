@@ -1266,6 +1266,10 @@ impl App {
             Opened::File(path) => self.open(Open::Image(path.clone())),
         };
         if let Err(e) = opening {
+            log::warn!(
+                target: "helios",
+                "the darkroom left open on {opened:?} is not restored, back to the place under it: {e}"
+            );
             contexts::leave_darkroom(
                 self.shell.app().handle(),
                 &egui_pop::model::commands::Origin::User,

@@ -320,6 +320,12 @@ impl Shell {
             f.fix.ok_or_else(|| format!("`{id}` has no fix"))?
         };
         let command = CommandId::new(&fix.command).map_err(|e| format!("{}: {e}", fix.command))?;
+        log::info!(
+            target: "helios",
+            "health.fix: finding `{id}` runs `{}` with {}",
+            fix.command,
+            fix.args
+        );
         self.core.app.handle().run(command, fix.args.clone());
         if let Ok(again) = CommandId::new(CHECK_NOW) {
             self.core.app.handle().run(again, Value::Null);
