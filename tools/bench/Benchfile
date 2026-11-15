@@ -395,14 +395,16 @@ timeout = "1h"
 # release, in a headless labwc through wbox, on a fresh profile (its own
 # HOME and XDG folders): the init wizard finished on its defaults, a
 # fixture card of raws (the raw corpus's CC0 files), JPEGs and RAW+JPEG
-# pairs imported through the import window, the Library's count, a quit
-# (exit 0) and a restart that still shows the photos. The scenario
-# invariants after every step, and no error or panic line in the logs;
-# a failure names the step in /out/journey-failure.txt with the screen
-# and the logs (tools/bench/journey.py). Run on every next and before a
-# release (docs/next.md)
+# pairs imported through the import window, the Library's count, the
+# import session clicked, the health check and its fixes, Settings ›
+# Storage and Backup › Strategy, a quit (exit 0) and a restart that
+# still shows the photos. The scenario invariants after every step, and
+# no error or panic line in the logs; a failure names the step in
+# /out/journey-failure.txt with the screen and the logs
+# (tools/bench/journey.py). Run on every next and before a release
+# (docs/next.md)
 [jobs.journey]
-about = "the first-user journey on a fresh profile in a headless labwc: wizard, card import, Library count, quit, restart"
+about = "the first-user journey on a fresh profile, headless: wizard, import, session, health fixes, Storage, restart"
 first = [{ job = "check", pass = ["branch", "crate", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5

@@ -1,4 +1,4 @@
-// The first-user journey, step 3: Helios started again on the same
+// The first-user journey, step 8: Helios started again on the same
 // profile. No wizard this time, and the Library still holds the photos
 // imported before the quit. Run live by tools/bench/journey.py.
 Scenario(
