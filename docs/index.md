@@ -18,6 +18,9 @@ The design and research documents of Helios. The crates and modules are describe
   builds, the test suite, timings and GPU tests (`cargo xtask bench-remote`).
 - [performance.md](./performance.md): the performance budgets
   (thumbnails first) and the dated measurements against them.
+- [ui-index.md](./ui-index.md): the "use these" index, generated: a UI
+  need to the call that makes it, Helios's presets first, then egui-pop's
+  widgets. Read it before writing UI code.
 - [gui.md](./gui.md): GUI design notes: dockable panels, the node
   header, the queue panel, the graph view.
 - [ux-research.md](./ux-research.md): what users ask of darktable's

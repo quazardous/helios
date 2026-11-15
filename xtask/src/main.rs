@@ -48,6 +48,9 @@
 //!   build (the box's latest of a branch, or this checkout's) installed
 //!   outside the checkout with its "Helios Dev" launcher (see
 //!   `install_dev.rs`).
+//! - `ui-index [--check]`: `docs/ui-index.md`, need to call, Helios's
+//!   presets first, from the `/// Need (group): ...` doc lines of Helios's
+//!   crates and of the egui-pop crates in the lock (see `ui_index.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, an optional line
@@ -67,6 +70,7 @@ mod manifest;
 mod promote;
 mod remote;
 mod test_times;
+mod ui_index;
 mod vault_access;
 
 use std::fmt::Write as _;
@@ -734,7 +738,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local | --from DIR] | install-dev --list | install-dev --uninstall";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --local | --from DIR] | install-dev --list | install-dev --uninstall | ui-index [--check]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -850,6 +854,10 @@ fn main() -> ExitCode {
         }),
         ["install-dev", rest @ ..] => install_dev::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", install_dev::USAGE);
+            ExitCode::from(2)
+        }),
+        ["ui-index", rest @ ..] => ui_index::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", ui_index::USAGE);
             ExitCode::from(2)
         }),
         ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
