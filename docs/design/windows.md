@@ -1253,7 +1253,7 @@ Audit of the import window, 2026-11-13:
 | Folder picker (egui-pop's in-app picker, "Choose a folder…") | Was over the main window, hidden behind the import window. Now over the import window, blocking it alone | wbox `picker`; egui-pop tests | Fixed |
 | Escape with the picker open | Was lost (the picker was in the other window). Now closes the picker, the import window stays | wbox `escape` | Fixed |
 | Closing the window with the picker open | Was: the picker came up over the main window. Now the choice is cancelled | wbox `close-with-picker`; egui-pop test | Fixed |
-| System file chooser (rfd, desktop portal) | Not used: Helios builds egui-pop without `native-dialogs`. egui-pop's native path sets no parent window at all | code | Open (egui-pop) |
+| System file chooser (rfd, desktop portal) | Not used: Helios builds egui-pop without `native-dialogs`. In egui-pop, was attached to no window. Now attached to the window it was asked from when egui-pop has that window's handles (the main window's, from eframe); asked from another window, to none, never to the main window, until eframe gives other windows' handles | egui-pop test (`app_windows.rs`); code | Fixed (egui-pop); other windows wait on eframe |
 | Command palette | The import window | wbox `palette` | OK |
 | Quick settings (`Ctrl+Shift+Q`) | The window it is asked in, as the palette | Helios test on real viewports (`settings_window.rs`); egui-pop test | OK |
 | Settings (`Ctrl+,`) | The Settings window (one instance), editing the focus it was asked in: the import window's, its header saying so; the import window stays open | Helios test on real viewports (`settings_window.rs`); egui-pop test (`admin_focus.rs`) | OK |
