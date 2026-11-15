@@ -405,7 +405,7 @@ timeout = "1h"
 # (tools/bench/journey.py). Run on every next and before a release
 # (docs/next.md)
 [jobs.journey]
-about = "first-user journey, fresh profile, headless: wizard, import, session, health, Storage, restart, darkroom, export"
+about = "first-user journey, fresh profile, headless: wizard, import, session, health, Storage, restart, edit, export"
 first = [{ job = "check", pass = ["branch", "crate", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
