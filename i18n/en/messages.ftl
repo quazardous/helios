@@ -1293,6 +1293,8 @@ gui-jobs-by-user = You
 
 gui-jobs-clear = Clear finished
 
+gui-jobs-console = Console
+
 gui-jobs-detail = Job detail
 
 gui-jobs-elapsed = Elapsed

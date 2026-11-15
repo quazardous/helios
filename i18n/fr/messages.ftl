@@ -687,6 +687,8 @@ gui-jobs-items-failed = En échec
 gui-jobs-kind = Type
 gui-jobs-kind-all = Tous les types
 gui-jobs-left = Temps restant
+gui-jobs-console = Console
+
 gui-jobs-log = Journal
 gui-jobs-none = Aucune tâche de fond
 gui-jobs-none-selected = Aucune tâche sélectionnée

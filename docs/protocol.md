@@ -665,16 +665,24 @@ them (they survive a restart), and every client of the node sees them.
   `attempts`; any other is settled `failed` with the reason
   `interrupted`, `retryable` when the node knows its kind. No promise
   stays running with nobody working on it.
-- **Every long job is one.** The desktop's jobs (`job.*`: an export, a
-  batch, the trash, a backup, a catalogue snapshot, a calibration, a
-  workshop run, the capture and cull passes) are mirrored as promises of
-  their node (`helios_node_core::job_promises`), owned by the job's id,
-  their `request` `{"job": id, "cancellable": bool}`: running with the
-  job's `done` of `total` and its item as `note`, settled `done` with
-  `{job, done, total, failed: [{path, error}], skipped}` and what the job
-  finished with (`folder`, `path`, `actions`), `failed` (not retryable) or
-  `cancelled`. `promises.cancel` cancels the job. A job inside another
-  (an export of a batch) and the background upkeep (`map`,
+- **Every long job is one.** The desktop's jobs and the headless
+  `helios-node`'s (`job.*`: an export, a batch, the trash, a backup, a
+  catalogue snapshot, a calibration, a workshop run, the capture and cull
+  passes, the health check) are mirrored as promises of their node
+  (`helios_node_core::job_promises`), owned by the job's id, their
+  `request` `{"job": id, "cancellable": bool}`: running with the job's
+  `done` of `total` and its item as `note`, settled `done` with
+  `{job, done, total, failed: [{path, error}], skipped}`, the photos the
+  job named as it started (`images`, image ids, at most 500: a batch's,
+  the trash's; what "Show in Library" shows, `library.show`) and what the
+  job finished with (`folder`, `path`, `actions`), `failed` (not
+  retryable) or `cancelled`. `promises.cancel` cancels the job. A job
+  relayed from a connected node (`node:<name>/<id>`) is not cancelled
+  through the promise (`cancellable: false`); when that node can cancel
+  it, its request says `"relayed": true` and the desktop sends the cancel
+  to that node. A job inside another (an export of a batch), a job naming
+  the promise it is the work of (`promise` in `job.started`: an import by
+  rule, already a promise) and the background upkeep (`map`,
   `stacks.suggest`, `importer.scan`) are left out. The newest 100 settled
   ones are kept.
 - **Work with no end** (the image map, kind `map`; the thumbnail

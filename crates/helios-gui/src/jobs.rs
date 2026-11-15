@@ -18,7 +18,8 @@
 //!   and resume run [`Jobs::pause`] for a job that offered it (the image
 //!   map's `map` job); retry is refused: no Helios job offers it yet.
 //! - A long job that ends while no Helios window has the focus says so
-//!   on the desktop ([`Ended`], then `platform::job_finished`), whoever
+//!   on the desktop ([`Ended`], from the journal's `job.*` events alone,
+//!   then `platform::job_finished`), whoever
 //!   started it: a window, the node on its own (a backup, the health
 //!   check's schedule), an agent, or a followed node (its relayed jobs).
 //! - A connected node's jobs come through a relay ([`crate::relay`]),
@@ -62,11 +63,24 @@ pub fn plugin(jobs: Jobs, relays: Relays) -> JobsPlugin {
 }
 
 /// The jobs' ends seen in the journal, for the desktop notification.
+/// What each job is (its title, its kind, whether it is inside another)
+/// comes from its `job.started`, heard in the same journal: it needs no
+/// jobs centre.
 #[derive(Debug, Default)]
 pub struct Ended {
     seen: Seq,
     /// A backup job ended since [`Ended::take_backups`].
     backups: bool,
+    /// The jobs started and not ended yet, by id.
+    running: BTreeMap<String, Started>,
+}
+
+/// What a job's `job.started` said of it.
+#[derive(Debug)]
+struct Started {
+    title: String,
+    kind: String,
+    child: bool,
 }
 
 impl Ended {
@@ -74,7 +88,7 @@ impl Ended {
     pub fn after(seq: Seq) -> Self {
         Self {
             seen: seq,
-            backups: false,
+            ..Self::default()
         }
     }
 
@@ -89,49 +103,68 @@ impl Ended {
     /// through its relay): how, and how long they took. Left out: a job
     /// inside another (an export of a batch: the batch says it), and the
     /// node's background upkeep (`platform::QUIET_KINDS`). The title and,
-    /// when the event lacks it, the kind come from the jobs model, else the
-    /// job's id.
+    /// when the end lacks it, the kind come from the job's start, else
+    /// its id.
     pub fn take(&mut self, app: &AppHandle) -> Vec<JobEnd> {
         let mut ends = Vec::new();
-        let centre = app.service(&egui_pop::api::jobs::JOBS);
         for e in app.events_since(self.seen) {
             self.seen = e.seq;
-            let ok = match e.name.as_str() {
-                helios_core::jobs::FINISHED => true,
-                helios_core::jobs::FAILED => false,
-                _ => continue,
-            };
-            let id = e.data["id"].as_str().unwrap_or_default();
-            let known = centre.as_ref().and_then(|c| c.job(id));
-            let kind = e.data["kind"]
-                .as_str()
-                .map(str::to_string)
-                .or_else(|| known.as_ref().map(|j| j.kind.clone()))
-                .unwrap_or_default();
-            if kind == helios_library::backup::KIND {
-                self.backups = true;
+            if let Some(end) = self.hear(&e.name, &e.data) {
+                ends.push(end);
             }
-            if known.as_ref().is_some_and(|j| j.parent.is_some()) {
-                continue;
-            }
-            let Some(job) = Job::of_kind(&kind) else {
-                continue;
-            };
-            let title = known.map_or_else(|| id.to_string(), |j| j.title);
-            let outcome = if ok {
-                Ok(title)
-            } else {
-                Err(e.data["error"]
-                    .as_str()
-                    .map_or_else(|| title.clone(), |why| format!("{title}: {why}")))
-            };
-            ends.push(JobEnd {
-                job,
-                outcome,
-                seconds: e.data["seconds"].as_f64().unwrap_or(0.0),
-            });
         }
         ends
+    }
+
+    /// Folds one journal event: a job's end, said.
+    fn hear(&mut self, name: &str, data: &serde_json::Value) -> Option<JobEnd> {
+        let id = data["id"].as_str().unwrap_or_default();
+        let ok = match name {
+            helios_core::jobs::STARTED => {
+                self.running.insert(
+                    id.to_string(),
+                    Started {
+                        title: data["title"].as_str().unwrap_or(id).to_string(),
+                        kind: data["kind"].as_str().unwrap_or_default().to_string(),
+                        child: data["parent"].is_string(),
+                    },
+                );
+                return None;
+            }
+            helios_core::jobs::CANCELLED => {
+                self.running.remove(id);
+                return None;
+            }
+            helios_core::jobs::FINISHED => true,
+            helios_core::jobs::FAILED => false,
+            _ => return None,
+        };
+        let known = self.running.remove(id);
+        let kind = data["kind"]
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| known.as_ref().map(|j| j.kind.clone()))
+            .unwrap_or_default();
+        if kind == helios_library::backup::KIND {
+            self.backups = true;
+        }
+        if known.as_ref().is_some_and(|j| j.child) {
+            return None;
+        }
+        let job = Job::of_kind(&kind)?;
+        let title = known.map_or_else(|| id.to_string(), |j| j.title);
+        let outcome = if ok {
+            Ok(title)
+        } else {
+            Err(data["error"]
+                .as_str()
+                .map_or_else(|| title.clone(), |why| format!("{title}: {why}")))
+        };
+        Some(JobEnd {
+            job,
+            outcome,
+            seconds: data["seconds"].as_f64().unwrap_or(0.0),
+        })
     }
 }
 
@@ -342,5 +375,69 @@ fn health_badge(ui: &mut egui::Ui, app: &AppHandle, level: helios_health::Level,
             egui_pop::model::ids::CommandId::from_static(crate::shell::HEALTH_COMMAND),
             serde_json::Value::Null,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_end_is_said_with_the_title_its_start_gave_and_a_child_is_not() {
+        let mut ended = Ended::default();
+        let started = |id: &str, kind: &str, parent: Option<&str>| {
+            let mut d = json!({ "id": id, "title": format!("Title of {id}"), "kind": kind });
+            if let Some(p) = parent {
+                d["parent"] = json!(p);
+            }
+            d
+        };
+        assert!(
+            ended
+                .hear(
+                    helios_core::jobs::STARTED,
+                    &started("batch-1", "batch", None)
+                )
+                .is_none()
+        );
+        ended.hear(
+            helios_core::jobs::STARTED,
+            &started("export-1", "export", Some("batch-1")),
+        );
+        ended.hear(
+            helios_core::jobs::STARTED,
+            &started("backup-1", "backup", None),
+        );
+        // A child's end is its parent's to say.
+        let child = json!({ "id": "export-1", "seconds": 1.0 });
+        assert!(ended.hear(helios_core::jobs::FINISHED, &child).is_none());
+        let end = ended
+            .hear(
+                helios_core::jobs::FINISHED,
+                &json!({ "id": "batch-1", "seconds": 4.0 }),
+            )
+            .unwrap();
+        assert_eq!(end.job, Job::Batch);
+        assert_eq!(end.outcome, Ok("Title of batch-1".to_string()));
+        let failed = ended
+            .hear(
+                helios_core::jobs::FAILED,
+                &json!({ "id": "backup-1", "error": "the disk is full" }),
+            )
+            .unwrap();
+        assert_eq!(
+            failed.outcome,
+            Err("Title of backup-1: the disk is full".to_string())
+        );
+        assert!(ended.take_backups(), "a backup ended");
+        // A job never heard starting is said by its id.
+        let unknown = ended
+            .hear(
+                helios_core::jobs::FINISHED,
+                &json!({ "id": "export-9", "kind": "export" }),
+            )
+            .unwrap();
+        assert_eq!(unknown.outcome, Ok("export-9".to_string()));
+        assert!(ended.running.is_empty());
     }
 }

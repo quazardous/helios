@@ -269,7 +269,11 @@ pub fn run(
     let total = request.items.len() as u64;
     let id = format!("batch-export-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let report = Arc::new(
-        jobs.start(Start::new(&id, &format!("Export {total} photos"), "batch").total(total)),
+        jobs.start(
+            Start::new(&id, &format!("Export {total} photos"), "batch")
+                .total(total)
+                .images(request.items.iter().map(|i| i.image.clone())),
+        ),
     );
     let said: Arc<dyn Fn(Line) + Send + Sync> = Arc::new(said);
     let todo: Vec<&Item> = request

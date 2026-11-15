@@ -39,6 +39,7 @@ use helios_health::{Findings, Registry};
 use helios_library::auto_import::Timing;
 use helios_library::import::{self, Report};
 use helios_node_core::health::HealthInputs;
+use helios_node_core::job_promises::JobPromises;
 use helios_node_core::jobs::{Backups, Health};
 use helios_node_core::node::{FLUSH_EVERY, Link, LocalNode};
 use helios_node_core::settings::NodeSettings;
@@ -211,6 +212,8 @@ impl VaultNode {
     ) -> Self {
         // Heard from now on: no import announced before the listener runs.
         let heard = bus.subscribe();
+        // The node's jobs mirrored as promises, from the first one.
+        let mirrored = bus.subscribe();
         let node = LocalNode::own(vault, bus.clone(), FLUSH_EVERY);
         let link = node.link();
         let watch = node.watch_volumes(options.volumes.clone());
@@ -243,6 +246,13 @@ impl VaultNode {
         );
         runner.report_to(jobs.clone());
         let health = Health::adopted_by(runner, &link, options.clock);
+        // Every job of the node's (backups, the health check, imports not
+        // started by a promise…) is a promise of its own, seen by
+        // `promises.list` and the desktops that connect; an import by rule
+        // is its promise already. Adopted last: the other jobs' ends are
+        // mirrored before the node stops.
+        node.promises().cancel_through(jobs.clone());
+        link.adopt(Arc::new(JobPromises::start(node.vault().clone(), mirrored)));
         Self {
             node,
             watch,
