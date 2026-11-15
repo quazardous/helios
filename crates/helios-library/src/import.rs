@@ -677,13 +677,27 @@ pub fn library_folder_problem(dir: &Path) -> Option<FolderProblem> {
     }
 }
 
-/// The library folder offered first: the platform's Pictures folder's
-/// `Helios` (`~/Pictures/Helios`), `None` without a home folder.
+/// The library folder offered first: `Helios` in the platform's Pictures
+/// folder ([`pictures_folder`]), `None` without one.
 pub fn suggested_library_folder() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|h| !h.is_empty())?;
-    Some(PathBuf::from(home).join("Pictures").join("Helios"))
+    pictures_folder().map(|p| p.join("Helios"))
+}
+
+/// The person's Pictures folder, as the platform names it: the Pictures
+/// known folder on Windows (wherever it was moved, a synced cloud folder included),
+/// `XDG_PICTURES_DIR` on Linux and the BSDs, `~/Pictures` on macOS; else
+/// `Pictures` in the home folder. `None` without a home folder.
+pub fn pictures_folder() -> Option<PathBuf> {
+    pictures_from(dirs::picture_dir(), dirs::home_dir())
+}
+
+/// [`pictures_folder`] from the platform's answers: its Pictures folder,
+/// else the home folder's `Pictures`; relative paths refused (a `HOME`
+/// written for another system is not a folder here).
+fn pictures_from(pictures: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    pictures
+        .filter(|p| p.is_absolute())
+        .or_else(|| home.filter(|h| h.is_absolute()).map(|h| h.join("Pictures")))
 }
 
 // What a source is and the image files it holds: the folder and card
@@ -1810,6 +1824,33 @@ fn prepare<S: Store>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_library_offered_first_is_in_the_platform_pictures_folder() {
+        use super::pictures_from;
+        let abs = |p: &str| std::env::temp_dir().join(p);
+        assert_eq!(
+            pictures_from(Some(abs("OneDrive/Pictures")), Some(abs("me"))),
+            Some(abs("OneDrive/Pictures"))
+        );
+        assert_eq!(
+            pictures_from(None, Some(abs("me"))),
+            Some(abs("me").join("Pictures"))
+        );
+        assert_eq!(
+            pictures_from(Some("Pictures".into()), Some("me".into())),
+            None
+        );
+        assert_eq!(pictures_from(None, None), None);
+        // What the desktop offers is the platform's own answer.
+        match dirs::picture_dir().filter(|p| p.is_absolute()) {
+            Some(p) => assert_eq!(super::suggested_library_folder(), Some(p.join("Helios"))),
+            None => assert_eq!(
+                super::suggested_library_folder(),
+                dirs::home_dir().map(|h| h.join("Pictures").join("Helios"))
+            ),
+        }
+    }
+
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {

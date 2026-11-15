@@ -115,7 +115,7 @@ fn a_named_filter_and_tags_on_a_saved_source_shape_its_automatic_import_and_its_
         Box::new(move || read.read(IMPORT_SOURCES)),
         Box::new(move |text| write.write(IMPORT_SOURCES, text)),
     );
-    shell.follow_import_sources(bus.subscribe(), move || again.read(IMPORT_SOURCES));
+    shell.follow_import_sources(&bus, move || again.read(IMPORT_SOURCES));
     shell.remember_import_choices_in(dir.join("library/import-choices.json"));
     host_import(&mut shell, &vault, &ended);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
