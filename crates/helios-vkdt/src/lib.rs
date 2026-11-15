@@ -11,7 +11,7 @@
 //!
 //! [`read`] turns them into a Helios [`Manifest`] and what the manifest has
 //! no place for ([`Extras`]: the order of connectors, every widget line);
-//! [`write`] gives the three files back. Slider ranges become the ranges of
+//! [`write()`] gives the three files back. Slider ranges become the ranges of
 //! their parameters. vkdt's files are read, never copied into Helios.
 
 use helios_core::{

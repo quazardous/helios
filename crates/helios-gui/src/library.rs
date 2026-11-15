@@ -2662,7 +2662,7 @@ impl Library {
     }
 
     /// Why an image cannot be opened, when a disk would help: "Plug in
-    /// <volume> to open this photo", with its last-seen date. `None` for
+    /// \<volume\> to open this photo", with its last-seen date. `None` for
     /// a present or missing image.
     pub fn unavailable(&self, id: &str) -> Option<Message> {
         let v = self.offline_volume(id)?;

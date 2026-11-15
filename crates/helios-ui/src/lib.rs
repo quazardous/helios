@@ -33,6 +33,7 @@ mod restriction;
 mod search;
 mod section;
 mod state;
+mod value;
 
 pub use action::{Action, action};
 pub use notify::{Notice, notify};
@@ -40,3 +41,4 @@ pub use restriction::restriction;
 pub use search::{Scope, Search, search};
 pub use section::{Section, section};
 pub use state::{Empty, Loading, empty, failed, loading};
+pub use value::{Kind, Late, Value, value};
