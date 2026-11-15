@@ -1276,7 +1276,10 @@ fn extractor_results_are_kept_or_go_with_their_run<S: Store>(s: S) {
         v.kept_extract("animals", "img-a").unwrap(),
         Some(kept.clone())
     );
-    assert_eq!(v.kept_extracts("animals").unwrap(), [kept.clone()]);
+    assert_eq!(
+        v.kept_extracts("animals").unwrap(),
+        std::slice::from_ref(&kept)
+    );
 
     // Found by key: kept, the run's own, another run's; a key kept under
     // another image or extractor is no hit.
