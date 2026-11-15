@@ -96,7 +96,7 @@ impl WindowFocus for LibraryWindow {
             .ctx()
             .input(|i| !i.events.is_empty() || i.pointer.any_down());
         ui.push_id("helios.library.window", |ui| {
-            library.show(ui, &crate::library::GalleryOptions::LIBRARY_WINDOW)
+            library.show(ui, &crate::library::GalleryOptions::LIBRARY_WINDOW);
         });
     }
 

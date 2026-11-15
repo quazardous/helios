@@ -96,7 +96,7 @@ impl SearchKey {
     /// One of these values.
     pub fn finite(self, values: &[&str]) -> Self {
         self.values(Values::Finite(
-            values.iter().map(|v| v.to_string()).collect(),
+            values.iter().map(ToString::to_string).collect(),
         ))
     }
 
