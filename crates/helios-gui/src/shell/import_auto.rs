@@ -490,25 +490,31 @@ impl Shell {
         });
     }
 
-    /// Reads the import sources again each time the node says another
-    /// client changed them: `heard` is the node's bus (`Bus::subscribe`),
+    /// Reads the import sources again each time the desktop's node says
+    /// another client changed them: `node` is the node's bus, followed on
+    /// the shell bus (`settings.layerChanged`, `crate::node_events`),
     /// `read` the document's text as the node keeps it. Read off the
     /// interface's thread; the window takes the text at its next pass.
     pub fn follow_import_sources(
         &mut self,
-        heard: Receiver<helios_core::Envelope>,
+        node: &std::sync::Arc<helios_core::Bus>,
         read: impl Fn() -> Result<Option<String>, String> + Send + 'static,
     ) {
+        self.follow_local_node(node);
+        let heard = self.node_events().listen(
+            "import-sources",
+            &[<helios_node_core::settings::LayerChanged as helios_core::Event>::KIND],
+        );
         let (tx, rx) = channel();
         let mut w = self.import.get_mut();
         let ctx = w.ctx.clone();
         let spawned = std::thread::Builder::new()
             .name("helios-import-sources-follow".into())
             .spawn(move || {
-                while let Ok(e) = heard.recv() {
-                    if e.kind
-                        != <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND
-                        || e.payload["layer"].as_str() != Some(DOCUMENT)
+                while let Some(e) = heard.recv() {
+                    // Changed, or perhaps changed while unheard.
+                    if e.node != crate::node_events::LOCAL
+                        || !(e.is_resync() || e.event.payload["layer"].as_str() == Some(DOCUMENT))
                     {
                         continue;
                     }

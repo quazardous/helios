@@ -21,6 +21,10 @@ pub fn checks() -> Vec<Arc<dyn Check>> {
 
 pub const PLUGINS: &str = "plugins";
 
+/// The desktop's command granting a plugin a capability it declares
+/// (`plugin`, `capability`).
+pub const GRANT: &str = "plugin.grant";
+
 /// How a plugin stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -28,9 +32,11 @@ pub enum Status {
     Answers,
     /// The user turned it off.
     Disabled,
-    /// It needs a capability the user has not granted, so it was not
-    /// started.
-    NotGranted(String),
+    /// It needs a `capability` the user has not granted, so it was not
+    /// started. `needed`: something uses it (a source plugin's connector
+    /// has an account); until then, waiting is not a problem, its
+    /// permission asked when a source first uses it.
+    NotGranted { capability: String, needed: bool },
     /// It did not start, crashed or did not answer its handshake.
     Crashed(String),
     /// Its manifest asks for what this Helios does not support (an
@@ -52,7 +58,8 @@ pub struct Plugin {
 }
 
 /// Each plugin's finding: answers is fine, disabled is said, not granted
-/// is a warning, crashed or unsupported a problem.
+/// is fine while nothing uses it and a warning (with "Allow") once
+/// something does, crashed or unsupported a problem.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Plugins;
 
@@ -89,7 +96,7 @@ impl Check for Plugins {
     fn declaration(&self) -> Declaration {
         Declaration::new("Each plugin installed starts and answers its handshake")
             .levels(&[Level::Ok, Level::Warning, Level::Problem])
-            .fixes(&["library.openFolder", "plugin.disable"])
+            .fixes(&["library.openFolder", "plugin.disable", GRANT])
     }
 
     fn run(&self, ctx: &Context) -> Vec<Finding> {
@@ -121,7 +128,24 @@ impl Check for Plugins {
                             Message::new("health-fix-plugin-folder", "Open its folder"),
                         )),
                     ),
-                    Status::NotGranted(capability) => (
+                    Status::NotGranted {
+                        capability,
+                        needed: false,
+                    } => (
+                        Level::Ok,
+                        Message::new("health-plugin-unused", "{ $plugin } is not used yet")
+                            .with("plugin", name()),
+                        Message::new(
+                            "health-plugin-unused-detail",
+                            "It asks for { $capability } when a source first uses it.",
+                        )
+                        .with("capability", capability.clone()),
+                        None,
+                    ),
+                    Status::NotGranted {
+                        capability,
+                        needed: true,
+                    } => (
                         Level::Warning,
                         Message::new(
                             "health-plugin-not-granted",
@@ -134,9 +158,10 @@ impl Check for Plugins {
                         )
                         .with("capability", capability.clone()),
                         Some(Fix {
-                            command: "plugin.disable".into(),
-                            args: json!({ "plugin": p.id }),
-                            label: Message::new("health-fix-plugin-disable", "Disable it"),
+                            command: GRANT.into(),
+                            args: json!({ "plugin": p.id, "capability": capability }),
+                            label: Message::new("health-fix-plugin-grant", "Allow { $capability }")
+                                .with("capability", capability.clone()),
                         }),
                     ),
                     Status::Crashed(why) => (
@@ -226,5 +251,43 @@ mod tests {
         let crash = found[2].fix.as_ref().unwrap();
         assert_eq!(crash.command, "plugin.disable");
         assert_eq!(crash.args["plugin"], "org.example.crash");
+    }
+
+    #[test]
+    fn a_permission_waited_for_warns_only_once_something_uses_the_plugin() {
+        let waiting = |needed| {
+            plugin(
+                "org.example.photos",
+                Status::NotGranted {
+                    capability: "network".into(),
+                    needed,
+                },
+            )
+        };
+        let ctx = Context {
+            plugins: vec![
+                waiting(false),
+                waiting(true),
+                plugin("org.example.granted", Status::Answers),
+            ],
+            ..Context::default()
+        };
+        let found = Plugins.run(&ctx);
+        // Unused: fine, nothing to fix.
+        assert_eq!(found[0].level, Level::Ok);
+        assert_eq!(found[0].message.key, "health-plugin-unused");
+        assert!(found[0].fix.is_none());
+        // Used without its permission: a warning, granting it the fix.
+        assert_eq!(found[1].level, Level::Warning);
+        let grant = found[1].fix.as_ref().unwrap();
+        assert_eq!(grant.command, GRANT);
+        assert_eq!(grant.args["plugin"], "org.example.photos");
+        assert_eq!(grant.args["capability"], "network");
+        // Granted: it answers.
+        assert_eq!(found[2].level, Level::Ok);
+        let declared = Plugins.declaration();
+        for f in &found {
+            assert_eq!(declared.breach(PLUGINS, f), None);
+        }
     }
 }

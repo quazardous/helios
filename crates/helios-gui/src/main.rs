@@ -161,6 +161,9 @@ fn health_runner(
 ) -> helios_health::runner::Runner {
     use helios_health::backup::CardShort;
     use helios_health::{Findings, Ignored, Registry, runner};
+    // Whether a connector has an account: a source plugin no account
+    // uses yet waits for its permissions without anything to warn of.
+    let book = library.as_ref().map(Library::accounts);
     let inputs = match library {
         Some(library) => library.health_inputs(helios_storage::system(), file),
         None => helios_node_core::health::HealthInputs::new(helios_storage::system(), None, file),
@@ -182,7 +185,7 @@ fn health_runner(
         .with_gpu(health_gpu)
         .with_plugins({
             let plugins = plugins.clone();
-            move || health_plugins(&plugins)
+            move || health_plugins(&plugins, book.as_deref())
         })
         .with_snapshots(helios_gui::catalogue::health)
         .into_context();
@@ -300,17 +303,36 @@ fn health_accounts_of(
 
 /// Every plugin installed, probed (started and its handshake answered,
 /// then stopped), and those whose manifest was refused.
-fn health_plugins(broker: &helios_plugin::Broker) -> Vec<helios_health::plugins::Plugin> {
+fn health_plugins(
+    broker: &helios_plugin::Broker,
+    book: Option<&dyn helios_connect::account::AccountBook>,
+) -> Vec<helios_health::plugins::Plugin> {
     use helios_health::plugins::{Plugin, Status};
     use helios_plugin::Probed;
     let mut out: Vec<Plugin> = broker
         .ids()
         .filter_map(|id| {
             let m = broker.manifest(id)?;
+            // A source plugin is needed once its connector (its id's last
+            // part) has an account; any other plugin, always.
+            let needed = || {
+                if !m.services.iter().any(|s| s == "import.source") {
+                    return true;
+                }
+                let connector = id.rsplit('.').next().unwrap_or(id);
+                book.and_then(|b| b.accounts().ok())
+                    .is_some_and(|accounts| accounts.iter().any(|a| a.connector == connector))
+            };
             let (status, log) = match broker.probe(id) {
                 Ok((Probed::Answers, log)) => (Status::Answers, log),
                 Ok((Probed::Disabled, log)) => (Status::Disabled, log),
-                Ok((Probed::NotGranted(c), log)) => (Status::NotGranted(c), log),
+                Ok((Probed::NotGranted(capability), log)) => (
+                    Status::NotGranted {
+                        capability,
+                        needed: needed(),
+                    },
+                    log,
+                ),
                 Ok((Probed::Failed(e), log)) => (Status::Crashed(e), log),
                 Err(e) => (Status::Crashed(e), Vec::new()),
             };
@@ -2414,7 +2436,7 @@ fn main() -> Result<(), String> {
                 // Changed by another client: read again, so automatic
                 // imports follow it.
                 if let Some(p) = persist.as_ref() {
-                    shell.follow_import_sources(p.bus().subscribe(), move || again.read(doc));
+                    shell.follow_import_sources(p.bus(), move || again.read(doc));
                 }
             }
             if let Err(e) = shell.use_profile(&profile) {
