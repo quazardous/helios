@@ -1,18 +1,29 @@
-//! `cargo xtask install-dev [--branch B | --local | --from DIR] | --list | --uninstall`:
-//! installs a dev build of Helios for the current user, outside the
-//! checkout, so cleaning `target/` never breaks the launcher.
+//! `cargo xtask install-dev`: installs a dev build of Helios for the
+//! current user, as "Helios Dev", outside the checkout, so cleaning
+//! `target/` never breaks it. Two ways:
 //!
-//! The build is the bench box's latest `build-gui` of a branch (`next` by
-//! default), or with `--local` this checkout's own built binaries (the
-//! newer of `target/release` and `target/debug`), or with `--from DIR` a
-//! folder of `build-gui` outputs (what `cargo xtask gate` brings back). It
-//! is copied into
-//! `${XDG_DATA_HOME:-~/.local/share}/helios-dev/<version>/`, `<version>`
-//! being the program's own full version (`0.79.1-dev.4+1a2b3c4d`):
-//! `helios-gui`, the `helios` command line when there is one, and the
-//! programs of the plugins Helios ships beside it, where Helios looks for
-//! them. A `current` link points at it, the "Helios Dev" launcher starts
-//! `current/helios-gui`, and the three latest installs are kept.
+//! - **The Flatpak** (the default): the bench box's latest `flatpak-devel`
+//!   bundle of a branch (`next` by default, `--branch B`), or a bundle file
+//!   (`--bundle FILE`), the app `io.github.quazardous.Helios.Devel`, with
+//!   its own data in `~/.var/app/<id>`. The box's bundle is checked against
+//!   the SHA-256 the job wrote, then installed with `flatpak install --user
+//!   --reinstall` (Flathub added as a user remote for its runtime when
+//!   missing). The `HELIOS_*` variables of
+//!   `${XDG_CONFIG_HOME:-~/.config}/environment.d/helios.conf` (the Google
+//!   OAuth client) are given to the app with `flatpak override --user
+//!   --env`; their values are never printed.
+//! - **The home folder** (`--home`, and always `--local` and `--from DIR`):
+//!   the box's latest `build-gui` of a branch, or this checkout's own built
+//!   binaries (the newer of `target/release` and `target/debug`), or a
+//!   folder of `build-gui` outputs (what `cargo xtask gate` brings back),
+//!   copied into `${XDG_DATA_HOME:-~/.local/share}/helios-dev/<version>/`,
+//!   `<version>` being the program's own full version
+//!   (`0.79.1-dev.4+1a2b3c4d`): `helios-gui`, the `helios` command line when
+//!   there is one, and the programs of the plugins Helios ships beside it,
+//!   where Helios looks for them. A `current` link points at it, the
+//!   "Helios Dev (home)" launcher starts `current/helios-gui`, and the three
+//!   latest installs are kept. Kept until the Flatpak replaces it on the
+//!   owner's desktop.
 //!
 //! The program is never started: its version is read from its bytes, or,
 //! for a release build that carries no commit, from `helios-gui --version`,
@@ -24,10 +35,16 @@ use std::time::SystemTime;
 
 use crate::remote::Bench;
 
-pub const USAGE: &str = "install-dev [--branch BRANCH | --local | --from DIR] | install-dev --list | install-dev --uninstall";
+pub const USAGE: &str = "install-dev [--branch BRANCH | --bundle FILE] | install-dev --home [--branch BRANCH] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home]";
 
 /// The desktop's application id, shared with `packaging/linux/install.sh`.
 const APP_ID: &str = "io.github.quazardous.Helios";
+/// The development Flatpak's id (packaging/flatpak/build.sh).
+const DEVEL_ID: &str = "io.github.quazardous.Helios.Devel";
+/// The bench box's job that builds it, and its outputs.
+const DEVEL_JOB: &str = "flatpak-devel";
+const BUNDLE: &str = "helios-devel.flatpak";
+const FLATHUB: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
 /// How many installs stay.
 const KEEP: usize = 3;
 const ICON_SIZES: [u32; 8] = [16, 24, 32, 48, 64, 128, 256, 512];
@@ -39,14 +56,27 @@ enum Source {
     From(PathBuf),
 }
 
+enum Flatpak {
+    Box(String),
+    File(PathBuf),
+}
+
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
-    let action = match args {
-        [] => Action::Install(Source::Box("next".into())),
-        ["--branch", b] => Action::Install(Source::Box((*b).to_string())),
-        ["--local"] => Action::Install(Source::Local),
-        ["--from", dir] => Action::Install(Source::From(PathBuf::from(dir))),
-        ["--list"] => Action::List,
-        ["--uninstall"] => Action::Uninstall,
+    let (home, rest): (bool, Vec<&str>) = match args {
+        ["--home", rest @ ..] => (true, rest.to_vec()),
+        _ => (false, args.to_vec()),
+    };
+    let action = match (home, rest.as_slice()) {
+        (false, []) => Action::Flatpak(Flatpak::Box("next".into())),
+        (false, ["--branch", b]) => Action::Flatpak(Flatpak::Box((*b).to_string())),
+        (false, ["--bundle", f]) => Action::Flatpak(Flatpak::File(PathBuf::from(f))),
+        (true, []) => Action::Install(Source::Box("next".into())),
+        (true, ["--branch", b]) => Action::Install(Source::Box((*b).to_string())),
+        (_, ["--local"]) => Action::Install(Source::Local),
+        (_, ["--from", dir]) => Action::Install(Source::From(PathBuf::from(dir))),
+        (false, ["--list"]) => Action::List,
+        (false, ["--uninstall"]) => Action::UninstallFlatpak,
+        (false, ["--uninstall", "--home"]) | (true, ["--uninstall"]) => Action::Uninstall,
         _ => return None,
     };
     let Some(data) = data_dir() else {
@@ -54,12 +84,17 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         return Some(ExitCode::FAILURE);
     };
     let result = match action {
+        Action::Flatpak(source) => install_flatpak(root, &data, &source),
         Action::Install(source) => install(root, &data, &source),
         Action::List => {
             print!("{}", list(&data.join("helios-dev")));
+            if let Some(v) = flatpak_version() {
+                println!("flatpak {DEVEL_ID} {v}");
+            }
             Ok(())
         }
         Action::Uninstall => uninstall(&data),
+        Action::UninstallFlatpak => uninstall_flatpak(),
     };
     Some(match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -71,9 +106,11 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
 }
 
 enum Action {
+    Flatpak(Flatpak),
     Install(Source),
     List,
     Uninstall,
+    UninstallFlatpak,
 }
 
 fn data_dir() -> Option<PathBuf> {
@@ -83,9 +120,40 @@ fn data_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
 }
 
+/// The home folder install's launcher. Not `<DEVEL_ID>.desktop`, the
+/// Flatpak's own: one in `~/.local/share/applications` would hide it.
 fn launcher_path(data: &Path) -> PathBuf {
     data.join("applications")
-        .join(format!("{APP_ID}.Devel.desktop"))
+        .join(format!("{APP_ID}.DevelHome.desktop"))
+}
+
+/// Where the home install's launcher was before the Flatpak came.
+fn old_launcher_path(data: &Path) -> PathBuf {
+    data.join("applications")
+        .join(format!("{DEVEL_ID}.desktop"))
+}
+
+/// Moves the home install's launcher from the Flatpak's file name to its
+/// own, as it is (a launcher edited by hand stays as edited), its name
+/// marked "(home)": the Flatpak's launcher shows beside it.
+fn move_old_launcher(data: &Path) {
+    let old = old_launcher_path(data);
+    let Ok(text) = std::fs::read_to_string(&old) else {
+        return;
+    };
+    let renamed: String = text
+        .lines()
+        .map(|l| match l.strip_prefix("Name=Helios Dev") {
+            Some(rest) if !rest.starts_with(" (home)") => format!("Name=Helios Dev (home){rest}\n"),
+            _ => format!("{l}\n"),
+        })
+        .collect();
+    if std::fs::write(launcher_path(data), renamed).is_ok() && std::fs::remove_file(&old).is_ok() {
+        println!(
+            "the home folder's launcher is now {} (\"Helios Dev (home)\")",
+            launcher_path(data).display()
+        );
+    }
 }
 
 /// The plugins' programs Helios ships, as `crates/helios-plugin/src/bundled.rs`
@@ -427,7 +495,7 @@ fn desktop_file(template: &str, version: &str, exec: &Path) -> String {
             continue;
         }
         let line = if line.starts_with("Name=") {
-            format!("Name=Helios Dev {version}")
+            format!("Name=Helios Dev (home) {version}")
         } else if line.starts_with("Comment=") {
             "Comment=A development build of Helios".to_string()
         } else if let Some(rest) = line.strip_prefix("Exec=helios-gui") {
@@ -446,6 +514,7 @@ fn write_launcher(root: &Path, data: &Path, version: &str) -> Result<(), String>
     let template = std::fs::read_to_string(linux.join(format!("{APP_ID}.desktop")))
         .map_err(|e| format!("the desktop file template: {e}"))?;
     let exec = data.join("helios-dev/current/helios-gui");
+    move_old_launcher(data);
     let launcher = launcher_path(data);
     let apps = launcher.parent().expect("in applications/");
     std::fs::create_dir_all(apps).map_err(|e| format!("{}: {e}", apps.display()))?;
@@ -492,6 +561,7 @@ fn refresh_caches(data: &Path) {
 }
 
 fn uninstall(data: &Path) -> Result<(), String> {
+    move_old_launcher(data);
     let launcher = launcher_path(data);
     let _ = std::fs::remove_file(&launcher);
     let base = data.join("helios-dev");
@@ -500,6 +570,256 @@ fn uninstall(data: &Path) -> Result<(), String> {
     }
     refresh_caches(data);
     println!("removed the Helios Dev launcher and {}", base.display());
+    Ok(())
+}
+
+/// Installs the development Flatpak for the user: the box's latest
+/// `flatpak-devel` bundle of a branch, checked against its SHA-256, or a
+/// bundle file; then the Helios environment as overrides.
+fn install_flatpak(root: &Path, data: &Path, source: &Flatpak) -> Result<(), String> {
+    if !Command::new("flatpak")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        return Err("flatpak is not installed".into());
+    }
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .ok_or("neither XDG_CACHE_HOME nor HOME is set")?
+        .join("helios-dev-flatpak");
+    let _ = std::fs::remove_dir_all(&cache);
+    std::fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    let (bundle, version) = match source {
+        Flatpak::Box(branch) => fetch_bundle(root, branch, &cache)?,
+        Flatpak::File(file) => (file.clone(), None),
+    };
+    flatpak(&[
+        "remote-add",
+        "--user",
+        "--if-not-exists",
+        "flathub",
+        FLATHUB,
+    ])?;
+    let mut install = vec!["install", "--user", "--reinstall", "--noninteractive", "-y"];
+    let path = bundle.to_string_lossy().into_owned();
+    install.push(&path);
+    flatpak(&install)?;
+    set_environment(&config_dir().join("environment.d/helios.conf"))?;
+    move_old_launcher(data);
+    if matches!(source, Flatpak::Box(_)) {
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+    let shown = version
+        .or_else(flatpak_version)
+        .unwrap_or_else(|| "?".into());
+    println!(
+        "installed Helios Dev {shown} as the Flatpak {DEVEL_ID} (flatpak run {DEVEL_ID}, or its launcher)"
+    );
+    Ok(())
+}
+
+fn config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
+        })
+}
+
+/// Runs `flatpak args…`, its output shown; an error names the command.
+fn flatpak(args: &[&str]) -> Result<(), String> {
+    let ok = Command::new("flatpak")
+        .args(args)
+        .stdin(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("`flatpak {}` failed", args.join(" ")))
+    }
+}
+
+/// The installed development Flatpak's version, as `flatpak info` says it.
+fn flatpak_version() -> Option<String> {
+    let out = Command::new("flatpak")
+        .args(["info", "--user", DEVEL_ID])
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    // "Commit:" names the build; "Version:" comes from the metainfo
+    text.lines().map(str::trim).find_map(|l| {
+        l.strip_prefix("Commit:")
+            .map(|c| format!("(commit {})", c.trim()))
+    })
+}
+
+/// Fetches the box's latest `flatpak-devel` bundle of `branch` into `dir`
+/// and checks it against the SHA-256 the job wrote; returns it and its
+/// version.
+fn fetch_bundle(
+    root: &Path,
+    branch: &str,
+    dir: &Path,
+) -> Result<(PathBuf, Option<String>), String> {
+    let bench = Bench::configure(root)?;
+    let queue = format!("cargo xtask bench-remote {DEVEL_JOB} branch={branch}");
+    let fetch = |output: &str| -> bool {
+        let Ok(mut ssh) = bench
+            .ssh(
+                10,
+                &[
+                    "fetch",
+                    "latest",
+                    DEVEL_JOB,
+                    &format!("branch={branch}"),
+                    output,
+                ],
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            return false;
+        };
+        let extracted = Command::new("tar")
+            .arg("-x")
+            .arg("-C")
+            .arg(dir)
+            .stdin(ssh.stdout.take().expect("piped"))
+            .stderr(Stdio::null())
+            .status();
+        ssh.wait().is_ok_and(|s| s.success()) && extracted.is_ok_and(|s| s.success())
+    };
+    let sums = format!("{BUNDLE}.sha256");
+    for output in ["sha256", "version", "bundle"] {
+        if !fetch(output) {
+            return Err(format!(
+                "the box has no {DEVEL_JOB} of {branch} to fetch ({output}); queue one with `{queue}`"
+            ));
+        }
+    }
+    let bundle = dir.join(BUNDLE);
+    if !bundle.is_file() || !dir.join(&sums).is_file() {
+        return Err(format!(
+            "the box's {DEVEL_JOB} outputs lack {BUNDLE} or {sums}"
+        ));
+    }
+    let checked = Command::new("sha256sum")
+        .args(["--check", "--quiet", "--strict", &sums])
+        .current_dir(dir)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !checked {
+        return Err(format!(
+            "{BUNDLE} does not match its SHA-256: not installed"
+        ));
+    }
+    let version = std::fs::read_to_string(dir.join("version.txt"))
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    // is it the branch's head?
+    let _ = Command::new("git")
+        .args(["fetch", "-q", "origin", branch])
+        .current_dir(root)
+        .status();
+    let head = Command::new("git")
+        .args(["rev-parse", &format!("origin/{branch}")])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    if let (Some(head), Some(built)) = (head, version.as_deref().and_then(version_commit))
+        && !head.starts_with(built)
+    {
+        eprintln!(
+            "note: the box's latest {DEVEL_JOB} of {branch} is {built}, not its head {}; queue a fresh one with `{queue}`",
+            &head[..8.min(head.len())]
+        );
+    }
+    Ok((bundle, version))
+}
+
+/// The `HELIOS_*` variables of an environment.d file (`KEY=VALUE` lines,
+/// `#` comments, a value's surrounding quotes dropped).
+fn helios_variables(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| {
+            let v = v.trim();
+            let v = v
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .or_else(|| v.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                .unwrap_or(v);
+            (k.trim().to_string(), v.to_string())
+        })
+        .filter(|(k, _)| {
+            k.starts_with("HELIOS_") && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+        .collect()
+}
+
+/// Gives the app the `HELIOS_*` variables of `file` (`flatpak override
+/// --user --env`). Only the variables' names are printed, never their
+/// values.
+fn set_environment(file: &Path) -> Result<(), String> {
+    let Ok(text) = std::fs::read_to_string(file) else {
+        println!(
+            "note: no {}: the app gets no Helios environment (Google Photos needs its OAuth client there)",
+            file.display()
+        );
+        return Ok(());
+    };
+    let vars = helios_variables(&text);
+    if vars.is_empty() {
+        return Ok(());
+    }
+    let mut cmd = Command::new("flatpak");
+    cmd.args(["override", "--user"]);
+    for (k, v) in &vars {
+        cmd.arg(format!("--env={k}={v}"));
+    }
+    let ok = cmd
+        .arg(DEVEL_ID)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    let names: Vec<&str> = vars.iter().map(|(k, _)| k.as_str()).collect();
+    if !ok {
+        return Err(format!(
+            "`flatpak override --user` of {} failed",
+            names.join(", ")
+        ));
+    }
+    println!(
+        "set for the app from {}: {}",
+        file.display(),
+        names.join(", ")
+    );
+    Ok(())
+}
+
+fn uninstall_flatpak() -> Result<(), String> {
+    flatpak(&["uninstall", "--user", "--noninteractive", "-y", DEVEL_ID])?;
+    let _ = Command::new("flatpak")
+        .args(["override", "--user", "--reset", DEVEL_ID])
+        .status();
+    println!("removed the Flatpak {DEVEL_ID} (its data in ~/.var/app/{DEVEL_ID} stays)");
     Ok(())
 }
 
@@ -567,12 +887,44 @@ mod tests {
         );
         assert_eq!(
             file,
-            "[Desktop Entry]\nName=Helios Dev 0.79.1-dev.4+1a2b3c4d\nComment=A development build of Helios\nExec=\"/d/helios-dev/current/helios-gui\" %U\nIcon=io.github.quazardous.Helios\nStartupWMClass=helios-gui\n"
+            "[Desktop Entry]\nName=Helios Dev (home) 0.79.1-dev.4+1a2b3c4d\nComment=A development build of Helios\nExec=\"/d/helios-dev/current/helios-gui\" %U\nIcon=io.github.quazardous.Helios\nStartupWMClass=helios-gui\n"
         );
         assert_eq!(
             launcher_path(Path::new("/d")),
-            Path::new("/d/applications/io.github.quazardous.Helios.Devel.desktop")
+            Path::new("/d/applications/io.github.quazardous.Helios.DevelHome.desktop")
         );
+    }
+
+    #[test]
+    fn install_dev_reads_the_helios_environment() {
+        let text = "# Helios\nHELIOS_A=one\nHELIOS_B=\"two words\"\nOTHER=x\n HELIOS_C = 'three' \nHELIOS BAD=y\n";
+        assert_eq!(
+            helios_variables(text),
+            [
+                ("HELIOS_A".to_string(), "one".to_string()),
+                ("HELIOS_B".to_string(), "two words".to_string()),
+                ("HELIOS_C".to_string(), "three".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn install_dev_moves_the_home_launcher_aside() {
+        let data = std::env::temp_dir().join(format!("xtask-install-dev-l-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(data.join("applications")).unwrap();
+        std::fs::write(
+            old_launcher_path(&data),
+            "[Desktop Entry]\nName=Helios Dev 0.1.1-dev.1+aaaaaaaa\nExec=/x/launch.sh\n",
+        )
+        .unwrap();
+        move_old_launcher(&data);
+        assert!(!old_launcher_path(&data).exists());
+        assert_eq!(
+            std::fs::read_to_string(launcher_path(&data)).unwrap(),
+            "[Desktop Entry]\nName=Helios Dev (home) 0.1.1-dev.1+aaaaaaaa\nExec=/x/launch.sh\n"
+        );
+        std::fs::remove_dir_all(&data).unwrap();
     }
 
     #[test]

@@ -12,5 +12,7 @@ __pycache__/
 /crates/*/dist/
 # Generated from Cargo.lock by packaging/flatpak/build.sh
 /packaging/flatpak/cargo-sources.json
+# The Devel app's manifest, generated from the release one by build.sh
+/packaging/flatpak/io.github.quazardous.Helios.Devel.yml
 # The release workflow writes it from its secrets (built-in OAuth clients)
 /packaging/flatpak/build.env

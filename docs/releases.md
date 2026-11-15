@@ -308,6 +308,35 @@ needs an override. Helios is not on Flathub: Flathub's policy refuses
 AI-assisted manifests and agent-made submissions, so the bundle on each
 release is the Flatpak channel (see the ROADMAP's "Distribution").
 
+**The development app** (2026-11-15). "Helios Dev" on the maintainers'
+desktops is the same Flatpak built from any branch under its own id,
+`io.github.quazardous.Helios.Devel`: `HELIOS_FLATPAK_DEVEL=1
+packaging/flatpak/build.sh build VERSION …` generates its manifest from
+the release one (its id, its version `X.Y.Z-dev.N+<commit>` given to the
+build, its desktop entry, metainfo and icons renamed to that id, named
+"Helios Dev", opening no file types). The bench box's `flatpak-devel` job
+builds it and `cargo xtask install-dev` installs it with `flatpak install
+--user` (CONTRIBUTING.md, "A dev build on the desktop"); it installs
+beside the release app, with its own data in `~/.var/app/<id>`. Its
+permissions are the release app's, unchanged, so what maintainers run
+daily is what the release ships; it needs none more:
+
+- the node: helios-gui starts helios-node inside the same sandbox, and
+  their socket is in the sandbox's own `$XDG_RUNTIME_DIR`;
+- Google's sign-in: the loopback the browser returns to is a port on
+  127.0.0.1 (`--share=network`), and the browser opens through the
+  desktop portal, open to every Flatpak; the OAuth client comes from
+  `flatpak override --user --env=…`, which `install-dev` sets from
+  `~/.config/environment.d/helios.conf`;
+- photo folders: `xdg-pictures`, `/run/media` and `/media`, as above;
+  other folders take an override (`--filesystem=PATH
+  io.github.quazardous.Helios.Devel`).
+
+The box's `flatpak-devel-gui` job runs the bundle in a headless
+compositor with only these permissions: it starts, opens a library, the
+import window lists a folder of `~/Pictures`, and importing it goes
+through helios-node.
+
 ## macOS
 
 The workflow also builds Helios for macOS on Apple silicon (arm64), in
