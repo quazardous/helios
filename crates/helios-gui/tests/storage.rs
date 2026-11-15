@@ -312,7 +312,7 @@ fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
     world.plugged.set(&[&studio]);
     scan::scan(
         &world.vault,
-        &[studio.clone()],
+        std::slice::from_ref(&studio),
         "studio-pc",
         FIRST + DAY,
         None,
