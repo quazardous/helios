@@ -2375,6 +2375,7 @@ name = "helios-controls-gallery"
 version = "0.90.0"
 dependencies = [
  "eframe",
+ "egui",
  "egui-pop",
  "egui_hud",
  "egui_kittest",

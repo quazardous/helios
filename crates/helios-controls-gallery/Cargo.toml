@@ -17,6 +17,9 @@ helios-ui.workspace = true
 # The curve editor and the colour wheel: the implicit card's own drawings.
 egui-pop = { workspace = true, features = ["viewport"] }
 serde_json.workspace = true
+# MIT OR Apache-2.0: the app's font set (helios-gui's), so the gallery and
+# its snapshots draw the same glyphs built alone or in the workspace.
+egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 # MIT OR Apache-2.0 (eframe): the window, or the browser's canvas.
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
 
@@ -31,3 +34,8 @@ egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+# egui: named for its font feature only (the code reaches it through
+# egui_pop::egui).
+ignored = ["egui"]
