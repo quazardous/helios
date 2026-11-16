@@ -1118,8 +1118,9 @@ Settings app at Health › Health check, a page declared like the others
 says how it stands; the findings follow, the worst first, toned by level,
 each with its message, a detail line, its fix's words, "Fix…" when it
 has a fix (`health.fix`: its command with its arguments, such as opening
-a volume's folder, then the checks again; a fix that is not easily taken
-back asks first) and "Ignore" (`health.ignore`). Ignored findings come
+a volume's folder; the checks run again once that command is done, its
+own `command.done` heard on the journal, so a fix finishing later is
+seen; a fix that is not easily taken back asks first) and "Ignore" (`health.ignore`). Ignored findings come
 last, marked ignored, with "Show again"; the list is kept by finding id
 in `health-ignored.json` beside Helios's settings. "Check now"
 (`health.checkNow`) runs the checks again. "No backup is set up" opens
@@ -1142,9 +1143,17 @@ commands they may offer. `Registry::add` refuses an owner or a
 declaration that is unsound (an id that is not lowercase, no level, a
 fix that is not a command id), with its reasons; a finding outside its
 check's declaration (another level, another fix) turns that check's run
-into a problem of its own, like a check that panics. Each module lists
-its checks (`helios_health::backup::checks()` and so on), and
-`Registry::builtin` gathers them. Helios's own:
+into a problem of its own, like a check that panics. Each check is a
+listener of the health report's collect point (`health.report`, on
+egui-pop's hook kernel), owned by its module: each module adds its own
+(`helios_health::backup::register` and so on; the node composes them,
+`helios_node_core::health::checks`), and the health module only
+collects, ranks and shows what they answer. A module removed takes its
+checks with it (`Registry::remove_owner`). A run's end is said as
+`health.checked`: the Settings app reads the findings again by that
+event, and the hook point of the same name passes them to the status
+bar's badge (`status.health`) then the page's groups
+(`health.context-keys`). Helios's own:
 
 - **Free space** on the library's volume (the one holding the vault's
   folder) and on every volume with a library, archive, backup or

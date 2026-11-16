@@ -19,6 +19,22 @@ use helios_health::snapshots::Snapshots;
 use helios_storage::{Volume, Volumes, registry};
 use helios_vault::{Store, Vault};
 
+/// Helios's own health checks, each module adding its own as listeners
+/// of the health report (`health.report`): the storage, the library, the
+/// backups, the GPU, the plugin host, the catalogue. The node composes
+/// the modules; the health module lists none. The desktop adds the GPU
+/// kernels' check and each plugin's.
+pub fn checks() -> helios_health::Registry {
+    let mut r = helios_health::Registry::default();
+    helios_health::checks::register_storage(&mut r);
+    helios_health::checks::register_library(&mut r);
+    helios_health::backup::register(&mut r);
+    helios_health::gpu::register(&mut r);
+    helios_health::plugins::register(&mut r);
+    helios_health::snapshots::register(&mut r);
+    r
+}
+
 type Provider<T> = Box<dyn Fn() -> T + Send + Sync>;
 type SnapshotsOf = Box<dyn Fn(&Path, &[Volume], u64) -> Snapshots + Send + Sync>;
 
@@ -163,8 +179,8 @@ impl<S: Store + 'static> HealthInputs<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use helios_health::Findings;
     use helios_health::runner::{Runner, Schedule};
-    use helios_health::{Findings, Registry};
     use helios_vault_sqlite::SqliteStore;
     use std::time::{Duration, Instant};
 
@@ -202,7 +218,7 @@ mod tests {
         assert_eq!(database.problems, Ok(Vec::new()));
 
         let runner = Runner::new(
-            Registry::builtin(),
+            checks(),
             inputs.into_context(),
             Findings::default(),
             Schedule::desktop(Instant::now()),
@@ -266,7 +282,7 @@ mod tests {
         let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
         let inputs = HealthInputs::<SqliteStore>::new(volumes, None, Some(file));
         let context = inputs.context();
-        let found: Vec<_> = Registry::builtin()
+        let found: Vec<_> = checks()
             .checks()
             .iter()
             .flat_map(|c| c.run(&context))

@@ -2556,6 +2556,7 @@ dependencies = [
 name = "helios-health"
 version = "0.91.0"
 dependencies = [
+ "egui-pop-hooks",
  "helios-core",
  "helios-storage",
  "helios-vault",

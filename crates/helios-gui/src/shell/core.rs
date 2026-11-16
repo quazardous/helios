@@ -172,4 +172,6 @@ pub(super) struct Core {
     /// The first run's "Coming from darktable?" is offered (the desktop
     /// only, `offer_pointer_choice`).
     pub(super) pointer_choice: bool,
+    /// Where a command finishing on a later frame takes its resolver.
+    pub(super) later: crate::host::Later,
 }

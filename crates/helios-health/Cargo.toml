@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+egui-pop-hooks.workspace = true
 helios-core.workspace = true
 helios-storage.workspace = true
 helios-vault.workspace = true

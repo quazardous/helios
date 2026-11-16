@@ -272,14 +272,14 @@ fn a_backup_started_from_a_window_finishes_after_that_window_closes() {
 #[test]
 fn the_health_check_runs_with_no_window_and_reports_in_the_jobs_api() {
     use helios_health::runner::{Runner, Schedule};
-    use helios_health::{Context, Findings, Registry};
+    use helios_health::{Context, Findings};
 
     let bus = Arc::new(Bus::new());
     let jobs = Jobs::new(bus.clone());
     let mut lib = library("health", 0, &jobs);
     let link = lib.node().link();
     let runner = Runner::new(
-        Registry::builtin(),
+        helios_node_core::health::checks(),
         Context::default,
         Findings::default(),
         Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(24)),

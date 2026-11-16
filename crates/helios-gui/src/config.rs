@@ -867,7 +867,7 @@ fn backup_wizard(t: &dyn Fn(Message) -> String) -> Wizard {
 /// order: Helios's own modules, then each plugin installed. Another
 /// owner's findings go in the page's last group, "Other checks".
 pub fn health_owners(plugins: &[plugins::PluginSettings]) -> Vec<String> {
-    let builtin = helios_health::Registry::builtin();
+    let builtin = helios_node_core::health::checks();
     builtin
         .by_owner()
         .into_iter()
