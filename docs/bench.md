@@ -621,6 +621,14 @@ Every agent follows them.
   the crate's features in both (`features=svg`, several joined by `+`), for
   the tests a feature gates: `egui-pop-test crate=egui-pop-core
   test=lib filter=icon_set features=svg`.
+- nextest runs no doctests, and egui-pop's CI does (`cargo test --doc`):
+  a whole-crate `egui-pop-test crate=<crate>` (no `test=`, no `filter=`)
+  runs the crate's doctests after its tests, `doc=0` to skip them;
+  `egui-pop-test crate=<crate> test=doc` runs the doctests alone
+  (`filter=` narrows them by name). A pull request that touches a doc
+  example (a code block in a `///` or `//!` comment, or a README a crate
+  includes as its docs) runs `egui-pop-test crate=<crate> test=doc` on
+  each crate it touches before it is merged.
 - The box does not repeat what CI runs. egui-pop and egui_stack pull
   requests go to their `next` branch, whose CI runs every test; the box
   serves what CI cannot: a fix loop's narrow runs and snapshots regenerated
