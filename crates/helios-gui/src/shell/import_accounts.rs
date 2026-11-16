@@ -1198,8 +1198,12 @@ pub(crate) fn consent_dialog(
             )
             .with("plugin", consent.title.clone())),
         );
+        // Each reason its own line of text, after its bullet.
         for c in &consent.capabilities {
-            ui.text_role(TextRole::Body, format!("• {}", c.reason));
+            ui.horizontal_wrapped(|ui| {
+                ui.text_role(TextRole::Body, "•");
+                ui.text_role(TextRole::Body, c.reason.clone());
+            });
         }
         ui.space_role(Space::Group);
         ui.muted(t(Message::new(
