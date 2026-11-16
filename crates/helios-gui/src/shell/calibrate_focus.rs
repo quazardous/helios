@@ -24,9 +24,14 @@ use std::sync::Arc;
 
 use egui::{Color32, Context as Egui, Pos2, Rect, Sense, Stroke};
 use egui_pop::api::windows::WindowId;
+use egui_pop::core::input::Input;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Grid, Space, TextRole, Tone, Track, UiPop as _};
+use egui_pop::core::widgets;
 use helios_calibrate::{Layout, XRITE_CC24_2014};
 use helios_core::Message;
 use helios_shell::commands::Origin;
+use helios_ui::{Action, Scroll};
 use serde_json::{Value, json};
 
 use super::Shell;
@@ -251,28 +256,27 @@ impl Calibration {
             egui::pos2(right.min.x - 8.0, full.max.y),
         );
         ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("helios.calibrate.profiles")
-                .show(ui, |ui| self.profiles_ui(ui));
+            helios_ui::scroll(ui, "helios.calibrate.profiles", Scroll::Region, |ui| {
+                self.profiles_ui(ui);
+            });
         });
         ui.scope_builder(egui::UiBuilder::new().max_rect(centre), |ui| {
             self.shot_ui(ui);
         });
         ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("helios.calibrate.report")
-                .show(ui, |ui| {
-                    if !self.in_flight.is_empty() {
-                        // Words, not a spinner: no frame drawn for nothing.
-                        ui.weak(self.text(Message::new(
-                            "gui-calibrate-working",
-                            "Waiting for the library…",
-                        )));
-                    }
-                    self.report_ui(ui);
-                    ui.separator();
-                    self.save_ui(ui);
-                });
+            helios_ui::scroll(ui, "helios.calibrate.report", Scroll::Region, |ui| {
+                if !self.in_flight.is_empty() {
+                    // Words, not a spinner: no frame drawn for nothing.
+                    ui.muted(self.text(Message::new(
+                        "gui-calibrate-working",
+                        "Waiting for the library…",
+                    )));
+                }
+                self.report_ui(ui);
+                ui.divider();
+                self.save_ui(ui);
+                self.patches_ui(ui);
+            });
         });
         ui.allocate_rect(full, Sense::hover());
     }
@@ -285,28 +289,28 @@ impl Calibration {
     fn shot_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let name = self.text(Message::new("gui-calibrate-shot", "Chart shot"));
-            ui.label(&name);
-            let r = ui.add(
-                egui::TextEdit::singleline(&mut self.path)
-                    .desired_width(ui.available_width() - 120.0),
-            );
-            egui_pop::core::a11y::name(&r, egui::Role::TextInput, &name);
+            let label = ui.text_role(TextRole::Body, &name);
+            let width = (ui.available_width() - 120.0).max(120.0);
+            let field = Input::path(&mut self.path, &name)
+                .id_salt("helios.calibrate.shot")
+                .width(width)
+                .show(ui);
+            // Named by the words beside it, which tests and agents find.
+            field.response.labelled_by(label.id);
             let open = self.text(Message::new("gui-calibrate-open-shot", "Open"));
-            if ui.button(open).clicked()
-                || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-            {
+            if helios_ui::action(ui, Action::Secondary, &open).clicked() || field.submitted {
                 self.events.push(Event::Open);
             }
         });
         if let Some(e) = &self.error {
-            ui.colored_label(ui.visuals().error_fg_color, e);
+            ui.text_tone(Tone::Danger, e.clone());
         }
         if !self.undo.is_empty() {
             let undo = self.text(Message::new(
                 "gui-calibrate-corners-undo",
                 "Put the corner back",
             ));
-            if ui.button(undo).clicked()
+            if helios_ui::action(ui, Action::Secondary, &undo).clicked()
                 && let Some(c) = self.undo.pop()
             {
                 self.corners = c;
@@ -314,7 +318,7 @@ impl Calibration {
             }
         }
         let Some(picture) = self.picture.as_mut() else {
-            ui.weak(self.text(Message::new(
+            ui.muted(self.text(Message::new(
                 "gui-calibrate-no-shot",
                 "Open a shot of a ColorChecker chart to make a profile",
             )));
@@ -383,7 +387,7 @@ impl Calibration {
                     .with("n", (i + 1).to_string()),
             );
             egui_pop::core::a11y::name(&r, egui::Role::Button, &name);
-            let r = r.on_hover_text(self.text(Message::new(
+            let r = r.tip(self.text(Message::new(
                 "gui-calibrate-corner-tip",
                 "Drag onto the centre of the corner patch",
             )));
@@ -437,22 +441,24 @@ impl Calibration {
     /// The report of the last dry run.
     #[allow(clippy::too_many_lines, reason = "the report's lines in one place")]
     fn report_ui(&self, ui: &mut egui::Ui) {
-        ui.heading(self.text(Message::new("gui-calibrate-report", "Report")));
+        ui.section_title(self.text(Message::new("gui-calibrate-report", "Report")));
         let Some(r) = &self.report else {
-            ui.weak(self.text(Message::new(
+            ui.muted(self.text(Message::new(
                 "gui-calibrate-report-none",
                 "Place the four corners on the centres of the corner patches",
             )));
             return;
         };
         let num = |v: &Value| v.as_f64().map_or_else(|| "-".into(), |x| format!("{x:.2}"));
-        ui.label(
+        ui.text_role(
+            TextRole::Body,
             self.text(
                 Message::new("gui-calibrate-quality", "Quality: { $quality }")
                     .with("quality", r["quality"].as_str().unwrap_or_default()),
             ),
         );
-        ui.label(
+        ui.text_role(
+            TextRole::Body,
             self.text(
                 Message::new(
                     "gui-calibrate-before",
@@ -462,7 +468,8 @@ impl Calibration {
                 .with("max", num(&r["before"]["max"])),
             ),
         );
-        ui.label(
+        ui.text_role(
+            TextRole::Body,
             self.text(
                 Message::new(
                     "gui-calibrate-after",
@@ -482,7 +489,8 @@ impl Calibration {
             .filter_map(Value::as_str)
             .collect();
         if !worst.is_empty() {
-            ui.label(
+            ui.text_role(
+                TextRole::Body,
                 self.text(
                     Message::new("gui-calibrate-worst", "Worst patches: { $patches }")
                         .with("patches", worst.join(", ")),
@@ -490,7 +498,8 @@ impl Calibration {
             );
         }
         if let Some(k) = r["illuminant"]["cct"].as_f64() {
-            ui.label(
+            ui.text_role(
+                TextRole::Body,
                 self.text(
                     Message::new("gui-calibrate-light", "Light: { $kelvin } K")
                         .with("kelvin", format!("{k:.0}")),
@@ -500,7 +509,8 @@ impl Calibration {
         let turns = r["orientation"]["quarter_turns"].as_u64().unwrap_or(0);
         let mirrored = r["orientation"]["mirrored"].as_bool().unwrap_or(false);
         if turns != 0 || mirrored {
-            ui.label(
+            ui.text_role(
+                TextRole::Body,
                 self.text(
                     Message::new(
                         "gui-calibrate-orientation",
@@ -518,8 +528,8 @@ impl Calibration {
             .filter_map(|p| p["name"].as_str())
             .collect();
         if !clipped.is_empty() {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
+            ui.text_tone(
+                Tone::Warning,
                 self.text(
                     Message::new("gui-calibrate-clipped", "Clipped, left out: { $patches }")
                         .with("patches", clipped.join(", ")),
@@ -531,23 +541,30 @@ impl Calibration {
                 .as_str()
                 .or_else(|| w["kind"].as_str())
                 .map_or_else(|| w.to_string(), String::from);
-            ui.colored_label(ui.visuals().warn_fg_color, text);
+            ui.text_tone(Tone::Warning, text);
         }
-        egui::CollapsingHeader::new(self.text(Message::new("gui-calibrate-patches", "Patches")))
-            .id_salt("helios.calibrate.patches")
-            .show(ui, |ui| {
-                egui::Grid::new("helios.calibrate.patch-table")
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for p in r["patches"].as_array().into_iter().flatten() {
-                            ui.label(p["name"].as_str().unwrap_or_default());
-                            ui.label(num(&p["before"]));
-                            ui.label(num(&p["after"]));
-                            ui.label(p["status"].as_str().unwrap_or_default());
-                            ui.end_row();
-                        }
-                    });
-            });
+    }
+
+    /// Each patch's Delta E before and after, and its status: a table at
+    /// the foot of the report's scrolling column, under "Make a profile".
+    fn patches_ui(&self, ui: &mut egui::Ui) {
+        let Some(r) = &self.report else {
+            return;
+        };
+        let num = |v: &Value| v.as_f64().map_or_else(|| "-".into(), |x| format!("{x:.2}"));
+        ui.space_role(Space::Group);
+        ui.section_title(self.text(Message::new("gui-calibrate-patches", "Patches")));
+        // Columns as wide as their words: the scrolling column does not
+        // grow the window, and its bar does not cover the status.
+        let tracks = [Track::CONTENT; 4];
+        ui.grid(Grid::new("helios.calibrate.patch-table", tracks), |g| {
+            for p in r["patches"].as_array().into_iter().flatten() {
+                g.cell(|ui| ui.text_role(TextRole::Body, p["name"].as_str().unwrap_or_default()));
+                g.cell(|ui| ui.text_role(TextRole::Body, num(&p["before"])));
+                g.cell(|ui| ui.text_role(TextRole::Body, num(&p["after"])));
+                g.cell(|ui| ui.muted(p["status"].as_str().unwrap_or_default()));
+            }
+        });
     }
 
     /// The residual table's line: kept or dropped, and Delta E without and
@@ -559,8 +576,9 @@ impl Calibration {
         } else {
             Message::new("gui-calibrate-residual-dropped", "Residual table: dropped")
         };
-        ui.label(self.text(status));
-        ui.label(
+        ui.text_role(TextRole::Body, self.text(status));
+        ui.text_role(
+            TextRole::Body,
             self.text(
                 Message::new(
                     "gui-calibrate-residual-held-out",
@@ -571,7 +589,8 @@ impl Calibration {
             ),
         );
         if residual["status"] == "kept" {
-            ui.label(
+            ui.text_role(
+                TextRole::Body,
                 self.text(
                     Message::new(
                         "gui-calibrate-residual-after",
@@ -586,25 +605,26 @@ impl Calibration {
 
     /// The profile's name, "Use as the default", Save.
     fn save_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(self.text(Message::new("gui-calibrate-save-heading", "Make a profile")));
+        ui.section_title(self.text(Message::new("gui-calibrate-save-heading", "Make a profile")));
         let name = self.text(Message::new("gui-calibrate-name", "Profile name"));
-        ui.label(&name);
-        let r = ui.text_edit_singleline(&mut self.name);
-        egui_pop::core::a11y::name(&r, egui::Role::TextInput, &name);
+        labelled_field(ui, &name, Input::text(&mut self.name, &name));
         let default = self.text(Message::new(
             "gui-calibrate-as-default",
             "Use as the default for this camera",
         ));
-        ui.checkbox(&mut self.as_default, default);
+        widgets::checkbox(ui, &mut self.as_default, default.as_str());
         let save = self.text(Message::new("gui-calibrate-save", "Save the profile"));
         if ui
-            .add_enabled(self.report.is_some(), egui::Button::new(save))
+            .add_enabled_ui(self.report.is_some(), |ui| {
+                helios_ui::action(ui, Action::Primary, &save)
+            })
+            .inner
             .clicked()
         {
             self.events.push(Event::Save);
         }
         if let Some(said) = &self.said {
-            ui.weak(said);
+            ui.muted(said.clone());
         }
     }
 
@@ -614,9 +634,9 @@ impl Calibration {
         reason = "the list and its actions in one place"
     )]
     fn profiles_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(self.text(Message::new("gui-calibrate-profiles", "Profiles")));
+        ui.section_title(self.text(Message::new("gui-calibrate-profiles", "Profiles")));
         if self.profiles.is_empty() {
-            ui.weak(self.text(Message::new(
+            ui.muted(self.text(Message::new(
                 "gui-calibrate-profiles-none",
                 "No calibration profile yet",
             )));
@@ -629,7 +649,7 @@ impl Calibration {
         cameras.sort();
         cameras.dedup();
         for camera in cameras {
-            ui.strong(&camera);
+            ui.text_role(TextRole::Section, &camera);
             let defaults = self.defaults.get(&camera).cloned().unwrap_or_default();
             let profiles: Vec<Value> = self
                 .profiles
@@ -641,16 +661,19 @@ impl Calibration {
                 let id = p["id"].as_str().unwrap_or_default().to_string();
                 let pname = p["name"].as_str().unwrap_or_default().to_string();
                 let is_default = defaults.contains(&id);
-                ui.group(|ui| {
+                ui.card(Tone::Neutral, |ui| {
                     let light = p["illuminant"]["cct"]
                         .as_f64()
                         .map_or_else(String::new, |k| format!(", {k:.0} K"));
-                    ui.label(format!(
-                        "{pname}{light}, {}",
-                        p["quality"].as_str().unwrap_or_default()
-                    ));
+                    ui.text_role(
+                        TextRole::Body,
+                        format!(
+                            "{pname}{light}, {}",
+                            p["quality"].as_str().unwrap_or_default()
+                        ),
+                    );
                     if is_default {
-                        ui.weak(self.text(Message::new(
+                        ui.meta(self.text(Message::new(
                             "gui-calibrate-is-default",
                             "The camera's default",
                         )));
@@ -659,7 +682,7 @@ impl Calibration {
                         let mut action =
                             |ui: &mut egui::Ui, key: &str, english: &str, event: Event| {
                                 let word = self.text(Message::new(key, english));
-                                let r = ui.small_button(&word);
+                                let r = helios_ui::row_action(ui, Action::Secondary, &word);
                                 egui_pop::core::a11y::name(
                                     &r,
                                     egui::Role::Button,
@@ -693,32 +716,36 @@ impl Calibration {
                 });
             }
         }
-        ui.separator();
+        ui.divider();
         let folder = self.text(Message::new(
             "gui-calibrate-export-folder",
             "Export to folder",
         ));
-        ui.label(&folder);
-        let r = ui.text_edit_singleline(&mut self.folder);
-        egui_pop::core::a11y::name(&r, egui::Role::TextInput, &folder);
+        labelled_field(ui, &folder, Input::path(&mut self.folder, &folder));
         let file = self.text(Message::new(
             "gui-calibrate-import-file",
             "Profile file to import",
         ));
-        ui.label(&file);
-        let r = ui.text_edit_singleline(&mut self.import_path);
-        egui_pop::core::a11y::name(&r, egui::Role::TextInput, &file);
+        labelled_field(ui, &file, Input::path(&mut self.import_path, &file));
         let import = self.text(Message::new("gui-calibrate-import", "Import the profile"));
+        let ready = !self.import_path.trim().is_empty();
         if ui
-            .add_enabled(
-                !self.import_path.trim().is_empty(),
-                egui::Button::new(import),
-            )
+            .add_enabled_ui(ready, |ui| {
+                helios_ui::action(ui, Action::Secondary, &import)
+            })
+            .inner
             .clicked()
         {
             self.events.push(Event::Import);
         }
     }
+}
+
+/// A field under the words that name it, as a form's field: egui-pop's
+/// `Input` (named `name` already), labelled by those words too.
+fn labelled_field(ui: &mut egui::Ui, name: &str, field: Input<'_>) {
+    let label = ui.text_role(TextRole::Body, name);
+    field.show(ui).response.labelled_by(label.id);
 }
 
 /// The window's title.
