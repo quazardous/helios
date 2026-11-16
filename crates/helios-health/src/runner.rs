@@ -512,9 +512,7 @@ mod tests {
     #[test]
     fn a_run_keeps_its_findings_and_wakes() {
         use std::sync::mpsc;
-        let mut registry = Registry::default();
-        crate::checks::register_storage(&mut registry);
-        crate::backup::register(&mut registry);
+        let (registry, _) = fakes();
         let runner = Runner::new(
             registry,
             Context::default,

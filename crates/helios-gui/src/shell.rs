@@ -52,9 +52,9 @@ pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{
     BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND,
-    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE,
-    OTHERS as HEALTH_OTHERS, PAGE as HEALTH_PAGE, findings_answer as health_findings_answer,
-    owner_key as health_owner_key,
+    Desktop as HealthDesktop, FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX,
+    IGNORE as HEALTH_IGNORE, OTHERS as HEALTH_OTHERS, PAGE as HEALTH_PAGE, checks as health_checks,
+    findings_answer as health_findings_answer, owner_key as health_owner_key,
 };
 pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;

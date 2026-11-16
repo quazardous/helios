@@ -1,28 +1,95 @@
 //! The plugin checks: each installed plugin starts, answers its
 //! handshake, and speaks interface versions this Helios supports. They
-//! read the [`Plugin`]s the desktop probed once per run (off the
+//! read the [`Plugin`]s probed once per run ([`probe`], off the
 //! interface thread); one finding per plugin, `plugins.<id>`.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 
 use helios_core::Message;
+use helios_health::{Declaration, Finding, Fix, Gather, Level, Owned, Registry};
 use serde_json::json;
-
-use crate::{Check, Context, Declaration, Finding, Fix, Level, Registry};
 
 /// The owner of the plugins' check.
 pub const OWNER: &str = "plugins";
 
-/// The plugin host's checks: each plugin starts and answers.
-pub fn checks() -> Vec<Arc<dyn Check>> {
-    vec![Arc::new(Plugins)]
+/// Adds the plugin host's check, each plugin starts and answers, to
+/// `registry`, owned by [`OWNER`], over what `source` gathers.
+pub fn register(registry: &mut Registry, source: &Gather<Vec<Plugin>>) {
+    helios_health::add_owned(registry, OWNER, vec![helios_health::over(Plugins, source)]);
 }
 
-/// Adds the plugin host's check to `registry`, owned by `OWNER`, as listeners of
-/// the health report.
-pub fn register(registry: &mut Registry) {
-    crate::add_owned(registry, OWNER, checks());
+/// Every plugin installed, probed (started and its handshake answered,
+/// then stopped), and those whose manifest was refused.
+pub fn probe(
+    broker: &crate::Broker,
+    book: Option<&dyn helios_connect::account::AccountBook>,
+) -> Vec<Plugin> {
+    use crate::Probed;
+    let mut out: Vec<Plugin> = broker
+        .ids()
+        .filter_map(|id| {
+            let m = broker.manifest(id)?;
+            // A source plugin is needed once its connector (its id's last
+            // part) has an account; any other plugin, always.
+            let needed = || {
+                if !m.services.iter().any(|s| s == "import.source") {
+                    return true;
+                }
+                let connector = id.rsplit('.').next().unwrap_or(id);
+                book.and_then(|b| b.accounts().ok())
+                    .is_some_and(|accounts| accounts.iter().any(|a| a.connector == connector))
+            };
+            let (status, log) = match broker.probe(id) {
+                Ok((Probed::Answers, log)) => (Status::Answers, log),
+                Ok((Probed::Disabled, log)) => (Status::Disabled, log),
+                Ok((Probed::NotGranted(capability), log)) => (
+                    Status::NotGranted {
+                        capability,
+                        needed: needed(),
+                    },
+                    log,
+                ),
+                Ok((Probed::Failed(e), log)) => (Status::Crashed(e), log),
+                Err(e) => (Status::Crashed(e), Vec::new()),
+            };
+            Some(Plugin {
+                id: id.to_string(),
+                name: m.title().to_string(),
+                version: m.version.clone(),
+                dir: broker.dir(id).map(Path::to_path_buf).unwrap_or_default(),
+                status,
+                log,
+            })
+        })
+        .collect();
+    for r in broker.rejected() {
+        let manifest = crate::Manifest::read(&r.dir).ok();
+        let id = manifest.as_ref().map_or_else(
+            || {
+                r.dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            },
+            |m| m.id.clone(),
+        );
+        // A copy shadowed by another of the same id is not a plugin of
+        // its own.
+        if broker.manifest(&id).is_some() {
+            continue;
+        }
+        out.push(Plugin {
+            name: manifest
+                .as_ref()
+                .map_or_else(|| id.clone(), |m| m.title().to_string()),
+            version: manifest.map(|m| m.version).unwrap_or_default(),
+            id,
+            dir: r.dir.clone(),
+            status: Status::Unsupported(r.problems.clone()),
+            log: Vec::new(),
+        });
+    }
+    out
 }
 
 pub const PLUGINS: &str = "plugins";
@@ -90,7 +157,9 @@ fn log_of(p: &Plugin) -> String {
     tail.join(" / ")
 }
 
-impl Check for Plugins {
+impl Owned for Plugins {
+    type State = Vec<Plugin>;
+
     fn id(&self) -> &str {
         PLUGINS
     }
@@ -105,8 +174,8 @@ impl Check for Plugins {
             .fixes(&["library.openFolder", "plugin.disable", GRANT])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        ctx.plugins
+    fn findings(&self, state: &Vec<Plugin>) -> Vec<Finding> {
+        state
             .iter()
             .map(|p| {
                 let name = || p.name.clone();
@@ -229,21 +298,18 @@ mod tests {
 
     #[test]
     fn each_plugin_has_its_finding_and_fix() {
-        let ctx = Context {
-            plugins: vec![
-                plugin("org.example.fine", Status::Answers),
-                plugin(
-                    "org.example.old",
-                    Status::Unsupported(vec!["interface `importer` version 9".into()]),
-                ),
-                plugin(
-                    "org.example.crash",
-                    Status::Crashed("exit status 101".into()),
-                ),
-            ],
-            ..Context::default()
-        };
-        let found = Plugins.run(&ctx);
+        let ctx = vec![
+            plugin("org.example.fine", Status::Answers),
+            plugin(
+                "org.example.old",
+                Status::Unsupported(vec!["interface `importer` version 9".into()]),
+            ),
+            plugin(
+                "org.example.crash",
+                Status::Crashed("exit status 101".into()),
+            ),
+        ];
+        let found = Plugins.findings(&ctx);
         let ids: Vec<(&str, Level)> = found.iter().map(|f| (f.id.as_str(), f.level)).collect();
         assert_eq!(
             ids,
@@ -270,15 +336,12 @@ mod tests {
                 },
             )
         };
-        let ctx = Context {
-            plugins: vec![
-                waiting(false),
-                waiting(true),
-                plugin("org.example.granted", Status::Answers),
-            ],
-            ..Context::default()
-        };
-        let found = Plugins.run(&ctx);
+        let ctx = vec![
+            waiting(false),
+            waiting(true),
+            plugin("org.example.granted", Status::Answers),
+        ];
+        let found = Plugins.findings(&ctx);
         // Unused: fine, nothing to fix.
         assert_eq!(found[0].level, Level::Ok);
         assert_eq!(found[0].message.key, "health-plugin-unused");

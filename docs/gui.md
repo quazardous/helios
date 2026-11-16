@@ -1145,10 +1145,14 @@ fix that is not a command id), with its reasons; a finding outside its
 check's declaration (another level, another fix) turns that check's run
 into a problem of its own, like a check that panics. Each check is a
 listener of the health report's collect point (`health.report`, on
-egui-pop's hook kernel), owned by its module: each module adds its own
-(`helios_health::backup::register` and so on; the node composes them,
-`helios_node_core::health::checks`), and the health module only
-collects, ranks and shows what they answer. A module removed takes its
+egui-pop's hook kernel), owned by its module: each module writes its
+checks over its own state, which it gathers itself once per run
+(`helios_health::Owned`, `helios_health::Gather`), and adds them
+(`helios_storage::health::register`, `helios_library::health::register`
+and so on; the node composes them, `HealthInputs::checks`, the desktop
+with the GPU and the plugin host, `helios_gui::shell::health_checks`).
+The health module depends on no module: it only collects, ranks and
+shows what they answer. A module removed takes its
 checks with it (`Registry::remove_owner`). A run's end is said as
 `health.checked`: the Settings app reads the findings again by that
 event, and the hook point of the same name passes them to the status
@@ -1167,7 +1171,7 @@ bar's badge (`status.health`) then the page's groups
   holding it under 5 % or 2 GB free is a warning whose fix opens the
   Storage page on that volume.
 
-The backup checks (`helios_health::backup`) read the library's strategy,
+The backup checks (`helios_storage::health::backup`) read the library's strategy,
 the volumes the vault knows and every photo's backup status once per run
 (`Backup::read`); without a vault they say nothing, and without a
 strategy only the first speaks:

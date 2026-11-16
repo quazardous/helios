@@ -19,6 +19,11 @@
 //! nothing: the plugins' own check says why); one that does not start,
 //! crashes, does not answer within the time limit or answers what is not
 //! findings gives that check's "failed" problem ([`helios_health::failed`]).
+//!
+//! The plugin host's own check, each plugin installed starts and answers,
+//! is in [`installed`].
+
+pub mod installed;
 
 use std::sync::Arc;
 use std::time::Duration;

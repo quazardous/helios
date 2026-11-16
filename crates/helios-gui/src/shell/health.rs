@@ -56,6 +56,49 @@ use serde_json::{Value, json};
 
 use super::Shell;
 
+/// What only the desktop knows, handed to the modules' health checks
+/// ([`checks`]): the `health.destinationDays` setting, the cards an import
+/// left short, still inserted, the GPU in use, the plugins installed (each
+/// probed), and the catalogue's snapshots. [`Default`]: none of them, as
+/// on a node without a window.
+pub struct Desktop {
+    pub destination_days: Box<dyn Fn() -> u64 + Send + Sync>,
+    pub cards: Box<dyn Fn() -> Vec<helios_storage::health::backup::CardShort> + Send + Sync>,
+    pub gpu: helios_health::Gather<Option<helios_gpu::health::Gpu>>,
+    pub plugins: helios_health::Gather<Vec<helios_plugin::health::installed::Plugin>>,
+    pub snapshots: Option<helios_node_core::health::SnapshotsOf>,
+}
+
+impl Default for Desktop {
+    fn default() -> Self {
+        Self {
+            destination_days: Box::new(|| helios_storage::health::backup::DESTINATION_DAYS),
+            cards: Box::new(Vec::new),
+            gpu: helios_health::Gather::fixed(None),
+            plugins: helios_health::Gather::fixed(Vec::new()),
+            snapshots: None,
+        }
+    }
+}
+
+/// Helios's own checks on the desktop, each module adding its own over
+/// what it reads, in the Health page's order: the storage, the library,
+/// the backups, the GPU, the plugin host, the catalogue. The desktop then
+/// adds the GPU kernels' check (over `desktop.gpu`) and each plugin's.
+pub fn checks<S: helios_vault::Store + 'static>(
+    inputs: &helios_node_core::health::HealthInputs<S>,
+    desktop: Desktop,
+) -> helios_health::Registry {
+    let mut r = helios_health::Registry::default();
+    inputs.register_storage(&mut r);
+    inputs.register_library(&mut r);
+    inputs.register_backup(&mut r, desktop.destination_days, desktop.cards);
+    helios_gpu::health::register(&mut r, &desktop.gpu);
+    helios_plugin::health::installed::register(&mut r, &desktop.plugins);
+    inputs.register_catalogue(&mut r, desktop.snapshots);
+    r
+}
+
 /// Opens the Health page.
 pub const COMMAND: &str = "help.health";
 /// Runs the checks now.

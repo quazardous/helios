@@ -51,7 +51,7 @@ pub const WIZARD: &str = "init.setup";
 pub const COMMAND: &str = "helios.setUp";
 
 /// The library folder step alone (`path`: set at once): the health
-/// warning's fix (`helios_health::checks::CHOOSE_LIBRARY_FOLDER`).
+/// warning's fix (`helios_library::health::CHOOSE_LIBRARY_FOLDER`).
 pub const FOLDER_STEP: &str = "init.libraryFolder";
 
 /// The wizard's finish: the draft's settings written.
