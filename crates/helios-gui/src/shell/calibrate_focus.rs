@@ -554,12 +554,9 @@ impl Calibration {
         let num = |v: &Value| v.as_f64().map_or_else(|| "-".into(), |x| format!("{x:.2}"));
         ui.space_role(Space::Group);
         ui.section_title(self.text(Message::new("gui-calibrate-patches", "Patches")));
-        let tracks = [
-            Track::fr(1.0),
-            Track::CONTENT,
-            Track::CONTENT,
-            Track::CONTENT,
-        ];
+        // Columns as wide as their words: the scrolling column does not
+        // grow the window, and its bar does not cover the status.
+        let tracks = [Track::CONTENT; 4];
         ui.grid(Grid::new("helios.calibrate.patch-table", tracks), |g| {
             for p in r["patches"].as_array().into_iter().flatten() {
                 g.cell(|ui| ui.text_role(TextRole::Body, p["name"].as_str().unwrap_or_default()));
