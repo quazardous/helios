@@ -718,6 +718,8 @@ gui-library-badge-backup-short = sauvegarde incomplète
 
 gui-library-badge-backup-unverified = non vérifiée
 
+gui-library-badge-edited = modifiée
+
 gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
