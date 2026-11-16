@@ -8,10 +8,23 @@
 //! card. The volumes there at the first look are published too, marked
 //! [`Mounted::at_start`]. Its clients subscribe: the import window lists
 //! the cards and a card inserted while it is closed raises a toast (the
-//! desktop's shell reads the bus); the backups
-//! start on a disk plugged in ([`crate::jobs::Backups::follow`]);
-//! the volume scan and the image map hear of them through
-//! [`VolumeWatch::on_change`].
+//! desktop's shell reads the bus).
+//!
+//! Each event then passes through its hook point on the application's
+//! bus (`bus-contract`, handed to the watch at its start; egui-pop's
+//! ADR 0029 and 0030): [`VolumeMounted`] (`volume.mounted`) and
+//! [`VolumeUnmounted`] (`volume.unmounted`), on the watch's thread. Who
+//! acts on a volume coming or going is a named listener in a declared
+//! place ([`MOUNTED_ORDER`], [`UNMOUNTED_ORDER`]), never a callback in
+//! the order of the desktop's start:
+//!
+//! | listener | points | what it does |
+//! |---|---|---|
+//! | [`CARDS`] | both, before the scan | the import window's cards and the card toast, woken at once |
+//! | [`SCAN`] | both | the volumes and where each photo is scanned inside the pass; the Storage page and the Library's badges follow it (`library.changed`) |
+//! | [`BACKUPS`] | mounted, after the scan | the strategy's "when a backup disk is plugged in", reading the locations the scan just set |
+//! | [`HEALTH`] | both, after the scan | the health checks that follow the volumes run again |
+//! | [`MAP`] | mounted, after the scan | the image map's job reads the volume plugged in |
 //!
 //! The desktop's node starts one ([`crate::node::LocalNode::watch_volumes`])
 //! and stops it as it stops. A client machine runs one of its own later,
@@ -23,6 +36,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
+use bus_contract::{Bus as HookBus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused};
 use helios_core::Bus;
 use helios_core::bus::{Envelope, Event};
 use helios_storage::{Card, Volume, VolumeId, Volumes};
@@ -113,7 +127,218 @@ impl Change {
     }
 }
 
-type Listener = Box<dyn Fn(&Change) + Send>;
+/// The hook point a volume mounted passes through, once published on the
+/// journal: its listeners in the order [`MOUNTED_ORDER`] declares.
+pub struct VolumeMounted;
+
+impl Point for VolumeMounted {
+    const ID: &'static str = Mounted::KIND;
+    type Input = Mounted;
+    type Value = Reactions;
+    const KIND: PointKind = PointKind::Event;
+}
+
+/// The hook point a volume gone passes through, once published on the
+/// journal: its listeners in the order [`UNMOUNTED_ORDER`] declares.
+pub struct VolumeUnmounted;
+
+impl Point for VolumeUnmounted {
+    const ID: &'static str = Unmounted::KIND;
+    type Input = Unmounted;
+    type Value = Reactions;
+    const KIND: PointKind = PointKind::Event;
+}
+
+/// What a volume event's listeners did, in order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reactions {
+    /// The listeners that ran, in their order.
+    pub ran: Vec<String>,
+}
+
+/// How long a volume event's listeners may take, all told: the scan of
+/// where each photo is runs inside the pass, on the watch's thread (never
+/// the interface's).
+pub const DEADLINE: Duration = Duration::from_mins(5);
+
+/// The volume points, this crate's contract with the application's bus:
+/// declared by [`declare`].
+pub const POINTS: &[PointDecl] = &[
+    PointDecl::of::<VolumeMounted>("A volume mounted: plugged in, or there at the first look")
+        .deadline(DEADLINE),
+    PointDecl::of::<VolumeUnmounted>("A volume gone: unplugged, or unmounted").deadline(DEADLINE),
+];
+
+/// The import window's cards and the card toast, woken at once (they read
+/// the journal's `volume.*` events).
+pub const CARDS: &str = "import.cards";
+/// The scan of the volumes and where each photo is (present, offline,
+/// missing), done inside the pass: whoever runs after it reads the
+/// locations it set. The Storage page and the Library's badges follow it
+/// (the vault says the locations changed: `library.changed`).
+pub const SCAN: &str = "library.scan";
+/// The strategy's "when a backup disk is plugged in": what is short goes
+/// to it ([`crate::jobs::Backups::follow`]).
+pub const BACKUPS: &str = "backups.on-connect";
+/// The health check runs the checks that follow the volumes again.
+pub const HEALTH: &str = "health.recheck";
+/// The image map's job reads the volume plugged in.
+pub const MAP: &str = "map.plugged";
+
+/// The listeners of [`VolumeMounted`], each with where it runs: the order
+/// they run in.
+pub const MOUNTED_ORDER: &[(&str, Place)] = &[
+    (CARDS, Place::Before(SCAN)),
+    (SCAN, Place::Free),
+    (BACKUPS, Place::After(SCAN)),
+    (HEALTH, Place::After(SCAN)),
+    (MAP, Place::After(SCAN)),
+];
+
+/// The listeners of [`VolumeUnmounted`], in order.
+pub const UNMOUNTED_ORDER: &[(&str, Place)] = &[
+    (CARDS, Place::Before(SCAN)),
+    (SCAN, Place::Free),
+    (HEALTH, Place::After(SCAN)),
+];
+
+/// Where a listener runs among its point's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// Wherever: it needs no other listener's work.
+    Free,
+    /// After this one.
+    After(&'static str),
+    /// Before this one.
+    Before(&'static str),
+}
+
+/// Declares [`POINTS`] on `bus` (once; a second watch on the same bus
+/// finds them there).
+pub fn declare(bus: &dyn HookBus) {
+    for refused in bus_contract::declare_all(bus, POINTS) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!(target: "helios::node", "volumes: {refused}");
+        }
+    }
+}
+
+fn place_in(
+    order: &[(&str, Place)],
+    point: &str,
+    id: &str,
+    owner: &str,
+) -> Result<ListenOpts, String> {
+    let Some((_, place)) = order.iter().find(|(listener, _)| *listener == id) else {
+        return Err(format!("`{id}` is not a listener of {point}"));
+    };
+    let opts = ListenOpts::new().owner(owner);
+    Ok(match place {
+        Place::Free => opts,
+        Place::After(other) => opts.after(*other),
+        Place::Before(other) => opts.before(*other),
+    })
+}
+
+/// Registers the listener `id` of [`VolumeMounted`] (one of
+/// [`MOUNTED_ORDER`]'s, owned by `owner`) on `bus`, in its declared place;
+/// it runs on the watch's thread. One there already under `id` is
+/// replaced.
+///
+/// # Errors
+/// `id` is not in [`MOUNTED_ORDER`], or the bus refused it.
+pub fn listen_mounted(
+    bus: &dyn HookBus,
+    id: &'static str,
+    owner: &str,
+    run: impl Fn(&Mounted) + Send + Sync + 'static,
+) -> Result<(), String> {
+    let opts = place_in(MOUNTED_ORDER, VolumeMounted::ID, id, owner)?;
+    declare(bus);
+    bus.unlisten(VolumeMounted::ID, id);
+    bus.listen::<VolumeMounted>(id, opts, move |mounted, reactions| {
+        run(mounted);
+        reactions.ran.push(id.to_owned());
+        Ok::<(), HookError>(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Registers the listener `id` of [`VolumeUnmounted`] (one of
+/// [`UNMOUNTED_ORDER`]'s) on `bus`, as [`listen_mounted`] does.
+///
+/// # Errors
+/// `id` is not in [`UNMOUNTED_ORDER`], or the bus refused it.
+pub fn listen_unmounted(
+    bus: &dyn HookBus,
+    id: &'static str,
+    owner: &str,
+    run: impl Fn(&Unmounted) + Send + Sync + 'static,
+) -> Result<(), String> {
+    let opts = place_in(UNMOUNTED_ORDER, VolumeUnmounted::ID, id, owner)?;
+    declare(bus);
+    bus.unlisten(VolumeUnmounted::ID, id);
+    bus.listen::<VolumeUnmounted>(id, opts, move |unmounted, reactions| {
+        run(unmounted);
+        reactions.ran.push(id.to_owned());
+        Ok::<(), HookError>(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Registers the listener `id` on both points (it must be in both
+/// orders), `run` hearing each as a [`Change`].
+///
+/// # Errors
+/// `id` is not a listener of both points, or the bus refused it.
+pub fn listen_both(
+    bus: &dyn HookBus,
+    id: &'static str,
+    owner: &str,
+    run: impl Fn(&Change) + Send + Sync + 'static,
+) -> Result<(), String> {
+    let run = Arc::new(run);
+    let mounted = run.clone();
+    listen_mounted(bus, id, owner, move |m| {
+        mounted(&Change::Mounted(m.clone()))
+    })?;
+    listen_unmounted(bus, id, owner, move |u| run(&Change::Unmounted(u.clone())))
+}
+
+/// The scan of where each photo is, as [`SCAN`]: a volume plugged in or
+/// gone is scanned inside the pass (not at the first look: the scan's own
+/// first run reads those).
+///
+/// # Errors
+/// The bus refused it.
+pub fn listen_scan(
+    bus: &dyn HookBus,
+    scanner: helios_storage::scan::Scanner,
+) -> Result<(), String> {
+    listen_both(bus, SCAN, "helios.library", move |change| {
+        if !change.at_start() {
+            scanner.scan_now();
+        }
+    })
+}
+
+/// The order the volume points' listeners run in on `bus`.
+pub fn order(bus: &dyn HookBus) -> String {
+    bus_contract::order_dump(bus, &[VolumeMounted::ID, VolumeUnmounted::ID])
+}
+
+/// One volume event as the watch passed it through its point.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Heard {
+    /// The point (`volume.mounted`, `volume.unmounted`).
+    pub point: &'static str,
+    pub id: VolumeId,
+    /// Its listeners that ran, in order.
+    pub ran: Vec<String>,
+}
+
+/// How many events [`VolumeWatch::heard`] keeps.
+const HEARD_KEPT: usize = 64;
 
 #[derive(Default)]
 struct Seen {
@@ -125,13 +350,14 @@ struct Seen {
 
 struct Shared {
     bus: Arc<Bus>,
+    hooks: Arc<dyn HookBus>,
     seen: Mutex<Seen>,
-    listeners: Mutex<Vec<Listener>>,
+    heard: Mutex<std::collections::VecDeque<Heard>>,
     stop: AtomicBool,
 }
 
 /// The volumes watched on a thread of their own, their comings and goings
-/// published on a bus. A handle: clones share the watch; it stops when
+/// published on a bus, then passed through their hook points. A handle: clones share the watch; it stops when
 /// asked ([`VolumeWatch::stop`]) or once every handle is dropped.
 #[derive(Clone)]
 pub struct VolumeWatch(Arc<Shared>);
@@ -143,12 +369,21 @@ impl std::fmt::Debug for VolumeWatch {
 }
 
 impl VolumeWatch {
-    /// Starts looking at `volumes` every `every`, publishing on `bus`.
-    pub fn start(volumes: Arc<dyn Volumes>, bus: Arc<Bus>, every: Duration) -> Self {
+    /// Starts looking at `volumes` every `every`, publishing on `bus`,
+    /// then passing each event through its point on `hooks` (the
+    /// application's bus, the points declared there).
+    pub fn start(
+        volumes: Arc<dyn Volumes>,
+        bus: Arc<Bus>,
+        hooks: Arc<dyn HookBus>,
+        every: Duration,
+    ) -> Self {
+        declare(&*hooks);
         let watch = Self(Arc::new(Shared {
             bus,
+            hooks,
             seen: Mutex::default(),
-            listeners: Mutex::default(),
+            heard: Mutex::default(),
             stop: AtomicBool::new(false),
         }));
         let weak: Weak<Shared> = Arc::downgrade(&watch.0);
@@ -169,8 +404,8 @@ impl VolumeWatch {
         watch
     }
 
-    /// One look at `volumes`: what came and went published, then told to
-    /// the listeners.
+    /// One look at `volumes`: what came and went published, then passed
+    /// through its point, its listeners in their declared order.
     fn look(&self, volumes: &dyn Volumes) {
         let mut now: Vec<Volume> = volumes
             .volumes()
@@ -211,19 +446,42 @@ impl VolumeWatch {
             seen.listed = true;
             changes
         };
-        for change in &changes {
-            match change {
-                Change::Mounted(m) => self.0.bus.publish(SOURCE, None, m),
-                Change::Unmounted(u) => self.0.bus.publish(SOURCE, None, u),
+        for change in changes {
+            let hooks = &*self.0.hooks;
+            let (point, altered) = match &change {
+                Change::Mounted(m) => {
+                    self.0.bus.publish(SOURCE, None, m);
+                    (
+                        VolumeMounted::ID,
+                        hooks.alter::<VolumeMounted>(m.clone(), Reactions::default()),
+                    )
+                }
+                Change::Unmounted(u) => {
+                    self.0.bus.publish(SOURCE, None, u);
+                    (
+                        VolumeUnmounted::ID,
+                        hooks.alter::<VolumeUnmounted>(u.clone(), Reactions::default()),
+                    )
+                }
             };
-            let listeners = self
-                .0
-                .listeners
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            for listener in listeners.iter() {
-                listener(change);
+            for failure in &altered.failures {
+                log::warn!(target: "helios::node", "{point}: {failure}");
             }
+            log::debug!(
+                target: "helios::node",
+                "{point} {}: {}",
+                change.id().as_str(),
+                altered.value.ran.join(", ")
+            );
+            let mut heard = self.0.heard.lock().unwrap_or_else(PoisonError::into_inner);
+            if heard.len() == HEARD_KEPT {
+                heard.pop_front();
+            }
+            heard.push_back(Heard {
+                point,
+                id: change.id().clone(),
+                ran: altered.value.ran,
+            });
         }
     }
 
@@ -242,15 +500,21 @@ impl VolumeWatch {
         self.0.bus.subscribe()
     }
 
-    /// Calls `f`, from the watch's thread, with each volume event, right
-    /// after it is published; the first list's included
-    /// ([`Change::at_start`]).
-    pub fn on_change(&self, f: impl Fn(&Change) + Send + 'static) {
+    /// The application's bus the volume points are passed on.
+    pub fn hooks(&self) -> &Arc<dyn HookBus> {
+        &self.0.hooks
+    }
+
+    /// The last volume events passed through their points (the last
+    /// 64), oldest first, with the listeners that ran.
+    pub fn heard(&self) -> Vec<Heard> {
         self.0
-            .listeners
+            .heard
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(Box::new(f));
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// The volumes mounted, as last looked at.
@@ -301,7 +565,7 @@ mod tests {
     }
 
     /// A disk plugged in, then unplugged: both published on the bus with
-    /// its identity, and told to the listeners.
+    /// its identity, then passed through their points.
     #[test]
     fn the_watch_publishes_a_volume_coming_and_going() {
         let mut disk = detect::weak("Backup", Some(5));
@@ -310,11 +574,13 @@ mod tests {
         let plugged = Arc::new(Plugged::default());
         let bus = Arc::new(Bus::new());
         let rx = bus.subscribe();
-        let watch = VolumeWatch::start(plugged.clone(), bus, Duration::from_millis(10));
+        let hooks: Arc<dyn HookBus> = Arc::new(egui_pop_hooks::Kernel::new());
         let (tx, heard) = std::sync::mpsc::channel();
-        watch.on_change(move |c| {
+        listen_both(&*hooks, CARDS, "test", move |c| {
             let _ = tx.send(c.clone());
-        });
+        })
+        .unwrap();
+        let watch = VolumeWatch::start(plugged.clone(), bus, hooks, Duration::from_millis(10));
         let deadline = Instant::now() + Duration::from_secs(10);
         while !watch.listed() {
             assert!(Instant::now() < deadline, "no first look in 10 s");
@@ -334,5 +600,30 @@ mod tests {
         assert!(matches!(next(&rx), Change::Unmounted(u) if u.id == disk.id));
         assert!(watch.mounted().is_empty());
         watch.stop();
+    }
+
+    /// Each listener runs in its declared place, whatever the order it
+    /// was registered in; one not declared is refused.
+    #[test]
+    fn the_listeners_run_in_their_declared_order() {
+        let bus = egui_pop_hooks::Kernel::new();
+        let ran: Arc<Mutex<Vec<&str>>> = Arc::default();
+        for id in [MAP, HEALTH, BACKUPS, SCAN, CARDS] {
+            let ran = ran.clone();
+            listen_mounted(&bus, id, "test", move |_| ran.lock().unwrap().push(id)).unwrap();
+        }
+        let mounted = Mounted {
+            id: VolumeId("uuid:d".into()),
+            mount: "/media/d".into(),
+            name: "d".into(),
+            card: None,
+            at_start: false,
+        };
+        let altered = bus.alter::<VolumeMounted>(mounted, Reactions::default());
+        assert!(altered.failures.is_empty());
+        assert_eq!(*ran.lock().unwrap(), [CARDS, SCAN, MAP, HEALTH, BACKUPS]);
+        assert_eq!(altered.value.ran, [CARDS, SCAN, MAP, HEALTH, BACKUPS]);
+        assert!(listen_unmounted(&bus, BACKUPS, "test", |_| {}).is_err());
+        assert!(listen_mounted(&bus, "nobody.knows", "test", |_| {}).is_err());
     }
 }

@@ -99,6 +99,7 @@ fn shell(doc: &Doc, slot: &Arc<Slot>) -> Harness<'static, Shell> {
     shell.follow_volumes(VolumeWatch::start(
         slot.clone(),
         Arc::new(helios_core::Bus::new()),
+        shell.app().handle().bus(),
         Duration::from_millis(30),
     ));
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));

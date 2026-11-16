@@ -1844,8 +1844,15 @@ fn main() -> Result<(), String> {
     // work as soon as it exists: a window closed during the start still
     // stops it.
     let (node_kept, node_to_stop) = std::sync::mpsc::channel::<NodeKept>();
+    // Helios's one bus (`bus-contract`, the default implementation): the
+    // application chooses it, egui-pop's points and Helios's (the health
+    // report and its reading, the volumes coming and going) declared and
+    // listened on it, each part handed it at construction.
+    let bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus> =
+        Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
     let booting = {
         let from = BootFrom {
+            hooks: bus.clone(),
             library_file: vault_file.clone(),
             run_settings,
             image_file,
@@ -1926,12 +1933,6 @@ fn main() -> Result<(), String> {
     };
     let watched = after_window.clone();
     let window_settings = ui_settings.clone();
-    // Helios's one bus (`bus-contract`, the default implementation): the
-    // application chooses it, egui-pop's points and Helios's (the health
-    // report and its reading) declared and listened on it, each part
-    // handed it at construction.
-    let bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus> =
-        Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
     let ran = helios_gui::shell::open_window("helios-gui", options, Some(&window_settings), move |cc| {
         start::mark("window open on the boot splash");
         let _ = WINDOW.set(cc.egui_ctx.clone());
@@ -2073,15 +2074,15 @@ fn main() -> Result<(), String> {
                         Err(e) => log::warn!("volumes: the scan failed: {e}"),
                     },
                 );
-                volume_watch.on_change(move |change| {
-                    if !change.at_start() {
-                        scanner.poke();
-                    }
-                });
+                // A volume plugged in or gone is scanned inside its
+                // event, before the listeners that read the locations.
+                if let Err(e) = helios_gui::node_volumes::listen_scan(&*bus, scanner) {
+                    log::error!("{}: {e}", helios_gui::node_volumes::SCAN);
+                }
                 // The strategy's "when a backup disk is plugged in": what
-                // is short goes to it.
+                // is short goes to it, once scanned.
                 if let Some(backups) = &backups {
-                    backups.follow(&volume_watch);
+                    backups.follow(&*bus);
                 }
                 // The Storage page, and the volumes offline photos name.
                 let marker = library
@@ -2191,13 +2192,19 @@ fn main() -> Result<(), String> {
                     log::warn!("library.map.scanNow: {e}");
                 }
                 let plugged = feed.clone();
-                volume_watch.on_change(move |change| {
-                    if let helios_gui::node_volumes::Change::Mounted(m) = change
-                        && !m.at_start
-                    {
-                        plugged.plugged(m.id.clone());
-                    }
-                });
+                let listened = helios_gui::node_volumes::listen_mounted(
+                    &*bus,
+                    helios_gui::node_volumes::MAP,
+                    "helios.map",
+                    move |m| {
+                        if !m.at_start {
+                            plugged.plugged(m.id.clone());
+                        }
+                    },
+                );
+                if let Err(e) = listened {
+                    log::error!("{}: {e}", helios_gui::node_volumes::MAP);
+                }
                 // The map's job and the thumbnail re-check run on the
                 // node's vault, as its jobs: the node stops them before
                 // the vault closes.
@@ -2477,6 +2484,8 @@ type NodeKept = Option<(LocalNode, Option<helios_node_core::endpoint::Advertised
 
 /// What the start's work, off the window's thread, is given.
 struct BootFrom {
+    /// Helios's one bus, where the volume watch passes its events.
+    hooks: Arc<dyn egui_pop::api::bus::bus_contract::Bus>,
     /// `--vault FILE`, else the default library.
     library_file: Option<PathBuf>,
     /// One invocation's settings (`--set KEY=VALUE`).
@@ -2524,6 +2533,7 @@ struct Booted {
 /// plugins read.
 fn boot(from: BootFrom) -> Booted {
     let BootFrom {
+        hooks,
         library_file,
         run_settings,
         image_file,
@@ -2565,10 +2575,11 @@ fn boot(from: BootFrom) -> Booted {
             helios_gui::node_volumes::VolumeWatch::start(
                 helios_storage::system(),
                 bus.clone(),
+                hooks.clone(),
                 helios_gui::node_volumes::POLL,
             )
         },
-        |n| n.watch_volumes(helios_storage::system()),
+        |n| n.watch_volumes(helios_storage::system(), hooks.clone()),
     );
     // The `helios` CLI and `helios-mcp` reach this node instead of
     // starting another: its commands served while it holds the library,

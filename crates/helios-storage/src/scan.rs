@@ -23,8 +23,8 @@
 //! few minutes.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use helios_vault::{Presence, Store, Vault};
@@ -143,10 +143,16 @@ pub fn scan<S: Store>(
     Ok(report)
 }
 
+/// One scan, as the scanner runs it: its outcome told to `done`.
+type ScanOnce = Box<dyn FnMut() + Send>;
+
 /// The scan on a thread of its own; dropping it stops the thread after
-/// the scan running, if any.
+/// the scan running, if any. A scan asked for inside a caller's work
+/// ([`Scanner::scan_now`]) runs on the caller's thread, one scan at a
+/// time with the thread's.
 pub struct Scanner {
     poke: Sender<()>,
+    once: Arc<Mutex<ScanOnce>>,
 }
 
 impl Scanner {
@@ -161,22 +167,27 @@ impl Scanner {
         every: Duration,
         done: impl Fn(Result<ScanReport, String>) + Send + 'static,
     ) -> Self {
+        let once: ScanOnce = Box::new(move || {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let folder = library();
+            done(scan(
+                &vault,
+                &volumes.volumes(),
+                &node,
+                now,
+                folder.as_deref(),
+            ));
+        });
+        let once = Arc::new(Mutex::new(once));
         let (poke, poked) = mpsc::channel::<()>();
+        let run = once.clone();
         let spawned = std::thread::Builder::new()
             .name("helios-volume-scan".into())
             .spawn(move || {
                 loop {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |d| d.as_secs());
-                    let folder = library();
-                    done(scan(
-                        &vault,
-                        &volumes.volumes(),
-                        &node,
-                        now,
-                        folder.as_deref(),
-                    ));
+                    (run.lock().unwrap_or_else(PoisonError::into_inner))();
                     match poked.recv_timeout(every) {
                         // Several pokes while scanning make one scan.
                         Ok(()) => while poked.try_recv().is_ok() {},
@@ -188,12 +199,20 @@ impl Scanner {
         if let Err(e) = spawned {
             log::warn!("volumes: no thread to scan them: {e}");
         }
-        Self { poke }
+        Self { poke, once }
     }
 
     /// Asks for a scan soon (a volume appeared or went).
     pub fn poke(&self) {
         let _ = self.poke.send(());
+    }
+
+    /// Scans now, on the calling thread, once a scan under way on the
+    /// scanner's thread ended: when it returns, the locations are as this
+    /// scan found them (a volume plugged in or gone, before whoever acts
+    /// on it reads them).
+    pub fn scan_now(&self) {
+        (self.once.lock().unwrap_or_else(PoisonError::into_inner))();
     }
 }
 
