@@ -188,7 +188,7 @@ impl Shell {
     /// An import the user started here was handed to the node: its
     /// request, as the end line names it.
     pub(super) fn user_import_started(&mut self, request: Value) {
-        self.focus.imports.borrow_mut().user_imports.push(request);
+        self.focus.imports.borrow_mut().started.push(request);
     }
 }
 
@@ -253,7 +253,7 @@ impl SessionEnded {
         let started_here = {
             let mut imports = self.imports.borrow_mut();
             imports.sessions.read_at = None;
-            let started = &mut imports.user_imports;
+            let started = &mut imports.started;
             match started.iter().position(|r| r == request) {
                 Some(at) => {
                     started.remove(at);

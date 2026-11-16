@@ -877,7 +877,7 @@ pub(super) struct Imports {
     pub(super) sessions: super::library_imports::Sessions,
     /// The imports the user started here and handed to the node, by
     /// their requests, until they end.
-    pub(super) user_imports: Vec<Value>,
+    pub(super) started: Vec<Value>,
 }
 
 /// `import.toast`: an import's outcome (its end line) in a short toast
