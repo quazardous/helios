@@ -13,11 +13,13 @@
 //!   the fixes it may offer ([`contract::Declaration`]); its findings are
 //!   held to it.
 //! - The [`Registry`] holds the checks by owner (the module or the
-//!   plugin that declares them): Helios's own, each module listing its
-//!   checks ([`checks`], [`backup`], [`gpu`], [`plugins`],
-//!   [`snapshots`]), and those plugins declare in their manifest, run
-//!   through their process (`helios_plugin::health`); the seam is
-//!   [`Registry::add`], which refuses an unsound declaration.
+//!   plugin that declares them), each a listener of the health report's
+//!   collect point ([`HealthReport`], `health.report`, on egui-pop's hook
+//!   kernel). Each module adds its own (`checks::register_storage`,
+//!   `backup::register`…, plugins' through their process:
+//!   `helios_plugin::health`); the registry lists no module. The seam is
+//!   [`Registry::add`], which refuses an unsound declaration; a run
+//!   collects what the listeners answer ([`Registry::report`]).
 //! - [`Findings`] keeps the last findings in memory per source (each
 //!   check, with its owner) beside the [`Ignored`] list, saved in a small
 //!   JSON file and undoable.
@@ -36,7 +38,9 @@ pub mod snapshots;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
+use egui_pop_hooks::{Kernel, ListenOpts, Point, PointSpec};
 use helios_core::Message;
 use helios_storage::Volume;
 use serde::{Deserialize, Serialize};
@@ -154,16 +158,112 @@ pub trait Check: Send + Sync {
     fn run(&self, ctx: &Context) -> Vec<Finding>;
 }
 
-/// The checks the runner runs, in order, each with its owner: the module
-/// or the plugin that declares it. Helios's own are
-/// [`Registry::builtin`]; a plugin's are added through [`Registry::add`]
-/// by the plugin host (`helios_plugin::health`), its owner the plugin's
-/// id.
-#[derive(Clone, Default)]
+/// The health report's collect point (`health.report`): each module
+/// that knows a health fact answers it with its findings, under its
+/// check's id and its own name as owner; the health module only collects,
+/// ranks and shows them. A listener answers `None` when its check is not
+/// part of this run ([`Report::wants`]).
+pub struct HealthReport;
+
+impl Point for HealthReport {
+    const ID: &'static str = "health.report";
+    type Input = Report;
+    type Value = Option<Vec<Finding>>;
+}
+
+/// How long a check may take before its findings are dropped as late: it
+/// runs on the run's own thread, never the interface's, so the bound is
+/// wide (a database's integrity check on a large library).
+pub const REPORT_DEADLINE: Duration = Duration::from_mins(10);
+
+/// What a run of the health report hands every listener: what the checks
+/// read, which checks run (all of them for none), and who hears each
+/// check start (the jobs centre's progress).
+pub struct Report {
+    pub context: Context,
+    pub only: Option<BTreeSet<String>>,
+    progress: Option<Progress>,
+}
+
+/// Hears each check of a report as it starts, by id.
+type Progress = Box<dyn Fn(&str) + Send + Sync>;
+
+impl Report {
+    /// Every check, over `context`.
+    pub fn all(context: Context) -> Self {
+        Self {
+            context,
+            only: None,
+            progress: None,
+        }
+    }
+
+    /// The checks `ids` only.
+    #[must_use]
+    pub fn only(mut self, ids: impl IntoIterator<Item = String>) -> Self {
+        self.only = Some(ids.into_iter().collect());
+        self
+    }
+
+    /// Hears each check as it starts, by id.
+    #[must_use]
+    pub fn progress(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.progress = Some(Box::new(f));
+        self
+    }
+
+    /// Whether the check `id` runs in this report.
+    pub fn wants(&self, id: &str) -> bool {
+        self.only.as_ref().is_none_or(|ids| ids.contains(id))
+    }
+}
+
+/// The checks, each a listener of [`HealthReport`] owned by the module or
+/// the plugin that declares it, in the order they were added. A module
+/// adds its own ([`Registry::add`]: `checks::register`,
+/// `helios_plugin::health::register`…); the registry knows no module, it
+/// refuses an unsound declaration and keeps each check's declaration for
+/// the schedule. Its hook kernel ([`Registry::kernel`]) shows who answers
+/// the point, in order (`egui_pop_hooks::Kernel::listeners`).
 pub struct Registry {
+    kernel: Arc<Kernel>,
     checks: Vec<Arc<dyn Check>>,
     /// The owner of each check, by position.
     owners: Vec<String>,
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        let kernel = Kernel::new();
+        let declared = kernel.declare::<HealthReport>(
+            PointSpec::new(
+                "Health findings: each module answers with what it finds of its own state",
+            )
+            .deadline(REPORT_DEADLINE),
+        );
+        if let Err(e) = declared {
+            log::error!("health: {e}");
+        }
+        Self {
+            kernel: Arc::new(kernel),
+            checks: Vec::new(),
+            owners: Vec::new(),
+        }
+    }
+}
+
+impl Clone for Registry {
+    /// Another registry with the same checks, on a kernel of its own: a
+    /// check added to one is not in the other.
+    fn clone(&self) -> Self {
+        let mut r = Self::default();
+        for (owner, check) in self.owned() {
+            r.listen(owner, check.clone());
+        }
+        r.checks.clone_from(&self.checks);
+        r.owners.clone_from(&self.owners);
+        r
+    }
 }
 
 impl std::fmt::Debug for Registry {
@@ -180,32 +280,9 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// Helios's own checks, each module's; the GPU kernels check is added
-    /// by the desktop, which knows the kernels ([`gpu::Kernels::new`]).
-    pub fn builtin() -> Self {
-        let mut r = Self::default();
-        let owned = [
-            (checks::STORAGE_OWNER, checks::storage()),
-            (checks::LIBRARY_OWNER, checks::library()),
-            (backup::OWNER, backup::checks()),
-            (gpu::OWNER, gpu::checks()),
-            (plugins::OWNER, plugins::checks()),
-            (snapshots::OWNER, snapshots::checks()),
-        ];
-        for (owner, checks) in owned {
-            for check in checks {
-                if let Err(problems) = r.add(owner, check) {
-                    // Helios's own declarations are tested sound.
-                    log::error!("health: {}", problems.join("; "));
-                }
-            }
-        }
-        r
-    }
-
-    /// Adds `owner`'s check; one with the id of a check already there
-    /// replaces it. A check whose declaration is unsound is refused, with
-    /// its reasons.
+    /// Adds `owner`'s check, as a listener of [`HealthReport`]; one with
+    /// the id of a check already there replaces it. A check whose
+    /// declaration is unsound is refused, with its reasons.
     pub fn add(&mut self, owner: &str, check: Arc<dyn Check>) -> Result<(), Vec<String>> {
         let mut problems = check.declaration().problems(check.id());
         if !contract::sound_name(owner) {
@@ -220,10 +297,53 @@ impl Registry {
         if let Some(at) = self.checks.iter().position(|c| c.id() == check.id()) {
             self.checks.remove(at);
             self.owners.remove(at);
+            self.kernel.unlisten(HealthReport::ID, check.id());
         }
+        self.listen(owner, check.clone());
         self.checks.push(check);
         self.owners.push(owner.to_owned());
         Ok(())
+    }
+
+    /// `check` answering the report, owned by `owner`.
+    fn listen(&self, owner: &str, check: Arc<dyn Check>) {
+        let id = check.id().to_owned();
+        let listened = self.kernel.listen::<HealthReport>(
+            id.clone(),
+            ListenOpts::new().owner(owner),
+            move |report, out| {
+                if report.wants(&id) {
+                    if let Some(progress) = &report.progress {
+                        progress(&id);
+                    }
+                    *out = Some(run_one(&check, &report.context));
+                }
+                Ok(())
+            },
+        );
+        if let Err(e) = listened {
+            log::error!("health: {e}");
+        }
+    }
+
+    /// Removes every check of `owner` (a module or a plugin gone); how
+    /// many went.
+    pub fn remove_owner(&mut self, owner: &str) -> usize {
+        self.kernel.forget(owner);
+        let before = self.checks.len();
+        let mut at = 0;
+        self.checks.retain(|_| {
+            let keep = self.owners[at] != owner;
+            at += 1;
+            keep
+        });
+        self.owners.retain(|o| o != owner);
+        before - self.checks.len()
+    }
+
+    /// The hook kernel the checks listen on.
+    pub fn kernel(&self) -> &Arc<Kernel> {
+        &self.kernel
     }
 
     pub fn checks(&self) -> &[Arc<dyn Check>] {
@@ -254,11 +374,75 @@ impl Registry {
         out
     }
 
-    /// Runs every check; a check that panics, or answers outside its
-    /// declaration, gives a problem of its own rather than stopping the
-    /// others.
+    /// What runs the report on another thread: the kernel and the
+    /// checks as they are now.
+    pub fn reporter(&self) -> Reporter {
+        Reporter {
+            kernel: self.kernel.clone(),
+            checks: self
+                .owned()
+                .map(|(o, c)| (o.to_owned(), c.clone()))
+                .collect(),
+        }
+    }
+
+    /// Emits the report ([`Reporter::report`]).
+    pub fn report(&self, report: Report) -> Vec<(String, String, Vec<Finding>)> {
+        self.reporter().report(report)
+    }
+
+    /// Runs every check over `ctx`; its findings in check order.
     pub fn run(&self, ctx: &Context) -> Vec<Finding> {
-        self.checks.iter().flat_map(|c| run_one(c, ctx)).collect()
+        self.report(Report::all(ctx.clone()))
+            .into_iter()
+            .flat_map(|(_, _, found)| found)
+            .collect()
+    }
+}
+
+/// A registry's kernel and checks, held to emit the report off the
+/// interface thread ([`Registry::reporter`]).
+pub struct Reporter {
+    kernel: Arc<Kernel>,
+    checks: Vec<(String, Arc<dyn Check>)>,
+}
+
+impl Reporter {
+    /// Emits the report: each check it wants answers, in order, as
+    /// `(owner, check, findings)`. A check that panics, answers outside
+    /// its declaration, fails or is late gives a problem of its own
+    /// rather than stopping the others.
+    pub fn report(&self, report: Report) -> Vec<(String, String, Vec<Finding>)> {
+        let collected = self.kernel.collect::<HealthReport>(report);
+        let mut answers: Vec<(String, Vec<Finding>)> = collected
+            .parts
+            .into_iter()
+            .filter_map(|(id, found)| Some((id, found?)))
+            .collect();
+        for failure in collected.failures.iter().filter(|f| f.dropped()) {
+            log::warn!("health: {failure}");
+            if let Some((_, check)) = self.checks.iter().find(|(_, c)| c.id() == failure.listener) {
+                answers.push((failure.listener.clone(), vec![crashed(check)]));
+            }
+        }
+        self.checks
+            .iter()
+            .filter_map(|(owner, check)| {
+                let at = answers.iter().position(|(id, _)| id == check.id())?;
+                let (id, found) = answers.swap_remove(at);
+                Some((owner.clone(), id, found))
+            })
+            .collect()
+    }
+}
+
+/// Adds `checks` to `registry`, owned by `owner`; a refused one is logged
+/// (Helios's own declarations are tested sound).
+pub fn add_owned(registry: &mut Registry, owner: &str, checks: Vec<Arc<dyn Check>>) {
+    for check in checks {
+        if let Err(problems) = registry.add(owner, check) {
+            log::error!("health: {}", problems.join("; "));
+        }
     }
 }
 
@@ -653,7 +837,13 @@ mod tests {
 
     #[test]
     fn helios_own_checks_are_declared_soundly_and_owned_by_their_modules() {
-        let r = Registry::builtin();
+        let mut r = Registry::default();
+        checks::register_storage(&mut r);
+        checks::register_library(&mut r);
+        backup::register(&mut r);
+        gpu::register(&mut r);
+        plugins::register(&mut r);
+        snapshots::register(&mut r);
         let owners: Vec<(&str, Vec<&str>)> = r
             .by_owner()
             .into_iter()
@@ -723,6 +913,87 @@ mod tests {
         r.add("other", fake("fake.fan", Level::Ok, None)).unwrap();
         assert_eq!(r.owner("fake.fan"), Some("other"));
         assert_eq!(r.checks().len(), 3);
+    }
+
+    #[test]
+    fn a_module_s_finding_comes_through_the_report_point_and_goes_with_the_module() {
+        let mut r = Registry::default();
+        r.add("disks", fake("disks.space", Level::Warning, None))
+            .unwrap();
+        r.add("fans", fake("fans.speed", Level::Ok, None)).unwrap();
+        // The point lists each module's listener, in order, with its owner.
+        let listeners = r.kernel().listeners(HealthReport::ID).unwrap();
+        let who: Vec<(&str, Option<&str>)> = listeners
+            .iter()
+            .map(|l| (l.id.as_str(), l.owner.as_deref()))
+            .collect();
+        assert_eq!(
+            who,
+            [("disks.space", Some("disks")), ("fans.speed", Some("fans"))]
+        );
+        let ids = |r: &Registry| -> Vec<String> {
+            r.run(&Context::default())
+                .into_iter()
+                .map(|f| f.id)
+                .collect()
+        };
+        assert_eq!(ids(&r), ["disks.space", "fans.speed"]);
+        // A report of some checks only: the others do not answer.
+        let some = r.report(Report::all(Context::default()).only(["fans.speed".to_owned()]));
+        let answered: Vec<(&str, &str)> = some
+            .iter()
+            .map(|(o, c, _)| (o.as_str(), c.as_str()))
+            .collect();
+        assert_eq!(answered, [("fans", "fans.speed")]);
+        // The module goes: its listener and its findings with it.
+        assert_eq!(r.remove_owner("disks"), 1);
+        assert_eq!(ids(&r), ["fans.speed"]);
+        assert_eq!(r.kernel().listeners(HealthReport::ID).unwrap().len(), 1);
+        assert_eq!(r.owner("disks.space"), None);
+        // A clone has its own kernel: what is added to it stays there.
+        let mut other = r.clone();
+        other
+            .add("disks", fake("disks.space", Level::Ok, None))
+            .unwrap();
+        assert_eq!(ids(&other), ["fans.speed", "disks.space"]);
+        assert_eq!(ids(&r), ["fans.speed"]);
+    }
+
+    /// A check slower than the report's deadline allows.
+    struct Slow;
+    impl Check for Slow {
+        fn id(&self) -> &'static str {
+            "slow"
+        }
+        fn title(&self) -> Message {
+            Message::plain("Slow")
+        }
+        fn declaration(&self) -> Declaration {
+            Declaration::new("Nothing").levels(&[Level::Ok])
+        }
+        fn run(&self, _: &Context) -> Vec<Finding> {
+            vec![Finding::new(
+                "slow",
+                "",
+                Level::Ok,
+                Message::plain("m"),
+                Message::plain("d"),
+            )]
+        }
+    }
+
+    #[test]
+    fn a_listener_failing_in_the_kernel_is_a_problem_of_its_check() {
+        let mut r = Registry::default();
+        r.add("slow", Arc::new(Slow)).unwrap();
+        // Another listener of the point, not a check, that fails: dropped
+        // and logged, the checks' answers stand.
+        r.kernel()
+            .listen::<HealthReport>("broken", ListenOpts::new(), |_, _| Err("on purpose".into()))
+            .unwrap();
+        let found = r.run(&Context::default());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].level, Level::Ok);
     }
 
     #[test]

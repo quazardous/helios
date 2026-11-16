@@ -34,8 +34,8 @@ use std::time::{Duration, Instant};
 
 use helios_core::jobs::Jobs;
 use helios_core::{Bus, Envelope, Event};
+use helios_health::Findings;
 use helios_health::runner::{Runner, Schedule};
-use helios_health::{Findings, Registry};
 use helios_library::auto_import::Timing;
 use helios_library::import::{self, Report};
 use helios_node_core::health::HealthInputs;
@@ -239,7 +239,7 @@ impl VaultNode {
             Some(file.to_path_buf()),
         );
         let runner = Runner::new(
-            Registry::builtin(),
+            helios_node_core::health::checks(),
             inputs.into_context(),
             Findings::default(),
             options.schedule,

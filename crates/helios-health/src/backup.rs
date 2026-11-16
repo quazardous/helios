@@ -11,7 +11,7 @@ use helios_storage::{Volume, registry};
 use helios_vault::{Store, Vault};
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Event, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Event, Finding, Fix, Level, Registry};
 
 /// The owner of the backup checks ([`checks`]).
 pub const OWNER: &str = "backup";
@@ -25,6 +25,12 @@ pub fn checks() -> Vec<Arc<dyn Check>> {
         Arc::new(Unverified),
         Arc::new(Cards),
     ]
+}
+
+/// Adds the backup module's checks to `registry`, owned by `OWNER`, as listeners of
+/// the health report.
+pub fn register(registry: &mut Registry) {
+    crate::add_owned(registry, OWNER, checks());
 }
 
 /// Days a backup destination may stay away before a warning, by default.

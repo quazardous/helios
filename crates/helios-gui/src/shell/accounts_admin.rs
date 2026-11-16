@@ -88,6 +88,10 @@ pub const ACCOUNT_CONNECTORS: &str = "import.accountConnectors";
 pub const RENAME: &str = "import.renameAccount";
 /// Disconnects an account, and keeps or forgets its sources.
 pub const DISCONNECT: &str = "import.disconnect";
+/// Said once an account is removed (its saved sources forgotten).
+pub const ACCOUNT_REMOVED: &str = "account.removed";
+/// Said once an account is signed out, its saved sources kept.
+pub const ACCOUNT_SIGNED_OUT: &str = "account.signedOut";
 
 fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
@@ -533,9 +537,17 @@ impl Shell {
             book.remove(&id)?;
         }
         drop(w);
-        if let Some(admin) = self.core.app.handle().service(&egui_pop::api::admin::ADMIN) {
-            admin.refresh();
-        }
+        // Said on the bus: the Settings app's account reads follow it.
+        let said = if keep {
+            ACCOUNT_SIGNED_OUT
+        } else {
+            ACCOUNT_REMOVED
+        };
+        self.core
+            .app
+            .handle()
+            .publish("helios", None, said, json!({ "account": id }));
+        self.read_fact(said);
         Ok(json!({
             "account": id,
             "removed": !keep,

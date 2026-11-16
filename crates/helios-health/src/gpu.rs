@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use helios_core::Message;
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Finding, Fix, Level, Registry};
 
 /// The owner of the GPU checks.
 pub const OWNER: &str = "gpu";
@@ -17,6 +17,12 @@ pub const OWNER: &str = "gpu";
 /// (the kernels' check, [`Kernels`], is added by the desktop).
 pub fn checks() -> Vec<Arc<dyn Check>> {
     vec![Arc::new(AdapterCheck)]
+}
+
+/// Adds the GPU module's checks to `registry`, owned by `OWNER`, as listeners of
+/// the health report.
+pub fn register(registry: &mut Registry) {
+    crate::add_owned(registry, OWNER, checks());
 }
 
 pub const ADAPTER: &str = "gpu.adapter";
