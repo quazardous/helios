@@ -54,8 +54,9 @@ with the workflow's token starts no workflow, a dispatch does. Nobody tags
 by hand. Who decides is the coordinator, on the advice of the **release
 keeper**, a merger agent kept for the release cycle (owner, 2026-11-13):
 when `next`'s CI turns green with fragments waiting in `changelog.d/`, it
-brings the snapshot images up to date first (below, "Snapshots before a
-release"), then runs the box's `release` job on `next` (`cargo xtask release`, checked
+pins published egui-pop and egui_hud versions first (below, "egui-pop
+and egui_hud: next follows next"), brings the snapshot images up to date
+(below, "Snapshots before a release"), then runs the box's `release` job on `next` (`cargo xtask release`, checked
 and the whole suite tested), says what a user would notice since the last
 release and recommends none, a patch or a minor one. A "yes" is a
 one-line fragment `kind: internal` with `release: patch` (or `minor`) in
@@ -64,6 +65,43 @@ the promotion to the tag and the published release. It also debugs a red CI on
 `next` first, before anything else (docs/next.md). Between releases the
 keeper merges any backlog of pull requests nobody merged
 (docs/next.md). Authors put no `release:` line in their own fragments.
+
+## egui-pop and egui_hud: next follows next
+
+Helios's two libraries move with it (owner, 2026-11-15):
+
+- **On `next`, Helios builds on egui-pop's `next` and egui_hud's `next`**,
+  each by one git revision, in the root `Cargo.toml`'s one
+  `[patch.crates-io]` table: every crate of a repository from the same
+  commit, so the graph holds one egui-pop. `cargo xtask check` refuses
+  two revisions of one repository; `cargo xtask deps-worlds` refuses an
+  egui-family crate held twice, a git and a crates.io copy of one version
+  included. `deny.toml` allows git sources from the quazardous
+  organisation only.
+- **A bump is a command, not a hand-written pull request:** `cargo xtask
+  pin-bump --pr` moves every pin to the newest commit of each `next` its
+  CI passed on (or to `egui-pop=REV egui_hud=REV`), lets cargo move
+  Cargo.lock for those crates only, checks the graph still holds one of
+  each, and opens `chore/pin-bump-<revs>` into `next` with its test
+  manifest (`check`, `lint`, `journey`); a branch already pushed for those
+  revisions means nothing to do. Without `--pr` it changes the checkout
+  and prints the body. The coordinator runs it when its watch sees
+  egui-pop's or egui_hud's `next` turn green, and the pull request is
+  merged like any other. No workflow polls the other repositories: that
+  would cost GitHub Actions runs for nothing, and the watch already
+  follows those `next`s.
+- **A release builds on published crates only.** `cargo xtask pins
+  --release` fails while any crate of the organisation comes from git;
+  `cargo xtask release` (the box's `release` job) and the release
+  workflow run it, and the promotion keeps a release asked for waiting
+  (the commit alone moves to `main`, the fragments stay) until it passes.
+  So the **release keeper cuts egui-pop's and egui_hud's releases
+  first** (egui-pop, then egui_hud on that egui-pop), then lands one pull
+  request into `next` that asks for those versions in Cargo.toml and
+  removes their lines from `[patch.crates-io]`, and only then refreshes
+  the snapshots and runs the `release` job below. From that pull request
+  to the published tag the coordinator runs no `pin-bump`; once Helios's
+  release is out, the next one puts the git pins back.
 
 ## Snapshots before a release
 

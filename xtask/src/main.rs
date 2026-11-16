@@ -60,6 +60,11 @@
 //! - `ui-index [--check]`: `docs/ui-index.md`, need to call, Helios's
 //!   presets first, from the `/// Need (group): ...` doc lines of Helios's
 //!   crates and of the egui-pop crates in the lock (see `ui_index.rs`).
+//! - `pin-bump [egui-pop=REV] [egui_hud=REV] [--pr]` | `pins [--release]`:
+//!   `next` builds on egui-pop and `egui_hud` `next` by git revision; the
+//!   bump moves those pins to their newest green commit, and the release
+//!   guard refuses a release while any of them comes from git (see
+//!   `pins.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, an optional line
@@ -76,6 +81,7 @@ mod i18n;
 mod install_dev;
 mod lint;
 mod manifest;
+mod pins;
 mod promote;
 mod raw_egui;
 mod remote;
@@ -749,7 +755,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -781,6 +787,12 @@ fn main() -> ExitCode {
             let date = words
                 .get(2)
                 .map_or_else(today, std::string::ToString::to_string);
+            let pinned = std::fs::read_to_string(root.join("Cargo.lock"))
+                .map(|lock| pins::release_problems(&lock))
+                .unwrap_or_default();
+            if !pinned.is_empty() {
+                return fail(&pinned);
+            }
             if !survives(&root) {
                 return fail(
                     &["the survival scenarios fail (`cargo survival`): no release".into()],
@@ -814,6 +826,9 @@ fn main() -> ExitCode {
                 }
             }
             problems.extend(version_problems(&root));
+            if let Ok(manifest) = std::fs::read_to_string(root.join("Cargo.toml")) {
+                problems.extend(pins::manifest_problems(&manifest));
+            }
             problems.extend(vault_access::problems(&root));
             problems.extend(vault_access::gui_problems(&root));
             if problems.is_empty() {
@@ -833,6 +848,14 @@ fn main() -> ExitCode {
         }),
         ["promote", rest @ ..] => promote::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", promote::USAGE);
+            ExitCode::from(2)
+        }),
+        ["pin-bump", rest @ ..] => pins::run_bump(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", pins::USAGE);
+            ExitCode::from(2)
+        }),
+        ["pins", rest @ ..] => pins::run_pins(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", pins::USAGE);
             ExitCode::from(2)
         }),
         ["lint", rest @ ..] => lint::run(&root, rest).unwrap_or_else(|| {

@@ -187,6 +187,13 @@ stress runs (`stability`) never go into CI.
   it carries the fix. A green `next` is what releases. A bug the owner reports is
   handled the same way: agents reproduce and validate it themselves and
   never ask the owner to test.
+- Helios `next` builds on egui-pop's and egui_hud's `next` by git
+  revision. When either turns green, the coordinator runs `cargo xtask
+  pin-bump --pr`, which opens the one pull request moving the pins; nobody
+  writes pin pull requests by hand, and no slice waits for an egui-pop
+  release. A release takes their published versions instead: the release
+  keeper cuts them first ([releases.md](releases.md), "egui-pop and
+  egui_hud: next follows next").
 - External contributors' pull requests (from forks) target `next` and run
   the full CI as usual.
 

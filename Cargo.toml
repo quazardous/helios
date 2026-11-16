@@ -138,10 +138,11 @@ too_many_lines = "allow"
 needless_pass_by_value = "allow"
 
 
-# egui-pop's late-value cell (`late::LateValue`, behind `helios_ui::value`)
-# ahead of its crates.io release: every egui-pop crate from the same
-# commit of its `next`, so the graph holds one egui-pop. Drop this table
-# once egui-pop 0.12 is published and the versions above ask for it.
+# Helios `next` builds on egui-pop's and egui_hud's `next`, each by one git
+# revision: every crate of a repository from the same commit, so the graph
+# holds one egui-pop. `cargo xtask pin-bump` moves these lines; a release
+# takes the published versions instead (`cargo xtask pins --release`;
+# docs/releases.md, "egui-pop and egui_hud: next follows next").
 [patch.crates-io]
 egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "d76e8d22" }
 egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "d76e8d22" }
@@ -164,6 +165,7 @@ egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "d76e8d
 # in every profile, so tests on real raws stay fast.
 # Dependencies build without debug info: the GPU and GUI stacks are large,
 # and Helios's own crates keep theirs.
+egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "b8d74871" }
 [profile.dev.package."*"]
 debug = false
 

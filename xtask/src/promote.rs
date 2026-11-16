@@ -16,9 +16,11 @@
 //!    is written as `cargo xtask release` writes it, Cargo.lock is refreshed
 //!    (`cargo update --workspace`) and the result is committed as
 //!    "Release X.Y.Z", the base its parent. Otherwise the commit alone is
-//!    promoted and the fragments wait. The survival scenarios are not run
-//!    again: CI ran them on the validated commit, and the release changes
-//!    no code. The workflow then tags `vX.Y.Z` and publishes it.
+//!    promoted and the fragments wait. While a crate of the quazardous
+//!    organisation comes from git (`pins.rs`'s release guard), a release
+//!    asked for waits too: the commit alone is promoted. The survival
+//!    scenarios are not run again: CI ran them on the validated commit,
+//!    and the release changes no code. The workflow then tags `vX.Y.Z` and publishes it.
 //! 3. The commit to promote must differ from the validated one by a version
 //!    bump only ([`bump_problems`]): Cargo.toml's workspace version, the
 //!    in-tree plugins' Helios range, CHANGELOG.md, the `AppStream`
@@ -51,10 +53,13 @@ pub enum Outcome {
     AlreadyOnMain,
     /// Nothing pushed, and why.
     Skipped(String),
-    /// `main` moved to `main`; `release` is the version released, if any.
+    /// `main` moved to `main`; `release` is the version released, if any;
+    /// `held` why a release the fragments asked for waits (an egui-pop or
+    /// `egui_hud` crate still comes from git: the release guard).
     Promoted {
         main: String,
         release: Option<String>,
+        held: Option<String>,
         next: Next,
     },
 }
@@ -85,9 +90,13 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         Ok(Outcome::Promoted {
             main,
             release,
+            held,
             next,
         }) => {
             let mut text = format!("main is now {main}");
+            if let Some(why) = &held {
+                let _ = write!(text, ", the release asked for waits ({why})");
+            }
             if let Some(v) = &release {
                 let _ = write!(text, ", \"Release {v}\" on top of {sha}");
                 // promote.yml tags and publishes it
@@ -245,9 +254,19 @@ pub fn promote(
     } else {
         crate::Gate::Asked
     };
+    // The release guard: no release while a crate of the organisation
+    // comes from git; the commit alone moves and the fragments wait.
+    let pinned = std::fs::read_to_string(dir.join("Cargo.lock"))
+        .map(|lock| crate::pins::release_problems(&lock))
+        .unwrap_or_default();
+    let mut held = None;
     let release = match crate::plan(dir, date, gate) {
         Err(problems) => return Err(problems.join("; ")),
         Ok(None) => None,
+        Ok(Some(_)) if !pinned.is_empty() => {
+            held = Some(pinned.join("; "));
+            None
+        }
         Ok(Some(plan)) => {
             let v = crate::apply_release(dir, date, plan);
             refresh(dir)?;
@@ -291,6 +310,7 @@ pub fn promote(
         return Ok(Outcome::Promoted {
             main: target,
             release,
+            held,
             next,
         });
     }
@@ -341,6 +361,7 @@ pub fn promote(
     Ok(Outcome::Promoted {
         main: target,
         release,
+        held,
         next: next_followed,
     })
 }
@@ -673,6 +694,7 @@ mod tests {
             Outcome::Promoted {
                 main: main.clone(),
                 release: Some("0.2.0".into()),
+                held: None,
                 next: Next::FastForwarded,
             }
         );
@@ -736,6 +758,7 @@ mod tests {
             Outcome::Promoted {
                 main: v.clone(),
                 release: None,
+                held: None,
                 next: Next::Untouched,
             }
         );
@@ -758,6 +781,7 @@ mod tests {
             Outcome::Promoted {
                 main: v.clone(),
                 release: None,
+                held: None,
                 next: Next::Untouched,
             }
         );
@@ -779,6 +803,34 @@ mod tests {
         assert_eq!(r, "0.2.0");
         let log = repo.show("main", "CHANGELOG.md");
         assert!(log.contains("- A new panel.") && log.contains("- Exports no longer stop."));
+    }
+
+    #[test]
+    fn a_release_waits_while_an_egui_pop_crate_comes_from_git() {
+        let repo = Repo::new("pinned");
+        repo.land(
+            "Cargo.lock",
+            &format!(
+                "{LOCK}\n[[package]]\nname = \"egui-pop\"\nversion = \"0.11.0\"\nsource = \"git+https://github.com/quazardous/egui-pop?rev=d76e8d22#d76e8d225320\"\n"
+            ),
+        );
+        let v = repo.land("changelog.d/export.md", FIXED);
+        let dir = repo.checkout(&v);
+        let out = promote(&dir, "origin", &v, "2026-11-16", &ok_refresh).unwrap();
+        let Outcome::Promoted {
+            release: None,
+            held: Some(why),
+            ..
+        } = out
+        else {
+            panic!("{out:?}")
+        };
+        assert!(why.contains("egui-pop comes from git (d76e8d22)"), "{why}");
+        assert_eq!(repo.branch("main"), v, "the commit alone is promoted");
+        assert!(
+            repo.show("main", "Cargo.toml")
+                .contains("version = \"0.1.0\"")
+        );
     }
 
     #[test]
@@ -857,6 +909,7 @@ mod tests {
             Outcome::Promoted {
                 main: main.clone(),
                 release: Some("0.2.1".into()),
+                held: None,
                 next: Next::FastForwarded,
             }
         );
