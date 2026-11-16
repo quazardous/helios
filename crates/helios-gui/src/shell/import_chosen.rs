@@ -305,35 +305,6 @@ impl ImportWindow {
     }
 }
 
-/// The reports of several imports as one: their counts added up.
-fn merged(reports: Vec<Value>) -> Value {
-    let mut all = reports.into_iter();
-    let Some(mut first) = all.next() else {
-        return json!({});
-    };
-    for report in all {
-        let (Some(into), Value::Object(from)) = (first.as_object_mut(), report) else {
-            continue;
-        };
-        for (key, value) in from {
-            match (into.get_mut(&key), value) {
-                (Some(Value::Number(a)), Value::Number(b)) => {
-                    if let (Some(x), Some(y)) = (a.as_u64(), b.as_u64()) {
-                        *a = (x + y).into();
-                    }
-                }
-                (Some(Value::Array(a)), Value::Array(b)) => a.extend(b),
-                (Some(Value::Bool(a)), Value::Bool(b)) => *a |= b,
-                (None, v) => {
-                    into.insert(key, v);
-                }
-                _ => {}
-            }
-        }
-    }
-    first
-}
-
 impl Shell {
     /// The footer's Import while the grid shows photos chosen in a
     /// service's page: the ones ticked downloaded into the source's
@@ -343,7 +314,7 @@ impl Shell {
     /// the toast, the Log panel, the photos selected); the pickings
     /// ended, the window closed. Nothing is fetched before.
     pub(super) fn import_chosen(&mut self) {
-        let sink = self.import_sink();
+        let (sink, ends) = (self.import_sink(), self.import_ends());
         let (hook, jobs, args, ctx, album) = {
             let mut w = self.import.get_mut();
             let Some((root, account, album)) = w
@@ -430,11 +401,11 @@ impl Shell {
                         log::debug!("import chosen: end of a picking: {e:?}");
                     }
                 }
-                let end = match failed {
-                    Some(e) => json!({ "failed": e }),
-                    None => json!({ "ended": merged(reports) }),
-                };
-                let _ = sink.send((args, end));
+                // One end for all the batches, as every import's.
+                match failed {
+                    Some(e) => ends.failed(&args, &e),
+                    None => ends.ended(&args, crate::import_end::merged(reports), None),
+                }
                 if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                     ctx.request_repaint_of(ViewportId::ROOT);
                 }
@@ -527,16 +498,5 @@ mod tests {
         assert_eq!(c.name_for(&item("IMG_1.JPG")), "IMG_1 (3).JPG");
         assert_eq!(c.name_for(&item("")), "item");
         assert_eq!(c.name_for(&item("x:y")), "x_y");
-    }
-
-    #[test]
-    fn several_imports_report_as_one() {
-        let one = json!({ "added": 2, "files": 2, "cancelled": false, "x": [1] });
-        let two = json!({ "added": 1, "files": 3, "cancelled": true, "x": [2] });
-        let all = merged(vec![one, two]);
-        assert_eq!(all["added"], 3);
-        assert_eq!(all["files"], 5);
-        assert_eq!(all["cancelled"], true);
-        assert_eq!(all["x"], json!([1, 2]));
     }
 }

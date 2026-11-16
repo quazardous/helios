@@ -373,6 +373,27 @@ they report to, as the node does; the storage strategy's
 `helios-after-import` thread is the model). `main.rs`'s three
 `backups.start` calls go. A fact, not a hook point: no answer is wanted.
 
+Where it stands (2026-11-16): done on the desktop side, as hook points
+after all, because the reactions' order matters (the undo step before the
+Library is filled, the session before the photos are selected). Every
+import path says its end through one `helios_gui::import_end::Publisher`
+(the `library.import` command's thread, the photos chosen through a
+remote connector in a service's page, and the node's promise through
+`NodeWatch`). `helios-gui` declares its two points, `import.ended` and
+`import.failed` (`import_end::POINTS`), on the one bus `main` builds and
+hands to the shell; their listeners are named, owned and ordered
+(`import_end::ORDER`, `FAILED_ORDER`), the host's `backups.on-import` and
+`library.refill` among them. The shell passes the end through its point,
+then says `import.ended` or `import.failed` on the journal with the
+listeners that ran. The listeners that need the shell's own state (the
+Log panel, the toast, the sessions) mark their place in the order and
+the shell does their part right after, in that order: a bus listener is
+`Send + Sync`, the shell's panels are not. The cameras' default looks
+are put on by the publisher, before the point, on every path: they add
+to the import's changes (its one undo step) and write the vault, which
+is not done on the interface's thread. The node's own
+`helios-after-import` thread is unchanged.
+
 ### Slice 3: one module catalogue
 
 One crate lists the processing modules and what each ships (its

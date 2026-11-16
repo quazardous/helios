@@ -88,6 +88,12 @@ pub(super) struct Core {
     pub(super) storage: storage::StoragePage,
     /// The lines of the imports the host runs (`import_sink`).
     pub(super) import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
+    /// Where every import's end is said (`import_ends`), and where the
+    /// shell hears them, to pass them through `import.ended`.
+    pub(super) import_ends: (
+        crate::import_end::Publisher,
+        std::sync::mpsc::Receiver<crate::import_end::ImportEnd>,
+    ),
     /// Exports asked for, for the host.
     pub(super) exports: Vec<ExportAsk>,
     /// Where `workshop.run` hands a run: the host's runner, which holds

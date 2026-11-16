@@ -461,54 +461,6 @@ fn catalogue_commands(
     Ok(())
 }
 
-/// What the desktop keeps of an import its node runs as a promise: each
-/// file's line for its Duplicates and Log panels, the import's undo step,
-/// the strategy's "after each import", the Library filled again and the
-/// end said.
-struct ImportHeard {
-    lines: std::sync::mpsc::Sender<(serde_json::Value, serde_json::Value)>,
-    history: helios_gui::library_history::LibraryHistory,
-    backups: Option<Arc<Backups>>,
-    done: Arc<AtomicBool>,
-    ctx: egui::Context,
-}
-
-impl helios_node_core::import_promise::ImportWatch for ImportHeard {
-    fn line(&self, request: &serde_json::Value, line: &serde_json::Value) {
-        let _ = self.lines.send((request.clone(), line.clone()));
-    }
-
-    fn ended(
-        &self,
-        request: &serde_json::Value,
-        report: &mut helios_library::import::Report,
-        camera_looks: usize,
-    ) {
-        let label = helios_gui::library_history::import_label(report.added + report.located);
-        self.history
-            .record(label, std::mem::take(&mut report.changes), seconds_f64());
-        if let Some(backups) = &self.backups {
-            backups.start(
-                helios_storage::strategy::Trigger::OnImport,
-                Some(report.clone()),
-            );
-        }
-        let end = serde_json::json!({ "ended": report, "camera_looks": camera_looks });
-        let _ = self.lines.send((request.clone(), end));
-        self.done.store(true, Ordering::Relaxed);
-        self.ctx.request_repaint();
-    }
-
-    fn failed(&self, request: &serde_json::Value, error: &str) {
-        warn(&format!("import: {error}"));
-        let _ = self
-            .lines
-            .send((request.clone(), serde_json::json!({ "failed": error })));
-        self.done.store(true, Ordering::Relaxed);
-        self.ctx.request_repaint();
-    }
-}
-
 /// The library operations as commands (see `helios_library`): an import
 /// runs as a job on the shell's jobs (`job.*`, in the jobs centre, where
 /// it is cancelled), the library filled again when it ends, its
@@ -538,6 +490,37 @@ fn library_commands(
     // Duplicates panel, so a duplicate kept is imported again the same
     // way; the Log panel), then the import's end.
     let lines = shell.import_sink();
+    // Every import's end, whichever path ran it, is said once
+    // (`helios_gui::import_end`): the cameras' default looks put on its
+    // raws first, then the listeners of `import.ended` in their order.
+    {
+        let library = library.clone();
+        shell.set_import_ends(
+            Some(Arc::new(move |changes| {
+                library
+                    .camera_looks_on_import(changes, seconds())
+                    .map_err(|m| m.english)
+            })),
+            ctx.clone(),
+        );
+    }
+    let ends = shell.import_ends();
+    {
+        // The strategy's "after each import", run by the node.
+        let backed = after_import.clone();
+        shell.listen_import_ended_by(helios_gui::import_end::BACKUPS, move |end| {
+            if let (Some(backups), Ok(report)) = (&backed, &end.outcome) {
+                backups.start(
+                    helios_storage::strategy::Trigger::OnImport,
+                    Some(report.clone()),
+                );
+            }
+        })?;
+        let refill = done.clone();
+        shell.listen_import_ended_by(helios_gui::import_end::REFILL, move |_| {
+            refill.store(true, Ordering::Relaxed);
+        })?;
+    }
     // Each import that changed the library is one undo step of its own
     // scope; undo and redo move the vault's rows, never a file, then the
     // Library is filled again.
@@ -572,9 +555,7 @@ fn library_commands(
         shell.merge_duplicate_accounts(&move |from, to| library.merge_sources(from, to));
     }
     {
-        let (library, jobs, done, ctx) = (library.clone(), jobs.clone(), done.clone(), ctx.clone());
-        let history = history.clone();
-        let backed = after_import.clone();
+        let (library, jobs) = (library.clone(), jobs.clone());
         shell.set_import_remote(Arc::new(move |job, mut emit| {
             let mut options = helios_gui::importers::options(&job.args)?;
             // A pick is the person's, in the import window, unless the
@@ -598,20 +579,8 @@ fn library_commands(
                 items: job.items,
                 new_only: false,
             };
-            let mut report =
-                library.import_remote(&jobs, &remote, &options, seconds(), &mut emit)?;
-            let label = helios_gui::library_history::import_label(report.added + report.located);
-            history.record(label, std::mem::take(&mut report.changes), seconds_f64());
-            // The strategy's "after each import", run by the node.
-            if let Some(backups) = &backed {
-                backups.start(
-                    helios_storage::strategy::Trigger::OnImport,
-                    Some(report.clone()),
-                );
-            }
-            done.store(true, Ordering::Relaxed);
-            ctx.request_repaint();
-            Ok(json!(report))
+            // Its end is said by the window, once for all its batches.
+            library.import_remote(&jobs, &remote, &options, seconds(), &mut emit)
         }));
     }
     {
@@ -630,13 +599,9 @@ fn library_commands(
     // each, for its undo step, its panels and the backups after it, and
     // follows the promises in its status bar.
     if let Some(watch) = import_watch {
-        let heard: Arc<dyn helios_node_core::import_promise::ImportWatch> = Arc::new(ImportHeard {
-            lines: lines.clone(),
-            history: history.clone(),
-            backups: after_import.clone(),
-            done: done.clone(),
-            ctx: ctx.clone(),
-        });
+        let heard: Arc<dyn helios_node_core::import_promise::ImportWatch> = Arc::new(
+            helios_gui::import_end::NodeWatch::new(lines.clone(), ends.clone()),
+        );
         *watch
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(heard);
@@ -670,16 +635,8 @@ fn library_commands(
             if sources.is_empty() && through.is_none() {
                 return Err("`path` is missing".into());
             }
-            let (library, jobs, done, ctx) =
-                (library.clone(), jobs.clone(), done.clone(), ctx.clone());
-            let (lines, asked, history) = (lines.clone(), args.clone(), history.clone());
-            let backed = after_import.clone();
-            // The import window's "Apply the camera's default look", on
-            // unless said otherwise.
-            let camera_look = args
-                .get("camera_look")
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
+            let (library, jobs, ends) = (library.clone(), jobs.clone(), ends.clone());
+            let (lines, asked) = (lines.clone(), args.clone());
             std::thread::spawn(move || {
                 // The job's events say how it went; the lines feed the
                 // Duplicates panel.
@@ -696,43 +653,13 @@ fn library_commands(
                     }
                     None => library.import(&jobs, &sources, &options, seconds(), &mut emit),
                 };
-                let end = match ended {
-                    Ok(mut report) => {
-                        // The cameras' default looks on the raws brought
-                        // in, inside the import's own step.
-                        let looks = if camera_look {
-                            library
-                                .camera_looks_on_import(&mut report.changes, seconds())
-                                .unwrap_or_else(|m| {
-                                warn(&format!("import: camera look: {}", m.english));
-                                0
-                            })
-                        } else {
-                            0
-                        };
-                        let label = helios_gui::library_history::import_label(
-                            report.added + report.located,
-                        );
-                        let changes = std::mem::take(&mut report.changes);
-                        history.record(label, changes, seconds_f64());
-                        // The strategy's "after each import", run by the
-                        // node.
-                        if let Some(backups) = &backed {
-                            backups.start(
-                                helios_storage::strategy::Trigger::OnImport,
-                                Some(report.clone()),
-                            );
-                        }
-                        json!({ "ended": report, "camera_looks": looks })
-                    }
-                    Err(e) => {
-                        warn(&format!("import: {e}"));
-                        json!({ "failed": e })
-                    }
-                };
-                let _ = lines.send((asked.clone(), end));
-                done.store(true, Ordering::Relaxed);
-                ctx.request_repaint();
+                // The cameras' default looks (the import window's "Apply
+                // the camera's default look", on unless `camera_look` is
+                // false) and the rest of its end: `import.ended`.
+                match ended {
+                    Ok(report) => ends.ended(&asked, report, None),
+                    Err(e) => ends.failed(&asked, &e),
+                }
             });
             Ok(json!({ "queued": true }))
         },

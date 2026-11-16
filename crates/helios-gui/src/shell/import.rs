@@ -38,6 +38,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use crate::dialogs::{Field, Form, Level, Notice};
+use crate::import_end::{self, CameraLooks, ImportEnd, Publisher, Reactions};
 
 /// The paths of an import's arguments: `path`, or `paths`.
 fn paths_of(args: &Value) -> Vec<PathBuf> {
@@ -464,21 +465,20 @@ impl Shell {
         Ok(json!({ "promise": promise }))
     }
 
-    /// Takes in the lines imports sent: duplicates to their panel, the
-    /// darktable edits not kept whole to the Log panel, each import's end
-    /// said. How many duplicates now wait for an answer among them.
+    /// Takes in the lines imports sent (duplicates to their panel, the
+    /// darktable edits not kept whole to the Log panel) and their ends,
+    /// each passed through its point ([`Shell::import_end_heard`]).
+    /// How many duplicates now wait for an answer among them.
     pub(super) fn receive_imports(&mut self) -> usize {
+        // The ends first: each was said after its import's lines, which
+        // are thus all there to take below, before it is heard.
+        let ends: Vec<ImportEnd> = self.core.import_ends.1.try_iter().collect();
         let mut asked = self.core.duplicates.borrow_mut().receive();
         while let Ok((import, line)) = self.core.import_lines.1.try_recv() {
-            if line.get("ended").is_some() || line.get("failed").is_some() {
-                // The import the user started: its session shown in the
-                // Library, the photos it brought selected once it shows
-                // them (unless the user turned it off). Never another's.
-                let ids = std::mem::take(&mut self.focus.imported_ids);
-                if self.import_session_ended(&import, &line) && !ids.is_empty() {
-                    self.focus.select_imported = ids;
-                }
-                self.import_ended(&line);
+            // An end said as a line (a host running an import by hand):
+            // heard as every end is.
+            if let Some(end) = ImportEnd::of_line(&import, &line) {
+                asked += self.import_end_heard(end);
                 continue;
             }
             if let Some(id) = line["id"].as_str()
@@ -501,6 +501,149 @@ impl Shell {
             }
             self.log_edits(&line);
         }
+        for end in ends {
+            asked += self.import_end_heard(end);
+        }
+        asked
+    }
+
+    /// Where every import's end is said, from any thread
+    /// ([`crate::import_end::Publisher`]): the cameras' looks and the
+    /// window woken as [`Shell::set_import_ends`] set them.
+    pub fn import_ends(&self) -> Publisher {
+        self.core.import_ends.0.clone()
+    }
+
+    /// The cameras' default looks put on the raws of every import that
+    /// ends (`looks`), and `ctx` woken once one ends.
+    pub fn set_import_ends(&mut self, looks: Option<CameraLooks>, ctx: Egui) {
+        let mut ends = self.core.import_ends.0.clone().waking(ctx);
+        if let Some(looks) = looks {
+            ends = ends.camera_looks(looks);
+        }
+        self.core.import_ends.0 = ends;
+    }
+
+    /// Registers the host's listener `id` of [`ImportEnded`](crate::import_end::ImportEnded) (one of
+    /// [`crate::import_end::ORDER`]'s, such as `backups.on-import` or
+    /// `library.refill`), run on the interface's thread in its declared
+    /// place.
+    ///
+    /// # Errors
+    /// `id` is not a declared listener, or the bus refused it.
+    pub fn listen_import_ended_by(
+        &self,
+        id: &'static str,
+        run: impl Fn(&ImportEnd) + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        import_end::listen(&*self.core.app.handle().bus(), id, move |end, _| run(end))
+    }
+
+    /// The order the import points' listeners run in (`import.ended`,
+    /// then `import.failed`).
+    pub fn import_end_order(&self) -> String {
+        import_end::order(&*self.core.app.handle().bus())
+    }
+
+    /// The shell's listeners of the import's points: the undo step recorded
+    /// here; the others run by [`Shell::import_end_heard`], in the order
+    /// they ran.
+    pub(super) fn listen_import_ended(&mut self) {
+        let bus = self.core.app.handle().bus();
+        let history = self.library_history();
+        let mut listened = vec![import_end::listen(
+            &*bus,
+            import_end::HISTORY,
+            move |end, r| {
+                if let (Some(changes), Ok(report)) = (r.changes.take(), &end.outcome) {
+                    let label = crate::library_history::import_label(report.added + report.located);
+                    let at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0.0, |d| d.as_secs_f64());
+                    history.record(label, changes, at);
+                }
+            },
+        )];
+        for id in [
+            import_end::CARDS,
+            import_end::DUPLICATES,
+            import_end::LOG,
+            import_end::TOAST,
+            import_end::SESSION,
+            import_end::WINDOW_HISTORY,
+            import_end::SELECT,
+        ] {
+            listened.push(import_end::listen(&*bus, id, |_, _| {}));
+        }
+        for e in listened.into_iter().filter_map(Result::err) {
+            self.notes.push(format!("{}: {e}", import_end::ENDED));
+        }
+    }
+
+    /// An import's end, passed through its point (`import.ended`, or
+    /// `import.failed`): each listener's part done in the order they
+    /// ran, then the point's name said on the journal with who asked,
+    /// the report, the cameras' looks and the listeners that ran (`ran`).
+    /// How many duplicates now wait for an answer.
+    pub(super) fn import_end_heard(&mut self, mut end: ImportEnd) -> usize {
+        let changes = end
+            .outcome
+            .as_mut()
+            .ok()
+            .map(|r| std::mem::take(&mut r.changes));
+        let (line, request) = (end.line(), end.request.clone());
+        let (said, mut data) = match &end.outcome {
+            Ok(report) => (
+                import_end::ENDED,
+                json!({
+                    "origin": end.origin,
+                    "report": report,
+                    "camera_looks": end.camera_looks,
+                }),
+            ),
+            Err(e) => (
+                import_end::FAILED,
+                json!({ "origin": end.origin, "error": e }),
+            ),
+        };
+        let handle = self.core.app.handle().clone();
+        let point = end.point();
+        let altered = import_end::pass(
+            &*handle.bus(),
+            end,
+            Reactions {
+                ran: Vec::new(),
+                changes,
+            },
+        );
+        for failure in &altered.failures {
+            log::warn!(target: "helios", "{point}: {failure}");
+        }
+        let ids = std::mem::take(&mut self.focus.imported_ids);
+        let (mut asked, mut select) = (0, false);
+        for id in &altered.value.ran {
+            match id.as_str() {
+                import_end::CARDS => {
+                    if let Some(report) = line.get("ended") {
+                        self.wait_for_backups(report);
+                    }
+                }
+                import_end::DUPLICATES => asked += self.core.duplicates.borrow_mut().receive(),
+                import_end::LOG => self.log_import_end(&line),
+                import_end::TOAST => self.toast_import_end(&line),
+                import_end::SESSION => select = self.import_session_ended(&request, &line),
+                import_end::WINDOW_HISTORY => self.import_window_history_again(),
+                // The user's import: its photos selected once the Library
+                // shows them (unless the user turned it off).
+                import_end::SELECT if select && !ids.is_empty() => {
+                    self.focus.select_imported.clone_from(&ids);
+                }
+                _ => {}
+            }
+        }
+        // Which listeners ran, in their order: for agents and tests.
+        data["ran"] = json!(altered.value.ran);
+        handle.publish("helios", None, said, data);
         asked
     }
 
@@ -607,21 +750,16 @@ impl Shell {
         }
     }
 
-    /// An import ended: a short toast, and its outcome in the Log panel.
-    fn import_ended(&mut self, line: &Value) {
+    /// What an import's end says (its end line): the Log panel's entries
+    /// before its own, its own message with its level, and whether it
+    /// takes the short success toast (else a notice of its level).
+    fn import_end_said(line: &Value) -> (Vec<(Level, Message)>, Level, Message, bool) {
         if let Some(e) = line["failed"].as_str() {
             let message =
                 Message::new("gui-import-failed", "The import failed: { $error }").with("error", e);
-            self.core
-                .log
-                .borrow_mut()
-                .push(Level::Error, message.clone());
-            self.notify_unlogged(Level::Error, message);
-            return;
+            return (Vec::new(), Level::Error, message, false);
         }
         let report = &line["ended"];
-        // Its cards short of their backups wait for a backup job.
-        self.wait_for_backups(report);
         let count = |k: &str| report[k].as_u64().unwrap_or(0);
         // A RAW+JPEG pair is one photo: its JPEG, added, is its raw's file.
         let photos = (count("added") + count("located")).saturating_sub(count("paired"));
@@ -631,22 +769,18 @@ impl Shell {
                 "The import was cancelled: { $photos } photos imported",
             )
             .with("photos", photos);
-            self.core
-                .log
-                .borrow_mut()
-                .push(Level::Info, message.clone());
-            self.notify_unlogged(Level::Info, message);
-            return;
+            return (Vec::new(), Level::Info, message, false);
         }
+        let mut before = Vec::new();
         if count("metadata") > 0 {
-            self.core.log.borrow_mut().push(
+            before.push((
                 Level::Info,
                 Message::new(
                     "gui-import-metadata",
                     "{ $photos } photos took their ratings, labels or tags from the importer",
                 )
                 .with("photos", count("metadata")),
-            );
+            ));
         }
         let (edits, reported) = (
             count("edits"),
@@ -673,8 +807,25 @@ impl Shell {
         } else {
             Level::Info
         };
-        self.core.log.borrow_mut().push(level, message.clone());
-        if level == Level::Warning {
+        (before, level, message, level == Level::Info)
+    }
+
+    /// `log.import`: an import's outcome in the Log panel.
+    fn log_import_end(&mut self, line: &Value) {
+        let (before, level, message, _) = Self::import_end_said(line);
+        let mut log = self.core.log.borrow_mut();
+        for (level, message) in before {
+            log.push(level, message);
+        }
+        log.push(level, message);
+    }
+
+    /// `import.toast`: an import's outcome in a short toast (a notice of
+    /// its level when it failed, was cancelled or reports edits not kept
+    /// whole).
+    fn toast_import_end(&mut self, line: &Value) {
+        let (_, level, message, plain) = Self::import_end_said(line);
+        if !plain {
             self.notify_unlogged(level, message);
             return;
         }

@@ -82,9 +82,13 @@ fn world(
             for id in &ids {
                 emit(&json!({ "item": id, "status": "added" }));
             }
-            let added = ids.len();
+            let added = ids.len() as u64;
             seen.lock().unwrap().push((job.source.label.clone(), ids));
-            Ok(json!({ "added": added, "files": added }))
+            Ok(helios_library::import::Report {
+                added,
+                files: added,
+                ..Default::default()
+            })
         },
     ));
     // The first photo of the first album is in the Library already.
