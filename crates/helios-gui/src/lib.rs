@@ -72,6 +72,7 @@ pub mod report;
 pub mod rule_editor;
 pub mod rule_editor_ui;
 pub mod scopes;
+pub mod settings_changed;
 pub mod shell;
 pub mod smart_album;
 pub mod snapshot;
