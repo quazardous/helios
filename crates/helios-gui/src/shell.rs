@@ -694,7 +694,7 @@ pub fn open_window(
 ) -> eframe::Result {
     place_main_window(&mut options, ui_settings);
     egui_pop::api::windows::present_mode(&mut options);
-    eframe::run_native(
+    crate::event_loop::run(
         title,
         options,
         Box::new(move |cc| {
@@ -715,6 +715,14 @@ pub fn place_main_window(options: &mut eframe::NativeOptions, ui_settings: Optio
     if let Some(dir) = ui_settings {
         egui_pop::api::window::restore(dir, options);
     }
+    let previous = options.window_builder.take();
+    options.window_builder = Some(Box::new(move |vb| {
+        let vb = match previous {
+            Some(hook) => hook(vb),
+            None => vb,
+        };
+        egui_pop::api::window::repair_builder(vb)
+    }));
 }
 
 /// The Settings window's id (egui-pop's Settings app in its window mode):

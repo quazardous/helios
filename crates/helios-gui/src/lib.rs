@@ -21,6 +21,7 @@ pub mod edit_marks;
 pub mod edit_snapshots;
 pub mod ending;
 pub mod engine_source;
+pub mod event_loop;
 pub mod export;
 pub mod graph;
 pub mod head_render;
