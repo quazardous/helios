@@ -132,6 +132,15 @@ pub(super) struct Focus {
     pub(super) subworkspaces_seen: (bool, Option<u64>),
     /// Helios's status bar items, published when what they say changes.
     pub(super) status_items: crate::status_items::Items,
+    /// What the open photo's edit changed from its defaults, as last
+    /// passed through `edit.changed` (`crate::edit_marks`): the Modules
+    /// and Parameters panels and the status bar show it.
+    pub(super) edit_marks: Rc<RefCell<crate::edit_marks::Marks>>,
+    /// The value store's write sequence and history revision the marks
+    /// were read at.
+    pub(super) edit_rev: Option<(u64, u64)>,
+    /// The bus `edit.changed`'s listeners are registered on.
+    pub(super) edit_listening: Option<Arc<dyn egui_pop::api::bus::bus_contract::Bus>>,
     /// The palettes a new layout gathered at the workbench's end edge
     /// (their group's first panel), moved off the end side bar once the
     /// areas are drawn ([`super::Shell::place_palettes`]).
@@ -205,6 +214,9 @@ impl Focus {
             subworkspaces: seed.subworkspaces,
             subworkspaces_seen: (false, None),
             status_items: crate::status_items::Items::default(),
+            edit_marks: Rc::default(),
+            edit_rev: None,
+            edit_listening: None,
             palettes_to_place: None,
             workshop_aims: workshop_edit::Aims::new(),
             workshops: Rc::default(),

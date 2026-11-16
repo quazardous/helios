@@ -21,6 +21,9 @@ command-dialog-assumeYes =
 command-dialog-current =
     .title = Décrire le dialogue qui attend une réponse
 
+command-edit-resetAll =
+    .title = Tout réinitialiser : les paramètres de chaque module à leurs valeurs par défaut et les modules contournés rétablis, la photo telle qu’avant sa modification ; une seule étape d’annulation
+
 command-gui-record-start =
     .title = Commencer l’enregistrement d’une vidéo
 
@@ -306,6 +309,9 @@ command-network-remove =
 
 command-node-bypass =
     .title = Contourner un module ou le rétablir (`node` : le module sélectionné par défaut ; `on` : alterné par défaut)
+
+command-node-reset =
+    .title = Réinitialiser les paramètres d’un module à leurs valeurs par défaut, son contournement gardé (`node` : le module sélectionné par défaut) ; une seule étape d’annulation
 
 command-notice-details =
     .title = Montrer les détails d’un échec (`notice` : son indice ; le dernier échec par défaut)

@@ -64,6 +64,9 @@ command-dialog-assumeYes =
 command-dialog-current =
     .title = Describe the dialog waiting for an answer
 
+command-edit-resetAll =
+    .title = Reset all: every module's parameters to their defaults and the modules bypassed brought back, the photo as it was before it was edited; one undo step
+
 command-gui-record-start =
     .title = Start recording a video
 
@@ -588,6 +591,9 @@ command-network-remove =
 
 command-node-bypass =
     .title = Bypass a module or bring it back (`node`: the selected one by default; `on`: toggled by default)
+
+command-node-reset =
+    .title = Reset a module's parameters to their defaults, its bypass kept (`node`: the selected one by default); one undo step
 
 command-notice-details =
     .title = Show a failure's details (`notice`: its index; the last failure by default)

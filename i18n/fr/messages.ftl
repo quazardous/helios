@@ -903,6 +903,8 @@ gui-modules-bypass = Contourner
 
 gui-modules-bypass-hint = Contourner { $node } : l’image est rendue comme s’il était absent, ses paramètres gardés ({ $key })
 
+gui-modules-changed = { $node } n’est plus à ses valeurs par défaut
+
 gui-modules-none = Aucun module : ouvrez une image pour voir les modules de son réseau
 
 gui-modules-none-in-scope = Aucun module du sous-espace de travail { $name } dans le réseau de l’image
@@ -938,6 +940,8 @@ gui-open-workspace-title = Ouvrir un espace de travail
 gui-open-workspace-verb = Ouvrir
 
 gui-opening = ouverture de { $path }
+
+gui-param-module-reset = Réinitialiser
 
 gui-params-fold-section = Replier { $group }
 
@@ -1069,6 +1073,14 @@ gui-status-decisions = { $count ->
 
 gui-status-decisions-show = Afficher les décisions
 
+gui-status-edit-compare = Avant et après
+
+gui-status-edit-reset-all = Tout réinitialiser
+
+gui-status-edited = Modifiée
+
+gui-status-edited-detail = Cette photo est modifiée : ses modules ne sont plus à leurs valeurs par défaut
+
 gui-status-history = Historique
 
 gui-status-history-detail = { $count ->
@@ -1084,6 +1096,10 @@ gui-status-images = { $count ->
     [one] { $count } image
    *[other] { $count } images
 }
+
+gui-status-original = Originale
+
+gui-status-original-detail = Cette photo est telle qu’elle est arrivée : aucun module n’a changé
 
 gui-status-zoom = Zoom
 
