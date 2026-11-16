@@ -145,3 +145,53 @@ fn the_render_cache_setting_reaches_the_desktop_engine() {
     caches::apply_settings(&shell, &settings);
     assert_eq!(shell.viewport().engine().budget(), None);
 }
+
+/// The render cache's budget changed in the Settings app reaches the
+/// desktop's engine and the cache service in the pass it is changed, not
+/// at the next start.
+#[test]
+fn a_budget_changed_in_the_settings_app_reaches_the_engine_in_the_same_pass() {
+    use egui_pop::api::admin::ADMIN;
+    use egui_pop::api::admin::model::ValueScope;
+    use egui_pop::model::ids::SettingId;
+    use helios_gui::config::{Settings, Sources};
+    let dir = std::env::temp_dir().join(format!("helios-caches-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let shell = Shell::new(helios_panels(), None);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let settings = Settings::resolve(&Sources {
+        global: Some("[system.cache]\nbudget = 512\n".into()),
+        ..Sources::default()
+    });
+    let app = h.state().app().handle().clone();
+    // As the desktop starts: the settings to the Settings app, the
+    // budget applied.
+    config::install(&app, settings.clone(), None, &dir);
+    caches::apply_settings(h.state(), &settings);
+    h.run();
+    assert_eq!(h.state().viewport().engine().budget(), Some(512 << 20));
+
+    // The person sets 256 MiB in Settings > Storage > Caches.
+    let admin = app.service(&ADMIN).unwrap();
+    admin
+        .set_in(
+            &app,
+            ValueScope::App,
+            &SettingId::new("system.cache.budget").unwrap(),
+            json!(256),
+        )
+        .unwrap();
+    h.step();
+    assert_eq!(
+        h.state().viewport().engine().budget(),
+        Some(256 << 20),
+        "the engine follows the budget in the pass it changed"
+    );
+    assert_eq!(
+        helios_cache::Service::global().budget(helios_cache::Tier::Ram),
+        Some(256 << 20)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

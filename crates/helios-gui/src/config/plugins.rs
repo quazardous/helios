@@ -423,12 +423,10 @@ struct Inner {
     refused: Mutex<BTreeMap<ValueScope, Vec<String>>>,
     /// One write at a time.
     writing: Mutex<()>,
-    /// Told the plugins whose values a save or another client changed.
-    changed: Mutex<Option<Changed>>,
+    /// The values the bus said changed (`settings.changed`), by setting
+    /// id: what a plugin is handed before its save reaches the file.
+    heard: Mutex<Values>,
 }
-
-/// Told a plugin's id when its values change.
-pub type Changed = Arc<dyn Fn(&str) + Send + Sync>;
 
 impl std::fmt::Debug for PluginSettingsStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -478,11 +476,9 @@ impl PluginSettingsStore {
                 library: Mutex::new(Values::new()),
                 refused: Mutex::new(BTreeMap::new()),
                 writing: Mutex::new(()),
-                changed: Mutex::new(None),
+                heard: Mutex::new(Values::new()),
             }),
         };
-        let me = store.clone();
-        helios.also_follow(Arc::new(move |name: &str| me.layer_changed(name)));
         if let Ok(values) = store.read_library() {
             *lock(&store.inner.library) = values;
         }
@@ -519,26 +515,59 @@ impl PluginSettingsStore {
                 Err(e) => log::warn!("plugin `{plugin}`: secret `{name}` not read: {e}"),
             }
         }
+        // What the bus said changed, ahead of its save (a secret kept as
+        // it is stays the keyring's).
+        for (id, v) in lock(&self.inner.heard).iter() {
+            if let Some(name) = id.strip_prefix(&prefix)
+                && p.contract.get(name).is_some()
+                && v.as_str() != Some(SECRET_SET)
+            {
+                out.insert(name.to_string(), v.clone());
+            }
+        }
         out
     }
 
-    /// Who is told which plugins' values changed (the broker, through
-    /// [`connect`]).
-    pub fn on_changed(&self, changed: Changed) {
-        *lock(&self.inner.changed) = Some(changed);
+    /// The plugin a setting belongs to, by setting id.
+    pub fn plugin_of(&self, setting: &str) -> Option<String> {
+        let (i, _) = self.inner.keys.get(setting)?;
+        Some(self.inner.plugins[*i].id.clone())
     }
 
-    /// Tells the plugins `ids` (setting ids) belong to that they moved.
-    fn tell<'a>(&self, ids: impl Iterator<Item = &'a String>) {
-        let Some(changed) = lock(&self.inner.changed).clone() else {
-            return;
-        };
-        let plugins: std::collections::BTreeSet<&str> = ids
-            .filter_map(|id| self.inner.keys.get(id))
-            .map(|(i, _)| self.inner.plugins[*i].id.as_str())
-            .collect();
-        for p in plugins {
-            changed(p);
+    /// A plugin setting's value as the bus said it changed (`None`: no
+    /// value, its default): handed to the plugin from now on.
+    pub fn heard(&self, setting: &str, value: Option<Json>) {
+        let mut heard = lock(&self.inner.heard);
+        match value {
+            Some(v) => {
+                heard.insert(setting.to_string(), v);
+            }
+            None => {
+                heard.remove(setting);
+            }
+        }
+    }
+
+    /// Follows the node's bus (`heard`, from `Bus::subscribe`): the open
+    /// library's layer said changed is read again, and what moved told to
+    /// the Settings app, whose `settings.changed` hands it to the plugin.
+    /// Ends with the bus.
+    pub fn follow(&self, heard: std::sync::mpsc::Receiver<helios_core::Envelope>) {
+        let me = self.clone();
+        let picked = std::thread::Builder::new()
+            .name("helios-plugin-settings-follow".into())
+            .spawn(move || {
+                let kind = <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND;
+                while let Ok(e) = heard.recv() {
+                    if e.kind == kind
+                        && let Some(name) = e.payload["layer"].as_str()
+                    {
+                        me.layer_changed(name);
+                    }
+                }
+            });
+        if let Err(e) = picked {
+            log::warn!("plugin settings: the node's layers are not followed: {e}");
         }
     }
 
@@ -798,7 +827,6 @@ impl PluginSettingsStore {
         if changes.is_empty() {
             return;
         }
-        self.tell(changes.keys());
         let watcher = lock(&self.inner.watchers).get(&LIBRARY.scope).cloned();
         if let Some(w) = watcher {
             w(LIBRARY.scope, changes);
@@ -807,20 +835,29 @@ impl PluginSettingsStore {
 }
 
 /// Hands `broker` the plugins' values from `store` as each plugin starts,
-/// and tells it when they change, so it hands the running plugin its new
-/// values or restarts it (`helios_plugin::Broker::settings_changed`).
-pub fn connect(store: &PluginSettingsStore, broker: &Arc<helios_plugin::Broker>) {
+/// and, as `plugins.values` on `bus`, tells it when they change
+/// (`settings.changed`), so it hands the running plugin its new values or
+/// restarts it (`helios_plugin::Broker::settings_changed`).
+pub fn connect(
+    store: &PluginSettingsStore,
+    broker: &Arc<helios_plugin::Broker>,
+    bus: &dyn egui_pop::api::bus::bus_contract::Bus,
+) {
     let values = store.clone();
     broker.on_values(move |id| values.values(id));
-    // The broker holds the store: the store holds it back weakly.
+    // The broker holds the store: the listener holds it weakly.
     let weak = Arc::downgrade(broker);
-    store.on_changed(Arc::new(move |id: &str| {
-        let Some(broker) = weak.upgrade() else { return };
-        match broker.settings_changed(id) {
-            Ok(told) => log::debug!("plugin `{id}`'s settings changed: {told:?}"),
-            Err(e) => log::warn!("{e}"),
-        }
-    }));
+    crate::settings_changed::listen_plugins(
+        bus,
+        store.clone(),
+        Arc::new(move |id: &str| {
+            let Some(broker) = weak.upgrade() else { return };
+            match broker.settings_changed(id) {
+                Ok(told) => log::debug!("plugin `{id}`'s settings changed: {told:?}"),
+                Err(e) => log::warn!("{e}"),
+            }
+        }),
+    );
 }
 
 impl SettingsStore for PluginSettingsStore {
@@ -850,19 +887,14 @@ impl SettingsStore for PluginSettingsStore {
     }
 
     fn save(&self, scope: ValueScope, changes: &Changes) -> Result<(), String> {
-        let saved = {
-            let _one = lock(&self.inner.writing);
-            if scope == ValueScope::App {
-                self.save_app(changes)
-            } else if scope == LIBRARY.scope {
-                self.save_library(changes)
-            } else {
-                return Err(format!("plugins keep no {} settings", scope.name()));
-            }
-        };
-        // What was kept of a partly refused save moved too.
-        self.tell(changes.keys());
-        saved
+        let _one = lock(&self.inner.writing);
+        if scope == ValueScope::App {
+            self.save_app(changes)
+        } else if scope == LIBRARY.scope {
+            self.save_library(changes)
+        } else {
+            Err(format!("plugins keep no {} settings", scope.name()))
+        }
     }
 
     fn watch(&self, scope: ValueScope, on_change: OnChange) -> Result<(), String> {
@@ -1128,16 +1160,11 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_s_values_are_the_library_s_over_the_app_s_with_its_secret_and_each_save_is_told() {
+    fn a_plugin_s_values_are_the_library_s_over_the_app_s_with_its_secret_and_what_the_bus_said() {
         let dir = temp("values");
         let layers = Arc::new(Layers::default());
         let secrets = Arc::new(MemorySecrets::default());
         let (_node, s) = store(&dir, &layers, &secrets);
-        let told: Arc<Mutex<Vec<String>>> = Arc::default();
-        {
-            let told = told.clone();
-            s.on_changed(Arc::new(move |id: &str| lock(&told).push(id.to_string())));
-        }
         let set = |pairs: &[(&str, Json)]| -> Changes {
             pairs
                 .iter()
@@ -1155,7 +1182,6 @@ mod tests {
         .unwrap();
         s.save(LIBRARY.scope, &set(&[("quality", json!(80))]))
             .unwrap();
-        assert_eq!(*lock(&told), [ID, ID], "each save is told");
         assert_eq!(
             Json::Object(s.values(ID)),
             json!({"quality": 80, "mode": "best", "token": "hunter2-secret"})
@@ -1167,6 +1193,14 @@ mod tests {
         assert!(e.contains("500 is above 100"), "{e}");
         assert_eq!(s.values(ID)["quality"], 80);
         assert!(s.values("org.example.none").is_empty());
+        // Said changed on the bus: handed before its save lands; a secret
+        // kept as it is stays the keyring's.
+        assert_eq!(s.plugin_of(&format!("{ID}.quality")).as_deref(), Some(ID));
+        assert_eq!(s.plugin_of("system.cache.budget"), None);
+        s.heard(&format!("{ID}.quality"), Some(json!(30)));
+        s.heard(&format!("{ID}.token"), Some(json!(SECRET_SET)));
+        assert_eq!(s.values(ID)["quality"], 30);
+        assert_eq!(s.values(ID)["token"], "hunter2-secret");
     }
 
     #[test]

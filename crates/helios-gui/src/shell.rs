@@ -787,6 +787,8 @@ pub struct Shell {
     toasts_in: Option<egui::ViewportId>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
+    /// The library's thumbnail cache, once opened, for `thumbs.budget`.
+    thumb_cache: crate::settings_changed::ThumbCacheSlot,
 }
 
 impl Shell {
@@ -1188,6 +1190,7 @@ impl Shell {
             window_asks: None,
             toasts_in: None,
             notes: Vec::new(),
+            thumb_cache: Rc::default(),
         };
         shell.restore_focus_windows();
         // What the desktop does once an import ends, in order.
@@ -1196,6 +1199,8 @@ impl Shell {
         shell.listen_library_filled();
         // Files dropped on any window open the import window on them.
         shell.listen_files_dropped();
+        // What follows a setting changed: the caches' budgets.
+        shell.listen_settings_changed();
         // Each focus window and the import window close their state with
         // their window's `window.close`, in the same pass.
         shell.listen_window_closes();
@@ -1767,6 +1772,25 @@ impl Shell {
     }
 
     /// The library's state, to show what it holds.
+    /// Registers Helios's listeners of `settings.changed` on the
+    /// application's bus: `caches.budget` and `thumbs.budget`
+    /// ([`crate::settings_changed`]).
+    fn listen_settings_changed(&self) {
+        let bus = self.core.app.handle().bus();
+        crate::settings_changed::listen_caches(&*bus, self.core.engine.clone());
+        crate::settings_changed::listen_thumbs(
+            &*bus,
+            self.focus.library.clone(),
+            self.thumb_cache.clone(),
+        );
+    }
+
+    /// The library's thumbnail cache, once opened: its limit follows
+    /// `system.cache.thumbnails` from now on.
+    pub fn set_thumb_cache(&self, cache: Arc<helios_thumbs::ThumbCache>) {
+        *self.thumb_cache.borrow_mut() = Some(cache);
+    }
+
     pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
         self.focus.library.borrow_mut()
     }

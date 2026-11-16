@@ -1694,7 +1694,20 @@ pub fn connect_plugins(app: &AppHandle, broker: &Arc<helios_plugin::Broker>) {
     };
     let store = lock(&bridge.state).plugins.clone();
     if let Some(store) = store {
-        plugins::connect(&store, broker);
+        plugins::connect(&store, broker, &*app.bus());
+    }
+}
+
+/// Follows the node's bus for the plugins' library values (`heard`,
+/// from `Bus::subscribe`): another client's change reaches the Settings
+/// app, and the plugin through `settings.changed`.
+pub fn follow_plugins(app: &AppHandle, heard: std::sync::mpsc::Receiver<helios_core::Envelope>) {
+    let Some(bridge) = app.service(&BRIDGE) else {
+        return;
+    };
+    let store = lock(&bridge.state).plugins.clone();
+    if let Some(store) = store {
+        store.follow(heard);
     }
 }
 
