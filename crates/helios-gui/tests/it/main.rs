@@ -110,6 +110,7 @@ mod thumb_budget;
 mod thumbnails;
 mod tips;
 mod viewport;
+mod window_close;
 mod window_commands;
 mod workshop_design;
 mod workshop_run;
