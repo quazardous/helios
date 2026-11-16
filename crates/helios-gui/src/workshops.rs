@@ -17,7 +17,11 @@
 //!   (`shell::workshop_design`); the session's notes and the switch letting
 //!   the agent see a proxy ([`SEND_PROXY`]) live here.
 
-use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::input::Input;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, TextRole, UiPop as _};
+use egui_pop::core::widgets;
+use helios_ui::{Action, Scroll};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
@@ -346,29 +350,32 @@ impl Panel {
             self.seen.follow(&store);
             crate::modules::selected(&store)
         };
-        ui.weak(text(Message::new(
+        ui.muted(text(Message::new(
             "gui-workshops-experimental",
             "Experimental: may change; what it saves stays a macro",
         )));
-        ui.separator();
+        ui.divider();
         let mut run: Option<(&str, serde_json::Value)> = None;
         let mut select: Option<String> = None;
         self.describe_ui(ui, &mut run);
         self.session_ui(ui, &mut run);
         self.review_ui(ui, &mut run);
-        ui.separator();
+        ui.divider();
         let find = ui
             .horizontal(|ui| {
-                let l = ui.label(text(Message::new("gui-workshops-find", "Find")));
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.find)
-                        .hint_text(text(Message::new(
-                            "gui-workshops-find-hint",
-                            "what you want: brighter, less contrast…",
-                        )))
-                        .desired_width(f32::INFINITY),
-                )
-                .labelled_by(l.id)
+                let name = text(Message::new("gui-workshops-find", "Find"));
+                let l = ui.text_role(TextRole::Body, name.clone());
+                let hint = text(Message::new(
+                    "gui-workshops-find-hint",
+                    "what you want: brighter, less contrast…",
+                ));
+                let field = Input::text(&mut self.find, &name)
+                    .placeholder(&hint)
+                    .width(ui.available_width())
+                    .show(ui);
+                // Named by the words beside it, which tests and agents find.
+                let _ = field.response.labelled_by(l.id);
+                field.submitted
             })
             .inner;
         let entries = entries(&self.shipped, &self.library, &self.seen.own);
@@ -391,10 +398,7 @@ impl Panel {
                 })
                 .collect()
         };
-        if find.lost_focus()
-            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-            && let Some((e, _)) = shown.first()
-        {
+        if find && let Some((e, _)) = shown.first() {
             match applied(e) {
                 Some(node) => select = Some(node),
                 None => {
@@ -406,12 +410,12 @@ impl Panel {
             }
         }
         if entries.is_empty() {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-workshops-none",
                 "No workshops in this workspace yet",
             )));
         } else if shown.is_empty() {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-workshops-none-found",
                 "No workshop found for these words",
             )));
@@ -429,36 +433,29 @@ impl Panel {
                 .is_some()
                 .then(|| (node.to_string(), file.clone()))
         });
-        ui.scroll_area(
-            egui::ScrollArea::vertical()
-                .id_salt(PANEL)
-                .auto_shrink([false, true]),
-            |ui| {
-                let mut group = None;
-                for (e, matched) in &shown {
-                    if matched.is_none() && group != Some(e.origin) {
-                        group = Some(e.origin);
-                        ui.add_space(4.0);
-                        ui.strong(text(match e.origin {
-                            Origin::Shipped => {
-                                Message::new("gui-workshops-shipped", "Shipped with Helios")
-                            }
-                            Origin::Library => {
-                                Message::new("gui-workshops-library", "Your library")
-                            }
-                            Origin::Workspace => {
-                                Message::new("gui-workshops-workspace", "This workspace")
-                            }
-                        }));
-                    }
-                    Self::row(ui, e, applied(e), &mut run, &mut select);
+        helios_ui::scroll(ui, PANEL, Scroll::Region, |ui| {
+            let mut group = None;
+            for (e, matched) in &shown {
+                if matched.is_none() && group != Some(e.origin) {
+                    group = Some(e.origin);
+                    ui.space_role(Space::Inline);
+                    ui.section_title(text(match e.origin {
+                        Origin::Shipped => {
+                            Message::new("gui-workshops-shipped", "Shipped with Helios")
+                        }
+                        Origin::Library => Message::new("gui-workshops-library", "Your library"),
+                        Origin::Workspace => {
+                            Message::new("gui-workshops-workspace", "This workspace")
+                        }
+                    }));
                 }
-                if let Some((node, file)) = &applied_now {
-                    ui.separator();
-                    applied_ui(ui, values, params, node, file, &mut run);
-                }
-            },
-        );
+                Self::row(ui, e, applied(e), &mut run, &mut select);
+            }
+            if let Some((node, file)) = &applied_now {
+                ui.divider();
+                applied_ui(ui, values, params, node, file, &mut run);
+            }
+        });
         if let Some((id, args)) = run {
             request(ui.ctx(), Request::Run(id.into(), args, CommandOrigin::User));
         }
@@ -478,10 +475,15 @@ impl Panel {
     fn describe_ui(&mut self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
-        let l = ui.label(text(Message::new(
-            "gui-workshops-describe",
-            "Describe what you want",
-        )));
+        let l = ui.text_role(
+            TextRole::Body,
+            text(Message::new(
+                "gui-workshops-describe",
+                "Describe what you want",
+            )),
+        );
+        // Stopgap: egui-pop's decorated input has no multi-line kind yet,
+        // so the words are egui's text area, the one raw widget left here.
         ui.add(
             egui::TextEdit::multiline(&mut self.describe)
                 .hint_text(text(Message::new(
@@ -494,15 +496,13 @@ impl Panel {
         .labelled_by(l.id);
         ui.horizontal(|ui| {
             let words = self.describe.trim();
+            let design = text(Message::new("gui-workshops-design", "Design a workshop"));
             if ui
-                .add_enabled(
-                    !words.is_empty(),
-                    egui::Button::new(text(Message::new(
-                        "gui-workshops-design",
-                        "Design a workshop",
-                    ))),
-                )
-                .on_hover_text(text(Message::new(
+                .add_enabled_ui(!words.is_empty(), |ui| {
+                    helios_ui::action(ui, Action::Secondary, &design)
+                })
+                .inner
+                .tip(text(Message::new(
                     "gui-workshops-design-hint",
                     "Ask your own agent (over MCP) for a workshop made for these words; Helios checks it on the open image and applies it as one undo step",
                 )))
@@ -511,23 +511,26 @@ impl Panel {
                 *run = Some(("workshop.describe", json!({ "intent": words })));
             }
             if self.design.as_ref().is_some_and(|d| d.waiting)
-                && ui
-                    .small_button(text(Message::new("gui-workshops-design-cancel", "Cancel")))
-                    .clicked()
+                && helios_ui::row_action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-workshops-design-cancel", "Cancel")),
+                )
+                .clicked()
             {
                 *run = Some(("workshop.describe", json!({ "cancel": true })));
             }
         });
         let mut proxy = self.send_proxy;
-        if ui
-            .checkbox(
-                &mut proxy,
-                text(Message::new(
-                    "gui-workshops-send-proxy",
-                    "Let the agent see a small preview of the photo (this session only)",
-                )),
-            )
-            .clicked()
+        if widgets::checkbox(
+            ui,
+            &mut proxy,
+            text(Message::new(
+                "gui-workshops-send-proxy",
+                "Let the agent see a small preview of the photo (this session only)",
+            )),
+        )
+        .clicked()
         {
             *run = Some(("workshop.send_proxy", json!({ "on": proxy })));
         }
@@ -535,19 +538,22 @@ impl Panel {
             return;
         };
         if d.waiting {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-workshops-design-waiting",
                 "Waiting for your agent: it reads helios_workshop_context and posts a draft with helios_workshop_design",
             )));
         }
         if let Some(applied) = &d.applied {
-            ui.label(text(
-                Message::new("gui-workshops-designed", "Designed: { $workshop }")
-                    .with("workshop", applied),
-            ));
+            ui.text_role(
+                TextRole::Body,
+                text(
+                    Message::new("gui-workshops-designed", "Designed: { $workshop }")
+                        .with("workshop", applied),
+                ),
+            );
         }
         for note in &d.notes {
-            ui.weak(note);
+            ui.muted(note.clone());
         }
     }
 
@@ -560,7 +566,7 @@ impl Panel {
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
         ui.horizontal(|ui| {
-            ui.weak(text(
+            ui.muted(text(
                 Message::new(
                     "gui-workshops-session",
                     "Session recorded: { $steps } steps",
@@ -568,10 +574,13 @@ impl Panel {
                 .with("steps", p.record.steps.len()),
             ));
             if p.record.kept {
-                ui.weak(text(Message::new("gui-workshops-session-kept", "Kept")));
-            } else if ui
-                .small_button(text(Message::new("gui-workshops-session-keep", "Keep")))
-                .on_hover_text(text(Message::new(
+                ui.muted(text(Message::new("gui-workshops-session-kept", "Kept")));
+            } else if helios_ui::row_action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-workshops-session-keep", "Keep")),
+            )
+            .tip(text(Message::new(
                     "gui-workshops-session-keep-hint",
                     "Keep this session's record: who set what, why, and what the image measured. Not kept, it is dropped when the session ends",
                 )))
@@ -580,12 +589,12 @@ impl Panel {
                 *run = Some(("workshop.session", json!({ "action": "keep" })));
             }
         });
-        if ui
-            .button(text(Message::new(
-                "gui-workshops-automatic",
-                "Make it automatic",
-            )))
-            .on_hover_text(text(Message::new(
+        if helios_ui::action(
+            ui,
+            Action::Secondary,
+            &text(Message::new("gui-workshops-automatic", "Make it automatic")),
+        )
+        .tip(text(Message::new(
                 "gui-workshops-automatic-hint",
                 "Turn what you set into a workshop for other photos: a target where a measure explains a value, else the same value; you confirm each row",
             )))
@@ -599,8 +608,9 @@ impl Panel {
             let step = p.record.step(of);
             let author = step.map(|r| r.author.clone()).unwrap_or_default();
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(text(
+                ui.text_role(
+                    TextRole::Body,
+                    text(
                         Message::new(
                             "gui-workshops-ghost",
                             "{ $param }: { $value } proposed by { $author }",
@@ -613,25 +623,30 @@ impl Panel {
                                 .map_or_else(|| value.to_string(), |v| format!("{v:.2}")),
                         )
                         .with("author", &author),
-                    ))
-                    .italics(),
+                    ),
                 );
-                if ui
-                    .small_button(text(Message::new("gui-workshops-ghost-accept", "Accept")))
-                    .on_hover_text(text(Message::new(
-                        "gui-workshops-ghost-accept-hint",
-                        "Set this value (one undo step); move the slider instead to override it",
-                    )))
-                    .clicked()
+                if helios_ui::row_action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-workshops-ghost-accept", "Accept")),
+                )
+                .tip(text(Message::new(
+                    "gui-workshops-ghost-accept-hint",
+                    "Set this value (one undo step); move the slider instead to override it",
+                )))
+                .clicked()
                 {
                     *run = Some((
                         "workshop.answer",
                         json!({ "of": of, "param": param, "action": "accept" }),
                     ));
                 }
-                if ui
-                    .small_button(text(Message::new("gui-workshops-ghost-reject", "Reject")))
-                    .clicked()
+                if helios_ui::row_action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-workshops-ghost-reject", "Reject")),
+                )
+                .clicked()
                 {
                     *run = Some((
                         "workshop.answer",
@@ -640,7 +655,7 @@ impl Panel {
                 }
             });
             if let Some(aim) = step.and_then(|r| r.aim.as_deref()) {
-                ui.weak(aim);
+                ui.muted(aim);
             }
         }
         self.generalised_ui(ui, run);
@@ -660,18 +675,20 @@ impl Panel {
         }
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
-        ui.separator();
+        ui.divider();
         for row in &mut g.rows {
-            ui.label(&row.note);
+            ui.text_role(TextRole::Body, row.note.clone());
             ui.horizontal_wrapped(|ui| {
                 if row.target.is_some() {
-                    ui.radio_value(
+                    widgets::radio_value(
+                        ui,
                         &mut row.default,
                         Choice::Target,
                         text(Message::new("gui-workshops-row-target", "Same target")),
                     );
                 }
-                ui.radio_value(
+                widgets::radio_value(
+                    ui,
                     &mut row.default,
                     Choice::Fixed,
                     text(
@@ -679,7 +696,8 @@ impl Panel {
                             .with("value", format!("{}", row.fixed)),
                     ),
                 );
-                ui.radio_value(
+                widgets::radio_value(
+                    ui,
                     &mut row.default,
                     Choice::Ai,
                     text(Message::new("gui-workshops-row-ai", "Keep as AI")),
@@ -687,10 +705,11 @@ impl Panel {
             });
         }
         for zone in &mut g.zones {
-            ui.label(&zone.note);
+            ui.text_role(TextRole::Body, zone.note.clone());
             ui.horizontal_wrapped(|ui| {
                 if zone.fit.is_some() || !zone.candidates.is_empty() {
-                    ui.radio_value(
+                    widgets::radio_value(
+                        ui,
                         &mut zone.default,
                         ZoneChoice::Parametric,
                         text(Message::new(
@@ -699,7 +718,8 @@ impl Panel {
                         )),
                     );
                 }
-                ui.radio_value(
+                widgets::radio_value(
+                    ui,
                     &mut zone.default,
                     ZoneChoice::Ai,
                     text(Message::new("gui-workshops-row-ai", "Keep as AI")),
@@ -708,7 +728,7 @@ impl Panel {
         }
         g.minimum = helios_template::generalise::minimum(&g.rows, &g.zones);
         let junctions = g.minimum.junctions;
-        ui.weak(if junctions == 0 {
+        ui.muted(if junctions == 0 {
             text(Message::new("gui-workshops-ai-none", "AI per photo: none"))
         } else {
             text(
@@ -723,9 +743,12 @@ impl Panel {
         let choices = g.choices();
         let mut cancel = false;
         ui.horizontal_wrapped(|ui| {
-            if ui
-                .button(text(Message::new("gui-workshops-confirm", "Confirm")))
-                .on_hover_text(text(Message::new(
+            if helios_ui::action(
+                ui,
+                Action::Primary,
+                &text(Message::new("gui-workshops-confirm", "Confirm")),
+            )
+            .tip(text(Message::new(
                     "gui-workshops-confirm-hint",
                     "Write the workshop's next version with these choices, as one undo step; a row kept as AI is asked on each photo",
                 )))
@@ -736,9 +759,12 @@ impl Panel {
                     json!({ "rows": choices, "confirm": true }),
                 ));
             }
-            cancel = ui
-                .small_button(text(Message::new("gui-workshops-design-cancel", "Cancel")))
-                .clicked();
+            cancel = helios_ui::row_action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-workshops-design-cancel", "Cancel")),
+            )
+            .clicked();
         });
         if cancel {
             self.generalised = None;
@@ -758,43 +784,40 @@ impl Panel {
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let r = e.file.reference();
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(&e.file.name).strong());
-            ui.weak(r.version.to_string());
-            match &applied {
-                Some(node) => {
-                    if ui
-                        .small_button(text(
-                            Message::new("gui-workshops-applied", "Applied: { $node }")
-                                .with("node", node),
-                        ))
-                        .on_hover_text(text(Message::new(
-                            "gui-workshops-applied-hint",
-                            "Select its node, to tune it below",
-                        )))
-                        .clicked()
-                    {
-                        *select = Some(node.clone());
-                    }
+            ui.text_role(TextRole::Body, e.file.name.clone());
+            ui.meta(r.version.to_string());
+            if let Some(node) = &applied {
+                let word = text(
+                    Message::new("gui-workshops-applied", "Applied: { $node }")
+                        .with("node", node),
+                );
+                if helios_ui::row_action(ui, Action::Secondary, &word)
+                    .tip(text(Message::new(
+                        "gui-workshops-applied-hint",
+                        "Select its node, to tune it below",
+                    )))
+                    .clicked()
+                {
+                    *select = Some(node.clone());
                 }
-                None => {
-                    if ui
-                        .small_button(text(Message::new("gui-workshops-apply", "Apply")))
-                        .on_hover_text(text(
-                            Message::new(
-                                "gui-workshops-apply-hint",
-                                "Insert { $name } after the node the image is shown from, aimed on the open image (one undo step)",
-                            )
-                            .with("name", &e.file.name),
-                        ))
-                        .clicked()
-                    {
-                        *run = Some(("workshop.apply", json!({ "workshop": r.to_string() })));
-                    }
+            } else {
+                let word = text(Message::new("gui-workshops-apply", "Apply"));
+                if helios_ui::row_action(ui, Action::Secondary, &word)
+                    .tip(text(
+                        Message::new(
+                            "gui-workshops-apply-hint",
+                            "Insert { $name } after the node the image is shown from, aimed on the open image (one undo step)",
+                        )
+                        .with("name", &e.file.name),
+                    ))
+                    .clicked()
+                {
+                    *run = Some(("workshop.apply", json!({ "workshop": r.to_string() })));
                 }
             }
         });
         if let Some(w) = &e.file.workshop {
-            ui.weak(&w.intent);
+            ui.muted(w.intent.clone());
         }
     }
 }
@@ -817,8 +840,8 @@ fn applied_ui(
         .map(|w| w.targets.clone())
         .unwrap_or_default();
     ui.horizontal(|ui| {
-        ui.strong(node);
-        ui.weak(file.reference().to_string());
+        ui.text_role(TextRole::Body, node);
+        ui.meta(file.reference().to_string());
     });
     let mut names: Vec<&str> = Vec::new();
     for x in &file.exposed {
@@ -838,7 +861,7 @@ fn applied_ui(
             .collect()
     };
     if rows.is_empty() {
-        ui.weak(text(Message::new(
+        ui.muted(text(Message::new(
             "gui-workshops-no-image",
             "Open an image to tune it",
         )));
@@ -849,7 +872,7 @@ fn applied_ui(
         .collect();
     for (group, paths) in crate::params::sections(&refs) {
         if let Some(group) = group {
-            ui.label(egui::RichText::new(group).strong());
+            ui.section_title(group);
         }
         for path in paths {
             params.param_ui(ui, values, path);
@@ -862,7 +885,7 @@ fn applied_ui(
                     (Some(z), None) => format!("{z} {}", text(what)),
                     _ => text(what),
                 };
-                ui.weak(text(
+                ui.muted(text(
                     Message::new(
                         "gui-workshops-aimed",
                         "aimed: { $measure } at { $value } { $unit }",
@@ -876,19 +899,25 @@ fn applied_ui(
     }
     ui.horizontal(|ui| {
         if !targets.is_empty()
-            && ui
-                .button(text(Message::new("gui-workshops-aim", "Aim again")))
-                .on_hover_text(text(Message::new(
-                    "gui-workshops-aim-hint",
-                    "Solve its targets again on the open image (one undo step)",
-                )))
-                .clicked()
+            && helios_ui::action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-workshops-aim", "Aim again")),
+            )
+            .tip(text(Message::new(
+                "gui-workshops-aim-hint",
+                "Solve its targets again on the open image (one undo step)",
+            )))
+            .clicked()
         {
             *run = Some(("workshop.aim", json!({ "node": node })));
         }
-        if ui
-            .button(text(Message::new("gui-workshops-open", "Open in graph")))
-            .clicked()
+        if helios_ui::action(
+            ui,
+            Action::Secondary,
+            &text(Message::new("gui-workshops-open", "Open in graph")),
+        )
+        .clicked()
         {
             *run = Some(("macro.open", json!({ "node": node })));
         }
