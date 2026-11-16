@@ -346,15 +346,24 @@ go away. The report's order is the listeners' resolved order; a check
 that fails shows as a warning finding naming its owner, as the runner
 does today.
 
-Where it stands (2026-11-16): the point is in (`helios_health::HealthReport`,
-a `collect` emit; `Registry::add` registers each check as a listener
-owned by its module, `Registry::remove_owner` takes a module's checks
-away, and a listener's failure is its check's "failed" problem). The
-health crate lists no module: each module's `register` adds its checks,
-and the node composes them (`helios_node_core::health::checks`). Still
-to do: the checks' code and their gathering move into their owners'
-crates, so `Context`'s per-module fields, `HealthInputs`'s `with_*` and
-`helios-health`'s storage and vault dependencies go.
+Where it stands (2026-11-16): done. The point is in
+(`helios_health::HealthReport`, a `collect` emit; `Registry::add`
+registers each check as a listener owned by its module,
+`Registry::remove_owner` takes a module's checks away, and a listener's
+failure is its check's "failed" problem). Each check lives in its owner's
+crate, over its owner's state (`helios_health::Owned`), which the owner
+gathers once per run (`helios_health::Gather`, cached in the run's
+`Context`, which holds nothing else): `helios_storage::health` (free
+space) and `helios_storage::health::backup`, `helios_library::health`
+(integrity, the library, its folder, changed outside, pairs),
+`helios_gpu::health` (adapter, kernels; it reads the GPU itself),
+`helios_plugin::health::installed` (it probes the plugins itself) and
+`helios_node_core::health::snapshots`. The node composes them
+(`HealthInputs::checks`: the volumes mounted are read once per run and
+shared), the desktop adds the GPU and the plugin host
+(`helios_gui::shell::health_checks`). `HealthInputs::with_*` and
+`Context`'s fields are gone, and `helios-health` depends on neither
+`helios-storage` nor `helios-vault`.
 
 ### Slice 2: after an import
 

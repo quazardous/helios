@@ -26,6 +26,7 @@
 
 pub mod detect;
 pub mod exclude;
+pub mod health;
 pub mod macos;
 pub mod marker;
 pub mod registry;

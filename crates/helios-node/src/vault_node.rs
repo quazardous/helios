@@ -8,7 +8,7 @@
 //! (a backup disk of the strategy plugged in starts one) and keeps the
 //! health check's schedule, each run a job on the node's jobs (`job.*`
 //! on its bus). Without a window, the check's inputs keep a windowless
-//! node's defaults ([`HealthInputs::new`]: no cards, no GPU, no plugins).
+//! node's defaults ([`HealthInputs::checks`]: no cards, no snapshots).
 //!
 //! Imports done through the node ([`Importer`], the control endpoint's
 //! `library.import`) publish their report on its bus
@@ -239,8 +239,8 @@ impl VaultNode {
             Some(file.to_path_buf()),
         );
         let runner = Runner::new(
-            helios_node_core::health::checks(),
-            inputs.into_context(),
+            inputs.checks(),
+            helios_health::Context::default,
             Findings::default(),
             options.schedule,
         );

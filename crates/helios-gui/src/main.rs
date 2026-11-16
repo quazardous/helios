@@ -143,9 +143,9 @@ fn seconds_f64() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// The health check's runner: Helios's checks, over the node's inputs
-/// (the volumes mounted, the vault and its file, its backups), filled from
-/// the desktop: the cards an import left short, still inserted, the
+/// The health check's runner: Helios's checks, each module's over what
+/// it reads (the volumes mounted, the vault and its file, its backups),
+/// with what the desktop hands them: the cards an import left short, still inserted, the
 /// `health.destinationDays` setting read from `settings`, the GPU in use
 /// and its kernels, the plugins installed, each probed, and the
 /// catalogue's snapshots; the ignored findings kept beside Helios's
@@ -159,8 +159,8 @@ fn health_runner(
     plugins: Arc<helios_plugin::Broker>,
     accounts: Option<&helios_plugin::health::AccountsFn>,
 ) -> helios_health::runner::Runner {
-    use helios_health::backup::CardShort;
     use helios_health::{Findings, Ignored, runner};
+    use helios_storage::health::backup::CardShort;
     // Whether a connector has an account: a source plugin no account
     // uses yet waits for its permissions without anything to warn of.
     let book = library.as_ref().map(Library::accounts);
@@ -168,9 +168,10 @@ fn health_runner(
         Some(library) => library.health_inputs(helios_storage::system(), file),
         None => helios_node_core::health::HealthInputs::new(helios_storage::system(), None, file),
     };
-    let context = inputs
-        .with_destination_days(move || helios_gui::platform::destination_days(&settings))
-        .with_cards(move || {
+    let gpu = helios_health::Gather::new(|_| helios_gpu::health::gpu());
+    let desktop = helios_gui::shell::HealthDesktop {
+        destination_days: Box::new(move || helios_gui::platform::destination_days(&settings)),
+        cards: Box::new(move || {
             cards
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -181,70 +182,36 @@ fn health_runner(
                     short: c.short,
                 })
                 .collect()
-        })
-        .with_gpu(health_gpu)
-        .with_plugins({
+        }),
+        gpu: gpu.clone(),
+        plugins: helios_health::Gather::new({
             let plugins = plugins.clone();
-            move || health_plugins(&plugins, book.as_deref())
-        })
-        .with_snapshots(helios_gui::catalogue::health)
-        .into_context();
+            move |_| helios_plugin::health::installed::probe(&plugins, book.as_deref())
+        }),
+        snapshots: Some(Box::new(helios_gui::catalogue::health)),
+    };
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
-    let mut registry = helios_node_core::health::checks();
-    if let Err(problems) = registry.add(
-        helios_health::gpu::OWNER,
-        Arc::new(helios_health::gpu::Kernels::new(health_kernels())),
-    ) {
-        log::error!("health: {}", problems.join("; "));
-    }
+    let mut registry = helios_gui::shell::health_checks(&inputs, desktop);
+    helios_health::add_owned(
+        &mut registry,
+        helios_gpu::health::OWNER,
+        vec![helios_health::over(
+            helios_gpu::health::Kernels::new(health_kernels()),
+            &gpu,
+        )],
+    );
     helios_plugin::health::register(&mut registry, &plugins, accounts);
     runner::Runner::new(
         registry,
-        context,
+        helios_health::Context::default,
         Findings::with_ignored(ignored),
         runner::Schedule::desktop(std::time::Instant::now()),
     )
 }
 
-/// The adapters wgpu enumerated and the one the process's device is open
-/// on; `None` before the GPU was tried (never enumerates from here).
-fn health_gpu() -> Option<helios_health::gpu::Gpu> {
-    use helios_health::gpu::{Adapter, AdapterKind, Gpu};
-    let adapters = helios_gpu::shared::enumerated()?;
-    let opened = helios_gpu::shared::opened();
-    let adapters: Vec<Adapter> = adapters
-        .iter()
-        .map(|a| {
-            let info = a.get_info();
-            Adapter {
-                name: info.name.clone(),
-                driver: format!("{} {}", info.driver, info.driver_info)
-                    .trim()
-                    .to_string(),
-                backend: format!("{:?}", info.backend),
-                kind: match info.device_type {
-                    eframe::wgpu::DeviceType::DiscreteGpu => AdapterKind::Discrete,
-                    eframe::wgpu::DeviceType::IntegratedGpu => AdapterKind::Integrated,
-                    eframe::wgpu::DeviceType::VirtualGpu => AdapterKind::Virtual,
-                    eframe::wgpu::DeviceType::Other => AdapterKind::Other,
-                    eframe::wgpu::DeviceType::Cpu => AdapterKind::Software,
-                },
-            }
-        })
-        .collect();
-    let used = opened.as_ref().map(|(i, _)| *i);
-    Some(Gpu {
-        adapters,
-        used,
-        why_cpu: used
-            .is_none()
-            .then(|| "the GPU device did not open (see the log)".to_string()),
-    })
-}
-
 /// Compiles every GPU kernel of the modules Helios links on the device
 /// open (none without one); run by the health check's thread.
-fn health_kernels() -> impl Fn() -> Vec<helios_health::gpu::Kernel> + Send + Sync + 'static {
+fn health_kernels() -> impl Fn() -> Vec<helios_gpu::health::Kernel> + Send + Sync + 'static {
     let catalogue = helios_gui::templates::modules();
     let kernels: Vec<(String, helios_core::GpuKernel)> = catalogue
         .module_names()
@@ -256,7 +223,7 @@ fn health_kernels() -> impl Fn() -> Vec<helios_health::gpu::Kernel> + Send + Syn
         };
         kernels
             .iter()
-            .map(|(module, kernel)| helios_health::gpu::Kernel {
+            .map(|(module, kernel)| helios_gpu::health::Kernel {
                 module: module.clone(),
                 error: gpu.compile(module, *kernel).err(),
             })
@@ -299,81 +266,6 @@ fn health_accounts_of(
             })
             .collect()
     })
-}
-
-/// Every plugin installed, probed (started and its handshake answered,
-/// then stopped), and those whose manifest was refused.
-fn health_plugins(
-    broker: &helios_plugin::Broker,
-    book: Option<&dyn helios_connect::account::AccountBook>,
-) -> Vec<helios_health::plugins::Plugin> {
-    use helios_health::plugins::{Plugin, Status};
-    use helios_plugin::Probed;
-    let mut out: Vec<Plugin> = broker
-        .ids()
-        .filter_map(|id| {
-            let m = broker.manifest(id)?;
-            // A source plugin is needed once its connector (its id's last
-            // part) has an account; any other plugin, always.
-            let needed = || {
-                if !m.services.iter().any(|s| s == "import.source") {
-                    return true;
-                }
-                let connector = id.rsplit('.').next().unwrap_or(id);
-                book.and_then(|b| b.accounts().ok())
-                    .is_some_and(|accounts| accounts.iter().any(|a| a.connector == connector))
-            };
-            let (status, log) = match broker.probe(id) {
-                Ok((Probed::Answers, log)) => (Status::Answers, log),
-                Ok((Probed::Disabled, log)) => (Status::Disabled, log),
-                Ok((Probed::NotGranted(capability), log)) => (
-                    Status::NotGranted {
-                        capability,
-                        needed: needed(),
-                    },
-                    log,
-                ),
-                Ok((Probed::Failed(e), log)) => (Status::Crashed(e), log),
-                Err(e) => (Status::Crashed(e), Vec::new()),
-            };
-            Some(Plugin {
-                id: id.to_string(),
-                name: m.title().to_string(),
-                version: m.version.clone(),
-                dir: broker.dir(id).map(Path::to_path_buf).unwrap_or_default(),
-                status,
-                log,
-            })
-        })
-        .collect();
-    for r in broker.rejected() {
-        let manifest = helios_plugin::Manifest::read(&r.dir).ok();
-        let id = manifest.as_ref().map_or_else(
-            || {
-                r.dir
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            },
-            |m| m.id.clone(),
-        );
-        // A copy shadowed by another of the same id is not a plugin of
-        // its own.
-        if broker.manifest(&id).is_some() {
-            continue;
-        }
-        out.push(Plugin {
-            name: manifest
-                .as_ref()
-                .map_or_else(|| id.clone(), |m| m.title().to_string()),
-            version: manifest.map(|m| m.version).unwrap_or_default(),
-            id,
-            dir: r.dir.clone(),
-            status: Status::Unsupported(r.problems.clone()),
-            log: Vec::new(),
-        });
-    }
-    out
 }
 
 /// Fills, on a thread of its own, the capture fields (time, camera, lens,
@@ -851,7 +743,7 @@ fn library_commands(
     let changed = persist.library().clone();
     shell.register(
         CommandSpec::new(
-            helios_health::checks::ACKNOWLEDGE_CHANGED,
+            helios_library::health::ACKNOWLEDGE_CHANGED,
             "Acknowledge the photos changed outside Helios: clears their mark (`images`: ids, every photo when absent); their new content stays recorded",
             "Library",
         ),

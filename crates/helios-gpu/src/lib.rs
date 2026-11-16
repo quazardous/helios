@@ -23,6 +23,7 @@
 //! [`check`] runs a module on both backends and compares: a GPU variant is
 //! only trusted within its tolerance of the CPU reference.
 
+pub mod health;
 pub mod shared;
 
 use std::collections::HashMap;

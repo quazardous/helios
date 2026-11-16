@@ -1,6 +1,6 @@
 [package]
 name = "helios-health"
-description = "Helios's health check: checks of the setup (storage, the vault), their findings, the ignored list and the background run"
+description = "Helios's health check: the report point modules answer, their findings, the ignored list and the background run"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,6 @@ repository.workspace = true
 [dependencies]
 egui-pop-hooks.workspace = true
 helios-core.workspace = true
-helios-storage.workspace = true
-helios-vault.workspace = true
 log = "0.4"
 serde.workspace = true
 serde_json.workspace = true
