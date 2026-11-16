@@ -43,6 +43,7 @@ use std::sync::{Arc, OnceLock};
 
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
+use egui_pop::api::bus::drag::{self, Seen};
 
 use crate::thumb_textures::Resident;
 use egui_pop::views::library::compare::{CompareView, Pane};
@@ -1456,13 +1457,20 @@ fn quick_menu(row: &egui::Response, selection: bool, filled: bool) {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DraggedPhotos(pub Vec<String>);
 
-/// Sets the drag payload when a library view starts carrying photos
-/// out.
+/// Starts egui-pop's drag session (`bus::drag`, which carries it to the
+/// window it is let go over) when a library view starts carrying photos
+/// out; while photos or a keyword are carried, the grabbing hand, unless
+/// a drop target set its own cursor.
 fn carry_out(ctx: &egui::Context, signals: &[Signal<String>]) {
     for s in signals {
         if let Signal::DragOut { keys } = s {
-            egui::DragAndDrop::set_payload(ctx, DraggedPhotos(keys.clone()));
+            drag::start(ctx, "photos", DraggedPhotos(keys.clone()));
         }
+    }
+    let carried = drag::payload::<DraggedPhotos>(ctx).is_some()
+        || drag::payload::<DraggedKeyword>(ctx).is_some();
+    if carried && ctx.output(|o| o.cursor_icon) == egui::CursorIcon::Default {
+        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
     }
 }
 
@@ -1475,6 +1483,18 @@ pub enum DropOn {
     Album(String),
     /// A keyword branch of the Keywords section (its path): they take it.
     Keyword(String),
+}
+
+impl DropOn {
+    /// The row's id as a drop target of egui-pop's drag session, unique
+    /// in its window.
+    fn target_id(&self) -> String {
+        match self {
+            DropOn::Quick => "library.quick".to_string(),
+            DropOn::Album(id) => format!("library.album:{id}"),
+            DropOn::Keyword(path) => format!("library.keyword:{path}"),
+        }
+    }
 }
 
 /// Whether `album` takes photos dropped on it, else why not.
@@ -1494,7 +1514,8 @@ fn drop_refusal(album: &helios_vault::collections::Album) -> Option<Message> {
     }
 }
 
-/// A row of the Albums section as a drop target for [`DraggedPhotos`]:
+/// A row of the Albums section as a drop target for [`DraggedPhotos`],
+/// in whichever window they were dragged from (egui-pop's drag session):
 /// while they hover it, its outline (the accent when it takes them, the
 /// error colour with a "not allowed" cursor and the reason beside the
 /// pointer when not); dropped, they go in (one step of the library's
@@ -1507,63 +1528,26 @@ fn drop_target(
 ) {
     let ctx = &row.ctx;
     let allowed = refusal.is_none();
-    if let Some(photos) = row.dnd_hover_payload::<DraggedPhotos>() {
-        hover.set(Some((target.clone(), allowed)));
-        let visuals = ctx.global_style().visuals.clone();
-        let colour = if allowed {
-            visuals.selection.stroke.color
-        } else {
-            visuals.error_fg_color
-        };
-        let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            egui::Id::unique("helios.library.drop"),
-        ));
-        painter.rect_stroke(
-            row.rect.expand(1.0),
-            2.0,
-            egui::Stroke::new(2.0, colour),
-            egui::StrokeKind::Inside,
-        );
-        let text = match &refusal {
-            Some(m) => {
-                ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
-                crate::i18n::text(ctx, m.clone())
+    let seen = drag::target::<DraggedPhotos>(ctx, &target.target_id(), row.rect, |_| {
+        refusal.clone().map(|m| crate::i18n::text(ctx, m))
+    });
+    let photos = match seen {
+        Seen::Over { payload, .. } => {
+            hover_over(row, &target, refusal.as_ref(), &payload, hover);
+            return;
+        }
+        Seen::Refused { .. } => {
+            if let Some(m) = refusal {
+                crate::dialogs::request(
+                    ctx,
+                    crate::dialogs::Request::Notify(crate::dialogs::Level::Warning, m),
+                );
             }
-            None => match &target {
-                DropOn::Keyword(path) => crate::i18n::text(
-                    ctx,
-                    Message::new(
-                        "gui-library-keyword-drop",
-                        "Tag { $count } photos with { $keyword }",
-                    )
-                    .with("count", photos.0.len())
-                    .with("keyword", path.as_str()),
-                ),
-                _ => crate::i18n::text(
-                    ctx,
-                    Message::new("gui-library-drop-add", "Add { $count } photos")
-                        .with("count", photos.0.len()),
-                ),
-            },
-        };
-        // The row's own tooltip, at the pointer: egui hides hover tooltips
-        // while something is dragged, so it is shown here, not through
-        // `on_hover_text`; it is no window, popup or menu of the panel's.
-        egui::Tooltip::for_widget(row).at_pointer().show(|ui| {
-            ui.label(text);
-        });
-    }
-    let Some(photos) = row.dnd_release_payload::<DraggedPhotos>() else {
-        return;
+            return;
+        }
+        Seen::Dropped(photos) if allowed => photos,
+        _ => return,
     };
-    if let Some(m) = refusal {
-        crate::dialogs::request(
-            ctx,
-            crate::dialogs::Request::Notify(crate::dialogs::Level::Warning, m),
-        );
-        return;
-    }
     let (command, args) = match target {
         DropOn::Quick => (
             QUICK_TOGGLE_COMMAND,
@@ -1579,6 +1563,64 @@ fn drop_target(
         ctx,
         crate::dialogs::Request::Run(command.into(), args, helios_shell::commands::Origin::User),
     );
+}
+
+/// Photos hovering a row of the Albums section: its outline, and beside
+/// the pointer what a drop would do, or why not.
+fn hover_over(
+    row: &egui::Response,
+    target: &DropOn,
+    refusal: Option<&Message>,
+    photos: &DraggedPhotos,
+    hover: &std::cell::Cell<Option<(DropOn, bool)>>,
+) {
+    let ctx = &row.ctx;
+    let allowed = refusal.is_none();
+    hover.set(Some((target.clone(), allowed)));
+    let visuals = ctx.global_style().visuals.clone();
+    let colour = if allowed {
+        visuals.selection.stroke.color
+    } else {
+        visuals.error_fg_color
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::unique("helios.library.drop"),
+    ));
+    painter.rect_stroke(
+        row.rect.expand(1.0),
+        2.0,
+        egui::Stroke::new(2.0, colour),
+        egui::StrokeKind::Inside,
+    );
+    let text = match refusal {
+        Some(m) => {
+            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+            crate::i18n::text(ctx, m.clone())
+        }
+        None => match target {
+            DropOn::Keyword(path) => crate::i18n::text(
+                ctx,
+                Message::new(
+                    "gui-library-keyword-drop",
+                    "Tag { $count } photos with { $keyword }",
+                )
+                .with("count", photos.0.len())
+                .with("keyword", path.as_str()),
+            ),
+            _ => crate::i18n::text(
+                ctx,
+                Message::new("gui-library-drop-add", "Add { $count } photos")
+                    .with("count", photos.0.len()),
+            ),
+        },
+    };
+    // The row's own tooltip, at the pointer: egui hides hover tooltips
+    // while something is dragged, so it is shown here, not through
+    // `on_hover_text`; it is no window, popup or menu of the panel's.
+    egui::Tooltip::for_widget(row).at_pointer().show(|ui| {
+        ui.label(text);
+    });
 }
 
 /// The albums as the Albums section shows them: each set's members, a

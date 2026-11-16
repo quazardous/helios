@@ -745,9 +745,10 @@ egui-pop's thumbnail grid and filmstrip gained `drag_out`: a drag that
 starts on a cell signals `DragOut` with the selection when the cell is
 in it, else that photo alone (the selection is left as it is), and the
 rubber band starts between cells; the cursor shows a carry and a chip
-beside the pointer how many photos go. The Library sets its
-`DraggedPhotos` payload (image ids) from it, in the grid and the
-filmstrip alike. The Albums section's rows take it: an album and the
+beside the pointer how many photos go. The Library starts egui-pop's
+drag session (`bus::drag`) with its `DraggedPhotos` payload (image ids)
+from it, in the grid and the filmstrip alike, and the cursor grabs
+while it is carried. The Albums section's rows take it: an album and the
 quick collection outline in the accent while it hovers, with "Add N
 photos" beside the pointer; dropped, it runs `library.collection.add`
 or `library.quick.toggle` with `add: true` (only puts in: what is
@@ -757,9 +758,17 @@ with the "not allowed" cursor and the reason beside the pointer
 (a smart album's rules choose its photos; drop on one of the set's
 albums), and a drop on them is refused with that reason as a warning.
 No modifier changes a drop. The keyboard way stays each album's menu,
-"Add the selected photos". Multi-window: the payload lives in the
-window's egui context and the OS keeps the pointer in the window the
-drag started in, so a drop over another window does nothing; the
+"Add the selected photos". Multi-window (2026-11-16): the OS keeps the
+pointer in the window the drag started in, so egui's own drag payload
+never reached another window; the rows are drop targets of egui-pop's
+drag session instead (`library.quick`, `library.album:<id>`,
+`library.keyword:<path>`, unique in their window), which delivers the
+photos to the target under the pointer in whichever window they are
+let go over (on Wayland, the first window that sees the pointer once
+they are let go), once, with `drag.dropped` or `drag.refused` and its
+reason on the bus. The keyword drags go the same way: a branch dragged
+onto another merges into it (`library.keyword-merge:<path>`), onto a
+photo of a grid in any window tags it (`library.cell:<key>`). The
 import window has no Albums section.
 
 **L7. Selection and batch commands.** Select none, invert, select
