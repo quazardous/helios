@@ -151,7 +151,7 @@ impl Shell {
             .focus
             .imports
             .borrow()
-            .import_sessions
+            .sessions
             .read_at
             .is_some_and(|at| at.elapsed() < READ_EVERY)
         {
@@ -161,7 +161,7 @@ impl Shell {
         let Ok(reader) = self.history_reader() else {
             return;
         };
-        self.focus.imports.borrow_mut().import_sessions.read_at = Some(Instant::now());
+        self.focus.imports.borrow_mut().sessions.read_at = Some(Instant::now());
         // A history that cannot be read lists nothing.
         let sessions = reader().map(|r| sessions_of(&r)).unwrap_or_default();
         self.focus.library.borrow_mut().set_imports(sessions);
@@ -252,7 +252,7 @@ impl SessionEnded {
     fn heard(&self, request: &Value, line: &Value) -> bool {
         let started_here = {
             let mut imports = self.imports.borrow_mut();
-            imports.import_sessions.read_at = None;
+            imports.sessions.read_at = None;
             let started = &mut imports.user_imports;
             match started.iter().position(|r| r == request) {
                 Some(at) => {

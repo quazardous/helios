@@ -874,7 +874,7 @@ pub(super) struct Imports {
     /// Those the last one brought, to select once the Library shows them.
     pub(super) select_imported: Vec<String>,
     /// The Library's import sessions, as last read.
-    pub(super) import_sessions: super::library_imports::Sessions,
+    pub(super) sessions: super::library_imports::Sessions,
     /// The imports the user started here and handed to the node, by
     /// their requests, until they end.
     pub(super) user_imports: Vec<Value>,
