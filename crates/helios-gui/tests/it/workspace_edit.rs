@@ -148,7 +148,7 @@ fn the_library_settings_are_edited_after_creation() {
             "duplicates": "ask", "suggest_stacks": true, "auto_advance": true
         }),
     );
-    let source = h.state().import_source().cloned().unwrap();
+    let source = h.state().import_source().unwrap();
     assert_eq!(
         (source.source.as_str(), source.placement.as_str()),
         ("folder", "copy")

@@ -13,13 +13,13 @@
 //! Both are said on the journal (`library.changed`, `library.filled`)
 //! with the listeners that ran (`ran`).
 //!
-//! `library.filled`'s listener holds the interface's state (`Rc`): it is
-//! a local listener ([`listen_filled_local`]), bound to the interface's
-//! thread, doing its part inside the pass. `library.changed`'s listeners
-//! still mark their place in the order when the change concerns them
-//! ([`wants`]), and [`crate::persist::Persist`], passing the point, does
-//! their part right after, in the order they ran: their state is split
-//! between the shell and the persistence layer.
+//! The listeners of both points hold the interface's state (`Rc`): they
+//! are local listeners ([`listen_changed`], [`listen_filled_local`]),
+//! bound to the interface's thread, each doing its own part inside the
+//! pass, `library.changed`'s only when the change concerns them
+//! ([`wants`]). Their state is shared between the shell
+//! ([`crate::shell::Shell::library_parts`]) and the persistence layer
+//! (the reads off the interface's thread, [`crate::persist::Persist`]).
 
 use std::collections::BTreeSet;
 use std::sync::mpsc::{Receiver, Sender};
@@ -212,20 +212,26 @@ fn opts(after: Option<&str>) -> ListenOpts {
 }
 
 /// Registers the listener `id` of [`LibraryChanged`] (one of [`ORDER`]'s)
-/// on `bus`, in its declared place: it marks its place when the change
-/// concerns it ([`wants`]); its part is done by the one passing the
-/// point. One there already under `id` is replaced.
+/// on `bus`, in its declared place: a local listener bound to the calling
+/// thread (the interface's: its state is `Rc`), doing its part (`run`)
+/// inside the pass when the change concerns it ([`wants`]). One there
+/// already under `id` is replaced.
 ///
 /// # Errors
 /// `id` is not in [`ORDER`], or the bus refused it.
-pub fn listen_changed(bus: &dyn Bus, id: &'static str) -> Result<(), String> {
+pub fn listen_changed(
+    bus: &dyn Bus,
+    id: &'static str,
+    run: impl Fn(&Change) + 'static,
+) -> Result<(), String> {
     let Some((_, after)) = ORDER.iter().find(|(listener, _)| *listener == id) else {
         return Err(format!("`{id}` is not a listener of {CHANGED}"));
     };
     declare(bus);
     bus.unlisten(CHANGED, id);
-    bus.listen::<LibraryChanged>(id, opts(*after), move |change, reactions| {
+    bus.listen_local::<LibraryChanged>(id, opts(*after), move |change, reactions| {
         if wants(id, change) {
+            run(change);
             reactions.ran.push(id.to_owned());
         }
         Ok::<(), HookError>(())
@@ -343,7 +349,7 @@ mod tests {
     fn listeners_run_in_the_declared_order_and_only_when_concerned() {
         let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
         for (id, _) in ORDER.iter().rev() {
-            listen_changed(&bus, id).unwrap();
+            listen_changed(&bus, id, |_| {}).unwrap();
         }
         let mut change = Change::default();
         change.add(Kind::Contents, BY_IMPORT);
@@ -359,10 +365,46 @@ mod tests {
         assert_eq!(pass_changed(&bus, change), [VOLUMES, FILL, ALBUMS]);
     }
 
+    /// Each listener does its own part inside the pass, in the declared
+    /// order: done when `pass_changed` returns, nothing left to the one
+    /// passing the point.
+    #[test]
+    fn each_listener_does_its_part_inside_the_pass() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
+        let done: Rc<RefCell<Vec<String>>> = Rc::default();
+        for (id, _) in ORDER {
+            let done = done.clone();
+            listen_changed(&bus, id, move |change| {
+                done.borrow_mut()
+                    .push(format!("{id} {}", change.to_json()["kinds"]));
+            })
+            .unwrap();
+        }
+        let mut change = Change::default();
+        change.add(Kind::Locations, BY_VAULT);
+        let ran = pass_changed(&bus, change);
+        assert_eq!(ran, [VOLUMES, FILL]);
+        assert_eq!(
+            *done.borrow(),
+            [
+                "library.volumes [\"locations\"]",
+                "library.fill [\"locations\"]"
+            ]
+        );
+        assert!(
+            order(&bus)
+                .contains("library.fill (owner helios.library): local; after library.volumes"),
+            "{}",
+            order(&bus)
+        );
+    }
+
     #[test]
     fn a_listener_not_declared_is_refused() {
         let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
-        assert!(listen_changed(&bus, "nobody.knows").is_err());
+        assert!(listen_changed(&bus, "nobody.knows", |_| {}).is_err());
         assert!(listen_filled(&bus, FILL).is_err());
     }
 

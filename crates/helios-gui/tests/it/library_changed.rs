@@ -191,7 +191,8 @@ fn an_undo_fills_the_library_once() {
 }
 
 /// The listeners of `library.changed` and `library.filled`, in the
-/// order they run: a reviewed dump.
+/// order they run: a reviewed dump. Each is local (its state is the
+/// interface's), doing its own part inside the pass.
 #[test]
 fn the_library_points_listeners_run_in_a_declared_order() {
     let mut d = desktop("order");
@@ -199,10 +200,10 @@ fn the_library_points_listeners_run_in_a_declared_order() {
     assert_eq!(
         d.persist.library_changed_order(shell),
         "library.changed\n\
-         \x20 1. library.volumes (owner helios.library): nothing\n\
-         \x20 2. library.fill (owner helios.library): after library.volumes\n\
-         \x20 3. library.albums (owner helios.library): after library.fill\n\
-         \x20 4. library.stacks (owner helios.library): after library.albums\n\
+         \x20 1. library.volumes (owner helios.library): local\n\
+         \x20 2. library.fill (owner helios.library): local; after library.volumes\n\
+         \x20 3. library.albums (owner helios.library): local; after library.fill\n\
+         \x20 4. library.stacks (owner helios.library): local; after library.albums\n\
          library.filled\n\
          \x20 1. library.select-imported (owner helios.library): local\n"
     );

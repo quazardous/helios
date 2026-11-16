@@ -86,8 +86,10 @@ pub(super) struct Focus {
     pub(super) rule_editor: Option<crate::rule_editor::RuleEditor>,
     /// The open image's decisions, and the Decisions panel's cards.
     pub(super) decisions: Rc<RefCell<crate::decisions::Decisions>>,
-    /// Where the workspace imports from, and how (its template's).
-    pub(super) import_source: Option<helios_template::ImportDesc>,
+    /// Where the workspace imports from, and how (its template's): shared
+    /// with `library.changed`'s listener `library.stacks`, which proposes
+    /// stacks after an import when it says so.
+    pub(super) import_source: Rc<RefCell<Option<helios_template::ImportDesc>>>,
     /// What the imports leave the Library, shared with the shell's
     /// listeners of their ends.
     pub(super) imports: Rc<RefCell<super::import::Imports>>,
@@ -187,7 +189,7 @@ impl Focus {
             album_ruled: None,
             rule_editor: None,
             decisions: Rc::default(),
-            import_source: None,
+            import_source: Rc::default(),
             imports: Rc::default(),
             menu: None,
             viewport: seed.viewport,

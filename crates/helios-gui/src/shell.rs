@@ -4992,7 +4992,7 @@ impl Shell {
         let Some(l) = library else {
             return;
         };
-        self.focus.import_source.clone_from(&l.import);
+        self.focus.import_source.replace(l.import.clone());
         self.focus.open_in_compare = l.compare;
         let mut lib = self.focus.library.borrow_mut();
         lib.auto_advance = l.auto_advance;
@@ -6074,17 +6074,25 @@ impl Shell {
         }
     }
 
+    /// The shell's parts `library.changed`'s local listeners do their
+    /// work on, inside the pass ([`crate::library_changed`]).
+    pub(crate) fn library_parts(&self) -> LibraryParts {
+        LibraryParts {
+            library: self.focus.library.clone(),
+            storage: self.core.storage.read.clone(),
+            stack_review: self.core.stack_review.clone(),
+            import_source: self.focus.import_source.clone(),
+        }
+    }
+
     /// The workspace's import source, as its template set it.
-    pub fn import_source(&self) -> Option<&helios_template::ImportDesc> {
-        self.focus.import_source.as_ref()
+    pub fn import_source(&self) -> Option<helios_template::ImportDesc> {
+        self.focus.import_source.borrow().clone()
     }
 
     /// Whether the workspace proposes stacks after each import.
     pub fn suggests_stacks(&self) -> bool {
-        self.focus
-            .import_source
-            .as_ref()
-            .is_some_and(|i| i.suggest_stacks)
+        suggests_stacks(self.focus.import_source.borrow().as_ref())
     }
 
     /// The imports asked for since the last call ([`IMPORT_COMMAND`]'s
@@ -8002,4 +8010,46 @@ pub(crate) fn raise_main_window(app: &AppHandle) -> bool {
         RAISE_OWNER,
         Reason::Command,
     ))
+}
+
+/// Whether an import source proposes stacks after each import.
+fn suggests_stacks(source: Option<&helios_template::ImportDesc>) -> bool {
+    source.is_some_and(|i| i.suggest_stacks)
+}
+
+/// The shell's parts `library.changed`'s local listeners work on: shared
+/// (`Rc`) with the shell, on the interface's thread
+/// ([`Shell::library_parts`]).
+#[derive(Clone)]
+pub(crate) struct LibraryParts {
+    library: Rc<RefCell<crate::library::Library>>,
+    storage: Rc<RefCell<storage::StorageRead>>,
+    stack_review: Rc<RefCell<crate::stack_review::Review>>,
+    import_source: Rc<RefCell<Option<helios_template::ImportDesc>>>,
+}
+
+impl LibraryParts {
+    /// The library shown.
+    pub(crate) fn library(&self) -> std::cell::Ref<'_, crate::library::Library> {
+        self.library.borrow()
+    }
+
+    /// `library.volumes`: the volumes read again (the Storage page, the
+    /// Library's volume names and badges).
+    pub(crate) fn refresh_volumes(&self) {
+        storage::refresh_volumes(&self.storage, &self.library);
+    }
+
+    /// `library.albums`: the albums and the quick collection read again.
+    pub(crate) fn ask_albums(&self) {
+        self.library.borrow_mut().ask_albums();
+    }
+
+    /// `library.stacks`'s part after an import: the stacks it suggests to
+    /// review, when the workspace asks for them.
+    pub(crate) fn suggest_stacks_after_import(&self) {
+        if suggests_stacks(self.import_source.borrow().as_ref()) {
+            self.stack_review.borrow_mut().suggest(Vec::new());
+        }
+    }
 }

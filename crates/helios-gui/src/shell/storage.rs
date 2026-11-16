@@ -380,17 +380,67 @@ pub(crate) type Owners = Arc<
     >,
 >;
 
-/// What the shell keeps of storage.
+/// The volumes and the strategy as the link last answered them: shared
+/// (`Rc`) between the shell and `library.changed`'s local listener
+/// `library.volumes`, which reads them again inside the pass
+/// ([`refresh_volumes`]).
 #[derive(Default)]
-pub(crate) struct StoragePage {
+pub(crate) struct StorageRead {
     link: Option<Arc<dyn StorageLink>>,
-    /// The accounts and sources behind remote volumes, read by
-    /// `library.volumes` to show one row per account.
-    pub(crate) owners: Owners,
-    volumes: Vec<Volume>,
+    list: Vec<Volume>,
     /// The library's backup strategy, as last read.
     strategy: Option<Strategy>,
     error: Option<String>,
+}
+
+/// Reads the volumes again: the page's list, and the volumes the Library
+/// names (a scan ran, a disk came or went). What the link reads off the
+/// frame shows at a coming one.
+pub(crate) fn refresh_volumes(
+    read: &RefCell<StorageRead>,
+    library: &RefCell<crate::library::Library>,
+) {
+    let Some(link) = read.borrow().link.clone() else {
+        return;
+    };
+    link.refresh();
+    show_volumes(read, library);
+}
+
+/// The volumes and the strategy as the link answers them now.
+fn show_volumes(read: &RefCell<StorageRead>, library: &RefCell<crate::library::Library>) {
+    let Some(link) = read.borrow().link.clone() else {
+        return;
+    };
+    let volumes = link.volumes();
+    // The import window's strategy line reads it too.
+    let strategy = link.strategy();
+    let mut read = read.borrow_mut();
+    match volumes {
+        Ok(volumes) => {
+            library.borrow_mut().set_volumes(&volumes);
+            read.list = volumes;
+            read.error = None;
+        }
+        Err(e) => read.error = Some(e),
+    }
+    match strategy {
+        Ok(s) => read.strategy = s,
+        Err(e) => read.error = Some(e),
+    }
+    if let Some(e) = &read.error {
+        log::warn!("storage: {e}");
+    }
+}
+
+/// What the shell keeps of storage.
+#[derive(Default)]
+pub(crate) struct StoragePage {
+    /// The volumes and the strategy as last read.
+    pub(crate) read: Rc<RefCell<StorageRead>>,
+    /// The accounts and sources behind remote volumes, read by
+    /// `library.volumes` to show one row per account.
+    pub(crate) owners: Owners,
     /// The cards an import left short of their backups: told safe to
     /// format once a backup job makes them so, while still inserted.
     waiting: Rc<RefCell<Vec<Card>>>,
@@ -410,7 +460,7 @@ impl Shell {
     /// names of offline photos' volumes in the Library.
     pub fn set_storage(&mut self, link: Arc<dyn StorageLink>) {
         self.register_storage_commands(&link);
-        self.core.storage.link = Some(link);
+        self.core.storage.read.borrow_mut().link = Some(link);
         self.refresh_volumes();
     }
 
@@ -418,40 +468,19 @@ impl Shell {
     /// Library names (a scan ran, a disk came or went). What the link
     /// reads off the frame shows at a coming one.
     pub fn refresh_volumes(&mut self) {
-        if let Some(link) = &self.core.storage.link {
-            link.refresh();
-        }
-        self.show_volumes();
+        refresh_volumes(&self.core.storage.read, &self.focus.library);
     }
 
-    /// The volumes and the strategy as the link answers them now.
-    fn show_volumes(&mut self) {
-        let Some(link) = self.core.storage.link.clone() else {
-            return;
-        };
-        match link.volumes() {
-            Ok(volumes) => {
-                self.focus.library.borrow_mut().set_volumes(&volumes);
-                self.core.storage.volumes = volumes;
-                self.core.storage.error = None;
-            }
-            Err(e) => self.core.storage.error = Some(e),
-        }
-        // The import window's strategy line reads it too.
-        match link.strategy() {
-            Ok(s) => self.core.storage.strategy = s,
-            Err(e) => self.core.storage.error = Some(e),
-        }
-        if let Some(e) = &self.core.storage.error {
-            log::warn!("storage: {e}");
-        }
+    /// The link the volumes are read through, once set.
+    fn storage_link(&self) -> Option<Arc<dyn StorageLink>> {
+        self.core.storage.read.borrow().link.clone()
     }
 
     /// Each photo's backups read again (one read for the Library), for
     /// its badges and its `backup:` filters; what the link reads off the
     /// frame shows at a coming one.
     pub fn refresh_backups(&mut self) {
-        if let Some(link) = &self.core.storage.link {
+        if let Some(link) = self.storage_link() {
             link.refresh();
         }
         self.show_backups();
@@ -459,7 +488,7 @@ impl Shell {
 
     /// Each photo's backups as the link answers them now.
     fn show_backups(&mut self) {
-        let Some(link) = self.core.storage.link.clone() else {
+        let Some(link) = self.storage_link() else {
             return;
         };
         match link.statuses() {
@@ -468,11 +497,10 @@ impl Shell {
                     .iter()
                     .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
                     .collect();
-                let badges = self.core.storage.strategy.is_some();
-                let rule = strategy::rule(
-                    &self.core.storage.volumes,
-                    self.core.storage.strategy.as_ref(),
-                );
+                let read = self.core.storage.read.borrow();
+                let badges = read.strategy.is_some();
+                let rule = strategy::rule(&read.list, read.strategy.as_ref());
+                drop(read);
                 let mut library = self.focus.library.borrow_mut();
                 library.set_backup_rule(rule);
                 library.set_backups(marks, badges);
@@ -530,7 +558,7 @@ impl Shell {
     /// longer followed.
     pub(super) fn backup_ended(&mut self) {
         self.refresh_backups();
-        let Some(link) = self.core.storage.link.clone() else {
+        let Some(link) = self.storage_link() else {
             return;
         };
         self.core
@@ -563,11 +591,11 @@ impl Shell {
     /// since a backup ended say whether they are safe to format.
     pub(super) fn storage_frame(&mut self) {
         self.reads_frame();
-        if let Some(link) = &self.core.storage.link {
+        if let Some(link) = self.storage_link() {
             let seq = link.seq();
             if seq != self.core.storage.seen {
                 self.core.storage.seen = seq;
-                self.show_volumes();
+                show_volumes(&self.core.storage.read, &self.focus.library);
                 self.show_backups();
                 // The Storage page's reads follow, their values kept
                 // while read again.
@@ -617,11 +645,8 @@ impl Shell {
     /// without a strategy ("No backup set up:", the Storage page offered):
     /// "2 copies: Backup disk (plugged in), NAS (not seen for 3 days)".
     pub fn import_backup_line(&self) -> (String, bool) {
-        backup_line(
-            &|m| self.text(m),
-            self.core.storage.strategy.as_ref(),
-            &self.core.storage.volumes,
-        )
+        let read = self.core.storage.read.borrow();
+        backup_line(&|m| self.text(m), read.strategy.as_ref(), &read.list)
     }
 
     /// Whether the Settings app is open on its Storage or Backup scope.
@@ -633,13 +658,13 @@ impl Shell {
     }
 
     /// The library's backup strategy, as last read.
-    pub fn storage_strategy(&self) -> Option<&Strategy> {
-        self.core.storage.strategy.as_ref()
+    pub fn storage_strategy(&self) -> Option<Strategy> {
+        self.core.storage.read.borrow().strategy.clone()
     }
 
     /// The volumes known, online ones first.
-    pub fn storage_volumes(&self) -> &[Volume] {
-        &self.core.storage.volumes
+    pub fn storage_volumes(&self) -> Vec<Volume> {
+        self.core.storage.read.borrow().list.clone()
     }
 
     /// `library.storage`: opens the Settings app at Storage › Volumes,
