@@ -174,7 +174,7 @@ impl Point for HealthReport {
 /// How long a check may take before its findings are dropped as late: it
 /// runs on the run's own thread, never the interface's, so the bound is
 /// wide (a database's integrity check on a large library).
-pub const REPORT_DEADLINE: Duration = Duration::from_secs(600);
+pub const REPORT_DEADLINE: Duration = Duration::from_mins(10);
 
 /// What a run of the health report hands every listener: what the checks
 /// read, which checks run (all of them for none), and who hears each
@@ -182,8 +182,11 @@ pub const REPORT_DEADLINE: Duration = Duration::from_secs(600);
 pub struct Report {
     pub context: Context,
     pub only: Option<BTreeSet<String>>,
-    progress: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    progress: Option<Progress>,
 }
+
+/// Hears each check of a report as it starts, by id.
+type Progress = Box<dyn Fn(&str) + Send + Sync>;
 
 impl Report {
     /// Every check, over `context`.

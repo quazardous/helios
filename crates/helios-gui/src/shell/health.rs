@@ -114,8 +114,10 @@ pub struct Checked {
 /// What [`HealthChecked`]'s listeners say the desktop shows.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shown {
-    /// The status bar's badge (`status.health`); `None` leaves it.
-    pub badge: Option<Option<(Level, usize)>>,
+    /// Whether `status.health` set the status bar's badge.
+    pub badge_set: bool,
+    /// The badge: the worst finding needing attention and their count.
+    pub badge: Option<(Level, usize)>,
     /// The context keys on for the page's groups
     /// (`health.context-keys`); `None` leaves them.
     pub keys: Option<Vec<String>>,
@@ -133,7 +135,8 @@ pub fn listen_checked(bus: &egui_pop::api::bus::egui_pop_hooks::Kernel) {
         (
             STATUS_LISTENER,
             Box::new(|c: &Checked, s: &mut Shown| {
-                s.badge = Some(c.worst);
+                s.badge_set = true;
+                s.badge = c.worst;
                 Ok(())
             }) as Box<dyn Fn(&Checked, &mut Shown) -> _ + Send + Sync>,
         ),
@@ -411,8 +414,8 @@ impl Shell {
             log::warn!(target: "helios", "health: {failure}");
         }
         let shown = altered.value;
-        if let Some(badge) = shown.badge {
-            self.core.status.borrow_mut().health = badge;
+        if shown.badge_set {
+            self.core.status.borrow_mut().health = shown.badge;
         }
         if let Some(keys) = shown.keys {
             for gone in self.core.health.keys.iter().filter(|k| !keys.contains(k)) {
