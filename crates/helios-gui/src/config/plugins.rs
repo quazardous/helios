@@ -887,17 +887,14 @@ impl SettingsStore for PluginSettingsStore {
     }
 
     fn save(&self, scope: ValueScope, changes: &Changes) -> Result<(), String> {
-        let saved = {
-            let _one = lock(&self.inner.writing);
-            if scope == ValueScope::App {
-                self.save_app(changes)
-            } else if scope == LIBRARY.scope {
-                self.save_library(changes)
-            } else {
-                return Err(format!("plugins keep no {} settings", scope.name()));
-            }
-        };
-        saved
+        let _one = lock(&self.inner.writing);
+        if scope == ValueScope::App {
+            self.save_app(changes)
+        } else if scope == LIBRARY.scope {
+            self.save_library(changes)
+        } else {
+            Err(format!("plugins keep no {} settings", scope.name()))
+        }
     }
 
     fn watch(&self, scope: ValueScope, on_change: OnChange) -> Result<(), String> {
