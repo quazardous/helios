@@ -36,19 +36,31 @@ const SMALL: Vec2 = vec2(360.0, 240.0);
 const LARGE: Vec2 = vec2(1000.0, 620.0);
 
 #[test]
-fn the_histogram_small_and_large() {
+fn the_histogram_small() {
     shoot(Mode::Histogram, SMALL, "scopes_histogram_small");
+}
+
+#[test]
+fn the_histogram_large() {
     shoot(Mode::Histogram, LARGE, "scopes_histogram_large");
 }
 
 #[test]
-fn the_waveform_small_and_large() {
+fn the_waveform_small() {
     shoot(Mode::Waveform, SMALL, "scopes_waveform_small");
+}
+
+#[test]
+fn the_waveform_large() {
     shoot(Mode::Waveform, LARGE, "scopes_waveform_large");
 }
 
 #[test]
-fn the_parade_small_and_large() {
+fn the_parade_small() {
     shoot(Mode::Parade, SMALL, "scopes_parade_small");
+}
+
+#[test]
+fn the_parade_large() {
     shoot(Mode::Parade, LARGE, "scopes_parade_large");
 }

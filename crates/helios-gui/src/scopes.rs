@@ -194,10 +194,19 @@ pub fn picture(image: &Image, mode: Mode, stops: bool) -> ColorImage {
     picture_sized(image, mode, stops, [WIDTH, HEIGHT])
 }
 
+/// How many bands a waveform of `across` pixels counts: each band the
+/// same whole number of the image's columns (uneven bands would draw
+/// brighter and darker stripes), as many as fit, no more than the image
+/// has columns (each then drawn wide).
+fn bands(across: usize, image: &Image) -> usize {
+    let columns = image.region().width.max(1) as usize;
+    let per_band = columns.div_ceil(across.max(1));
+    (columns / per_band).max(1)
+}
+
 /// The scope of an image as a picture of `size` pixels (each side at
-/// least 3): as many bands as pixels across (no more than the image has
-/// columns, each then drawn wide), as many levels as rows (up to
-/// `MAX_LEVELS`).
+/// least 3): as many bands as fit across (see `bands`), as many levels
+/// as rows (up to `MAX_LEVELS`).
 pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -> ColorImage {
     let [width, height] = [size[0].max(3), size[1].max(3)];
     let levels = height.min(MAX_LEVELS);
@@ -223,7 +232,7 @@ pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -
         }
         Mode::Waveform => {
             // No more bands than the image has columns; each drawn wide.
-            let bands = width.min(image.region().width.max(1) as usize);
+            let bands = bands(width, image);
             let w = waveform(image, bands, levels, s);
             let peak = w.columns.iter().map(Counts::peak).max().unwrap_or(0);
             for (b, counts) in w.columns.iter().enumerate() {
@@ -234,7 +243,7 @@ pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -
         }
         Mode::Parade => {
             let third = width / 3;
-            let bands = third.min(image.region().width.max(1) as usize);
+            let bands = bands(third, image);
             let channels = parade(image, bands, levels, s);
             for (c, w) in channels.iter().enumerate() {
                 let peak = w.columns.iter().map(Counts::peak).max().unwrap_or(0);
