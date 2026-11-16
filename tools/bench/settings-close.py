@@ -286,13 +286,13 @@ def close_listener(agent) -> dict:
     for p in s.get("points", []) if isinstance(s, dict) else []:
         if p.get("point") != "window.close":
             continue
-        ids = [l.get("id") for l in p.get("listeners", [])]
-        for i, l in enumerate(p.get("listeners", [])):
-            if l.get("id") == LISTENER:
+        ids = [x.get("id") for x in p.get("listeners", [])]
+        for i, x in enumerate(p.get("listeners", [])):
+            if x.get("id") == LISTENER:
                 return {
                     "after_admin": ADMIN_LISTENER in ids[:i],
-                    "runs": l.get("runs"),
-                    "failures": l.get("failures"),
+                    "runs": x.get("runs"),
+                    "failures": x.get("failures"),
                 }
         return {"error": f"no `{LISTENER}` listener on window.close ({ids})"}
     return {"error": "no window.close point on the bus"}
@@ -403,8 +403,8 @@ def one(args, comp, agent, way: str, index: int, baseline: Path | None, state: P
     screen = shot(comp, args.out, f"{name}-after")
     r["flat"] = screen is not None and png_is_flat(screen)
     written = log_since(logs, mark)
-    r["painted_nothing"] = [l for l in written if PAINTS_NOTHING in l]
-    r["closed_lines"] = sum(CLOSED_LINE in l for l in written)
+    r["painted_nothing"] = [line for line in written if PAINTS_NOTHING in line]
+    r["closed_lines"] = sum(CLOSED_LINE in line for line in written)
     listener_after = close_listener(agent)
     r["listener"] = listener_after
     if screen is not None and baseline is not None:
@@ -431,7 +431,9 @@ def one(args, comp, agent, way: str, index: int, baseline: Path | None, state: P
             f"{r['painted_nothing'][0].strip()}"
         )
     if r["closed_lines"] != 1:
-        problems.append(f"\"the Settings app is closed\" logged {r['closed_lines']} times, 1 expected")
+        problems.append(
+            f'"the Settings app is closed" logged {r["closed_lines"]} times, 1 expected'
+        )
     if way != "admin":
         if "error" in listener_after:
             problems.append(listener_after["error"])
