@@ -31,6 +31,7 @@ mod develop_raw;
 mod dialog_details;
 mod dialogs;
 mod duplicates;
+mod edit_marks;
 mod edit_snapshots;
 mod engine_source;
 mod english_on_a_french_system;

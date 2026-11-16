@@ -109,7 +109,7 @@ fn shows(h: &Harness<'_, Shell>, id: &str) -> bool {
 /// on, in its tone; Helios's items follow the place and the mode.
 #[test]
 fn the_status_bar_says_where_and_its_items_follow_the_place() {
-    use helios_gui::status_items::{CULLED, HISTORY, IMAGES, ZOOM};
+    use helios_gui::status_items::{CULLED, EDIT, HISTORY, IMAGES, ZOOM};
     let dir = temp("status");
     let mut h = window(&dir);
     let crumbs = |h: &Harness<'_, Shell>| egui_pop::api::contexts::crumbs(h.state().app().handle());
@@ -124,7 +124,7 @@ fn the_status_bar_says_where_and_its_items_follow_the_place() {
         "{:?}",
         egui_pop::api::strips::status(h.state().app().handle())
     );
-    // The darkroom on a file: the zoom and the history, not the count.
+    // The darkroom on a file: the zoom, the history and the edit, not the count.
     let photo = dir.join("photo.png");
     std::fs::write(&photo, b"not read").unwrap();
     contexts::open(
@@ -136,6 +136,12 @@ fn the_status_bar_says_where_and_its_items_follow_the_place() {
     assert_eq!(crumbs(&h), ["Helios", "Library", "Darkroom · photo.png"]);
     assert!(shows(&h, ZOOM) && shows(&h, HISTORY), "{:?}", items(&h));
     assert!(!shows(&h, IMAGES), "{:?}", items(&h));
+    // The photo as it came: "Original" until a module changes.
+    assert!(
+        items(&h).contains(&(EDIT.to_string(), "Original".to_string())),
+        "{:?}",
+        items(&h)
+    );
     // Culling: a chip in the accent tone, and the picks and rejects.
     run(&mut h, "view.culling", json!({ "on": true }));
     let chips = egui_pop::api::contexts::chips(h.state().app().handle());
