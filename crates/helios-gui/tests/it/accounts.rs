@@ -1330,6 +1330,95 @@ fn a_source_s_own_download_folder_takes_the_picked_photos_without_asking() {
     assert_eq!(*folder.0.lock().unwrap(), Some(std::env::temp_dir()));
 }
 
+/// Photos chosen through a (fake) remote connector end as every import
+/// does (`helios_gui::import_end`): once, through `import.ended`, its
+/// listeners in the declared order, the host's backups and Library fill
+/// asked once, the cameras' looks put on by the desktop, the end in the
+/// Log panel: the same order and effects as the `library.import` command
+/// and the node's promise (`import_end`'s tests).
+#[test]
+fn photos_chosen_through_a_remote_connector_end_through_import_ended() {
+    use helios_gui::import_end::{self, ORDER};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (mut h, _opened, _folder, imported, _) = picking_world(None);
+    let (backups, refills, looks) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let looked = looks.clone();
+    h.state_mut().set_import_ends(
+        Some(Arc::new(move |_changes| {
+            looked.fetch_add(1, Ordering::SeqCst);
+            Ok(1)
+        })),
+        egui::Context::default(),
+    );
+    let asked = backups.clone();
+    h.state()
+        .listen_import_ended_by(import_end::BACKUPS, move |end| {
+            if end.outcome.is_ok() {
+                asked.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+    let filled = refills.clone();
+    h.state()
+        .listen_import_ended_by(import_end::REFILL, move |_| {
+            filled.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+    let handle = h.state().app().handle().clone();
+    let since = handle.last_event();
+    let is_end = |name: &str| name == import_end::ENDED || name == import_end::FAILED;
+    h.get_by_label(CHOOSE).click();
+    until(&mut h, "the chosen photos in the grid", |h| {
+        shown(h, "Import 1")
+    });
+    click(&mut h, "Import 1");
+    until(&mut h, "the import's end", |_| {
+        handle.events_since(since).iter().any(|e| is_end(&e.name))
+    });
+    h.run_steps(3);
+    let ends: Vec<_> = handle
+        .events_since(since)
+        .into_iter()
+        .filter(|e| is_end(&e.name))
+        .collect();
+    assert_eq!(ends.len(), 1, "one end");
+    let end = &ends[0];
+    assert_eq!(end.name, import_end::ENDED, "{}", end.data);
+    let ran: Vec<&str> = end.data["ran"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let declared: Vec<&str> = ORDER.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ran, declared, "the declared order");
+    assert_eq!(end.data["origin"], "user");
+    assert_eq!(end.data["report"]["added"], 1, "{}", end.data);
+    assert_eq!(end.data["camera_looks"], 1);
+    assert_eq!(imported.lock().unwrap().len(), 1, "imported once");
+    assert_eq!(
+        (
+            backups.load(Ordering::SeqCst),
+            refills.load(Ordering::SeqCst),
+            looks.load(Ordering::SeqCst)
+        ),
+        (1, 1, 1),
+        "backups, Library fill and cameras' looks, once each"
+    );
+    assert!(
+        h.state()
+            .log()
+            .entries()
+            .iter()
+            .any(|e| e.message.english.contains("photos imported")),
+        "the end in the Log panel"
+    );
+}
+
 /// A connector declaring three browsers: the Contents column offers
 /// them for its account, the one chosen is kept on the source and comes
 /// back when the sources are read again.

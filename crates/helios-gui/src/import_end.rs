@@ -5,9 +5,16 @@
 //! page imported in-process, and the node's import promise (heard through
 //! [`NodeWatch`]). Each calls [`Publisher::ended`] or
 //! [`Publisher::failed`] on the import's thread; the shell then passes
-//! the end through the hook point [`ImportEnded`] on the interface's
-//! thread, its listeners in the order [`ORDER`] declares, and says
-//! `import.ended` (or `import.failed`) on the journal.
+//! the end through the hook point [`ImportEnded`] (or [`ImportFailed`])
+//! on the interface's thread, its listeners in the order [`ORDER`] (or
+//! [`FAILED_ORDER`]) declares, and says `import.ended` (or
+//! `import.failed`) on the journal.
+//!
+//! The two points are this crate's contract with the application's bus
+//! ([`POINTS`]): the desktop's `main` builds the one bus and hands it to
+//! the shell, which declares them there; the host's listeners
+//! (`backups.on-import`, `library.refill`) and the shell's register on the
+//! same bus, each with its owner and the listener it runs after.
 //!
 //! The cameras' default looks are put on the import's raws by
 //! [`Publisher::ended`] itself, before the point, on every path: their
@@ -18,7 +25,9 @@
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use egui_pop::api::bus::egui_pop_hooks::{HookError, Kernel, ListenOpts, Point, PointSpec};
+use egui_pop::api::bus::bus_contract::{
+    self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
+};
 use helios_library::import::Report;
 use helios_vault::undo::Changes;
 use serde_json::{Value, json};
@@ -26,8 +35,8 @@ use serde_json::{Value, json};
 /// The hook point an import's end passes through, and the journal's
 /// event once it did.
 pub const ENDED: &str = "import.ended";
-/// The journal's event for an import that failed (it passed through
-/// [`ImportEnded`] too).
+/// The hook point a failed import passes through, and the journal's
+/// event once it did.
 pub const FAILED: &str = "import.failed";
 /// The owner of the shell's listeners of [`ImportEnded`].
 pub const BUS_OWNER: &str = "helios.import";
@@ -70,6 +79,18 @@ pub const ORDER: &[(&str, Option<&str>)] = &[
     (SELECT, Some(WINDOW_HISTORY)),
 ];
 
+/// The listeners of [`ImportFailed`], in order: no undo step, no backup,
+/// nothing selected; what the import brought before it failed is shown
+/// (the Library filled, the duplicates it found), and the failure said.
+pub const FAILED_ORDER: &[(&str, Option<&str>)] = &[
+    (REFILL, None),
+    (DUPLICATES, Some(REFILL)),
+    (LOG, Some(DUPLICATES)),
+    (TOAST, Some(LOG)),
+    (SESSION, Some(TOAST)),
+    (WINDOW_HISTORY, Some(SESSION)),
+];
+
 /// The hook point an import's end passes through.
 pub struct ImportEnded;
 
@@ -78,6 +99,22 @@ impl Point for ImportEnded {
     type Input = ImportEnd;
     type Value = Reactions;
 }
+
+/// The hook point a failed import passes through.
+pub struct ImportFailed;
+
+impl Point for ImportFailed {
+    const ID: &'static str = FAILED;
+    type Input = ImportEnd;
+    type Value = Reactions;
+}
+
+/// The import's points, this crate's contract with the application's
+/// bus: declared by [`declare`].
+pub const POINTS: &[PointDecl] = &[
+    PointDecl::of::<ImportEnded>("An import ended: what the desktop does after it"),
+    PointDecl::of::<ImportFailed>("An import failed: what the desktop does after it"),
+];
 
 /// An import's end, as [`ImportEnded`]'s listeners read it.
 #[derive(Clone, Debug)]
@@ -119,9 +156,14 @@ impl ImportEnd {
             camera_looks: line["camera_looks"].as_u64().unwrap_or(0) as usize,
         })
     }
+
+    /// The point it passes through: [`ENDED`] or [`FAILED`].
+    pub fn point(&self) -> &'static str {
+        if self.outcome.is_ok() { ENDED } else { FAILED }
+    }
 }
 
-/// What [`ImportEnded`]'s listeners did, in order, and what they leave.
+/// What the import points' listeners did, in order, and what they leave.
 #[derive(Clone, Debug, Default)]
 pub struct Reactions {
     /// The listeners that ran, in their order.
@@ -130,45 +172,87 @@ pub struct Reactions {
     pub changes: Option<Changes>,
 }
 
-/// Declares [`ImportEnded`] on `bus` (once; a second shell on the same
-/// bus finds it there).
-pub fn declare(bus: &Kernel) {
-    let _ = bus.declare::<ImportEnded>(PointSpec::new(
-        "An import ended (or failed): what the desktop does after it",
-    ));
+/// Declares [`POINTS`] on `bus` (once; a second shell on the same bus
+/// finds them there).
+pub fn declare(bus: &dyn Bus) {
+    for refused in bus_contract::declare_all(bus, POINTS) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!(target: "helios", "import: {refused}");
+        }
+    }
 }
 
-/// Registers `run` as the listener `id` of [`ImportEnded`] on `bus`, after
-/// the listener [`ORDER`] names; one there already under `id` is replaced.
+/// Registers `run` as the listener `id` of the import's points on `bus`:
+/// of [`ImportEnded`] and of [`ImportFailed`] when their order
+/// ([`ORDER`], [`FAILED_ORDER`]) names it, after the listener it names
+/// there; one there already under `id` is replaced.
 ///
 /// # Errors
-/// `id` is not in [`ORDER`], or the kernel refused it.
+/// `id` is in neither order, or the bus refused it.
 pub fn listen(
-    bus: &Kernel,
+    bus: &dyn Bus,
     id: &'static str,
     run: impl Fn(&ImportEnd, &mut Reactions) + Send + Sync + 'static,
 ) -> Result<(), String> {
-    let (_, after) = ORDER
-        .iter()
-        .find(|(listener, _)| *listener == id)
-        .ok_or_else(|| format!("`{id}` is not a listener of {ENDED}"))?;
-    declare(bus);
-    bus.unlisten(ENDED, id);
-    let mut opts = ListenOpts::new().owner(BUS_OWNER);
-    if let Some(after) = after {
-        opts = opts.after(*after);
+    let place = |order: &[(&str, Option<&'static str>)]| {
+        order
+            .iter()
+            .find(|(listener, _)| *listener == id)
+            .map(|(_, after)| *after)
+    };
+    let (ended, failed) = (place(ORDER), place(FAILED_ORDER));
+    if ended.is_none() && failed.is_none() {
+        return Err(format!("`{id}` is not a listener of {ENDED} nor {FAILED}"));
     }
-    bus.listen::<ImportEnded>(id, opts, move |end, reactions| {
-        run(end, reactions);
-        reactions.ran.push(id.to_owned());
-        Ok::<(), HookError>(())
-    })
-    .map_err(|e| e.to_string())
+    declare(bus);
+    let run = Arc::new(run);
+    let opts = |after: Option<&str>| {
+        let opts = ListenOpts::new().owner(BUS_OWNER);
+        match after {
+            Some(after) => opts.after(after),
+            None => opts,
+        }
+    };
+    if let Some(after) = ended {
+        bus.unlisten(ENDED, id);
+        let run = run.clone();
+        bus.listen::<ImportEnded>(id, opts(after), move |end, reactions| {
+            run(end, reactions);
+            reactions.ran.push(id.to_owned());
+            Ok::<(), HookError>(())
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(after) = failed {
+        bus.unlisten(FAILED, id);
+        bus.listen::<ImportFailed>(id, opts(after), move |end, reactions| {
+            run(end, reactions);
+            reactions.ran.push(id.to_owned());
+            Ok::<(), HookError>(())
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
-/// The order [`ImportEnded`]'s listeners run in on `bus`.
-pub fn order(bus: &Kernel) -> String {
-    egui_pop::api::bus::order_dump(bus, &[ENDED])
+/// Passes `end` through its point ([`ImportEnded`], or [`ImportFailed`]
+/// when it failed) on `bus`: the listeners that ran, in order, and what
+/// they left; the failures of those that failed.
+pub fn pass(
+    bus: &dyn Bus,
+    end: ImportEnd,
+    reactions: Reactions,
+) -> bus_contract::Altered<Reactions> {
+    if end.outcome.is_ok() {
+        bus.alter::<ImportEnded>(end, reactions)
+    } else {
+        bus.alter::<ImportFailed>(end, reactions)
+    }
+}
+
+/// The order the import points' listeners run in on `bus`.
+pub fn order(bus: &dyn Bus) -> String {
+    bus_contract::order_dump(bus, &[ENDED, FAILED])
 }
 
 /// Puts the cameras' default looks on the raws of an import (its
@@ -357,27 +441,32 @@ mod tests {
 
     #[test]
     fn listeners_run_in_the_declared_order_whatever_order_they_register_in() {
-        let bus = Kernel::new();
+        let bus: Arc<dyn Bus> = Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
         for (id, _) in ORDER.iter().rev() {
-            listen(&bus, id, |_, _| {}).unwrap();
+            listen(&*bus, id, |_, _| {}).unwrap();
         }
-        let end = ImportEnd {
+        let end = |outcome| ImportEnd {
             request: json!({}),
             origin: "user".into(),
-            outcome: Ok(Report::default()),
+            outcome,
             camera_looks: 0,
         };
-        let ran = bus
-            .alter::<ImportEnded>(end, Reactions::default())
+        let ran = pass(&*bus, end(Ok(Report::default())), Reactions::default())
             .value
             .ran;
         let declared: Vec<&str> = ORDER.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ran, declared);
+        let ran = pass(&*bus, end(Err("gone".into())), Reactions::default())
+            .value
+            .ran;
+        let declared: Vec<&str> = FAILED_ORDER.iter().map(|(id, _)| *id).collect();
         assert_eq!(ran, declared);
     }
 
     #[test]
     fn a_listener_not_declared_is_refused() {
-        assert!(listen(&Kernel::new(), "nobody.knows", |_, _| {}).is_err());
+        let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
+        assert!(listen(&bus, "nobody.knows", |_, _| {}).is_err());
     }
 
     #[test]

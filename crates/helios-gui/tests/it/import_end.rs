@@ -344,7 +344,7 @@ fn every_import_path_runs_the_same_listeners_in_order_with_the_same_effects() {
 }
 
 #[test]
-fn the_import_end_s_listeners_run_in_a_declared_order() {
+fn the_import_points_listeners_run_in_a_declared_order() {
     let w = world("order");
     assert_eq!(
         w.h.state().import_end_order(),
@@ -358,6 +358,13 @@ fn the_import_end_s_listeners_run_in_a_declared_order() {
          \x20 7. import.toast (owner helios.import): after log.import\n\
          \x20 8. library.import-session (owner helios.import): after import.toast\n\
          \x20 9. import-window.history (owner helios.import): after library.import-session\n\
-         \x20 10. library.select-imported (owner helios.import): after import-window.history\n"
+         \x20 10. library.select-imported (owner helios.import): after import-window.history\n\
+         import.failed\n\
+         \x20 1. library.refill (owner helios.import): nothing\n\
+         \x20 2. duplicates.collect (owner helios.import): after library.refill\n\
+         \x20 3. log.import (owner helios.import): after duplicates.collect\n\
+         \x20 4. import.toast (owner helios.import): after log.import\n\
+         \x20 5. library.import-session (owner helios.import): after import.toast\n\
+         \x20 6. import-window.history (owner helios.import): after library.import-session\n"
     );
 }

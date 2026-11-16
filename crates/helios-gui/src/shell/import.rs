@@ -38,7 +38,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use crate::dialogs::{Field, Form, Level, Notice};
-use crate::import_end::{self, CameraLooks, ImportEnd, ImportEnded, Publisher, Reactions};
+use crate::import_end::{self, CameraLooks, ImportEnd, Publisher, Reactions};
 
 /// The paths of an import's arguments: `path`, or `paths`.
 fn paths_of(args: &Value) -> Vec<PathBuf> {
@@ -467,7 +467,7 @@ impl Shell {
 
     /// Takes in the lines imports sent (duplicates to their panel, the
     /// darktable edits not kept whole to the Log panel) and their ends,
-    /// each passed through [`ImportEnded`] ([`Shell::import_end_heard`]).
+    /// each passed through its point ([`Shell::import_end_heard`]).
     /// How many duplicates now wait for an answer among them.
     pub(super) fn receive_imports(&mut self) -> usize {
         // The ends first: each was said after its import's lines, which
@@ -524,7 +524,7 @@ impl Shell {
         self.core.import_ends.0 = ends;
     }
 
-    /// Registers the host's listener `id` of [`ImportEnded`] (one of
+    /// Registers the host's listener `id` of [`ImportEnded`](crate::import_end::ImportEnded) (one of
     /// [`crate::import_end::ORDER`]'s, such as `backups.on-import` or
     /// `library.refill`), run on the interface's thread in its declared
     /// place.
@@ -536,22 +536,23 @@ impl Shell {
         id: &'static str,
         run: impl Fn(&ImportEnd) + Send + Sync + 'static,
     ) -> Result<(), String> {
-        import_end::listen(&self.core.app.handle().bus(), id, move |end, _| run(end))
+        import_end::listen(&*self.core.app.handle().bus(), id, move |end, _| run(end))
     }
 
-    /// The order [`ImportEnded`]'s listeners run in.
+    /// The order the import points' listeners run in (`import.ended`,
+    /// then `import.failed`).
     pub fn import_end_order(&self) -> String {
-        import_end::order(&self.core.app.handle().bus())
+        import_end::order(&*self.core.app.handle().bus())
     }
 
-    /// The shell's listeners of [`ImportEnded`]: the undo step recorded
+    /// The shell's listeners of the import's points: the undo step recorded
     /// here; the others run by [`Shell::import_end_heard`], in the order
     /// they ran.
     pub(super) fn listen_import_ended(&mut self) {
         let bus = self.core.app.handle().bus();
         let history = self.library_history();
         let mut listened = vec![import_end::listen(
-            &bus,
+            &*bus,
             import_end::HISTORY,
             move |end, r| {
                 if let (Some(changes), Ok(report)) = (r.changes.take(), &end.outcome) {
@@ -572,19 +573,18 @@ impl Shell {
             import_end::WINDOW_HISTORY,
             import_end::SELECT,
         ] {
-            listened.push(import_end::listen(&bus, id, |_, _| {}));
+            listened.push(import_end::listen(&*bus, id, |_, _| {}));
         }
         for e in listened.into_iter().filter_map(Result::err) {
             self.notes.push(format!("{}: {e}", import_end::ENDED));
         }
     }
 
-    /// An import's end, passed through [`ImportEnded`]: each listener's
-    /// part done in the order they ran, then `import.ended` (or
-    /// `import.failed`) said on the journal with who asked, the report,
-    /// the cameras' looks and the listeners that ran (`ran`). How many
-    /// duplicates now
-    /// wait for an answer.
+    /// An import's end, passed through its point (`import.ended`, or
+    /// `import.failed`): each listener's part done in the order they
+    /// ran, then the point's name said on the journal with who asked,
+    /// the report, the cameras' looks and the listeners that ran (`ran`).
+    /// How many duplicates now wait for an answer.
     pub(super) fn import_end_heard(&mut self, mut end: ImportEnd) -> usize {
         let changes = end
             .outcome
@@ -607,7 +607,9 @@ impl Shell {
             ),
         };
         let handle = self.core.app.handle().clone();
-        let altered = handle.bus().alter::<ImportEnded>(
+        let point = end.point();
+        let altered = import_end::pass(
+            &*handle.bus(),
             end,
             Reactions {
                 ran: Vec::new(),
@@ -615,7 +617,7 @@ impl Shell {
             },
         );
         for failure in &altered.failures {
-            log::warn!(target: "helios", "{}: {failure}", import_end::ENDED);
+            log::warn!(target: "helios", "{point}: {failure}");
         }
         let ids = std::mem::take(&mut self.focus.imported_ids);
         let (mut asked, mut select) = (0, false);
