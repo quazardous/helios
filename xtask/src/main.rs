@@ -61,7 +61,7 @@
 //!   presets first, from the `/// Need (group): ...` doc lines of Helios's
 //!   crates and of the egui-pop crates in the lock (see `ui_index.rs`).
 //! - `pin-bump [egui-pop=REV] [egui_hud=REV] [--pr]` | `pins [--release]`:
-//!   `next` builds on egui-pop and egui_hud `next` by git revision; the
+//!   `next` builds on egui-pop and `egui_hud` `next` by git revision; the
 //!   bump moves those pins to their newest green commit, and the release
 //!   guard refuses a release while any of them comes from git (see
 //!   `pins.rs`).

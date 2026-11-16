@@ -1,7 +1,7 @@
-//! The versions of egui-pop and egui_hud Helios builds on (docs/releases.md,
-//! "egui-pop and egui_hud: next follows next").
+//! The versions of egui-pop and `egui_hud` Helios builds on (docs/releases.md,
+//! "egui-pop and `egui_hud`: next follows next").
 //!
-//! - On `next`, Helios builds on egui-pop's `next` and egui_hud's `next`,
+//! - On `next`, Helios builds on egui-pop's `next` and `egui_hud`'s `next`,
 //!   each by one git revision, in the root `Cargo.toml`'s one
 //!   `[patch.crates-io]` table: every crate of a repository from the same
 //!   revision, so the graph holds one egui-pop.
@@ -16,13 +16,13 @@
 //!   with a changelog fragment, pushes `chore/pin-bump-<revs>` and opens the
 //!   pull request into `next`; a branch already pushed for the same
 //!   revisions means there is nothing to do. The coordinator runs it when
-//!   its watch sees egui-pop's (or egui_hud's) `next` turn green: no
+//!   its watch sees egui-pop's (or `egui_hud`'s) `next` turn green: no
 //!   workflow polls another repository.
 //! - `pins [--release]`: the revisions in use; with `--release`, the
 //!   release guard: it fails while any crate of the quazardous organisation
 //!   comes from git. `cargo xtask release` and the promotion apply it too:
 //!   a release builds on published crates only, so the release keeper cuts
-//!   egui-pop's and egui_hud's releases first.
+//!   egui-pop's and `egui_hud`'s releases first.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -212,25 +212,22 @@ pub fn set_rev(manifest: &str, repo: &str, rev: &str, crates: &[String]) -> Stri
     let found = patch_lines(manifest, repo);
     if found.is_empty() {
         let new: Vec<String> = crates.iter().map(|c| entry(c, repo, rev)).collect();
-        match lines.iter().position(|l| l.trim() == "[patch.crates-io]") {
-            Some(start) => {
-                // after the table's last entry, before the blank line that ends it
-                let mut at = start + 1;
-                while at < lines.len() && !lines[at].trim().starts_with('[') {
-                    at += 1;
-                }
-                while at > start + 1 && lines[at - 1].trim().is_empty() {
-                    at -= 1;
-                }
-                lines.splice(at..at, new);
+        if let Some(start) = lines.iter().position(|l| l.trim() == "[patch.crates-io]") {
+            // after the table's last entry, before the blank line that ends it
+            let mut at = start + 1;
+            while at < lines.len() && !lines[at].trim().starts_with('[') {
+                at += 1;
             }
-            None => {
-                if lines.last().is_some_and(|l| !l.trim().is_empty()) {
-                    lines.push(String::new());
-                }
-                lines.push("[patch.crates-io]".into());
-                lines.extend(new);
+            while at > start + 1 && lines[at - 1].trim().is_empty() {
+                at -= 1;
             }
+            lines.splice(at..at, new);
+        } else {
+            if lines.last().is_some_and(|l| !l.trim().is_empty()) {
+                lines.push(String::new());
+            }
+            lines.push("[patch.crates-io]".into());
+            lines.extend(new);
         }
     } else {
         for (i, name) in found {
@@ -367,10 +364,10 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
 
 /// The bump in the checkout `dir`: `(moves, body)`, nothing moved when
 /// `moves` is empty.
-fn bump(
-    dir: &Path,
-    revs: &[(&Repo, String)],
-) -> Result<(Vec<(String, String, String)>, String), String> {
+/// A pin moved: `(repository, from, to)`.
+type Move = (String, String, String);
+
+fn bump(dir: &Path, revs: &[(&Repo, String)]) -> Result<(Vec<Move>, String), String> {
     let manifest_path = dir.join("Cargo.toml");
     let lock_path = dir.join("Cargo.lock");
     let manifest = read(&manifest_path)?;

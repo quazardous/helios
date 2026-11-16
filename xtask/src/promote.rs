@@ -55,7 +55,7 @@ pub enum Outcome {
     Skipped(String),
     /// `main` moved to `main`; `release` is the version released, if any;
     /// `held` why a release the fragments asked for waits (an egui-pop or
-    /// egui_hud crate still comes from git: the release guard).
+    /// `egui_hud` crate still comes from git: the release guard).
     Promoted {
         main: String,
         release: Option<String>,
