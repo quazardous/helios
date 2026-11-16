@@ -485,12 +485,19 @@ const SHOWN_LEASE: u64 = 3_600;
 pub struct Reader {
     node: Arc<Client>,
     cache: Arc<ReadCache>,
+    /// How many times the library shown was brought up to date
+    /// (`cursor.refresh` asked of the node), for tests.
+    refreshes: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Reader {
     /// Reads `method` from the cache, else from the node (waiting for it):
     /// on a thread of its own, never the UI's.
     pub fn read(&self, method: &str, params: Value) -> Result<Value, String> {
+        if method == "cursor.refresh" {
+            self.refreshes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         self.cache
             .read(&self.node, method, params)
             .map_err(|e| e.message)
@@ -505,6 +512,13 @@ impl Reader {
     /// The cache of the node's reads.
     pub fn cache(&self) -> &ReadCache {
         &self.cache
+    }
+
+    /// How many times the library shown was brought up to date by its
+    /// cursor's delta (`cursor.refresh` asked of the node): one per fill
+    /// of a library already shown.
+    pub fn refreshes(&self) -> u64 {
+        self.refreshes.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -1258,6 +1272,7 @@ impl<S: Store + 'static> Persist<S> {
         let reader = Reader {
             node: node.clone(),
             cache,
+            refreshes: Arc::default(),
         };
         Self {
             library,
