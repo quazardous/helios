@@ -1,28 +1,64 @@
-//! The GPU checks: which adapter Helios renders on (or the CPU), and
-//! whether every GPU kernel compiles there. They read a [`Gpu`] gathered
-//! once per run; the kernels are compiled by a function the desktop gives
-//! ([`Kernels::new`]), once per adapter and driver.
+//! The GPU module's health checks: which adapter Helios renders on (or
+//! the CPU), and whether every GPU kernel compiles there. They read a
+//! [`Gpu`] gathered once per run ([`gpu`]); the kernels are compiled by a
+//! function the desktop gives ([`Kernels::new`]), once per adapter and
+//! driver.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use helios_core::Message;
+use helios_health::{Declaration, Finding, Fix, Gather, Level, Owned, Registry};
 use serde_json::json;
-
-use crate::{Check, Context, Declaration, Finding, Fix, Level, Registry};
 
 /// The owner of the GPU checks.
 pub const OWNER: &str = "gpu";
 
-/// The GPU module's checks known without the desktop: the adapter in use
-/// (the kernels' check, [`Kernels`], is added by the desktop).
-pub fn checks() -> Vec<Arc<dyn Check>> {
-    vec![Arc::new(AdapterCheck)]
+/// Adds the GPU module's check known without the desktop, the adapter in
+/// use, to `registry`, owned by [`OWNER`], over what `source` gathers (the
+/// kernels' check, [`Kernels`], is added by the desktop over the same
+/// source).
+pub fn register(registry: &mut Registry, source: &Gather<Option<Gpu>>) {
+    helios_health::add_owned(
+        registry,
+        OWNER,
+        vec![helios_health::over(AdapterCheck, source)],
+    );
 }
 
-/// Adds the GPU module's checks to `registry`, owned by `OWNER`, as listeners of
-/// the health report.
-pub fn register(registry: &mut Registry) {
-    crate::add_owned(registry, OWNER, checks());
+/// The adapters wgpu enumerated and the one the process's device is open
+/// on ([`crate::shared`]); `None` before the GPU was tried (never
+/// enumerates from here).
+pub fn gpu() -> Option<Gpu> {
+    let adapters = crate::shared::enumerated()?;
+    let opened = crate::shared::opened();
+    let adapters: Vec<Adapter> = adapters
+        .iter()
+        .map(|a| {
+            let info = a.get_info();
+            Adapter {
+                name: info.name.clone(),
+                driver: format!("{} {}", info.driver, info.driver_info)
+                    .trim()
+                    .to_string(),
+                backend: format!("{:?}", info.backend),
+                kind: match info.device_type {
+                    wgpu::DeviceType::DiscreteGpu => AdapterKind::Discrete,
+                    wgpu::DeviceType::IntegratedGpu => AdapterKind::Integrated,
+                    wgpu::DeviceType::VirtualGpu => AdapterKind::Virtual,
+                    wgpu::DeviceType::Other => AdapterKind::Other,
+                    wgpu::DeviceType::Cpu => AdapterKind::Software,
+                },
+            }
+        })
+        .collect();
+    let used = opened.as_ref().map(|(i, _)| *i);
+    Some(Gpu {
+        adapters,
+        used,
+        why_cpu: used
+            .is_none()
+            .then(|| "the GPU device did not open (see the log)".to_string()),
+    })
 }
 
 pub const ADAPTER: &str = "gpu.adapter";
@@ -122,7 +158,9 @@ fn docs_fix() -> Fix {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AdapterCheck;
 
-impl Check for AdapterCheck {
+impl Owned for AdapterCheck {
+    type State = Option<Gpu>;
+
     fn id(&self) -> &str {
         ADAPTER
     }
@@ -137,8 +175,8 @@ impl Check for AdapterCheck {
             .fixes(&["links.open"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some(gpu) = &ctx.gpu else {
+    fn findings(&self, state: &Option<Gpu>) -> Vec<Finding> {
+        let Some(gpu) = state else {
             return Vec::new();
         };
         let hardware = gpu.hardware();
@@ -243,7 +281,9 @@ impl Kernels {
     }
 }
 
-impl Check for Kernels {
+impl Owned for Kernels {
+    type State = Option<Gpu>;
+
     fn id(&self) -> &str {
         KERNELS
     }
@@ -258,8 +298,8 @@ impl Check for Kernels {
             .fixes(&["links.open"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some(adapter) = ctx.gpu.as_ref().and_then(Gpu::adapter) else {
+    fn findings(&self, state: &Option<Gpu>) -> Vec<Finding> {
+        let Some(adapter) = state.as_ref().and_then(Gpu::adapter) else {
             return Vec::new();
         };
         let kernels = self.on(adapter);
@@ -315,15 +355,12 @@ mod tests {
         }
     }
 
-    fn ctx(adapters: Vec<Adapter>, used: Option<usize>) -> Context {
-        Context {
-            gpu: Some(Gpu {
-                adapters,
-                used,
-                why_cpu: None,
-            }),
-            ..Context::default()
-        }
+    fn ctx(adapters: Vec<Adapter>, used: Option<usize>) -> Option<Gpu> {
+        Some(Gpu {
+            adapters,
+            used,
+            why_cpu: None,
+        })
     }
 
     #[test]
@@ -332,14 +369,33 @@ mod tests {
             adapter("llvmpipe (LLVM 19)", AdapterKind::Software),
             adapter("Radeon RX 7600", AdapterKind::Discrete),
         ];
-        let found = AdapterCheck.run(&ctx(both.clone(), Some(0)));
+        let found = AdapterCheck.findings(&ctx(both.clone(), Some(0)));
         assert_eq!(found[0].level, Level::Warning);
         assert_eq!(found[0].fix.as_ref().unwrap().command, "links.open");
-        assert_eq!(AdapterCheck.run(&ctx(both, Some(1)))[0].level, Level::Ok);
+        assert_eq!(
+            AdapterCheck.findings(&ctx(both, Some(1)))[0].level,
+            Level::Ok
+        );
         // Alone, a software adapter is all there is.
         let alone = vec![adapter("Microsoft Basic Render Driver", AdapterKind::Other)];
-        assert_eq!(AdapterCheck.run(&ctx(alone, Some(0)))[0].level, Level::Ok);
-        assert!(AdapterCheck.run(&Context::default()).is_empty());
+        assert_eq!(
+            AdapterCheck.findings(&ctx(alone, Some(0)))[0].level,
+            Level::Ok
+        );
+        assert!(AdapterCheck.findings(&None).is_empty());
+    }
+
+    #[test]
+    fn the_gpu_checks_are_declared_soundly() {
+        assert_eq!(
+            AdapterCheck.declaration().problems(ADAPTER),
+            Vec::<String>::new()
+        );
+        let kernels = Kernels::new(Vec::new);
+        assert_eq!(
+            kernels.declaration().problems(KERNELS),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -360,11 +416,11 @@ mod tests {
             ]
         });
         let ctx = ctx(vec![adapter("WARP", AdapterKind::Software)], Some(0));
-        let found = check.run(&ctx);
+        let found = check.findings(&ctx);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "gpu.kernels/sigmoid");
         assert_eq!(found[0].level, Level::Warning);
-        check.run(&ctx);
+        check.findings(&ctx);
         assert_eq!(calls.load(Ordering::SeqCst), 1, "cached");
     }
 }

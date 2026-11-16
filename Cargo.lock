@@ -2467,6 +2467,7 @@ dependencies = [
  "bytemuck",
  "helios-bricks",
  "helios-core",
+ "helios-health",
  "helios-module-blur",
  "helios-module-exposure",
  "helios-module-sigmoid",
@@ -2558,8 +2559,6 @@ version = "0.91.0"
 dependencies = [
  "egui-pop-hooks",
  "helios-core",
- "helios-storage",
- "helios-vault",
  "log",
  "serde",
  "serde_json",
@@ -2624,6 +2623,7 @@ dependencies = [
  "helios-core",
  "helios-decision",
  "helios-export",
+ "helios-health",
  "helios-load",
  "helios-storage",
  "helios-thumbs",
@@ -3005,6 +3005,8 @@ name = "helios-storage"
 version = "0.91.0"
 dependencies = [
  "blake3",
+ "helios-core",
+ "helios-health",
  "helios-vault",
  "log",
  "quick-xml 0.42.0",

@@ -11,7 +11,7 @@ use super::{Batch, Library};
 /// Pairs RAW+JPEG files: the pairs among photos (`images`, else the
 /// selection; `all`: the whole Library), or two photos as they are
 /// (`exact`).
-pub const PAIR_COMMAND: &str = helios_health::checks::PAIR_FILES;
+pub const PAIR_COMMAND: &str = helios_library::health::PAIR_FILES;
 
 /// Unpairs photos (`images`, else the selection): each file a photo of
 /// its own again.

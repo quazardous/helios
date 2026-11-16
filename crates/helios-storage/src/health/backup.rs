@@ -3,34 +3,31 @@
 //! still inserted are safe to format. They read a [`Backup`], gathered
 //! from the vault once per run ([`Backup::read`]).
 
-use std::sync::Arc;
-
 use helios_core::Message;
-use helios_storage::strategy::{self, BackupStatus, Scope, Strategy};
-use helios_storage::{Volume, registry};
+use helios_health::{Declaration, Event, Finding, Fix, Gather, Level, Owned, Registry};
 use helios_vault::{Store, Vault};
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Event, Finding, Fix, Level, Registry};
+use crate::strategy::{self, BackupStatus, Scope, Strategy};
+use crate::{Volume, registry};
 
-/// The owner of the backup checks ([`checks`]).
+/// The owner of the backup checks.
 pub const OWNER: &str = "backup";
 
-/// The backup module's checks, in the order they run.
-pub fn checks() -> Vec<Arc<dyn Check>> {
-    vec![
-        Arc::new(StrategySet),
-        Arc::new(StrategyMet),
-        Arc::new(DestinationsSeen),
-        Arc::new(Unverified),
-        Arc::new(Cards),
-    ]
-}
-
-/// Adds the backup module's checks to `registry`, owned by `OWNER`, as listeners of
-/// the health report.
-pub fn register(registry: &mut Registry) {
-    crate::add_owned(registry, OWNER, checks());
+/// Adds the backup module's checks to `registry`, owned by [`OWNER`], over
+/// what `source` gathers (`None`: no vault, the checks say nothing).
+pub fn register(registry: &mut Registry, source: &Gather<Option<Backup>>) {
+    helios_health::add_owned(
+        registry,
+        OWNER,
+        vec![
+            helios_health::over(StrategySet, source),
+            helios_health::over(StrategyMet, source),
+            helios_health::over(DestinationsSeen, source),
+            helios_health::over(Unverified, source),
+            helios_health::over(Cards, source),
+        ],
+    );
 }
 
 /// Days a backup destination may stay away before a warning, by default.
@@ -93,8 +90,8 @@ impl Backup {
 }
 
 /// The strategy, when the run read the backups and one is set.
-fn strategy_of(ctx: &Context) -> Option<(&Backup, &Strategy)> {
-    let b = ctx.backup.as_ref()?;
+fn strategy_of(state: &Option<Backup>) -> Option<(&Backup, &Strategy)> {
+    let b = state.as_ref()?;
     Some((b, b.strategy.as_ref()?))
 }
 
@@ -125,7 +122,9 @@ pub const STRATEGY_SET: &str = "backup.strategy";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StrategySet;
 
-impl Check for StrategySet {
+impl Owned for StrategySet {
+    type State = Option<Backup>;
+
     fn id(&self) -> &str {
         STRATEGY_SET
     }
@@ -140,8 +139,8 @@ impl Check for StrategySet {
             .fixes(&["admin.open"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some(backup) = &ctx.backup else {
+    fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
+        let Some(backup) = state else {
             return Vec::new();
         };
         let finding = match &backup.strategy {
@@ -184,7 +183,9 @@ pub const STRATEGY_MET: &str = "backup.met";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StrategyMet;
 
-impl Check for StrategyMet {
+impl Owned for StrategyMet {
+    type State = Option<Backup>;
+
     fn id(&self) -> &str {
         STRATEGY_MET
     }
@@ -200,8 +201,8 @@ impl Check for StrategyMet {
             .fixes(&["library.backupNow", "library.storage"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some((backup, s)) = strategy_of(ctx) else {
+    fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
+        let Some((backup, s)) = strategy_of(state) else {
             return Vec::new();
         };
         let short = backup.statuses.iter().filter(|st| !st.met()).count();
@@ -251,7 +252,9 @@ pub const DESTINATIONS_SEEN: &str = "backup.destinations-seen";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DestinationsSeen;
 
-impl Check for DestinationsSeen {
+impl Owned for DestinationsSeen {
+    type State = Option<Backup>;
+
     fn id(&self) -> &str {
         DESTINATIONS_SEEN
     }
@@ -267,8 +270,8 @@ impl Check for DestinationsSeen {
             .fixes(&["library.storage"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some((backup, s)) = strategy_of(ctx) else {
+    fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
+        let Some((backup, s)) = strategy_of(state) else {
             return Vec::new();
         };
         let destinations: Vec<&Volume> = backup
@@ -336,7 +339,9 @@ pub const UNVERIFIED: &str = "backup.unverified";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Unverified;
 
-impl Check for Unverified {
+impl Owned for Unverified {
+    type State = Option<Backup>;
+
     fn id(&self) -> &str {
         UNVERIFIED
     }
@@ -351,8 +356,8 @@ impl Check for Unverified {
             .fixes(&["library.backupNow"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some((backup, _)) = strategy_of(ctx) else {
+    fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
+        let Some((backup, _)) = strategy_of(state) else {
             return Vec::new();
         };
         let count = backup.statuses.iter().filter(|s| s.unverified > 0).count();
@@ -388,7 +393,9 @@ pub const CARDS: &str = "backup.cards";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Cards;
 
-impl Check for Cards {
+impl Owned for Cards {
+    type State = Option<Backup>;
+
     fn id(&self) -> &str {
         CARDS
     }
@@ -404,8 +411,8 @@ impl Check for Cards {
             .fixes(&["library.backupNow"])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        let Some(backup) = &ctx.backup else {
+    fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
+        let Some(backup) = state else {
             return Vec::new();
         };
         backup
