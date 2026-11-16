@@ -36,7 +36,6 @@
 "shell/import_profiles.rs" = 28
 "shell/import_window.rs" = 53
 "shell/import_window/source_list.rs" = 29
-"shell/import_wizard.rs" = 53
 "shell/library_focus.rs" = 2
 "splash.rs" = 22
 "stack_review.rs" = 16
