@@ -635,10 +635,8 @@ impl Shell {
                 import_end::WINDOW_HISTORY => self.import_window_history_again(),
                 // The user's import: its photos selected once the Library
                 // shows them (unless the user turned it off).
-                import_end::SELECT => {
-                    if select && !ids.is_empty() {
-                        self.focus.select_imported.clone_from(&ids);
-                    }
+                import_end::SELECT if select && !ids.is_empty() => {
+                    self.focus.select_imported.clone_from(&ids);
                 }
                 _ => {}
             }
