@@ -1190,6 +1190,7 @@ gui-macro-iface-description 8f890bb4923460e1
 gui-macro-iface-down a7408a34290b19ae
 gui-macro-iface-drive-add 136e3e6617e1ef13
 gui-macro-iface-drive-remove 59b079ca9654b62f
+gui-macro-iface-driven 4b188163bde27e92
 gui-macro-iface-filter 3a5e912c59d0059f
 gui-macro-iface-group afb283420d5acdea
 gui-macro-iface-inner ac1609cad03b7821
@@ -1205,6 +1206,8 @@ gui-macro-iface-pick 13c0205c1084ef77
 gui-macro-iface-point 99e4381d6de572d0
 gui-macro-iface-point-add ede58f45355011d9
 gui-macro-iface-range 5d0048f573dd6f60
+gui-macro-iface-range-from ac055483daabc985
+gui-macro-iface-range-to 90113b2a67cfe3f2
 gui-macro-iface-remove 10cd5685cc4fc34f
 gui-macro-iface-shown 72921dc7fd855582
 gui-macro-iface-soft 9effdc68411fc7f9

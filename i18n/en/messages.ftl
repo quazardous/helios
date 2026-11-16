@@ -1833,6 +1833,8 @@ gui-macro-iface-drive-add = Drive another parameter
 
 gui-macro-iface-drive-remove = Stop driving it
 
+gui-macro-iface-driven = Driven parameter
+
 gui-macro-iface-filter = Filter
 
 gui-macro-iface-group = Group
@@ -1862,6 +1864,10 @@ gui-macro-iface-point = x: the slider's value; y: the inner value there
 gui-macro-iface-point-add = Add a point
 
 gui-macro-iface-range = Range
+
+gui-macro-iface-range-from = From
+
+gui-macro-iface-range-to = To
 
 gui-macro-iface-remove = Stop showing it
 

@@ -24,13 +24,17 @@
 //! with the list as `exposed`, so an agent answers the dialog as a form
 //! with that same list.
 
-use egui::{RichText, Ui};
+use egui::Ui;
 use egui_pop::api::dialogs::CustomPass;
+use egui_pop::core::input::Input;
 use egui_pop::core::slider::{RangeSlider, Slider};
-use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, Tone, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::{Message, ParamKind, Value};
 use helios_template::format::{Drive, Exposed};
 use helios_template::macros::InnerParam;
+use helios_ui::{Action, Scroll};
 use serde_json::json;
 
 /// Checks an interface: `Ok` when the step would take it.
@@ -69,16 +73,24 @@ fn free_name(exposed: &[Exposed], node: &str, param: &str) -> String {
         .expect("a free name")
 }
 
+/// A text field named `label`, the word beside it: egui-pop's text
+/// `Input`, named by that word, which tests and agents find.
+fn labelled_text(
+    ui: &mut Ui,
+    label: &str,
+    text: &mut String,
+) -> egui_pop::core::input::InputOutput {
+    let l = ui.text_role(TextRole::Body, label);
+    let mut field = Input::text(text, label).show(ui);
+    field.response = field.response.labelled_by(l.id);
+    field
+}
+
 /// An optional text field: empty is `None`.
 fn text_field(ui: &mut Ui, label: &str, value: &mut Option<String>) {
     ui.horizontal(|ui| {
-        let l = ui.label(label);
         let mut text = value.clone().unwrap_or_default();
-        if ui
-            .text_edit_singleline(&mut text)
-            .labelled_by(l.id)
-            .changed()
-        {
+        if labelled_text(ui, label, &mut text).changed {
             *value = (!text.trim().is_empty()).then(|| text.trim().to_string());
         }
     });
@@ -175,37 +187,38 @@ impl Editor {
     /// One pass of the dialog's body.
     pub fn ui(&mut self, ui: &mut Ui, pass: &mut CustomPass) {
         ui.horizontal(|ui| {
-            let l = ui.label(tr(ui, Message::new("gui-macro-iface-filter", "Filter")));
-            ui.text_edit_singleline(&mut self.filter).labelled_by(l.id);
+            let name = tr(ui, Message::new("gui-macro-iface-filter", "Filter"));
+            labelled_text(ui, &name, &mut self.filter);
         });
         let height = (ui.available_height() * 0.5).max(120.0);
+        // Each list scrolls within half the dialog's height at most.
+        let list = |ui: &mut Ui, id: &str, add: &mut dyn FnMut(&mut Ui)| {
+            ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
+                helios_ui::scroll(ui, id, Scroll::Region, |ui| add(ui));
+            });
+        };
         ui.columns(2, |cols| {
-            cols[0].strong(tr(
+            let title = tr(
                 &cols[0],
                 Message::new("gui-macro-iface-inner", "Inner parameters"),
-            ));
-            cols[0].scroll_area(
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.macro.iface.inner")
-                    .max_height(height),
-                |ui| self.inner_ui(ui),
             );
-            cols[1].strong(tr(
+            cols[0].section_title(title);
+            list(&mut cols[0], "helios.macro.iface.inner", &mut |ui| {
+                self.inner_ui(ui);
+            });
+            let title = tr(
                 &cols[1],
                 Message::new("gui-macro-iface-shown", "Shown by the macro"),
-            ));
-            cols[1].scroll_area(
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.macro.iface.shown")
-                    .max_height(height),
-                |ui| self.shown_ui(ui),
             );
+            cols[1].section_title(title);
+            list(&mut cols[1], "helios.macro.iface.shown", &mut |ui| {
+                self.shown_ui(ui);
+            });
         });
-        ui.separator();
-        ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.macro.iface.row"),
-            |ui| self.row_ui(ui),
-        );
+        ui.divider();
+        helios_ui::scroll(ui, "helios.macro.iface.row", Scroll::Region, |ui| {
+            self.row_ui(ui);
+        });
         // Checked as the step would be, once per change.
         if self
             .verdict
@@ -224,7 +237,7 @@ impl Editor {
         }
         let verdict = self.verdict.as_ref().map(|(_, v)| v.clone());
         if let Some(Err(e)) = &verdict {
-            ui.label(RichText::new(e).color(ui.visuals().warn_fg_color));
+            ui.text_tone(Tone::Warning, e.clone());
         }
         // Always possible: an agent answers with a list of its own, and
         // the step refuses what does not fit, with its reason.
@@ -253,17 +266,17 @@ impl Editor {
                 continue;
             }
             if node != Some(p.node.as_str()) {
-                ui.weak(&p.node);
+                ui.muted(&p.node);
                 node = Some(&p.node);
             }
             let d = helios_values::Descriptor::from_spec(&p.spec, p.hint.as_ref());
             let mut on = self.is_exposed(&p.node, &p.spec.name);
             ui.horizontal(|ui| {
-                if ui.checkbox(&mut on, &p.spec.name).changed() {
+                if widgets::checkbox(ui, &mut on, &p.spec.name).changed() {
                     toggle = Some((p.node.clone(), p.spec.name.clone(), on));
                 }
-                ui.weak(crate::params::shown(&d, &p.value))
-                    .on_hover_text(&p.spec.description);
+                ui.muted(crate::params::shown(&d, &p.value))
+                    .tip(&p.spec.description);
             });
         }
         match toggle {
@@ -289,7 +302,7 @@ impl Editor {
     /// The interface, in its order: select, move, take out.
     fn shown_ui(&mut self, ui: &mut Ui) {
         if self.exposed.is_empty() {
-            ui.weak(tr(
+            ui.muted(tr(
                 ui,
                 Message::new(
                     "gui-macro-iface-none",
@@ -320,46 +333,40 @@ impl Editor {
                 if x.is_driven() {
                     text = format!("~ {text}");
                 }
-                if ui
-                    .selectable_label(self.selected == Some(i), text)
-                    .on_hover_text(inner)
+                if widgets::selectable_label(ui, self.selected == Some(i), text)
+                    .tip(inner)
                     .clicked()
                 {
                     self.selected = Some(i);
                 }
-                if ui
-                    .add_enabled(i > 0, egui::Button::new("↑").small())
-                    .on_hover_text(&up)
-                    .clicked()
-                {
+                if row_button(ui, i > 0, "↑").tip(&up).clicked() {
                     action = Some((i, -1));
                 }
-                if ui
-                    .add_enabled(i + 1 < len, egui::Button::new("↓").small())
-                    .on_hover_text(&down)
-                    .clicked()
-                {
+                if row_button(ui, i + 1 < len, "↓").tip(&down).clicked() {
                     action = Some((i, 1));
                 }
-                if ui.small_button("×").on_hover_text(&remove).clicked() {
+                if row_button(ui, true, "×").tip(&remove).clicked() {
                     action = Some((i, 0));
                 }
             });
         }
         if !self.numbers().is_empty()
-            && ui
-                .button(tr(
+            && helios_ui::action(
+                ui,
+                Action::Secondary,
+                &tr(
                     ui,
                     Message::new("gui-macro-iface-new-slider", "New semantic slider"),
-                ))
-                .on_hover_text(tr(
-                    ui,
-                    Message::new(
-                        "gui-macro-iface-new-slider-hint",
-                        "One slider that moves several inner numbers, each along its curve",
-                    ),
-                ))
-                .clicked()
+                ),
+            )
+            .tip(tr(
+                ui,
+                Message::new(
+                    "gui-macro-iface-new-slider-hint",
+                    "One slider that moves several inner numbers, each along its curve",
+                ),
+            ))
+            .clicked()
         {
             self.new_slider();
         }
@@ -380,7 +387,7 @@ impl Editor {
     /// The row selected: its name and how it is shown.
     fn row_ui(&mut self, ui: &mut Ui) {
         let Some(i) = self.selected.filter(|i| *i < self.exposed.len()) else {
-            ui.weak(tr(
+            ui.muted(tr(
                 ui,
                 Message::new(
                     "gui-macro-iface-pick",
@@ -406,19 +413,18 @@ impl Editor {
             .unwrap_or(i);
         let x = &mut self.exposed[i];
         ui.horizontal(|ui| {
-            let l = ui.label(tr(ui, Message::new("gui-macro-iface-name", "Name")));
-            ui.text_edit_singleline(&mut x.name)
-                .labelled_by(l.id)
-                .on_hover_text(tr(
-                    ui,
-                    Message::new(
-                        "gui-macro-iface-name-hint",
-                        "The same name on two rows links them: one value sets both",
-                    ),
-                ));
+            let name = tr(ui, Message::new("gui-macro-iface-name", "Name"));
+            let hint = tr(
+                ui,
+                Message::new(
+                    "gui-macro-iface-name-hint",
+                    "The same name on two rows links them: one value sets both",
+                ),
+            );
+            labelled_text(ui, &name, &mut x.name).response.tip(hint);
         });
         if first != i {
-            ui.weak(tr(
+            ui.muted(tr(
                 ui,
                 Message::new(
                     "gui-macro-iface-linked",
@@ -436,16 +442,16 @@ impl Editor {
             }
             ParamKind::Choice { options, .. } => choice_ui(ui, x, &inner, options),
             ParamKind::Bool { .. } => {
-                own_default(ui, x, &inner, |ui, v, by| {
+                own_default(ui, x, &inner, |ui, v, by, _| {
                     if let Value::Bool(b) = v {
-                        ui.checkbox(b, "").labelled_by(by);
+                        ui.add(widgets::Checkbox::without_text(b)).labelled_by(by);
                     }
                 });
             }
             ParamKind::Text { .. } => {
-                own_default(ui, x, &inner, |ui, v, by| {
+                own_default(ui, x, &inner, |ui, v, by, name| {
                     if let Value::Text(t) = v {
-                        ui.text_edit_singleline(t).labelled_by(by);
+                        Input::text(t, name).show(ui).response.labelled_by(by);
                     }
                 });
             }
@@ -497,9 +503,20 @@ fn driven_ui(ui: &mut Ui, x: &mut Exposed, numbers: &[(String, String, f64)]) {
     let mut min = x.min.unwrap_or(lo);
     let mut max = x.max.unwrap_or(hi);
     ui.horizontal(|ui| {
-        ui.label(tr(ui, Message::new("gui-macro-iface-range", "Range")));
-        ui.add(egui::DragValue::new(&mut min).speed(0.01));
-        ui.add(egui::DragValue::new(&mut max).speed(0.01));
+        ui.text_role(
+            TextRole::Body,
+            tr(ui, Message::new("gui-macro-iface-range", "Range")),
+        );
+        let from = tr(ui, Message::new("gui-macro-iface-range-from", "From"));
+        Input::number(&mut min, &from)
+            .id_salt("helios.macro.iface.range.from")
+            .width(NUMBER_WIDTH)
+            .show(ui);
+        let to = tr(ui, Message::new("gui-macro-iface-range-to", "To"));
+        Input::number(&mut max, &to)
+            .id_salt("helios.macro.iface.range.to")
+            .width(NUMBER_WIDTH)
+            .show(ui);
     });
     x.min = Some(min);
     x.max = Some(max);
@@ -512,24 +529,25 @@ fn driven_ui(ui: &mut Ui, x: &mut Exposed, numbers: &[(String, String, f64)]) {
     );
     let mut remove_drive: Option<usize> = None;
     let many = x.drives.len() > 1;
+    let driven_name = tr(
+        ui,
+        Message::new("gui-macro-iface-driven", "Driven parameter"),
+    );
+    let options: Vec<((String, String), String)> = numbers
+        .iter()
+        .map(|(n, p, _)| ((n.clone(), p.clone()), format!("{n}.{p}")))
+        .collect();
     for (k, d) in x.drives.iter_mut().enumerate() {
-        ui.separator();
+        ui.divider();
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt(("helios.macro.iface.drive", k))
-                .selected_text(format!("{}.{}", d.node, d.param))
-                .show_ui(ui, |ui| {
-                    for (n, p, _) in numbers {
-                        let on = d.node == *n && d.param == *p;
-                        if ui.selectable_label(on, format!("{n}.{p}")).clicked() {
-                            d.node.clone_from(n);
-                            d.param.clone_from(p);
-                        }
-                    }
-                });
+            let mut current = (d.node.clone(), d.param.clone());
+            let id = format!("helios.macro.iface.drive.{k}");
+            if helios_ui::choice(ui, &id, &driven_name, &mut current, &options).changed() {
+                (d.node, d.param) = current;
+            }
             if many
-                && ui
-                    .small_button("×")
-                    .on_hover_text(tr(
+                && row_button(ui, true, "×")
+                    .tip(tr(
                         ui,
                         Message::new("gui-macro-iface-drive-remove", "Stop driving it"),
                     ))
@@ -544,11 +562,21 @@ fn driven_ui(ui: &mut Ui, x: &mut Exposed, numbers: &[(String, String, f64)]) {
                 let len = d.curve.len();
                 for (j, [px, py]) in d.curve.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(px).speed(0.01).prefix("x "))
-                            .on_hover_text(&point_hint);
-                        ui.add(egui::DragValue::new(py).speed(0.01).prefix("y "))
-                            .on_hover_text(&point_hint);
-                        if len > 2 && ui.small_button("×").clicked() {
+                        Input::number(px, "x")
+                            .prefix("x ")
+                            .id_salt(("helios.macro.iface.point.x", k, j))
+                            .width(NUMBER_WIDTH)
+                            .show(ui)
+                            .response
+                            .tip(&point_hint);
+                        Input::number(py, "y")
+                            .prefix("y ")
+                            .id_salt(("helios.macro.iface.point.y", k, j))
+                            .width(NUMBER_WIDTH)
+                            .show(ui)
+                            .response
+                            .tip(&point_hint);
+                        if len > 2 && row_button(ui, true, "×").clicked() {
                             remove_point = Some(j);
                         }
                     });
@@ -557,12 +585,12 @@ fn driven_ui(ui: &mut Ui, x: &mut Exposed, numbers: &[(String, String, f64)]) {
                     d.curve.remove(j);
                 }
                 if d.curve.len() < helios_core::curve::MAX_POINTS
-                    && ui
-                        .small_button(tr(
-                            ui,
-                            Message::new("gui-macro-iface-point-add", "Add a point"),
-                        ))
-                        .clicked()
+                    && helios_ui::row_action(
+                        ui,
+                        Action::Secondary,
+                        &tr(ui, Message::new("gui-macro-iface-point-add", "Add a point")),
+                    )
+                    .clicked()
                 {
                     let [x0, y0] = d.curve[d.curve.len() - 1];
                     d.curve.push([x0 + 0.5, y0]);
@@ -582,12 +610,15 @@ fn driven_ui(ui: &mut Ui, x: &mut Exposed, numbers: &[(String, String, f64)]) {
     if let Some((n, p, v)) = numbers
         .iter()
         .find(|(n, p, _)| !driven.contains(&(n.clone(), p.clone())))
-        && ui
-            .button(tr(
+        && helios_ui::action(
+            ui,
+            Action::Secondary,
+            &tr(
                 ui,
                 Message::new("gui-macro-iface-drive-add", "Drive another parameter"),
-            ))
-            .clicked()
+            ),
+        )
+        .clicked()
     {
         x.drives.push(Drive {
             node: n.clone(),
@@ -645,26 +676,39 @@ fn curve_ui(ui: &mut Ui, curve: &[[f64; 2]]) {
     }
 }
 
-/// "Its own default": a check box, then the default's widget when on.
+/// "Its own default": a check box, then the default's widget when on,
+/// given the check box's id and words to name it by.
 fn own_default(
     ui: &mut Ui,
     x: &mut Exposed,
     inner: &InnerParam,
-    widget: impl FnOnce(&mut Ui, &mut Value, egui::Id),
+    widget: impl FnOnce(&mut Ui, &mut Value, egui::Id, &str),
 ) {
     let mut on = x.default.is_some();
     let label = tr(
         ui,
         Message::new("gui-macro-iface-default", "Its own default"),
     );
-    let check = ui.checkbox(&mut on, label);
+    let check = widgets::checkbox(ui, &mut on, label.as_str());
     if check.changed() {
         x.default = on.then(|| inner.value.clone());
     }
     // The value's widget is named by the check box.
     if let Some(v) = &mut x.default {
-        widget(ui, v, check.id);
+        widget(ui, v, check.id, &label);
     }
+}
+
+/// How wide a number field is.
+const NUMBER_WIDTH: f32 = 80.0;
+
+/// A small button in a list's row (`↑`, `↓`, `×`), greyed when not
+/// `enabled`: helios-ui's row action.
+fn row_button(ui: &mut Ui, enabled: bool, label: &str) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        helios_ui::row_action(ui, Action::Secondary, label)
+    })
+    .inner
 }
 
 /// A number's range within the inner one, its soft range and default.
@@ -681,7 +725,7 @@ fn number_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, lo: f64, hi: f64,
     x.max = (high < hi).then_some(high);
     let mut soft = x.soft.is_some();
     let label = tr(ui, Message::new("gui-macro-iface-soft", "A soft range"));
-    if ui.checkbox(&mut soft, label).changed() {
+    if widgets::checkbox(ui, &mut soft, label).changed() {
         x.soft = soft.then_some([low, high]);
     }
     if let Some([s_lo, s_hi]) = &mut x.soft {
@@ -690,7 +734,7 @@ fn number_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, lo: f64, hi: f64,
             .default(low, high)
             .show(ui);
     }
-    own_default(ui, x, inner, |ui, v, _| {
+    own_default(ui, x, inner, |ui, v, _, _| {
         let label = tr(ui, Message::new("gui-macro-iface-default-value", "Default"));
         match v {
             Value::Float(f) => {
@@ -709,15 +753,15 @@ fn number_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, lo: f64, hi: f64,
 
 /// A choice's options kept and its default.
 fn choice_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, options: &[String]) {
-    ui.label(tr(
-        ui,
-        Message::new("gui-macro-iface-options", "Options kept"),
-    ));
+    ui.text_role(
+        TextRole::Body,
+        tr(ui, Message::new("gui-macro-iface-options", "Options kept")),
+    );
     let mut kept: Vec<String> = x.options.clone().unwrap_or_else(|| options.to_vec());
     ui.horizontal_wrapped(|ui| {
         for o in options {
             let mut on = kept.contains(o);
-            if ui.checkbox(&mut on, o).changed() {
+            if widgets::checkbox(ui, &mut on, o.as_str()).changed() {
                 if on {
                     kept.push(o.clone());
                     kept.sort_by_key(|k| options.iter().position(|p| p == k));
@@ -728,11 +772,11 @@ fn choice_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, options: &[String
         }
     });
     x.options = (kept.len() < options.len()).then_some(kept.clone());
-    own_default(ui, x, inner, |ui, v, _| {
+    own_default(ui, x, inner, |ui, v, _, _| {
         if let Value::Choice(c) = v {
             ui.horizontal_wrapped(|ui| {
                 for o in &kept {
-                    ui.selectable_value(c, o.clone(), o);
+                    widgets::selectable_value(ui, c, o.clone(), o.as_str());
                 }
             });
         }
