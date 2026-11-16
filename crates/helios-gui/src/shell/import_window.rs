@@ -65,6 +65,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Context as Egui;
 use egui::ViewportId;
+use egui_pop::api::bus::Reason;
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::api::toasts::{TOASTS, Toast};
@@ -187,6 +188,11 @@ pub const FORGET_VOLUME: &str = "library.forgetVolume";
 /// size (`appWindow == 'import'` in `when` clauses, `window: "import"` for
 /// agents).
 pub const WINDOW: &str = "import";
+
+/// The owner of the import window on egui-pop's bus (ADR 0029): who asks
+/// its opening and whose listener of `window.close` closes the import
+/// focus.
+pub const OWNER: &str = "helios.import-window";
 
 /// The id of the window of the main one the import window is drawn in
 /// where the backend has no windows of its own (kittest, the web).
@@ -1351,73 +1357,90 @@ impl Shell {
                 w.going = None;
             }
         }
-        match (w.open, there) {
-            (true, false) if w.shown.is_some() => {
-                w.open = false;
-                w.shown = None;
-                w.clear_contents();
-            }
-            (true, false) => {
-                let title = w
-                    .texts
-                    .as_ref()
-                    .map_or_else(|| "Import photos".to_owned(), |t| t(window_title()));
-                // The main window's title bar start and menus, as every
-                // Helios window has (docs/design/windows.md, section 7).
-                let spec = WindowSpec::new(WINDOW, title)
-                    .size(default_size(ctx.content_rect().size()))
-                    .min_size(MIN_SIZE)
-                    .shell_bars(true);
-                w.shown = Some(id.clone());
-                drop(w);
-                let state = self.import.state.clone();
-                app.open_window(spec, move |ui, window| {
-                    let _stall = crate::stall::frame("the import window's pass");
-                    // Never drawn while the shell holds it (it does not, between
-                    // its own passes).
-                    if let Ok(mut w) = state.try_borrow_mut() {
-                        let mut frame = Frame {
-                            app: window.app().clone(),
-                            embedded: window.embedded(),
-                            close_requested: window.close_requested(),
-                            title: None,
-                            close: false,
-                        };
-                        w.window_pass(ui, &mut frame);
-                        if let Some(title) = frame.title {
-                            window.set_title(title);
-                        }
-                        if frame.close {
-                            let app = window.app().clone();
-                            if holds_main_window(&app) {
-                                // Moved into the main window (closed while
-                                // it was open): the shell comes back there,
-                                // and the window closes at the next pass.
-                                app.raise_window(&WindowId::main());
-                            } else {
-                                window.close();
-                                hide_closing_window(ui.ctx(), &app);
-                            }
+        if w.open && !there {
+            let title = w
+                .texts
+                .as_ref()
+                .map_or_else(|| "Import photos".to_owned(), |t| t(window_title()));
+            // The main window's title bar start and menus, as every
+            // Helios window has (docs/design/windows.md, section 7).
+            let spec = WindowSpec::new(WINDOW, title)
+                .size(default_size(ctx.content_rect().size()))
+                .min_size(MIN_SIZE)
+                .shell_bars(true);
+            w.shown = Some(id.clone());
+            drop(w);
+            let state = self.import.state.clone();
+            app.request_window_open(spec, OWNER, Reason::Command, move |ui, window| {
+                let _stall = crate::stall::frame("the import window's pass");
+                // Never drawn while the shell holds it (it does not, between
+                // its own passes).
+                if let Ok(mut w) = state.try_borrow_mut() {
+                    let mut frame = Frame {
+                        app: window.app().clone(),
+                        embedded: window.embedded(),
+                        close_requested: window.close_requested(),
+                        title: None,
+                        close: false,
+                    };
+                    w.window_pass(ui, &mut frame);
+                    drop(w);
+                    if let Some(title) = frame.title {
+                        window.set_title(title);
+                    }
+                    if frame.close {
+                        let app = window.app().clone();
+                        if holds_main_window(&app) {
+                            // Moved into the main window (closed while
+                            // it was open): the shell comes back there,
+                            // and the window closes at the next pass.
+                            window.keep_open();
+                            app.raise_window(&WindowId::main());
+                        } else {
+                            // Its `window.close` at the end of this pass.
+                            window.close();
                         }
                     }
-                });
-            }
+                }
+            });
+        } else if !w.open && there {
+            drop(w);
             // Moved into the main window (closed while it was open): the
             // main window draws the shell again, rather than closing as
             // the last window would (Helios quitting); its own window is
             // closed at the next pass.
-            (false, true) if holds_main_window(&app) => {
-                drop(w);
+            if holds_main_window(&app) {
                 app.raise_window(&WindowId::main());
-            }
-            (false, true) => {
-                w.shown = None;
-                drop(w);
+            } else {
                 app.close_window(&id);
             }
-            (false, false) => w.shown = None,
-            (true, true) => {}
         }
+    }
+
+    /// The import window's listener of egui-pop's `window.close` (owner
+    /// [`OWNER`]), local to the interface's thread: whatever closes its
+    /// window (its title bar, a command, Escape, the compositor, the main
+    /// window's close), the import focus closes in the same pass.
+    pub(super) fn listen_import_window_close(&self) -> Result<(), String> {
+        let state = self.import.state.clone();
+        super::focus_window::listen_window_close(
+            self.core.app.handle(),
+            OWNER,
+            WINDOW,
+            move |did| {
+                let mut w = state.try_borrow_mut().map_err(|_| {
+                    egui_pop::api::bus::bus_contract::HookError(
+                        "the import window is being drawn".into(),
+                    )
+                })?;
+                if w.open {
+                    w.closed_by_window();
+                }
+                w.shown = None;
+                did.push(format!("{WINDOW}: closed"));
+                Ok(())
+            },
+        )
     }
 
     /// The import window inside the main window, where the backend has no
@@ -1631,6 +1654,18 @@ impl Shell {
 }
 
 impl ImportWindow {
+    /// Its window closed by something else than its own pass (a command,
+    /// the main window's close): the import focus closes as its Cancel
+    /// does.
+    fn closed_by_window(&mut self) {
+        crate::start::trace_frame("import window closed");
+        self.open = false;
+        self.going_away();
+        self.wizard = None;
+        self.clear_contents();
+        self.accounts.window_closed();
+    }
+
     /// An import started: the window closes, what it showed forgotten,
     /// the photos chosen and not imported given up.
     pub(super) fn close_after_import(&mut self) {
@@ -1646,24 +1681,6 @@ impl ImportWindow {
 /// How soon the main window passes again while a closed window is not
 /// dropped yet.
 const GONE_CHECK: std::time::Duration = std::time::Duration::from_millis(50);
-
-/// Hides an OS window closing from its own pass, and brings the main
-/// window forward. egui drops a window's viewport at a pass of the main
-/// window, and a compositor gives a hidden window no frames (behind a
-/// browser opened for a sign-in or a picking): until the main window
-/// shows again, the closed window would stay on screen, drawn empty
-/// (black) whenever something asks it for a frame. Hidden at once, it
-/// waits out of sight; the main window, asked to the front, gets its
-/// frames back. Wayland cannot hide a window: it is minimised there.
-/// The main window is asked to the front on the bus (`window.activate`).
-pub(super) fn hide_closing_window(ctx: &Egui, app: &egui_pop::api::app::AppHandle) {
-    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-    }
-    super::raise_main_window(app);
-    ctx.request_repaint_of(ViewportId::ROOT);
-}
 
 /// Whether the import window's content holds the main window: moved
 /// into it when the main window was closed while it was open.

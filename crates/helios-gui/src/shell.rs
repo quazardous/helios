@@ -1188,6 +1188,9 @@ impl Shell {
         shell.listen_library_filled();
         // Files dropped on any window open the import window on them.
         shell.listen_files_dropped();
+        // Each focus window and the import window close their state with
+        // their window's `window.close`, in the same pass.
+        shell.listen_window_closes();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
