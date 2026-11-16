@@ -28,6 +28,7 @@ use helios_storage::{Role, Volume, VolumeId, VolumeKind, Volumes, registry};
 use serde_json::{Value, json};
 
 use super::Shell;
+use crate::import_end;
 
 /// Opens the Settings app at Storage › Volumes; `volume` (an id) marks
 /// that volume and scrolls to it.
@@ -348,7 +349,7 @@ impl StorageLink for NodeStorage {
                 json!({ "root": card.root, "path": card.path, "label": card.label, "files": files }),
             )
             .map_err(|e| e.message)?;
-        let mut now = card_of(&answer).ok_or("no card answered")?;
+        let mut now = import_end::card_of(&answer).ok_or("no card answered")?;
         now.files.clone_from(&card.files);
         Ok(now)
     }
@@ -488,7 +489,7 @@ impl Shell {
             {
                 continue;
             }
-            let Some(card) = card_of(card) else {
+            let Some(card) = import_end::card_of(card) else {
                 continue;
             };
             self.core.storage.waiting.retain(|c| c.path != card.path);
@@ -643,38 +644,6 @@ impl Shell {
         };
         self.open_settings_page(&path)
     }
-}
-
-/// A card from an import's report line (`helios_library::import::Card`
-/// as it serializes).
-fn card_of(v: &Value) -> Option<Card> {
-    let files = v["files"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|f| {
-            let path = std::path::PathBuf::from(f.get(0)?.as_str()?);
-            let id = f
-                .get(1)
-                .and_then(Value::as_str)
-                .and_then(|h| helios_vault::ImageId::from_hex(h).ok());
-            Some((path, id))
-        })
-        .collect();
-    Some(Card {
-        path: v["path"].as_str()?.into(),
-        label: v["label"].as_str()?.to_string(),
-        photos: v["photos"].as_u64().unwrap_or(0),
-        missing: v["missing"].as_u64().unwrap_or(0),
-        want: v["want"]
-            .as_u64()
-            .and_then(|w| u8::try_from(w).ok())
-            .unwrap_or(0),
-        short: v["short"].as_u64().unwrap_or(0),
-        safe_to_format: v["safe_to_format"] == true,
-        root: v["root"].as_str()?.into(),
-        files,
-    })
 }
 
 /// A destination's words: any disk of a role, or one disk by name.
