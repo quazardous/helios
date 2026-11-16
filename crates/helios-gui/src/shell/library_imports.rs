@@ -21,10 +21,13 @@
 //! - **Run Workshop…** ([`RUN_WORKSHOP_COMMAND`]): `workshop.run` on the
 //!   Library's selection, whatever it comes from.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
-use egui_pop::api::toasts::{TOASTS, Toast};
+use egui_pop::api::app::AppHandle;
+use egui_pop::api::toasts::Toast;
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
 use helios_library::import_history::Record;
@@ -132,41 +135,13 @@ impl Shell {
     /// `id` (null: none), shown, its photos selected with `select`;
     /// answers the session shown.
     fn show_import_session(&mut self, args: &Value) -> Result<Value, String> {
-        if let Some(id) = args.get("id") {
-            let id = match id {
-                Value::Null => None,
-                Value::String(id) if !id.is_empty() => Some(id.clone()),
-                other => return Err(format!("`id`: {other} is not an import of the history")),
-            };
-            let select = args["select"].as_bool().unwrap_or(false);
-            {
-                let mut lib = self.focus.library.borrow_mut();
-                lib.show_import(id.as_deref(), select);
-                lib.record_filter();
-            }
-            if id.is_some() {
-                // Shown where the Library is (a window without the place
-                // keeps its own).
-                let _ = crate::contexts::go(
-                    self.core.app.handle(),
-                    crate::contexts::LIBRARY,
-                    Value::Null,
-                    &egui_pop::model::commands::Origin::User,
-                );
-            }
-        }
-        Ok(json!({ "id": self.focus.library.borrow().import_session() }))
+        show_import_session(&self.focus.library, self.core.app.handle(), args)
     }
 
     /// Whether the Library shows the session of an import the user
     /// started, once it ends ([`SHOW_IMPORT_SETTING`], on by default).
     pub fn shows_imports_in_library(&self) -> bool {
-        let store = self.core.app.handle().store();
-        let store = store.lock().unwrap_or_else(PoisonError::into_inner);
-        store
-            .get(&format!("settings/{SHOW_IMPORT_SETTING}"))
-            .and_then(|e| e.value.as_bool())
-            .unwrap_or(true)
+        shows_imports_in_library(self.core.app.handle())
     }
 
     /// Each frame: the Library's import sessions read again when they are
@@ -174,7 +149,9 @@ impl Shell {
     pub(super) fn follow_import_sessions(&mut self) {
         if self
             .focus
-            .import_sessions
+            .imports
+            .borrow()
+            .sessions
             .read_at
             .is_some_and(|at| at.elapsed() < READ_EVERY)
         {
@@ -184,30 +161,99 @@ impl Shell {
         let Ok(reader) = self.history_reader() else {
             return;
         };
-        self.focus.import_sessions.read_at = Some(Instant::now());
+        self.focus.imports.borrow_mut().sessions.read_at = Some(Instant::now());
         // A history that cannot be read lists nothing.
         let sessions = reader().map(|r| sessions_of(&r)).unwrap_or_default();
         self.focus.library.borrow_mut().set_imports(sessions);
     }
 
-    /// `import-window.history`: an import ended, the import window's
-    /// History lists it at once, whoever ran it: read again at the
-    /// window's next frame, asked now (an open window otherwise draws
-    /// again only when something moves in it).
-    pub(super) fn import_window_history_again(&mut self) {
-        let mut w = self.import.get_mut();
-        w.history.read_again();
-        w.waker()();
+    /// `library.import-session`, the shell's listener of the import's
+    /// points: an import ended, the sessions are read again; one the
+    /// user started is shown in the Library, or offered while the user
+    /// edits a photo. Whether its photos are to be selected goes to
+    /// `select` (read by `library.select-imported`).
+    pub(super) fn listen_import_session(&self) -> Result<(), String> {
+        let ended = SessionEnded {
+            imports: self.focus.imports.clone(),
+            library: self.focus.library.clone(),
+            teller: self.teller(),
+        };
+        crate::import_end::listen_local(
+            &*self.core.app.handle().bus(),
+            crate::import_end::SESSION,
+            move |end, r| r.select = ended.heard(&end.request, &end.line()),
+        )
     }
 
-    /// `library.import-session`: an import ended (its request, as asked,
-    /// and its end line): the sessions are read again; one the user
-    /// started is shown in the Library, or offered while the user edits
-    /// a photo. Whether its photos are to be selected.
-    pub(super) fn import_session_ended(&mut self, request: &Value, line: &Value) -> bool {
-        self.focus.import_sessions.read_at = None;
+    /// An import the user started here was handed to the node: its
+    /// request, as the end line names it.
+    pub(super) fn user_import_started(&mut self, request: Value) {
+        self.focus.imports.borrow_mut().started.push(request);
+    }
+}
+
+/// `library.importSession` on `library`: the Library scoped to the
+/// import session `id` (null: none), shown, its photos selected with
+/// `select`; answers the session shown.
+fn show_import_session(
+    library: &RefCell<crate::library::Library>,
+    app: &AppHandle,
+    args: &Value,
+) -> Result<Value, String> {
+    if let Some(id) = args.get("id") {
+        let id = match id {
+            Value::Null => None,
+            Value::String(id) if !id.is_empty() => Some(id.clone()),
+            other => return Err(format!("`id`: {other} is not an import of the history")),
+        };
+        let select = args["select"].as_bool().unwrap_or(false);
+        {
+            let mut lib = library.borrow_mut();
+            lib.show_import(id.as_deref(), select);
+            lib.record_filter();
+        }
+        if id.is_some() {
+            // Shown where the Library is (a window without the place
+            // keeps its own).
+            let _ = crate::contexts::go(
+                app,
+                crate::contexts::LIBRARY,
+                Value::Null,
+                &egui_pop::model::commands::Origin::User,
+            );
+        }
+    }
+    Ok(json!({ "id": library.borrow().import_session() }))
+}
+
+/// Whether the Library shows the session of an import the user started,
+/// once it ends ([`SHOW_IMPORT_SETTING`], on by default).
+fn shows_imports_in_library(app: &AppHandle) -> bool {
+    let store = app.store();
+    let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+    store
+        .get(&format!("settings/{SHOW_IMPORT_SETTING}"))
+        .and_then(|e| e.value.as_bool())
+        .unwrap_or(true)
+}
+
+/// What `library.import-session` holds of the shell.
+struct SessionEnded {
+    imports: Rc<RefCell<super::import::Imports>>,
+    library: Rc<RefCell<crate::library::Library>>,
+    teller: super::said::Teller,
+}
+
+impl SessionEnded {
+    /// An import ended (its request, as asked, and its end line): the
+    /// sessions are read again; one the user started is shown in the
+    /// Library, or offered while the user edits a photo. Whether its
+    /// photos are to be selected.
+    fn heard(&self, request: &Value, line: &Value) -> bool {
         let started_here = {
-            let started = &mut self.focus.user_imports;
+            let mut imports = self.imports.borrow_mut();
+            imports.sessions.read_at = None;
+            let started = &mut imports.started;
             match started.iter().position(|r| r == request) {
                 Some(at) => {
                     started.remove(at);
@@ -216,50 +262,51 @@ impl Shell {
                 None => false,
             }
         };
+        let app = &self.teller.app;
         let by_user = started_here || request["origin"] == crate::persist::WHO;
-        if !by_user || !self.shows_imports_in_library() || line.get("ended").is_none() {
+        if !by_user || !shows_imports_in_library(app) || line.get("ended").is_none() {
             return false;
         }
         let Some(history) = line["ended"]["history"].as_str().map(String::from) else {
             // No session to show: its photos are selected all the same.
             return true;
         };
-        if crate::contexts::darkroom(self.core.app.handle()).is_some() {
-            self.offer_import_session(&history);
+        if crate::contexts::darkroom(app).is_some() {
+            self.offer(&history);
             return false;
         }
-        if let Err(e) = self.show_import_session(&json!({ "id": history, "select": true })) {
-            self.warn(format!("{IMPORT_SESSION_COMMAND}: {e}"));
+        if let Err(e) = show_import_session(
+            &self.library,
+            app,
+            &json!({ "id": history, "select": true }),
+        ) {
+            self.teller.notify(
+                crate::dialogs::Level::Warning,
+                Message::from(format!("{IMPORT_SESSION_COMMAND}: {e}")),
+            );
         }
         true
     }
 
     /// While the user edits a photo: a notice offering the import's
     /// session ("Show in Library").
-    fn offer_import_session(&mut self, history: &str) {
+    fn offer(&self, history: &str) {
         let message = Message::new(
             "gui-import-session-ended",
             "The import ended: its photos are in the Library",
         );
-        let label = self.text(Message::new("gui-import-session-show", "Show in Library"));
-        let text = self.text(message);
-        if let (Ok(id), Some(toasts)) = (
-            CommandId::new(IMPORT_SESSION_COMMAND),
-            self.core.app.handle().service(&TOASTS),
-        ) {
-            toasts.notify(Toast::info(&text).action(
+        let label = self
+            .teller
+            .text(Message::new("gui-import-session-show", "Show in Library"));
+        let text = self.teller.text(message);
+        if let Ok(id) = CommandId::new(IMPORT_SESSION_COMMAND) {
+            self.teller.toast(Toast::info(&text).action(
                 &label,
                 id,
                 json!({ "id": history, "select": true }),
             ));
         }
-        self.notes.push(text);
-    }
-
-    /// An import the user started here was handed to the node: its
-    /// request, as the end line names it.
-    pub(super) fn user_import_started(&mut self, request: Value) {
-        self.focus.user_imports.push(request);
+        self.teller.note(text);
     }
 }
 

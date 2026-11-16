@@ -76,7 +76,7 @@ egui-pop-i18n = "0.10"
 # MIT OR Apache-2.0: the bus contract (points, ordered listeners, the
 # order dump), std only: Helios's library crates declare their points and
 # listen on the bus the application hands them, never building one.
-bus-contract = "0.1.0"
+bus-contract = "0.2.0"
 # MIT: egui-pop's hook kernel, the bus contract's default implementation:
 # the one bus Helios's binaries build (and tests, a bus each).
 egui-pop-hooks = "0.1"
@@ -151,23 +151,23 @@ needless_pass_by_value = "allow"
 # takes the published versions instead (`cargo xtask pins --release`;
 # docs/releases.md, "egui-pop and egui_hud: next follows next").
 [patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "9735593d" }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "688f83dd" }
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.

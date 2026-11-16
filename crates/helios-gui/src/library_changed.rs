@@ -13,11 +13,13 @@
 //! Both are said on the journal (`library.changed`, `library.filled`)
 //! with the listeners that ran (`ran`).
 //!
-//! The listeners need the desktop's own state (the Library, the reads
-//! through the node), which is not `Send + Sync` as a bus listener is:
-//! each marks its place in the order when the change concerns it
-//! ([`wants`]), and the one passing the point does its part right after,
-//! in the order they ran.
+//! `library.filled`'s listener holds the interface's state (`Rc`): it is
+//! a local listener ([`listen_filled_local`]), bound to the interface's
+//! thread, doing its part inside the pass. `library.changed`'s listeners
+//! still mark their place in the order when the change concerns them
+//! ([`wants`]), and [`crate::persist::Persist`], passing the point, does
+//! their part right after, in the order they ran: their state is split
+//! between the shell and the persistence layer.
 
 use std::collections::BTreeSet;
 use std::sync::mpsc::{Receiver, Sender};
@@ -245,6 +247,31 @@ pub fn listen_filled(bus: &dyn Bus, id: &'static str) -> Result<(), String> {
     declare(bus);
     bus.unlisten(FILLED, id);
     bus.listen::<LibraryFilled>(id, opts(*after), move |_, reactions| {
+        reactions.ran.push(id.to_owned());
+        Ok::<(), HookError>(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// [`listen_filled`] for a listener holding the interface's state (not
+/// `Send + Sync`): a local listener bound to the calling thread (the
+/// interface's), in the same declared place, doing its part (`run`)
+/// inside the pass when the Library is shown on that thread.
+///
+/// # Errors
+/// `id` is not in [`FILLED_ORDER`], or the bus refused it.
+pub fn listen_filled_local(
+    bus: &dyn Bus,
+    id: &'static str,
+    run: impl Fn(&Filled) + 'static,
+) -> Result<(), String> {
+    let Some((_, after)) = FILLED_ORDER.iter().find(|(listener, _)| *listener == id) else {
+        return Err(format!("`{id}` is not a listener of {FILLED}"));
+    };
+    declare(bus);
+    bus.unlisten(FILLED, id);
+    bus.listen_local::<LibraryFilled>(id, opts(*after), move |filled, reactions| {
+        run(filled);
         reactions.ran.push(id.to_owned());
         Ok::<(), HookError>(())
     })

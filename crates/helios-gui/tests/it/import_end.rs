@@ -354,19 +354,53 @@ fn the_import_points_listeners_run_in_a_declared_order() {
          \x20 1. library.history (owner helios.import): nothing\n\
          \x20 2. backups.on-import (owner helios.import): after library.history\n\
          \x20 3. library.refill (owner helios.import): after backups.on-import\n\
-         \x20 4. storage.cards-waiting (owner helios.import): after library.refill\n\
-         \x20 5. duplicates.collect (owner helios.import): after storage.cards-waiting\n\
-         \x20 6. log.import (owner helios.import): after duplicates.collect\n\
-         \x20 7. import.toast (owner helios.import): after log.import\n\
-         \x20 8. library.import-session (owner helios.import): after import.toast\n\
-         \x20 9. import-window.history (owner helios.import): after library.import-session\n\
-         \x20 10. library.select-imported (owner helios.import): after import-window.history\n\
+         \x20 4. storage.cards-waiting (owner helios.import): local; after library.refill\n\
+         \x20 5. duplicates.collect (owner helios.import): local; after storage.cards-waiting\n\
+         \x20 6. log.import (owner helios.import): local; after duplicates.collect\n\
+         \x20 7. import.toast (owner helios.import): local; after log.import\n\
+         \x20 8. library.import-session (owner helios.import): local; after import.toast\n\
+         \x20 9. import-window.history (owner helios.import): local; after library.import-session\n\
+         \x20 10. library.select-imported (owner helios.import): local; after import-window.history\n\
          import.failed\n\
          \x20 1. library.refill (owner helios.import): nothing\n\
-         \x20 2. duplicates.collect (owner helios.import): after library.refill\n\
-         \x20 3. log.import (owner helios.import): after duplicates.collect\n\
-         \x20 4. import.toast (owner helios.import): after log.import\n\
-         \x20 5. library.import-session (owner helios.import): after import.toast\n\
-         \x20 6. import-window.history (owner helios.import): after library.import-session\n"
+         \x20 2. duplicates.collect (owner helios.import): local; after library.refill\n\
+         \x20 3. log.import (owner helios.import): local; after duplicates.collect\n\
+         \x20 4. import.toast (owner helios.import): local; after log.import\n\
+         \x20 5. library.import-session (owner helios.import): local; after import.toast\n\
+         \x20 6. import-window.history (owner helios.import): local; after library.import-session\n"
     );
+}
+
+/// The shell's listeners are local to the interface's thread: an end
+/// passed on the shell's bus there has their work done inside the pass,
+/// with no call to the shell after it (here the Log panel's line, and
+/// the end said by the toast's notice once the shell takes it in).
+#[test]
+fn the_shells_listeners_do_their_part_inside_the_pass() {
+    let w = world("inside");
+    let bus = w.h.state().app().handle().bus();
+    let logged = w.logged();
+    let report = helios_library::import::Report {
+        files: 2,
+        added: 2,
+        ..helios_library::import::Report::default()
+    };
+    let end = import_end::ImportEnd {
+        request: json!({ "origin": "agent" }),
+        origin: "agent".into(),
+        outcome: Ok(report),
+        camera_looks: 0,
+    };
+    let altered = import_end::pass(&*bus, end, import_end::Reactions::default());
+    assert!(altered.failures.is_empty(), "{:?}", altered.failures);
+    assert!(
+        altered.deferred.is_empty(),
+        "nothing deferred on the interface's thread: {:?}",
+        altered.deferred
+    );
+    let ran: Vec<&str> = altered.value.ran.iter().map(String::as_str).collect();
+    let declared: Vec<&str> = ORDER.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ran, declared);
+    // Done inside the pass: the Log panel already holds the end.
+    assert_eq!(w.logged() - logged, 1);
 }

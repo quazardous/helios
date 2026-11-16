@@ -204,6 +204,6 @@ fn the_library_points_listeners_run_in_a_declared_order() {
          \x20 3. library.albums (owner helios.library): after library.fill\n\
          \x20 4. library.stacks (owner helios.library): after library.albums\n\
          library.filled\n\
-         \x20 1. library.select-imported (owner helios.library): nothing\n"
+         \x20 1. library.select-imported (owner helios.library): local\n"
     );
 }

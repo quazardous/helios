@@ -121,6 +121,7 @@ pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
 mod reads;
+mod said;
 mod storage;
 mod storage_admin;
 mod trace;
@@ -1140,6 +1141,7 @@ impl Shell {
             dialogs,
             assume_yes: false,
             notices: Vec::new(),
+            said: Rc::default(),
             now: 0.0,
             engine,
             gpu: None,
