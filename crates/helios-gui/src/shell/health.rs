@@ -10,14 +10,24 @@
 //!   the page has no group for in `/others`); and a summary line with its
 //!   tone (`/summary`). The page's groups show by the context keys
 //!   [`owner_key`] and [`OTHERS`], set while they have rows.
-//! - `health.fix` (`{"id"}`): runs a finding's fix, then the checks again
-//!   (so a fix done at once, an acknowledgement, clears its finding).
+//! - `health.fix` (`{"id"}`): asks for a finding's fix; the checks run
+//!   again once the fix's command is done (its own `command.done` or
+//!   `command.failed` in the journal, heard by the listener
+//!   `health.recheck`), never before, so a slow fix's finding clears.
 //! - `health.ignore` (`{"id", "on"}`): ignores a finding, or shows it
 //!   again.
 //! - `health.checkNow`: runs the checks again.
 //! - `library.chooseFolder` (`{"path"}`, asked through the folder chooser
 //!   without it): sets the library folder, then runs the checks again;
 //!   the fix of "No library folder chosen".
+//!
+//! On the bus: a run ending says `health.checked` (a run starting
+//! `health.checking`, a finding ignored `health.ignored`), on the journal
+//! and to the Settings app's reads, which read `health.findings` again by
+//! that event (`shell::reads`'s policies); and the hook point
+//! [`HealthChecked`] passes the findings to its listeners in order:
+//! `status.health` (the status bar's badge), then `health.context-keys`
+//! (the page's groups).
 //!
 //! The checks run as background jobs ([`helios_health::runner`]): all a
 //! while after start, then each as often as it declares (daily by
@@ -35,8 +45,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use egui::Context as Egui;
+use egui_pop::api::bus::egui_pop_hooks::{ListenOpts, Point, PointSpec};
 use egui_pop::api::files::{self, FILES, FileRequest};
-use egui_pop::api::host::Pending;
+use egui_pop::api::host::{Event, Pending, Seq};
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
 use helios_health::runner::Runner;
@@ -62,6 +73,115 @@ pub const PAGE: &str = "health/check";
 /// The context key set while findings of an owner the page has no group
 /// for are there.
 pub const OTHERS: &str = "healthOthers";
+
+/// The owner of the health check's listeners on the bus.
+pub const BUS_OWNER: &str = "helios.health";
+/// The listener setting the status bar's badge from the findings.
+pub const STATUS_LISTENER: &str = "status.health";
+/// The listener setting the page's groups' context keys.
+pub const KEYS_LISTENER: &str = "health.context-keys";
+/// The listener running the checks again once a fix is done.
+pub const RECHECK_LISTENER: &str = "health.recheck";
+/// Said on the journal when a run ends.
+pub const CHECKED: &str = "health.checked";
+/// Said on the journal when a run starts.
+pub const CHECKING: &str = "health.checking";
+/// Said on the journal when a finding is ignored or shown again.
+pub const IGNORED: &str = "health.ignored";
+
+/// The hook point a run's findings pass through once read
+/// (`health.checked`): each listener fills its part of what the desktop
+/// then shows, in their declared order.
+pub struct HealthChecked;
+
+impl Point for HealthChecked {
+    const ID: &'static str = CHECKED;
+    type Input = Checked;
+    type Value = Shown;
+}
+
+/// What the findings say, for [`HealthChecked`]'s listeners.
+#[derive(Clone, Debug, Default)]
+pub struct Checked {
+    /// The worst finding needing attention and their count.
+    pub worst: Option<(Level, usize)>,
+    /// The owners with rows on the page.
+    pub owners: Vec<String>,
+    /// Whether rows of an owner the page has no group for are there.
+    pub others: bool,
+}
+
+/// What [`HealthChecked`]'s listeners say the desktop shows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Shown {
+    /// The status bar's badge (`status.health`); `None` leaves it.
+    pub badge: Option<Option<(Level, usize)>>,
+    /// The context keys on for the page's groups
+    /// (`health.context-keys`); `None` leaves them.
+    pub keys: Option<Vec<String>>,
+}
+
+/// The listeners of [`HealthChecked`] on `bus`, in order: the badge, then
+/// the page's groups.
+pub fn listen_checked(bus: &egui_pop::api::bus::egui_pop_hooks::Kernel) {
+    // Declared once; a second shell on the same bus finds it there.
+    let _ = bus.declare::<HealthChecked>(PointSpec::new(
+        "A health run's findings, read: what the desktop shows of them",
+    ));
+    let opts = || ListenOpts::new().owner(BUS_OWNER);
+    for (id, run) in [
+        (
+            STATUS_LISTENER,
+            Box::new(|c: &Checked, s: &mut Shown| {
+                s.badge = Some(c.worst);
+                Ok(())
+            }) as Box<dyn Fn(&Checked, &mut Shown) -> _ + Send + Sync>,
+        ),
+        (
+            KEYS_LISTENER,
+            Box::new(|c: &Checked, s: &mut Shown| {
+                let mut keys: Vec<String> = c.owners.iter().map(|o| owner_key(o)).collect();
+                if c.others {
+                    keys.push(OTHERS.to_owned());
+                }
+                s.keys = Some(keys);
+                Ok(())
+            }),
+        ),
+    ] {
+        bus.unlisten(HealthChecked::ID, id);
+        let o = if id == KEYS_LISTENER {
+            opts().after(STATUS_LISTENER)
+        } else {
+            opts()
+        };
+        if let Err(e) = bus.listen::<HealthChecked>(id, o, move |c, s| run(c, s)) {
+            log::error!(target: "helios", "health: {e}");
+        }
+    }
+}
+
+/// The order the health points' listeners run in on `bus` and in the
+/// health report of `registry` ("who runs when").
+pub fn order(
+    bus: &egui_pop::api::bus::egui_pop_hooks::Kernel,
+    registry: &helios_health::Registry,
+) -> String {
+    let mut out =
+        egui_pop::api::bus::order_dump(registry.kernel(), &[helios_health::HealthReport::ID]);
+    out.push_str(&egui_pop::api::bus::order_dump(bus, &[HealthChecked::ID]));
+    out
+}
+
+/// A fix asked: its command, and the journal from where its dispatch is
+/// looked for.
+#[derive(Clone, Debug)]
+struct Fixing {
+    command: String,
+    since: Seq,
+    /// Its dispatch, once heard: its `command.done` names it as cause.
+    dispatched: Option<Seq>,
+}
 
 /// The context key set while the owner `owner` (a module, a plugin's id)
 /// has findings: its group on the page shows.
@@ -97,6 +217,11 @@ pub(crate) struct HealthPage {
     keys: Vec<String>,
     /// The folder chooser asked for the library folder.
     choosing_folder: Option<Pending>,
+    /// The fixes asked whose command is not done yet.
+    fixing: Vec<Fixing>,
+    /// A fix ended while a run was under way: the checks run again once
+    /// it ends.
+    recheck: bool,
 }
 
 impl HealthPage {
@@ -224,6 +349,7 @@ impl Shell {
             }
         });
         self.core.health.runner = Some(runner);
+        listen_checked(&self.core.app.handle().bus());
         if !self.has_command(FINDINGS) {
             let answer = self.core.health.answer.clone();
             let registered = self.register(
@@ -239,42 +365,67 @@ impl Shell {
                 log::warn!("health: {e}");
             }
         }
-        self.health_answer();
+        self.health_answer(None);
     }
 
-    /// Makes `health.findings`'s answer again, and has the Settings app
-    /// read it.
-    fn health_answer(&mut self) {
+    /// The order the health points' listeners run in ([`order`]).
+    pub fn health_order(&self) -> String {
+        let bus = self.core.app.handle().bus();
+        match self.core.health.runner.as_ref() {
+            Some(r) => order(&bus, r.registry()),
+            None => egui_pop::api::bus::order_dump(&bus, &[HealthChecked::ID]),
+        }
+    }
+
+    /// Makes `health.findings`'s answer again and passes the findings
+    /// through [`HealthChecked`]'s listeners; `said`, the event saying
+    /// why, goes on the journal and to the Settings app's reads.
+    fn health_answer(&mut self, said: Option<&str>) {
         let Some(runner) = self.core.health.runner.as_ref() else {
             return;
         };
         let t = |m: Message| self.text(m);
         let known = crate::config::health_owners(&crate::config::lock(&self.core.health.plugins));
-        let answer = findings_answer(&t, &runner.findings(), runner.running(), &known);
-        // The groups with rows show; those that had and have no more hide.
-        let mut keys: Vec<String> = answer["owners"]
-            .as_object()
-            .map(|o| o.keys().map(|k| owner_key(k)).collect())
-            .unwrap_or_default();
-        if answer["others"].as_array().is_some_and(|o| !o.is_empty()) {
-            keys.push(OTHERS.to_owned());
-        }
-        let handle = self.core.app.handle();
-        for gone in self.core.health.keys.iter().filter(|k| !keys.contains(k)) {
-            handle.set_context(gone, "false");
-        }
-        for on in &keys {
-            handle.set_context(on, "true");
-        }
-        self.core.health.keys = keys;
+        let findings = runner.findings();
+        let answer = findings_answer(&t, &findings, runner.running(), &known);
+        let checked = Checked {
+            worst: findings.worst(),
+            owners: answer["owners"]
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default(),
+            others: answer["others"].as_array().is_some_and(|o| !o.is_empty()),
+        };
+        drop(findings);
         *self
             .core
             .health
             .answer
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = answer;
-        if let Some(admin) = self.core.app.handle().service(&egui_pop::api::admin::ADMIN) {
-            admin.refresh();
+        let handle = self.core.app.handle().clone();
+        let altered = handle
+            .bus()
+            .alter::<HealthChecked>(checked, Shown::default());
+        for failure in &altered.failures {
+            log::warn!(target: "helios", "health: {failure}");
+        }
+        let shown = altered.value;
+        if let Some(badge) = shown.badge {
+            self.core.status.borrow_mut().health = badge;
+        }
+        if let Some(keys) = shown.keys {
+            for gone in self.core.health.keys.iter().filter(|k| !keys.contains(k)) {
+                handle.set_context(gone, "false");
+            }
+            for on in &keys {
+                handle.set_context(on, "true");
+            }
+            self.core.health.keys = keys;
+        }
+        if let Some(name) = said {
+            handle.publish("helios", None, name, Value::Null);
+            self.read_fact(name);
         }
     }
 
@@ -326,10 +477,14 @@ impl Shell {
             fix.command,
             fix.args
         );
-        self.core.app.handle().run(command, fix.args.clone());
-        if let Ok(again) = CommandId::new(CHECK_NOW) {
-            self.core.app.handle().run(again, Value::Null);
-        }
+        let handle = self.core.app.handle();
+        // Its dispatch and its end come after what the journal holds now.
+        self.core.health.fixing.push(Fixing {
+            command: fix.command.clone(),
+            since: handle.last_event(),
+            dispatched: None,
+        });
+        handle.run(command, fix.args.clone());
         Ok(json!({ "id": id, "command": fix.command }))
     }
 
@@ -339,9 +494,7 @@ impl Shell {
         let on = args["on"].as_bool().unwrap_or(true);
         let runner = self.core.health.runner.as_ref().ok_or("no health check")?;
         runner.findings().ignored.set(id, on)?;
-        let worst = runner.findings().worst();
-        self.core.status.borrow_mut().health = worst;
-        self.health_answer();
+        self.health_answer(Some(IGNORED));
         Ok(json!({ "id": id, "ignored": on }))
     }
 
@@ -406,8 +559,47 @@ impl Shell {
         }
     }
 
-    /// Before the bar is drawn: a run when one is due, and the badge's
-    /// worst finding; the page read again when a run starts or ends.
+    /// `health.recheck`, a listener of the journal: a fix asked is
+    /// dispatched, then done (or failed, or refused): the checks run
+    /// again, now that what it changed is there.
+    pub(super) fn health_heard(&mut self, e: &Event) {
+        let fixing = &mut self.core.health.fixing;
+        if fixing.is_empty() {
+            return;
+        }
+        let command = e.data["command"].as_str().unwrap_or_default();
+        let ended = match e.name.as_str() {
+            "command.dispatched" => {
+                if let Some(f) = fixing
+                    .iter_mut()
+                    .find(|f| f.dispatched.is_none() && f.command == command && e.seq > f.since)
+                {
+                    f.dispatched = Some(e.seq);
+                }
+                false
+            }
+            "command.done" | "command.failed" => {
+                let before = fixing.len();
+                fixing.retain(|f| f.dispatched.is_none() || f.dispatched != e.cause);
+                fixing.len() != before
+            }
+            "command.refused" => {
+                let before = fixing.len();
+                fixing
+                    .retain(|f| f.dispatched.is_some() || f.command != command || e.seq <= f.since);
+                fixing.len() != before
+            }
+            _ => false,
+        };
+        if ended {
+            log::info!(target: "helios", "{RECHECK_LISTENER}: `{command}` ended, the checks run again");
+            self.core.health.recheck = true;
+        }
+    }
+
+    /// Before the bar is drawn: a run when one is due, or asked by a fix
+    /// that ended; [`HealthChecked`] passed through when a run starts or
+    /// ends.
     pub(super) fn health_tick(&mut self, ctx: &Egui) {
         {
             let mut held = self
@@ -441,13 +633,14 @@ impl Shell {
         let Some(runner) = self.core.health.runner.as_ref() else {
             return;
         };
+        if self.core.health.recheck && runner.run_now() {
+            self.core.health.recheck = false;
+        }
         runner.tick(Instant::now(), generation);
-        let worst = runner.findings().worst();
         let seen = (runner.runs(), runner.running());
-        self.core.status.borrow_mut().health = worst;
         if seen != self.core.health.seen {
             self.core.health.seen = seen;
-            self.health_answer();
+            self.health_answer(Some(if seen.1 { CHECKING } else { CHECKED }));
         }
     }
 }

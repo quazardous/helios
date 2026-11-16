@@ -73,13 +73,21 @@ impl World {
     /// The UI crates (see [`is_ui_crate`]) its crates may depend on.
     fn ui_allowed(self) -> &'static [&'static str] {
         match self {
-            // egui-pop-model is egui-free: ids, layouts, the panel model.
-            World::Engine | World::Forms => &["egui-pop-model"],
-            World::Visual => &["egui-pop-model", "egui_hud", "egui_fit"],
-            World::FormsFramework => &["egui-pop", "egui-pop-model", "egui-pop-i18n"],
+            // egui-pop-model is egui-free: ids, layouts, the panel model;
+            // egui-pop-hooks too: the hook kernel (points, ordered
+            // listeners), with no dependency at all.
+            World::Engine | World::Forms => &["egui-pop-model", "egui-pop-hooks"],
+            World::Visual => &["egui-pop-model", "egui-pop-hooks", "egui_hud", "egui_fit"],
+            World::FormsFramework => &[
+                "egui-pop",
+                "egui-pop-model",
+                "egui-pop-hooks",
+                "egui-pop-i18n",
+            ],
             World::VisualFramework => &[
                 "egui-pop",
                 "egui-pop-model",
+                "egui-pop-hooks",
                 "egui-pop-i18n",
                 "egui_hud",
                 "egui_fit",
@@ -89,6 +97,7 @@ impl World {
                 "egui-pop",
                 "egui-pop-agent",
                 "egui-pop-model",
+                "egui-pop-hooks",
                 "egui-pop-i18n",
             ],
             World::DevTool => &[],

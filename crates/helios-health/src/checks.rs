@@ -10,7 +10,7 @@ use helios_core::Message;
 use helios_storage::{Role, Volume, capacity_text, registry};
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Event, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Event, Finding, Fix, Level, Registry};
 
 /// The owner of the storage checks ([`storage`]).
 pub const STORAGE_OWNER: &str = "storage";
@@ -34,6 +34,18 @@ pub fn library() -> Vec<Arc<dyn Check>> {
         Arc::new(ChangedOutside),
         Arc::new(RawJpegPairs),
     ]
+}
+
+/// Adds the storage module's checks to `registry`, owned by `STORAGE_OWNER`, as listeners of
+/// the health report.
+pub fn register_storage(registry: &mut Registry) {
+    crate::add_owned(registry, STORAGE_OWNER, storage());
+}
+
+/// Adds the library module's checks to `registry`, owned by `LIBRARY_OWNER`, as listeners of
+/// the health report.
+pub fn register_library(registry: &mut Registry) {
+    crate::add_owned(registry, LIBRARY_OWNER, library());
 }
 
 /// Free space on the library's volume and on every volume with a role

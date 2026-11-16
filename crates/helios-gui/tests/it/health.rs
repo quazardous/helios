@@ -10,10 +10,14 @@
 //! in use (fake adapters), its kernels (a compile failure injected), the
 //! plugins (fake ones: fine, of a wrong version, crashing) and the
 //! catalogue snapshots. And no library folder chosen, until one is.
+//!
+//! On the bus: a slow fix's re-check runs once its command is done, never
+//! before, and the page shows the new answer by event; the health
+//! points' listeners run in a declared order.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use egui::vec2;
@@ -292,7 +296,7 @@ impl Drop for Library {
 /// A shell running Helios's checks over `ctx`, its Health page open
 /// once the first run is in.
 fn checked(ctx: Context) -> Harness<'static, Shell> {
-    checked_by(Registry::builtin(), ctx)
+    checked_by(helios_node_core::health::checks(), ctx)
 }
 
 /// A shell running `registry`'s checks over `ctx`, its Health page open
@@ -953,7 +957,7 @@ fn no_library_folder_is_a_warning_until_one_is_chosen() {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_import_library_folder(Arc::new(Folder(folder.clone())));
     shell.set_health(Runner::new(
-        Registry::builtin(),
+        helios_node_core::health::checks(),
         move || Context {
             library_folder: Some(read.lock().unwrap().clone()),
             ..Context::default()
@@ -983,4 +987,134 @@ fn no_library_folder_is_a_warning_until_one_is_chosen() {
     until(&mut h, "the folder chosen", |h| {
         finding(h, "library.folder").is_some_and(|f| f.level == Level::Ok)
     });
+}
+
+/// A check finding a problem until `repaired`, whose fix is
+/// `test.slowFix`; each run notes whether the fix was done when it
+/// looked.
+struct Fixable {
+    repaired: Arc<AtomicBool>,
+    looked: Arc<std::sync::Mutex<Vec<bool>>>,
+}
+
+impl Check for Fixable {
+    fn id(&self) -> &'static str {
+        "test.fixable"
+    }
+
+    fn title(&self) -> Message {
+        Message::plain("Fixable")
+    }
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("A flux capacitor")
+            .levels(&[Level::Ok, Level::Problem])
+            .fixes(&["test.slowFix"])
+    }
+
+    fn run(&self, _: &Context) -> Vec<Finding> {
+        let repaired = self.repaired.load(Ordering::SeqCst);
+        self.looked.lock().unwrap().push(repaired);
+        if repaired {
+            return vec![Finding::new(
+                "test.fixable",
+                "",
+                Level::Ok,
+                Message::plain("The flux capacitor is plugged in"),
+                Message::plain("Nothing to do"),
+            )];
+        }
+        vec![
+            Finding::new(
+                "test.fixable",
+                "",
+                Level::Problem,
+                Message::plain("The flux capacitor is unplugged"),
+                Message::plain("Plug it back in"),
+            )
+            .fix(helios_health::Fix {
+                command: "test.slowFix".into(),
+                args: json!({}),
+                label: Message::plain("Plug it in"),
+            }),
+        ]
+    }
+}
+
+#[test]
+fn a_slow_fix_s_recheck_runs_after_it_ends_and_the_page_shows_the_new_answer() {
+    let repaired = Arc::new(AtomicBool::new(false));
+    let looked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = Registry::default();
+    registry
+        .add(
+            "test",
+            Arc::new(Fixable {
+                repaired: repaired.clone(),
+                looked: looked.clone(),
+            }),
+        )
+        .unwrap();
+    let mut h = checked_by(registry, Context::default());
+    // The fix: a command finishing on a later frame, 300 ms after it
+    // starts, as a fix running a job does.
+    let later = h.state().later();
+    h.state_mut()
+        .register(
+            helios_shell::commands::CommandSpec::new(
+                "test.slowFix",
+                "Plug the flux capacitor back in",
+                "Test",
+            ),
+            move |_, _| {
+                let resolver = later.take().ok_or("no resolver")?;
+                let repaired = repaired.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(300));
+                    repaired.store(true, Ordering::SeqCst);
+                    resolver.resolve(Ok(json!({ "plugged": true })));
+                });
+                Ok(serde_json::Value::Null)
+            },
+        )
+        .unwrap();
+    until(&mut h, "the problem listed", |h| {
+        h.query_by_label_contains("The flux capacitor is unplugged")
+            .is_some()
+    });
+    h.state_mut()
+        .run(
+            helios_gui::shell::HEALTH_FIX,
+            json!({ "id": "test.fixable" }),
+            Origin::User,
+        )
+        .unwrap();
+    // The page shows the new answer, read again by `health.checked`.
+    until(&mut h, "the page showing the fix", |h| {
+        h.query_by_label_contains("The flux capacitor is plugged in")
+            .is_some()
+    });
+    let looked = looked.lock().unwrap().clone();
+    assert_eq!(
+        looked.first(),
+        Some(&false),
+        "the first run saw the problem"
+    );
+    assert!(
+        looked.len() >= 2 && looked[1..].iter().all(|done| *done),
+        "every run after the fix was asked looked once it was done: {looked:?}"
+    );
+}
+
+#[test]
+fn the_health_points_run_their_listeners_in_a_declared_order() {
+    let h = headless::harness(shell(), vec2(1280.0, 800.0));
+    assert_eq!(
+        h.state().health_order(),
+        "health.report\n\
+         \x20 1. test.broken (owner test): nothing\n\
+         health.checked\n\
+         \x20 1. status.health (owner helios.health): nothing\n\
+         \x20 2. health.context-keys (owner helios.health): after status.health\n"
+    );
 }

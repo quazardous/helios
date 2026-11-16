@@ -182,6 +182,11 @@ impl Runner {
         *self.waker.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(wake));
     }
 
+    /// The checks, each a listener of the health report.
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
     pub fn registry_mut(&mut self) -> &mut Registry {
         &mut self.registry
     }
@@ -260,12 +265,14 @@ impl Runner {
             return false;
         }
         let runs = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
-        let checks: Vec<(String, Arc<dyn crate::Check>)> = self
+        let total = self
             .registry
-            .owned()
-            .filter(|(_, c)| only.is_none_or(|ids| ids.iter().any(|id| id == c.id())))
-            .map(|(owner, c)| (owner.to_owned(), c.clone()))
-            .collect();
+            .checks()
+            .iter()
+            .filter(|c| only.is_none_or(|ids| ids.iter().any(|id| id == c.id())))
+            .count() as u64;
+        let only: Option<Vec<String>> = only.map(<[String]>::to_vec);
+        let reporter = self.registry.reporter();
         let whole = only.is_none();
         let ids: BTreeSet<String> = self
             .registry
@@ -281,10 +288,12 @@ impl Runner {
         let report = jobs.as_ref().map(|jobs| {
             jobs.start(
                 Start::new(&format!("health-{runs}"), "Health check", KIND)
-                    .total(checks.len() as u64)
+                    .total(total)
                     .not_cancellable(),
             )
         });
+        // Shared with the report's progress, heard on the same thread.
+        let report = report.map(Arc::new);
         let (context, findings, running, waker) = (
             self.context.clone(),
             self.findings.clone(),
@@ -294,23 +303,27 @@ impl Runner {
         let spawned = std::thread::Builder::new()
             .name("helios-health".into())
             .spawn(move || {
-                let ctx = context();
-                let total = checks.len() as u64;
-                let mut found = Vec::with_capacity(checks.len());
-                for (i, (owner, check)) in checks.iter().enumerate() {
-                    if let Some(r) = &report {
-                        r.progress(Progress::new().counts(i as u64, total).item(check.id()));
+                let progress = report.clone();
+                let seen = AtomicU64::new(0);
+                let mut asked = crate::Report::all(context()).progress(move |id| {
+                    if let Some(r) = &progress {
+                        let i = seen.fetch_add(1, Ordering::SeqCst);
+                        r.progress(Progress::new().counts(i, total).item(id));
                     }
-                    let these = crate::run_one(check, &ctx);
-                    if let Some(r) = &report {
-                        r.log(format!("{}: {} findings", check.id(), these.len()));
+                });
+                if let Some(only) = only {
+                    asked = asked.only(only);
+                }
+                let found = reporter.report(asked);
+                if let Some(r) = &report {
+                    for (_, check, these) in &found {
+                        r.log(format!("{check}: {} findings", these.len()));
                     }
-                    found.push((owner, check.id(), these));
                 }
                 {
                     let mut kept = findings.lock().unwrap_or_else(PoisonError::into_inner);
                     for (owner, check, these) in found {
-                        kept.put(owner, check, these);
+                        kept.put(&owner, &check, these);
                     }
                     if whole {
                         kept.retain(|check| ids.contains(check));
@@ -499,8 +512,11 @@ mod tests {
     #[test]
     fn a_run_keeps_its_findings_and_wakes() {
         use std::sync::mpsc;
+        let mut registry = Registry::default();
+        crate::checks::register_storage(&mut registry);
+        crate::backup::register(&mut registry);
         let runner = Runner::new(
-            Registry::builtin(),
+            registry,
             Context::default,
             Findings::default(),
             Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
