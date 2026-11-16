@@ -87,6 +87,7 @@ mod plugin_consent;
 mod queue;
 mod quick_open;
 mod quick_settings;
+mod quit;
 mod raw_front;
 mod scale;
 mod scenario_files;

@@ -528,6 +528,8 @@ struct Parts {
     plugin_settings: crate::config::plugins::Shared,
     /// Where a command finishing on a later frame takes its resolver.
     later: Later,
+    /// Quitting, shared with the main window's `window.close` hooks.
+    quit: Rc<lifetime::Quit>,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -891,6 +893,7 @@ impl Shell {
             values,
             ..
         } = wiring;
+        let quit = Rc::new(lifetime::Quit::new(jobs.clone(), i18n.clone()));
         let mut builder = App::builder()
             .name("Helios")
             .host(host)
@@ -1004,7 +1007,10 @@ impl Shell {
             .plugin(crate::agent_state::AgentState {
                 late: agent_state.clone(),
                 values: values.clone(),
-            });
+            })
+            // The question before quitting and the quit itself, on the
+            // main window's `window.close` step.
+            .plugin(lifetime::QuitHooks(quit.clone()));
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
         }
@@ -1036,6 +1042,7 @@ impl Shell {
                 controls,
                 plugin_settings,
                 later,
+                quit,
             },
         }
     }
@@ -1067,6 +1074,7 @@ impl Shell {
             controls,
             plugin_settings,
             later,
+            quit,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -1176,7 +1184,7 @@ impl Shell {
             activity_focus: activity_focus::ActivityFocus::default(),
             library_focus: library_focus::LibraryFocus::default(),
             focus_windows_kept: None,
-            lifetime: lifetime::Lifetime::default(),
+            lifetime: lifetime::Lifetime::new(quit),
             window_asks: None,
             toasts_in: None,
             notes: Vec::new(),
@@ -4567,22 +4575,10 @@ impl Shell {
             let _ = self.run(&c.command, c.args, Origin::Script("policy".into()));
             return;
         }
-        let command = match CommandId::new(c.command.as_str()) {
-            Ok(id) => id,
-            Err(e) => return self.warn(e.to_string()),
-        };
-        let report = crate::report::Context::command(command.as_str());
-        let mut d = dialogs::Confirm::new(&c.title, &c.verb, command)
-            .detail(&c.detail)
-            .args(c.args)
-            .details(
-                crate::report::details(&report),
-                dialogs::DetailsMode::Hidden,
-            );
-        if c.danger {
-            d = d.danger();
+        match confirm_dialog(c) {
+            Ok(d) => self.open_dialog(d),
+            Err(e) => self.warn(e),
         }
-        self.open_dialog(d);
     }
 
     /// Asks for values, then runs the form's command with them.
@@ -6301,7 +6297,7 @@ impl Shell {
             Action::Maximize => {
                 frame::request(self.core.app.handle(), ctx, FrameRequest::ToggleMaximize);
             }
-            Action::Quit => self.quit(ctx),
+            Action::Quit => self.quit(),
             Action::QuitConfirmed => self.quit_confirmed(),
             Action::NoticeDetails(i) => self.notice_details(i),
             Action::MainWindow => self.main_window(),
@@ -6795,6 +6791,7 @@ impl Shell {
             Action::Answer(answer, origin) => self.answer(answer, &origin)?,
             Action::AssumeYes(on) => {
                 self.core.assume_yes = on;
+                self.quit_assumes_yes(on);
                 self.note(if on {
                     Message::new("gui-policy-yes", "confirmations are answered yes by policy")
                 } else {
@@ -7324,13 +7321,9 @@ impl Shell {
                 Some((false, line)) => log::info!(target: "helios", "{line}"),
                 None => {}
             }
-            // egui-pop's Quit (Ctrl+Q, File > Quit), from any window: it
-            // closes the window it ran in, the application quits.
-            if e.name == "command.done"
-                && e.data["command"] == egui_pop::api::app::CMD_QUIT.as_str()
-            {
-                self.quit(ctx);
-            }
+            // egui-pop's Quit (Ctrl+Q, File > Quit) needs nothing here:
+            // it is the main window's `window.close` (reason `quit`), whose
+            // hooks ask first and quit (`lifetime::QuitHooks`).
             if e.name == "workbench.refused"
                 && let Some(why) = e.data["reason"].as_str()
             {
@@ -8002,4 +7995,25 @@ pub(crate) fn raise_main_window(app: &AppHandle) -> bool {
         RAISE_OWNER,
         Reason::Command,
     ))
+}
+
+/// A question before an action, as egui-pop's dialog: its primary button
+/// runs the command, its details carry the report's context.
+///
+/// # Errors
+/// The command is not a command id.
+pub(crate) fn confirm_dialog(c: crate::dialogs::Confirm) -> Result<dialogs::Confirm, String> {
+    let command = CommandId::new(c.command.as_str()).map_err(|e| e.to_string())?;
+    let report = crate::report::Context::command(command.as_str());
+    let mut d = dialogs::Confirm::new(&c.title, &c.verb, command)
+        .detail(&c.detail)
+        .args(c.args)
+        .details(
+            crate::report::details(&report),
+            dialogs::DetailsMode::Hidden,
+        );
+    if c.danger {
+        d = d.danger();
+    }
+    Ok(d)
 }
