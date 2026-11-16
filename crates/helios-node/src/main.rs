@@ -2095,11 +2095,19 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         }
     };
     let jobs = Jobs::new(bus.clone());
+    // The node's bus (`bus-contract`), its choice as the application: one,
+    // the default implementation, where its health checks listen.
+    let hooks: Arc<dyn bus_contract::Bus> = Arc::new(egui_pop_hooks::Kernel::new());
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.
     let held = vault.zip(args.vault.as_ref()).map(|(vault, file)| {
-        let mut node =
-            VaultNode::start(vault, file, bus.clone(), &jobs, VaultNodeOptions::system());
+        let mut node = VaultNode::start(
+            vault,
+            file,
+            bus.clone(),
+            &jobs,
+            VaultNodeOptions::system(hooks.clone()),
+        );
         // A node that serves on its own runs the saved sources' automatic
         // imports; one a client started for a while (`--idle-exit`) does
         // not: it is there for that client.

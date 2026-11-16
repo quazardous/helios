@@ -284,7 +284,7 @@ fn the_health_check_runs_with_no_window_and_reports_in_the_jobs_api() {
             None,
             None,
         )
-        .checks(),
+        .checks(Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new())),
         Context::default,
         Findings::default(),
         Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(24)),

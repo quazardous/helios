@@ -60,6 +60,7 @@ fn the_node_runs_its_jobs_and_closes_the_vault_cleanly_when_stopped() {
             // A health run at once, then none for an hour.
             schedule: Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
             clock: Duration::from_millis(20),
+            hooks: Arc::new(egui_pop_hooks::Kernel::new()),
         },
     );
     let link = node.link();
@@ -145,6 +146,7 @@ fn an_import_through_the_node_is_backed_up_then_the_health_check_runs_and_the_no
                 Duration::from_hours(1),
             ),
             clock: Duration::from_millis(20),
+            hooks: Arc::new(egui_pop_hooks::Kernel::new()),
         },
     );
     let link = node.link();
@@ -280,6 +282,7 @@ fn the_node_runs_the_saved_sources_automatic_imports_with_their_own_origin() {
                 Duration::from_hours(1),
             ),
             clock: Duration::from_secs(1),
+            hooks: Arc::new(egui_pop_hooks::Kernel::new()),
         },
     );
     node.run_automatic_imports(Timing {
@@ -991,6 +994,7 @@ fn the_headless_node_mirrors_its_jobs_as_promises_without_doubles() {
                 Duration::from_hours(1),
             ),
             clock: Duration::from_millis(20),
+            hooks: Arc::new(egui_pop_hooks::Kernel::new()),
         },
     );
     let job = jobs.start(Start::new("trash-1", "Move 1 file to the trash", "trash").total(1));

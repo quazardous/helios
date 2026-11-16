@@ -67,9 +67,10 @@ impl<S: Store + 'static> HealthInputs<S> {
 
     /// The node's own checks, with what a node without a window has: the
     /// storage, the library, the backups (the default destination days, no
-    /// cards) and the catalogue (no snapshots yet).
-    pub fn checks(&self) -> Registry {
-        let mut r = Registry::default();
+    /// cards) and the catalogue (no snapshots yet), their listeners on
+    /// `bus`, the node's.
+    pub fn checks(&self, bus: Arc<dyn bus_contract::Bus>) -> Registry {
+        let mut r = Registry::new(bus);
         self.register_storage(&mut r);
         self.register_library(&mut r);
         self.register_backup(&mut r, || DESTINATION_DAYS, Vec::new);
@@ -154,6 +155,11 @@ mod tests {
     use helios_vault_sqlite::SqliteStore;
     use std::time::{Duration, Instant};
 
+    /// A bus of its own, as an application gives one.
+    fn bus() -> Arc<dyn bus_contract::Bus> {
+        Arc::new(egui_pop_hooks::Kernel::new())
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("helios-node-health-{name}-{}", std::process::id()));
@@ -166,7 +172,7 @@ mod tests {
     #[test]
     fn the_node_s_checks_are_declared_soundly_and_owned_by_their_modules() {
         let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
-        let r = HealthInputs::<SqliteStore>::new(volumes, None, None).checks();
+        let r = HealthInputs::<SqliteStore>::new(volumes, None, None).checks(bus());
         let owners: Vec<(&str, Vec<&str>)> = r
             .by_owner()
             .into_iter()
@@ -217,7 +223,7 @@ mod tests {
         let vault = Arc::new(Vault::new(SqliteStore::open(&file).unwrap()));
         let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
         let inputs = HealthInputs::new(volumes, Some(vault), Some(file));
-        let mut registry = Registry::default();
+        let mut registry = Registry::new(bus());
         inputs.register_storage(&mut registry);
         inputs.register_library(&mut registry);
         inputs.register_backup(
@@ -270,7 +276,7 @@ mod tests {
         let vault = Arc::new(Vault::new(SqliteStore::open(&file).unwrap()));
         let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
         let inputs = HealthInputs::new(volumes, Some(vault.clone()), Some(file));
-        let mut registry = Registry::default();
+        let mut registry = Registry::new(bus());
         inputs.register_library(&mut registry);
         let check = || {
             registry
@@ -310,7 +316,7 @@ mod tests {
         let volumes: Arc<dyn Volumes> = Arc::new(Vec::<Volume>::new());
         let inputs = HealthInputs::<SqliteStore>::new(volumes, None, Some(file));
         let found: Vec<_> = inputs
-            .checks()
+            .checks(bus())
             .run(&Context::default())
             .into_iter()
             .filter(|f| f.id == VAULT_INTEGRITY || f.id == LIBRARY)

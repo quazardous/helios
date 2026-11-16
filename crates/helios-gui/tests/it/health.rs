@@ -70,10 +70,16 @@ impl Check for Broken {
     }
 }
 
+/// A registry on a bus of its own, as an application gives one.
+fn new_registry() -> Registry {
+    Registry::new(Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new()))
+}
+
 fn shell() -> Shell {
-    let mut registry = Registry::default();
-    registry.add("test", Arc::new(Broken)).unwrap();
     let mut shell = Shell::new(helios_panels(), None);
+    // The checks on the shell's bus, beside egui-pop's points.
+    let mut registry = Registry::new(shell.app().handle().bus());
+    registry.add("test", Arc::new(Broken)).unwrap();
     shell.set_health(Runner::new(
         registry,
         Context::default,
@@ -313,7 +319,7 @@ impl Facts {
     /// Helios's checks over these facts, each module's own, in the
     /// desktop's order.
     fn registry(&self) -> Registry {
-        let mut r = Registry::default();
+        let mut r = new_registry();
         helios_storage::health::register(
             &mut r,
             &Gather::fixed(helios_storage::health::Disks {
@@ -596,7 +602,7 @@ fn only<C: Owned>(check: C, state: C::State) -> Registry
 where
     C::State: Clone,
 {
-    let mut r = Registry::default();
+    let mut r = new_registry();
     r.add("test", helios_health::over(check, &Gather::fixed(state)))
         .unwrap();
     r
@@ -951,7 +957,7 @@ impl Check for Said {
 
 #[test]
 fn the_page_groups_the_findings_by_their_owner() {
-    let mut registry = Registry::default();
+    let mut registry = new_registry();
     let said = |id, level, message| Arc::new(Said { id, level, message }) as Arc<dyn Check>;
     // Owners the page has a group for (Helios's backups and GPU modules)
     // and one it has not (a test's).
@@ -1022,7 +1028,7 @@ fn no_library_folder_is_a_warning_until_one_is_chosen() {
     let read = folder.clone();
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_import_library_folder(Arc::new(Folder(folder.clone())));
-    let mut registry = Registry::default();
+    let mut registry = Registry::new(shell.app().handle().bus());
     helios_library::health::register(
         &mut registry,
         &Gather::new(move |_| helios_library::health::State {
@@ -1116,7 +1122,7 @@ impl Check for Fixable {
 fn a_slow_fix_s_recheck_runs_after_it_ends_and_the_page_shows_the_new_answer() {
     let repaired = Arc::new(AtomicBool::new(false));
     let looked = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut registry = Registry::default();
+    let mut registry = new_registry();
     registry
         .add(
             "test",
@@ -1188,4 +1194,105 @@ fn the_health_points_run_their_listeners_in_a_declared_order() {
          \x20 1. status.health (owner helios.health): nothing\n\
          \x20 2. health.context-keys (owner helios.health): after status.health\n"
     );
+}
+
+/// One bus, as the desktop's `main` builds it and hands it to the shell
+/// (egui-pop) and to the health checks: Helios's points sit next to
+/// egui-pop's, one order dump reads both, and a second egui-pop
+/// application on it is refused.
+#[test]
+fn helios_s_points_sit_next_to_egui_pop_s_on_the_one_bus() {
+    use egui_pop::api::bus::bus_contract::{Bus, Point as _, order_dump};
+    use egui_pop::api::bus::{WindowClose, WindowOpen};
+    use helios_health::HealthReport;
+    let bus: Arc<dyn Bus> = Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
+    let mut shell = Shell::builder(helios_panels(), None)
+        .bus(bus.clone())
+        .build_in_window(&egui::Context::default())
+        .expect("the first application on the bus");
+    assert!(
+        std::ptr::addr_eq(Arc::as_ptr(&shell.app().handle().bus()), Arc::as_ptr(&bus)),
+        "egui-pop runs on the bus it was given"
+    );
+    let mut registry = Registry::new(bus.clone());
+    registry.add("test", Arc::new(Broken)).unwrap();
+    shell.set_health(Runner::new(
+        registry,
+        Context::default,
+        Findings::default(),
+        Schedule::new(
+            Instant::now(),
+            Duration::from_hours(1),
+            Duration::from_hours(1),
+        ),
+    ));
+
+    // Every point declared on the one bus: egui-pop's and Helios's.
+    let declared: Vec<&str> = bus
+        .points()
+        .into_iter()
+        .filter(|p| p.declared)
+        .map(|p| p.id)
+        .collect();
+    for id in [
+        WindowOpen::ID,
+        WindowClose::ID,
+        HealthReport::ID,
+        helios_gui::shell::HEALTH_CHECKED,
+    ] {
+        assert!(declared.contains(&id), "{id} declared: {declared:?}");
+    }
+    let dump = order_dump(
+        &*bus,
+        &[
+            WindowClose::ID,
+            HealthReport::ID,
+            helios_gui::shell::HEALTH_CHECKED,
+        ],
+    );
+    assert!(
+        dump.contains(&format!(
+            "  1. {} (owner",
+            egui_pop::api::admin::WINDOW_LISTENER
+        )),
+        "egui-pop's listener: {dump}"
+    );
+    assert!(
+        dump.contains("test.broken (owner test)"),
+        "the check: {dump}"
+    );
+    assert!(
+        dump.contains("status.health (owner helios.health)"),
+        "the badge: {dump}"
+    );
+    // The shell's own reading of its health points is that bus's.
+    assert!(shell.health_order().contains("test.broken (owner test)"));
+
+    // One egui-pop application per bus.
+    let second = Shell::builder(helios_panels(), None)
+        .bus(bus.clone())
+        .build_in_window(&egui::Context::default());
+    assert!(
+        matches!(second, Err(egui_pop::api::BuildError::Bus(_))),
+        "a second application on the bus is refused"
+    );
+}
+
+/// The owners the Health page has a group for are those of the desktop's
+/// own checks, in their order: the list known without building the checks
+/// does not drift from them.
+#[test]
+fn the_page_s_owners_are_the_desktop_checks_owners() {
+    let inputs = helios_node_core::health::HealthInputs::<SqliteStore>::new(
+        Arc::new(Vec::<Volume>::new()),
+        None,
+        None,
+    );
+    let registry = helios_gui::shell::health_checks(
+        Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new()),
+        &inputs,
+        helios_gui::shell::HealthDesktop::default(),
+    );
+    let owners: Vec<&str> = registry.by_owner().into_iter().map(|(o, _)| o).collect();
+    assert_eq!(owners, helios_gui::shell::HEALTH_OWNERS);
 }

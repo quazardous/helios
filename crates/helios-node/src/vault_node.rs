@@ -174,16 +174,20 @@ pub struct Options {
     pub schedule: Schedule,
     /// How often a due health run is looked for.
     pub clock: Duration,
+    /// The node's bus (`bus-contract`), where its health checks listen:
+    /// the application's choice, built by the node's `main`.
+    pub hooks: Arc<dyn bus_contract::Bus>,
 }
 
 impl Options {
     /// The machine's volumes, the desktop's schedule (a run a while after
-    /// start, then daily).
-    pub fn system() -> Self {
+    /// start, then daily), the health checks on `hooks`.
+    pub fn system(hooks: Arc<dyn bus_contract::Bus>) -> Self {
         Self {
             volumes: helios_storage::system(),
             schedule: Schedule::desktop(Instant::now()),
             clock: HEALTH_CLOCK,
+            hooks,
         }
     }
 }
@@ -239,7 +243,7 @@ impl VaultNode {
             Some(file.to_path_buf()),
         );
         let runner = Runner::new(
-            inputs.checks(),
+            inputs.checks(options.hooks.clone()),
             helios_health::Context::default,
             Findings::default(),
             options.schedule,
