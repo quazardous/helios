@@ -2,16 +2,16 @@
 //! its states, dark and light, as a snapshot, and its clicks reported.
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::core::motion;
 use egui_pop::egui;
 use egui_pop::theme::{self, ThemeSpec};
 use helios_controls_gallery::presets::PresetsPage;
-use helios_ui::{Empty, Search};
+use helios_ui::{Action, Empty, Search};
 
 fn harness(theme_name: &str) -> Harness<'static, PresetsPage> {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(900.0, 1100.0))
+        .with_size(egui::vec2(900.0, 1700.0))
         .build_ui_state(
             |ui, page: &mut PresetsPage| {
                 page.content(ui);
@@ -37,6 +37,22 @@ fn the_page_shows_every_preset() {
     }
     h.get_by_label("Retry");
     h.get_by_label("Album: Trip");
+    // The presets of the Activity window: a choice named by what it
+    // chooses, a details grid, bars and spinners named after their job,
+    // row actions.
+    assert_eq!(
+        h.get_by_label("Kind shown").accesskit_node().role(),
+        egui::accesskit::Role::ComboBox
+    );
+    h.get_by_label("Started");
+    h.get_by_label("12 Oct 2026, 18:42");
+    for name in ["Import in a row", "Preview in a row", "Export wide"] {
+        h.get_all_by_label(name).next().expect(name);
+    }
+    for kind in Action::ALL {
+        h.get_by_label(&format!("{} in a row", kind.name()));
+    }
+    h.get_by_label("18:43:00  failed: IMG_0025.CR3, disk full");
     // The late values, one per state.
     for name in ["Photos", "Free space", "Last backup", "Archive size"] {
         h.get_by_role_and_label(egui::accesskit::Role::Status, name);
@@ -49,6 +65,14 @@ fn a_failed_late_value_reports_its_retry() {
     h.get_by_label("Retry Archive size").click();
     h.run();
     assert_eq!(h.state().last.as_deref(), Some("value Archive size retry"));
+}
+
+#[test]
+fn a_row_action_is_reported() {
+    let mut h = harness("pop-dark");
+    h.get_by_label("danger in a row").click();
+    h.run();
+    assert_eq!(h.state().last.as_deref(), Some("row action danger"));
 }
 
 #[test]

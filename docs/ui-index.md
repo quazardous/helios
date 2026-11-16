@@ -25,18 +25,21 @@ egui-pop in the lock: 0.11.0.
 |---|---|---|
 | a heading over a group of fields | **`helios_ui::section(..)`** (Helios preset)<br>`helios_ui::section` | A section's header: the theme's section space, its title in the section text role, its description in the muted one. |
 |  | `ui.section_title(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::section_title` | A section's title (`text-role.section`). |
-| a label in a named text role (body, strong, code...) | `ui.text_role(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::text_role` | A label in a text role (`role_text`). |
+| a label in a named text role (title, section, body, muted, meta) | `ui.text_role(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::text_role` | A label in a text role (`role_text`). |
 | a section title | **`helios_ui::section(..)`** (Helios preset)<br>`helios_ui::section` | A section's header: the theme's section space, its title in the section text role, its description in the muted one. |
 |  | `ui.section_title(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::section_title` | A section's title (`text-role.section`). |
 | greyed or weak text | `ui.muted(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::muted` | Secondary text: a hint, a description (`text-role.muted`). |
+| monospace text, a log or console line, a path or code | `ui.code_text(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::code_text` | Monospace text: a log's or a console's line, a path, a piece of code. |
 | secondary text, a hint or a description | `ui.muted(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::muted` | Secondary text: a hint, a description (`text-role.muted`). |
 | small print about an item, a date or a size | `ui.meta(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::meta` | Small print about an item: a date, a size (`text-role.meta`). |
+| text in a tone, a failed state or an error in the danger colour | `ui.text_tone(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::text_tone` | Text in a tone: a failed state, an error, a warning, a success. |
 
 ## Spacing, cards and scrolling
 
 | Need | Use | What it is |
 |---|---|---|
 | a card, a framed group | `ui.card(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::card` | `add` inside the kit's `card` in a tone (`Tone::Neutral` for the plain card). |
+| a divider, a rule between two sections (separator) | `ui.divider(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::divider` | A divider: a rule across the layout between two sections, in `border.default`, one point wide on whole physical pixels, centred in a space of `Space::Group`. |
 | a scrolling region | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 |  | `ui.scroll_area(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
 | collapsible sections in a panel | `Sections` (egui-pop)<br>`egui_pop::core::sections::Sections` | A stack of collapsible sections filling the room it is given (a panel's height), named for its memory and for agents. |
@@ -51,6 +54,8 @@ egui-pop in the lock: 0.11.0.
 | a button by tone (primary, danger, quiet) | **`helios_ui::action(..)`** (Helios preset)<br>`helios_ui::action` | A button for `kind` of action, labelled `label`: egui-pop's button in the action's tone. |
 |  | `ui.button_tone(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::button_tone` | egui's button in a tone of the kit's `button` (`button.tone.*`): a `Stock::Button` scope (`UiPop::scoped`), so the button keeps its layout, icon and shortcut text. |
 | a button with a menu of alternatives (split button) | `input::split_button(..)` (egui-pop)<br>`egui_pop::core::input::split_button` | A split button on its own: an action (`text`) and a chevron opening a menu of `items`. |
+| a small (compact) button in a dense list row | `RowButton` (egui-pop)<br>`egui_pop::core::compact::RowButton` | A button small enough for a list's row (see the module). |
+| a small action in a list's row (Cancel beside a job) | **`helios_ui::row_action(..)`** (Helios preset)<br>`helios_ui::row_action` | A small button for `kind` of action in a list's row, labelled `label` (Cancel or Retry beside a job): egui-pop's compact row button in the action's tone, no taller than the row. |
 | an icon button | `IconWidget` (egui-pop)<br>`egui_pop::core::icon::IconWidget` | An icon as a widget. |
 | the screen's primary or secondary action | **`helios_ui::action(..)`** (Helios preset)<br>`helios_ui::action` | A button for `kind` of action, labelled `label`: egui-pop's button in the action's tone. |
 
@@ -84,7 +89,7 @@ egui-pop in the lock: 0.11.0.
 |---|---|---|
 | a busy spinner | `Spinner` (egui-pop)<br>`egui_pop::core::progress::Spinner` | A spinner, with a label after it; `Spinner::delayed` shows it only after `motion.spinner.delay`, and keeps it `motion.spinner.min`. |
 | a job's progress, a bar when it counts and a spinner when it does not | **`helios_ui::progress(..)`** (Helios preset)<br>`helios_ui::progress` | The progress of the work named `name` (its accessible name): egui-pop's progress bar at `fraction` (0 to 1), or its spinner when the work does not say how far it is. |
-| a place that failed to load, with Retry | **`helios_ui::failed(..)`** (Helios preset)<br>`helios_ui::failed` | A place that failed to load: egui-pop's empty state in danger, with `title`, the `reason` and a Retry action. |
+| a place that failed to load, with Retry | **`helios_ui::failed(..)`** (Helios preset)<br>`helios_ui::failed` | A place that failed to load: egui-pop's empty state in danger, with `title`, the `reason` and a Retry action (egui-pop's translated "Retry"). |
 | a progress bar | **`helios_ui::progress(..)`** (Helios preset)<br>`helios_ui::progress` | The progress of the work named `name` (its accessible name): egui-pop's progress bar at `fraction` (0 to 1), or its spinner when the work does not say how far it is. |
 |  | `ProgressBar` (egui-pop, under the preset)<br>`egui_pop::core::progress::ProgressBar` | A progress bar. |
 | a small circular progress | `Ring` (egui-pop)<br>`egui_pop::core::progress::Ring` | A small circular progress: determinate (an arc from the top) or indeterminate (a turning arc). |
@@ -93,10 +98,10 @@ egui-pop in the lock: 0.11.0.
 | a value still loading | `Spinner` (egui-pop)<br>`egui_pop::core::progress::Spinner` | A spinner, with a label after it; `Spinner::delayed` shows it only after `motion.spinner.delay`, and keeps it `motion.spinner.min`. |
 | a value that refreshes, its last value kept meanwhile | **`helios_ui::value(..)`** (Helios preset)<br>`helios_ui::value` | The value in egui-pop's late-value cell: a skeleton sized for its kind while pending, the value, the last value with a small spinner while refreshing, the reason with Retry once failed. |
 | a value worked out late (a size, a count), with its waiting states | **`helios_ui::value(..)`** (Helios preset)<br>`helios_ui::value` | The value in egui-pop's late-value cell: a skeleton sized for its kind while pending, the value, the last value with a small spinner while refreshing, the reason with Retry once failed. |
-| an empty album, with the way back to all photos | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action). |
-| an empty state, nothing here yet | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action). |
+| an empty album, with the way back to all photos | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action), in the language the application shows. |
+| an empty state, nothing here yet | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action), in the language the application shows. |
 |  | `EmptyState` (egui-pop, under the preset)<br>`egui_pop::core::placeholder::EmptyState` | An empty place: an icon, a title, a sentence, an action. |
-| no results for a search or a filter | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action). |
+| no results for a search or a filter | **`helios_ui::empty(..)`** (Helios preset)<br>`helios_ui::empty` | The empty state of `case`: egui-pop's empty state (icon, title, sentence, action), in the language the application shows. |
 |  | `EmptyState` (egui-pop, under the preset)<br>`egui_pop::core::placeholder::EmptyState` | An empty place: an icon, a title, a sentence, an action. |
 | placeholder shapes while content loads | **`helios_ui::loading(..)`** (Helios preset)<br>`helios_ui::loading` | What loads, shown in its shape: egui-pop's skeleton, busy for assistive technologies and named "Loading". |
 |  | `Skeleton` (egui-pop, under the preset)<br>`egui_pop::core::placeholder::Skeleton` | Grey shapes standing in for content. |
@@ -109,6 +114,7 @@ egui-pop in the lock: 0.11.0.
 | a colour swatch | `Indicator` (egui-pop)<br>`egui_pop::core::indicator::Indicator` | A micro-indicator, built then added inline (`ui.add`) or painted on a widget (`Indicator::on`, `Indicator::paint_at`). |
 | a level against thresholds (disk space, memory) | `Meter` (egui-pop)<br>`egui_pop::core::progress::Meter` | A value against thresholds (disk space, memory), not progress: a bar whose tone follows the highest threshold reached. |
 | a status dot, a LED, a count badge or a flag | `Indicator` (egui-pop)<br>`egui_pop::core::indicator::Indicator` | A micro-indicator, built then added inline (`ui.add`) or painted on a widget (`Indicator::on`, `Indicator::paint_at`). |
+| an inline error, warning or success message | `ui.text_tone(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::text_tone` | Text in a tone: a failed state, an error, a warning, a success. |
 
 ## Icons and glyphs
 
