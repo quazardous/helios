@@ -446,7 +446,8 @@ timeout = "40m"
 # helios-gui's snapshots regenerated (UPDATE_SNAPSHOTS=1, on lavapipe as
 # in CI): every PNG of crates/helios-gui/tests/snapshots lands in
 # /out/snapshots, to review and commit; `test=` names a module of the `it`
-# test executable (import_snapshots by default, `test=it` for all)
+# test executable (import_snapshots by default, `test=it` for all), or
+# several joined by `+` (`test=chrome_snapshots+import_snapshots`)
 [jobs.gui-snapshots]
 about = "helios-gui's snapshots regenerated, every PNG returned"
 first = [{ job = "check", pass = ["branch", "src"] }]
@@ -455,7 +456,7 @@ cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-t="${test:-import_snapshots}"; if [ -f crates/helios-gui/tests/it/main.rs ]; then [ "$t" = it ] && t=""; sel="--test it ${t:+-- $t::}"; else sel="--test $t"; fi; \
+t="${test:-import_snapshots}"; if [ -f crates/helios-gui/tests/it/main.rs ]; then [ "$t" = it ] && t=""; sel="--test it ${t:+-- $(printf '%s:: ' ${t//+/ })}"; else sel="--test $t"; fi; \
 UPDATE_SNAPSHOTS=${update:-1} cargo test --locked -p helios-gui $sel; rc=$?; \
 mkdir -p /out/snapshots && find crates/helios-gui/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 exit $rc"""
