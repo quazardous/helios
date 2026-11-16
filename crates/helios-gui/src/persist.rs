@@ -2567,7 +2567,7 @@ impl<S: Store + 'static> Persist<S> {
             change.add(kind, by);
         }
         while let Ok(event) = self.events.try_recv() {
-            if let Some(kind) = Kind::of_event(&event.kind) {
+            if let Some(kind) = Kind::of_event(event.kind) {
                 change.add(kind, BY_VAULT);
             } else if event.kind == "vault.field_changed" {
                 let p = &event.payload;
