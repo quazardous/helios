@@ -3072,3 +3072,221 @@ fn an_old_workspace_s_album_scopes_the_main_panel_only_and_the_window_keeps_its_
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The Library window (Window › Library) in a system window of its own,
+/// its passes run as eframe runs a deferred window's, where the system
+/// hides where windows are (Wayland): no position in their input.
+struct LibraryWindow {
+    viewport: egui::ViewportId,
+    time: f64,
+    /// The accessible names its last pass drew, with their rectangles.
+    nodes: Vec<(String, egui::Rect)>,
+}
+
+impl LibraryWindow {
+    /// Opens the Library window, the main window's own viewports real
+    /// (not embedded), and runs its first passes.
+    fn open(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>) -> Self {
+        use helios_gui::shell::{LIBRARY_WINDOW, LIBRARY_WINDOW_COMMAND};
+        h.ctx.set_embed_viewports(false);
+        run(h, LIBRARY_WINDOW_COMMAND, Value::Null);
+        settle(h, persist, 1.0);
+        let viewport = h
+            .state()
+            .app()
+            .handle()
+            .window_viewport(&egui_pop::api::windows::WindowId::new(LIBRARY_WINDOW))
+            .expect("the Library window is open");
+        let mut w = Self {
+            viewport,
+            time: h.ctx.input(|i| i.time),
+            nodes: Vec::new(),
+        };
+        for _ in 0..3 {
+            w.pass(h, Vec::new());
+            settle(h, persist, 1.0);
+        }
+        w
+    }
+
+    /// One pass of the window, given these input events.
+    fn pass(&mut self, h: &Harness<'static, Shell>, events: Vec<egui::Event>) {
+        use egui::{Pos2, RawInput, Rect, ViewportId, ViewportInfo};
+        let cb = h.output().viewport_output[&self.viewport]
+            .viewport_ui_cb
+            .clone()
+            .expect("the main window's last pass declared the Library window");
+        self.time += 1.0 / 60.0;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 750.0));
+        let mut input = RawInput {
+            viewport_id: self.viewport,
+            screen_rect: Some(rect),
+            time: Some(self.time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        input.viewports.insert(
+            self.viewport,
+            ViewportInfo {
+                focused: Some(true),
+                ..Default::default()
+            },
+        );
+        input
+            .viewports
+            .insert(ViewportId::ROOT, ViewportInfo::default());
+        let mut out = h.ctx.run_ui(input, |ui| cb(ui));
+        out.textures_delta.clear();
+        if let Some(update) = &out.platform_output.accesskit_update {
+            self.nodes = update
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| {
+                    let name = n.label().or_else(|| n.value())?.to_string();
+                    let b = n.bounds()?;
+                    Some((
+                        name,
+                        Rect::from_min_max(
+                            Pos2::new(b.x0 as f32, b.y0 as f32),
+                            Pos2::new(b.x1 as f32, b.y1 as f32),
+                        ),
+                    ))
+                })
+                .collect();
+        }
+    }
+
+    /// The centre of the node its last pass drew named `name`, else of
+    /// the first whose name contains it.
+    fn at(&self, name: &str) -> egui::Pos2 {
+        self.nodes
+            .iter()
+            .find(|(n, _)| n == name)
+            .or_else(|| self.nodes.iter().find(|(n, _)| n.contains(name)))
+            .unwrap_or_else(|| {
+                let names: Vec<_> = self.nodes.iter().map(|(n, _)| n).collect();
+                panic!("no {name:?} in the Library window: {names:?}")
+            })
+            .1
+            .center()
+    }
+
+    /// A click of the hand at `name`, each step a pass of its own.
+    fn click(
+        &mut self,
+        h: &mut Harness<'static, Shell>,
+        persist: &mut Persist<SqliteStore>,
+        name: &str,
+    ) {
+        let at = self.at(name);
+        self.pass(h, vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            self.pass(
+                h,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        settle(h, persist, 1.0);
+        self.pass(h, vec![egui::Event::PointerGone]);
+    }
+}
+
+/// Drags from `from` in the main window out past its right edge, and
+/// lets go there: the main window keeps the pointer while the button is
+/// held, then the system gives it to the Library window, at `there` of
+/// its points, which sees no release.
+fn drag_into_window(
+    h: &mut Harness<'static, Shell>,
+    persist: &mut Persist<SqliteStore>,
+    w: &mut LibraryWindow,
+    from: egui::Pos2,
+    there: impl Fn(&LibraryWindow) -> egui::Pos2,
+) {
+    let out = egui::pos2(1400.0, from.y);
+    h.drag_at(from);
+    h.run();
+    for i in 1..=8 {
+        h.hover_at(from + (out - from) * (i as f32 / 8.0));
+        h.run();
+    }
+    h.drop_at(out);
+    h.event(egui::Event::PointerGone);
+    // One pass of the main window only: the drag waits a few for another
+    // window to see the pointer.
+    h.run_steps(1);
+    let at = there(w);
+    w.pass(h, vec![egui::Event::PointerMoved(at)]);
+    w.pass(h, Vec::new());
+    settle(h, persist, 2.0);
+    w.pass(h, vec![egui::Event::PointerGone]);
+    settle(h, persist, 3.0);
+}
+
+/// Photos dragged from the grid of the main window and let go over an
+/// album of the Library window, where the system hides where windows are
+/// (Wayland): they go in the album, once.
+#[test]
+fn photos_dragged_from_the_main_window_onto_an_album_of_the_library_window_go_in() {
+    let root = temp("drag-windows");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    run(
+        &mut h,
+        "library.collection.create",
+        json!({ "name": "Trip", "images": [id(3).hex()] }),
+    );
+    settle(&mut h, &mut persist, 1.0);
+    let mut w = LibraryWindow::open(&mut h, &mut persist);
+    w.click(&mut h, &mut persist, "Albums");
+    w.at("Trip 1");
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(2).hex()]);
+    settle(&mut h, &mut persist, 2.0);
+    let from = cell_at(&h, "a.jpg");
+    drag_into_window(&mut h, &mut persist, &mut w, from, |w| w.at("Trip 1"));
+    assert_eq!(albums(&h), [("Trip".to_string(), 3)]);
+    assert_eq!(
+        steps(&h).last().map(String::as_str),
+        Some("Add 2 photos to “Trip”")
+    );
+    w.pass(&h, Vec::new());
+    w.at("Trip 3");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A keyword branch dragged from the main window's Keywords section and
+/// let go over a photo of the Library window's grid tags the photo.
+#[test]
+fn a_keyword_dragged_from_the_main_window_onto_a_photo_of_the_library_window_tags_it() {
+    let root = temp("drag-keyword-windows");
+    let path = vault_file(&root);
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .set_field(&id(1), "tags", Some(&json!(["sea"])))
+            .unwrap();
+    }
+    let (mut h, mut persist) = window(&root, &path);
+    h.get_by_label("Keywords").click();
+    settle(&mut h, &mut persist, 1.0);
+    let from = h.get_by_label("sea 1").rect().center();
+    let mut w = LibraryWindow::open(&mut h, &mut persist);
+    w.at("c.nef");
+    drag_into_window(&mut h, &mut persist, &mut w, from, |w| w.at("c.nef"));
+    assert_eq!(tags_of(&persist, 3), json!(["sea"]));
+    assert_eq!(
+        tags_of(&persist, 2),
+        Value::Null,
+        "only the photo let go on"
+    );
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
