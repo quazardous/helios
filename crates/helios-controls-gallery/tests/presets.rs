@@ -11,7 +11,7 @@ use helios_ui::{Action, Empty, Search};
 
 fn harness(theme_name: &str) -> Harness<'static, PresetsPage> {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(900.0, 1700.0))
+        .with_size(egui::vec2(900.0, 1900.0))
         .build_ui_state(
             |ui, page: &mut PresetsPage| {
                 page.content(ui);
