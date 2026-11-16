@@ -275,6 +275,7 @@ impl Calibration {
                 self.report_ui(ui);
                 ui.divider();
                 self.save_ui(ui);
+                self.patches_ui(ui);
             });
         });
         ui.allocate_rect(full, Sense::hover());
@@ -542,8 +543,15 @@ impl Calibration {
                 .map_or_else(|| w.to_string(), String::from);
             ui.text_tone(Tone::Warning, text);
         }
-        // Each patch's Delta E before and after, and its status: a table
-        // in the report's scrolling column.
+    }
+
+    /// Each patch's Delta E before and after, and its status: a table at
+    /// the foot of the report's scrolling column, under "Make a profile".
+    fn patches_ui(&self, ui: &mut egui::Ui) {
+        let Some(r) = &self.report else {
+            return;
+        };
+        let num = |v: &Value| v.as_f64().map_or_else(|| "-".into(), |x| format!("{x:.2}"));
         ui.space_role(Space::Group);
         ui.section_title(self.text(Message::new("gui-calibrate-patches", "Patches")));
         let tracks = [
