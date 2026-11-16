@@ -287,6 +287,8 @@ gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
 gui-connect-copy-link = Copier le lien
 
+gui-connect-link = Adresse de la page
+
 gui-connect-link-hint = L'adresse de la page, à coller dans votre navigateur s'il ne l'a pas ouverte.
 
 gui-connect-open-again = Ouvrir à nouveau

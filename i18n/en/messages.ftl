@@ -473,6 +473,8 @@ gui-connect-done = { $account } is connected.
 
 gui-connect-failed = Not connected: { $why }
 
+gui-connect-link = Page address
+
 gui-connect-link-hint = The page's address, to paste in your browser if it did not open.
 
 gui-connect-next = Connect

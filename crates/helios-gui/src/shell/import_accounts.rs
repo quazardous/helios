@@ -44,10 +44,19 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use egui_pop::core::icon::Icon;
+use egui_pop::core::input::Input;
+use egui_pop::core::overlay::{self, Kind as OverlayKind, OverlaySpec};
+use egui_pop::core::param::{self, Mode};
+use egui_pop::core::progress::Spinner;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Grid, Space, TextRole, Tone, Track, UiPop as _};
+use egui_pop::model::field::FieldState;
+use egui_pop::model::values::{Descriptor, Value as PopValue};
 use helios_connect::Text;
 use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
 use helios_connect::connect::{Context, FieldKind, Session, Status, WebSteps};
 use helios_core::Message;
+use helios_ui::Action;
 
 use super::import_window::Texts;
 use crate::import_scan::Connectors;
@@ -947,22 +956,23 @@ fn browser_follower(
 /// again" in case the browser did not show it.
 fn browser_link(ui: &mut egui::Ui, url: &str, opener: &Opener, t: &dyn Fn(Message) -> String) {
     let mut shown = url.to_owned();
-    ui.add(egui::TextEdit::singleline(&mut shown).desired_width(f32::INFINITY))
-        .on_hover_text(t(Message::new(
+    let name = t(Message::new("gui-connect-link", "Page address"));
+    Input::text(&mut shown, &name)
+        .state(FieldState::new().read_only())
+        .width(ui.available_width())
+        .show(ui)
+        .response
+        .tip(t(Message::new(
             "gui-connect-link-hint",
             "The page's address, to paste in your browser if it did not open.",
         )));
     ui.horizontal(|ui| {
-        if ui
-            .button(t(Message::new("gui-connect-open-again", "Open again")))
-            .clicked()
-        {
+        let again = t(Message::new("gui-connect-open-again", "Open again"));
+        if helios_ui::action(ui, Action::Secondary, &again).clicked() {
             opener(url);
         }
-        if ui
-            .button(t(Message::new("gui-connect-copy-link", "Copy link")))
-            .clicked()
-        {
+        let copy = t(Message::new("gui-connect-copy-link", "Copy link"));
+        if helios_ui::action(ui, Action::Secondary, &copy).clicked() {
             ui.ctx().copy_text(url.to_owned());
         }
     });
@@ -1065,31 +1075,66 @@ pub(crate) fn account_menu(
     let picks = accounts.picks(id, connectors);
     let mut asked = None;
     response.context_menu(|ui| {
-        if picks
-            && ui
-                .button(t(Message::new("gui-account-choose", "Choose photos…")))
-                .clicked()
-        {
+        let choose = t(Message::new("gui-account-choose", "Choose photos…"));
+        if picks && menu_item(ui, &choose) {
             asked = Some(Asked::Pick(id.to_owned()));
-            ui.close();
         }
-        if ui
-            .button(t(Message::new("gui-account-reconnect", "Reconnect")))
-            .clicked()
-        {
+        if menu_item(ui, &t(Message::new("gui-account-reconnect", "Reconnect"))) {
             asked = Some(Asked::Reconnect(id.to_owned()));
-            ui.close();
         }
-        if ui
-            .button(t(Message::new("gui-account-manage", "Manage accounts…")))
-            .clicked()
-        {
+        if menu_item(
+            ui,
+            &t(Message::new("gui-account-manage", "Manage accounts…")),
+        ) {
             asked = Some(Asked::Manage);
-            ui.close();
         }
         items(ui);
     });
     asked
+}
+
+/// An item of an account's menu: the action's button, which egui's menu
+/// style draws as a menu's item; the menu closes once it is clicked.
+fn menu_item(ui: &mut egui::Ui, label: &str) -> bool {
+    let clicked = helios_ui::action(ui, Action::Secondary, label).clicked();
+    if clicked {
+        ui.close();
+    }
+    clicked
+}
+
+/// A spinner before `text`, wrapped to the width left: a step working.
+fn working(ui: &mut egui::Ui, text: String) {
+    ui.horizontal_top(|ui| {
+        ui.add(Spinner::new());
+        // The text wraps to the column's width: a line wider than the
+        // column would widen its content past its edge.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        ui.text_role(TextRole::Body, text);
+    });
+}
+
+/// The field of a connection form's value, in the form grid's value
+/// column (its name in the column before): egui-pop's editor of a text
+/// value, a secret typed masked, in the field and in the accessibility
+/// tree. Named `label` for assistive technologies and agents.
+///
+/// egui-pop's decorated input has no masked kind yet: the parameter
+/// editor, which has, draws its own label beside the field, so it is
+/// given none and the field is named here.
+fn form_field(ui: &mut egui::Ui, label: &str, secret: bool, value: &mut String) {
+    let mut descriptor = Descriptor::text("", "");
+    if secret {
+        descriptor = descriptor.sensitive();
+    }
+    let mut typed = PopValue::Text(value.clone());
+    let response = param::param(ui, &descriptor, Mode::Plain(&mut typed));
+    let name = label.to_owned();
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_label(name));
+    if let PopValue::Text(text) = typed {
+        *value = text;
+    }
 }
 
 impl Accounts {
@@ -1119,62 +1164,61 @@ pub(crate) fn consent_dialog(
         return None;
     };
     let (mut allow, mut close) = (false, false);
-    let shown = egui::Modal::new(egui::Id::unique("helios.plugin.consent")).show(ctx, |ui| {
-        ui.set_width(400.0);
-        ui.heading(t(Message::new("gui-consent-title", "Allow { $plugin }?")
-            .with("plugin", consent.title.clone())));
-        ui.weak(t(Message::new("gui-consent-from", "Plugin { $id }")
-            .with("id", consent.plugin.clone())));
-        ui.add_space(6.0);
+    let title = t(Message::new("gui-consent-title", "Allow { $plugin }?")
+        .with("plugin", consent.title.clone()));
+    // Escape or a click beside it closes it as Don't allow would, without
+    // its word: nothing granted, nothing run.
+    let mut spec =
+        OverlaySpec::new("helios.plugin.consent", &title, OverlayKind::Modal).width(400.0);
+    spec.dismiss_on_outside = true;
+    let mut open = true;
+    overlay::show(ctx, &spec, &mut open, None, |ui| {
+        ui.text_role(TextRole::Title, title.clone());
+        ui.muted(t(
+            Message::new("gui-consent-from", "Plugin { $id }").with("id", consent.plugin.clone())
+        ));
+        ui.space_role(Space::Group);
         if consent.declined {
-            ui.label(t(Message::new(
+            ui.text_role(TextRole::Body, t(Message::new(
                 "gui-consent-declined",
                 "Nothing was changed: { $plugin } does not run without these permissions. You can allow them later in Settings > Plugins.",
             )
             .with("plugin", consent.title.clone())));
-            if ui
-                .button(t(Message::new("gui-connect-close", "Close")))
-                .clicked()
-            {
+            let word = t(Message::new("gui-connect-close", "Close"));
+            if helios_ui::action(ui, Action::Secondary, &word).clicked() {
                 close = true;
             }
             return;
         }
-        ui.label(t(Message::new(
-            "gui-consent-asks",
-            "{ $plugin } asks for your permission to:",
-        )
-        .with("plugin", consent.title.clone())));
+        ui.text_role(
+            TextRole::Body,
+            t(Message::new(
+                "gui-consent-asks",
+                "{ $plugin } asks for your permission to:",
+            )
+            .with("plugin", consent.title.clone())),
+        );
         for c in &consent.capabilities {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("•");
-                ui.label(&c.reason);
-            });
+            ui.text_role(TextRole::Body, format!("• {}", c.reason));
         }
-        ui.add_space(6.0);
-        ui.weak(t(Message::new(
+        ui.space_role(Space::Group);
+        ui.muted(t(Message::new(
             "gui-consent-later",
             "Helios remembers your answer; Settings > Plugins changes it.",
         )));
         ui.horizontal(|ui| {
-            if ui
-                .button(t(Message::new("gui-consent-allow", "Allow")))
-                .clicked()
-            {
+            let word = t(Message::new("gui-consent-allow", "Allow"));
+            if helios_ui::action(ui, Action::Primary, &word).clicked() {
                 allow = true;
             }
-            if ui
-                .button(t(Message::new("gui-consent-deny", "Don't allow")))
-                .clicked()
-            {
+            let word = t(Message::new("gui-consent-deny", "Don't allow"));
+            if helios_ui::action(ui, Action::Secondary, &word).clicked() {
                 consent.declined = true;
                 ui.ctx().request_repaint();
             }
         });
     });
-    // Escape or a click beside it closes it as Don't allow would, without
-    // its word: nothing granted, nothing run.
-    if !allow && shown.should_close() {
+    if !allow && !open {
         close = true;
     }
     // What the answer changed is drawn at once: the window repaints only
@@ -1207,21 +1251,23 @@ pub(crate) fn connect_dialog(
     // view: services refuse them); the dialog offers it again.
     let opener = accounts.opener.clone();
     let mut close = false;
-    egui::Modal::new(egui::Id::unique("helios.import.connect")).show(ctx, |ui| {
-        ui.set_width(360.0);
-        ui.heading(t(Message::new("gui-connect-title", "Connect { $source }")
-            .with("source", connecting.label.clone())));
-        ui.add_space(4.0);
+    let title = t(Message::new("gui-connect-title", "Connect { $source }")
+        .with("source", connecting.label.clone()));
+    // Only its own Cancel or Close ends it: Escape and a click beside it
+    // do nothing while a step runs.
+    let spec = OverlaySpec::new("helios.import.connect", &title, OverlayKind::Modal)
+        .width(360.0)
+        .keep_on_escape();
+    let mut open = true;
+    let cancel = t(Message::new("gui-connect-cancel", "Cancel"));
+    let close_word = t(Message::new("gui-connect-close", "Close"));
+    overlay::show(ctx, &spec, &mut open, None, |ui| {
+        ui.text_role(TextRole::Title, title.clone());
+        ui.space_role(Space::Inline);
         match &status {
             Status::Working { .. } => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(t(Message::new("gui-connect-working", "Connecting…")));
-                });
-                if ui
-                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                    .clicked()
-                {
+                working(ui, t(Message::new("gui-connect-working", "Connecting…")));
+                if helios_ui::action(ui, Action::Secondary, &cancel).clicked() {
                     connecting.session.cancel();
                 }
             }
@@ -1237,85 +1283,70 @@ pub(crate) fn connect_dialog(
                         .map(|f| (f.id.clone(), f.default.clone()))
                         .collect();
                 }
-                egui::Grid::new("helios.import.connect.form")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        for field in fields {
-                            let label =
-                                ui.label(t(Message::new(&field.label.key, &field.label.en)));
-                            let value = connecting.values.entry(field.id.clone()).or_default();
-                            ui.add(
-                                egui::TextEdit::singleline(value)
-                                    .password(field.kind == FieldKind::Secret),
-                            )
-                            .labelled_by(label.id);
-                            ui.end_row();
-                            if let Some(help) = &field.help {
-                                ui.label("");
-                                ui.weak(t(Message::new(&help.key, &help.en)));
-                                ui.end_row();
-                            }
+                let form = Grid::new(
+                    "helios.import.connect.form",
+                    [Track::CONTENT, Track::fr(1.0)],
+                );
+                let values = &mut connecting.values;
+                ui.grid(form, |g| {
+                    for field in fields {
+                        let label = t(Message::new(&field.label.key, &field.label.en));
+                        g.cell(|ui| ui.text_role(TextRole::Body, label.clone()));
+                        let value = values.entry(field.id.clone()).or_default();
+                        g.cell(|ui| form_field(ui, &label, field.kind == FieldKind::Secret, value));
+                        if let Some(help) = &field.help {
+                            g.cell(|_| ());
+                            g.cell(|ui| ui.muted(t(Message::new(&help.key, &help.en))));
                         }
-                    });
+                    }
+                });
                 if let Some(e) = error {
-                    ui.colored_label(ui.visuals().warn_fg_color, e);
+                    ui.text_tone(Tone::Warning, e);
                 }
                 ui.horizontal(|ui| {
-                    if ui
-                        .button(t(Message::new("gui-connect-next", "Connect")))
-                        .clicked()
-                    {
+                    let next = t(Message::new("gui-connect-next", "Connect"));
+                    if helios_ui::action(ui, Action::Primary, &next).clicked() {
                         connecting.session.answer(connecting.values.clone());
                     }
-                    if ui
-                        .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                        .clicked()
-                    {
+                    if helios_ui::action(ui, Action::Secondary, &cancel).clicked() {
                         connecting.session.cancel();
                     }
                 });
             }
             Status::Browser { url, .. } => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(t(Message::new(
+                working(
+                    ui,
+                    t(Message::new(
                         "gui-connect-browser",
                         "Sign in in your browser, then come back here.",
-                    )));
-                });
+                    )),
+                );
                 browser_link(ui, url, &opener, t);
-                if ui
-                    .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                    .clicked()
-                {
+                if helios_ui::action(ui, Action::Secondary, &cancel).clicked() {
                     connecting.session.cancel();
                 }
             }
             Status::Connected(account) => {
-                ui.label(t(Message::new(
-                    "gui-connect-done",
-                    "{ $account } is connected.",
-                )
-                .with("account", account.label.clone())));
-                if ui
-                    .button(t(Message::new("gui-connect-close", "Close")))
-                    .clicked()
-                {
+                ui.text_role(
+                    TextRole::Body,
+                    t(
+                        Message::new("gui-connect-done", "{ $account } is connected.")
+                            .with("account", account.label.clone()),
+                    ),
+                );
+                if helios_ui::action(ui, Action::Secondary, &close_word).clicked() {
                     close = true;
                 }
             }
             Status::Failed { why, .. } => {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
+                ui.text_tone(
+                    Tone::Warning,
                     t(
                         Message::new("gui-connect-failed", "Not connected: { $why }")
                             .with("why", why.clone()),
                     ),
                 );
-                if ui
-                    .button(t(Message::new("gui-connect-close", "Close")))
-                    .clicked()
-                {
+                if helios_ui::action(ui, Action::Secondary, &close_word).clicked() {
                     close = true;
                 }
             }
@@ -1340,46 +1371,38 @@ fn header_ui(
     let mut asked = None;
     let id = account.id.as_str();
     ui.horizontal(|ui| {
-        ui.strong(header);
+        ui.text_role(TextRole::Body, header);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // The menu's button: a drawn icon (the fonts have no "⋯"),
             // named for screen readers and tests.
             let name = t(Message::new("gui-account-menu", "Account"));
             let button = ui.add(Icon::More.label(&name).sense_click());
             egui::Popup::menu(&button).show(|ui| {
-                if ui
-                    .button(t(Message::new("gui-account-reconnect", "Reconnect")))
-                    .clicked()
-                {
+                if menu_item(ui, &t(Message::new("gui-account-reconnect", "Reconnect"))) {
                     asked = Some(Asked::Reconnect(id.to_owned()));
-                    ui.close();
                 }
-                if ui
-                    .button(t(Message::new(
-                        "gui-account-another",
-                        "Use another account…",
-                    )))
-                    .clicked()
-                {
+                let another = t(Message::new("gui-account-another", "Use another account…"));
+                if menu_item(ui, &another) {
                     asked = Some(Asked::Add(account.connector.clone()));
-                    ui.close();
                 }
-                if ui
-                    .button(t(Message::new("gui-account-manage", "Manage accounts…")))
-                    .clicked()
-                {
+                if menu_item(
+                    ui,
+                    &t(Message::new("gui-account-manage", "Manage accounts…")),
+                ) {
                     asked = Some(Asked::Manage);
-                    ui.close();
                 }
             });
             if more
-                && ui
-                    .button(t(Message::new("gui-choose-more-short", "Choose more…")))
-                    .on_hover_text(t(Message::new(
-                        "gui-choose-more-hint",
-                        "Opens the page again: the photos chosen there are added to these",
-                    )))
-                    .clicked()
+                && helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &t(Message::new("gui-choose-more-short", "Choose more…")),
+                )
+                .tip(t(Message::new(
+                    "gui-choose-more-hint",
+                    "Opens the page again: the photos chosen there are added to these",
+                )))
+                .clicked()
             {
                 asked = Some(Asked::Pick(id.to_owned()));
             }
@@ -1420,18 +1443,15 @@ pub(crate) fn choose_ui(
 ) -> Option<Asked> {
     let account = accounts.listed().iter().find(|a| a.id == id).cloned();
     let Some(account) = account else {
-        ui.weak(header);
+        ui.muted(header);
         return None;
     };
     let mut asked = header_ui(ui, &account, header, chosen, t);
-    ui.add_space(8.0);
+    ui.space_role(Space::Group);
     let who = account.email().unwrap_or(&account.label).to_owned();
     let primary = |ui: &mut egui::Ui, text: String| -> bool {
-        ui.vertical_centered(|ui| {
-            ui.add(egui::Button::new(egui::RichText::new(text).strong()))
-                .clicked()
-        })
-        .inner
+        ui.vertical_centered(|ui| helios_ui::action(ui, Action::Primary, &text).clicked())
+            .inner
     };
     let choose = t(
         Message::new("gui-choose-photos", "Choose photos in { $service }…")
@@ -1441,20 +1461,20 @@ pub(crate) fn choose_ui(
         Message::new("gui-choose-reconnect", "Reconnect { $account }").with("account", who.clone()),
     );
     let refused = |ui: &mut egui::Ui| {
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
+        ui.text_tone(
+            Tone::Warning,
             t(Message::new(
                 "gui-choose-refused",
                 "▲ { $service } no longer lets Helios read this account.",
             )
             .with("service", service.to_owned())),
         );
-        ui.weak(t(Message::new(
+        ui.muted(t(Message::new(
             "gui-choose-refused-why",
             "This happens when access was removed in the account's settings at { $service }, or when the access Helios was given ran out.",
         )
         .with("service", service.to_owned())));
-        ui.add_space(8.0);
+        ui.space_role(Space::Group);
     };
     let reconnect = Some(Asked::Reconnect(id.to_owned()));
     let pick = Some(Asked::Pick(id.to_owned()));
@@ -1469,11 +1489,14 @@ pub(crate) fn choose_ui(
             return asked;
         }
         AccountState::NotConnected => {
-            ui.label(t(Message::new(
-                "gui-choose-not-connected",
-                "This account is not connected.",
-            )));
-            ui.add_space(8.0);
+            ui.text_role(
+                TextRole::Body,
+                t(Message::new(
+                    "gui-choose-not-connected",
+                    "This account is not connected.",
+                )),
+            );
+            ui.space_role(Space::Group);
             let connect = t(Message::new("gui-choose-connect", "Connect { $service }")
                 .with("service", service.to_owned()));
             if primary(ui, connect) {
@@ -1482,30 +1505,33 @@ pub(crate) fn choose_ui(
             return asked;
         }
         AccountState::Connecting { .. } => {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(t(Message::new(
+            working(
+                ui,
+                t(Message::new(
                     "gui-choose-connecting",
                     "Sign in in your browser, then come back here.",
-                )));
-            });
+                )),
+            );
             return asked;
         }
         AccountState::Connected => {}
     }
     if accounts.identity_missing(&account) {
-        ui.label(t(Message::new(
-            "gui-choose-identity",
-            "Reconnect once to show which account this is.",
-        )));
-        ui.add_space(8.0);
+        ui.text_role(
+            TextRole::Body,
+            t(Message::new(
+                "gui-choose-identity",
+                "Reconnect once to show which account this is.",
+            )),
+        );
+        ui.space_role(Space::Group);
         if primary(ui, t(Message::new("gui-account-reconnect", "Reconnect"))) {
             asked = reconnect;
         }
         return asked;
     }
     if !accounts.picks(id, connectors) {
-        ui.weak(t(Message::new(
+        ui.muted(t(Message::new(
             "gui-import-browse-not-listed",
             "Helios does not list this source's photos here yet.",
         )));
@@ -1517,18 +1543,11 @@ pub(crate) fn choose_ui(
         .as_ref()
         .filter(|p| p.account == id)
         .map(Picking::status);
-    // The text wraps to the Detail column's width: a line wider than the
-    // column would widen its content past its edge.
-    let spinning = |ui: &mut egui::Ui, text: String| {
-        ui.horizontal_top(|ui| {
-            ui.spinner();
-            ui.add(egui::Label::new(text).wrap());
-        });
-    };
     let warned = |ui: &mut egui::Ui, text: String| {
-        ui.colored_label(ui.visuals().warn_fg_color, text);
-        ui.add_space(8.0);
+        ui.text_tone(Tone::Warning, text);
+        ui.space_role(Space::Group);
     };
+    let cancel_word = t(Message::new("gui-connect-cancel", "Cancel"));
     let mut cancel = false;
     match status {
         // A refusal is the account's own state, said above while it lasts:
@@ -1538,9 +1557,9 @@ pub(crate) fn choose_ui(
             if primary(ui, choose) {
                 asked = pick;
             }
-            ui.add_space(4.0);
+            ui.space_role(Space::Inline);
             ui.vertical_centered(|ui| {
-                ui.weak(t(Message::new(
+                ui.muted(t(Message::new(
                     "gui-choose-about",
                     "{ $service } opens in your browser. Choose your photos, press Done there, then come back here.",
                 )
@@ -1548,62 +1567,55 @@ pub(crate) fn choose_ui(
             });
         }
         Some(PickStatus::Starting) => {
-            spinning(
+            working(
                 ui,
                 t(Message::new("gui-choose-opening", "Opening { $service }…")
                     .with("service", service.to_owned())),
             );
-            cancel = ui
-                .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                .clicked();
+            cancel = helios_ui::action(ui, Action::Secondary, &cancel_word).clicked();
         }
         Some(PickStatus::Browser { url }) => {
-            spinning(
+            working(
                 ui,
                 t(Message::new(
                     "gui-choose-waiting",
                     "Choose your photos in the browser, press Done there, then come back here.",
                 )),
             );
-            ui.weak(t(Message::new(
+            ui.muted(t(Message::new(
                 "gui-choose-signed-in",
                 "{ $service } shows the photos of the account your browser is signed in to: { $account }.",
             )
             .with("service", service.to_owned())
             .with("account", who)));
             ui.horizontal_wrapped(|ui| {
-                ui.weak(t(Message::new(
+                ui.muted(t(Message::new(
                     "gui-choose-not-open",
                     "The page did not open?",
                 )));
-                if ui
-                    .link(t(Message::new("gui-choose-open-again", "Open it again")))
-                    .clicked()
-                {
+                let again = t(Message::new("gui-choose-open-again", "Open it again"));
+                if helios_ui::row_action(ui, Action::Secondary, &again).clicked() {
                     opener(&url);
                 }
-                ui.weak("·");
-                if ui
-                    .link(t(Message::new("gui-choose-copy-link", "Copy the link")))
-                    .on_hover_text(url.clone())
+                let copy = t(Message::new("gui-choose-copy-link", "Copy the link"));
+                if helios_ui::row_action(ui, Action::Secondary, &copy)
+                    .tip(url.clone())
                     .clicked()
                 {
                     ui.ctx().copy_text(url.clone());
                 }
             });
-            cancel = ui
-                .button(t(Message::new("gui-connect-cancel", "Cancel")))
-                .clicked();
+            cancel = helios_ui::action(ui, Action::Secondary, &cancel_word).clicked();
         }
         // The photos chosen fill the grid, "Choose more…" in the header;
         // none left there: chosen again.
         Some(PickStatus::Chosen) if chosen => {
-            ui.add(
-                egui::Label::new(t(Message::new(
+            ui.text_role(
+                TextRole::Body,
+                t(Message::new(
                     "gui-choose-chosen",
                     "The photos chosen show in the middle: tick the ones to import, then press Import.",
-                )))
-                .wrap(),
+                )),
             );
         }
         Some(PickStatus::Chosen) => {
@@ -1612,11 +1624,11 @@ pub(crate) fn choose_ui(
             }
         }
         Some(PickStatus::Nothing) => {
-            ui.label(t(Message::new(
-                "gui-choose-nothing",
-                "No photos were chosen.",
-            )));
-            ui.add_space(8.0);
+            ui.text_role(
+                TextRole::Body,
+                t(Message::new("gui-choose-nothing", "No photos were chosen.")),
+            );
+            ui.space_role(Space::Group);
             if primary(ui, choose) {
                 asked = pick;
             }
