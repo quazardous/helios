@@ -1396,7 +1396,7 @@ impl Shell {
                                 app.raise_window(&WindowId::main());
                             } else {
                                 window.close();
-                                hide_closing_window(ui.ctx());
+                                hide_closing_window(ui.ctx(), &app);
                             }
                         }
                     }
@@ -1655,12 +1655,13 @@ const GONE_CHECK: std::time::Duration = std::time::Duration::from_millis(50);
 /// (black) whenever something asks it for a frame. Hidden at once, it
 /// waits out of sight; the main window, asked to the front, gets its
 /// frames back. Wayland cannot hide a window: it is minimised there.
-pub(super) fn hide_closing_window(ctx: &Egui) {
+/// The main window is asked to the front on the bus (`window.activate`).
+pub(super) fn hide_closing_window(ctx: &Egui, app: &egui_pop::api::app::AppHandle) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
-    ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Focus);
+    super::raise_main_window(app);
     ctx.request_repaint_of(ViewportId::ROOT);
 }
 
