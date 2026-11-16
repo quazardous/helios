@@ -52,8 +52,10 @@ impl Shots for Harness<'_, Shell> {
     fn try_window_shot(&mut self, name: impl Into<String>, title: &str) -> SnapshotResult {
         let window = self
             .query_by_role_and_label(Role::Window, title)
-            .map(|n| n.rect())
-            .unwrap_or_else(|| panic!("no window titled {title:?} is shown"));
+            .map_or_else(
+                || panic!("no window titled {title:?} is shown"),
+                |n| n.rect(),
+            );
         let cut = above(&self.ctx, window);
         self.try_shot_of(name, cut)
     }
