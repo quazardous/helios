@@ -2,17 +2,23 @@
 //! of its states, side by side. It is the reference for how Helios's
 //! screens look, and the place UI bugs are reported from.
 
+use egui_pop::core::ui::{Tone, UiPop as _};
 use egui_pop::egui::{self, Ui};
-use helios_ui::{Action, Empty, Kind, Late, Loading, Search, Section, Value};
+use helios_ui::{Action, Empty, Kind, Late, Loading, Progress, Scroll, Search, Section, Value};
 
-/// The page's state: the search fields' queries and the last preset
-/// clicked.
+/// The page's state: the search fields' queries, the choice's value and
+/// the last preset clicked.
 #[derive(Debug, Default)]
 pub struct PresetsPage {
     queries: [String; 3],
+    /// The choice's value: an index into [`KINDS`].
+    kind: usize,
     /// What the last click asked for, said under the page's title.
     pub last: Option<String>,
 }
+
+/// The choice's options.
+const KINDS: [&str; 3] = ["All kinds", "Imports", "Exports"];
 
 impl PresetsPage {
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -49,6 +55,88 @@ impl PresetsPage {
                     self.last = Some(format!("action {}", kind.name()));
                 }
             }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Import 12 photos");
+            for kind in Action::ALL {
+                let label = format!("{} in a row", kind.name());
+                if helios_ui::row_action(ui, kind, &label).clicked() {
+                    self.last = Some(format!("row action {}", kind.name()));
+                }
+            }
+        });
+
+        helios_ui::section(
+            ui,
+            &Section::new("Choices").description("A drop-down named by what it chooses."),
+        );
+        let options: Vec<(usize, String)> = KINDS
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (i, (*k).to_string()))
+            .collect();
+        if helios_ui::choice(
+            ui,
+            "gallery.presets.kind",
+            "Kind shown",
+            &mut self.kind,
+            &options,
+        )
+        .changed()
+        {
+            self.last = Some(format!("choice {}", KINDS[self.kind]));
+        }
+
+        helios_ui::section(
+            ui,
+            &Section::new("Details").description("Names and their values, in two columns."),
+        );
+        let fields: Vec<(String, String)> = [
+            ("Kind", "Import"),
+            ("Started", "12 Oct 2026, 18:42"),
+            ("Source", "Card EOS_DIGITAL"),
+        ]
+        .iter()
+        .map(|(n, v)| ((*n).to_string(), (*v).to_string()))
+        .collect();
+        helios_ui::details(ui, "gallery.presets.details", &fields);
+
+        helios_ui::section(
+            ui,
+            &Section::new("Progress").description(
+                "A bar when the work counts, a spinner when it does not; in a row, or wide.",
+            ),
+        );
+        ui.horizontal(|ui| {
+            helios_ui::progress(ui, Progress::Row, "Import in a row", Some(0.29));
+            helios_ui::progress(ui, Progress::Row, "Preview in a row", None);
+        });
+        helios_ui::progress(ui, Progress::Block, "Export wide", Some(0.64));
+
+        helios_ui::section(
+            ui,
+            &Section::new("Scrolling")
+                .description("A region, and a console's tail: the newest line in view."),
+        );
+        ui.columns(2, |cols| {
+            cols[0].set_max_height(90.0);
+            helios_ui::scroll(
+                &mut cols[0],
+                "gallery.presets.region",
+                Scroll::Region,
+                |ui| {
+                    for i in 1..=12 {
+                        ui.text_role(egui_pop::core::ui::TextRole::Body, format!("Photo {i:02}"));
+                    }
+                },
+            );
+            helios_ui::scroll(&mut cols[1], "gallery.presets.tail", Scroll::Tail, |ui| {
+                for i in 1..=24 {
+                    ui.code_text(format!("18:42:{i:02}  read IMG_{i:04}.CR3"));
+                }
+                ui.text_tone(Tone::Danger, "18:43:00  failed: IMG_0025.CR3, disk full");
+            });
         });
 
         helios_ui::section(
