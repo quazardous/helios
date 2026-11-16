@@ -123,7 +123,7 @@ fn a_plugin_declares_its_checks_and_they_run_through_its_process() {
         return;
     }
     let broker = broker("declares", &manifest(CHECKS)).unwrap();
-    let mut registry = Registry::default();
+    let mut registry = Registry::new(Arc::new(egui_pop_hooks::Kernel::new()));
     assert_eq!(
         health::register(&mut registry, &broker, None),
         Vec::<String>::new()

@@ -1,8 +1,9 @@
 //! `cargo xtask lint [--fix] [--require-all]`: every linter and formatter
 //! of the project in one command.
 //!
-//! rustfmt, clippy, `deps-worlds` (see `deps_worlds.rs`) and `raw-egui
-//! --check` (see `raw_egui.rs`) always run.
+//! rustfmt, clippy, `deps-worlds` (see `deps_worlds.rs`), `raw-egui
+//! --check` (see `raw_egui.rs`) and `bus --check` (see `bus.rs`) always
+//! run.
 //! The other tools run when installed and
 //! are reported as skipped otherwise: cargo-deny (licenses, advisories,
 //! sources), cargo-machete (unused dependencies), taplo (TOML formatting),
@@ -170,6 +171,14 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     }
     if !raw.is_empty() {
         lint.failed.push("raw-egui".into());
+    }
+    println!("\n==> bus");
+    let bus = crate::bus::problems(root);
+    for p in &bus {
+        eprintln!("bus: {p}");
+    }
+    if !bus.is_empty() {
+        lint.failed.push("bus".into());
     }
     if lint.has(&CARGO_DENY) {
         lint.run("cargo-deny", &["cargo", "deny", "check"]);

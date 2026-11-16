@@ -127,7 +127,7 @@ impl Running {
 /// clones share all of it.
 #[derive(Clone)]
 pub struct Runner {
-    registry: Registry,
+    registry: Arc<Registry>,
     context: Arc<dyn Fn() -> Context + Send + Sync>,
     findings: Arc<Mutex<Findings>>,
     jobs: Arc<Mutex<Option<Jobs>>>,
@@ -159,7 +159,7 @@ impl Runner {
         schedule: Schedule,
     ) -> Self {
         Self {
-            registry,
+            registry: Arc::new(registry),
             context: Arc::new(context),
             findings: Arc::new(Mutex::new(findings)),
             jobs: Arc::default(),
@@ -185,10 +185,6 @@ impl Runner {
     /// The checks, each a listener of the health report.
     pub fn registry(&self) -> &Registry {
         &self.registry
-    }
-
-    pub fn registry_mut(&mut self) -> &mut Registry {
-        &mut self.registry
     }
 
     /// The findings and the ignored list.
@@ -396,7 +392,7 @@ mod tests {
     fn fakes() -> (Registry, [Arc<AtomicUsize>; 3]) {
         let runs: [Arc<AtomicUsize>; 3] = Default::default();
         let declared = Declaration::new("A fake module's state").levels(&[Level::Ok]);
-        let mut r = Registry::default();
+        let mut r = Registry::new(Arc::new(egui_pop_hooks::Kernel::new()));
         for (owner, id, declaration, runs) in [
             ("clock", "clock.tick", declared.clone().every(10), &runs[0]),
             (

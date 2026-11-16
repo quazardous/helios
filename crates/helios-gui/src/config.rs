@@ -867,15 +867,9 @@ fn backup_wizard(t: &dyn Fn(Message) -> String) -> Wizard {
 /// order: Helios's own modules, then each plugin installed. Another
 /// owner's findings go in the page's last group, "Other checks".
 pub fn health_owners(plugins: &[plugins::PluginSettings]) -> Vec<String> {
-    let inputs = helios_node_core::health::HealthInputs::<helios_vault_sqlite::SqliteStore>::new(
-        std::sync::Arc::new(Vec::<helios_storage::Volume>::new()),
-        None,
-        None,
-    );
-    crate::shell::health_checks(&inputs, crate::shell::HealthDesktop::default())
-        .by_owner()
-        .into_iter()
-        .map(|(owner, _)| owner.to_owned())
+    crate::shell::HEALTH_OWNERS
+        .iter()
+        .map(|&owner| owner.to_owned())
         .chain(plugins.iter().map(|p| p.id.clone()))
         .collect()
 }

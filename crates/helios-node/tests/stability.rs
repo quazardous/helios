@@ -648,6 +648,7 @@ fn node_process() {
             volumes,
             schedule,
             clock,
+            hooks: Arc::new(egui_pop_hooks::Kernel::new()),
         },
     );
     let link = node.link();

@@ -4,7 +4,7 @@ Vision, settled concepts, phases and open questions for Helios. This is a
 living document: decisions are dated, and an idea stays "not decided" until
 it says otherwise.
 
-Last updated: 2026-11-15.
+Last updated: 2026-11-16.
 
 ---
 
@@ -418,6 +418,25 @@ LightCraft. Design, steps and open questions:
   jobs, panels and layout, selection, settings changes. Decided and
   sliced in egui-pop's ADR 0029, "What is not on the bus does not exist"
   (github.com/quazardous/egui-pop, `docs/adr/0029-not-on-the-bus.md`).
+- (2026-11-16, decided) **The bus is a contract the application
+  supplies; Helios runs one bus.** Each library offers contracts; whether
+  to run one bus or several is the application's choice, never the
+  library's. The contract is its own crate, `bus-contract` (points,
+  ordered and owned listeners, requests, alter and collect, introspection
+  and the order dump), with egui-pop's hook kernel as its default
+  implementation. A library declares its points as a table (`POINTS`),
+  registers its listeners and asks requests on the bus it is handed at
+  construction; it never builds one (`cargo xtask bus --check` refuses
+  it outside binaries and tests). Helios's choice is one bus: the
+  desktop's `main` builds it and hands it to egui-pop
+  (`App::builder().bus`) and to each Helios crate that declares or
+  listens (the health report and its reading first), so one order dump
+  shows egui-pop's points and Helios's. Still to join it: the vault's,
+  the engine's and the node relay's events, which Helios polls as four
+  sources today; they join through the journal contract still to be cut
+  against Helios's journal and egui-pop's. Decided in egui-pop's ADR
+  0030, "The bus is a contract the application supplies"
+  (`docs/adr/0030-the-bus-is-a-contract.md`).
 - (2026-10-11, decided) **Data access is a framework prerogative.** Modules
   and services declare what they need and never read or write data
   themselves; the framework batches, projects, caches by content, prefetches

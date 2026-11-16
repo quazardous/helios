@@ -16,5 +16,8 @@ serde_json.workspace = true
 toml = "1"
 log = "0.4"
 
+[dev-dependencies]
+egui-pop-hooks.workspace = true
+
 [lints]
 workspace = true
