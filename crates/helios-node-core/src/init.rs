@@ -161,9 +161,9 @@ mod tests {
     fn the_folder_step_is_filled_by_the_health_fix() {
         assert_eq!(
             CHOOSE_LIBRARY_FOLDER,
-            helios_health::checks::CHOOSE_LIBRARY_FOLDER
+            helios_library::health::CHOOSE_LIBRARY_FOLDER
         );
-        assert_eq!(LIBRARY_FOLDER, helios_health::checks::FOLDER_CHOSEN);
+        assert_eq!(LIBRARY_FOLDER, helios_library::health::FOLDER_CHOSEN);
     }
 
     /// `init.steps` and `init.status` answer through the node's commands;

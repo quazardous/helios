@@ -47,6 +47,7 @@ pub mod cull;
 pub mod darktable;
 pub mod export;
 pub mod fetch;
+pub mod health;
 pub mod import;
 pub mod import_history;
 pub mod import_profile;

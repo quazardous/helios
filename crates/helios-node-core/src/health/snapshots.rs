@@ -1,28 +1,36 @@
 //! The catalogue snapshots check: the last verified snapshot of the
 //! catalogue is recent and restorable. Until snapshots exist, the desktop
-//! gives none ([`Context::snapshots`] is `None`) and the check says so in
+//! gives none ([`Catalogue::snapshots`] is `None`) and the check says so in
 //! one line; snapshots, once taken, only fill a [`Snapshots`].
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use helios_core::Message;
+use helios_health::{Declaration, Finding, Fix, Gather, Level, Owned, Registry};
 use serde_json::json;
-
-use crate::{Check, Context, Declaration, Finding, Fix, Level, Registry};
 
 /// The owner of the snapshots' check: the catalogue.
 pub const OWNER: &str = "catalogue";
 
-/// The catalogue's checks: its last verified snapshot.
-pub fn checks() -> Vec<Arc<dyn Check>> {
-    vec![Arc::new(SnapshotsCheck)]
+/// What the catalogue's check reads.
+#[derive(Clone, Debug, Default)]
+pub struct Catalogue {
+    /// The vault's database file; `None` without one (the check then says
+    /// nothing).
+    pub vault: Option<PathBuf>,
+    /// The catalogue's snapshots; `None` until Helios takes them (the
+    /// check then says there are none yet).
+    pub snapshots: Option<Snapshots>,
 }
 
-/// Adds the catalogue's check to `registry`, owned by `OWNER`, as listeners of
-/// the health report.
-pub fn register(registry: &mut Registry) {
-    crate::add_owned(registry, OWNER, checks());
+/// Adds the catalogue's check, its last verified snapshot, to `registry`,
+/// owned by [`OWNER`], over what `source` gathers.
+pub fn register(registry: &mut Registry, source: &Gather<Catalogue>) {
+    helios_health::add_owned(
+        registry,
+        OWNER,
+        vec![helios_health::over(SnapshotsCheck, source)],
+    );
 }
 
 pub const SNAPSHOTS: &str = "catalogue.snapshots";
@@ -73,7 +81,9 @@ impl Snapshots {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SnapshotsCheck;
 
-impl Check for SnapshotsCheck {
+impl Owned for SnapshotsCheck {
+    type State = Catalogue;
+
     fn id(&self) -> &str {
         SNAPSHOTS
     }
@@ -88,11 +98,11 @@ impl Check for SnapshotsCheck {
             .fixes(&["library.openFolder", SNAPSHOT_NOW])
     }
 
-    fn run(&self, ctx: &Context) -> Vec<Finding> {
-        if ctx.vault.is_none() {
+    fn findings(&self, state: &Catalogue) -> Vec<Finding> {
+        if state.vault.is_none() {
             return Vec::new();
         }
-        let Some(snapshots) = &ctx.snapshots else {
+        let Some(snapshots) = &state.snapshots else {
             return vec![Finding::new(
                 SNAPSHOTS,
                 "",
@@ -220,11 +230,10 @@ mod tests {
 
     const DAY: u64 = 86_400;
 
-    fn ctx(snapshots: Option<Snapshots>) -> Context {
-        Context {
+    fn ctx(snapshots: Option<Snapshots>) -> Catalogue {
+        Catalogue {
             vault: Some(PathBuf::from("/lib/vault.sqlite")),
             snapshots,
-            ..Context::default()
         }
     }
 
@@ -239,7 +248,7 @@ mod tests {
 
     fn run(list: Vec<Snapshot>) -> Finding {
         SnapshotsCheck
-            .run(&ctx(Some(Snapshots {
+            .findings(&ctx(Some(Snapshots {
                 list,
                 now: 30 * DAY,
                 max_age_days: MAX_AGE_DAYS,
@@ -249,14 +258,14 @@ mod tests {
 
     #[test]
     fn none_yet_is_one_info_line_and_phase_seven_fills_the_data() {
-        let found = SnapshotsCheck.run(&ctx(None));
+        let found = SnapshotsCheck.findings(&ctx(None));
         assert_eq!(found[0].level, Level::Ok);
         assert_eq!(found[0].message.key, "health-snapshots-none-yet");
         let level = |list| run(list).level;
         assert_eq!(level(vec![snap(29 * DAY, true, true)]), Level::Ok);
         assert_eq!(level(vec![snap(10 * DAY, true, true)]), Level::Warning);
         assert_eq!(level(vec![snap(29 * DAY, true, false)]), Level::Problem);
-        assert!(SnapshotsCheck.run(&Context::default()).is_empty());
+        assert!(SnapshotsCheck.findings(&Catalogue::default()).is_empty());
     }
 
     #[test]

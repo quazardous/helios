@@ -40,13 +40,18 @@ use std::path::{Path, PathBuf};
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::core::icon::{Icon, Size};
+use egui_pop::core::input::Input;
 use egui_pop::core::overlay::DialogLayout;
 use egui_pop::core::param::{self, Mode};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
+use egui_pop::core::widgets;
 use egui_pop::model::values::Value as PopValue;
 use helios_connect::account::{Account, AccountState};
 use helios_connect::{ConnectorManifest, Setup, SetupAsks};
 use helios_core::Message;
 use helios_core::config::{Contract, KeyType, Level};
+use helios_ui::{Action, Scroll};
 use serde_json::{Map, Value};
 
 use super::import_accounts::{Asked, state_text, translated};
@@ -311,29 +316,38 @@ impl ImportWindow {
         );
         body.set_clip_rect(rect.intersect(body.clip_rect()));
         let editing = self.wizard.as_ref().is_some_and(|wz| wz.editing.is_some());
-        body.heading(if editing {
-            t(Message::new("gui-editor-title", "Edit source"))
-        } else {
-            t(Message::new("gui-wizard-title", "Add a source"))
-        });
+        body.text_role(
+            TextRole::Title,
+            if editing {
+                t(Message::new("gui-editor-title", "Edit source"))
+            } else {
+                t(Message::new("gui-wizard-title", "Add a source"))
+            },
+        );
         let step = self.wizard.as_ref().map_or(Step::Kind, |wz| wz.step);
-        egui::ScrollArea::vertical()
-            .id_salt("helios.import.wizard.scroll")
-            .auto_shrink([false, false])
-            .show(&mut body, |ui| match step {
-                Step::Kind => self.kind_ui(ui, &t),
-                Step::Setup => {
-                    self.setup_ui(ui, &t, app);
-                    self.account_settings_ui(ui, &t);
-                    self.params_ui(ui, &t);
+        helios_ui::scroll(
+            &mut body,
+            "helios.import.wizard.scroll",
+            Scroll::Region,
+            |ui| {
+                // The step fills the body's width: its bar at the body's edge.
+                ui.set_min_width(ui.available_width());
+                match step {
+                    Step::Kind => self.kind_ui(ui, &t),
+                    Step::Setup => {
+                        self.setup_ui(ui, &t, app);
+                        self.account_settings_ui(ui, &t);
+                        self.params_ui(ui, &t);
+                    }
+                    Step::How => self.how_ui(ui, &t),
+                    Step::Name => self.name_ui(ui, &t),
                 }
-                Step::How => self.how_ui(ui, &t),
-                Step::Name => self.name_ui(ui, &t),
-            });
+            },
+        );
         let ready = self.wizard_ready();
         let mut go = None;
         layout.footer(ui, |ui| {
-            ui.separator();
+            ui.divider();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let next = if step == Step::Name && editing {
                     t(Message::new("gui-editor-save", "Save the source"))
@@ -342,21 +356,31 @@ impl ImportWindow {
                 } else {
                     t(Message::new("gui-wizard-next", "Next"))
                 };
-                if ui.add_enabled(ready, egui::Button::new(next)).clicked() {
+                if ui
+                    .add_enabled_ui(ready, |ui| helios_ui::action(ui, Action::Primary, &next))
+                    .inner
+                    .clicked()
+                {
                     go = Some(Go::Next);
                 }
                 // The editor starts at the setup: its kind is the source's.
                 let first = if editing { Step::Setup } else { Step::Kind };
                 if step != first
-                    && ui
-                        .button(t(Message::new("gui-wizard-back", "Back")))
-                        .clicked()
+                    && helios_ui::action(
+                        ui,
+                        Action::Secondary,
+                        &t(Message::new("gui-wizard-back", "Back")),
+                    )
+                    .clicked()
                 {
                     go = Some(Go::Back);
                 }
-                if ui
-                    .button(t(Message::new("gui-import-window-cancel", "Cancel")))
-                    .clicked()
+                if helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &t(Message::new("gui-import-window-cancel", "Cancel")),
+                )
+                .clicked()
                 {
                     go = Some(Go::Cancel);
                 }
@@ -637,11 +661,14 @@ impl ImportWindow {
     }
 
     fn kind_ui(&mut self, ui: &mut egui::Ui, t: &dyn Fn(Message) -> String) {
-        ui.label(t(Message::new(
-            "gui-wizard-kind",
-            "What kind of source is it?",
-        )));
-        ui.add_space(4.0);
+        ui.text_role(
+            TextRole::Body,
+            t(Message::new(
+                "gui-wizard-kind",
+                "What kind of source is it?",
+            )),
+        );
+        ui.space_role(Space::Inline);
         let kinds = kinds(self);
         let library = self.accounts.book.is_some();
         let texts = self.texts.clone();
@@ -659,11 +686,13 @@ impl ImportWindow {
             let mut clicked = false;
             ui.horizontal(|ui| {
                 ui.add(icon(&setup.icon, Icon::Circle).size(Size::Toolbar));
-                let row = ui.add_enabled(enabled, egui::Button::selectable(chosen, label));
+                let row = ui
+                    .add_enabled_ui(enabled, |ui| widgets::selectable_label(ui, chosen, label))
+                    .inner;
                 let row = if enabled {
                     row
                 } else {
-                    row.on_disabled_hover_text(t(Message::new(
+                    row.disabled_tip(t(Message::new(
                         "gui-wizard-no-library",
                         "Open a library first: accounts are kept in it",
                     )))
@@ -679,13 +708,7 @@ impl ImportWindow {
                 wz.auto = None;
             }
             ui.indent(("helios.import.wizard.about", &manifest.id), |ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(translated(texts.as_ref(), &manifest.description))
-                            .weak(),
-                    )
-                    .wrap(),
-                );
+                ui.muted(translated(texts.as_ref(), &manifest.description));
             });
         }
     }
@@ -708,20 +731,24 @@ impl ImportWindow {
                 };
                 let mut choose = false;
                 ui.horizontal(|ui| {
-                    let label = ui.label(t(Message::new("gui-wizard-folder", "Folder")));
-                    let field = ui
-                        .add(egui::TextEdit::singleline(&mut wz.folder).desired_width(320.0))
-                        .labelled_by(label.id);
+                    let name = t(Message::new("gui-wizard-folder", "Folder"));
+                    let label = ui.text_role(TextRole::Body, name.clone());
+                    let field = Input::path(&mut wz.folder, &name).width(320.0).show(ui);
+                    // Named by the word beside it, which tests and agents find.
+                    let field = field.response.labelled_by(label.id);
                     if std::mem::take(&mut wz.focus) {
                         field.request_focus();
                     }
-                    choose = ui
-                        .button(t(Message::new("gui-wizard-choose", "Choose…")))
-                        .clicked();
+                    choose = helios_ui::action(
+                        ui,
+                        Action::Secondary,
+                        &t(Message::new("gui-wizard-choose", "Choose…")),
+                    )
+                    .clicked();
                 });
                 if !wz.folder.trim().is_empty() && wz.folder().is_none() {
-                    ui.colored_label(
-                        ui.visuals().warn_fg_color,
+                    ui.text_tone(
+                        Tone::Warning,
                         t(Message::new("gui-wizard-no-folder", "No folder there")),
                     );
                 }
@@ -736,31 +763,32 @@ impl ImportWindow {
             }
             SetupAsks::Volume if editing => {
                 let folder = self.wizard.as_ref().map(|wz| wz.folder.clone());
-                ui.label(t(Message::new("gui-editor-card", "Card or camera")));
-                ui.weak(folder.unwrap_or_default());
+                ui.text_role(
+                    TextRole::Body,
+                    t(Message::new("gui-editor-card", "Card or camera")),
+                );
+                ui.muted(folder.unwrap_or_default());
             }
             SetupAsks::Volume => {
-                ui.label(t(Message::new("gui-wizard-volume", "Which one?")));
+                ui.text_role(
+                    TextRole::Body,
+                    t(Message::new("gui-wizard-volume", "Which one?")),
+                );
                 let mounted = self.sources.mounted.clone();
                 let Some(wz) = self.wizard.as_mut() else {
                     return;
                 };
                 if mounted.is_empty() {
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(t(Message::new(
-                            "gui-wizard-no-volume",
-                            "Insert a card or plug in a camera: it is listed here as soon as it is mounted.",
-                        )))
-                        .weak())
-                        .wrap(),
-                    );
+                    ui.muted(t(Message::new(
+                        "gui-wizard-no-volume",
+                        "Insert a card or plug in a camera: it is listed here as soon as it is mounted.",
+                    )));
                 }
                 for card in mounted {
                     let root = card.root.display().to_string();
                     let chosen = wz.folder == root;
-                    if ui
-                        .selectable_label(chosen, &card.label)
-                        .on_hover_text(&root)
+                    if widgets::selectable_label(ui, chosen, &card.label)
+                        .tip(&root)
                         .clicked()
                     {
                         wz.folder.clone_from(&root);
@@ -768,7 +796,10 @@ impl ImportWindow {
                 }
             }
             SetupAsks::Account => {
-                ui.label(t(Message::new("gui-wizard-account", "Account")));
+                ui.text_role(
+                    TextRole::Body,
+                    t(Message::new("gui-wizard-account", "Account")),
+                );
                 let accounts: Vec<_> = self
                     .accounts
                     .listed()
@@ -781,23 +812,23 @@ impl ImportWindow {
                     return;
                 };
                 if accounts.is_empty() {
-                    ui.weak(t(Message::new("gui-wizard-no-account", "No account yet")));
+                    ui.muted(t(Message::new("gui-wizard-no-account", "No account yet")));
                 }
                 for account in accounts {
                     ui.horizontal(|ui| {
                         let chosen = wz.account.as_deref() == Some(account.id.as_str());
-                        if ui.selectable_label(chosen, account.shown()).clicked() {
+                        if widgets::selectable_label(ui, chosen, account.shown()).clicked() {
                             wz.account = Some(account.id.clone());
                         }
-                        ui.label(egui::RichText::new(t(state_text(&account.state))).small());
+                        ui.meta(t(state_text(&account.state)));
                     });
                 }
-                if ui
-                    .button(t(Message::new(
-                        "gui-wizard-sign-in",
-                        "Sign in to an account…",
-                    )))
-                    .clicked()
+                if helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &t(Message::new("gui-wizard-sign-in", "Sign in to an account…")),
+                )
+                .clicked()
                 {
                     sign_in = true;
                 }
@@ -808,21 +839,21 @@ impl ImportWindow {
                     .and_then(|a| self.source_already_on(&connector, a, editing.as_ref()));
                 let mut open = None;
                 if let Some((key, name)) = taken {
-                    ui.add_space(4.0);
-                    ui.add(
-                        egui::Label::new(t(Message::new(
+                    ui.space_role(Space::Inline);
+                    ui.text_role(
+                        TextRole::Body,
+                        t(Message::new(
                             "gui-wizard-account-has-source",
                             "This account already has a source, { $source }: one source per account is enough.",
                         )
-                        .with("source", name)))
-                        .wrap(),
+                        .with("source", name)),
                     );
-                    if ui
-                        .button(t(Message::new(
-                            "gui-wizard-open-source",
-                            "Open that source",
-                        )))
-                        .clicked()
+                    if helios_ui::action(
+                        ui,
+                        Action::Secondary,
+                        &t(Message::new("gui-wizard-open-source", "Open that source")),
+                    )
+                    .clicked()
                     {
                         open = Some(key);
                     }
@@ -848,34 +879,40 @@ impl ImportWindow {
             return;
         };
         let (honours, copies, picked) = (wz.honours, wz.copies, wz.profile.clone());
-        ui.label(t(Message::new(
-            "gui-wizard-how",
-            "How its photos are imported: an import profile. You can change it later in the Detail column.",
-        )));
-        ui.add_space(4.0);
+        ui.text_role(
+            TextRole::Body,
+            t(Message::new(
+                "gui-wizard-how",
+                "How its photos are imported: an import profile. You can change it later in the Detail column.",
+            )),
+        );
+        ui.space_role(Space::Inline);
         let mut chosen = None;
         for p in self.profiles.list() {
             let copied = !honours.add_in_place || copies || p.choices.copy_folders;
-            if ui.radio(p.id == picked, &p.name).clicked() {
+            if widgets::radio(ui, p.id == picked, &p.name).clicked() {
                 chosen = Some(p.id.clone());
             }
             ui.indent(("helios.import.wizard.profile", &p.id), |ui| {
                 let line = super::import_profile_store::summary(&p.choices, copied, None, t);
-                ui.add(egui::Label::new(egui::RichText::new(line).weak()).wrap());
+                ui.muted(line);
             });
         }
         if !honours.add_in_place {
-            ui.add(
-                egui::Label::new(t(Message::new(
+            ui.text_role(
+                TextRole::Body,
+                t(Message::new(
                     "gui-wizard-copied",
                     "This source's photos are always copied into the Library: it cannot add them where they are.",
-                )))
-                .wrap(),
+                )),
             );
         }
-        let customise = ui
-            .button(t(Message::new("gui-wizard-customise", "Customise…")))
-            .on_hover_text(t(Message::new(
+        let customise = helios_ui::action(
+            ui,
+            Action::Secondary,
+            &t(Message::new("gui-wizard-customise", "Customise…")),
+        )
+        .tip(t(Message::new(
                 "gui-wizard-customise-help",
                 "Opens the import profiles: edit this one, or make a new one; the profile left selected is this source's",
             )))
@@ -905,11 +942,11 @@ impl ImportWindow {
         else {
             return;
         };
-        ui.add_space(8.0);
-        ui.strong(t(import_auto::title_message()));
+        ui.space_role(Space::Group);
+        ui.section_title(t(import_auto::title_message()));
         ui.horizontal(|ui| {
-            ui.radio_value(&mut wz.auto, None, t(import_auto::off_message()));
-            ui.radio_value(&mut wz.auto, Some(offered), t(offered.message()));
+            widgets::radio_value(ui, &mut wz.auto, None, t(import_auto::off_message()));
+            widgets::radio_value(ui, &mut wz.auto, Some(offered), t(offered.message()));
         });
     }
 
@@ -929,8 +966,8 @@ impl ImportWindow {
         if wz.contract.is_empty() {
             return;
         }
-        ui.add_space(8.0);
-        ui.strong(t(Message::new("gui-editor-params", "Parameters")));
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new("gui-editor-params", "Parameters")));
         let contract = wz.contract.clone();
         let fit = contract_ui(ui, t, &owner, Level::Source, &contract, &mut wz.params);
         refused_ui(ui, t, fit);
@@ -949,8 +986,8 @@ impl ImportWindow {
         if wz.account_contract.is_empty() || wz.account.is_none() {
             return;
         }
-        ui.add_space(8.0);
-        ui.strong(t(Message::new(
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new(
             "gui-wizard-account-settings",
             "Account settings",
         )));
@@ -1083,15 +1120,16 @@ impl ImportWindow {
             return;
         };
         ui.horizontal(|ui| {
-            let label = ui.label(t(Message::new("gui-wizard-name", "Source name")));
-            let field = ui
-                .add(egui::TextEdit::singleline(&mut wz.name).desired_width(240.0))
-                .labelled_by(label.id);
+            let name = t(Message::new("gui-wizard-name", "Source name"));
+            let label = ui.text_role(TextRole::Body, name.clone());
+            let field = Input::text(&mut wz.name, &name).width(240.0).show(ui);
+            // Named by the words beside it, which tests and agents find.
+            let field = field.response.labelled_by(label.id);
             if std::mem::take(&mut wz.focus) {
                 field.request_focus();
             }
         });
-        ui.weak(t(Message::new(
+        ui.muted(t(Message::new(
             "gui-wizard-name-help",
             "How the source is listed in the Sources column",
         )));
@@ -1135,8 +1173,8 @@ pub(super) fn contract_ui(
         let before = value.clone();
         let response = param::param_shown(ui, &d, Mode::Plain(&mut value), &|c| c.to_owned());
         if !help.is_empty() {
-            response.on_hover_text(&help);
-            ui.weak(&help);
+            let _ = response.tip(&help);
+            ui.muted(help.clone());
         }
         if value != before {
             values.insert(name.to_owned(), value.to_json());
@@ -1152,8 +1190,8 @@ pub(super) fn refused_ui(
     fit: Result<(), String>,
 ) {
     if let Err(why) = fit {
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
+        ui.text_tone(
+            Tone::Warning,
             t(Message::new(
                 "gui-editor-params-refused",
                 "A parameter does not fit what the connector takes: { $why }",

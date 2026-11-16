@@ -256,21 +256,25 @@ pub fn take_by_hand(
 /// (next to it and on the mounted `volumes`): each one there was verified
 /// when it was written; the newest is read back again now, to say
 /// whether it can be restored.
-pub fn health(file: &Path, volumes: &[Volume], now: u64) -> helios_health::snapshots::Snapshots {
+pub fn health(
+    file: &Path,
+    volumes: &[Volume],
+    now: u64,
+) -> helios_node_core::health::snapshots::Snapshots {
     let all = list(file, volumes);
     let newest = all.iter().max_by_key(|l| l.taken).map(|l| l.file.clone());
     let list = all
         .into_iter()
-        .map(|l| helios_health::snapshots::Snapshot {
+        .map(|l| helios_node_core::health::snapshots::Snapshot {
             restorable: newest.as_ref() != Some(&l.file) || snapshot::verify(&l.file).is_ok(),
             verified: Some(l.taken),
             taken: l.taken,
             file: l.file,
         })
         .collect();
-    helios_health::snapshots::Snapshots {
+    helios_node_core::health::snapshots::Snapshots {
         list,
         now,
-        max_age_days: helios_health::snapshots::MAX_AGE_DAYS,
+        max_age_days: helios_node_core::health::snapshots::MAX_AGE_DAYS,
     }
 }

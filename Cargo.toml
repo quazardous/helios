@@ -73,9 +73,12 @@ egui-pop-agent = "0.5"
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
 egui-pop-i18n = "0.10"
-# MIT: egui-pop's hook kernel (named, ordered listeners of a point, each
-# with its error boundary), with no egui: the health report's collect
-# point is on it.
+# MIT OR Apache-2.0: the bus contract (points, ordered listeners, the
+# order dump), std only: Helios's library crates declare their points and
+# listen on the bus the application hands them, never building one.
+bus-contract = "0.1.0"
+# MIT: egui-pop's hook kernel, the bus contract's default implementation:
+# the one bus Helios's binaries build (and tests, a bus each).
 egui-pop-hooks = "0.1"
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
@@ -148,23 +151,23 @@ needless_pass_by_value = "allow"
 # takes the published versions instead (`cargo xtask pins --release`;
 # docs/releases.md, "egui-pop and egui_hud: next follows next").
 [patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "104f9b35" }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "17cb0239" }
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.

@@ -8,6 +8,9 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+# Its health checks answer the health report (adapter, kernels).
+helios-health.workspace = true
+serde_json.workspace = true
 # MIT OR Apache-2.0; the version egui 0.36 uses, so the GUI can share the device.
 wgpu = "30"
 bytemuck = "1"

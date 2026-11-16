@@ -279,7 +279,12 @@ fn the_health_check_runs_with_no_window_and_reports_in_the_jobs_api() {
     let mut lib = library("health", 0, &jobs);
     let link = lib.node().link();
     let runner = Runner::new(
-        helios_node_core::health::checks(),
+        helios_node_core::health::HealthInputs::<helios_vault_sqlite::SqliteStore>::new(
+            Arc::new(Vec::<helios_storage::Volume>::new()),
+            None,
+            None,
+        )
+        .checks(Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new())),
         Context::default,
         Findings::default(),
         Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(24)),

@@ -25,16 +25,18 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use egui_pop::core::indicator::{self, Tone};
 use helios_core::Message;
+use helios_gpu::health::{Adapter, AdapterCheck, AdapterKind, Gpu, Kernel, Kernels};
 use helios_gui::shell::HEALTH_BADGE;
 use helios_gui::{Shell, headless, helios_panels};
-use helios_health::backup::{Backup, CardShort};
-use helios_health::checks::Database;
-use helios_health::gpu::{Adapter, AdapterCheck, AdapterKind, Gpu, Kernel, Kernels};
-use helios_health::plugins::{Plugin, Plugins, Status};
 use helios_health::runner::{Runner, Schedule};
-use helios_health::snapshots::{Snapshot, Snapshots, SnapshotsCheck};
-use helios_health::{Check, Context, Declaration, Finding, Findings, Level, Registry};
+use helios_health::{
+    Check, Context, Declaration, Finding, Findings, Gather, Level, Owned, Registry,
+};
+use helios_library::health::Database;
+use helios_node_core::health::snapshots::{Catalogue, Snapshot, Snapshots, SnapshotsCheck};
+use helios_plugin::health::installed::{Plugin, Plugins, Status};
 use helios_shell::commands::Origin;
+use helios_storage::health::backup::{Backup, CardShort};
 use helios_storage::strategy::{self, Scope, Strategy};
 use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, detect, registry, scan};
 use helios_vault::Vault;
@@ -68,10 +70,16 @@ impl Check for Broken {
     }
 }
 
+/// A registry on a bus of its own, as an application gives one.
+fn new_registry() -> Registry {
+    Registry::new(Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new()))
+}
+
 fn shell() -> Shell {
-    let mut registry = Registry::default();
-    registry.add("test", Arc::new(Broken)).unwrap();
     let mut shell = Shell::new(helios_panels(), None);
+    // The checks on the shell's bus, beside egui-pop's points.
+    let mut registry = Registry::new(shell.app().handle().bus());
+    registry.add("test", Arc::new(Broken)).unwrap();
     shell.set_health(Runner::new(
         registry,
         Context::default,
@@ -266,16 +274,76 @@ impl Library {
     }
 
     /// What a run reads with `mounted` plugged in at `now`.
-    fn context(&self, mounted: &[&Volume], now: u64) -> Context {
+    fn context(&self, mounted: &[&Volume], now: u64) -> Facts {
         let mounted: Vec<Volume> = mounted.iter().map(|v| (*v).clone()).collect();
-        Context {
+        Facts {
             volumes: mounted.clone(),
             library: Some(self.dir.clone()),
             vault: Some(self.file.clone()),
             backup: Some(Backup::read(&self.vault, &mounted, now).unwrap()),
             database: Some(database(&self.file)),
-            ..Context::default()
+            ..Facts::default()
         }
+    }
+}
+
+/// What a run's modules read, fixed by the test (each module gathers its
+/// own in the application).
+#[derive(Clone, Default)]
+struct Facts {
+    volumes: Vec<Volume>,
+    library: Option<std::path::PathBuf>,
+    #[expect(
+        clippy::option_option,
+        reason = "as the library's own state: not read, or none chosen"
+    )]
+    library_folder: Option<Option<std::path::PathBuf>>,
+    vault: Option<std::path::PathBuf>,
+    backup: Option<Backup>,
+    database: Option<Database>,
+    gpu: Option<Gpu>,
+    plugins: Vec<Plugin>,
+    snapshots: Option<Snapshots>,
+    changed_outside: Option<usize>,
+    raw_jpeg_pairs: Option<usize>,
+}
+
+impl Facts {
+    fn catalogue(&self) -> Catalogue {
+        Catalogue {
+            vault: self.vault.clone(),
+            snapshots: self.snapshots.clone(),
+        }
+    }
+
+    /// Helios's checks over these facts, each module's own, in the
+    /// desktop's order.
+    fn registry(&self) -> Registry {
+        let mut r = new_registry();
+        helios_storage::health::register(
+            &mut r,
+            &Gather::fixed(helios_storage::health::Disks {
+                volumes: self.volumes.clone(),
+                library: self.library.clone(),
+            }),
+        );
+        helios_library::health::register(
+            &mut r,
+            &Gather::fixed(helios_library::health::State {
+                volumes: self.volumes.clone(),
+                library: self.library.clone(),
+                library_folder: self.library_folder.clone(),
+                vault: self.vault.clone(),
+                changed_outside: self.changed_outside,
+                raw_jpeg_pairs: self.raw_jpeg_pairs,
+                database: self.database.clone(),
+            }),
+        );
+        helios_storage::health::backup::register(&mut r, &Gather::fixed(self.backup.clone()));
+        helios_gpu::health::register(&mut r, &Gather::fixed(self.gpu.clone()));
+        helios_plugin::health::installed::register(&mut r, &Gather::fixed(self.plugins.clone()));
+        helios_node_core::health::snapshots::register(&mut r, &Gather::fixed(self.catalogue()));
+        r
     }
 }
 
@@ -295,17 +363,17 @@ impl Drop for Library {
 
 /// A shell running Helios's checks over `ctx`, its Health page open
 /// once the first run is in.
-fn checked(ctx: Context) -> Harness<'static, Shell> {
-    checked_by(helios_node_core::health::checks(), ctx)
+fn checked(ctx: Facts) -> Harness<'static, Shell> {
+    checked_by(ctx.registry())
 }
 
 /// A shell running `registry`'s checks over `ctx`, its Health page open
 /// once the first run is in.
-fn checked_by(registry: Registry, ctx: Context) -> Harness<'static, Shell> {
+fn checked_by(registry: Registry) -> Harness<'static, Shell> {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_health(Runner::new(
         registry,
-        move || ctx.clone(),
+        Context::default,
         Findings::default(),
         Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
     ));
@@ -529,10 +597,14 @@ fn the_library_opens_and_its_disk_needs_room() {
     assert_eq!(x.args["path"], json!(lib.dir.display().to_string()));
 }
 
-/// Only `check`.
-fn only(check: Arc<dyn Check>) -> Registry {
-    let mut r = Registry::default();
-    r.add("test", check).unwrap();
+/// Only `check`, over `state`.
+fn only<C: Owned>(check: C, state: C::State) -> Registry
+where
+    C::State: Clone,
+{
+    let mut r = new_registry();
+    r.add("test", helios_health::over(check, &Gather::fixed(state)))
+        .unwrap();
     r
 }
 
@@ -555,11 +627,11 @@ fn a_software_adapter_beside_a_gpu_is_a_warning_whose_fix_is_the_docs() {
         used,
         why_cpu: None,
     };
-    let ctx = Context {
+    let ctx = Facts {
         gpu: Some(gpu(Some(0))),
-        ..Context::default()
+        ..Facts::default()
     };
-    let mut h = checked_by(only(Arc::new(AdapterCheck)), ctx);
+    let mut h = checked_by(only(AdapterCheck, ctx.gpu));
     until(&mut h, "the finding", |h| {
         h.query_by_label("Helios renders on a software adapter, llvmpipe (LLVM 19.1.7, 256 bits)")
             .is_some()
@@ -578,11 +650,11 @@ fn a_software_adapter_beside_a_gpu_is_a_warning_whose_fix_is_the_docs() {
     h.state_mut().run(&x.command, args, Origin::User).unwrap();
 
     // On the GPU: fine, its driver said.
-    let ctx = Context {
+    let ctx = Facts {
         gpu: Some(gpu(Some(1))),
-        ..Context::default()
+        ..Facts::default()
     };
-    let mut h = checked_by(only(Arc::new(AdapterCheck)), ctx);
+    let mut h = checked_by(only(AdapterCheck, ctx.gpu));
     until(&mut h, "the finding", |h| {
         h.query_by_label("Helios renders on AMD Radeon RX 7600")
             .is_some()
@@ -590,14 +662,14 @@ fn a_software_adapter_beside_a_gpu_is_a_warning_whose_fix_is_the_docs() {
     assert_eq!(finding(&h, "gpu.adapter").unwrap().level, Level::Ok);
 
     // The CPU while a GPU is there: a warning.
-    let ctx = Context {
+    let ctx = Facts {
         gpu: Some(Gpu {
             why_cpu: Some("no device".into()),
             ..gpu(None)
         }),
-        ..Context::default()
+        ..Facts::default()
     };
-    let mut h = checked_by(only(Arc::new(AdapterCheck)), ctx);
+    let mut h = checked_by(only(AdapterCheck, ctx.gpu));
     until(&mut h, "the finding", |h| {
         h.query_by_label("Helios renders on the CPU").is_some()
     });
@@ -621,7 +693,7 @@ fn a_kernel_that_does_not_compile_falls_back_to_the_cpu_and_compiles_once() {
             },
         ]
     });
-    let ctx = Context {
+    let ctx = Facts {
         gpu: Some(Gpu {
             adapters: vec![adapter(
                 "Microsoft Basic Render Driver",
@@ -630,9 +702,9 @@ fn a_kernel_that_does_not_compile_falls_back_to_the_cpu_and_compiles_once() {
             used: Some(0),
             why_cpu: None,
         }),
-        ..Context::default()
+        ..Facts::default()
     };
-    let mut h = checked_by(only(Arc::new(kernels)), ctx);
+    let mut h = checked_by(only(kernels, ctx.gpu));
     until(&mut h, "the finding", |h| {
         h.query_by_label("sigmoid falls back to the CPU").is_some()
     });
@@ -675,7 +747,7 @@ fn plugin(id: &str, name: &str, status: Status, log: &[&str]) -> Plugin {
 
 #[test]
 fn each_plugin_answers_or_says_why_with_its_fix() {
-    let ctx = Context {
+    let ctx = Facts {
         plugins: vec![
             plugin("org.example.fine", "Fine", Status::Answers, &[]),
             plugin(
@@ -693,9 +765,9 @@ fn each_plugin_answers_or_says_why_with_its_fix() {
                 &["Traceback (most recent call last)", "ValueError: boom"],
             ),
         ],
-        ..Context::default()
+        ..Facts::default()
     };
-    let mut h = checked_by(only(Arc::new(Plugins)), ctx);
+    let mut h = checked_by(only(Plugins, ctx.plugins));
     until(&mut h, "the findings", |h| {
         h.query_by_label("Crash does not start").is_some()
     });
@@ -727,7 +799,7 @@ fn each_plugin_answers_or_says_why_with_its_fix() {
 fn without_catalogue_snapshots_one_line_says_none_yet() {
     let lib = Library::new("snapshots");
     let ctx = lib.context(&[&lib.studio], FIRST);
-    let mut h = checked_by(only(Arc::new(SnapshotsCheck)), ctx.clone());
+    let mut h = checked_by(only(SnapshotsCheck, ctx.catalogue()));
     until(&mut h, "the finding", |h| {
         h.query_by_label("No catalogue snapshots yet").is_some()
     });
@@ -736,7 +808,7 @@ fn without_catalogue_snapshots_one_line_says_none_yet() {
     // Once snapshots exist, an old one is a warning with its folder.
     let day = 86_400;
     let file = lib.dir.join("snapshots/catalogue-1.sqlite");
-    let ctx = Context {
+    let ctx = Facts {
         snapshots: Some(Snapshots {
             list: vec![Snapshot {
                 file: file.clone(),
@@ -745,11 +817,11 @@ fn without_catalogue_snapshots_one_line_says_none_yet() {
                 restorable: true,
             }],
             now: FIRST + 30 * day,
-            max_age_days: helios_health::snapshots::MAX_AGE_DAYS,
+            max_age_days: helios_node_core::health::snapshots::MAX_AGE_DAYS,
         }),
         ..ctx
     };
-    let mut h = checked_by(only(Arc::new(SnapshotsCheck)), ctx);
+    let mut h = checked_by(only(SnapshotsCheck, ctx.catalogue()));
     until(&mut h, "the finding", |h| {
         h.query_by_label("The last catalogue snapshot is 30 days old")
             .is_some()
@@ -831,12 +903,12 @@ fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() 
     assert_eq!(listed[0].disk, None);
     assert_eq!(listed[1].disk.as_deref(), Some("Backup"));
     let check = |now: u64| {
-        let ctx = Context {
+        let ctx = Facts {
             vault: Some(lib.file.clone()),
             snapshots: Some(catalogue::health(&lib.file, &mounted, now)),
-            ..Context::default()
+            ..Facts::default()
         };
-        SnapshotsCheck.run(&ctx).remove(0)
+        SnapshotsCheck.findings(&ctx.catalogue()).remove(0)
     };
     let when = listed[0].taken;
     let found = check(when + 60);
@@ -885,7 +957,7 @@ impl Check for Said {
 
 #[test]
 fn the_page_groups_the_findings_by_their_owner() {
-    let mut registry = Registry::default();
+    let mut registry = new_registry();
     let said = |id, level, message| Arc::new(Said { id, level, message }) as Arc<dyn Check>;
     // Owners the page has a group for (Helios's backups and GPU modules)
     // and one it has not (a test's).
@@ -902,7 +974,7 @@ fn the_page_groups_the_findings_by_their_owner() {
         )
         .unwrap();
     registry.add("test", Arc::new(Broken)).unwrap();
-    let mut h = checked_by(registry, Context::default());
+    let mut h = checked_by(registry);
     until(&mut h, "the findings", |h| {
         h.query_by_label_contains("The flux capacitor is unplugged")
             .is_some()
@@ -956,12 +1028,17 @@ fn no_library_folder_is_a_warning_until_one_is_chosen() {
     let read = folder.clone();
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_import_library_folder(Arc::new(Folder(folder.clone())));
-    shell.set_health(Runner::new(
-        helios_node_core::health::checks(),
-        move || Context {
+    let mut registry = Registry::new(shell.app().handle().bus());
+    helios_library::health::register(
+        &mut registry,
+        &Gather::new(move |_| helios_library::health::State {
             library_folder: Some(read.lock().unwrap().clone()),
-            ..Context::default()
-        },
+            ..helios_library::health::State::default()
+        }),
+    );
+    shell.set_health(Runner::new(
+        registry,
+        Context::default,
         Findings::default(),
         Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
     ));
@@ -970,7 +1047,7 @@ fn no_library_folder_is_a_warning_until_one_is_chosen() {
         finding(h, "library.folder").is_some_and(|f| f.level == Level::Warning)
     });
     let x = finding(&h, "library.folder").unwrap().fix.unwrap();
-    assert_eq!(x.command, helios_health::checks::CHOOSE_LIBRARY_FOLDER);
+    assert_eq!(x.command, helios_library::health::CHOOSE_LIBRARY_FOLDER);
 
     // Chosen (as the setup's answer or an agent's `path`): the checks
     // run again and the warning clears.
@@ -1045,7 +1122,7 @@ impl Check for Fixable {
 fn a_slow_fix_s_recheck_runs_after_it_ends_and_the_page_shows_the_new_answer() {
     let repaired = Arc::new(AtomicBool::new(false));
     let looked = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut registry = Registry::default();
+    let mut registry = new_registry();
     registry
         .add(
             "test",
@@ -1055,7 +1132,7 @@ fn a_slow_fix_s_recheck_runs_after_it_ends_and_the_page_shows_the_new_answer() {
             }),
         )
         .unwrap();
-    let mut h = checked_by(registry, Context::default());
+    let mut h = checked_by(registry);
     // The fix: a command finishing on a later frame, 300 ms after it
     // starts, as a fix running a job does.
     let later = h.state().later();
@@ -1117,4 +1194,105 @@ fn the_health_points_run_their_listeners_in_a_declared_order() {
          \x20 1. status.health (owner helios.health): nothing\n\
          \x20 2. health.context-keys (owner helios.health): after status.health\n"
     );
+}
+
+/// One bus, as the desktop's `main` builds it and hands it to the shell
+/// (egui-pop) and to the health checks: Helios's points sit next to
+/// egui-pop's, one order dump reads both, and a second egui-pop
+/// application on it is refused.
+#[test]
+fn helios_s_points_sit_next_to_egui_pop_s_on_the_one_bus() {
+    use egui_pop::api::bus::bus_contract::{Bus, Point as _, order_dump};
+    use egui_pop::api::bus::{WindowClose, WindowOpen};
+    use helios_health::HealthReport;
+    let bus: Arc<dyn Bus> = Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
+    let mut shell = Shell::builder(helios_panels(), None)
+        .bus(bus.clone())
+        .build_in_window(&egui::Context::default())
+        .expect("the first application on the bus");
+    assert!(
+        std::ptr::addr_eq(Arc::as_ptr(&shell.app().handle().bus()), Arc::as_ptr(&bus)),
+        "egui-pop runs on the bus it was given"
+    );
+    let mut registry = Registry::new(bus.clone());
+    registry.add("test", Arc::new(Broken)).unwrap();
+    shell.set_health(Runner::new(
+        registry,
+        Context::default,
+        Findings::default(),
+        Schedule::new(
+            Instant::now(),
+            Duration::from_hours(1),
+            Duration::from_hours(1),
+        ),
+    ));
+
+    // Every point declared on the one bus: egui-pop's and Helios's.
+    let declared: Vec<&str> = bus
+        .points()
+        .into_iter()
+        .filter(|p| p.declared)
+        .map(|p| p.id)
+        .collect();
+    for id in [
+        WindowOpen::ID,
+        WindowClose::ID,
+        HealthReport::ID,
+        helios_gui::shell::HEALTH_CHECKED,
+    ] {
+        assert!(declared.contains(&id), "{id} declared: {declared:?}");
+    }
+    let dump = order_dump(
+        &*bus,
+        &[
+            WindowClose::ID,
+            HealthReport::ID,
+            helios_gui::shell::HEALTH_CHECKED,
+        ],
+    );
+    assert!(
+        dump.contains(&format!(
+            "{} (owner egui_pop.admin)",
+            egui_pop::api::admin::WINDOW_LISTENER
+        )),
+        "egui-pop's listener: {dump}"
+    );
+    assert!(
+        dump.contains("test.broken (owner test)"),
+        "the check: {dump}"
+    );
+    assert!(
+        dump.contains("status.health (owner helios.health)"),
+        "the badge: {dump}"
+    );
+    // The shell's own reading of its health points is that bus's.
+    assert!(shell.health_order().contains("test.broken (owner test)"));
+
+    // One egui-pop application per bus.
+    let second = Shell::builder(helios_panels(), None)
+        .bus(bus.clone())
+        .build_in_window(&egui::Context::default());
+    assert!(
+        matches!(second, Err(egui_pop::api::BuildError::Bus(_))),
+        "a second application on the bus is refused"
+    );
+}
+
+/// The owners the Health page has a group for are those of the desktop's
+/// own checks, in their order: the list known without building the checks
+/// does not drift from them.
+#[test]
+fn the_page_s_owners_are_the_desktop_checks_owners() {
+    let inputs = helios_node_core::health::HealthInputs::<SqliteStore>::new(
+        Arc::new(Vec::<Volume>::new()),
+        None,
+        None,
+    );
+    let registry = helios_gui::shell::health_checks(
+        Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new()),
+        &inputs,
+        helios_gui::shell::HealthDesktop::default(),
+    );
+    let owners: Vec<&str> = registry.by_owner().into_iter().map(|(o, _)| o).collect();
+    assert_eq!(owners, helios_gui::shell::HEALTH_OWNERS);
 }

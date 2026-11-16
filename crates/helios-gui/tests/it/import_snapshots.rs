@@ -2,7 +2,8 @@
 //! source), a card ticked with its photos in the file browser's
 //! thumbnails, and a folder added where it is; at 1x, the card's Contents
 //! in the browser's other modes (details, filmstrip, agenda), and the
-//! "Add…" wizard's steps
+//! "Add…" wizard's steps (the folder step with a folder that is not
+//! there)
 //! (`tests/snapshots/`, thresholds in the workspace's `kittest.toml`).
 //! Each picture is the import window alone, not the main window behind
 //! it (`shot::Shots::try_window_shot`).
@@ -234,5 +235,26 @@ fn the_import_window_snapshots() {
     assert_eq!(sources.len(), 1, "{sources:?}");
     assert_eq!(sources[0].connector, "card");
     assert_eq!(sources[0].name.as_deref(), Some("EOS_DIGITAL"));
+    // The folder step, a folder typed that is not there: the field, its
+    // Choose… button and the warning.
+    let mut h = window(Vec::new(), json!(null), 1.0);
+    for click in ["Add…", "Folder", "Next"] {
+        h.query_all_by_label(click)
+            .next()
+            .unwrap_or_else(|| panic!("no {click}"))
+            .click();
+        for _ in 0..4 {
+            h.run();
+        }
+    }
+    h.query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(egui_kittest::Node::is_focused)
+        .expect("the folder field focused")
+        .type_text("/photos/Trip");
+    for _ in 0..4 {
+        h.run();
+    }
+    let _ = h.get_by_label("No folder there");
+    results.add(h.try_window_shot(name("wizard-folder", 1.0), IMPORT_PHOTOS));
     let _ = std::fs::remove_dir_all(&dir);
 }

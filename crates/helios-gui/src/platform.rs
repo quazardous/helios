@@ -170,7 +170,7 @@ pub fn destination_days(store: &egui_pop::core::binding::SharedStore) -> u64 {
         .get(&format!("settings/{SETTING_DESTINATION_DAYS}"))
         .and_then(|e| e.value.as_i64())
         .and_then(|d| u64::try_from(d).ok())
-        .unwrap_or(helios_health::backup::DESTINATION_DAYS)
+        .unwrap_or(helios_storage::health::backup::DESTINATION_DAYS)
 }
 
 /// A job is long, and its end worth a notification, from this many
@@ -511,7 +511,7 @@ impl Plugin for Platform {
                 "Warn when a backup disk is away for (days)",
                 1,
                 365,
-                i64::try_from(helios_health::backup::DESTINATION_DAYS).unwrap_or(14),
+                i64::try_from(helios_storage::health::backup::DESTINATION_DAYS).unwrap_or(14),
             )
             .description(
                 "The health check warns when a disk the backup strategy copies to has not been plugged in for longer.",

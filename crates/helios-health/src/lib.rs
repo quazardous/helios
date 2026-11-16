@@ -3,9 +3,10 @@
 //! sums up in a status bar badge.
 //!
 //! - A [`Check`] has an id, a title and a [`Check::run`] over a
-//!   [`Context`] (the volumes mounted with their roles, the library's
-//!   place, the vault's file, its backups, the photos changed outside
-//!   Helios), giving [`Finding`]s.
+//!   [`Context`] (one run of the report), giving [`Finding`]s. The health
+//!   module knows no module's state: a check is written by the module
+//!   that owns what it checks ([`Owned`]), over that module's own state,
+//!   which the module gathers itself once per run ([`Gather`]).
 //! - A [`Finding`] has a [`Level`] (ok, warning, problem), a message and a
 //!   detail line for people ([`Message`], translated by the desktop), and
 //!   maybe a [`Fix`]: a command with its arguments.
@@ -14,9 +15,10 @@
 //!   held to it.
 //! - The [`Registry`] holds the checks by owner (the module or the
 //!   plugin that declares them), each a listener of the health report's
-//!   collect point ([`HealthReport`], `health.report`, on egui-pop's hook
-//!   kernel). Each module adds its own (`checks::register_storage`,
-//!   `backup::register`…, plugins' through their process:
+//!   collect point ([`HealthReport`], `health.report`, declared in
+//!   [`POINTS`] on the bus the application hands the registry: one bus
+//!   with egui-pop's points in Helios). Each module adds its own (`helios_storage::health`,
+//!   `helios_library::health`…, plugins' through their process:
 //!   `helios_plugin::health`); the registry lists no module. The seam is
 //!   [`Registry::add`], which refuses an unsound declaration; a run
 //!   collects what the listeners answer ([`Registry::report`]).
@@ -27,22 +29,18 @@
 //!   after start, then each as its declaration says (how often, on which
 //!   [`Event`]s).
 
-pub mod backup;
-pub mod checks;
 pub mod contract;
-pub mod gpu;
-pub mod plugins;
 pub mod runner;
-pub mod snapshots;
 
-use std::collections::BTreeSet;
+use std::any::Any;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use egui_pop_hooks::{Kernel, ListenOpts, Point, PointSpec};
+use bus_contract::{Bus, ListenOpts, Point, PointDecl, PointKind, Refused};
 use helios_core::Message;
-use helios_storage::Volume;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
@@ -107,41 +105,139 @@ impl Finding {
     }
 }
 
-/// What a check reads: gathered once per run, off the interface thread.
-#[derive(Clone, Debug, Default)]
+/// One run of the health report, as its checks see it: each owner's
+/// state, gathered once per run on the run's thread ([`Gather::read`]),
+/// shared by that owner's checks. The health module reads no module's
+/// state itself; a context starts with nothing gathered (a clone too: it
+/// is another run).
+#[derive(Default)]
 pub struct Context {
-    /// The volumes mounted now, with the roles the vault gives them.
-    pub volumes: Vec<Volume>,
-    /// The library's folder, when known: the volume holding it is the
-    /// library's.
-    pub library: Option<PathBuf>,
-    /// The library folder chosen (where imports copy photos), read from
-    /// the vault: `None` when not read (no vault: the check says
-    /// nothing), `Some(None)` when none is chosen.
-    pub library_folder: Option<Option<PathBuf>>,
-    /// The vault's database file, when there is one.
-    pub vault: Option<PathBuf>,
-    /// The library's backups, read from the vault; `None` without one
-    /// (the backup checks then say nothing).
-    pub backup: Option<backup::Backup>,
-    /// The adapters wgpu sees and the one Helios renders on; `None` when
-    /// unknown (the GPU checks then say nothing).
-    pub gpu: Option<gpu::Gpu>,
-    /// The plugins installed, each probed (started, handshake answered).
-    pub plugins: Vec<plugins::Plugin>,
-    /// The catalogue's snapshots; `None` until Helios takes them (the
-    /// check then says there are none yet).
-    pub snapshots: Option<snapshots::Snapshots>,
-    /// How many Library photos are marked changed outside Helios (their
-    /// file rewritten by another application); `None` without a vault.
-    pub changed_outside: Option<usize>,
-    /// How many RAW+JPEG pairs the Library shows as two photos (imported
-    /// before pairs were one photo); `None` without a vault.
-    pub raw_jpeg_pairs: Option<usize>,
-    /// What the node read of the vault's database file (it opens, its
-    /// integrity); `None` when not read (the library and integrity
-    /// checks then say nothing).
-    pub database: Option<checks::Database>,
+    gathered: Mutex<HashMap<u64, Arc<Gathered>>>,
+}
+
+/// One owner's state, once gathered in a run.
+type Gathered = OnceLock<Arc<dyn Any + Send + Sync>>;
+
+impl Clone for Context {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let gathered = self
+            .gathered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len();
+        f.debug_struct("Context")
+            .field("gathered", &gathered)
+            .finish()
+    }
+}
+
+/// How a module gathers its own state for its checks: at most once per
+/// run of the report, whichever of its checks asks first (a clone is the
+/// same source, so its checks share what it gathered).
+pub struct Gather<S> {
+    key: u64,
+    gather: Arc<dyn Fn(&Context) -> S + Send + Sync>,
+}
+
+impl<S> Clone for Gather<S> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key,
+            gather: self.gather.clone(),
+        }
+    }
+}
+
+impl<S: Send + Sync + 'static> Gather<S> {
+    /// The state `gather` reads, called on the run's thread with the run
+    /// (to read another source's state in the same run).
+    pub fn new(gather: impl Fn(&Context) -> S + Send + Sync + 'static) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self {
+            key: NEXT.fetch_add(1, Ordering::Relaxed),
+            gather: Arc::new(gather),
+        }
+    }
+
+    /// Always `state` (tests, a state known ahead).
+    pub fn fixed(state: S) -> Self
+    where
+        S: Clone,
+    {
+        Self::new(move |_| state.clone())
+    }
+
+    /// The state in the run `ctx`, gathered the first time it is asked.
+    pub fn read(&self, ctx: &Context) -> Arc<S> {
+        let cell = ctx
+            .gathered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(self.key)
+            .or_default()
+            .clone();
+        let any = cell
+            .get_or_init(|| Arc::new((self.gather)(ctx)) as Arc<dyn Any + Send + Sync>)
+            .clone();
+        any.downcast::<S>()
+            .unwrap_or_else(|_| unreachable!("a source gathers one type"))
+    }
+}
+
+/// A check written by the module that owns what it checks, over that
+/// module's own state ([`Owned::State`]); [`over`] makes it a [`Check`]
+/// reading the state from its module's [`Gather`].
+pub trait Owned: Send + Sync + 'static {
+    /// What it reads: its module's state, gathered once per run.
+    type State: Send + Sync + 'static;
+    /// A stable id (`storage.free-space`), prefixing its findings' ids.
+    fn id(&self) -> &str;
+    /// Its name for people.
+    fn title(&self) -> Message;
+    /// What it watches, the levels it may raise and the fixes it may
+    /// offer: its findings are held to it.
+    fn declaration(&self) -> Declaration;
+    /// What it finds in `state`. Nothing to say: nothing; unable to
+    /// look: a warning saying so.
+    fn findings(&self, state: &Self::State) -> Vec<Finding>;
+}
+
+/// An [`Owned`] check reading its state from its module's [`Gather`].
+pub struct Over<C: Owned> {
+    check: C,
+    source: Gather<C::State>,
+}
+
+impl<C: Owned> Check for Over<C> {
+    fn id(&self) -> &str {
+        self.check.id()
+    }
+
+    fn title(&self) -> Message {
+        self.check.title()
+    }
+
+    fn declaration(&self) -> Declaration {
+        self.check.declaration()
+    }
+
+    fn run(&self, ctx: &Context) -> Vec<Finding> {
+        self.check.findings(&self.source.read(ctx))
+    }
+}
+
+/// `check` over the state `source` gathers, as a [`Check`].
+pub fn over<C: Owned>(check: C, source: &Gather<C::State>) -> Arc<dyn Check> {
+    Arc::new(Over {
+        check,
+        source: source.clone(),
+    })
 }
 
 /// One check of the setup.
@@ -169,12 +265,31 @@ impl Point for HealthReport {
     const ID: &'static str = "health.report";
     type Input = Report;
     type Value = Option<Vec<Finding>>;
+    const KIND: PointKind = PointKind::Collect;
 }
 
 /// How long a check may take before its findings are dropped as late: it
 /// runs on the run's own thread, never the interface's, so the bound is
 /// wide (a database's integrity check on a large library).
 pub const REPORT_DEADLINE: Duration = Duration::from_mins(10);
+
+/// The health module's points, its contract with the application's bus:
+/// [`Registry::new`] declares them on the bus it is given.
+pub const POINTS: &[PointDecl] = &[PointDecl::of::<HealthReport>(
+    "Health findings: each module answers with what it finds of its own state",
+)
+.deadline(REPORT_DEADLINE)];
+
+/// Declares `table` on `bus`; a point already declared there (a second
+/// registry, or a desktop and its tests on one bus) is kept as it is,
+/// any other refusal logged.
+fn declare(bus: &dyn Bus, table: &[PointDecl]) {
+    for refused in bus_contract::declare_all(bus, table) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!("health: {refused}");
+        }
+    }
+}
 
 /// What a run of the health report hands every listener: what the checks
 /// read, which checks run (all of them for none), and who hears each
@@ -223,47 +338,14 @@ impl Report {
 /// adds its own ([`Registry::add`]: `checks::register`,
 /// `helios_plugin::health::register`…); the registry knows no module, it
 /// refuses an unsound declaration and keeps each check's declaration for
-/// the schedule. Its hook kernel ([`Registry::kernel`]) shows who answers
-/// the point, in order (`egui_pop_hooks::Kernel::listeners`).
+/// the schedule. Its listeners are on the bus the application gives it
+/// ([`Registry::new`], [`Registry::bus`]), which shows who answers the
+/// point, in order (`bus_contract::Bus::listeners`).
 pub struct Registry {
-    kernel: Arc<Kernel>,
+    bus: Arc<dyn Bus>,
     checks: Vec<Arc<dyn Check>>,
     /// The owner of each check, by position.
     owners: Vec<String>,
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        let kernel = Kernel::new();
-        let declared = kernel.declare::<HealthReport>(
-            PointSpec::new(
-                "Health findings: each module answers with what it finds of its own state",
-            )
-            .deadline(REPORT_DEADLINE),
-        );
-        if let Err(e) = declared {
-            log::error!("health: {e}");
-        }
-        Self {
-            kernel: Arc::new(kernel),
-            checks: Vec::new(),
-            owners: Vec::new(),
-        }
-    }
-}
-
-impl Clone for Registry {
-    /// Another registry with the same checks, on a kernel of its own: a
-    /// check added to one is not in the other.
-    fn clone(&self) -> Self {
-        let mut r = Self::default();
-        for (owner, check) in self.owned() {
-            r.listen(owner, check.clone());
-        }
-        r.checks.clone_from(&self.checks);
-        r.owners.clone_from(&self.owners);
-        r
-    }
 }
 
 impl std::fmt::Debug for Registry {
@@ -280,6 +362,18 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
+    /// No checks yet, their listeners to go on `bus`, the application's
+    /// (one bus for Helios: egui-pop's points are on it too), where the
+    /// health module's [`POINTS`] are declared.
+    pub fn new(bus: Arc<dyn Bus>) -> Self {
+        declare(&*bus, POINTS);
+        Self {
+            bus,
+            checks: Vec::new(),
+            owners: Vec::new(),
+        }
+    }
+
     /// Adds `owner`'s check, as a listener of [`HealthReport`]; one with
     /// the id of a check already there replaces it. A check whose
     /// declaration is unsound is refused, with its reasons.
@@ -297,7 +391,7 @@ impl Registry {
         if let Some(at) = self.checks.iter().position(|c| c.id() == check.id()) {
             self.checks.remove(at);
             self.owners.remove(at);
-            self.kernel.unlisten(HealthReport::ID, check.id());
+            self.bus.unlisten(HealthReport::ID, check.id());
         }
         self.listen(owner, check.clone());
         self.checks.push(check);
@@ -308,7 +402,7 @@ impl Registry {
     /// `check` answering the report, owned by `owner`.
     fn listen(&self, owner: &str, check: Arc<dyn Check>) {
         let id = check.id().to_owned();
-        let listened = self.kernel.listen::<HealthReport>(
+        let listened = self.bus.listen::<HealthReport>(
             id.clone(),
             ListenOpts::new().owner(owner),
             move |report, out| {
@@ -329,7 +423,7 @@ impl Registry {
     /// Removes every check of `owner` (a module or a plugin gone); how
     /// many went.
     pub fn remove_owner(&mut self, owner: &str) -> usize {
-        self.kernel.forget(owner);
+        self.bus.forget(owner);
         let before = self.checks.len();
         let mut at = 0;
         self.checks.retain(|_| {
@@ -341,9 +435,9 @@ impl Registry {
         before - self.checks.len()
     }
 
-    /// The hook kernel the checks listen on.
-    pub fn kernel(&self) -> &Arc<Kernel> {
-        &self.kernel
+    /// The bus the checks listen on.
+    pub fn bus(&self) -> &Arc<dyn Bus> {
+        &self.bus
     }
 
     pub fn checks(&self) -> &[Arc<dyn Check>] {
@@ -374,11 +468,11 @@ impl Registry {
         out
     }
 
-    /// What runs the report on another thread: the kernel and the
-    /// checks as they are now.
+    /// What runs the report on another thread: the bus and the checks
+    /// as they are now.
     pub fn reporter(&self) -> Reporter {
         Reporter {
-            kernel: self.kernel.clone(),
+            bus: self.bus.clone(),
             checks: self
                 .owned()
                 .map(|(o, c)| (o.to_owned(), c.clone()))
@@ -400,10 +494,10 @@ impl Registry {
     }
 }
 
-/// A registry's kernel and checks, held to emit the report off the
+/// A registry's bus and checks, held to emit the report off the
 /// interface thread ([`Registry::reporter`]).
 pub struct Reporter {
-    kernel: Arc<Kernel>,
+    bus: Arc<dyn Bus>,
     checks: Vec<(String, Arc<dyn Check>)>,
 }
 
@@ -413,7 +507,7 @@ impl Reporter {
     /// its declaration, fails or is late gives a problem of its own
     /// rather than stopping the others.
     pub fn report(&self, report: Report) -> Vec<(String, String, Vec<Finding>)> {
-        let collected = self.kernel.collect::<HealthReport>(report);
+        let collected = self.bus.collect::<HealthReport>(report);
         let mut answers: Vec<(String, Vec<Finding>)> = collected
             .parts
             .into_iter()
@@ -661,6 +755,11 @@ impl Findings {
 mod tests {
     use super::*;
 
+    /// A registry on a bus of its own, as an application gives one.
+    fn registry() -> Registry {
+        Registry::new(Arc::new(egui_pop_hooks::Kernel::new()))
+    }
+
     fn finding(id: &str, level: Level) -> Finding {
         Finding::new("test", id, level, Message::plain(id), Message::plain(""))
     }
@@ -777,13 +876,73 @@ mod tests {
 
     #[test]
     fn a_check_that_panics_is_a_problem_and_the_others_still_run() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("test", Arc::new(Panics)).unwrap();
-        r.add("storage", Arc::new(checks::FreeSpace::default()))
+        r.add("disks", fake("disks.space", Level::Ok, None))
             .unwrap();
         let found = r.run(&Context::default());
         assert_eq!(found[0].id, "panics");
         assert_eq!(found[0].level, Level::Problem);
+        assert_eq!(found[1].id, "disks.space", "the other still ran");
+    }
+
+    /// A module's check over its own state: a level read from it.
+    struct Reads(&'static str);
+
+    impl Owned for Reads {
+        type State = Level;
+        fn id(&self) -> &str {
+            self.0
+        }
+        fn title(&self) -> Message {
+            Message::plain(self.0)
+        }
+        fn declaration(&self) -> Declaration {
+            Declaration::new("A fake module's state").levels(&[Level::Ok, Level::Warning])
+        }
+        fn findings(&self, level: &Level) -> Vec<Finding> {
+            vec![Finding::new(
+                self.0,
+                "",
+                *level,
+                Message::plain("read"),
+                Message::plain(""),
+            )]
+        }
+    }
+
+    #[test]
+    fn a_module_gathers_its_state_once_per_run_for_all_its_checks() {
+        use std::sync::atomic::AtomicUsize;
+        let gathered = Arc::new(AtomicUsize::new(0));
+        let g = gathered.clone();
+        let source = Gather::new(move |_| {
+            g.fetch_add(1, Ordering::SeqCst);
+            Level::Warning
+        });
+        let mut r = registry();
+        add_owned(
+            &mut r,
+            "fans",
+            vec![
+                over(Reads("fans.speed"), &source),
+                over(Reads("fans.noise"), &source),
+            ],
+        );
+        let found = r.run(&Context::default());
+        let levels: Vec<(&str, Level)> = found.iter().map(|f| (f.id.as_str(), f.level)).collect();
+        assert_eq!(
+            levels,
+            [
+                ("fans.speed", Level::Warning),
+                ("fans.noise", Level::Warning)
+            ]
+        );
+        assert_eq!(gathered.load(Ordering::SeqCst), 1, "once for both checks");
+        r.run(&Context::default());
+        assert_eq!(gathered.load(Ordering::SeqCst), 2, "again in the next run");
+        let fixed = Gather::fixed(Level::Ok);
+        assert_eq!(*fixed.read(&Context::default()), Level::Ok);
     }
 
     /// A module's check: declared at `levels`, it finds `level` with the
@@ -836,64 +995,8 @@ mod tests {
     }
 
     #[test]
-    fn helios_own_checks_are_declared_soundly_and_owned_by_their_modules() {
-        let mut r = Registry::default();
-        checks::register_storage(&mut r);
-        checks::register_library(&mut r);
-        backup::register(&mut r);
-        gpu::register(&mut r);
-        plugins::register(&mut r);
-        snapshots::register(&mut r);
-        let owners: Vec<(&str, Vec<&str>)> = r
-            .by_owner()
-            .into_iter()
-            .map(|(o, checks)| (o, checks.iter().map(|c| c.id()).collect()))
-            .collect();
-        assert_eq!(
-            owners,
-            [
-                ("storage", vec!["storage.free-space"]),
-                (
-                    "library",
-                    vec![
-                        "vault.integrity",
-                        "library.default",
-                        "library.folder",
-                        "library.changed-outside",
-                        "library.raw-jpeg-pairs"
-                    ]
-                ),
-                (
-                    "backup",
-                    vec![
-                        "backup.strategy",
-                        "backup.met",
-                        "backup.destinations-seen",
-                        "backup.unverified",
-                        "backup.cards"
-                    ]
-                ),
-                ("gpu", vec!["gpu.adapter"]),
-                ("plugins", vec!["plugins"]),
-                ("catalogue", vec!["catalogue.snapshots"]),
-            ]
-        );
-        for check in r.checks() {
-            assert_eq!(
-                check.declaration().problems(check.id()),
-                Vec::<String>::new()
-            );
-        }
-        let kernels = gpu::Kernels::new(Vec::new);
-        assert_eq!(
-            kernels.declaration().problems(kernels.id()),
-            Vec::<String>::new()
-        );
-    }
-
-    #[test]
     fn a_module_declares_its_checks_and_their_findings_come_by_owner() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add(
             "fake",
             fake("fake.disk", Level::Warning, Some("fake.repair")),
@@ -917,12 +1020,12 @@ mod tests {
 
     #[test]
     fn a_module_s_finding_comes_through_the_report_point_and_goes_with_the_module() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("disks", fake("disks.space", Level::Warning, None))
             .unwrap();
         r.add("fans", fake("fans.speed", Level::Ok, None)).unwrap();
         // The point lists each module's listener, in order, with its owner.
-        let listeners = r.kernel().listeners(HealthReport::ID).unwrap();
+        let listeners = r.bus().listeners(HealthReport::ID).unwrap();
         let who: Vec<(&str, Option<&str>)> = listeners
             .iter()
             .map(|l| (l.id.as_str(), l.owner.as_deref()))
@@ -948,14 +1051,16 @@ mod tests {
         // The module goes: its listener and its findings with it.
         assert_eq!(r.remove_owner("disks"), 1);
         assert_eq!(ids(&r), ["fans.speed"]);
-        assert_eq!(r.kernel().listeners(HealthReport::ID).unwrap().len(), 1);
+        assert_eq!(r.bus().listeners(HealthReport::ID).unwrap().len(), 1);
         assert_eq!(r.owner("disks.space"), None);
-        // A clone has its own kernel: what is added to it stays there.
-        let mut other = r.clone();
+        // A second registry on the same bus finds the point declared and
+        // adds its own listeners beside the first's.
+        let mut other = Registry::new(r.bus().clone());
         other
             .add("disks", fake("disks.space", Level::Ok, None))
             .unwrap();
-        assert_eq!(ids(&other), ["fans.speed", "disks.space"]);
+        assert_eq!(r.bus().listeners(HealthReport::ID).unwrap().len(), 2);
+        assert_eq!(ids(&other), ["disks.space"]);
         assert_eq!(ids(&r), ["fans.speed"]);
     }
 
@@ -983,12 +1088,12 @@ mod tests {
     }
 
     #[test]
-    fn a_listener_failing_in_the_kernel_is_a_problem_of_its_check() {
-        let mut r = Registry::default();
+    fn a_listener_failing_on_the_bus_is_a_problem_of_its_check() {
+        let mut r = registry();
         r.add("slow", Arc::new(Slow)).unwrap();
         // Another listener of the point, not a check, that fails: dropped
         // and logged, the checks' answers stand.
-        r.kernel()
+        r.bus()
             .listen::<HealthReport>("broken", ListenOpts::new(), |_, _| Err("on purpose".into()))
             .unwrap();
         let found = r.run(&Context::default());
@@ -998,7 +1103,7 @@ mod tests {
 
     #[test]
     fn an_unsound_declaration_or_owner_is_refused_with_its_reasons() {
-        let mut r = Registry::default();
+        let mut r = registry();
         let none = Arc::new(Fake {
             id: "fake.disk",
             levels: &[],
@@ -1034,7 +1139,7 @@ mod tests {
 
     #[test]
     fn a_check_may_say_it_failed_whatever_it_declares() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("test", Arc::new(Fails)).unwrap();
         let found = r.run(&Context::default());
         assert_eq!(found.len(), 1);
@@ -1050,7 +1155,7 @@ mod tests {
 
     #[test]
     fn a_finding_outside_its_declaration_is_a_problem_of_its_check() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("fake", fake("fake.level", Level::Problem, None))
             .unwrap();
         r.add("fake", fake("fake.fix", Level::Ok, Some("plugin.disable")))

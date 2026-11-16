@@ -175,7 +175,7 @@ fn the_fix_and_the_menu_open_the_setup_and_a_path_sets_the_folder() {
     let chosen = scratch("agent");
     run(
         &mut h,
-        helios_health::checks::CHOOSE_LIBRARY_FOLDER,
+        helios_library::health::CHOOSE_LIBRARY_FOLDER,
         json!({ "path": chosen.display().to_string() }),
     )
     .unwrap();
@@ -184,7 +184,7 @@ fn the_fix_and_the_menu_open_the_setup_and_a_path_sets_the_folder() {
 
     run(
         &mut h,
-        helios_health::checks::CHOOSE_LIBRARY_FOLDER,
+        helios_library::health::CHOOSE_LIBRARY_FOLDER,
         json!({}),
     )
     .unwrap();

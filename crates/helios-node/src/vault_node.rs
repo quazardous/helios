@@ -8,7 +8,7 @@
 //! (a backup disk of the strategy plugged in starts one) and keeps the
 //! health check's schedule, each run a job on the node's jobs (`job.*`
 //! on its bus). Without a window, the check's inputs keep a windowless
-//! node's defaults ([`HealthInputs::new`]: no cards, no GPU, no plugins).
+//! node's defaults ([`HealthInputs::checks`]: no cards, no snapshots).
 //!
 //! Imports done through the node ([`Importer`], the control endpoint's
 //! `library.import`) publish their report on its bus
@@ -174,16 +174,20 @@ pub struct Options {
     pub schedule: Schedule,
     /// How often a due health run is looked for.
     pub clock: Duration,
+    /// The node's bus (`bus-contract`), where its health checks listen:
+    /// the application's choice, built by the node's `main`.
+    pub hooks: Arc<dyn bus_contract::Bus>,
 }
 
 impl Options {
     /// The machine's volumes, the desktop's schedule (a run a while after
-    /// start, then daily).
-    pub fn system() -> Self {
+    /// start, then daily), the health checks on `hooks`.
+    pub fn system(hooks: Arc<dyn bus_contract::Bus>) -> Self {
         Self {
             volumes: helios_storage::system(),
             schedule: Schedule::desktop(Instant::now()),
             clock: HEALTH_CLOCK,
+            hooks,
         }
     }
 }
@@ -239,8 +243,8 @@ impl VaultNode {
             Some(file.to_path_buf()),
         );
         let runner = Runner::new(
-            helios_node_core::health::checks(),
-            inputs.into_context(),
+            inputs.checks(options.hooks.clone()),
+            helios_health::Context::default,
             Findings::default(),
             options.schedule,
         );
