@@ -430,6 +430,12 @@ static WINDOW: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
 /// window's close quits whatever windows are open, without a question.
 static SESSION_ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Helios was asked to quit from outside the main window's pass (the
+/// system's end of session, a catalogue restore): the pass runs Quit
+/// (`workbench.quit`), which ends in egui-pop's `quit`, the main window's
+/// `window.close` on the bus; no raw viewport close.
+static QUIT_ASKED: AtomicBool = AtomicBool::new(false);
+
 /// SIGTERM, SIGINT and SIGHUP (on Windows, the console's events and the
 /// session's end) close Helios as Ctrl+Q does; ended before the window
 /// opens or past the deadline, the session is marked clean all the same.
@@ -442,7 +448,7 @@ fn listen_for_ending() -> Arc<helios_gui::ending::Ending> {
                 return false;
             };
             SESSION_ENDING.store(true, std::sync::atomic::Ordering::SeqCst);
-            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+            QUIT_ASKED.store(true, Ordering::SeqCst);
             ctx.request_repaint();
             true
         }),
@@ -526,7 +532,8 @@ fn catalogue_commands(
                 .ok_or("`file` is missing")?;
             helios_vault_sqlite::snapshot::request_restore(&at, Path::new(from))?;
             RESTART.store(true, Ordering::Relaxed);
-            egui.send_viewport_cmd(egui::ViewportCommand::Close);
+            QUIT_ASKED.store(true, Ordering::SeqCst);
+            egui.request_repaint();
             Ok(json!({ "restarting": true }))
         },
     )?;
@@ -1593,6 +1600,9 @@ impl App {
                 quit::mark("end splash done");
             }
             ENDED.store(true, Ordering::SeqCst);
+            // The main window's `window.close` already ran on the bus (it
+            // started the end splash, its close cancelled while the end
+            // ran): the host now lets the system window go.
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         self.end = Some(end);
@@ -1606,6 +1616,17 @@ impl eframe::App for App {
             start::trace_frame("end splash drawn");
             self.ending(ui);
             return;
+        }
+        if QUIT_ASKED.swap(false, Ordering::SeqCst) {
+            // The system's end of session quits without a question.
+            if SESSION_ENDING.load(Ordering::SeqCst) {
+                self.shell.session_ending();
+            }
+            let _ = self.shell.run(
+                "workbench.quit",
+                serde_json::Value::Null,
+                helios_shell::commands::Origin::User,
+            );
         }
         if ui.ctx().input(|i| i.viewport().close_requested()) {
             // The application's life is the shell's policy, not the main
