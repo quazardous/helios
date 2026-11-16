@@ -2266,7 +2266,30 @@ pub fn required_params(benchfile: &str, job: &str) -> Vec<String> {
             .collect();
         // only `${name}` is required: `${name:-…}` and `${name:+…}` have a
         // default, and any other form (`${f//@/::}`) is the shell's own
-        let defaulted = !s[name.len()..].starts_with('}');
+        let after = &s[name.len()..];
+        let defaulted = !after.starts_with('}');
+        // what `${name:+…}` / `${name:-…}` hold only expands when the
+        // parameter is set (or stands in when it is not): a `${test}` inside
+        // `${test:+--test ${test}}` is no requirement, so skip the whole form
+        if after.starts_with(":+") || after.starts_with(":-") {
+            let mut depth = 1usize;
+            let mut end = after.len();
+            for (i, c) in after.char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            s = &after[end..];
+            continue;
+        }
         // a name in capitals is the shell's own (`${PIPESTATUS[0]}`), not a
         // parameter: the box leaves those to the shell
         let shell = name.chars().any(|c| c.is_ascii_uppercase());
@@ -2300,6 +2323,19 @@ mod tests {
             required_params(shell, "s"),
             vec!["need".to_string()],
             "the shell's own names are no parameters"
+        );
+    }
+
+    #[test]
+    fn a_parameter_used_only_inside_a_default_form_is_optional() {
+        // egui-pop-test's own shape: a whole-crate run passes no `test=`
+        let bf = "[jobs.t]\ncommand = \"\"\"cargo nextest run -p ${crate} ${test:+--test ${test}} ${filter:-${test}} ${feat:+-F ${features}}\"\"\"\n";
+        assert_eq!(required_params(bf, "t"), vec!["crate".to_string()]);
+        let both = "[jobs.u]\ncommand = \"\"\"${test:+--test ${test}} then ${test}\"\"\"\n";
+        assert_eq!(
+            required_params(both, "u"),
+            vec!["test".to_string()],
+            "a name also used bare outside the form stays required"
         );
     }
 
