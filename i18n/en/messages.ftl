@@ -1411,6 +1411,8 @@ gui-library-badge-changed-outside = changed outside
 
 gui-library-badge-crushed = crushed shadows
 
+gui-library-badge-edited = edited
+
 gui-library-badge-missing = missing
 
 gui-library-badge-no-backup = no backup

@@ -238,6 +238,12 @@ pub const FIELDS: &[FieldSpec] = &[
         about: "the largest share of one channel's pixels crushed to black, 0 to 1",
         read_only: true,
     },
+    FieldSpec {
+        name: crate::edit::EDITED,
+        kind: FieldKind::Bool,
+        about: "its edit changed it from the original (a module off its defaults or bypassed), as of the last step saved; none: unknown",
+        read_only: true,
+    },
 ];
 
 pub fn spec(name: &str) -> Result<&'static FieldSpec, String> {
