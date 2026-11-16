@@ -143,22 +143,22 @@ needless_pass_by_value = "allow"
 # commit of its `next`, so the graph holds one egui-pop. Drop this table
 # once egui-pop 0.12 is published and the versions above ask for it.
 [patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "d285eb21" }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "cdcb1d84" }
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
