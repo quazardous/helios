@@ -147,7 +147,9 @@ struct Index {
 /// The cache: a folder of JPEG thumbnails.
 pub struct ThumbCache {
     dir: PathBuf,
-    limit: u64,
+    /// At most this many bytes; changed while open by
+    /// [`ThumbCache::set_limit`].
+    limit: AtomicU64,
     index: Mutex<Index>,
     /// Signalled once the folder is listed.
     listed: Condvar,
@@ -193,7 +195,7 @@ impl ThumbCache {
         let service = Service::global();
         Ok(ThumbCache {
             dir: dir.to_path_buf(),
-            limit,
+            limit: AtomicU64::new(limit),
             index: Mutex::new(Index {
                 entries: Lru::new(),
                 listing: Listing::NotYet,
@@ -287,7 +289,14 @@ impl ThumbCache {
     }
 
     pub fn limit(&self) -> u64 {
-        self.limit
+        self.limit.load(Ordering::Relaxed)
+    }
+
+    /// Changes the limit while the cache is open (the setting changed):
+    /// a lower one evicts what is used least recently at once.
+    pub fn set_limit(&self, limit: u64) {
+        self.limit.store(limit, Ordering::Relaxed);
+        self.evict(None);
     }
 
     /// The bytes the entries take, and how many there are.
@@ -493,10 +502,11 @@ impl ThumbCache {
     fn evict(&self, keep: Option<&Path>) {
         let gone = {
             let mut index = self.index.lock().expect("the cache's index");
-            if index.entries.bytes() <= self.limit {
+            let limit = self.limit();
+            if index.entries.bytes() <= limit {
                 return;
             }
-            let target = helios_cache::eviction_target(self.limit);
+            let target = helios_cache::eviction_target(limit);
             index
                 .entries
                 .evict(target, |rel| Some(rel.as_path()) == keep)
@@ -520,7 +530,7 @@ impl Store for ThumbCache {
             entries: 0,
             bytes: 0,
             pinned: 0,
-            budget: Some(self.limit),
+            budget: Some(self.limit()),
             shown: None,
         });
         for (rel, bytes) in index.entries.iter() {

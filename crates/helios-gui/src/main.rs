@@ -2001,6 +2001,10 @@ fn main() -> Result<(), String> {
                             .ok()
                     }),
             );
+            // The cache's limit follows its setting (`thumbs.budget`).
+            if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
+                shell.set_thumb_cache(cache);
+            }
             // The grids' thumbnail textures, within their budget.
             let texture_budget = helios_gui::thumb_textures::budget(&settings);
             // The Settings app writes them back: the person's and the
@@ -2034,12 +2038,16 @@ fn main() -> Result<(), String> {
                     .map(|n| Arc::new(n) as Arc<dyn helios_gui::config::NodeLayers>),
                 &settings_dir,
             );
-            if let Some(heard) = layer_events {
+            let plugin_layers = layer_events.map(|(heard, plugins_heard)| {
                 kept.follow(heard);
-            }
+                plugins_heard
+            });
             // The plugins' own settings, handed to each as it starts and
-            // again when the person changes them.
+            // again when they change (`plugins.values`).
             helios_gui::config::connect_plugins(shell.app().handle(), &plugins);
+            if let Some(heard) = plugin_layers {
+                helios_gui::config::follow_plugins(shell.app().handle(), heard);
+            }
             if let Some(rs) = render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
@@ -2495,7 +2503,12 @@ struct Booted {
     library_reading: Option<LibraryReading>,
     node_settings:
         Option<helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>>,
-    layer_events: Option<std::sync::mpsc::Receiver<helios_core::Envelope>>,
+    /// The node's events heard for Helios's settings, then for the
+    /// plugins' (each store follows its own).
+    layer_events: Option<(
+        std::sync::mpsc::Receiver<helios_core::Envelope>,
+        std::sync::mpsc::Receiver<helios_core::Envelope>,
+    )>,
     settings: helios_gui::config::Settings,
     preparing: Option<Preparing>,
     plugins: Arc<helios_plugin::Broker>,
@@ -2610,7 +2623,9 @@ fn boot(from: BootFrom) -> Booted {
     let library_reading = persist.as_ref().map(|p| read_library(p.reader()));
     // Heard from before they are read: a layer another client of the
     // node changes from now on is read again (`NodeSettingsStore::follow`).
-    let layer_events = persist.as_ref().map(|p| p.bus().subscribe());
+    let layer_events = persist
+        .as_ref()
+        .map(|p| (p.bus().subscribe(), p.bus().subscribe()));
     // Helios's settings, resolved once from their layers: the machine's
     // file, the library's and the person's layers the node keeps (as
     // `helios-node --vault` does), `--set`. Every part reads them from
