@@ -10,7 +10,11 @@
 //!   the network shown by as many stops as the histogram moved (one undo
 //!   step, the `histogram.drag` step first, Escape giving it up).
 //! - The waveform and the parade are pictures computed once per image,
-//!   mode and scale, into a texture.
+//!   mode, scale and panel size, into a texture of the panel's size in
+//!   pixels (up to [`MAX_PICTURE`]) drawn one texel per pixel. A resize
+//!   recomputes once the size holds still and no button is down, not at
+//!   every frame of a drag.
+//! - Each scope fills its panel, at any size.
 
 use std::sync::Mutex;
 
@@ -34,7 +38,10 @@ pub struct Scopes {
     pub mode: Mode,
     /// Stops (log2 around 1.0) rather than linear.
     pub stops: bool,
-    texture: Option<(u64, TextureHandle)>,
+    texture: Option<Picture>,
+    /// A panel size (pixels) waiting to hold still before the picture
+    /// is computed again at it.
+    pending: Option<[usize; 2]>,
     /// The histogram's counts and clipping, per generation.
     counts: Option<(u64, Counts3, Clipping)>,
     generation: u64,
@@ -48,6 +55,21 @@ pub struct Scopes {
 /// The red, green and blue bins, as egui-pop's histogram takes them.
 type Counts3 = [Vec<f32>; 3];
 
+/// A computed picture: of which generation, at which size in pixels.
+struct Picture {
+    generation: u64,
+    size: [usize; 2],
+    texture: TextureHandle,
+}
+
+/// The largest picture computed, in pixels: a larger panel draws it
+/// stretched rather than counting millions of cells.
+pub const MAX_PICTURE: [usize; 2] = [2048, 2048];
+
+/// The most levels a waveform counts: past it, each level is drawn
+/// over several rows (crisp bands, not a blurred stretch).
+const MAX_LEVELS: usize = 1024;
+
 impl Default for Scopes {
     fn default() -> Self {
         Scopes {
@@ -55,6 +77,7 @@ impl Default for Scopes {
             mode: Mode::Histogram,
             stops: true,
             texture: None,
+            pending: None,
             counts: None,
             generation: 0,
             preview_seen: 0,
@@ -121,6 +144,7 @@ pub fn exposure_path(store: &Store) -> Option<String> {
         .map(|(p, _)| (*p).to_string())
 }
 
+/// The picture's default size, for [`picture`].
 const WIDTH: usize = 256;
 const HEIGHT: usize = 128;
 
@@ -143,14 +167,16 @@ fn level(count: u32, peak: u32) -> f32 {
 
 fn column(img: &mut ColorImage, x: usize, counts: &Counts, peak: u32, tint: [f32; 3]) {
     let levels = counts.bins.len();
+    let height = img.size[1];
     for (i, &c) in counts.bins.iter().enumerate() {
         let v = level(c, peak);
         if v == 0.0 {
             continue;
         }
-        // Level 0 at the bottom.
-        let y0 = HEIGHT - 1 - i * HEIGHT / levels;
-        let y1 = HEIGHT - (i + 1) * HEIGHT / levels;
+        // Level 0 at the bottom; with fewer levels than rows, a level
+        // covers its rows.
+        let y0 = height - 1 - i * height / levels;
+        let y1 = (height - (i + 1) * height / levels).min(y0);
         for y in y1..=y0 {
             let p = &mut img.pixels[y * img.size[0] + x];
             let add = |old: u8, t: f32| (f32::from(old) + v * t * 255.0).min(255.0) as u8;
@@ -165,18 +191,37 @@ fn column(img: &mut ColorImage, x: usize, counts: &Counts, peak: u32, tint: [f32
 
 /// The scope of an image as a picture, `WIDTH` × `HEIGHT`.
 pub fn picture(image: &Image, mode: Mode, stops: bool) -> ColorImage {
-    let mut img = ColorImage::filled([WIDTH, HEIGHT], Color32::from_rgb(12, 12, 12));
+    picture_sized(image, mode, stops, [WIDTH, HEIGHT])
+}
+
+/// How many bands a waveform of `across` pixels counts: each band the
+/// same whole number of the image's columns (uneven bands would draw
+/// brighter and darker stripes), as many as fit, no more than the image
+/// has columns (each then drawn wide).
+fn bands(across: usize, image: &Image) -> usize {
+    let columns = image.region().width.max(1) as usize;
+    let per_band = columns.div_ceil(across.max(1));
+    (columns / per_band).max(1)
+}
+
+/// The scope of an image as a picture of `size` pixels (each side at
+/// least 3): as many bands as fit across (see `bands`), as many levels
+/// as rows (up to `MAX_LEVELS`).
+pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -> ColorImage {
+    let [width, height] = [size[0].max(3), size[1].max(3)];
+    let levels = height.min(MAX_LEVELS);
+    let mut img = ColorImage::filled([width, height], Color32::from_rgb(12, 12, 12));
     let s = scale(stops);
     let tints = [[1.0, 0.25, 0.25], [0.25, 1.0, 0.25], [0.3, 0.45, 1.0]];
     match mode {
         Mode::Histogram => {
-            let h = histogram(image, WIDTH, s);
+            let h = histogram(image, width, s);
             for (c, counts) in h.channels.iter().enumerate() {
                 let peak = counts.peak();
                 for (x, &n) in counts.bins.iter().enumerate() {
-                    let tall = (level(n, peak) * HEIGHT as f32) as usize;
-                    for y in HEIGHT - tall.min(HEIGHT)..HEIGHT {
-                        let p = &mut img.pixels[y * WIDTH + x];
+                    let tall = (level(n, peak) * height as f32) as usize;
+                    for y in height - tall.min(height)..height {
+                        let p = &mut img.pixels[y * width + x];
                         let t = tints[c];
                         let add = |old: u8, t: f32| (f32::from(old) + t * 110.0).min(255.0) as u8;
                         *p =
@@ -187,19 +232,19 @@ pub fn picture(image: &Image, mode: Mode, stops: bool) -> ColorImage {
         }
         Mode::Waveform => {
             // No more bands than the image has columns; each drawn wide.
-            let bands = WIDTH.min(image.region().width.max(1) as usize);
-            let w = waveform(image, bands, HEIGHT, s);
+            let bands = bands(width, image);
+            let w = waveform(image, bands, levels, s);
             let peak = w.columns.iter().map(Counts::peak).max().unwrap_or(0);
             for (b, counts) in w.columns.iter().enumerate() {
-                for x in b * WIDTH / bands..(b + 1) * WIDTH / bands {
+                for x in b * width / bands..(b + 1) * width / bands {
                     column(&mut img, x, counts, peak, [0.9, 0.9, 0.9]);
                 }
             }
         }
         Mode::Parade => {
-            let third = WIDTH / 3;
-            let bands = third.min(image.region().width.max(1) as usize);
-            let channels = parade(image, bands, HEIGHT, s);
+            let third = width / 3;
+            let bands = bands(third, image);
+            let channels = parade(image, bands, levels, s);
             for (c, w) in channels.iter().enumerate() {
                 let peak = w.columns.iter().map(Counts::peak).max().unwrap_or(0);
                 for (b, counts) in w.columns.iter().enumerate() {
@@ -270,24 +315,64 @@ impl Scopes {
             self.histogram_ui(ui, edit);
             return;
         }
-        let Some(image) = &self.image else { return };
-        let stale = self
-            .texture
-            .as_ref()
-            .is_none_or(|(g, _)| *g != self.generation);
-        if stale {
-            let picture = picture(image, self.mode, self.stops);
+        let panel = fill(ui, 0.5);
+        let ppp = ui.ctx().pixels_per_point();
+        let want = [
+            ((panel.x * ppp).round() as usize).clamp(3, MAX_PICTURE[0]),
+            ((panel.y * ppp).round() as usize).clamp(3, MAX_PICTURE[1]),
+        ];
+        if self.recompute(ui, want)
+            && let Some(image) = &self.image
+        {
+            let picture = picture_sized(image, self.mode, self.stops, want);
             let texture =
                 ui.ctx()
                     .load_texture("helios.scopes", picture, egui::TextureOptions::LINEAR);
-            self.texture = Some((self.generation, texture));
+            self.texture = Some(Picture {
+                generation: self.generation,
+                size: want,
+                texture,
+            });
+            self.pending = None;
         }
-        if let Some((_, texture)) = &self.texture {
-            let width = ui.available_width();
-            let size = egui::vec2(width, width * HEIGHT as f32 / WIDTH as f32);
-            let response = ui.add(egui::Image::new((texture.id(), size)));
+        if let Some(p) = &self.texture {
+            // One texel per pixel when the picture is at the panel's
+            // size; stretched only past the cap or while a resize waits.
+            let exact = egui::vec2(p.size[0] as f32, p.size[1] as f32) / ppp;
+            let size = if (exact - panel).abs().max_elem() < 1.0 {
+                exact
+            } else {
+                panel
+            };
+            let response = ui.add(egui::Image::new((p.texture.id(), size)));
             crate::name_rect(ui.ctx(), "helios.scopes.picture", response.rect);
         }
+    }
+
+    /// Whether the picture is computed again this frame: at once for a
+    /// new image, mode or scale; for a new panel size, once that size
+    /// held for a frame with no button down (a resize drag ends), so a
+    /// drag does not recompute at every frame.
+    fn recompute(&mut self, ui: &Ui, want: [usize; 2]) -> bool {
+        let Some(p) = &self.texture else { return true };
+        if p.generation != self.generation {
+            return true;
+        }
+        if p.size == want {
+            self.pending = None;
+            return false;
+        }
+        if ui.input(|i| i.pointer.any_down()) {
+            // The release wakes a frame of its own.
+            self.pending = Some(want);
+            return false;
+        }
+        if self.pending == Some(want) {
+            return true;
+        }
+        self.pending = Some(want);
+        ui.ctx().request_repaint();
+        false
     }
 
     /// egui-pop's histogram of the image, draggable when there is an
@@ -320,7 +405,10 @@ impl Scopes {
             Color32::from_rgb(70, 120, 230),
         ];
         let channels = (0..3).map(|c| Channel::new(&names[c], &bins[c], colors[c]));
-        let widget = Histogram::new(channels).log(true).clipping(*clip);
+        let widget = Histogram::new(channels)
+            .log(true)
+            .clipping(*clip)
+            .size(fill(ui, 1.0 / 3.0));
         let target = edit.and_then(|(_, store)| {
             exposure_path(
                 &store
@@ -385,4 +473,18 @@ impl Scopes {
             s.cancel(g);
         }
     }
+}
+
+/// The room a scope fills: the panel's width and what is left of its
+/// height; `aspect` (height per width) when the height is unbounded (a
+/// scroll area) or too short to draw in.
+fn fill(ui: &Ui, aspect: f32) -> egui::Vec2 {
+    let room = ui.available_size();
+    let width = room.x.max(16.0);
+    let height = if room.y.is_finite() && room.y >= 24.0 {
+        room.y
+    } else {
+        (width * aspect).round()
+    };
+    egui::vec2(width, height)
 }
