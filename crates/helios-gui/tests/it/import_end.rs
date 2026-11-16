@@ -242,6 +242,8 @@ impl World {
                 })
                 .collect(),
         );
+        // Its fill landed: `library.filled`, as the host's says it.
+        self.h.state_mut().library_filled();
         self.h.run_steps(3);
         let new: Vec<String> = all.into_iter().filter(|i| !before.contains(i)).collect();
         assert!(!new.is_empty(), "the import brought photos");

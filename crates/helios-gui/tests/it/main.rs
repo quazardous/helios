@@ -60,6 +60,7 @@ mod jobs;
 mod keep_image_open;
 mod keymap;
 mod language;
+mod library_changed;
 mod library_filter;
 mod library_gallery;
 mod library_imports;

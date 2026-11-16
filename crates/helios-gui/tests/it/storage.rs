@@ -134,8 +134,9 @@ impl World {
     fn plug(&mut self, h: &mut Harness<'_, Shell>, volumes: &[&Volume], now: u64) {
         self.plugged.set(volumes);
         scan::scan(&self.vault, &self.plugged.volumes(), "studio-pc", now, None).unwrap();
+        let since = h.state().app().handle().last_event();
         self.persist.frame_settled(h.state_mut(), now as f64);
-        assert!(self.persist.take_locations_changed(), "the scan is heard");
+        assert!(locations_changed(h, since), "the scan is heard");
         h.state_mut().refresh_volumes();
         self.persist.fill_library(h.state_mut()).unwrap();
         self.settle(h);
@@ -325,10 +326,11 @@ fn the_page_draws_its_labels_at_once_and_a_refresh_never_blanks_it() {
         None,
     )
     .unwrap();
+    let since = h.state().app().handle().last_event();
     world
         .persist
         .frame_settled(h.state_mut(), (FIRST + DAY) as f64);
-    assert!(world.persist.take_locations_changed());
+    assert!(locations_changed(&h, since));
     h.state_mut().refresh_volumes();
     assert!(world.link.settle(Duration::from_secs(10)));
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -464,10 +466,31 @@ fn an_offline_photo_shows_its_badge_and_plugging_its_disk_in_clears_it() {
         None,
     )
     .unwrap();
+    let since = h.state().app().handle().last_event();
     world2.persist.frame_settled(h.state_mut(), 0.0);
-    assert!(world2.persist.take_locations_changed());
+    assert!(locations_changed(&h, since));
     world2.persist.fill_library(h.state_mut()).unwrap();
     assert_eq!(badges(&h), ["missing"]);
+}
+
+/// Whether `library.changed` said where copies are changed (a scan)
+/// since the journal's event `since`, the volumes and the Library read
+/// again.
+fn locations_changed(h: &Harness<'_, Shell>, since: u64) -> bool {
+    h.state()
+        .app()
+        .handle()
+        .events_since(since)
+        .iter()
+        .any(|e| {
+            e.name == helios_gui::library_changed::CHANGED
+                && e.data["kinds"]
+                    .as_array()
+                    .is_some_and(|k| k.contains(&json!("locations")))
+                && e.data["ran"]
+                    .as_array()
+                    .is_some_and(|r| r.contains(&json!(helios_gui::library_changed::FILL)))
+        })
 }
 
 /// Gives the known volume `id` the roles `roles`.

@@ -36,6 +36,7 @@ pub mod jobs;
 pub mod keymaps;
 pub mod keys;
 pub mod library;
+pub mod library_changed;
 pub mod library_history;
 pub mod log_panel;
 #[cfg(target_os = "macos")]

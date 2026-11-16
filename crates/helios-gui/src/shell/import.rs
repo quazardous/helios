@@ -29,7 +29,10 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
 use egui::Context as Egui;
+use egui_pop::api::bus::FilesDrop;
+use egui_pop::api::bus::bus_contract::{HookError, ListenOpts};
 use egui_pop::api::toasts::{TOASTS, Toast};
+use egui_pop::model::ids::CommandId;
 use helios_core::Message;
 use helios_shell::commands::Origin;
 use helios_template::{ImportDesc, LibraryDesc};
@@ -634,7 +637,8 @@ impl Shell {
                 import_end::SESSION => select = self.import_session_ended(&request, &line),
                 import_end::WINDOW_HISTORY => self.import_window_history_again(),
                 // The user's import: its photos selected once the Library
-                // shows them (unless the user turned it off).
+                // shows them, at `library.filled` (unless the user turned
+                // it off).
                 import_end::SELECT if select && !ids.is_empty() => {
                     self.focus.select_imported.clone_from(&ids);
                 }
@@ -647,9 +651,43 @@ impl Shell {
         asked
     }
 
-    /// The photos the last import brought, selected as soon as the
-    /// Library holds them.
-    pub(super) fn select_imported_photos(&mut self) {
+    /// The shell's listener of `library.filled`
+    /// ([`crate::library_changed::SELECT`]): it marks its place, its part
+    /// done by [`Shell::library_filled`].
+    pub(super) fn listen_library_filled(&mut self) {
+        let bus = self.core.app.handle().bus();
+        if let Err(e) = crate::library_changed::listen_filled(&*bus, crate::library_changed::SELECT)
+        {
+            self.notes
+                .push(format!("{}: {e}", crate::library_changed::FILLED));
+        }
+    }
+
+    /// The Library read again is shown (the host's fill landed): passed
+    /// through `library.filled`, each listener's part done in the order
+    /// they ran (the photos the last import brought selected), then
+    /// `library.filled` said on the journal with the listeners that ran.
+    pub fn library_filled(&mut self) {
+        use crate::library_changed as lc;
+        let handle = self.core.app.handle().clone();
+        let photos = self.focus.library.borrow().entries.len();
+        let ran = lc::pass_filled(&*handle.bus(), lc::Filled { photos });
+        for id in &ran {
+            if id == lc::SELECT {
+                self.select_imported_photos();
+            }
+        }
+        handle.publish(
+            "helios",
+            None,
+            lc::FILLED,
+            json!({ "photos": photos, "ran": ran }),
+        );
+    }
+
+    /// The photos the last import brought, selected once the Library
+    /// holds them (else at a later fill).
+    fn select_imported_photos(&mut self) {
         if self.focus.select_imported.is_empty() {
             return;
         }
@@ -845,62 +883,44 @@ impl Shell {
         });
     }
 
-    /// Files and folders dropped on the window open the import window
-    /// with them as its sources; while they are dragged over it, it says
-    /// so.
-    pub(super) fn take_dropped_files(&mut self, ctx: &Egui) {
-        // The import window open takes them itself, over its contents,
-        // while it is drawn in the main window (embedded). In its own OS
-        // window, what is dropped on the main window becomes its sources.
-        let embedded = self
-            .import_window_viewport()
-            .is_none_or(|v| v == egui::ViewportId::ROOT);
-        if self.import_window_open() && embedded {
-            return;
-        }
-        let (hovered, dropped): (bool, Vec<PathBuf>) = ctx.input(|i| {
-            (
-                !i.raw.hovered_files.is_empty(),
-                i.raw
-                    .dropped_files
-                    .iter()
-                    .map(|f| f.path().to_path_buf())
-                    .filter(|p| !p.as_os_str().is_empty())
-                    .collect(),
-            )
-        });
-        if hovered {
-            let text = self.text(Message::new(
-                "gui-import-drop",
-                "Drop to import into the library",
-            ));
-            let painter = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::unique("helios.import.drop"),
-            ));
-            let rect = ctx.content_rect();
-            let visuals = ctx.global_style().visuals.clone();
-            painter.rect_filled(rect, 0.0, visuals.extreme_bg_color.gamma_multiply(0.85));
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                text,
-                egui::FontId::proportional(20.0),
-                visuals.strong_text_color(),
-            );
-        }
-        if dropped.is_empty() {
-            return;
-        }
-        if let Err(e) = self.run(
-            super::import_window::COMMAND,
-            json!({ "paths": dropped }),
-            Origin::User,
-        ) {
-            self.warn(e);
+    /// Files and folders dropped on any of Helios's windows (the main
+    /// one, the import window, a focus window, a detached panel's window)
+    /// open the import window with them as its sources: the listener
+    /// [`DROP_LISTENER`] of egui-pop's `files.drop`, after the file
+    /// browser's. Dropped over a browser's target (the import window's
+    /// photos), the browser took them: nothing more. Nothing in Helios
+    /// reads egui's dropped or hovering files itself; while files hover
+    /// a window, egui-pop shows whether anything takes them.
+    pub(super) fn listen_files_dropped(&mut self) {
+        let bus = self.core.app.handle().bus();
+        let listened = bus.listen::<FilesDrop>(
+            DROP_LISTENER,
+            ListenOpts::new()
+                .owner(import_end::BUS_OWNER)
+                .after(egui_pop::api::bus::FILES_BROWSER),
+            |drop, did| {
+                if !did.is_empty() {
+                    return Ok(());
+                }
+                let Some(app) = egui_pop::api::bus::asking() else {
+                    return Err(HookError("no application asking".into()));
+                };
+                let command = CommandId::new(super::import_window::COMMAND)
+                    .map_err(|e| HookError(e.to_string()))?;
+                app.run(command, json!({ "paths": drop.paths }));
+                did.push(format!("{DROP_LISTENER}: {} files", drop.paths.len()));
+                Ok(())
+            },
+        );
+        if let Err(e) = listened {
+            self.notes.push(format!("files.drop: {e}"));
         }
     }
 }
+
+/// Helios's listener of egui-pop's `files.drop`: files dropped on any
+/// window open the import window on them.
+pub const DROP_LISTENER: &str = "helios.import";
 
 /// Why nothing is imported without a library open: the host runs imports
 /// as `library.import`, which it has only with one (`--vault FILE`).

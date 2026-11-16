@@ -1151,6 +1151,8 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
             .collect(),
     );
     h.run_steps(3);
+    // Its fill landed: `library.filled`, as the host's says it.
+    h.state_mut().library_filled();
     let mut selected = h.state().library().selection();
     selected.sort();
     let mut expected = ids.clone();
@@ -2144,6 +2146,20 @@ fn window_run_with(
     at: Option<egui::Pos2>,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
+    window_run_dropping(h, window, close, size, at, events, &[])
+}
+
+/// A deferred window's own pass, given input events and the files the
+/// system says dropped on it.
+fn window_run_dropping(
+    h: &mut Harness<'static, Shell>,
+    window: egui::ViewportId,
+    close: bool,
+    size: egui::Vec2,
+    at: Option<egui::Pos2>,
+    events: Vec<egui::Event>,
+    dropped: &[PathBuf],
+) -> egui::FullOutput {
     use egui::{Pos2, RawInput, Rect, ViewportEvent, ViewportId, ViewportInfo};
     let cb = h.output().viewport_output[&window]
         .viewport_ui_cb
@@ -2165,6 +2181,10 @@ fn window_run_with(
         time: Some(h.ctx.input(|i| i.time) + 1.0 / 60.0),
         focused: true,
         events,
+        dropped_files: dropped
+            .iter()
+            .map(|p| Arc::new(Dropped(p.clone())) as _)
+            .collect(),
         ..Default::default()
     };
     input.viewports.insert(window, info);
@@ -3967,4 +3987,170 @@ fn the_import_window_has_the_main_windows_title_bar_and_menus() {
         .collect();
     assert_eq!(open, ["main"], "the main window stays");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+thread_local! {
+    /// The files dropped on each immediate window (a detached panel's) at
+    /// its next pass, for [`render_immediate`].
+    static IMMEDIATE_DROPS: std::cell::RefCell<std::collections::BTreeMap<egui::ViewportId, Vec<PathBuf>>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The immediate windows' renderer, as eframe's: each runs a pass of its
+/// own, inside the main window's, with its own input (the files dropped
+/// on it, when a test drops some).
+fn render_immediate(ctx: &egui::Context, viewport: egui::ImmediateViewport<'_>) {
+    let egui::ImmediateViewport {
+        ids,
+        mut viewport_ui_cb,
+        ..
+    } = viewport;
+    let dropped = IMMEDIATE_DROPS.with_borrow_mut(|d| d.remove(&ids.this).unwrap_or_default());
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(640.0, 480.0));
+    let mut input = egui::RawInput {
+        viewport_id: ids.this,
+        screen_rect: Some(rect),
+        dropped_files: dropped
+            .into_iter()
+            .map(|p| Arc::new(Dropped(p)) as _)
+            .collect(),
+        ..Default::default()
+    };
+    input.viewports.insert(
+        ids.this,
+        egui::ViewportInfo {
+            inner_rect: Some(rect),
+            ..Default::default()
+        },
+    );
+    let mut out = ctx.run_ui(input, |ui| viewport_ui_cb(ui));
+    out.textures_delta.clear();
+}
+
+/// What `files.dropped` said, by window: the paths and what took them.
+fn files_dropped(h: &Harness<'static, Shell>) -> Vec<(String, Value, Value)> {
+    h.state()
+        .app()
+        .handle()
+        .events_since(Default::default())
+        .into_iter()
+        .filter(|e| e.name == "files.dropped")
+        .map(|e| {
+            (
+                e.data["window"].as_str().unwrap_or_default().to_string(),
+                e.data["paths"].clone(),
+                e.data["did"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// Files dropped on a focus window of its own (the Library's) or on a
+/// detached panel's window open the import window on them, as a drop on
+/// the main window does: the import listens to `files.drop` from every
+/// window (before, only the main window's drops were read, the others
+/// lost).
+#[test]
+fn a_folder_dropped_on_a_focus_window_or_a_detached_panel_opens_the_import_on_it() {
+    use egui_pop::api::workbench;
+    use egui_pop::model::ids::PanelId;
+    use helios_gui::shell::{LIBRARY_WINDOW, LIBRARY_WINDOW_COMMAND};
+
+    let dir = temp("drop-any-window");
+    let (first, second) = (dir.join("Shoot"), dir.join("Trip"));
+    photos(&first, 2, 64, 48);
+    photos(&second, 2, 64, 48);
+    egui::Context::set_immediate_viewport_renderer(render_immediate);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.run();
+    let app = h.state().app().handle().clone();
+
+    // On the Library focus's own window.
+    h.state_mut()
+        .run(LIBRARY_WINDOW_COMMAND, Value::Null, Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let library = app
+        .window_viewport(&WindowId::new(LIBRARY_WINDOW))
+        .expect("the Library focus in its own window");
+    window_run_dropping(
+        &mut h,
+        library,
+        false,
+        vec2(1000.0, 700.0),
+        None,
+        Vec::new(),
+        std::slice::from_ref(&first),
+    );
+    h.run_steps(3);
+    assert!(h.state().import_window_open(), "the drop is not lost");
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&first));
+    let dropped = files_dropped(&h);
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert_eq!(dropped[0].0, LIBRARY_WINDOW);
+    assert_eq!(dropped[0].1, json!([first.display().to_string()]));
+    assert_eq!(dropped[0].2, json!(["helios.import: 1 files"]));
+    let ctx = h.ctx.clone();
+    h.state_mut().close_import_window(&ctx);
+    h.run_steps(3);
+    assert!(!h.state().import_window_open());
+
+    // On the Log panel's window, detached.
+    h.state_mut()
+        .run("helios.log.detach", Value::Null, Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let log = workbench::window_id(&PanelId::from_static("helios.log"));
+    IMMEDIATE_DROPS.with_borrow_mut(|d| d.insert(log, vec![second.clone()]));
+    h.run_steps(3);
+    assert!(
+        IMMEDIATE_DROPS.with_borrow(std::collections::BTreeMap::is_empty),
+        "the Log panel's window passed"
+    );
+    assert!(h.state().import_window_open(), "the drop is not lost");
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&second));
+    let dropped = files_dropped(&h);
+    assert_eq!(dropped.len(), 2, "{dropped:?}");
+    assert_eq!(dropped[1].0, "panel:helios.log");
+    assert_eq!(dropped[1].2, json!(["helios.import: 1 files"]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Only egui-pop's bus reads egui's hovered and dropped files: nothing
+/// in Helios's sources does (each window's drop is its `files.drop`, the
+/// import its listener).
+#[test]
+fn nothing_in_helios_reads_the_files_dropped_itself() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut dirs: Vec<PathBuf> = ["crates", "plugins"]
+        .iter()
+        .map(|d| root.join(d))
+        .filter(|d| d.is_dir())
+        .collect();
+    let mut found = Vec::new();
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+            let path = entry.path();
+            let name = entry.file_name();
+            if path.is_dir() {
+                // Sources only: tests feed the system's input, builds hold
+                // none of ours.
+                if name != "tests" && name != "target" {
+                    dirs.push(path);
+                }
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                if line.contains(".dropped_files") || line.contains(".hovered_files") {
+                    found.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "read outside egui-pop's bus: {found:#?}");
 }
