@@ -681,9 +681,10 @@ impl ShellBuilder {
 
 /// Opens the main window before its shell exists, as egui-pop's
 /// `run_native_with` does for a [`ShellBuilder`]: its place from the
-/// last run (kept under `ui_settings`), the present mode for several
-/// windows, the native window recorded. `make` gives eframe the
-/// application, which builds its shell later
+/// last run ([`place_main_window`]), the present mode for several
+/// windows, the native window recorded, on Helios's event loop
+/// ([`crate::event_loop`], which tells egui-pop the screens). `make`
+/// gives eframe the application, which builds its shell later
 /// ([`ShellBuilder::build_in_window`]).
 pub fn open_window(
     title: &str,
@@ -691,9 +692,7 @@ pub fn open_window(
     ui_settings: Option<&Path>,
     make: impl FnOnce(&eframe::CreationContext<'_>) -> Box<dyn eframe::App> + 'static,
 ) -> eframe::Result {
-    if let Some(dir) = ui_settings {
-        egui_pop::api::window::restore(dir, &mut options);
-    }
+    place_main_window(&mut options, ui_settings);
     egui_pop::api::windows::present_mode(&mut options);
     eframe::run_native(
         title,
@@ -703,6 +702,19 @@ pub fn open_window(
             Ok(make(cc))
         }),
     )
+}
+
+/// The main window's place: the one kept under `ui_settings` from the
+/// last run (its size bounded, a position far away dropped), then, as
+/// eframe creates the window (its `window_builder` hook), repaired against
+/// the screens Helios's event loop told egui-pop
+/// (`egui_pop::api::window::repair_builder`): a place on a monitor now
+/// gone comes back onto a screen left. Where the system tells no
+/// position (Wayland) none was kept, and nothing moves.
+pub fn place_main_window(options: &mut eframe::NativeOptions, ui_settings: Option<&Path>) {
+    if let Some(dir) = ui_settings {
+        egui_pop::api::window::restore(dir, options);
+    }
 }
 
 /// The Settings window's id (egui-pop's Settings app in its window mode):
