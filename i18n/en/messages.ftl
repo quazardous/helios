@@ -945,8 +945,6 @@ gui-import-darktable-help = Each sidecar, duplicates included, becomes a version
 
 gui-import-darktable-report = { $sidecar }: { $report }
 
-gui-import-drop = Drop to import into the library
-
 gui-import-dropped-title = Import { $count } items
 
 gui-import-ended = { $photos } photos imported, { $edits } darktable edits

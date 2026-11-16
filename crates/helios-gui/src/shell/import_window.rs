@@ -1914,20 +1914,6 @@ impl ImportWindow {
                 .show(ui, |ui| self.window_ui(ui, &words, &app))
                 .inner
         };
-        // Dropped anywhere else on the window: its sources too.
-        if event.is_none() {
-            let dropped: Vec<PathBuf> = ctx.input(|i| {
-                i.raw
-                    .dropped_files
-                    .iter()
-                    .map(|f| f.path().to_path_buf())
-                    .filter(|p| !p.as_os_str().is_empty())
-                    .collect()
-            });
-            if !dropped.is_empty() {
-                event = Some(Event::Dropped(dropped));
-            }
-        }
         // Its close button closes the import focus.
         if window.close_requested {
             event = Some(Event::Cancel);
