@@ -20,6 +20,7 @@
 use std::collections::BTreeMap;
 
 use egui::Ui;
+use egui_pop::api::bus::drag::{self, Seen};
 use helios_core::Message;
 use helios_vault::keywords::{self, SEPARATOR};
 
@@ -349,7 +350,7 @@ impl Library {
                     .interact(egui::Sense::drag())
                     .on_hover_text(path);
                 if r.drag_started() {
-                    egui::DragAndDrop::set_payload(&ctx, DraggedKeyword(path.to_string()));
+                    drag::start(&ctx, "keyword", DraggedKeyword(path.to_string()));
                 }
                 keyword_menu(&r, path, selection);
                 drop_target(
@@ -358,7 +359,17 @@ impl Library {
                     None,
                     &self.drop_hover,
                 );
-                if let Some(dragged) = r.dnd_release_payload::<DraggedKeyword>()
+                // Another branch let go on it merges into it; the branch
+                // carried is no target of its own (a drop on itself is
+                // neither taken nor refused).
+                let own = drag::payload::<DraggedKeyword>(&ctx).is_some_and(|d| d.0 == path);
+                if !own
+                    && let Seen::Dropped(dragged) = drag::target::<DraggedKeyword>(
+                        &ctx,
+                        &format!("library.keyword-merge:{path}"),
+                        r.rect,
+                        |_| None,
+                    )
                     && dragged.0 != path
                 {
                     runs.push((
@@ -379,59 +390,67 @@ impl Library {
         }
     }
 
-    /// A keyword branch released over the grid: the photo under the
-    /// pointer takes it (the selection, when the photo is in it), as a
-    /// mark of the Library. `grid` is the grid's response; its cells' ids
-    /// follow egui-pop's (`grid.id.with(("cell", key))`).
+    /// A keyword branch let go over a photo of the grid, in whichever
+    /// window it was dragged from (egui-pop's drag session): the photo
+    /// takes it (the selection, when the photo is in it), as a mark of
+    /// the Library. Each photo in view is a drop target while a branch is
+    /// carried. `grid` is the grid's response; its cells' ids follow
+    /// egui-pop's (`grid.id.with(("cell", key))`).
     pub(super) fn drop_keyword_on_grid(&self, grid: &egui::Response) {
         let ctx = &grid.ctx;
-        let Some(dragged) = egui::DragAndDrop::payload::<DraggedKeyword>(ctx) else {
-            return;
-        };
-        let Some(pointer) = ctx.pointer_latest_pos() else {
-            return;
-        };
-        let cell = self.in_view.borrow().iter().find_map(|key: &String| {
-            ctx.read_response(grid.id.with(("cell", key)))
-                .filter(|r| r.rect.contains(pointer))
-                .map(|_| key.clone())
-        });
-        let Some(cell) = cell else {
-            return;
-        };
-        let selection = self.view.state.selection();
-        let images = if selection.contains(&cell) {
-            selection.keys().to_vec()
-        } else {
-            vec![cell]
-        };
-        if !ctx.input(|i| i.pointer.any_released()) {
-            let text = crate::i18n::text(
-                ctx,
-                Message::new(
-                    "gui-library-keyword-drop",
-                    "Tag { $count } photos with { $keyword }",
-                )
-                .with("count", images.len())
-                .with("keyword", dragged.0.as_str()),
-            );
-            // egui hides hover tooltips while something is dragged.
-            egui::Tooltip::for_widget(grid).at_pointer().show(|ui| {
-                ui.label(text);
-            });
+        // Carried, or just let go: a drop is taken in the pass after.
+        if drag::payload::<DraggedKeyword>(ctx).is_none()
+            && drag::ended::<DraggedKeyword>(ctx).is_none()
+        {
             return;
         }
-        let Some(keyword) = egui::DragAndDrop::take_payload::<DraggedKeyword>(ctx) else {
-            return;
+        let selection = self.view.state.selection();
+        let images_of = |cell: &String| {
+            if selection.contains(cell) {
+                selection.keys().to_vec()
+            } else {
+                vec![cell.clone()]
+            }
         };
-        crate::dialogs::request(
-            ctx,
-            crate::dialogs::Request::Run(
-                KEYWORD_ADD_COMMAND.into(),
-                serde_json::json!({ "keyword": keyword.0, "images": images }),
-                helios_shell::commands::Origin::User,
-            ),
-        );
+        for key in self.in_view.borrow().iter() {
+            let Some(cell) = ctx.read_response(grid.id.with(("cell", key))) else {
+                continue;
+            };
+            let rect = cell.rect.intersect(grid.rect);
+            if !rect.is_positive() {
+                continue;
+            }
+            match drag::target::<DraggedKeyword>(ctx, &format!("library.cell:{key}"), rect, |_| {
+                None
+            }) {
+                Seen::Over { payload, .. } => {
+                    let text = crate::i18n::text(
+                        ctx,
+                        Message::new(
+                            "gui-library-keyword-drop",
+                            "Tag { $count } photos with { $keyword }",
+                        )
+                        .with("count", images_of(key).len())
+                        .with("keyword", payload.0.as_str()),
+                    );
+                    // egui hides hover tooltips while something is dragged.
+                    egui::Tooltip::for_widget(grid).at_pointer().show(|ui| {
+                        ui.label(text);
+                    });
+                }
+                Seen::Dropped(keyword) => {
+                    crate::dialogs::request(
+                        ctx,
+                        crate::dialogs::Request::Run(
+                            KEYWORD_ADD_COMMAND.into(),
+                            serde_json::json!({ "keyword": keyword.0, "images": images_of(key) }),
+                            helios_shell::commands::Origin::User,
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 }
 
