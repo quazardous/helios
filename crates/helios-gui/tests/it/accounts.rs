@@ -35,6 +35,8 @@ use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
+use crate::shot::Shots as _;
+
 fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, Shell>) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
@@ -2371,7 +2373,7 @@ fn accounts_snapshots() {
     let mut results = egui_kittest::SnapshotResults::new();
     let (mut h, ..) = picking_world(None);
     h.run_steps(4);
-    results.add(h.try_snapshot("accounts-choose-pop-dark-1x"));
+    results.add(h.try_window_shot("accounts-choose-pop-dark-1x", "Import photos"));
 
     let (mut h, ..) = picking_world_with(None, End::Wait, AccountState::Connected);
     until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
@@ -2379,7 +2381,7 @@ fn accounts_snapshots() {
     until(&mut h, "the status line", |h| shown(h, "Copy the link"));
     // The spinner repaints for ever: a few frames, not a settled run.
     h.run_steps(4);
-    results.add(h.try_snapshot("accounts-waiting-pop-dark-1x"));
+    results.add(h.try_window_shot("accounts-waiting-pop-dark-1x", "Import photos"));
 
     let needs = AccountState::NeedsAttention {
         step: None,
@@ -2391,7 +2393,7 @@ fn accounts_snapshots() {
         shown(h, "Reconnect ann@example.org")
     });
     h.run_steps(4);
-    results.add(h.try_snapshot("accounts-refused-pop-dark-1x"));
+    results.add(h.try_window_shot("accounts-refused-pop-dark-1x", "Import photos"));
 
     let (_world, mut h) = world();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
@@ -2411,5 +2413,5 @@ fn accounts_snapshots() {
         shown(h, "Server") && shown(h, "Connect Test server")
     });
     h.run_steps(4);
-    results.add(h.try_snapshot("accounts-connect-form-pop-dark-1x"));
+    results.add(h.try_window_shot("accounts-connect-form-pop-dark-1x", "Import photos"));
 }
