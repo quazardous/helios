@@ -11,22 +11,24 @@
 //!   screen's flag.
 //!
 //! The lines come from egui-pop's journal, read once a frame: nothing is
-//! logged per frame. The Settings app closing with its own window is the
-//! exception: it is logged by a listener on the bus's `window.close`
-//! (egui-pop ADR 0029), in the call that closes the window, so the log
-//! never says the app is open while its window is gone.
+//! logged per frame. The Settings app opening or closing with its own
+//! window is the exception: it is logged by a listener on the bus's
+//! `window.open` and `window.close` (egui-pop ADR 0029), in the call that
+//! opens or closes the window, so the log never says the app is open
+//! while its window is gone, nor closed while its window is up.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::admin::{self, ADMIN, Admin};
 use egui_pop::api::app::AppHandle;
 use egui_pop::api::bus::egui_pop_hooks::ListenOpts;
-use egui_pop::api::bus::{WindowClose, WindowRequest};
+use egui_pop::api::bus::egui_pop_hooks::Point;
+use egui_pop::api::bus::{WindowClose, WindowOpen, WindowRequest};
 use serde_json::Value;
 
-/// Helios's listener on `window.close`: the Settings app's window
-/// closing logs what holds the screen, right after `admin.window` has
-/// closed the app.
+/// Helios's listener on `window.open` and `window.close`: the Settings
+/// app's window opening or closing logs what holds the screen, right
+/// after `admin.window` has opened or closed the app.
 pub(super) const LISTENER: &str = "helios.screen";
 
 /// The longest answer written to the log.
@@ -129,10 +131,11 @@ impl Held {
     }
 }
 
-/// What holds the screen, logged when it changes: looked at once a frame
-/// ([`Screen::follow`]), and by [`LISTENER`] when the Settings app's
-/// window closes, so that close is logged in the same call as egui-pop's
-/// `window.closed`, not at a later pass.
+/// What holds the screen, logged when it changes: by [`LISTENER`] when
+/// the Settings app's window opens or closes, in the same call as
+/// egui-pop's `window.opened` and `window.closed`, and looked at once a
+/// frame ([`Screen::follow`]) for what no window says (the app opening
+/// or closing over the main window, its wizard, the focus screen).
 #[derive(Clone, Debug, Default)]
 pub(super) struct Screen {
     held: Arc<Mutex<Held>>,
@@ -153,36 +156,49 @@ impl Screen {
         held.change(now, admin::in_window(app));
     }
 
-    /// [`LISTENER`] on `window.close`, after `admin.window` (which closes
-    /// the Settings app when its window closes, whoever asked).
+    /// [`LISTENER`] on `window.open` and `window.close`, after
+    /// `admin.window` (which opens or closes the Settings app with its
+    /// window, whoever asked).
     fn listen(&self, app: &AppHandle) {
         let Some(admin) = app.service(&ADMIN) else {
             return;
         };
-        let held = self.held.clone();
-        let listened = app.bus().listen::<WindowClose>(
-            LISTENER,
-            ListenOpts::new()
-                .owner("helios")
-                .after(admin::WINDOW_LISTENER),
-            move |req: &WindowRequest, did: &mut Vec<String>| {
-                if req.window != admin::APP_WINDOW {
-                    return Ok(());
-                }
-                let now = Held::of(Some(&admin));
-                let mut held = held.lock().unwrap_or_else(PoisonError::into_inner);
-                if held.change(now, true) {
-                    did.push(format!(
-                        "{LISTENER}: the Settings app is {}",
-                        if held.settings_open { "open" } else { "closed" }
-                    ));
-                }
-                Ok(())
-            },
-        );
-        if let Err(e) = listened {
-            log::error!(target: "helios", "{e}");
+        let opened = self.listen_on::<WindowOpen>(app, admin.clone());
+        let closed = self.listen_on::<WindowClose>(app, admin);
+        for l in [opened, closed] {
+            if let Err(e) = l {
+                log::error!(target: "helios", "{e}");
+            }
         }
+    }
+
+    fn listen_on<P>(&self, app: &AppHandle, admin: Arc<Admin>) -> Result<(), String>
+    where
+        P: Point<Input = WindowRequest, Value = Vec<String>>,
+    {
+        let held = self.held.clone();
+        app.bus()
+            .listen::<P>(
+                LISTENER,
+                ListenOpts::new()
+                    .owner("helios")
+                    .after(admin::WINDOW_LISTENER),
+                move |req: &WindowRequest, did: &mut Vec<String>| {
+                    if req.window != admin::APP_WINDOW {
+                        return Ok(());
+                    }
+                    let now = Held::of(Some(&admin));
+                    let mut held = held.lock().unwrap_or_else(PoisonError::into_inner);
+                    if held.change(now, true) {
+                        did.push(format!(
+                            "{LISTENER}: the Settings app is {}",
+                            if held.settings_open { "open" } else { "closed" }
+                        ));
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|e| e.to_string())
     }
 }
 
