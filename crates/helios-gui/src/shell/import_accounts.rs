@@ -308,12 +308,16 @@ pub struct RemoteImport {
 }
 
 /// Imports photos chosen under an account, as a card's import runs: a
-/// job, each item's line given to `emit`, its undo step and backups; the
-/// import's report (as `library.import` ends with it) when it ends. Run
-/// off the interface's thread; the items are copied into the choices'
-/// `into`, else into the library folder.
+/// job, each item's line given to `emit`; the import's report, its
+/// changes in it, when it ends (its end is said by the window, once for
+/// all its batches, through `import.ended`). Run off the interface's
+/// thread; the items are copied into the choices' `into`, else into the
+/// library folder.
 pub type ImportRemote = Arc<
-    dyn Fn(RemoteImport, &mut dyn FnMut(&serde_json::Value)) -> Result<serde_json::Value, String>
+    dyn Fn(
+            RemoteImport,
+            &mut dyn FnMut(&serde_json::Value),
+        ) -> Result<helios_library::import::Report, String>
         + Send
         + Sync,
 >;

@@ -48,6 +48,7 @@ mod import_albums;
 mod import_auto;
 mod import_card_identity;
 mod import_close;
+mod import_end;
 mod import_handoff;
 mod import_profiles;
 mod import_snapshots;

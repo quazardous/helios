@@ -1,0 +1,418 @@
+//! An import's end, published once.
+//!
+//! Every import the desktop runs ends here, whichever path ran it: the
+//! `library.import` command's thread, the photos chosen in a service's
+//! page imported in-process, and the node's import promise (heard through
+//! [`NodeWatch`]). Each calls [`Publisher::ended`] or
+//! [`Publisher::failed`] on the import's thread; the shell then passes
+//! the end through the hook point [`ImportEnded`] on the interface's
+//! thread, its listeners in the order [`ORDER`] declares, and says
+//! `import.ended` (or `import.failed`) on the journal.
+//!
+//! The cameras' default looks are put on the import's raws by
+//! [`Publisher::ended`] itself, before the point, on every path: their
+//! changes belong to the import's own undo step, and they write the
+//! vault, which is not done on the interface's thread. The node's
+//! promise puts them on before it says the end, so it passes their count.
+
+use std::sync::Arc;
+use std::sync::mpsc::Sender;
+
+use egui_pop::api::bus::egui_pop_hooks::{HookError, Kernel, ListenOpts, Point, PointSpec};
+use helios_library::import::Report;
+use helios_vault::undo::Changes;
+use serde_json::{Value, json};
+
+/// The hook point an import's end passes through, and the journal's
+/// event once it did.
+pub const ENDED: &str = "import.ended";
+/// The journal's event for an import that failed (it passed through
+/// [`ImportEnded`] too).
+pub const FAILED: &str = "import.failed";
+/// The owner of the shell's listeners of [`ImportEnded`].
+pub const BUS_OWNER: &str = "helios.import";
+
+/// The import's undo step recorded.
+pub const HISTORY: &str = "library.history";
+/// The storage strategy's "after each import" asked of the node.
+pub const BACKUPS: &str = "backups.on-import";
+/// The Library filled again.
+pub const REFILL: &str = "library.refill";
+/// The cards the import read, short of their backups, wait for one.
+pub const CARDS: &str = "storage.cards-waiting";
+/// The Duplicates panel holds every duplicate the import found.
+pub const DUPLICATES: &str = "duplicates.collect";
+/// The import's outcome in the Log panel.
+pub const LOG: &str = "log.import";
+/// The import's outcome in a toast.
+pub const TOAST: &str = "import.toast";
+/// The Library's import sessions read again; one the user started shown.
+pub const SESSION: &str = "library.import-session";
+/// The import window's History read again.
+pub const WINDOW_HISTORY: &str = "import-window.history";
+/// The photos the import brought selected once the Library shows them.
+pub const SELECT: &str = "library.select-imported";
+
+/// The listeners of [`ImportEnded`], each with the one it runs after:
+/// the order they run in. The host registers [`BACKUPS`] and [`REFILL`]
+/// (it holds the node's backups and the Library's fill); the shell the
+/// others.
+pub const ORDER: &[(&str, Option<&str>)] = &[
+    (HISTORY, None),
+    (BACKUPS, Some(HISTORY)),
+    (REFILL, Some(BACKUPS)),
+    (CARDS, Some(REFILL)),
+    (DUPLICATES, Some(CARDS)),
+    (LOG, Some(DUPLICATES)),
+    (TOAST, Some(LOG)),
+    (SESSION, Some(TOAST)),
+    (WINDOW_HISTORY, Some(SESSION)),
+    (SELECT, Some(WINDOW_HISTORY)),
+];
+
+/// The hook point an import's end passes through.
+pub struct ImportEnded;
+
+impl Point for ImportEnded {
+    const ID: &'static str = ENDED;
+    type Input = ImportEnd;
+    type Value = Reactions;
+}
+
+/// An import's end, as [`ImportEnded`]'s listeners read it.
+#[derive(Clone, Debug)]
+pub struct ImportEnd {
+    /// The import's request (`library.import`'s arguments, or the node
+    /// promise's), with `origin`.
+    pub request: Value,
+    /// Who asked for it (`origin` of the request; `user` when unsaid).
+    pub origin: String,
+    /// Its report (its changes taken into [`Reactions::changes`]), or
+    /// why it failed.
+    pub outcome: Result<Report, String>,
+    /// How many of its raws took their camera's default look.
+    pub camera_looks: usize,
+}
+
+impl ImportEnd {
+    /// The end line the shell's listeners read: `{ "ended": report,
+    /// "camera_looks": n }` or `{ "failed": error }`.
+    pub fn line(&self) -> Value {
+        match &self.outcome {
+            Ok(report) => json!({ "ended": report, "camera_looks": self.camera_looks }),
+            Err(e) => json!({ "failed": e }),
+        }
+    }
+
+    /// The end of an import said by its end line alone (`line` as
+    /// [`ImportEnd::line`] makes it): no changes to record.
+    pub fn of_line(request: &Value, line: &Value) -> Option<ImportEnd> {
+        let outcome = if let Some(e) = line.get("failed") {
+            Err(e.as_str().map_or_else(|| e.to_string(), String::from))
+        } else {
+            Ok(report_of(line.get("ended")?))
+        };
+        Some(ImportEnd {
+            request: request.clone(),
+            origin: origin_of(request),
+            outcome,
+            camera_looks: line["camera_looks"].as_u64().unwrap_or(0) as usize,
+        })
+    }
+}
+
+/// What [`ImportEnded`]'s listeners did, in order, and what they leave.
+#[derive(Clone, Debug, Default)]
+pub struct Reactions {
+    /// The listeners that ran, in their order.
+    pub ran: Vec<String>,
+    /// The import's changes, until [`HISTORY`] records them.
+    pub changes: Option<Changes>,
+}
+
+/// Declares [`ImportEnded`] on `bus` (once; a second shell on the same
+/// bus finds it there).
+pub fn declare(bus: &Kernel) {
+    let _ = bus.declare::<ImportEnded>(PointSpec::new(
+        "An import ended (or failed): what the desktop does after it",
+    ));
+}
+
+/// Registers `run` as the listener `id` of [`ImportEnded`] on `bus`, after
+/// the listener [`ORDER`] names; one there already under `id` is replaced.
+///
+/// # Errors
+/// `id` is not in [`ORDER`], or the kernel refused it.
+pub fn listen(
+    bus: &Kernel,
+    id: &'static str,
+    run: impl Fn(&ImportEnd, &mut Reactions) + Send + Sync + 'static,
+) -> Result<(), String> {
+    let (_, after) = ORDER
+        .iter()
+        .find(|(listener, _)| *listener == id)
+        .ok_or_else(|| format!("`{id}` is not a listener of {ENDED}"))?;
+    declare(bus);
+    bus.unlisten(ENDED, id);
+    let mut opts = ListenOpts::new().owner(BUS_OWNER);
+    if let Some(after) = after {
+        opts = opts.after(*after);
+    }
+    bus.listen::<ImportEnded>(id, opts, move |end, reactions| {
+        run(end, reactions);
+        reactions.ran.push(id.to_owned());
+        Ok::<(), HookError>(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// The order [`ImportEnded`]'s listeners run in on `bus`.
+pub fn order(bus: &Kernel) -> String {
+    egui_pop::api::bus::order_dump(bus, &[ENDED])
+}
+
+/// Puts the cameras' default looks on the raws of an import (its
+/// changes, to which theirs are added); how many took one.
+pub type CameraLooks = Arc<dyn Fn(&mut Changes) -> Result<usize, String> + Send + Sync>;
+
+/// Where an import's end is said, from the import's thread.
+#[derive(Clone)]
+pub struct Publisher {
+    ends: Sender<ImportEnd>,
+    looks: Option<CameraLooks>,
+    wake: Option<egui::Context>,
+}
+
+impl Publisher {
+    /// A publisher sending to `ends`.
+    pub fn new(ends: Sender<ImportEnd>) -> Publisher {
+        Publisher {
+            ends,
+            looks: None,
+            wake: None,
+        }
+    }
+
+    /// The cameras' looks put on the raws of the imports it says ended.
+    #[must_use]
+    pub fn camera_looks(mut self, looks: CameraLooks) -> Publisher {
+        self.looks = Some(looks);
+        self
+    }
+
+    /// `ctx` woken once an end is said.
+    #[must_use]
+    pub fn waking(mut self, ctx: egui::Context) -> Publisher {
+        self.wake = Some(ctx);
+        self
+    }
+
+    /// The import asked by `request` ended with `report`; `camera_looks`,
+    /// the looks put on its raws already (the node's promise), else they
+    /// are put on now unless the request says `camera_look: false`.
+    pub fn ended(&self, request: &Value, mut report: Report, camera_looks: Option<usize>) {
+        let camera_looks = match (camera_looks, &self.looks) {
+            (Some(n), _) => n,
+            (None, Some(looks)) if request.get("camera_look") != Some(&json!(false)) => {
+                looks(&mut report.changes).unwrap_or_else(|e| {
+                    log::warn!(target: "helios", "import: camera look: {e}");
+                    0
+                })
+            }
+            (None, _) => 0,
+        };
+        self.send(ImportEnd {
+            request: request.clone(),
+            origin: origin_of(request),
+            outcome: Ok(report),
+            camera_looks,
+        });
+    }
+
+    /// The import asked by `request` failed with `error`.
+    pub fn failed(&self, request: &Value, error: &str) {
+        log::warn!(target: "helios", "import: {error}");
+        self.send(ImportEnd {
+            request: request.clone(),
+            origin: origin_of(request),
+            outcome: Err(error.to_owned()),
+            camera_looks: 0,
+        });
+    }
+
+    fn send(&self, end: ImportEnd) {
+        let _ = self.ends.send(end);
+        if let Some(ctx) = &self.wake {
+            ctx.request_repaint();
+        }
+    }
+}
+
+/// What the desktop hears of an import its node runs as a promise: each
+/// file's line for its Duplicates and Log panels, then the end, published
+/// as every import's is.
+pub struct NodeWatch {
+    lines: Sender<(Value, Value)>,
+    ends: Publisher,
+}
+
+impl NodeWatch {
+    /// Lines to `lines` (the shell's `import_sink`), the end to `ends`.
+    pub fn new(lines: Sender<(Value, Value)>, ends: Publisher) -> NodeWatch {
+        NodeWatch { lines, ends }
+    }
+}
+
+impl helios_node_core::import_promise::ImportWatch for NodeWatch {
+    fn line(&self, request: &Value, line: &Value) {
+        let _ = self.lines.send((request.clone(), line.clone()));
+    }
+
+    fn ended(&self, request: &Value, report: &mut Report, camera_looks: usize) {
+        let mut ended = report.clone();
+        ended.changes = std::mem::take(&mut report.changes);
+        self.ends.ended(request, ended, Some(camera_looks));
+    }
+
+    fn failed(&self, request: &Value, error: &str) {
+        self.ends.failed(request, error);
+    }
+}
+
+/// Several imports' reports as one (the batches of photos chosen in a
+/// service's page): their counts added up, their changes and cards kept.
+pub fn merged(reports: Vec<Report>) -> Report {
+    let mut all = reports.into_iter();
+    let Some(mut into) = all.next() else {
+        return Report::default();
+    };
+    for r in all {
+        into.files += r.files;
+        into.added += r.added;
+        into.located += r.located;
+        into.unchanged += r.unchanged;
+        into.skipped += r.skipped;
+        into.asked += r.asked;
+        into.failed += r.failed;
+        into.cancelled |= r.cancelled;
+        into.copied += r.copied;
+        into.fetched += r.fetched;
+        into.unfetched += r.unfetched;
+        into.retried += r.retried;
+        into.sidecars += r.sidecars;
+        into.edits += r.edits;
+        into.edits_reported += r.edits_reported;
+        into.edits_failed += r.edits_failed;
+        into.metadata += r.metadata;
+        into.paired += r.paired;
+        into.read += r.read;
+        into.cards.extend(r.cards);
+        into.changes.images.extend(r.changes.images);
+        into.changes.documents.extend(r.changes.documents);
+        into.copies.extend(r.copies);
+        if into.history.is_none() {
+            into.history = r.history;
+        }
+    }
+    into
+}
+
+/// Who asked for an import, by its request.
+fn origin_of(request: &Value) -> String {
+    request["origin"].as_str().unwrap_or("user").to_owned()
+}
+
+/// A report read back from its JSON (an end said as a line): the counts
+/// the listeners read; no changes, no cards.
+fn report_of(v: &Value) -> Report {
+    let n = |k: &str| v[k].as_u64().unwrap_or(0);
+    Report {
+        files: n("files"),
+        added: n("added"),
+        located: n("located"),
+        unchanged: n("unchanged"),
+        skipped: n("skipped"),
+        asked: n("asked"),
+        failed: n("failed"),
+        cancelled: v["cancelled"] == true,
+        copied: n("copied"),
+        fetched: n("fetched"),
+        unfetched: n("unfetched"),
+        retried: n("retried"),
+        sidecars: n("sidecars"),
+        edits: n("edits"),
+        edits_reported: n("edits_reported"),
+        edits_failed: n("edits_failed"),
+        metadata: n("metadata"),
+        paired: n("paired"),
+        read: n("read"),
+        history: v["history"].as_str().map(String::from),
+        ..Report::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listeners_run_in_the_declared_order_whatever_order_they_register_in() {
+        let bus = Kernel::new();
+        for (id, _) in ORDER.iter().rev() {
+            listen(&bus, id, |_, _| {}).unwrap();
+        }
+        let end = ImportEnd {
+            request: json!({}),
+            origin: "user".into(),
+            outcome: Ok(Report::default()),
+            camera_looks: 0,
+        };
+        let ran = bus
+            .alter::<ImportEnded>(end, Reactions::default())
+            .value
+            .ran;
+        let declared: Vec<&str> = ORDER.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ran, declared);
+    }
+
+    #[test]
+    fn a_listener_not_declared_is_refused() {
+        assert!(listen(&Kernel::new(), "nobody.knows", |_, _| {}).is_err());
+    }
+
+    #[test]
+    fn merged_reports_add_their_counts_and_keep_the_first_session() {
+        let a = Report {
+            added: 2,
+            files: 2,
+            history: Some("h1".into()),
+            ..Report::default()
+        };
+        let b = Report {
+            added: 1,
+            files: 3,
+            skipped: 2,
+            history: Some("h2".into()),
+            ..Report::default()
+        };
+        let m = merged(vec![a, b]);
+        assert_eq!((m.added, m.files, m.skipped), (3, 5, 2));
+        assert_eq!(m.history.as_deref(), Some("h1"));
+    }
+
+    #[test]
+    fn an_end_line_reads_back_as_the_end_it_said() {
+        let request = json!({ "origin": "agent" });
+        let end = ImportEnd::of_line(
+            &request,
+            &json!({ "ended": { "added": 3, "history": "h" }, "camera_looks": 2 }),
+        )
+        .unwrap();
+        assert_eq!(end.origin, "agent");
+        assert_eq!(end.camera_looks, 2);
+        assert_eq!(end.outcome.unwrap().added, 3);
+        let failed = ImportEnd::of_line(&request, &json!({ "failed": "gone" })).unwrap();
+        assert_eq!(failed.outcome.unwrap_err(), "gone");
+        assert!(ImportEnd::of_line(&request, &json!({ "status": "added" })).is_none());
+    }
+}

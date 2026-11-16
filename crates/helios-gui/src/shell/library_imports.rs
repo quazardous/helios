@@ -190,20 +190,22 @@ impl Shell {
         self.focus.library.borrow_mut().set_imports(sessions);
     }
 
-    /// An import ended (its request, as asked, and its end line): the
-    /// sessions and the import window's History are read again; one the user started is shown in the
-    /// Library with its photos selected, or offered while the user edits
-    /// a photo. Whether the Library changes its selection.
+    /// `import-window.history`: an import ended, the import window's
+    /// History lists it at once, whoever ran it: read again at the
+    /// window's next frame, asked now (an open window otherwise draws
+    /// again only when something moves in it).
+    pub(super) fn import_window_history_again(&mut self) {
+        let mut w = self.import.get_mut();
+        w.history.read_again();
+        w.waker()();
+    }
+
+    /// `library.import-session`: an import ended (its request, as asked,
+    /// and its end line): the sessions are read again; one the user
+    /// started is shown in the Library, or offered while the user edits
+    /// a photo. Whether its photos are to be selected.
     pub(super) fn import_session_ended(&mut self, request: &Value, line: &Value) -> bool {
         self.focus.import_sessions.read_at = None;
-        // The import window's History lists it at once, whoever ran it:
-        // read again at the window's next frame, asked now (an open
-        // window otherwise draws again only when something moves in it).
-        {
-            let mut w = self.import.get_mut();
-            w.history.read_again();
-            w.waker()();
-        }
         let started_here = {
             let started = &mut self.focus.user_imports;
             match started.iter().position(|r| r == request) {

@@ -944,7 +944,9 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
     }));
     shell.set_import_browser(opened.opener());
     shell.set_import_remote(Arc::new(
-        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| Ok(json!({})),
+        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| {
+            Ok(helios_library::import::Report::default())
+        },
     ));
     shell.set_import_accounts(book, secrets);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
@@ -1208,9 +1210,13 @@ fn picking_world_with(
                 emit(&json!({ "item": id, "status": "added" }));
             }
             let into = job.args["into"].as_str().map(String::from);
-            let added = ids.len();
+            let added = ids.len() as u64;
             seen.lock().unwrap().push((into, ids));
-            Ok(json!({ "added": added, "files": added }))
+            Ok(helios_library::import::Report {
+                added,
+                files: added,
+                ..Default::default()
+            })
         },
     ));
     // `p1` is in the Library already.
@@ -1671,7 +1677,9 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
         end: End::Done,
     })));
     shell.set_import_remote(Arc::new(
-        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| Ok(json!({})),
+        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| {
+            Ok(helios_library::import::Report::default())
+        },
     ));
     shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
@@ -1840,7 +1848,9 @@ fn a_failed_picking_and_a_warning_notice_are_written_to_the_log_file() {
     }));
     shell.set_import_browser(Opened::default().opener());
     shell.set_import_remote(Arc::new(
-        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| Ok(json!({})),
+        |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| {
+            Ok(helios_library::import::Report::default())
+        },
     ));
     shell.set_import_accounts(book, secrets);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));

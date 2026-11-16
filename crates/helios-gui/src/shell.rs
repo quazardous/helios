@@ -1109,6 +1109,10 @@ impl Shell {
             init: init_wizard::InitState::default(),
             storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
+            import_ends: {
+                let (to, from) = std::sync::mpsc::channel();
+                (crate::import_end::Publisher::new(to), from)
+            },
             exports: Vec::new(),
             workshop_runner: None,
             workshop_reviewer: None,
@@ -1159,6 +1163,8 @@ impl Shell {
             notes: Vec::new(),
         };
         shell.restore_focus_windows();
+        // What the desktop does once an import ends, in order.
+        shell.listen_import_ended();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
