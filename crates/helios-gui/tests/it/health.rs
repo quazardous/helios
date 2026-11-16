@@ -1252,7 +1252,7 @@ fn helios_s_points_sit_next_to_egui_pop_s_on_the_one_bus() {
     );
     assert!(
         dump.contains(&format!(
-            "  1. {} (owner",
+            "{} (owner egui_pop.admin)",
             egui_pop::api::admin::WINDOW_LISTENER
         )),
         "egui-pop's listener: {dump}"
