@@ -1327,8 +1327,6 @@ gui-jobs-left = Time left
 
 gui-jobs-log = Log
 
-gui-jobs-none = No background jobs
-
 gui-jobs-none-selected = No job selected
 
 gui-jobs-open-folder = Open folder
@@ -3372,6 +3370,38 @@ resolve-failed = { $node }: { $reason }
 resolve-not-asked = { $node } was not asked: { $reason }
 
 resolve-refused = { $node }: the model gave no answer ({ $reason })
+
+ui-empty-empty-album = This album is empty
+
+ui-empty-empty-album-action = Show all photos
+
+ui-empty-empty-album-text = The Library shows this album only, and it holds no photo.
+
+ui-empty-no-jobs = No background jobs
+
+ui-empty-no-jobs-text = Imports, exports and previews show here while they run.
+
+ui-empty-no-match = No photo matches
+
+ui-empty-no-match-action = Clear the search
+
+ui-empty-no-match-text = Try fewer words, or clear the search.
+
+ui-empty-no-photos = No photos yet
+
+ui-empty-no-photos-action = Import photos…
+
+ui-empty-no-photos-text = Import photos to see them here.
+
+ui-empty-no-source = No source yet
+
+ui-empty-no-source-action = Add a source…
+
+ui-empty-no-source-text = Add a folder, a card or an account to import from.
+
+ui-empty-nothing-queued = Nothing queued
+
+ui-empty-nothing-queued-text = Edits waiting to be rendered show here.
 
 workflow-newer-format = run `{ $run }` was kept by a newer Helios: it cannot be worked here
 

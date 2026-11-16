@@ -39,7 +39,7 @@ mod section;
 mod state;
 mod value;
 
-pub use action::{Action, action};
+pub use action::{Action, action, row_action};
 pub use choice::choice;
 pub use details::details;
 pub use notify::{Notice, notify};

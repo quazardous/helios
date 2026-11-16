@@ -65,9 +65,9 @@ static FRAME: FocusWindow = FocusWindow {
     max_default_size: egui::vec2(1100.0, 720.0),
     share: 0.8,
 };
-/// A row's height in the Jobs list: two lines, the second as high as the
-/// kit's button (Cancel).
-const ROW: f32 = 56.0;
+/// A row's height in the Jobs list: two lines, the second holding a
+/// compact row button (Cancel).
+const ROW: f32 = 50.0;
 /// How many failed items the detail lists.
 const FAILED_SHOWN: usize = 20;
 /// How many lines of its console a job keeps.
@@ -430,17 +430,14 @@ impl Jobs {
                 self.cleared.extend(finished);
             }
         });
-        ui.separator();
+        ui.divider();
         self.fix_selection();
         let rows: Vec<Promise> = self.rows().into_iter().cloned().collect();
         self.drawn.clear();
         let mut hovered = None;
         helios_ui::scroll(ui, "helios.activity.jobs", Scroll::Region, |ui| {
             if rows.is_empty() {
-                ui.muted(text(
-                    ui,
-                    Message::new("gui-jobs-none", "No background jobs"),
-                ));
+                helios_ui::empty(ui, helios_ui::Empty::NoJobs);
             }
             for p in &rows {
                 if self.row_ui(ui, p) {
@@ -490,7 +487,7 @@ impl Jobs {
                         self.progress_ui(ui, p, bar);
                         if actions && cancellable(p) {
                             let cancel = text(ui, Message::new("gui-promise-cancel", "Cancel"));
-                            if helios_ui::action(ui, helios_ui::Action::Secondary, &cancel)
+                            if helios_ui::row_action(ui, helios_ui::Action::Secondary, &cancel)
                                 .clicked()
                             {
                                 self.events.push(Event::Ask(Action::Cancel, p.id.clone()));
@@ -531,9 +528,7 @@ impl Jobs {
                 }
             }
             (s @ State::Failed { .. }, _) => {
-                // egui-pop has no text in a tone yet: the failure's red
-                // stays egui's.
-                ui.colored_label(ui.visuals().error_fg_color, text(ui, state_message(s)));
+                ui.text_tone(Tone::Danger, text(ui, state_message(s)));
             }
             (State::Cancelled, _) => {
                 ui.muted(text(ui, state_message(&p.state)));
@@ -601,7 +596,7 @@ impl Jobs {
             ));
             return;
         };
-        ui.separator();
+        ui.divider();
         ui.horizontal(|ui| {
             ui.add(IconWidget::new(Source::named(
                 kind_icon(&p.kind),
@@ -748,8 +743,7 @@ impl Jobs {
                 };
                 ui.horizontal(|ui| {
                     ui.meta(at);
-                    // egui-pop has no monospace text role yet.
-                    ui.monospace(said);
+                    ui.code_text(said);
                 });
             }
         });
@@ -766,8 +760,7 @@ impl Jobs {
                 ui.set_min_width(ui.available_width());
                 helios_ui::scroll(ui, "helios.activity.console", Scroll::Tail, |ui| {
                     for line in console {
-                        // egui-pop has no monospace text role yet.
-                        ui.monospace(line);
+                        ui.code_text(line);
                     }
                 });
             });
@@ -845,12 +838,7 @@ fn outcome_ui(ui: &mut egui::Ui, result: &Value) {
             .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned());
         ui.horizontal(|ui| {
             ui.text_role(TextRole::Body, name);
-            // egui-pop has no text in a tone yet: the error's red stays
-            // egui's.
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                f["error"].as_str().unwrap_or_default(),
-            );
+            ui.text_tone(Tone::Danger, f["error"].as_str().unwrap_or_default());
         });
     }
 }

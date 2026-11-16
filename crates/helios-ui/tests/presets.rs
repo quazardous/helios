@@ -115,6 +115,56 @@ fn every_empty_case_says_why_and_offers_its_action() {
 }
 
 #[test]
+fn an_empty_case_shows_in_the_language_installed() {
+    let mut h = harness((), |ui, ()| {
+        let _ = helios_ui::empty(ui, Empty::NoPhotos);
+    });
+    let keys = |case: Empty| {
+        let action = case.action_key().expect("NoPhotos has an action");
+        [case.title_key().key, case.text_key().key, action.key]
+    };
+    let [title, text, action] = keys(Empty::NoPhotos);
+    let french = egui_pop::core::strings::MapStrings::new("fr")
+        .with(title, "Aucune photo pour l’instant")
+        .with(text, "Importez des photos pour les voir ici.")
+        .with(action, "Importer des photos…");
+    egui_pop::core::strings::install(&h.ctx, std::sync::Arc::new(french));
+    h.run();
+    h.get_by_label("Aucune photo pour l’instant");
+    h.get_by_label("Importez des photos pour les voir ici.");
+    h.get_by_label("Importer des photos…");
+    // Every case has keys of its own.
+    let mut all = std::collections::BTreeSet::new();
+    for case in Empty::ALL {
+        assert!(all.insert(case.title_key().key), "{case:?}");
+        assert!(all.insert(case.text_key().key), "{case:?}");
+        if let Some(a) = case.action_key() {
+            assert!(all.insert(a.key), "{case:?}");
+        }
+    }
+}
+
+#[test]
+fn a_row_action_is_a_button_lower_than_an_action() {
+    let h = harness(Vec::<egui::Rect>::new(), |ui, rects| {
+        rects.clear();
+        ui.horizontal(|ui| {
+            rects.push(helios_ui::action(ui, Action::Secondary, "Cancel").rect);
+            rects.push(helios_ui::row_action(ui, Action::Secondary, "Cancel row").rect);
+            rects.push(helios_ui::row_action(ui, Action::Danger, "Delete row").rect);
+        });
+    });
+    for name in ["Cancel row", "Delete row"] {
+        assert_eq!(h.get_by_label(name).accesskit_node().role(), Role::Button);
+    }
+    let rects = h.state().clone();
+    assert!(
+        rects[1].height() < rects[0].height(),
+        "lower than the action: {rects:?}"
+    );
+}
+
+#[test]
 fn a_failure_says_its_reason_and_offers_retry() {
     let mut h = harness(false, |ui, retried| {
         if helios_ui::failed(ui, "Could not read the library", "The disk did not answer.") {
