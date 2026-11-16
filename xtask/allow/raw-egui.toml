@@ -16,7 +16,6 @@
 "library/metadata.rs" = 31
 "library/versions.rs" = 3
 "log_panel.rs" = 5
-"macro_interface.rs" = 52
 "mask_tree.rs" = 18
 "modules.rs" = 25
 "params.rs" = 27

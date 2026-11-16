@@ -1,0 +1,3 @@
+kind: changed
+
+The macro interface editor is drawn with the theme: its list titles as section titles, node names, values and hints muted, the problem with the interface in the warning tone, the filter, name, label, description, unit, group and text default as the theme's text fields, a semantic slider's range and its curve's points as the theme's number fields (named From, To, x and y), the parameter a slider drives as the theme's drop-down (named "Driven parameter"), the check boxes, rows and buttons the theme's (the row arrows and crosses as small row buttons), hover texts the theme's tooltips, and the lists scroll in the theme's scroll areas.
