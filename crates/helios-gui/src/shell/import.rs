@@ -150,8 +150,9 @@ impl Shell {
         if paths.is_empty() {
             return Err("`paths` is missing".into());
         }
-        let asks =
-            args["ask"] == true && self.focus.import_source.is_none() && args.get("copy").is_none();
+        let asks = args["ask"] == true
+            && self.focus.import_source.borrow().is_none()
+            && args.get("copy").is_none();
         if asks {
             let title = self.text(
                 Message::new("gui-import-dropped-title", "Import { $count } items")
@@ -262,7 +263,7 @@ impl Shell {
     /// only in a workspace); darktable edits always.
     fn import_fields(&self) -> Vec<Field> {
         let mut fields = Vec::new();
-        let asks = self.focus.import_source.is_none();
+        let asks = self.focus.import_source.borrow().is_none();
         if asks {
             fields.push(boolean(
                 "copy",
@@ -289,6 +290,7 @@ impl Shell {
             )),
             self.focus
                 .import_source
+                .borrow()
                 .as_ref()
                 .is_none_or(|s| s.darktable),
         ));
@@ -340,10 +342,11 @@ impl Shell {
             .unwrap_or_else(|| {
                 self.focus
                     .import_source
+                    .borrow()
                     .as_ref()
                     .is_none_or(|s| s.darktable)
             });
-        if args["remember"] == true && self.focus.import_source.is_none() {
+        if args["remember"] == true && self.focus.import_source.borrow().is_none() {
             self.remember_import(copy.unwrap_or(false), darktable, origin)?;
         }
         if !darktable {
@@ -400,7 +403,8 @@ impl Shell {
         copy: Option<bool>,
         choices: &Value,
     ) -> Result<Value, String> {
-        let source = self.focus.import_source.as_ref();
+        let source = self.focus.import_source.borrow().clone();
+        let source = source.as_ref();
         let given = |key: &str| {
             choices
                 .get(key)

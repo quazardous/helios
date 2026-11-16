@@ -847,7 +847,7 @@ fn the_import_dialog_asks_where_photos_go_and_remembers_it_for_the_workspace() {
             "origin": "user"
         })]
     );
-    let source = h.state().import_source().cloned().unwrap();
+    let source = h.state().import_source().unwrap();
     assert_eq!(
         (
             source.source.as_str(),

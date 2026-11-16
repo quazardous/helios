@@ -49,8 +49,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_inspect::cache::ReadCache;
@@ -128,8 +129,6 @@ pub struct Persist<S: Store> {
     /// The bus `library.changed`'s listeners are registered on (the
     /// shell's), once.
     listening: Option<Arc<dyn egui_pop::api::bus::bus_contract::Bus>>,
-    /// The library shown, refreshed by its cursor's delta.
-    shown: Mutex<Option<Shown>>,
     /// The desktop's node, in this process: the library's writes go
     /// through it.
     node: Arc<Client>,
@@ -141,21 +140,15 @@ pub struct Persist<S: Store> {
     reading: Vec<(BTreeSet<String>, Pending)>,
     /// The library's reads through the node.
     reader: Reader,
-    /// The library being read again ([`Persist::ask_fill`]).
-    filling: Option<Filling>,
-    /// Asked again while it was read (true: by the host): read once more.
-    fill_again: Option<bool>,
+    /// The library's reads off the interface's thread (the Library read
+    /// again, the stacks), shared with `library.changed`'s listeners.
+    reads: Arc<Reads>,
     /// Where the images of the library the host asked read can be read,
     /// once shown ([`Persist::take_filled`]).
     filled: Option<Files>,
     /// The search filters' queries being run, by gallery: the photos
     /// each takes and the facet counts.
     searching: Vec<(String, Receiver<Result<Searched, String>>)>,
-    /// The stacks and the proposals waiting being read again
-    /// ([`Persist::ask_stacks`]).
-    stacking: Option<Receiver<Result<Stacked, String>>>,
-    /// Asked again while they were read: read once more.
-    stack_again: bool,
     /// The library's other reads through the node (the Library's filter
     /// history, the folders' counts), answered at a coming frame.
     asked: Vec<(Asked, Pending)>,
@@ -938,6 +931,67 @@ struct Filling {
     host: bool,
 }
 
+/// The library's reads off the interface's thread that `library.changed`'s
+/// listeners ask (`library.fill`, `library.stacks`) inside the pass, and
+/// [`Persist`]'s frame shows once answered: shared between them (`Arc`:
+/// [`Persist`] is built on the boot's thread).
+struct Reads {
+    reader: Reader,
+    bus: Arc<Bus>,
+    /// The library shown, refreshed by its cursor's delta.
+    shown: Mutex<Option<Shown>>,
+    /// The library being read again ([`Reads::ask_fill`]).
+    filling: Mutex<Option<Filling>>,
+    /// Asked again while it was read (true: by the host): read once more.
+    fill_again: Mutex<Option<bool>>,
+    /// The stacks and the proposals waiting being read again
+    /// ([`Reads::ask_stacks`]).
+    stacking: Mutex<Option<Receiver<Result<Stacked, String>>>>,
+    /// Asked again while they were read: read once more.
+    stack_again: AtomicBool,
+}
+
+/// `m` locked, even when a thread panicked holding it.
+fn held<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Reads {
+    /// Reads `library` again as [`Persist::fill_library`] does, on a
+    /// thread of its own: a coming frame shows it. `host`: the host takes
+    /// where its images can be read once shown ([`Persist::take_filled`]).
+    /// Asked while a read goes on, it is read once more after it.
+    fn ask_fill(&self, library: &crate::library::Library, host: bool) {
+        let mut filling = held(&self.filling);
+        if filling.is_some() {
+            let mut again = held(&self.fill_again);
+            *again = Some(again.unwrap_or(false) || host);
+            return;
+        }
+        let shown = self.shown.lock().expect("library lock").take();
+        let (reader, order, known) = (self.reader.clone(), library.sort(), known_in(library));
+        let answer = spawn("helios-library-fill", move || {
+            fetch(&reader, shown, order, &known)
+        });
+        *filling = Some(Filling { answer, host });
+    }
+
+    /// Reads the stacks and the proposals waiting again through the node,
+    /// on a thread of its own: a coming frame shows them. Asked while a
+    /// read goes on, they are read once more after it.
+    fn ask_stacks(&self) {
+        let mut stacking = held(&self.stacking);
+        if stacking.is_some() {
+            self.stack_again.store(true, Ordering::Relaxed);
+            return;
+        }
+        let (reader, seq) = (self.reader.clone(), self.bus.last_seq());
+        *stacking = Some(spawn("helios-stacks-read", move || {
+            read_stacked_after(&reader, seq)
+        }));
+    }
+}
+
 /// Runs `read` on a thread of its own; its answer comes on the receiver.
 fn spawn<T: Send + 'static>(
     name: &str,
@@ -958,12 +1012,12 @@ fn spawn<T: Send + 'static>(
 
 /// The images the library shows.
 fn known(shell: &Shell) -> BTreeSet<String> {
-    shell
-        .library()
-        .entries
-        .iter()
-        .map(|e| e.id.clone())
-        .collect()
+    known_in(&shell.library())
+}
+
+/// The photos `library` shows.
+fn known_in(library: &crate::library::Library) -> BTreeSet<String> {
+    library.entries.iter().map(|e| e.id.clone()).collect()
 }
 
 /// Shows the stacks in the library and the proposals waiting in the
@@ -1283,6 +1337,15 @@ impl<S: Store + 'static> Persist<S> {
             cache,
             refreshes: Arc::default(),
         };
+        let reads = Arc::new(Reads {
+            reader: reader.clone(),
+            bus: bus.clone(),
+            shown: Mutex::new(None),
+            filling: Mutex::new(None),
+            fill_again: Mutex::new(None),
+            stacking: Mutex::new(None),
+            stack_again: AtomicBool::new(false),
+        });
         Self {
             library,
             bus,
@@ -1290,18 +1353,14 @@ impl<S: Store + 'static> Persist<S> {
             editing: None,
             changes: crate::library_changed::Publisher::channel(),
             listening: None,
-            shown: Mutex::new(None),
             node,
             writes: VecDeque::new(),
             writing: None,
             reading: Vec::new(),
             reader,
-            filling: None,
-            fill_again: None,
+            reads,
             filled: None,
             searching: Vec::new(),
-            stacking: None,
-            stack_again: false,
             asked: Vec::new(),
         }
     }
@@ -1323,9 +1382,9 @@ impl<S: Store + 'static> Persist<S> {
         self.writing.is_some()
             || !self.writes.is_empty()
             || !self.reading.is_empty()
-            || self.filling.is_some()
+            || held(&self.reads.filling).is_some()
             || !self.searching.is_empty()
-            || self.stacking.is_some()
+            || held(&self.reads.stacking).is_some()
             || !self.asked.is_empty()
     }
 
@@ -1391,7 +1450,7 @@ impl<S: Store + 'static> Persist<S> {
     /// search filter's photos and facet counts.
     fn pump_reads(&mut self, shell: &mut Shell) {
         use std::sync::mpsc::TryRecvError;
-        if let Some(filling) = &self.filling {
+        let filled = held(&self.reads.filling).as_ref().and_then(|filling| {
             let read = match filling.answer.try_recv() {
                 Ok(read) => Some(read),
                 Err(TryRecvError::Empty) => None,
@@ -1399,22 +1458,23 @@ impl<S: Store + 'static> Persist<S> {
                     Some(Err("the library's reading stopped (a panic)".to_string()))
                 }
             };
-            if let Some(read) = read {
-                let host = filling.host;
-                self.filling = None;
-                match read.and_then(|fetched| self.apply(shell, fetched)) {
-                    Ok(files) => {
-                        if host {
-                            self.filled = Some(files);
-                        }
-                        // What follows the Library shown: in this pass.
-                        shell.library_filled();
+            read.map(|read| (read, filling.host))
+        });
+        if let Some((read, host)) = filled {
+            *held(&self.reads.filling) = None;
+            match read.and_then(|fetched| self.apply(shell, fetched)) {
+                Ok(files) => {
+                    if host {
+                        self.filled = Some(files);
                     }
-                    Err(e) => unreadable(shell, e),
+                    // What follows the Library shown: in this pass.
+                    shell.library_filled();
                 }
-                if let Some(host) = self.fill_again.take() {
-                    self.ask_fill(shell, host);
-                }
+                Err(e) => unreadable(shell, e),
+            }
+            let again = held(&self.reads.fill_again).take();
+            if let Some(host) = again {
+                self.ask_fill(shell, host);
             }
         }
         let mut i = 0;
@@ -1436,23 +1496,24 @@ impl<S: Store + 'static> Persist<S> {
                 Err(e) => unreadable(shell, e),
             }
         }
-        if let Some(stacking) = &self.stacking {
-            let read = match stacking.try_recv() {
-                Ok(read) => Some(read),
-                Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => {
-                    Some(Err("the stacks' reading stopped (a panic)".to_string()))
-                }
-            };
-            if let Some(read) = read {
-                self.stacking = None;
-                match read {
-                    Ok(stacked) => show_stacked(shell, stacked),
-                    Err(e) => shell.notify(Level::Error, e),
-                }
-                if std::mem::take(&mut self.stack_again) {
-                    self.ask_stacks();
-                }
+        let stacked =
+            held(&self.reads.stacking)
+                .as_ref()
+                .and_then(|stacking| match stacking.try_recv() {
+                    Ok(read) => Some(read),
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => {
+                        Some(Err("the stacks' reading stopped (a panic)".to_string()))
+                    }
+                });
+        if let Some(read) = stacked {
+            *held(&self.reads.stacking) = None;
+            match read {
+                Ok(stacked) => show_stacked(shell, stacked),
+                Err(e) => shell.notify(Level::Error, e),
+            }
+            if self.reads.stack_again.swap(false, Ordering::Relaxed) {
+                self.ask_stacks();
             }
         }
     }
@@ -1907,8 +1968,9 @@ impl<S: Store + 'static> Persist<S> {
     }
 
     /// Registers `library.changed`'s listeners on the shell's bus, once:
-    /// each marks its place, its part done by [`Persist::library_changed`]
-    /// in the order they ran. The bus.
+    /// local listeners, each doing its own part inside the pass, on the
+    /// shell's parts ([`Shell::library_parts`]) and the reads this layer
+    /// runs off the interface's thread. The bus.
     fn listen_library_changed(
         &mut self,
         shell: &Shell,
@@ -1922,48 +1984,54 @@ impl<S: Store + 'static> Persist<S> {
         {
             return bus;
         }
-        for (id, _) in lc::ORDER {
-            if let Err(e) = lc::listen_changed(&*bus, id) {
-                log::error!(target: "helios", "{}: {e}", lc::CHANGED);
-            }
+        let parts = shell.library_parts();
+        let listened = [
+            {
+                let parts = parts.clone();
+                lc::listen_changed(&*bus, lc::VOLUMES, move |_| parts.refresh_volumes())
+            },
+            {
+                // Read off the interface's thread, shown at a coming frame.
+                let (parts, reads) = (parts.clone(), self.reads.clone());
+                lc::listen_changed(&*bus, lc::FILL, move |_| {
+                    reads.ask_fill(&parts.library(), true);
+                })
+            },
+            {
+                let parts = parts.clone();
+                lc::listen_changed(&*bus, lc::ALBUMS, move |_| parts.ask_albums())
+            },
+            {
+                let reads = self.reads.clone();
+                lc::listen_changed(&*bus, lc::STACKS, move |change| {
+                    if change.kinds.contains(&lc::Kind::Stacks) {
+                        reads.ask_stacks();
+                    }
+                    // The workspace proposes stacks after each import, to
+                    // review.
+                    if change.by.contains(lc::BY_IMPORT) {
+                        parts.suggest_stacks_after_import();
+                    }
+                })
+            },
+        ];
+        for e in listened.into_iter().filter_map(Result::err) {
+            log::error!(target: "helios", "{}: {e}", lc::CHANGED);
         }
         self.listening = Some(bus.clone());
         bus
     }
 
     /// What one frame heard changed in the library, passed once through
-    /// `library.changed`: each listener's part done in the order they ran
-    /// (the volumes, the Library read again, the albums, the stacks),
-    /// then `library.changed` said on the journal with what changed, who
-    /// said it and the listeners that ran (`ran`).
+    /// `library.changed`: each listener does its part inside the pass, in
+    /// the order they run (the volumes, the Library read again, the
+    /// albums, the stacks); then `library.changed` is said on the journal
+    /// with what changed, who said it and the listeners that ran (`ran`).
     fn library_changed(&mut self, shell: &mut Shell, change: crate::library_changed::Change) {
         use crate::library_changed as lc;
         let bus = self.listen_library_changed(shell);
         let mut data = change.to_json();
-        let (stacks, imported) = (
-            change.kinds.contains(&lc::Kind::Stacks),
-            change.by.contains(lc::BY_IMPORT),
-        );
         let ran = lc::pass_changed(&*bus, change);
-        for id in &ran {
-            match id.as_str() {
-                lc::VOLUMES => shell.refresh_volumes(),
-                // Read off the UI thread, shown at a coming frame.
-                lc::FILL => self.ask_fill(shell, true),
-                lc::ALBUMS => shell.library_mut().ask_albums(),
-                lc::STACKS => {
-                    if stacks {
-                        self.ask_stacks();
-                    }
-                    // The workspace proposes stacks after each import, to
-                    // review.
-                    if imported && shell.suggests_stacks() {
-                        shell.stack_review_mut().suggest(Vec::new());
-                    }
-                }
-                _ => {}
-            }
-        }
         data["ran"] = json!(ran);
         shell
             .app()
@@ -1985,7 +2053,7 @@ impl<S: Store + 'static> Persist<S> {
     /// It waits for the node: the host asks [`Persist::ask_fill`] instead,
     /// read off the UI thread.
     pub fn fill_library(&self, shell: &mut Shell) -> Result<Vec<(String, PathBuf)>, String> {
-        let shown = self.shown.lock().expect("library lock").take();
+        let shown = self.reads.shown.lock().expect("library lock").take();
         let fetched = fetch(&self.reader, shown, shell.library().sort(), &known(shell))?;
         self.apply(shell, fetched)
     }
@@ -1995,16 +2063,7 @@ impl<S: Store + 'static> Persist<S> {
     /// where its images can be read once shown ([`Persist::take_filled`]),
     /// for thumbnails.
     pub fn ask_fill(&mut self, shell: &Shell, host: bool) {
-        if self.filling.is_some() {
-            self.fill_again = Some(self.fill_again.unwrap_or(false) || host);
-            return;
-        }
-        let shown = self.shown.lock().expect("library lock").take();
-        let (reader, order, known) = (self.reader.clone(), shell.library().sort(), known(shell));
-        let answer = spawn("helios-library-fill", move || {
-            fetch(&reader, shown, order, &known)
-        });
-        self.filling = Some(Filling { answer, host });
+        self.reads.ask_fill(&shell.library(), host);
     }
 
     /// Where each image of the library the host asked read
@@ -2038,11 +2097,16 @@ impl<S: Store + 'static> Persist<S> {
         }
         shell.set_library(rows.entries);
         let old = match rows.cursor {
-            Some(cursor) => self.shown.lock().expect("library lock").replace(Shown {
-                cursor,
-                files: rows.files.iter().cloned().collect(),
-                order: rows.order,
-            }),
+            Some(cursor) => self
+                .reads
+                .shown
+                .lock()
+                .expect("library lock")
+                .replace(Shown {
+                    cursor,
+                    files: rows.files.iter().cloned().collect(),
+                    order: rows.order,
+                }),
             None => None,
         };
         if let Some(old) = old {
@@ -2099,7 +2163,12 @@ impl<S: Store + 'static> Persist<S> {
             .iter()
             .map(|(id, path)| (id.clone(), path.clone()))
             .collect();
-        let old = self.shown.lock().expect("library lock").replace(shown);
+        let old = self
+            .reads
+            .shown
+            .lock()
+            .expect("library lock")
+            .replace(shown);
         if let Some(old) = old {
             self.reader.close(old.cursor);
         }
@@ -2111,14 +2180,7 @@ impl<S: Store + 'static> Persist<S> {
     /// on a thread of its own: a coming frame shows them. Asked while a
     /// read goes on, they are read once more after it.
     fn ask_stacks(&mut self) {
-        if self.stacking.is_some() {
-            self.stack_again = true;
-            return;
-        }
-        let (reader, seq) = (self.reader.clone(), self.bus.last_seq());
-        self.stacking = Some(spawn("helios-stacks-read", move || {
-            read_stacked_after(&reader, seq)
-        }));
+        self.reads.ask_stacks();
     }
 
     /// The versions strip's reads and what was asked of photos'

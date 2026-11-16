@@ -541,14 +541,16 @@ impl Shell {
             self.apply_template_tools(&next.meta.name, &t.tools);
         }
         if changed(&|b| b.bundle.template.library != t.library) {
-            self.focus.import_source = t.library.as_ref().and_then(|l| l.import.clone());
+            self.focus
+                .import_source
+                .replace(t.library.as_ref().and_then(|l| l.import.clone()));
             // A Compare workspace opens in Compare (once, when opened).
             if before.is_none() {
                 self.focus.open_in_compare = t.library.as_ref().is_some_and(|l| l.compare);
             }
             let mut lib = self.focus.library.borrow_mut();
             lib.auto_advance = t.library.as_ref().is_some_and(|l| l.auto_advance);
-            lib.import_offered = self.focus.import_source.is_some();
+            lib.import_offered = self.focus.import_source.borrow().is_some();
             // The workspace's sort (validation refused one it does not
             // know).
             if let Some(sort) =
