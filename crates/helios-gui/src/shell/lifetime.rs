@@ -259,7 +259,8 @@ impl Shell {
         let root = egui::ViewportId::ROOT;
         ctx.send_viewport_cmd_to(root, ViewportCommand::Visible(true));
         ctx.send_viewport_cmd_to(root, ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd_to(root, ViewportCommand::Focus);
+        // The focus is asked on the bus (`window.activate`, `command`).
+        super::raise_main_window(self.core.app.handle());
         ctx.request_repaint();
         true
     }
