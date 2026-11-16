@@ -1,7 +1,7 @@
 //! Helios's items in egui-pop's status bar, each shown only where it
 //! means something (a `when` clause over the context stack's keys): the
-//! number of images in the library, the zoom and the history's length in
-//! the darkroom, the picks and rejects while culling, each after its
+//! number of images in the library, the zoom, the history's length and
+//! whether the photo is edited in the darkroom, the picks and rejects while culling, each after its
 //! icon. egui-pop's own breadcrumb and mode chips start the bar.
 //!
 //! Each frame [`Items::frame`] measures what the items say and publishes
@@ -10,8 +10,9 @@
 //! its events, so it is current when its place comes back.
 //!
 //! On a narrow window the counts stay longest (their priority), then the
-//! zoom, then the history. The zoom's and the history's hover cards hold
-//! their actions: fit, fill and 100 %; undo and redo.
+//! zoom, then the edit's mark, then the history. The hover cards hold
+//! their actions: fit, fill and 100 % for the zoom; undo and redo for the
+//! history; "Reset all" and the before and after for the edit's mark.
 
 use std::collections::BTreeMap;
 
@@ -34,6 +35,8 @@ pub const IMAGES: &str = "helios.status.images";
 pub const ZOOM: &str = "helios.status.zoom";
 /// The darkroom's history: the steps there are to undo.
 pub const HISTORY: &str = "helios.status.history";
+/// The darkroom's photo: edited, or as it came (`crate::edit_marks`).
+pub const EDIT: &str = "helios.status.edit";
 /// Culling: the images picked and rejected.
 pub const CULLED: &str = "helios.status.culled";
 
@@ -43,10 +46,13 @@ const ZOOM_FILL: CommandId = CommandId::from_static("viewport.zoom.fill");
 const ZOOM_100: CommandId = CommandId::from_static("viewport.zoom.100");
 const UNDO: CommandId = CommandId::from_static("param.undo");
 const REDO: CommandId = CommandId::from_static("param.redo");
+const RESET_ALL: CommandId = CommandId::from_static(crate::edit_marks::RESET_ALL);
+const COMPARE: CommandId = CommandId::from_static("viewport.compare");
 
 /// What stays on a narrow bar, the highest the longest.
 const PRIORITY_COUNTS: i32 = 30;
 const PRIORITY_ZOOM: i32 = 20;
+const PRIORITY_EDIT: i32 = 15;
 const PRIORITY_HISTORY: i32 = 10;
 
 /// What the items say, measured by the shell each frame.
@@ -61,6 +67,9 @@ pub struct Measure {
     pub zoom: Option<f64>,
     /// Steps to undo.
     pub history: usize,
+    /// The photo shown is edited: a parameter differs from its default,
+    /// or a module is bypassed.
+    pub edited: bool,
 }
 
 /// The items, declared with the frames they show in.
@@ -84,6 +93,11 @@ pub fn indicators(frames: &[FrameSpec]) -> Vec<Indicator> {
                 .during(darkroom),
         );
         items.push(
+            item(EDIT, 22, PRIORITY_EDIT)
+                .hover(edit_card)
+                .during(darkroom),
+        );
+        items.push(
             item(HISTORY, 25, PRIORITY_HISTORY)
                 .hover(history_card)
                 .during(darkroom),
@@ -101,6 +115,7 @@ fn icon(item: &str) -> &'static str {
         IMAGES => "phosphor:images",
         ZOOM => "phosphor:magnifying-glass",
         HISTORY => "history",
+        EDIT => "phosphor:sliders-horizontal",
         _ => "phosphor:check-square",
     }
 }
@@ -138,6 +153,25 @@ fn history_card(state: &IndicatorState, app: &AppHandle) -> Card {
         .link(
             t(Message::new("gui-status-history-redo", "Redo")),
             REDO,
+            Json::Null,
+        )
+}
+
+/// The edit's card: what the mark says, "Reset all" and the before and
+/// after.
+fn edit_card(state: &IndicatorState, app: &AppHandle) -> Card {
+    let ctx = app.egui();
+    let t = |msg: Message| crate::i18n::text(&ctx, msg);
+    Card::new()
+        .text(&state.detail)
+        .link(
+            t(Message::new("gui-status-edit-reset-all", "Reset all")),
+            RESET_ALL,
+            Json::Null,
+        )
+        .link(
+            t(Message::new("gui-status-edit-compare", "Before and after")),
+            COMPARE,
             Json::Null,
         )
 }
@@ -185,6 +219,23 @@ impl Items {
             ).with("count", m.history)),
             "count": m.history,
         });
+        let edit = if m.edited {
+            json!({
+                "text": t(Message::new("gui-status-edited", "Edited")),
+                "detail": t(Message::new(
+                    "gui-status-edited-detail",
+                    "This photo is edited: its modules changed from their defaults"
+                )),
+            })
+        } else {
+            json!({
+                "text": t(Message::new("gui-status-original", "Original")),
+                "detail": t(Message::new(
+                    "gui-status-original-detail",
+                    "This photo is as it came: no module changed"
+                )),
+            })
+        };
         let culled = json!({
             "text": t(Message::new("gui-status-culled", "{ $picked } picked, { $rejected } rejected")
                 .with("picked", m.picked)
@@ -194,6 +245,7 @@ impl Items {
             (IMAGES, images),
             (ZOOM, zoom),
             (HISTORY, history),
+            (EDIT, edit),
             (CULLED, culled),
         ] {
             if self.said.get(id) != Some(&data) {

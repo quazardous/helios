@@ -120,6 +120,9 @@ pub(super) struct Core {
     /// Every notice so far; the status bar shows the last, toasts the
     /// warnings and errors.
     pub(super) notices: Vec<Notice>,
+    /// What the shell's local listeners of the bus said, until the shell
+    /// takes it into its notes and notices ([`super::said`]).
+    pub(super) said: Rc<RefCell<super::said::Said>>,
     /// The GUI's clock, in seconds, as of this frame.
     pub(super) now: f64,
     /// The viewport engine and its render cache, shared by every window's

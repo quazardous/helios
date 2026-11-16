@@ -58,7 +58,7 @@ use crate::promise_line::Action;
 pub const WINDOW: &str = "activity";
 
 /// The focus's window (`focus_window`).
-static FRAME: FocusWindow = FocusWindow {
+pub(super) static FRAME: FocusWindow = FocusWindow {
     window: WINDOW,
     embedded: "helios.activity.embedded",
     min_size: egui::vec2(640.0, 360.0),

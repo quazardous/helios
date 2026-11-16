@@ -51,7 +51,7 @@ const SHOWN_SIDE: u32 = 2048;
 const HANDLE: f32 = 16.0;
 
 /// The focus's window (`focus_window`).
-static FRAME: FocusWindow = FocusWindow {
+pub(super) static FRAME: FocusWindow = FocusWindow {
     window: WINDOW,
     embedded: "helios.calibrate.embedded",
     min_size: egui::vec2(720.0, 440.0),
@@ -149,7 +149,7 @@ pub(crate) struct Calibration {
 /// The focus: its state shared with the window's content.
 #[derive(Default)]
 pub(super) struct CalibrationFocus {
-    state: Rc<RefCell<Calibration>>,
+    pub(super) state: Rc<RefCell<Calibration>>,
 }
 
 impl CalibrationFocus {

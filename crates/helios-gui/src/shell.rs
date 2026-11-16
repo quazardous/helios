@@ -121,6 +121,7 @@ pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
 mod reads;
+mod said;
 mod storage;
 mod storage_admin;
 mod trace;
@@ -313,6 +314,11 @@ enum Action {
     /// A module (the selected one by default) bypassed, brought back, or
     /// toggled, as whom.
     Bypass(Option<String>, Option<bool>, Origin),
+    /// A module's parameters (the selected one by default) reset to their
+    /// defaults, as whom.
+    ResetNode(Option<String>, Origin),
+    /// The whole edit reset: the photo back to its original, as whom.
+    ResetAll(Origin),
     /// Goes to a place of the context stack at the workspace's top: the
     /// library, or the workspace's network.
     Place(crate::contexts::FrameId),
@@ -1137,6 +1143,7 @@ impl Shell {
             dialogs,
             assume_yes: false,
             notices: Vec::new(),
+            said: Rc::default(),
             now: 0.0,
             engine,
             gpu: None,
@@ -1186,6 +1193,9 @@ impl Shell {
         shell.listen_files_dropped();
         // What follows a setting changed: the caches' budgets.
         shell.listen_settings_changed();
+        // Each focus window and the import window close their state with
+        // their window's `window.close`, in the same pass.
+        shell.listen_window_closes();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
@@ -1230,10 +1240,11 @@ impl Shell {
                 .params
                 .borrow_mut()
                 .set_app(shell.core.app.handle().clone());
-            let (params, viewport, values) = (
+            let (params, viewport, values, marks) = (
                 shell.focus.params.clone(),
                 shell.focus.viewport.clone(),
                 shell.core.values.clone(),
+                shell.focus.edit_marks.clone(),
             );
             shell.set_content("helios.params", move |ui| {
                 let (selection, members) = {
@@ -1254,9 +1265,13 @@ impl Shell {
                         .unwrap_or_default();
                     (selection, members)
                 };
-                params
-                    .borrow_mut()
-                    .panel_ui(ui, &values, selection.as_deref(), &members);
+                params.borrow_mut().panel_ui(
+                    ui,
+                    &values,
+                    selection.as_deref(),
+                    &members,
+                    &marks.borrow(),
+                );
             });
         }
         if has(&shell, crate::workshops::PANEL) {
@@ -1319,10 +1334,14 @@ impl Shell {
             });
         }
         if has(&shell, crate::modules::PANEL) {
-            let (viewport, values) = (shell.focus.viewport.clone(), shell.core.values.clone());
+            let (viewport, values, marks) = (
+                shell.focus.viewport.clone(),
+                shell.core.values.clone(),
+                shell.focus.edit_marks.clone(),
+            );
             let workshops = has(&shell, crate::workshops::PANEL);
             shell.set_content(crate::modules::PANEL, move |ui| {
-                crate::modules::ui(ui, &viewport, &values, workshops);
+                crate::modules::ui(ui, &viewport, &values, &marks.borrow(), workshops);
             });
         }
         if has(&shell, crate::mask_tree::PANEL) {
@@ -2108,6 +2127,62 @@ impl Shell {
         }
     }
 
+    /// Reads the edit's marks again once the value store was written (a
+    /// drag's frames, a step, an undo, a redo) or its history moved
+    /// (another photo opened) and, when they
+    /// changed, passes them through `edit.changed` on the application's
+    /// bus: each listener's part done in the order they ran, then
+    /// `edit.changed` said on the journal (`crate::edit_marks`).
+    fn follow_edit_marks(&mut self) {
+        use crate::edit_marks as em;
+        let marks = {
+            let store = lock(&self.core.values);
+            // A write (a drag's frames included) or the history moved
+            // (another photo opened).
+            let rev = (store.seq(), store.history_rev());
+            if self.focus.edit_rev == Some(rev) {
+                return;
+            }
+            self.focus.edit_rev = Some(rev);
+            em::Marks::read(&store)
+        };
+        if *self.focus.edit_marks.borrow() == marks {
+            return;
+        }
+        let bus = self.core.app.handle().bus();
+        if !self
+            .focus
+            .edit_listening
+            .as_ref()
+            .is_some_and(|b| Arc::ptr_eq(b, &bus))
+        {
+            for (id, _) in em::ORDER {
+                if let Err(e) = em::listen(&*bus, id) {
+                    log::error!(target: "helios", "{}: {e}", em::CHANGED);
+                }
+            }
+            self.focus.edit_listening = Some(bus.clone());
+        }
+        let mut data = marks.to_json();
+        let ran = em::pass(&*bus, marks.clone());
+        for id in &ran {
+            if id == em::MARKS {
+                *self.focus.edit_marks.borrow_mut() = marks.clone();
+            }
+        }
+        data["ran"] = json!(ran);
+        self.core
+            .app
+            .handle()
+            .publish("helios", None, em::CHANGED, data);
+    }
+
+    /// What the open photo's edit changed from its defaults, as last
+    /// said on `edit.changed`.
+    pub fn edit_marks(&self) -> crate::edit_marks::Marks {
+        self.focus.edit_marks.borrow().clone()
+    }
+
     /// Measures what Helios's status bar items say, and publishes what
     /// changed.
     fn status_items(&mut self, ctx: &egui::Context) {
@@ -2120,12 +2195,14 @@ impl Shell {
             .mapping()
             .map(|m| m.zoom);
         let history = lock(&self.core.values).undo_steps().len();
+        let edited = self.focus.edit_marks.borrow().edited();
         let measure = crate::status_items::Measure {
             images,
             picked,
             rejected,
             zoom,
             history,
+            edited,
         };
         self.focus
             .status_items
@@ -3795,6 +3872,29 @@ impl Shell {
                 };
                 Ok(Action::Bypass(node, on, origin.clone()))
             }),
+        );
+        add(
+            CommandSpec::new(
+                crate::edit_marks::RESET_NODE,
+                "Reset a module's parameters to their defaults, its bypass kept (`node`: the selected one by default); one undo step",
+                "Node graph",
+            ),
+            Box::new(|a, origin| {
+                let node = match a.get("node") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(n)) => Some(n.clone()),
+                    Some(n) => return Err(format!("`node`: {n} is not a node's name")),
+                };
+                Ok(Action::ResetNode(node, origin.clone()))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                crate::edit_marks::RESET_ALL,
+                "Reset all: every module's parameters to their defaults and the modules bypassed brought back, the photo as it was before it was edited; one undo step",
+                "Node graph",
+            ),
+            Box::new(|_, origin| Ok(Action::ResetAll(origin.clone()))),
         );
         Shell::declare_mask_commands(&mut add);
         Shell::declare_member_commands(&mut add);
@@ -6619,6 +6719,17 @@ impl Shell {
                 let (node, on) = crate::modules::bypass(&mut store, node.as_deref(), on, &origin)?;
                 return Ok(json!({ "node": node, "bypassed": on }));
             }
+            Action::ResetNode(node, origin) => {
+                let mut store = lock(&self.core.values);
+                let (node, reset) =
+                    crate::edit_marks::reset_node(&mut store, node.as_deref(), &origin)?;
+                return Ok(json!({ "node": node, "reset": reset }));
+            }
+            Action::ResetAll(origin) => {
+                let mut store = lock(&self.core.values);
+                let reset = crate::edit_marks::reset_all(&mut store, &origin)?;
+                return Ok(json!({ "reset": reset }));
+            }
             Action::Compare => {
                 use crate::viewport::COMPARE;
                 let mut store = lock(&self.core.values);
@@ -7032,6 +7143,7 @@ impl Shell {
             .viewport
             .borrow_mut()
             .sync(&mut lock(&self.core.values));
+        self.follow_edit_marks();
         self.follow_opening(&ctx);
         self.follow_decisions();
         self.status_bar(&ctx);

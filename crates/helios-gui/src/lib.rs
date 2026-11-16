@@ -17,6 +17,7 @@ pub mod decisions;
 pub mod dialogs;
 pub mod display;
 pub mod duplicates;
+pub mod edit_marks;
 pub mod edit_snapshots;
 pub mod ending;
 pub mod engine_source;

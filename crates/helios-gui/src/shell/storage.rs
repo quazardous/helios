@@ -14,7 +14,9 @@
 //! Volumes; `{"volume": id}` marks that volume and scrolls to it (the
 //! health check's free-space fix does).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 
@@ -391,7 +393,7 @@ pub(crate) struct StoragePage {
     error: Option<String>,
     /// The cards an import left short of their backups: told safe to
     /// format once a backup job makes them so, while still inserted.
-    waiting: Vec<Card>,
+    waiting: Rc<RefCell<Vec<Card>>>,
     /// The same, for the health check's thread.
     shared_waiting: Arc<Mutex<Vec<Card>>>,
     /// The link's [`StorageLink::seq`] last shown.
@@ -479,23 +481,23 @@ impl Shell {
         }
     }
 
-    /// The cards an import read, from its report (`cards`): those short
-    /// of their backups wait for a backup job to end.
-    pub(super) fn wait_for_backups(&mut self, report: &Value) {
-        for card in report["cards"].as_array().into_iter().flatten() {
-            if card["safe_to_format"] == true
-                || card["missing"].as_u64().unwrap_or(0) > 0
-                || card["short"].as_u64().unwrap_or(0) == 0
-            {
-                continue;
-            }
-            let Some(card) = import_end::card_of(card) else {
-                continue;
-            };
-            self.core.storage.waiting.retain(|c| c.path != card.path);
-            self.core.storage.waiting.push(card);
-        }
-        self.share_waiting();
+    /// `storage.cards-waiting`, the shell's listener of `import.ended`:
+    /// the cards an import read, from its report (`cards`), those short
+    /// of their backups waiting for a backup job to end.
+    pub(super) fn listen_cards_waiting(&self) -> Result<(), String> {
+        let (waiting, shared) = (
+            self.core.storage.waiting.clone(),
+            self.core.storage.shared_waiting.clone(),
+        );
+        import_end::listen_local(
+            &*self.core.app.handle().bus(),
+            import_end::CARDS,
+            move |end, _| {
+                if let Ok(report) = &end.outcome {
+                    wait_for_backups(&waiting, &shared, &report.cards);
+                }
+            },
+        )
     }
 
     /// The cards waiting for their backups, as the health check's thread
@@ -505,13 +507,10 @@ impl Shell {
     }
 
     fn share_waiting(&self) {
-        let mut shared = self
-            .core
-            .storage
-            .shared_waiting
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        shared.clone_from(&self.core.storage.waiting);
+        share_waiting(
+            &self.core.storage.waiting,
+            &self.core.storage.shared_waiting,
+        );
     }
 
     /// The cards still waiting for their backups.
@@ -519,6 +518,7 @@ impl Shell {
         self.core
             .storage
             .waiting
+            .borrow()
             .iter()
             .map(|c| c.label.clone())
             .collect()
@@ -533,9 +533,13 @@ impl Shell {
         let Some(link) = self.core.storage.link.clone() else {
             return;
         };
-        self.core.storage.waiting.retain(|c| c.path.is_dir());
+        self.core
+            .storage
+            .waiting
+            .borrow_mut()
+            .retain(|c| c.path.is_dir());
         self.share_waiting();
-        let cards = self.core.storage.waiting.clone();
+        let cards = self.core.storage.waiting.borrow().clone();
         if cards.is_empty() {
             return;
         }
@@ -582,7 +586,11 @@ impl Shell {
         for (path, now) in checked {
             match now {
                 Ok(now) if now.safe_to_format => {
-                    self.core.storage.waiting.retain(|c| c.path != path);
+                    self.core
+                        .storage
+                        .waiting
+                        .borrow_mut()
+                        .retain(|c| c.path != path);
                     let message = Message::new(
                         "gui-backup-card-safe",
                         "{ $card } is safe to format: every photo has its backups",
@@ -775,4 +783,29 @@ pub fn backup_line(
             .with("copies", u64::from(s.copies))
     };
     (t(line.with("disks", disks)), false)
+}
+
+/// The cards an import read (`cards`): those short of their backups wait
+/// for a backup job to end, in `waiting` and its copy for the health
+/// check's thread.
+fn wait_for_backups(waiting: &RefCell<Vec<Card>>, shared: &Mutex<Vec<Card>>, cards: &[Card]) {
+    {
+        let mut waiting = waiting.borrow_mut();
+        for card in cards {
+            if card.safe_to_format || card.missing > 0 || card.short == 0 {
+                continue;
+            }
+            waiting.retain(|c| c.path != card.path);
+            waiting.push(card.clone());
+        }
+    }
+    share_waiting(waiting, shared);
+}
+
+/// The waiting cards copied for the health check's thread.
+fn share_waiting(waiting: &RefCell<Vec<Card>>, shared: &Mutex<Vec<Card>>) {
+    shared
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone_from(&waiting.borrow());
 }

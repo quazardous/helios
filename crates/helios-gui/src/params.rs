@@ -31,7 +31,9 @@
 //!   member's name and its value in words ("spot: opacity 30 %").
 //! - Marks, in the gutters of each part: changed from its default (a dot
 //!   that resets), held by someone else's gesture, just moved by another
-//!   origin (who, in the tooltip).
+//!   origin (who, in the tooltip). A module's header carries a mark and a
+//!   Reset (`node.reset`) once one of its parameters changed
+//!   (`crate::edit_marks`).
 //! - The widget's id comes from the path, and so does its picture's name
 //!   (`param:<path>`); the context menu resets, copies the path or the
 //!   value, and pastes: commands, like everything else. While a widget
@@ -1114,6 +1116,7 @@ impl Params {
         store: &Mutex<Store>,
         selection: Option<&str>,
         members: &Members,
+        marks: &crate::edit_marks::Marks,
     ) {
         self.end_steps(store, ui.input(|i| i.time));
         let paths: Vec<(String, String, Option<String>)> = {
@@ -1147,7 +1150,7 @@ impl Params {
                         .position(|(n, _, _)| n != node)
                         .map_or(paths.len(), |i| start + i);
                     ui.add_space(4.0);
-                    ui.strong(node);
+                    header_ui(ui, node, marks.changed(node));
                     // A module's own header (the chart profile's choice).
                     crate::calibrate::header_ui(ui, store, node);
                     // The Camera look entry's (fit, switch, scores).
@@ -1172,6 +1175,33 @@ impl Params {
             },
         );
     }
+}
+
+/// A module's header: its name, its changed mark when a parameter
+/// differs from its default, and its Reset (`node.reset`: its
+/// parameters back to their defaults, its bypass kept, one undo step),
+/// offered only then.
+fn header_ui(ui: &mut Ui, node: &str, changed: bool) {
+    ui.horizontal(|ui| {
+        ui.strong(node);
+        if changed {
+            crate::modules::changed_mark(ui, node);
+            let ctx = ui.ctx().clone();
+            let reset = crate::i18n::text(&ctx, Message::new("gui-param-module-reset", "Reset"));
+            let r = helios_ui::row_action(ui, helios_ui::Action::Secondary, &reset);
+            crate::name_rect(&ctx, &format!("module:{node}:reset"), r.rect);
+            if r.clicked() {
+                crate::dialogs::request(
+                    &ctx,
+                    crate::dialogs::Request::Run(
+                        crate::edit_marks::RESET_NODE.into(),
+                        json!({ "node": node }),
+                        Origin::User,
+                    ),
+                );
+            }
+        }
+    });
 }
 
 /// A node's parameters by section: the ungrouped ones first, then each

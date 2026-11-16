@@ -3,7 +3,9 @@
 //! - **The panel** lists the modules of the network shown, in the order
 //!   they were added (inside a sub-workspace, its modules only): a row selects its module (`view/graph/selection`,
 //!   what the Parameters and Masks panels follow), and its Bypass toggle
-//!   bypasses it or brings it back.
+//!   bypasses it or brings it back. A module whose parameters differ
+//!   from their defaults carries a mark after its name
+//!   (`module:<node>:changed`, `crate::edit_marks`).
 //! - **A bypass** is a value of the store, `bypass/<node>`
 //!   (`helios_values::bypass_path`), declared for each module with an
 //!   input to pass through: bypassed, the module keeps its parameters and
@@ -209,6 +211,7 @@ pub fn ui(
     ui: &mut Ui,
     viewport: &RefCell<crate::viewport::Viewport>,
     values: &Mutex<Store>,
+    marks: &crate::edit_marks::Marks,
     workshops: bool,
 ) {
     let ctx = ui.ctx().clone();
@@ -331,6 +334,9 @@ pub fn ui(
                     let shown = selection.as_deref() == Some(row.node.as_str())
                         || many.len() > 1 && many.contains(&row.node);
                     let clicked = ui.selectable_label(shown, name);
+                    if marks.changed(&row.node) {
+                        changed_mark(ui, &row.node);
+                    }
                     if clicked.clicked() {
                         let modifiers = ui.input(|i| i.modifiers);
                         many = pick(&names, &many, selection.as_deref(), &row.node, modifiers);
@@ -456,6 +462,21 @@ pub fn ui(
     {
         request(ui.ctx(), Request::Notify(Level::Warning, e.into()));
     }
+}
+
+/// The mark of a module whose parameters differ from their defaults,
+/// named `module:<node>:changed` (the Modules panel's rows, the
+/// Parameters panel's headers).
+pub fn changed_mark(ui: &mut Ui, node: &str) {
+    let ctx = ui.ctx().clone();
+    let name = crate::i18n::text(
+        &ctx,
+        Message::new("gui-modules-changed", "{ $node } changed from its defaults")
+            .with("node", node),
+    );
+    let r = ui.text_tone(egui_pop::core::ui::Tone::Info, "•");
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
+    crate::name_rect(&ctx, &format!("module:{node}:changed"), r.rect);
 }
 
 /// The rows selected after a click on `node`: Shift adds the run from the

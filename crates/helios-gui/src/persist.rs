@@ -38,7 +38,9 @@
 //!   it; a drag saved that way and then cancelled saves the values it put
 //!   back, so the given-up values never stay the latest edit. Each
 //!   version names who made its step (the user, an agent, a script), and
-//!   each save is announced on the bus as `edit.saved`;
+//!   each save is announced on the bus as `edit.saved`, and keeps whether
+//!   the edit changes the photo from its original (its `edited` field, the
+//!   Library's and the filmstrip's "edited" badge);
 //! - pins the image's history snapshots taken since (see
 //!   `crate::edit_snapshots`): once the edit is saved, a snapshot taken
 //!   at the step it holds is pinned to that version, and the image's
@@ -73,7 +75,7 @@ type Searched = (Vec<String>, helios_vault::Facets);
 
 /// The fields the library shows (the capture time gives the day the
 /// search field's dates match; the title is copied with the marks).
-const SHOWN: [&str; 14] = [
+const SHOWN: [&str; 15] = [
     RATING,
     REJECTED,
     PICKED,
@@ -88,6 +90,7 @@ const SHOWN: [&str; 14] = [
     cull::FOCUS,
     cull::CLIP_WHITE,
     cull::CLIP_BLACK,
+    helios_vault::edit::EDITED,
 ];
 
 /// Who the vault's audit trail names for what the desktop writes.
@@ -254,6 +257,9 @@ enum Write {
 struct EditStep {
     version: Version,
     in_progress: bool,
+    /// The edit changes the image from its original
+    /// (`crate::edit_marks::Marks::edited`), kept as its `edited` field.
+    edited: bool,
     /// The session once the step is written.
     after: EditSession,
 }
@@ -362,6 +368,7 @@ impl Write {
                     "version": step.version,
                     "step": step.after.steps(),
                     "inProgress": step.in_progress,
+                    "edited": step.edited,
                 }),
             ),
             Self::Snapshots(image, snapshots) => (
@@ -2612,7 +2619,7 @@ impl<S: Store + 'static> Persist<S> {
             return;
         };
         let at = now.max(0.0) as u64;
-        let (committed, label, origin, gesture, current) = {
+        let (committed, label, origin, gesture, current, edited) = {
             let store = shell.values().lock().expect("value store lock");
             let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
             for (path, entry) in store.list("node/") {
@@ -2659,6 +2666,7 @@ impl<S: Store + 'static> Persist<S> {
                 store.last_origin().map_or_else(|| WHO.to_string(), who),
                 gesture,
                 current,
+                crate::edit_marks::Marks::read(&store).edited(),
             )
         };
         let step = if committed == e.committed {
@@ -2696,6 +2704,7 @@ impl<S: Store + 'static> Persist<S> {
             self.writes.push_back(Write::Edit(Box::new(EditStep {
                 version,
                 in_progress: e.session.in_progress(),
+                edited,
                 after: e.session.clone(),
             })));
         }
@@ -2714,6 +2723,13 @@ impl<S: Store + 'static> Persist<S> {
         let editing = self.editing.as_mut().filter(|e| e.session.image() == image);
         match answer {
             Ok(_) => {
+                // Its thumbnails (the Library, the filmstrip) say whether
+                // it is edited, as the vault now keeps it.
+                shell.library_mut().show_field(
+                    &image.hex(),
+                    helios_vault::edit::EDITED,
+                    Some(&Value::Bool(step.edited)),
+                );
                 if let Some(e) = editing {
                     e.confirmed = step.after;
                 }

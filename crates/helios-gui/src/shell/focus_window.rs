@@ -19,6 +19,8 @@ use std::rc::Rc;
 
 use egui::{Context as Egui, Vec2, ViewportId};
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::bus::bus_contract::{HookError, ListenOpts};
+use egui_pop::api::bus::{PLACE, REGISTRY, Reason, WindowClose};
 use egui_pop::api::windows::{WindowId, WindowSpec};
 
 /// The document, under the interface's persistence directory, listing
@@ -82,8 +84,44 @@ impl FocusWindow {
         app.window_viewport(&self.id()) == Some(ViewportId::ROOT)
     }
 
-    /// Each frame of the main window: the focus's OS window opened or
-    /// closed as the focus is.
+    /// The owner of the focus's window on egui-pop's bus (ADR 0029):
+    /// `helios.<window>`, who asks its opening and whose listener of
+    /// `window.close` closes the focus.
+    pub(super) fn owner(&self) -> String {
+        format!("helios.{}", self.window)
+    }
+
+    /// The focus's listener of egui-pop's `window.close`, local to the
+    /// interface's thread: whatever closes its window (its title bar, a
+    /// command, Escape, the compositor, the main window's close), the
+    /// focus closes in the same pass, after the registry let the window
+    /// go and before its place is kept.
+    ///
+    /// # Errors
+    /// The bus refused the listener.
+    pub(super) fn listen_close<T: WindowFocus>(
+        &'static self,
+        app: &AppHandle,
+        state: &Rc<RefCell<T>>,
+    ) -> Result<(), String> {
+        let state = state.clone();
+        let owner = self.owner();
+        listen_window_close(app, &owner, self.window, move |did| {
+            let mut s = state
+                .try_borrow_mut()
+                .map_err(|_| HookError("the focus is being drawn".into()))?;
+            s.set_open(false);
+            *s.shown() = None;
+            did.push(format!("{}: closed", self.window));
+            Ok(())
+        })
+    }
+
+    /// Each frame of the main window: the focus's OS window opened when
+    /// the focus opened, as its owner's `window.open` request, and asked
+    /// closed when the focus closed (a command); closed by itself, its
+    /// listener of `window.close` ([`FocusWindow::listen_close`]) closed
+    /// the focus already.
     pub(super) fn follow<T: WindowFocus>(
         &'static self,
         app: &AppHandle,
@@ -97,53 +135,48 @@ impl FocusWindow {
         let id = self.id();
         let there = app.window_viewport(&id).is_some();
         let mut s = state.borrow_mut();
-        match (s.is_open(), there) {
-            (true, false) if s.shown().is_some() => {
-                s.set_open(false);
-                *s.shown() = None;
-            }
-            (true, false) => {
-                let title = s.title(ctx);
-                let spec = WindowSpec::new(self.window, title)
-                    .size(self.default_size(ctx.content_rect().size()))
-                    .min_size(self.min_size)
-                    .shell_bars(true);
-                *s.shown() = Some(id.clone());
-                drop(s);
-                let state = state.clone();
-                app.open_window(spec, move |ui, window| {
-                    let Ok(mut s) = state.try_borrow_mut() else {
-                        return;
-                    };
-                    let closing = !s.is_open() || window.close_requested();
-                    if !closing {
-                        egui::CentralPanel::default().show(ui, |ui| s.window_ui(ui));
-                        if s.asks_main_pass() {
-                            ui.ctx().request_repaint_of(ViewportId::ROOT);
-                        }
-                        return;
+        if s.is_open() && !there {
+            let title = s.title(ctx);
+            let spec = WindowSpec::new(self.window, title)
+                .size(self.default_size(ctx.content_rect().size()))
+                .min_size(self.min_size)
+                .shell_bars(true);
+            *s.shown() = Some(id.clone());
+            drop(s);
+            let state = state.clone();
+            app.request_window_open(spec, &self.owner(), Reason::Command, move |ui, window| {
+                let Ok(mut s) = state.try_borrow_mut() else {
+                    return;
+                };
+                if s.is_open() && !window.close_requested() {
+                    egui::CentralPanel::default().show(ui, |ui| s.window_ui(ui));
+                    if s.asks_main_pass() {
+                        ui.ctx().request_repaint_of(ViewportId::ROOT);
                     }
+                    return;
+                }
+                let app = window.app().clone();
+                if self.holds_main_window(&app) {
+                    // Moved into the main window (closed while it was
+                    // open): the shell comes back there rather than the
+                    // last window closing.
+                    window.keep_open();
                     s.set_open(false);
-                    let app = window.app().clone();
-                    if self.holds_main_window(&app) {
-                        app.raise_window(&WindowId::main());
-                    } else {
-                        window.close();
-                        super::import_window::hide_closing_window(ui.ctx(), &app);
-                    }
-                });
-            }
-            (false, true) if self.holds_main_window(app) => {
-                drop(s);
+                    drop(s);
+                    app.raise_window(&WindowId::main());
+                } else {
+                    // Closed from the window itself (Escape, its close
+                    // button): its `window.close` at the end of this pass.
+                    window.close();
+                }
+            });
+        } else if !s.is_open() && there {
+            drop(s);
+            if self.holds_main_window(app) {
                 app.raise_window(&WindowId::main());
-            }
-            (false, true) => {
-                *s.shown() = None;
-                drop(s);
+            } else {
                 app.close_window(&id);
             }
-            (false, false) => *s.shown() = None,
-            (true, true) => {}
         }
     }
 
@@ -180,7 +213,75 @@ impl FocusWindow {
     }
 }
 
+/// Registers `close` as `owner`'s listener of egui-pop's `window.close`
+/// for the window `window`, local to the interface's thread (the state
+/// it closes is `Rc`), after the registry let the window go and before
+/// its place is kept: run for that window's closes alone. Closed by the
+/// person from the window itself, the main window comes forward.
+///
+/// # Errors
+/// The bus refused the listener.
+pub(super) fn listen_window_close(
+    app: &AppHandle,
+    owner: &str,
+    window: &'static str,
+    close: impl Fn(&mut Vec<String>) -> Result<(), HookError> + 'static,
+) -> Result<(), String> {
+    let bus = app.bus();
+    let id = format!("{owner}.close");
+    bus.unlisten(
+        <WindowClose as egui_pop::api::bus::bus_contract::Point>::ID,
+        &id,
+    );
+    bus.listen_local::<WindowClose>(
+        id,
+        ListenOpts::new().owner(owner).after(REGISTRY).before(PLACE),
+        move |request, did| {
+            if request.window != window {
+                return Ok(());
+            }
+            close(did)?;
+            // Closed by the person from the window itself (its close
+            // button, Escape, the system's shortcut): the main window,
+            // behind it, comes forward.
+            if request.reason == Reason::User
+                && let Some(app) = egui_pop::api::bus::asking()
+            {
+                super::raise_main_window(&app);
+                did.push(format!("{window}: the main window brought forward"));
+            }
+            Ok(())
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 impl super::Shell {
+    /// The listeners of egui-pop's `window.close` closing the state of
+    /// Helios's own windows: the Activity, Calibration and Library foci
+    /// and the import window.
+    pub(super) fn listen_window_closes(&mut self) {
+        let app = self.core.app.handle().clone();
+        let listened = [
+            super::activity_focus::FRAME.listen_close(&app, &self.activity_focus.state),
+            super::calibrate_focus::FRAME.listen_close(&app, &self.calibration.state),
+            super::library_focus::FRAME.listen_close(&app, &self.library_focus.state),
+            self.listen_import_window_close(),
+        ];
+        for e in listened.into_iter().filter_map(Result::err) {
+            self.notes.push(format!("window.close: {e}"));
+        }
+    }
+
+    /// The order the listeners of `window.close` run in (egui-pop's and
+    /// Helios's windows').
+    pub fn window_close_order(&self) -> String {
+        egui_pop::api::bus::order_dump(
+            &*self.core.app.handle().bus(),
+            &[<WindowClose as egui_pop::api::bus::bus_contract::Point>::ID],
+        )
+    }
+
     /// The focus windows open, by window id, in a fixed order.
     fn open_focus_windows(&self) -> Vec<&'static str> {
         let mut open = Vec::new();

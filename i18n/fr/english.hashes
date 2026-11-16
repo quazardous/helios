@@ -80,6 +80,7 @@ command-decision-list.title 6600b2fe720b4aad
 command-dialog-answer.title eafe9e4e2e36ad73
 command-dialog-assumeYes.title 6f49391f70e668f3
 command-dialog-current.title 6ccc78624dd76c64
+command-edit-resetAll.title 799f53a4b1de5505
 command-graph-edit.description 5fff2a07d51e9a0b
 command-graph-export.description 57102c77a80a4198
 command-graph-read.description 0fc7303e09432ec5
@@ -255,6 +256,7 @@ command-network-move.title ef5dc76b20a2f118
 command-network-paste.title 97701ed112f511f3
 command-network-remove.title d8fa2c4b0ac3a88d
 command-node-bypass.title 92d6d970e355da8a
+command-node-reset.title 2792886c89a32c6e
 command-notice-details.title 4b45dfa875812ee6
 command-param-copyPath.title f347a7d3f946183d
 command-param-copyValue.title 910593755a63cea8
@@ -757,7 +759,6 @@ gui-import-darktable e80677a991ca5776
 gui-import-darktable-failed 734562b386ffbef3
 gui-import-darktable-help 429c1e5b6e9d64d7
 gui-import-darktable-report ecba0a3f2e4918fa
-gui-import-drop da83ea59969e4ff6
 gui-import-dropped-title be60191c7613e69f
 gui-import-ended c5137118d2a51aff
 gui-import-ended-reported 4a72175477f43d3b
@@ -983,6 +984,7 @@ gui-library-badge-backup-short 8fac7f711ac4176d
 gui-library-badge-backup-unverified 8ff08de6c4a53720
 gui-library-badge-blown 57b66a1b5e337b70
 gui-library-badge-crushed 1152f6fb562980fa
+gui-library-badge-edited 67abc6720572760e
 gui-library-badge-missing 5821c2953f0639df
 gui-library-badge-no-backup 2b3f93f60c5b31be
 gui-library-badge-offline 01064de9e41d67ce
@@ -1290,6 +1292,7 @@ gui-masks-tree-hint f297ce6a2372d366
 gui-masks-unlock 52d38f3a80ff723a
 gui-modules-bypass 90c419da8337da4d
 gui-modules-bypass-hint b821d3b701af9968
+gui-modules-changed cf5f1050bdda5d05
 gui-modules-fold-hint e819be3423c95479
 gui-modules-macro ba5fb00f7c9f1105
 gui-modules-macro-interface 26c6cf94d372328a
@@ -1331,6 +1334,7 @@ gui-param-hint 4a3998954c9f0c92
 gui-param-hint-wheel-focused cd76af83a9f1a799
 gui-param-hint-wheel-focused-or 69d0fb19160d0cc2
 gui-param-hint-wheel-over 6298df6f49c5660a
+gui-param-module-reset 9213e68cebd60946
 gui-param-past-range 34a7fc44204d4fc6
 gui-param-picker 50d22f15ce19390e
 gui-params-fold-section 027bd042853f7229
@@ -1545,6 +1549,10 @@ gui-stacks-top-why 5606662a6c0a2c97
 gui-status-culled 24a22c4d6d1a26d9
 gui-status-decisions c0ca1b2f6767f144
 gui-status-decisions-show aa59b37d30632236
+gui-status-edit-compare 6cf2cfa5ee8406d5
+gui-status-edit-reset-all 93ddbe79e69bb3c3
+gui-status-edited 47e8f3c2972ff5ae
+gui-status-edited-detail 177e54881502fb67
 gui-status-health-problem 935f612e2f699332
 gui-status-health-show f0433b89d22a3c9e
 gui-status-health-warning 02d925b19d5926e8
@@ -1553,6 +1561,8 @@ gui-status-history-detail 19faa215b0c20fae
 gui-status-history-redo ef2842c65cf40641
 gui-status-history-undo cc7022a2d9050a57
 gui-status-images 4afec94fc4bb8812
+gui-status-original fcb35279639c70f0
+gui-status-original-detail b7f274f6ff728c67
 gui-status-zoom b7f0fac92d5ef120
 gui-status-zoom-fill 17ff0f2a952bf24e
 gui-status-zoom-fit d584f3a86901a72a

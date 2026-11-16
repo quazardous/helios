@@ -1411,6 +1411,8 @@ gui-library-badge-changed-outside = changed outside
 
 gui-library-badge-crushed = crushed shadows
 
+gui-library-badge-edited = edited
+
 gui-library-badge-missing = missing
 
 gui-library-badge-no-backup = no backup
@@ -2031,6 +2033,8 @@ gui-modules-bypass = Bypass
 
 gui-modules-bypass-hint = Bypass { $node }: the image renders as if it were absent, its parameters kept ({ $key })
 
+gui-modules-changed = { $node } changed from its defaults
+
 gui-modules-fold-hint = Fold { $node } back into one node
 
 gui-modules-macro = macro { $version }
@@ -2112,6 +2116,8 @@ gui-param-hint-wheel-focused = the wheel once focused
 gui-param-hint-wheel-focused-or = the wheel once focused or with { $keys }
 
 gui-param-hint-wheel-over = the wheel over it
+
+gui-param-module-reset = Reset
 
 gui-param-past-range = { $label }: past its usual range
 
@@ -2639,6 +2645,14 @@ gui-status-decisions = { $count } decisions wait for an answer
 
 gui-status-decisions-show = Show the decisions
 
+gui-status-edit-compare = Before and after
+
+gui-status-edit-reset-all = Reset all
+
+gui-status-edited = Edited
+
+gui-status-edited-detail = This photo is edited: its modules changed from their defaults
+
 gui-status-health-problem = Health check: { $count } findings need attention, a problem among them
 
 gui-status-health-show = Open the health check
@@ -2654,6 +2668,10 @@ gui-status-history-redo = Redo
 gui-status-history-undo = Undo
 
 gui-status-images = { $count } images
+
+gui-status-original = Original
+
+gui-status-original-detail = This photo is as it came: no module changed
 
 gui-status-zoom = Zoom
 

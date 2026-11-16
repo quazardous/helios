@@ -491,6 +491,21 @@ impl EditSession {
     }
 }
 
+/// Whether an image's edit changed it from the original: the desktop
+/// says so with each step it saves (a module off its defaults, or one
+/// bypassed); a field of its own, so the Library's read carries it. An
+/// image no step was saved for since the field came has none: unknown,
+/// shown as not edited.
+pub const EDITED: &str = "edited";
+
+/// Keeps whether `image`'s edit changed it ([`EDITED`]).
+///
+/// # Errors
+/// The image is not in the library, or the store failed.
+pub fn set_edited<S: Store>(vault: &Vault<S>, image: &ImageId, edited: bool) -> Result<(), String> {
+    vault.transaction(|store| store.set_field(image, EDITED, Some(&Value::Bool(edited))))
+}
+
 /// Writes `version`, step `step` of an edit session (`in_progress`: saved
 /// during a gesture), and announces it ([`EditSaved`]).
 pub fn add_step<S: Store>(
