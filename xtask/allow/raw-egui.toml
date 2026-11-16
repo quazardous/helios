@@ -26,7 +26,6 @@
 "rule_editor_ui.rs" = 34
 "scopes.rs" = 4
 "shell.rs" = 5
-"shell/calibrate_focus.rs" = 48
 "shell/import_browsers.rs" = 7
 "shell/import_choices.rs" = 14
 "shell/import_detail.rs" = 1
