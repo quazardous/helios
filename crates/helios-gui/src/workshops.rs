@@ -475,25 +475,21 @@ impl Panel {
     fn describe_ui(&mut self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
-        let l = ui.text_role(
-            TextRole::Body,
-            text(Message::new(
-                "gui-workshops-describe",
-                "Describe what you want",
-            )),
-        );
-        // Stopgap: egui-pop's decorated input has no multi-line kind yet,
-        // so the words are egui's text area, the one raw widget left here.
-        ui.add(
-            egui::TextEdit::multiline(&mut self.describe)
-                .hint_text(text(Message::new(
-                    "gui-workshops-describe-hint",
-                    "backlit, the mountain and the sky too contrasted…",
-                )))
-                .desired_rows(2)
-                .desired_width(f32::INFINITY),
-        )
-        .labelled_by(l.id);
+        let name = text(Message::new(
+            "gui-workshops-describe",
+            "Describe what you want",
+        ));
+        let l = ui.text_role(TextRole::Body, name.clone());
+        let field = Input::multiline(&mut self.describe, &name)
+            .placeholder(&text(Message::new(
+                "gui-workshops-describe-hint",
+                "backlit, the mountain and the sky too contrasted…",
+            )))
+            .rows(2)
+            .width(ui.available_width())
+            .show(ui);
+        // Named by the words above it, which tests and agents find.
+        let _ = field.response.labelled_by(l.id);
         ui.horizontal(|ui| {
             let words = self.describe.trim();
             let design = text(Message::new("gui-workshops-design", "Design a workshop"));

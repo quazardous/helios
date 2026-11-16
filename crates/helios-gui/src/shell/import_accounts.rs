@@ -46,12 +46,10 @@ use std::time::{Duration, Instant};
 use egui_pop::core::icon::Icon;
 use egui_pop::core::input::Input;
 use egui_pop::core::overlay::{self, Kind as OverlayKind, OverlaySpec};
-use egui_pop::core::param::{self, Mode};
 use egui_pop::core::progress::Spinner;
 use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::{Grid, Space, TextRole, Tone, Track, UiPop as _};
 use egui_pop::model::field::FieldState;
-use egui_pop::model::values::{Descriptor, Value as PopValue};
 use helios_connect::Text;
 use helios_connect::account::{Account, AccountBook, AccountState, MemorySecrets, Secrets};
 use helios_connect::connect::{Context, FieldKind, Session, Status, WebSteps};
@@ -1115,26 +1113,18 @@ fn working(ui: &mut egui::Ui, text: String) {
 }
 
 /// The field of a connection form's value, in the form grid's value
-/// column (its name in the column before): egui-pop's editor of a text
-/// value, a secret typed masked, in the field and in the accessibility
-/// tree. Named `label` for assistive technologies and agents.
-///
-/// egui-pop's decorated input has no masked kind yet: the parameter
-/// editor, which has, draws its own label beside the field, so it is
-/// given none and the field is named here.
+/// column (its name in the column before): egui-pop's text input, a
+/// secret typed in its masked input (bullets in the field, and its value
+/// never in the accessibility tree). Named `label` for assistive
+/// technologies and agents.
 fn form_field(ui: &mut egui::Ui, label: &str, secret: bool, value: &mut String) {
-    let mut descriptor = Descriptor::text("", "");
-    if secret {
-        descriptor = descriptor.sensitive();
-    }
-    let mut typed = PopValue::Text(value.clone());
-    let response = param::param(ui, &descriptor, Mode::Plain(&mut typed));
-    let name = label.to_owned();
-    ui.ctx()
-        .accesskit_node_builder(response.id, |node| node.set_label(name));
-    if let PopValue::Text(text) = typed {
-        *value = text;
-    }
+    let width = ui.available_width();
+    let input = if secret {
+        Input::masked(value, label)
+    } else {
+        Input::text(value, label)
+    };
+    let _ = input.width(width).show(ui);
 }
 
 impl Accounts {
