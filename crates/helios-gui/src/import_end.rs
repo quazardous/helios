@@ -10,6 +10,11 @@
 //! [`FAILED_ORDER`]) declares, and says `import.ended` (or
 //! `import.failed`) on the journal.
 //!
+//! The shell's own listeners hold the interface's state (`Rc`), not
+//! `Send + Sync`: they are local listeners ([`listen_local`]), bound to
+//! the interface's thread, where the shell passes the end: they run there
+//! inline, in the declared order with the others.
+//!
 //! The two points are this crate's contract with the application's bus
 //! ([`POINTS`]): the desktop's `main` builds the one bus and hands it to
 //! the shell, which declares them there; the host's listeners
@@ -22,6 +27,7 @@
 //! vault, which is not done on the interface's thread. The node's
 //! promise puts them on before it says the end, so it passes their count.
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
@@ -170,6 +176,12 @@ pub struct Reactions {
     pub ran: Vec<String>,
     /// The import's changes, until [`HISTORY`] records them.
     pub changes: Option<Changes>,
+    /// How many duplicates wait for an answer once [`DUPLICATES`] took
+    /// those the import found.
+    pub asked: usize,
+    /// Whether [`SELECT`] selects the photos the import brought (the
+    /// user's import, said by [`SESSION`]).
+    pub select: bool,
 }
 
 /// Declares [`POINTS`] on `bus` (once; a second shell on the same bus
@@ -179,6 +191,38 @@ pub fn declare(bus: &dyn Bus) {
         if !matches!(refused, Refused::AlreadyDeclared { .. }) {
             log::error!(target: "helios", "import: {refused}");
         }
+    }
+}
+
+/// A listener's place in one of the points: absent, or after the
+/// listener named (none: first).
+type Place = Option<Option<&'static str>>;
+
+/// Where listener `id` runs in the import's points: after the listener
+/// [`ORDER`] names (in [`ImportEnded`]) and after the one
+/// [`FAILED_ORDER`] names (in [`ImportFailed`]), when they name it.
+///
+/// # Errors
+/// `id` is in neither order.
+fn places(id: &str) -> Result<(Place, Place), String> {
+    let place = |order: &[(&str, Option<&'static str>)]| {
+        order
+            .iter()
+            .find(|(listener, _)| *listener == id)
+            .map(|(_, after)| *after)
+    };
+    let (ended, failed) = (place(ORDER), place(FAILED_ORDER));
+    if ended.is_none() && failed.is_none() {
+        return Err(format!("`{id}` is not a listener of {ENDED} nor {FAILED}"));
+    }
+    Ok((ended, failed))
+}
+
+fn opts(after: Option<&str>) -> ListenOpts {
+    let opts = ListenOpts::new().owner(BUS_OWNER);
+    match after {
+        Some(after) => opts.after(after),
+        None => opts,
     }
 }
 
@@ -194,25 +238,9 @@ pub fn listen(
     id: &'static str,
     run: impl Fn(&ImportEnd, &mut Reactions) + Send + Sync + 'static,
 ) -> Result<(), String> {
-    let place = |order: &[(&str, Option<&'static str>)]| {
-        order
-            .iter()
-            .find(|(listener, _)| *listener == id)
-            .map(|(_, after)| *after)
-    };
-    let (ended, failed) = (place(ORDER), place(FAILED_ORDER));
-    if ended.is_none() && failed.is_none() {
-        return Err(format!("`{id}` is not a listener of {ENDED} nor {FAILED}"));
-    }
+    let (ended, failed) = places(id)?;
     declare(bus);
     let run = Arc::new(run);
-    let opts = |after: Option<&str>| {
-        let opts = ListenOpts::new().owner(BUS_OWNER);
-        match after {
-            Some(after) => opts.after(after),
-            None => opts,
-        }
-    };
     if let Some(after) = ended {
         bus.unlisten(ENDED, id);
         let run = run.clone();
@@ -226,6 +254,44 @@ pub fn listen(
     if let Some(after) = failed {
         bus.unlisten(FAILED, id);
         bus.listen::<ImportFailed>(id, opts(after), move |end, reactions| {
+            run(end, reactions);
+            reactions.ran.push(id.to_owned());
+            Ok::<(), HookError>(())
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// [`listen`] for a listener that holds the interface's state (not
+/// `Send + Sync`): a local listener, bound to the calling thread (the
+/// interface's), in the same declared place. An end passed on that
+/// thread runs it inline, in order with the others; passed from another
+/// thread, it runs at that thread's next pass (`Altered::deferred`).
+///
+/// # Errors
+/// `id` is in neither order, or the bus refused it.
+pub fn listen_local(
+    bus: &dyn Bus,
+    id: &'static str,
+    run: impl Fn(&ImportEnd, &mut Reactions) + 'static,
+) -> Result<(), String> {
+    let (ended, failed) = places(id)?;
+    declare(bus);
+    let run = Rc::new(run);
+    if let Some(after) = ended {
+        bus.unlisten(ENDED, id);
+        let run = run.clone();
+        bus.listen_local::<ImportEnded>(id, opts(after), move |end, reactions| {
+            run(end, reactions);
+            reactions.ran.push(id.to_owned());
+            Ok::<(), HookError>(())
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(after) = failed {
+        bus.unlisten(FAILED, id);
+        bus.listen_local::<ImportFailed>(id, opts(after), move |end, reactions| {
             run(end, reactions);
             reactions.ran.push(id.to_owned());
             Ok::<(), HookError>(())
@@ -505,6 +571,43 @@ mod tests {
     fn a_listener_not_declared_is_refused() {
         let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
         assert!(listen(&bus, "nobody.knows", |_, _| {}).is_err());
+        assert!(listen_local(&bus, "nobody.knows", |_, _| {}).is_err());
+    }
+
+    /// Local listeners (the interface's state, `Rc`) and shared ones
+    /// run in one declared order; passed on their thread, a local
+    /// listener's work is done inside the pass, nothing deferred.
+    #[test]
+    fn local_listeners_run_inside_the_pass_in_the_declared_order() {
+        let bus: Arc<dyn Bus> = Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
+        let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
+        for (id, _) in ORDER.iter().rev() {
+            if [HISTORY, BACKUPS, REFILL].contains(id) {
+                listen(&*bus, id, |_, _| {}).unwrap();
+            } else {
+                let seen = seen.clone();
+                listen_local(&*bus, id, move |_, r| {
+                    seen.borrow_mut().push(*id);
+                    if *id == DUPLICATES {
+                        r.asked = 2;
+                    }
+                })
+                .unwrap();
+            }
+        }
+        let end = ImportEnd {
+            request: json!({}),
+            origin: "user".into(),
+            outcome: Ok(Report::default()),
+            camera_looks: 0,
+        };
+        let altered = pass(&*bus, end, Reactions::default());
+        assert!(altered.deferred.is_empty(), "{:?}", altered.deferred);
+        let declared: Vec<&str> = ORDER.iter().map(|(id, _)| *id).collect();
+        assert_eq!(altered.value.ran, declared);
+        assert_eq!(*seen.borrow(), declared[3..]);
+        assert_eq!(altered.value.asked, 2);
+        assert!(order(&*bus).contains("local"), "{}", order(&*bus));
     }
 
     #[test]

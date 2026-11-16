@@ -88,15 +88,9 @@ pub(super) struct Focus {
     pub(super) decisions: Rc<RefCell<crate::decisions::Decisions>>,
     /// Where the workspace imports from, and how (its template's).
     pub(super) import_source: Option<helios_template::ImportDesc>,
-    /// The photos the imports running brought so far, and those the last
-    /// one brought, to select once the Library shows them.
-    pub(super) imported_ids: Vec<String>,
-    pub(super) select_imported: Vec<String>,
-    /// The Library's import sessions, as last read.
-    pub(super) import_sessions: super::library_imports::Sessions,
-    /// The imports the user started here and handed to the node, by
-    /// their requests, until they end.
-    pub(super) user_imports: Vec<serde_json::Value>,
+    /// What the imports leave the Library, shared with the shell's
+    /// listeners of their ends.
+    pub(super) imports: Rc<RefCell<super::import::Imports>>,
     /// A menu of commands asked for, open at a point.
     pub(super) menu: Option<(egui::Pos2, Vec<MenuItem>)>,
     pub(super) viewport: Rc<RefCell<crate::viewport::Viewport>>,
@@ -185,10 +179,7 @@ impl Focus {
             rule_editor: None,
             decisions: Rc::default(),
             import_source: None,
-            imported_ids: Vec::new(),
-            select_imported: Vec::new(),
-            import_sessions: super::library_imports::Sessions::default(),
-            user_imports: Vec::new(),
+            imports: Rc::default(),
             menu: None,
             viewport: seed.viewport,
             opening: None,
