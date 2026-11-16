@@ -481,8 +481,7 @@ impl Shell {
             // An end said as a line (a host running an import by hand):
             // heard as every end is.
             if let Some(end) = ImportEnd::of_line(&import, &line) {
-                // Its listeners read the line as said (its cards with it).
-                asked += self.import_end_heard(end, Some(line));
+                asked += self.import_end_heard(end);
                 continue;
             }
             if let Some(id) = line["id"].as_str()
@@ -506,7 +505,7 @@ impl Shell {
             self.log_edits(&line);
         }
         for end in ends {
-            asked += self.import_end_heard(end, None);
+            asked += self.import_end_heard(end);
         }
         asked
     }
@@ -589,15 +588,13 @@ impl Shell {
     /// ran, then the point's name said on the journal with who asked,
     /// the report, the cameras' looks and the listeners that ran (`ran`).
     /// How many duplicates now wait for an answer.
-    /// `said`: the end line a host said, read as it is (an end said as a
-    /// line keeps no cards in its [`ImportEnd`]); else the end's own.
-    pub(super) fn import_end_heard(&mut self, mut end: ImportEnd, said: Option<Value>) -> usize {
+    pub(super) fn import_end_heard(&mut self, mut end: ImportEnd) -> usize {
         let changes = end
             .outcome
             .as_mut()
             .ok()
             .map(|r| std::mem::take(&mut r.changes));
-        let (line, request) = (said.unwrap_or_else(|| end.line()), end.request.clone());
+        let (line, request) = (end.line(), end.request.clone());
         let (said, mut data) = match &end.outcome {
             Ok(report) => (
                 import_end::ENDED,
