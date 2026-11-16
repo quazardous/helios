@@ -2589,9 +2589,7 @@ impl Shell {
         )?;
         let app = self.core.app.handle();
         if asked != egui::ViewportId::ROOT && !egui_pop::api::admin::in_window(app) {
-            let ctx = app.egui();
-            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
-            ctx.request_repaint_of(egui::ViewportId::ROOT);
+            raise_main_window(app);
         }
         Ok(out)
     }
@@ -7876,4 +7874,22 @@ mod sets {
         }
         Ok(())
     }
+}
+
+/// Who asks the main window to the front from the shell.
+const RAISE_OWNER: &str = "helios.shell";
+
+/// Asks the main window to the front: its `window.activate` with the
+/// reason `command` (ADR 0029). The registry holds it as the active
+/// window and egui-pop's `window.raise` listener shows, restores and
+/// focuses it; the shell never sends the focus itself. Whether the bus
+/// took it (the main window is always in the registry).
+pub(crate) fn raise_main_window(app: &AppHandle) -> bool {
+    use egui_pop::api::bus::{Reason, WindowKind, WindowRequest};
+    app.request_window_activate(WindowRequest::new(
+        egui_pop::api::windows::WindowId::MAIN,
+        WindowKind::Main,
+        RAISE_OWNER,
+        Reason::Command,
+    ))
 }

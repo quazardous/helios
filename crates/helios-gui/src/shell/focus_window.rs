@@ -129,7 +129,7 @@ impl FocusWindow {
                         app.raise_window(&WindowId::main());
                     } else {
                         window.close();
-                        super::import_window::hide_closing_window(ui.ctx());
+                        super::import_window::hide_closing_window(ui.ctx(), &app);
                     }
                 });
             }
