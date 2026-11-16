@@ -3241,14 +3241,15 @@ fn photos_dragged_from_the_main_window_onto_an_album_of_the_library_window_go_in
         "library.collection.create",
         json!({ "name": "Trip", "images": [id(3).hex()] }),
     );
+    // The main window's selection, made before the Library window has
+    // the input (each window's gallery has its own).
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(1).hex(), id(2).hex()]);
     settle(&mut h, &mut persist, 1.0);
     let mut w = LibraryWindow::open(&mut h, &mut persist);
     w.click(&mut h, &mut persist, "Albums");
     w.at("Trip 1");
-    h.state_mut()
-        .library_mut()
-        .select_ids(&[id(1).hex(), id(2).hex()]);
-    settle(&mut h, &mut persist, 2.0);
     let from = cell_at(&h, "a.jpg");
     drag_into_window(&mut h, &mut persist, &mut w, from, |w| w.at("Trip 1"));
     assert_eq!(albums(&h), [("Trip".to_string(), 3)]);
