@@ -298,6 +298,12 @@ pub fn specs() -> Vec<CommandSpec> {
                 true,
             ),
             ("inProgress", json!({ "type": "boolean" }), false),
+            (
+                "edited",
+                json!({ "type": "boolean",
+                        "description": "the edit changes the image from its original (kept as its `edited` field)" }),
+                false,
+            ),
         ])),
         library("library.snapshots.get", "Read an image's snapshots")
             .params(object(&[("image", string(), true)]))
@@ -1185,6 +1191,9 @@ pub fn run<S: Store>(
             let step = params["step"].as_u64().unwrap_or(1);
             let in_progress = params["inProgress"].as_bool().unwrap_or(false);
             helios_vault::edit::add_step(vault, &version, step, in_progress)?;
+            if let Some(edited) = params["edited"].as_bool() {
+                helios_vault::edit::set_edited(vault, &version.image, edited)?;
+            }
             Ok(json!({ "image": version.image.hex(), "version": version.id.hex() }))
         }
         "library.snapshots.get" => {

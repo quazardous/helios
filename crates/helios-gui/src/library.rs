@@ -402,6 +402,9 @@ pub struct Entry {
     pub clip_white: Option<f64>,
     /// The largest share of one channel crushed black, once measured.
     pub clip_black: Option<f64>,
+    /// Its edit changed it from the original, as of the last step saved
+    /// (`helios_vault::edit::EDITED`; unknown: not edited).
+    pub edited: bool,
 }
 
 /// A volume as the library names it: its name, and when and on which
@@ -559,6 +562,9 @@ impl Entry {
             cull::FOCUS => self.focus = value.and_then(Value::as_f64),
             cull::CLIP_WHITE => self.clip_white = value.and_then(Value::as_f64),
             cull::CLIP_BLACK => self.clip_black = value.and_then(Value::as_f64),
+            helios_vault::edit::EDITED => {
+                self.edited = value.and_then(Value::as_bool).unwrap_or(false);
+            }
             _ => {}
         }
     }
@@ -2063,6 +2069,7 @@ struct PresenceWords {
     crushed: String,
     quick: String,
     versions: String,
+    edited: String,
 }
 
 impl PresenceWords {
@@ -2104,6 +2111,7 @@ impl PresenceWords {
                 ctx,
                 Message::new("gui-library-badge-versions", "versions"),
             ),
+            edited: crate::i18n::text(ctx, Message::new("gui-library-badge-edited", "edited")),
         }
     }
 }
@@ -2178,6 +2186,12 @@ impl LibraryItems<String> for Items<'_> {
         }
         if self.quick.contains(&entry.id) {
             badges.push(Badge::new(self.words.quick.clone()).tone(BadgeTone::Info));
+        }
+        // Its edit changed it from the original. TODO: declared through
+        // the thumbnail badge contract (`BadgeDecl` over an `edited` fact,
+        // docs/design/thumbnail-badges.md, slice 4) once it exists.
+        if entry.edited {
+            badges.push(Badge::new(self.words.edited.clone()).tone(BadgeTone::Info));
         }
         // Its versions (L10, L-C5 B): copies and darktable duplicates,
         // counted, one cell for the photo.
@@ -3823,8 +3837,12 @@ impl Library {
     /// after another writer changed it, or after a write failed.
     pub fn show_field(&mut self, image: &str, field: &str, value: Option<&Value>) {
         if let Some(i) = self.at(image) {
-            let turns = self.entries[i].rotation;
+            let (turns, edited) = (self.entries[i].rotation, self.entries[i].edited);
             self.entries[i].show(field, value);
+            if self.entries[i].edited != edited {
+                // Its "edited" badge comes or goes.
+                self.revision += 1;
+            }
             if self.entries[i].rotation != turns {
                 self.forget_pictures(image);
             }
