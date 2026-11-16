@@ -2009,6 +2009,10 @@ gui-macro-iface-default = Sa propre valeur par défaut
 
 gui-macro-iface-range = Plage
 
+gui-macro-iface-range-from = De
+
+gui-macro-iface-range-to = À
+
 gui-macro-iface-soft = Une plage souple
 
 gui-macro-iface-soft-range = Plage souple
@@ -2024,6 +2028,8 @@ gui-macro-iface-point-add = Ajouter un point
 gui-macro-iface-drive-remove = Ne plus le piloter
 
 gui-macro-iface-drive-add = Piloter un autre paramètre
+
+gui-macro-iface-driven = Paramètre piloté
 
 gui-macro-iface-default-value = Valeur par défaut
 
