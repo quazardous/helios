@@ -435,3 +435,56 @@ fn a_picture_of_a_name_never_drawn_fails_after_its_wait() {
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A panel detached into a window of its own in the darkroom stays in
+/// its window when another photo opens: the darkroom on another photo is
+/// the same place for the layout, not one starting from the darkroom's
+/// arrangement (which docks the panel back as a tab).
+#[test]
+fn a_detached_panel_stays_in_its_window_when_another_photo_opens() {
+    let dir = temp("detached");
+    let shell = Shell::builder(helios_panels(), Some(dir.join("ui")))
+        .workspace(&dir.join("photos"))
+        .build();
+    let (mut h, windows) = headless::harness_with_windows(shell, vec2(1280.0, 800.0), 1.0);
+    h.state_mut().load_layout().unwrap();
+    h.run();
+    run(&mut h, "view.library", json!(null));
+    let open = |h: &mut Harness<'_, Shell>, name: &str| {
+        let photo = dir.join(name);
+        std::fs::write(&photo, b"not read").unwrap();
+        contexts::open(
+            h.state().app().handle(),
+            &Opened::File(photo),
+            &PopOrigin::User,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        h.run();
+        assert_eq!(key(h, "place"), "helios.darkroom");
+    };
+    let detached = |h: &Harness<'_, Shell>| -> Vec<String> {
+        h.state()
+            .layout()
+            .auxiliary
+            .iter()
+            .map(|a| a.panel.to_string())
+            .collect()
+    };
+    open(&mut h, "a.png");
+    run(&mut h, "helios.scopes.detach", json!(null));
+    h.step();
+    assert_eq!(detached(&h), ["helios.scopes"]);
+    assert!(
+        windows.drawn("helios.scopes").is_some(),
+        "a window of its own"
+    );
+    // Another photo: the window stays, the panel in it.
+    open(&mut h, "b.png");
+    assert_eq!(detached(&h), ["helios.scopes"], "{:?}", h.state().layout());
+    // And back on the first one.
+    open(&mut h, "a.png");
+    assert_eq!(detached(&h), ["helios.scopes"], "{:?}", h.state().layout());
+    let _ = std::fs::remove_dir_all(&dir);
+}
