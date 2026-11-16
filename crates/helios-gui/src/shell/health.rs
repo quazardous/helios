@@ -45,7 +45,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use egui::Context as Egui;
-use egui_pop::api::bus::egui_pop_hooks::{ListenOpts, Point, PointSpec};
+use egui_pop::api::bus::bus_contract::{Bus, ListenOpts, Point, PointDecl, Refused};
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::{Event, Pending, Seq};
 use egui_pop::model::ids::CommandId;
@@ -81,15 +81,29 @@ impl Default for Desktop {
     }
 }
 
+/// The owners of Helios's own checks on the desktop ([`checks`]), in the
+/// Health page's order: what the page has a group for, known without
+/// building the checks.
+pub const OWNERS: &[&str] = &[
+    helios_storage::health::OWNER,
+    helios_library::health::OWNER,
+    helios_storage::health::backup::OWNER,
+    helios_gpu::health::OWNER,
+    helios_plugin::health::installed::OWNER,
+    helios_node_core::health::snapshots::OWNER,
+];
+
 /// Helios's own checks on the desktop, each module adding its own over
 /// what it reads, in the Health page's order: the storage, the library,
 /// the backups, the GPU, the plugin host, the catalogue. The desktop then
 /// adds the GPU kernels' check (over `desktop.gpu`) and each plugin's.
+/// The checks listen on `bus`, the application's (the shell's: one bus).
 pub fn checks<S: helios_vault::Store + 'static>(
+    bus: Arc<dyn Bus>,
     inputs: &helios_node_core::health::HealthInputs<S>,
     desktop: Desktop,
 ) -> helios_health::Registry {
-    let mut r = helios_health::Registry::default();
+    let mut r = helios_health::Registry::new(bus);
     inputs.register_storage(&mut r);
     inputs.register_library(&mut r);
     inputs.register_backup(&mut r, desktop.destination_days, desktop.cards);
@@ -166,13 +180,21 @@ pub struct Shown {
     pub keys: Option<Vec<String>>,
 }
 
+/// The desktop's health points, its contract with the application's bus,
+/// declared by [`listen_checked`].
+pub const POINTS: &[PointDecl] = &[PointDecl::of::<HealthChecked>(
+    "A health run's findings, read: what the desktop shows of them",
+)];
+
 /// The listeners of [`HealthChecked`] on `bus`, in order: the badge, then
 /// the page's groups.
-pub fn listen_checked(bus: &egui_pop::api::bus::egui_pop_hooks::Kernel) {
+pub fn listen_checked(bus: &dyn Bus) {
     // Declared once; a second shell on the same bus finds it there.
-    let _ = bus.declare::<HealthChecked>(PointSpec::new(
-        "A health run's findings, read: what the desktop shows of them",
-    ));
+    for refused in egui_pop::api::bus::bus_contract::declare_all(bus, POINTS) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!(target: "helios", "health: {refused}");
+        }
+    }
     let opts = || ListenOpts::new().owner(BUS_OWNER);
     for (id, run) in [
         (
@@ -208,13 +230,11 @@ pub fn listen_checked(bus: &egui_pop::api::bus::egui_pop_hooks::Kernel) {
 }
 
 /// The order the health points' listeners run in on `bus` and in the
-/// health report of `registry` ("who runs when").
-pub fn order(
-    bus: &egui_pop::api::bus::egui_pop_hooks::Kernel,
-    registry: &helios_health::Registry,
-) -> String {
+/// health report of `registry` ("who runs when"): on the desktop both are
+/// the one bus.
+pub fn order(bus: &dyn Bus, registry: &helios_health::Registry) -> String {
     let mut out =
-        egui_pop::api::bus::order_dump(registry.kernel(), &[helios_health::HealthReport::ID]);
+        egui_pop::api::bus::order_dump(&**registry.bus(), &[helios_health::HealthReport::ID]);
     out.push_str(&egui_pop::api::bus::order_dump(bus, &[HealthChecked::ID]));
     out
 }
@@ -395,7 +415,7 @@ impl Shell {
             }
         });
         self.core.health.runner = Some(runner);
-        listen_checked(&self.core.app.handle().bus());
+        listen_checked(&*self.core.app.handle().bus());
         if !self.has_command(FINDINGS) {
             let answer = self.core.health.answer.clone();
             let registered = self.register(
@@ -418,8 +438,8 @@ impl Shell {
     pub fn health_order(&self) -> String {
         let bus = self.core.app.handle().bus();
         match self.core.health.runner.as_ref() {
-            Some(r) => order(&bus, r.registry()),
-            None => egui_pop::api::bus::order_dump(&bus, &[HealthChecked::ID]),
+            Some(r) => order(&*bus, r.registry()),
+            None => egui_pop::api::bus::order_dump(&*bus, &[HealthChecked::ID]),
         }
     }
 

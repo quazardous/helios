@@ -30,6 +30,8 @@ helios-display.workspace = true
 helios-template.workspace = true
 helios-journal.workspace = true
 blake3.workspace = true
+bus-contract.workspace = true
+egui-pop-hooks.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-demosaic = { path = "../../modules/demosaic" }

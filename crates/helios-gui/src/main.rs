@@ -143,7 +143,7 @@ fn seconds_f64() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// The health check's runner: Helios's checks, each module's over what
+/// The health check's runner on `bus`: Helios's checks, each module's over what
 /// it reads (the volumes mounted, the vault and its file, its backups),
 /// with what the desktop hands them: the cards an import left short, still inserted, the
 /// `health.destinationDays` setting read from `settings`, the GPU in use
@@ -152,6 +152,7 @@ fn seconds_f64() -> f64 {
 /// settings. The plugins' own checks join them, owned by each plugin, a
 /// connector's handed its accounts by `accounts`.
 fn health_runner(
+    bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus>,
     library: Option<Library>,
     file: Option<PathBuf>,
     cards: Arc<std::sync::Mutex<Vec<helios_library::import::Card>>>,
@@ -191,7 +192,7 @@ fn health_runner(
         snapshots: Some(Box::new(helios_gui::catalogue::health)),
     };
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
-    let mut registry = helios_gui::shell::health_checks(&inputs, desktop);
+    let mut registry = helios_gui::shell::health_checks(bus, &inputs, desktop);
     helios_health::add_owned(
         &mut registry,
         helios_gpu::health::OWNER,
@@ -2030,6 +2031,12 @@ fn main() -> Result<(), String> {
     };
     let watched = after_window.clone();
     let window_settings = ui_settings.clone();
+    // Helios's one bus (`bus-contract`, the default implementation): the
+    // application chooses it, egui-pop's points and Helios's (the health
+    // report and its reading) declared and listened on it, each part
+    // handed it at construction.
+    let bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus> =
+        Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
     let ran = helios_gui::shell::open_window("helios-gui", options, Some(&window_settings), move |cc| {
         start::mark("window open on the boot splash");
         let _ = WINDOW.set(cc.egui_ctx.clone());
@@ -2062,6 +2069,7 @@ fn main() -> Result<(), String> {
                 workshops: helios_gui::workshops::enabled(settings.config()),
             };
             let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
+                .bus(bus.clone())
                 .workspace(&workspace)
                 .on_exit(move |app| save_workspace(&dir, app))
                 .desktop(instance)
@@ -2075,7 +2083,16 @@ fn main() -> Result<(), String> {
                 builder = builder.images(Arc::new(move |id: &str| library.image_present(id)));
             }
             start::mark("shell declared (commands, themes, translations)");
-            let mut shell = builder.build_in_window(ctx);
+            let mut shell = match builder.build_in_window(ctx) {
+                Ok(shell) => shell,
+                Err(e) => {
+                    // One egui-pop application per bus: a second on
+                    // Helios's would find its points taken.
+                    log::error!(target: "helios", "{e}");
+                    eprintln!("helios-gui: {e}");
+                    std::process::exit(1);
+                }
+            };
             start::mark("application built (plugins, fonts)");
             // The library's thumbnail cache, beside its catalogue.
             let _ = THUMB_CACHE.set(
@@ -2308,6 +2325,7 @@ fn main() -> Result<(), String> {
             // window; the shell shows the same runner's findings.
             let (cards, settings) = (shell.waiting_cards(), shell.app().handle().store());
             let runner = health_runner(
+                bus.clone(),
                 library.clone(),
                 health_file.clone(),
                 cards,

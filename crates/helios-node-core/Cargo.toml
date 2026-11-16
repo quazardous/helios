@@ -17,6 +17,7 @@ helios-library.workspace = true
 helios-load.workspace = true
 helios-photo.workspace = true
 blake3.workspace = true
+bus-contract.workspace = true
 helios-storage.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
@@ -26,6 +27,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+egui-pop-hooks.workspace = true
 helios-export.workspace = true
 helios-testkit.workspace = true
 helios-module-whitebalance = { path = "../../modules/whitebalance" }

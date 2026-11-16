@@ -15,8 +15,9 @@
 //!   held to it.
 //! - The [`Registry`] holds the checks by owner (the module or the
 //!   plugin that declares them), each a listener of the health report's
-//!   collect point ([`HealthReport`], `health.report`, on egui-pop's hook
-//!   kernel). Each module adds its own (`helios_storage::health`,
+//!   collect point ([`HealthReport`], `health.report`, declared in
+//!   [`POINTS`] on the bus the application hands the registry: one bus
+//!   with egui-pop's points in Helios). Each module adds its own (`helios_storage::health`,
 //!   `helios_library::health`…, plugins' through their process:
 //!   `helios_plugin::health`); the registry lists no module. The seam is
 //!   [`Registry::add`], which refuses an unsound declaration; a run
@@ -38,7 +39,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use egui_pop_hooks::{Kernel, ListenOpts, Point, PointSpec};
+use bus_contract::{Bus, ListenOpts, Point, PointDecl, PointKind, Refused};
 use helios_core::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -264,12 +265,31 @@ impl Point for HealthReport {
     const ID: &'static str = "health.report";
     type Input = Report;
     type Value = Option<Vec<Finding>>;
+    const KIND: PointKind = PointKind::Collect;
 }
 
 /// How long a check may take before its findings are dropped as late: it
 /// runs on the run's own thread, never the interface's, so the bound is
 /// wide (a database's integrity check on a large library).
 pub const REPORT_DEADLINE: Duration = Duration::from_mins(10);
+
+/// The health module's points, its contract with the application's bus:
+/// [`Registry::new`] declares them on the bus it is given.
+pub const POINTS: &[PointDecl] = &[PointDecl::of::<HealthReport>(
+    "Health findings: each module answers with what it finds of its own state",
+)
+.deadline(REPORT_DEADLINE)];
+
+/// Declares `table` on `bus`; a point already declared there (a second
+/// registry, or a desktop and its tests on one bus) is kept as it is,
+/// any other refusal logged.
+fn declare(bus: &dyn Bus, table: &[PointDecl]) {
+    for refused in bus_contract::declare_all(bus, table) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!("health: {refused}");
+        }
+    }
+}
 
 /// What a run of the health report hands every listener: what the checks
 /// read, which checks run (all of them for none), and who hears each
@@ -318,47 +338,14 @@ impl Report {
 /// adds its own ([`Registry::add`]: `checks::register`,
 /// `helios_plugin::health::register`…); the registry knows no module, it
 /// refuses an unsound declaration and keeps each check's declaration for
-/// the schedule. Its hook kernel ([`Registry::kernel`]) shows who answers
-/// the point, in order (`egui_pop_hooks::Kernel::listeners`).
+/// the schedule. Its listeners are on the bus the application gives it
+/// ([`Registry::new`], [`Registry::bus`]), which shows who answers the
+/// point, in order (`bus_contract::Bus::listeners`).
 pub struct Registry {
-    kernel: Arc<Kernel>,
+    bus: Arc<dyn Bus>,
     checks: Vec<Arc<dyn Check>>,
     /// The owner of each check, by position.
     owners: Vec<String>,
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        let kernel = Kernel::new();
-        let declared = kernel.declare::<HealthReport>(
-            PointSpec::new(
-                "Health findings: each module answers with what it finds of its own state",
-            )
-            .deadline(REPORT_DEADLINE),
-        );
-        if let Err(e) = declared {
-            log::error!("health: {e}");
-        }
-        Self {
-            kernel: Arc::new(kernel),
-            checks: Vec::new(),
-            owners: Vec::new(),
-        }
-    }
-}
-
-impl Clone for Registry {
-    /// Another registry with the same checks, on a kernel of its own: a
-    /// check added to one is not in the other.
-    fn clone(&self) -> Self {
-        let mut r = Self::default();
-        for (owner, check) in self.owned() {
-            r.listen(owner, check.clone());
-        }
-        r.checks.clone_from(&self.checks);
-        r.owners.clone_from(&self.owners);
-        r
-    }
 }
 
 impl std::fmt::Debug for Registry {
@@ -375,6 +362,18 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
+    /// No checks yet, their listeners to go on `bus`, the application's
+    /// (one bus for Helios: egui-pop's points are on it too), where the
+    /// health module's [`POINTS`] are declared.
+    pub fn new(bus: Arc<dyn Bus>) -> Self {
+        declare(&*bus, POINTS);
+        Self {
+            bus,
+            checks: Vec::new(),
+            owners: Vec::new(),
+        }
+    }
+
     /// Adds `owner`'s check, as a listener of [`HealthReport`]; one with
     /// the id of a check already there replaces it. A check whose
     /// declaration is unsound is refused, with its reasons.
@@ -392,7 +391,7 @@ impl Registry {
         if let Some(at) = self.checks.iter().position(|c| c.id() == check.id()) {
             self.checks.remove(at);
             self.owners.remove(at);
-            self.kernel.unlisten(HealthReport::ID, check.id());
+            self.bus.unlisten(HealthReport::ID, check.id());
         }
         self.listen(owner, check.clone());
         self.checks.push(check);
@@ -403,7 +402,7 @@ impl Registry {
     /// `check` answering the report, owned by `owner`.
     fn listen(&self, owner: &str, check: Arc<dyn Check>) {
         let id = check.id().to_owned();
-        let listened = self.kernel.listen::<HealthReport>(
+        let listened = self.bus.listen::<HealthReport>(
             id.clone(),
             ListenOpts::new().owner(owner),
             move |report, out| {
@@ -424,7 +423,7 @@ impl Registry {
     /// Removes every check of `owner` (a module or a plugin gone); how
     /// many went.
     pub fn remove_owner(&mut self, owner: &str) -> usize {
-        self.kernel.forget(owner);
+        self.bus.forget(owner);
         let before = self.checks.len();
         let mut at = 0;
         self.checks.retain(|_| {
@@ -436,9 +435,9 @@ impl Registry {
         before - self.checks.len()
     }
 
-    /// The hook kernel the checks listen on.
-    pub fn kernel(&self) -> &Arc<Kernel> {
-        &self.kernel
+    /// The bus the checks listen on.
+    pub fn bus(&self) -> &Arc<dyn Bus> {
+        &self.bus
     }
 
     pub fn checks(&self) -> &[Arc<dyn Check>] {
@@ -469,11 +468,11 @@ impl Registry {
         out
     }
 
-    /// What runs the report on another thread: the kernel and the
-    /// checks as they are now.
+    /// What runs the report on another thread: the bus and the checks
+    /// as they are now.
     pub fn reporter(&self) -> Reporter {
         Reporter {
-            kernel: self.kernel.clone(),
+            bus: self.bus.clone(),
             checks: self
                 .owned()
                 .map(|(o, c)| (o.to_owned(), c.clone()))
@@ -495,10 +494,10 @@ impl Registry {
     }
 }
 
-/// A registry's kernel and checks, held to emit the report off the
+/// A registry's bus and checks, held to emit the report off the
 /// interface thread ([`Registry::reporter`]).
 pub struct Reporter {
-    kernel: Arc<Kernel>,
+    bus: Arc<dyn Bus>,
     checks: Vec<(String, Arc<dyn Check>)>,
 }
 
@@ -508,7 +507,7 @@ impl Reporter {
     /// its declaration, fails or is late gives a problem of its own
     /// rather than stopping the others.
     pub fn report(&self, report: Report) -> Vec<(String, String, Vec<Finding>)> {
-        let collected = self.kernel.collect::<HealthReport>(report);
+        let collected = self.bus.collect::<HealthReport>(report);
         let mut answers: Vec<(String, Vec<Finding>)> = collected
             .parts
             .into_iter()
@@ -756,6 +755,11 @@ impl Findings {
 mod tests {
     use super::*;
 
+    /// A registry on a bus of its own, as an application gives one.
+    fn registry() -> Registry {
+        Registry::new(Arc::new(egui_pop_hooks::Kernel::new()))
+    }
+
     fn finding(id: &str, level: Level) -> Finding {
         Finding::new("test", id, level, Message::plain(id), Message::plain(""))
     }
@@ -872,7 +876,7 @@ mod tests {
 
     #[test]
     fn a_check_that_panics_is_a_problem_and_the_others_still_run() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("test", Arc::new(Panics)).unwrap();
         r.add("disks", fake("disks.space", Level::Ok, None))
             .unwrap();
@@ -916,7 +920,7 @@ mod tests {
             g.fetch_add(1, Ordering::SeqCst);
             Level::Warning
         });
-        let mut r = Registry::default();
+        let mut r = registry();
         add_owned(
             &mut r,
             "fans",
@@ -992,7 +996,7 @@ mod tests {
 
     #[test]
     fn a_module_declares_its_checks_and_their_findings_come_by_owner() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add(
             "fake",
             fake("fake.disk", Level::Warning, Some("fake.repair")),
@@ -1016,12 +1020,12 @@ mod tests {
 
     #[test]
     fn a_module_s_finding_comes_through_the_report_point_and_goes_with_the_module() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("disks", fake("disks.space", Level::Warning, None))
             .unwrap();
         r.add("fans", fake("fans.speed", Level::Ok, None)).unwrap();
         // The point lists each module's listener, in order, with its owner.
-        let listeners = r.kernel().listeners(HealthReport::ID).unwrap();
+        let listeners = r.bus().listeners(HealthReport::ID).unwrap();
         let who: Vec<(&str, Option<&str>)> = listeners
             .iter()
             .map(|l| (l.id.as_str(), l.owner.as_deref()))
@@ -1047,14 +1051,16 @@ mod tests {
         // The module goes: its listener and its findings with it.
         assert_eq!(r.remove_owner("disks"), 1);
         assert_eq!(ids(&r), ["fans.speed"]);
-        assert_eq!(r.kernel().listeners(HealthReport::ID).unwrap().len(), 1);
+        assert_eq!(r.bus().listeners(HealthReport::ID).unwrap().len(), 1);
         assert_eq!(r.owner("disks.space"), None);
-        // A clone has its own kernel: what is added to it stays there.
-        let mut other = r.clone();
+        // A second registry on the same bus finds the point declared and
+        // adds its own listeners beside the first's.
+        let mut other = Registry::new(r.bus().clone());
         other
             .add("disks", fake("disks.space", Level::Ok, None))
             .unwrap();
-        assert_eq!(ids(&other), ["fans.speed", "disks.space"]);
+        assert_eq!(r.bus().listeners(HealthReport::ID).unwrap().len(), 2);
+        assert_eq!(ids(&other), ["disks.space"]);
         assert_eq!(ids(&r), ["fans.speed"]);
     }
 
@@ -1082,12 +1088,12 @@ mod tests {
     }
 
     #[test]
-    fn a_listener_failing_in_the_kernel_is_a_problem_of_its_check() {
-        let mut r = Registry::default();
+    fn a_listener_failing_on_the_bus_is_a_problem_of_its_check() {
+        let mut r = registry();
         r.add("slow", Arc::new(Slow)).unwrap();
         // Another listener of the point, not a check, that fails: dropped
         // and logged, the checks' answers stand.
-        r.kernel()
+        r.bus()
             .listen::<HealthReport>("broken", ListenOpts::new(), |_, _| Err("on purpose".into()))
             .unwrap();
         let found = r.run(&Context::default());
@@ -1097,7 +1103,7 @@ mod tests {
 
     #[test]
     fn an_unsound_declaration_or_owner_is_refused_with_its_reasons() {
-        let mut r = Registry::default();
+        let mut r = registry();
         let none = Arc::new(Fake {
             id: "fake.disk",
             levels: &[],
@@ -1133,7 +1139,7 @@ mod tests {
 
     #[test]
     fn a_check_may_say_it_failed_whatever_it_declares() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("test", Arc::new(Fails)).unwrap();
         let found = r.run(&Context::default());
         assert_eq!(found.len(), 1);
@@ -1149,7 +1155,7 @@ mod tests {
 
     #[test]
     fn a_finding_outside_its_declaration_is_a_problem_of_its_check() {
-        let mut r = Registry::default();
+        let mut r = registry();
         r.add("fake", fake("fake.level", Level::Problem, None))
             .unwrap();
         r.add("fake", fake("fake.fix", Level::Ok, Some("plugin.disable")))

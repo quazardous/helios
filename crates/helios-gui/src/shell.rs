@@ -51,9 +51,10 @@ use crate::workbench::Contents;
 pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{
-    BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND,
-    Desktop as HealthDesktop, FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX,
-    IGNORE as HEALTH_IGNORE, OTHERS as HEALTH_OTHERS, PAGE as HEALTH_PAGE, checks as health_checks,
+    BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, CHECKED as HEALTH_CHECKED,
+    COMMAND as HEALTH_COMMAND, Desktop as HealthDesktop, FINDINGS as HEALTH_FINDINGS,
+    FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, OTHERS as HEALTH_OTHERS, OWNERS as HEALTH_OWNERS,
+    PAGE as HEALTH_PAGE, POINTS as HEALTH_POINTS, checks as health_checks,
     findings_answer as health_findings_answer, owner_key as health_owner_key,
 };
 pub use import_auto::Trigger as ImportTrigger;
@@ -608,6 +609,16 @@ impl ShellBuilder {
         self
     }
 
+    /// The application's bus (`bus-contract`), built by the desktop's
+    /// `main` and handed to each part that declares points or listens:
+    /// egui-pop's points go on it beside Helios's (one bus). Not given,
+    /// egui-pop makes one of its own (tests, tools, pictures).
+    #[must_use]
+    pub fn bus(mut self, bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus>) -> Self {
+        self.app = self.app.bus(bus);
+        self
+    }
+
     /// The window manager's focus mode, read beforehand (else egui-pop
     /// reads it as the window opens, a child process on Linux).
     #[must_use]
@@ -630,14 +641,15 @@ impl ShellBuilder {
     /// The shell, its application built on the context of a window
     /// already open ([`open_window`]): the desktop opens its window on
     /// the boot splash first, and builds the shell once the start's work
-    /// off the window's thread is done.
-    pub fn build_in_window(self, ctx: &Egui) -> Shell {
-        let app = self
-            .app
-            .plugin(self.i18n)
-            .build(ctx)
-            .unwrap_or_else(|e| panic!("Helios's application builds: {e}"));
-        Shell::assemble(self.parts, app)
+    /// off the window's thread is done. Refused when the bus given
+    /// ([`ShellBuilder::bus`]) already hosts an egui-pop application
+    /// (`BuildError::Bus`: one per bus); any other error is a defect.
+    pub fn build_in_window(self, ctx: &Egui) -> Result<Shell, egui_pop::api::plugin::BuildError> {
+        match self.app.plugin(self.i18n).build(ctx) {
+            Ok(app) => Ok(Shell::assemble(self.parts, app)),
+            Err(e @ egui_pop::api::plugin::BuildError::Bus(_)) => Err(e),
+            Err(e) => panic!("Helios's application builds: {e}"),
+        }
     }
 
     /// Opens the window (egui-pop's `run_native_with`): the window's
