@@ -104,11 +104,9 @@ struct Held {
 impl Held {
     fn of(admin: Option<&Admin>) -> Held {
         Held {
-            settings_open: admin.is_some_and(|a| a.is_open()),
-            wizard: admin
-                .and_then(|a| a.wizard_flow())
-                .map(|f| f.wizard.clone()),
-            focused: admin.is_some_and(|a| a.focus_screen()),
+            settings_open: admin.is_some_and(Admin::is_open),
+            wizard: admin.and_then(Admin::wizard_flow).map(|f| f.wizard.clone()),
+            focused: admin.is_some_and(Admin::focus_screen),
         }
     }
 
