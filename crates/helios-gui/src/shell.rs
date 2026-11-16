@@ -1177,6 +1177,8 @@ impl Shell {
         shell.restore_focus_windows();
         // What the desktop does once an import ends, in order.
         shell.listen_import_ended();
+        // What follows the Library read again, once shown.
+        shell.listen_library_filled();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
@@ -7015,7 +7017,6 @@ impl Shell {
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.receive_imports();
-        self.select_imported_photos();
         self.follow_import_sessions();
         self.receive_exports();
         if asked > 0 {

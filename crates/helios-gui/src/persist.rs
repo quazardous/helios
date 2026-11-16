@@ -115,16 +115,18 @@ pub struct Persist<S: Store> {
     bus: Arc<Bus>,
     events: Receiver<Envelope>,
     editing: Option<Editing>,
-    /// A scan changed where copies are (a disk plugged in or out): the
-    /// library is to be read again ([`Persist::take_locations_changed`]).
-    locations_changed: bool,
+    /// Where the desktop says the library changed (an import ended, a
+    /// step undone), heard with the vault's events as one change
+    /// ([`crate::library_changed`]).
+    changes: (
+        crate::library_changed::Publisher,
+        Receiver<(crate::library_changed::Kind, &'static str)>,
+    ),
+    /// The bus `library.changed`'s listeners are registered on (the
+    /// shell's), once.
+    listening: Option<Arc<dyn egui_pop::api::bus::bus_contract::Bus>>,
     /// The library shown, refreshed by its cursor's delta.
     shown: Mutex<Option<Shown>>,
-    /// The library's history as last seen ([`LibraryHistory::rev`]): when
-    /// it moves, the albums are read again.
-    ///
-    /// [`LibraryHistory::rev`]: crate::library_history::LibraryHistory::rev
-    history_rev: u64,
     /// The desktop's node, in this process: the library's writes go
     /// through it.
     node: Arc<Client>,
@@ -1279,9 +1281,9 @@ impl<S: Store + 'static> Persist<S> {
             bus,
             events,
             editing: None,
-            locations_changed: false,
+            changes: crate::library_changed::Publisher::channel(),
+            listening: None,
             shown: Mutex::new(None),
-            history_rev: 0,
             node,
             writes: VecDeque::new(),
             writing: None,
@@ -1398,6 +1400,8 @@ impl<S: Store + 'static> Persist<S> {
                         if host {
                             self.filled = Some(files);
                         }
+                        // What follows the Library shown: in this pass.
+                        shell.library_filled();
                     }
                     Err(e) => unreadable(shell, e),
                 }
@@ -1694,6 +1698,7 @@ impl<S: Store + 'static> Persist<S> {
                     }
                     Err(e) => shell.notify(Level::Warning, e.to_string()),
                 }
+                shell.library_mut().ask_albums();
                 self.read_albums_if_wanted(shell);
             }
             (Write::Album(..), Err(e)) => shell.notify(
@@ -1838,12 +1843,125 @@ impl<S: Store + 'static> Persist<S> {
         &self.bus
     }
 
-    /// Whether a scan changed where copies are since the last call (a
-    /// disk plugged in or out), or a photo was marked changed outside
-    /// Helios or acknowledged: the host reads the library again, so its
-    /// badges follow.
-    pub fn take_locations_changed(&mut self) -> bool {
-        std::mem::take(&mut self.locations_changed)
+    /// Where the desktop says the library changed, from any thread (an
+    /// import ended, a library step undone or redone): heard at the next
+    /// frame with the vault's events, and passed with them through
+    /// `library.changed` once ([`crate::library_changed`]).
+    pub fn changes(&self) -> crate::library_changed::Publisher {
+        self.changes.0.clone()
+    }
+
+    /// `ctx` woken when the desktop says the library changed.
+    pub fn wake_on_changes(&mut self, ctx: egui::Context) {
+        self.changes.0 = self.changes.0.clone().waking(ctx);
+    }
+
+    /// Fills the Library again once an import ended: `import.ended`'s
+    /// `library.refill` says the library changed (its contents).
+    ///
+    /// # Errors
+    /// The bus refused the listener.
+    pub fn listen_import_refill(&self, shell: &Shell) -> Result<(), String> {
+        let changes = self.changes();
+        shell.listen_import_ended_by(crate::import_end::REFILL, move |_| {
+            changes.changed(
+                crate::library_changed::Kind::Contents,
+                crate::library_changed::BY_IMPORT,
+            );
+        })
+    }
+
+    /// How the library's history walks its steps (undo, redo): through
+    /// the node (`library.changes.apply`: the step's rows all moved or
+    /// none), then the library said changed.
+    pub fn history_apply(&self) -> crate::library_history::Apply {
+        let (node, changes) = (self.node.clone(), self.changes());
+        Arc::new(move |walk, forward| {
+            let r = node
+                .request(
+                    "library.changes.apply",
+                    json!({ "changes": walk, "forward": forward }),
+                )
+                .map_err(|e| e.message)
+                .and_then(|walked| serde_json::from_value(walked).map_err(|e| e.to_string()));
+            changes.changed(
+                crate::library_changed::Kind::Contents,
+                crate::library_changed::BY_HISTORY,
+            );
+            r
+        })
+    }
+
+    /// The order `library.changed`'s and `library.filled`'s listeners
+    /// run in on the shell's bus.
+    pub fn library_changed_order(&mut self, shell: &Shell) -> String {
+        let bus = self.listen_library_changed(shell);
+        crate::library_changed::order(&*bus)
+    }
+
+    /// Registers `library.changed`'s listeners on the shell's bus, once:
+    /// each marks its place, its part done by [`Persist::library_changed`]
+    /// in the order they ran. The bus.
+    fn listen_library_changed(
+        &mut self,
+        shell: &Shell,
+    ) -> Arc<dyn egui_pop::api::bus::bus_contract::Bus> {
+        use crate::library_changed as lc;
+        let bus = shell.app().handle().bus();
+        if self
+            .listening
+            .as_ref()
+            .is_some_and(|b| Arc::ptr_eq(b, &bus))
+        {
+            return bus;
+        }
+        for (id, _) in lc::ORDER {
+            if let Err(e) = lc::listen_changed(&*bus, id) {
+                log::error!(target: "helios", "{}: {e}", lc::CHANGED);
+            }
+        }
+        self.listening = Some(bus.clone());
+        bus
+    }
+
+    /// What one frame heard changed in the library, passed once through
+    /// `library.changed`: each listener's part done in the order they ran
+    /// (the volumes, the Library read again, the albums, the stacks),
+    /// then `library.changed` said on the journal with what changed, who
+    /// said it and the listeners that ran (`ran`).
+    fn library_changed(&mut self, shell: &mut Shell, change: crate::library_changed::Change) {
+        use crate::library_changed as lc;
+        let bus = self.listen_library_changed(shell);
+        let mut data = change.to_json();
+        let (stacks, imported) = (
+            change.kinds.contains(&lc::Kind::Stacks),
+            change.by.contains(lc::BY_IMPORT),
+        );
+        let ran = lc::pass_changed(&*bus, change);
+        for id in &ran {
+            match id.as_str() {
+                lc::VOLUMES => shell.refresh_volumes(),
+                // Read off the UI thread, shown at a coming frame.
+                lc::FILL => self.ask_fill(shell, true),
+                lc::ALBUMS => shell.library_mut().ask_albums(),
+                lc::STACKS => {
+                    if stacks {
+                        self.ask_stacks();
+                    }
+                    // The workspace proposes stacks after each import, to
+                    // review.
+                    if imported && shell.suggests_stacks() {
+                        shell.stack_review_mut().suggest(Vec::new());
+                    }
+                }
+                _ => {}
+            }
+        }
+        data["ran"] = json!(ran);
+        shell
+            .app()
+            .handle()
+            .publish("helios", None, lc::CHANGED, data);
     }
 
     /// Fills the library with the vault's images, read through the node;
@@ -2311,8 +2429,9 @@ impl<S: Store + 'static> Persist<S> {
 
     /// Sends the album changes the library asked to the node, each one
     /// step of the library's history once answered ([`Persist::written`]);
-    /// reads the albums again when that history moved (a change, an undo,
-    /// a redo, an import).
+    /// reads the albums when the Library wants them (an album changed,
+    /// or `library.changed`'s `library.albums`: an import, an undo, a
+    /// redo).
     fn edit_albums(&mut self, shell: &mut Shell, now: f64) {
         for (edit, batch) in shell.library_mut().take_album_edits() {
             self.writes.push_back(Write::Album(edit, now, batch));
@@ -2322,13 +2441,8 @@ impl<S: Store + 'static> Persist<S> {
     }
 
     /// Asks the node the albums and the quick collection when the
-    /// library's history moved or the Library wants them.
+    /// Library wants them.
     fn read_albums_if_wanted(&mut self, shell: &mut Shell) {
-        let rev = shell.library_history().rev();
-        if rev != self.history_rev {
-            self.history_rev = rev;
-            shell.library_mut().ask_albums();
-        }
         if shell.library_mut().take_albums_wanted() {
             let pending = self.node.call("library.albums.list", json!({}));
             self.asked.push((Asked::Albums, pending));
@@ -2443,21 +2557,18 @@ impl<S: Store + 'static> Persist<S> {
         self.hear(shell);
     }
 
-    /// Shows what the vault's events say changed.
+    /// Shows what the vault's events say changed: a field in place; what
+    /// they and the desktop say changed in the library, passed once
+    /// through `library.changed` ([`Persist::library_changed`]).
     fn hear(&mut self, shell: &mut Shell) {
-        let mut stacks_changed = false;
-        let mut decided = false;
+        use crate::library_changed::{BY_VAULT, Change, Kind};
+        let mut change = Change::default();
+        while let Ok((kind, by)) = self.changes.1.try_recv() {
+            change.add(kind, by);
+        }
         while let Ok(event) = self.events.try_recv() {
-            if event.kind == "vault.stack_changed" {
-                stacks_changed = true;
-            } else if event.kind == "library.decision" {
-                decided = true;
-            } else if event.kind == helios_vault::LOCATIONS_CHANGED
-                || event.kind == helios_vault::LIBRARY_CHANGED
-                || event.kind == helios_vault::changed::CHANGED_OUTSIDE
-                || event.kind == helios_vault::capture::CAPTURES_SET
-            {
-                self.locations_changed = true;
+            if let Some(kind) = Kind::of_event(&event.kind) {
+                change.add(kind, BY_VAULT);
             } else if event.kind == "vault.field_changed" {
                 let p = &event.payload;
                 if let (Some(image), Some(field)) = (p["image"].as_str(), p["field"].as_str()) {
@@ -2466,8 +2577,13 @@ impl<S: Store + 'static> Persist<S> {
                 }
             }
         }
-        if stacks_changed || decided {
-            self.ask_stacks();
+        // Said by the desktop meanwhile (an import's end heard on
+        // another thread): the same change.
+        while let Ok((kind, by)) = self.changes.1.try_recv() {
+            change.add(kind, by);
+        }
+        if !change.is_empty() {
+            self.library_changed(shell, change);
         }
     }
 

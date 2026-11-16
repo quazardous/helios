@@ -5,14 +5,12 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use egui_kittest::Harness;
 use egui_pop::api::history::{Answer, Request};
 use egui_pop::model::commands::Origin as PopOrigin;
 use helios_core::Bus;
-use helios_gui::import_end;
 use helios_gui::library_history::LIBRARY;
 use helios_gui::persist::Persist;
 use helios_gui::{Shell, headless, helios_panels};
@@ -44,13 +42,10 @@ fn roll(dir: &Path, folder: &str, n: u8) -> PathBuf {
 }
 
 /// A desktop as `main` wires it: the shell over a library on disk, its
-/// imports' ends and its undo steps filling the Library again.
+/// imports' ends and its undo steps saying the library changed.
 struct Desktop {
     h: Harness<'static, Shell>,
     persist: Persist<SqliteStore>,
-    /// The host's "fill the Library again" (an import ended, a step
-    /// undone).
-    refill: Arc<AtomicBool>,
     at: f64,
     dir: PathBuf,
 }
@@ -73,35 +68,13 @@ fn desktop(name: &str) -> Desktop {
         helios_library::import_history::list(&v, None)
     }));
     shell.set_import_ends(None, egui::Context::default());
-    let refill = Arc::new(AtomicBool::new(false));
-    let filled = refill.clone();
-    shell
-        .listen_import_ended_by(import_end::REFILL, move |_| {
-            filled.store(true, Ordering::Relaxed);
-        })
-        .unwrap();
-    // Undo and redo walk the library's steps through the node, then the
-    // Library is filled again.
-    let (node, filled) = (persist.node().clone(), refill.clone());
-    shell
-        .library_history()
-        .set_apply(Arc::new(move |changes, forward| {
-            let r = node
-                .request(
-                    "library.changes.apply",
-                    json!({ "changes": changes, "forward": forward }),
-                )
-                .map_err(|e| e.message)
-                .and_then(|walked| serde_json::from_value(walked).map_err(|e| e.to_string()));
-            filled.store(true, Ordering::Relaxed);
-            r
-        }));
+    persist.listen_import_refill(&shell).unwrap();
+    shell.library_history().set_apply(persist.history_apply());
     persist.fill_library(&mut shell).unwrap();
     let h = headless::harness(shell, egui::vec2(1280.0, 800.0));
     let mut d = Desktop {
         h,
         persist,
-        refill,
         at: 0.0,
         dir,
     };
@@ -115,15 +88,7 @@ impl Desktop {
     fn pass(&mut self) {
         self.at += 0.05;
         self.h.step();
-        let shell = self.h.state_mut();
-        if self.refill.swap(false, Ordering::Relaxed) {
-            self.persist.ask_fill(shell, true);
-        }
-        self.persist.frame(shell, self.at);
-        if self.persist.take_locations_changed() {
-            shell.refresh_volumes();
-            self.persist.ask_fill(shell, true);
-        }
+        self.persist.frame(self.h.state_mut(), self.at);
         let _ = self.persist.take_filled();
     }
 
@@ -223,4 +188,22 @@ fn an_undo_fills_the_library_once() {
     d.settle();
     assert!(d.library_ids().is_empty(), "the import undone");
     assert_eq!(d.refreshes() - before, 1, "one fill for one undo");
+}
+
+/// The listeners of `library.changed` and `library.filled`, in the
+/// order they run: a reviewed dump.
+#[test]
+fn the_library_points_listeners_run_in_a_declared_order() {
+    let mut d = desktop("order");
+    let shell = d.h.state();
+    assert_eq!(
+        d.persist.library_changed_order(shell),
+        "library.changed\n\
+         \x20 1. library.volumes (owner helios.library): nothing\n\
+         \x20 2. library.fill (owner helios.library): after library.volumes\n\
+         \x20 3. library.albums (owner helios.library): after library.fill\n\
+         \x20 4. library.stacks (owner helios.library): after library.albums\n\
+         library.filled\n\
+         \x20 1. library.select-imported (owner helios.library): nothing\n"
+    );
 }

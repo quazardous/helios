@@ -474,7 +474,6 @@ fn library_commands(
     import_watch: Option<&helios_node_core::import_promise::Watch>,
     backups: Option<&Arc<Backups>>,
     plugins: &Arc<helios_plugin::Broker>,
-    refill: &Arc<AtomicBool>,
     ctx: &egui::Context,
 ) -> Result<(), String> {
     use helios_library::stacks;
@@ -485,7 +484,7 @@ fn library_commands(
     let (library, jobs) = (persist.library().clone(), shell.jobs());
     // The node's backups, for the strategy's "after each import".
     let after_import = backups.cloned();
-    let (done, ctx) = (refill.clone(), ctx.clone());
+    let ctx = ctx.clone();
     // Each file's line goes to the shell with the import's arguments (the
     // Duplicates panel, so a duplicate kept is imported again the same
     // way; the Log panel), then the import's end.
@@ -516,32 +515,16 @@ fn library_commands(
                 );
             }
         })?;
-        let refill = done.clone();
-        shell.listen_import_ended_by(helios_gui::import_end::REFILL, move |_| {
-            refill.store(true, Ordering::Relaxed);
-        })?;
+        // The Library filled again: `library.changed`, with what the
+        // vault said meanwhile (`helios_gui::library_changed`).
+        persist.listen_import_refill(shell)?;
     }
     // Each import that changed the library is one undo step of its own
     // scope; undo and redo move the vault's rows, never a file, then the
     // Library is filled again.
-    let history = shell.library_history();
-    {
-        // Walked by the node (`library.changes.apply`): the step's rows
-        // all moved or none.
-        let (node, done, ctx) = (persist.node().clone(), done.clone(), ctx.clone());
-        history.set_apply(Arc::new(move |changes, forward| {
-            let r = node
-                .request(
-                    "library.changes.apply",
-                    json!({ "changes": changes, "forward": forward }),
-                )
-                .map_err(|e| e.message)
-                .and_then(|walked| serde_json::from_value(walked).map_err(|e| e.to_string()));
-            done.store(true, Ordering::Relaxed);
-            ctx.request_repaint();
-            r
-        }));
-    }
+    // Walked by the node (`library.changes.apply`): the step's rows all
+    // moved or none; then the library said changed.
+    shell.library_history().set_apply(persist.history_apply());
     // The source plugins (`import.source`): their accounts in the import
     // window, the photos chosen in a service's page imported by the
     // window's Import as fetched copies.
@@ -1026,8 +1009,6 @@ struct App {
     _shell_dropped: quit::MarkOnDrop,
     /// What the viewport shows.
     shown: Option<Shown>,
-    /// Set when an import ended: the library is filled again.
-    refill: Arc<AtomicBool>,
     /// The start's last marks: the first frame, the first input answered.
     frames: start::Frames,
     /// The library being read, shown once it is.
@@ -1562,28 +1543,15 @@ impl eframe::App for App {
         {
             self.shell.notify(helios_gui::dialogs::Level::Error, e);
         }
-        if self.refill.swap(false, Ordering::Relaxed)
-            && let Some(persist) = &mut self.persist
-        {
-            // Read off the UI thread, shown at a coming frame.
-            persist.ask_fill(&self.shell, true);
-            // The workspace proposes stacks after each import, to review.
-            if self.shell.suggests_stacks() {
-                self.shell.stack_review_mut().suggest(Vec::new());
-            }
-        }
         if let Some(persist) = &mut self.persist {
             {
                 let _stall = helios_gui::stall::section("the library's changes sent to the vault");
                 persist.frame(&mut self.shell, seconds_f64());
             }
-            // A scan changed where copies are (a disk plugged in or
-            // out): the photos' badges and thumbnails follow.
-            if persist.take_locations_changed() {
-                self.shell.refresh_volumes();
-                persist.ask_fill(&self.shell, true);
-            }
-            // The library read again: its thumbnails.
+            // What changed in the library (an import, an undo, a scan,
+            // another client) passed once through `library.changed`
+            // inside `frame`: the volumes, the Library read again, the
+            // albums, the stacks. The library read again: its thumbnails.
             if let Some(files) = persist.take_filled() {
                 show_thumbnails(&mut self.shell, &files);
             }
@@ -1977,7 +1945,7 @@ fn main() -> Result<(), String> {
                 no_library,
                 volume_watch,
                 import_watch,
-                persist,
+                mut persist,
                 library_reading,
                 node_settings,
                 layer_events,
@@ -2351,7 +2319,9 @@ fn main() -> Result<(), String> {
             if let Some(p) = &preparing {
                 shell.notify(helios_gui::dialogs::Level::Info, opening_notice(&p.path));
             }
-            let refill = Arc::new(AtomicBool::new(false));
+            if let Some(p) = &mut persist {
+                p.wake_on_changes(ctx.clone());
+            }
             if let Some(p) = &persist
                 && let Err(e) = library_commands(
                     &mut shell,
@@ -2359,7 +2329,6 @@ fn main() -> Result<(), String> {
                     import_watch.as_ref(),
                     backups.as_ref(),
                     &plugins,
-                    &refill,
                     ctx,
                 )
             {
@@ -2446,7 +2415,6 @@ fn main() -> Result<(), String> {
                 shell,
                 _shell_dropped: quit::MarkOnDrop("shell dropped"),
                 shown: None,
-                refill,
                 frames: start::Frames::default(),
                 library_reading,
                 preparing: preparing.into_iter().collect(),

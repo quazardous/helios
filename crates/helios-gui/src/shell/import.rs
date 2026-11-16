@@ -634,7 +634,8 @@ impl Shell {
                 import_end::SESSION => select = self.import_session_ended(&request, &line),
                 import_end::WINDOW_HISTORY => self.import_window_history_again(),
                 // The user's import: its photos selected once the Library
-                // shows them (unless the user turned it off).
+                // shows them, at `library.filled` (unless the user turned
+                // it off).
                 import_end::SELECT if select && !ids.is_empty() => {
                     self.focus.select_imported.clone_from(&ids);
                 }
@@ -647,9 +648,43 @@ impl Shell {
         asked
     }
 
-    /// The photos the last import brought, selected as soon as the
-    /// Library holds them.
-    pub(super) fn select_imported_photos(&mut self) {
+    /// The shell's listener of `library.filled`
+    /// ([`crate::library_changed::SELECT`]): it marks its place, its part
+    /// done by [`Shell::library_filled`].
+    pub(super) fn listen_library_filled(&mut self) {
+        let bus = self.core.app.handle().bus();
+        if let Err(e) = crate::library_changed::listen_filled(&*bus, crate::library_changed::SELECT)
+        {
+            self.notes
+                .push(format!("{}: {e}", crate::library_changed::FILLED));
+        }
+    }
+
+    /// The Library read again is shown (the host's fill landed): passed
+    /// through `library.filled`, each listener's part done in the order
+    /// they ran (the photos the last import brought selected), then
+    /// `library.filled` said on the journal with the listeners that ran.
+    pub fn library_filled(&mut self) {
+        use crate::library_changed as lc;
+        let handle = self.core.app.handle().clone();
+        let photos = self.focus.library.borrow().entries.len();
+        let ran = lc::pass_filled(&*handle.bus(), lc::Filled { photos });
+        for id in &ran {
+            if id == lc::SELECT {
+                self.select_imported_photos();
+            }
+        }
+        handle.publish(
+            "helios",
+            None,
+            lc::FILLED,
+            json!({ "photos": photos, "ran": ran }),
+        );
+    }
+
+    /// The photos the last import brought, selected once the Library
+    /// holds them (else at a later fill).
+    fn select_imported_photos(&mut self) {
         if self.focus.select_imported.is_empty() {
             return;
         }

@@ -394,6 +394,33 @@ to the import's changes (its one undo step) and write the vault, which
 is not done on the interface's thread. The node's own
 `helios-after-import` thread is unchanged.
 
+### Slice 2b: the library changed
+
+The vault says its library changed four ways (`vault.library_changed`,
+`vault.locations_changed`, `vault.changed_outside`, `vault.captures_set`)
+and its stacks two (`vault.stack_changed`, `library.decision`); the
+desktop used to turn the first four into a `locations_changed` flag,
+while imports and undo set a separate `refill` flag, so an import or an
+undo read the Library twice, and the albums compared the library
+history's revision every frame.
+
+Where it stands (2026-11-16): done. `helios_gui::library_changed`
+declares two points on the one bus. `Persist` gathers what one frame
+heard (the vault's events, and what the desktop says through its
+`library_changed::Publisher`: `import.ended`'s `library.refill`, a
+library step undone or redone) into one change (`kinds`: contents,
+locations, captures, stacks; `by`: vault, import, history) and passes it
+once through `library.changed`: `library.volumes`, `library.fill`,
+`library.albums`, `library.stacks`, each running only when the change
+concerns it. Once the Library read again is shown, the shell passes
+`library.filled`, whose `library.select-imported` selects the photos the
+last import brought, in that pass (no more polling). Both are said on
+the journal with the listeners that ran (`ran`). As for the import's
+points, the listeners need state that is not `Send + Sync` (the Library,
+the reads through the node): they mark their place, and `Persist` (for
+`library.changed`) or the shell (for `library.filled`) does their part
+right after, in the order they ran.
+
 ### Slice 3: one module catalogue
 
 One crate lists the processing modules and what each ships (its
