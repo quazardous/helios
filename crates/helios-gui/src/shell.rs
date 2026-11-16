@@ -1179,6 +1179,8 @@ impl Shell {
         shell.listen_import_ended();
         // What follows the Library read again, once shown.
         shell.listen_library_filled();
+        // Files dropped on any window open the import window on them.
+        shell.listen_files_dropped();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
@@ -7039,7 +7041,6 @@ impl Shell {
         if self.focus.library.borrow_mut().take_import_asked() {
             let _ = self.run(import_window::COMMAND, Value::Null, Origin::User);
         }
-        self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
         self.calibration_frame(&ctx);
         self.activity_frame(&ctx);

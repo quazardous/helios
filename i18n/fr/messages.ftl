@@ -2249,8 +2249,6 @@ gui-import-ended = { $photos } photos importées, { $edits } retouches darktable
 
 gui-import-ended-reported = { $photos } photos importées, { $edits } retouches darktable ; { $reported } pas conservées en entier : voir le panneau Journal
 
-gui-import-drop = Déposez pour importer dans la bibliothèque
-
 gui-import-cancelled = L’import a été annulé : { $photos } photos importées
 
 gui-import-metadata = { $photos } photos ont reçu leurs notes, étiquettes ou mots-clés de l’importateur

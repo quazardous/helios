@@ -368,8 +368,11 @@ Importing is always within reach, whatever the workspace (decided
 - **File > Import…** (Ctrl+Shift+I, as in Lightroom) asks for a card or a
   folder;
 - the empty **Library** and **Filmstrip** panels show **Import photos…**;
-- files and folders **dropped on the window** are imported (the window
-  says "Drop to import into the library" while they are dragged over it);
+- files and folders **dropped on any Helios window** (the main one, a
+  focus window, a detached panel's, the import window) are imported:
+  Helios listens to egui-pop's `files.drop` request, after the file
+  browser's; while files are dragged over a window, egui-pop shows
+  whether something takes them;
 - a paste of files (Edit > Paste) imports them, as before.
 
 A workspace whose template has an import source imports as it says. Without
