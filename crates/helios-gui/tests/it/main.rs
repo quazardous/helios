@@ -87,6 +87,7 @@ mod quick_settings;
 mod raw_front;
 mod scale;
 mod scenario_files;
+mod scopes_size;
 mod settings_app;
 mod settings_plugins;
 mod settings_transfer;
