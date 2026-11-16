@@ -1,6 +1,8 @@
 //! Buttons by their weight in a screen: the one primary action, the
-//! secondary ones, a destructive one.
+//! secondary ones, a destructive one; full size, or small in a list's
+//! row.
 
+use egui_pop::core::compact::RowButton;
 use egui_pop::core::ui::{Tone, UiPop as _};
 use egui_pop::egui::{Response, Ui};
 
@@ -45,4 +47,13 @@ impl Action {
 /// Need (action): the screen's primary or secondary action.
 pub fn action(ui: &mut Ui, kind: Action, label: &str) -> Response {
     ui.button_tone(kind.tone(), label)
+}
+
+/// A small button for `kind` of action in a list's row, labelled `label`
+/// (Cancel or Retry beside a job): egui-pop's compact row button in the
+/// action's tone, no taller than the row.
+///
+/// Need (action): a small action in a list's row (Cancel beside a job).
+pub fn row_action(ui: &mut Ui, kind: Action, label: &str) -> Response {
+    ui.add(RowButton::new(label).tone(kind.tone()))
 }

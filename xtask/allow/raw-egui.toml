@@ -27,7 +27,6 @@
 "rule_editor_ui.rs" = 34
 "scopes.rs" = 4
 "shell.rs" = 5
-"shell/activity_focus.rs" = 6
 "shell/calibrate_focus.rs" = 48
 "shell/import_accounts.rs" = 78
 "shell/import_browsers.rs" = 7

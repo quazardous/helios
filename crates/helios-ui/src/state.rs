@@ -4,7 +4,8 @@
 
 use egui_pop::core::icon::Icon;
 use egui_pop::core::placeholder::{EmptyState, Skeleton};
-use egui_pop::egui::{Response, Ui};
+use egui_pop::core::strings::{self, StrKey};
+use egui_pop::egui::{Context, Response, Ui};
 
 /// The empty places of Helios's screens. Screens pick a case; they do not
 /// write the sentence.
@@ -54,58 +55,103 @@ impl Empty {
         }
     }
 
+    /// Its title, in English ([`Empty::title_key`] translates it).
     pub fn title(self) -> &'static str {
-        match self {
-            Empty::NoPhotos => "No photos yet",
-            Empty::NoMatch => "No photo matches",
-            Empty::EmptyAlbum => "This album is empty",
-            Empty::NoJobs => "No background jobs",
-            Empty::NothingQueued => "Nothing queued",
-            Empty::NoSource => "No source yet",
-        }
+        self.title_key().fallback
     }
 
-    /// The sentence under the title: why, and what to do.
+    /// The sentence under the title, in English: why, and what to do
+    /// ([`Empty::text_key`] translates it).
     pub fn text(self) -> &'static str {
+        self.text_key().fallback
+    }
+
+    /// Its action's label in English, when it has one
+    /// ([`Empty::action_key`] translates it).
+    pub fn action(self) -> Option<&'static str> {
+        self.action_key().map(|k| k.fallback)
+    }
+
+    /// Its title's key in the catalogues (`messages.ftl`), with its
+    /// English.
+    pub fn title_key(self) -> StrKey {
         match self {
-            Empty::NoPhotos => "Import photos to see them here.",
-            Empty::NoMatch => "Try fewer words, or clear the search.",
-            Empty::EmptyAlbum => "The Library shows this album only, and it holds no photo.",
-            Empty::NoJobs => "Imports, exports and previews show here while they run.",
-            Empty::NothingQueued => "Edits waiting to be rendered show here.",
-            Empty::NoSource => "Add a folder, a card or an account to import from.",
+            Empty::NoPhotos => StrKey::new("ui-empty-no-photos", "No photos yet"),
+            Empty::NoMatch => StrKey::new("ui-empty-no-match", "No photo matches"),
+            Empty::EmptyAlbum => StrKey::new("ui-empty-empty-album", "This album is empty"),
+            Empty::NoJobs => StrKey::new("ui-empty-no-jobs", "No background jobs"),
+            Empty::NothingQueued => StrKey::new("ui-empty-nothing-queued", "Nothing queued"),
+            Empty::NoSource => StrKey::new("ui-empty-no-source", "No source yet"),
         }
     }
 
-    /// Its action's label, when it has one.
-    pub fn action(self) -> Option<&'static str> {
+    /// Its sentence's key in the catalogues, with its English.
+    pub fn text_key(self) -> StrKey {
         match self {
-            Empty::NoPhotos => Some("Import photos…"),
-            Empty::NoMatch => Some("Clear the search"),
-            Empty::EmptyAlbum => Some("Show all photos"),
-            Empty::NoSource => Some("Add a source…"),
+            Empty::NoPhotos => {
+                StrKey::new("ui-empty-no-photos-text", "Import photos to see them here.")
+            }
+            Empty::NoMatch => StrKey::new(
+                "ui-empty-no-match-text",
+                "Try fewer words, or clear the search.",
+            ),
+            Empty::EmptyAlbum => StrKey::new(
+                "ui-empty-empty-album-text",
+                "The Library shows this album only, and it holds no photo.",
+            ),
+            Empty::NoJobs => StrKey::new(
+                "ui-empty-no-jobs-text",
+                "Imports, exports and previews show here while they run.",
+            ),
+            Empty::NothingQueued => StrKey::new(
+                "ui-empty-nothing-queued-text",
+                "Edits waiting to be rendered show here.",
+            ),
+            Empty::NoSource => StrKey::new(
+                "ui-empty-no-source-text",
+                "Add a folder, a card or an account to import from.",
+            ),
+        }
+    }
+
+    /// Its action's key in the catalogues, with its English, when it has
+    /// one.
+    pub fn action_key(self) -> Option<StrKey> {
+        match self {
+            Empty::NoPhotos => Some(StrKey::new("ui-empty-no-photos-action", "Import photos…")),
+            Empty::NoMatch => Some(StrKey::new("ui-empty-no-match-action", "Clear the search")),
+            Empty::EmptyAlbum => Some(StrKey::new(
+                "ui-empty-empty-album-action",
+                "Show all photos",
+            )),
+            Empty::NoSource => Some(StrKey::new("ui-empty-no-source-action", "Add a source…")),
             Empty::NoJobs | Empty::NothingQueued => None,
         }
     }
 
-    fn state(self) -> EmptyState {
-        let state = EmptyState::new(self.icon(), self.title()).text(self.text());
-        match self.action() {
-            Some(label) => state.action(label),
+    /// Its empty state, in the language `ctx` shows (egui-pop's strings:
+    /// the translation plugin when the application installs one, else
+    /// English).
+    fn state(self, ctx: &Context) -> EmptyState {
+        let state = EmptyState::new(self.icon(), strings::tr(ctx, &self.title_key()))
+            .text(strings::tr(ctx, &self.text_key()));
+        match self.action_key() {
+            Some(key) => state.action(strings::tr(ctx, &key)),
             None => state,
         }
     }
 }
 
 /// The empty state of `case`: egui-pop's empty state (icon, title,
-/// sentence, action). Whether its action was clicked; the screen runs
-/// the command.
+/// sentence, action), in the language the application shows. Whether its
+/// action was clicked; the screen runs the command.
 ///
 /// Need (state): an empty state, nothing here yet.
 /// Need (state): no results for a search or a filter.
 /// Need (state): an empty album, with the way back to all photos.
 pub fn empty(ui: &mut Ui, case: Empty) -> bool {
-    case.state().show(ui)
+    let state = case.state(ui.ctx());
+    state.show(ui)
 }
 
 /// The shape of what is loading.
@@ -131,13 +177,14 @@ pub fn loading(ui: &mut Ui, shape: Loading) -> Response {
 }
 
 /// A place that failed to load: egui-pop's empty state in danger, with
-/// `title`, the `reason` and a Retry action. Whether Retry was clicked.
+/// `title`, the `reason` and a Retry action (egui-pop's translated
+/// "Retry"). Whether Retry was clicked.
 ///
 /// Need (state): a place that failed to load, with Retry.
 pub fn failed(ui: &mut Ui, title: &str, reason: &str) -> bool {
     EmptyState::new(Icon::Error, title)
         .text(reason)
-        .action("Retry")
+        .action(strings::tr(ui.ctx(), &strings::RETRY))
         .danger()
         .show(ui)
 }
