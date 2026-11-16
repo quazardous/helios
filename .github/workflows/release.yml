@@ -65,6 +65,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-linux
+      # The release guard: a published release builds on published
+      # egui-pop and egui_hud crates, never on a git revision
+      # (docs/releases.md, "egui-pop and egui_hud: next follows next").
+      - name: published dependencies
+        if: env.PUBLISH == 'true'
+        run: cargo --locked xtask pins --release
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny

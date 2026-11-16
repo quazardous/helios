@@ -65,10 +65,14 @@ multiple-versions = "warn"
 wildcards = "allow"
 
 [sources]
-# crates.io only: egui-pop, egui_fit and egui_hud are published there.
+# crates.io, plus git for the quazardous organisation's crates only:
+# Helios `next` builds on egui-pop and egui_hud `next` by git revision
+# (Cargo.toml's [patch.crates-io], moved by `cargo xtask pin-bump`); a
+# release takes their published versions (`cargo xtask pins --release`
+# refuses a git source; docs/releases.md). Any other git source is denied.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# Temporary: Cargo.toml's [patch.crates-io] takes egui-pop from its git
-# repository until egui-pop 0.11 is published; both go together.
-allow-git = ["https://github.com/quazardous/egui-pop"]
+
+[sources.allow-org]
+github = ["quazardous"]

@@ -452,26 +452,43 @@ pub fn judge(edges: &[Edge], allow: &[Allowed]) -> Vec<String> {
     problems
 }
 
-/// The egui-family crates `Cargo.lock` holds in more than one version.
+/// The egui-family crates `Cargo.lock` holds in more than one version, a
+/// version being its number and where it comes from: `0.11.0` from
+/// crates.io and `0.11.0` from a git revision are two crates in one graph
+/// (a `[patch.crates-io]` pin some dependency does not take).
 pub fn lock_duplicates(lock: &str) -> Vec<String> {
     let mut seen: Vec<(String, Vec<String>)> = Vec::new();
-    let mut name: Option<String> = None;
+    let mut add = |name: Option<String>, version: Option<String>, source: Option<String>| {
+        let (Some(n), Some(v)) = (name, version) else {
+            return;
+        };
+        if !is_ui_crate(&n) {
+            return;
+        }
+        let v = match source.as_deref().and_then(|s| s.strip_prefix("git+")) {
+            Some(git) => format!("{v} from git {}", git.rsplit('#').next().unwrap_or(git)),
+            None => v,
+        };
+        match seen.iter_mut().find(|(s, _)| *s == n) {
+            Some((_, versions)) if !versions.contains(&v) => versions.push(v),
+            Some(_) => {}
+            None => seen.push((n, vec![v])),
+        }
+    };
+    let (mut name, mut version, mut source) = (None, None, None);
     for line in lock.lines() {
         let line = line.trim();
         if line == "[[package]]" {
-            name = None;
+            add(name.take(), version.take(), source.take());
         } else if let Some(v) = quoted(line, "name") {
             name = Some(v);
-        } else if let Some(v) = quoted(line, "version")
-            && let Some(n) = name.take().filter(|n| is_ui_crate(n))
-        {
-            match seen.iter_mut().find(|(s, _)| *s == n) {
-                Some((_, versions)) if !versions.contains(&v) => versions.push(v),
-                Some(_) => {}
-                None => seen.push((n, vec![v])),
-            }
+        } else if let Some(v) = quoted(line, "version") {
+            version = Some(v);
+        } else if let Some(v) = quoted(line, "source") {
+            source = Some(v);
         }
     }
+    add(name, version, source);
     seen.into_iter()
         .filter(|(_, v)| v.len() > 1)
         .map(|(n, v)| {
@@ -945,6 +962,20 @@ mod tests {
         let d = lock_duplicates(lock);
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(d[0].contains("`egui-pop` (0.10.0, 0.11.0)"), "{d:?}");
+    }
+
+    #[test]
+    fn deps_worlds_lock_with_a_crate_from_git_and_from_crates_io_fails() {
+        let lock = "version = 4\n\n[[package]]\nname = \"egui-pop\"\nversion = \"0.11.0\"\n\
+                    source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\n\
+                    [[package]]\nname = \"egui-pop\"\nversion = \"0.11.0\"\n\
+                    source = \"git+https://github.com/quazardous/egui-pop?rev=d76e8d22#d76e8d225320\"\n";
+        let d = lock_duplicates(lock);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].contains("(0.11.0, 0.11.0 from git d76e8d225320)"),
+            "{d:?}"
+        );
     }
 
     #[test]
