@@ -912,19 +912,26 @@ timeout = "75m"
 # `test=keyboard_walk`) runs that module alone, and `filter=` is joined to
 # the module's path (a branch from before the change runs as it did).
 # `features=` turns on the crate's features (`features=svg`; several
-# joined by `+` or `,`), for the tests a feature gates
+# joined by `+` or `,`), for the tests a feature gates.
+# Doctests: nextest does not run them, so a whole-crate run (no `test=`,
+# no `filter=`) also runs `cargo test --doc` on the crate, as egui-pop's CI
+# does (`doc=0` turns it off); `test=doc` runs the crate's doctests alone,
+# `filter=` then narrowing them by name (a file path or item path). The
+# 2024 edition compiles a crate's doctests once, merged: about a minute
 [jobs.egui-pop-test]
-about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
+about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run); a whole-crate run adds its doctests"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
 checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; x=""; \
-if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else x="test(/^$t::/)"; fi; fi; \
+t="${test:-}"; case "$t" in lib) sel="--lib";; ""|doc) sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; x=""; \
+if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ] && [ "$t" != doc ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else x="test(/^$t::/)"; fi; fi; \
 fe="${features:-}"; fe="${fe//+/,}"; case "$fe" in *[!A-Za-z0-9_,/-]*) echo "bad features=$fe" >&2; exit 2;; esac; \
-cargo nextest run --locked --fail-fast -p ${crate} ${fe:+--features "$fe"} $sel ${x:+-E "$x"} $f"""
+d="${doc:-1}"; case "$d" in 0|1) ;; *) echo "bad doc=$d (0 or 1)" >&2; exit 2;; esac; \
+if [ "$t" != doc ]; then cargo nextest run --locked --fail-fast -p ${crate} ${fe:+--features "$fe"} $sel ${x:+-E "$x"} $f || exit $?; fi; \
+if [ "$t" = doc ] || { [ -z "$t" ] && [ -z "$f" ] && [ "$d" = 1 ]; }; then echo "== doctests of ${crate}"; cargo test --locked -p ${crate} ${fe:+--features "$fe"} --doc ${f:+-- $f}; fi"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
