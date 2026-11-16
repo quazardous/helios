@@ -19,15 +19,11 @@
 //! a picture has the same size on every run. No suite of the shell calls
 //! kittest's `snapshot`, which takes the whole window.
 
-use egui::{Id, Order, Rect, accesskit::Role};
+use egui::{Order, Rect, accesskit::Role};
 use egui_kittest::kittest::Queryable as _;
 use egui_kittest::{Harness, SnapshotError, SnapshotResult};
+use egui_pop::model::panels::Area;
 use helios_gui::Shell;
-
-/// The ids of the panels egui-pop draws the shell's bars in.
-const TITLE_BAR: &str = "egui_pop.title";
-const TOP_BAR: &str = "egui_pop.top";
-const STATUS_BAR: &str = "egui_pop.status";
 
 /// The cuts of the shell's picture.
 pub trait Shots {
@@ -83,32 +79,29 @@ impl Shots for Harness<'_, Shell> {
     }
 }
 
-/// The shell's bars, where egui-pop drew them last pass.
+/// The shell's bars and the workbench between them, as drawn last pass.
 #[derive(Clone, Copy, Debug)]
 pub struct Bars {
-    /// The title bar and the menu bar, all of the window's width (empty
-    /// when the window has neither).
+    /// Above the workbench, all of the window's width: the title bar and
+    /// the menu bar.
     pub top: Rect,
-    /// The status bar, all of the window's width.
+    /// Under the workbench, all of the window's width: the status bar.
     pub status: Rect,
-    /// Between the two: the workbench.
+    /// Between the two, all of the window's width: the workbench.
     pub body: Rect,
 }
 
-/// The outer rect of a panel egui-pop draws a bar in.
-fn bar(ctx: &egui::Context, id: &str) -> Option<Rect> {
-    egui::PanelState::load(ctx, Id::unique(id)).map(|s| s.outer_rect)
-}
-
-/// The shell's bars, from the panels they are drawn in.
+/// The shell's bars, around the workbench: what egui-pop's areas (the
+/// centre, the side bars, the bottom panel) took last pass.
 pub fn bars(h: &Harness<'_, Shell>) -> Bars {
     let window = h.ctx.content_rect();
-    let bottom_of_top = [TITLE_BAR, TOP_BAR]
+    let app = h.state().app().handle();
+    let work = Area::ALL
         .into_iter()
-        .filter_map(|id| bar(&h.ctx, id))
-        .map(|r| r.bottom())
-        .fold(window.top(), f32::max);
-    let top_of_status = bar(&h.ctx, STATUS_BAR).map_or(window.bottom(), |r| r.top());
+        .filter_map(|area| app.area_rect(area))
+        .reduce(Rect::union)
+        .expect("the workbench is drawn: a shot comes after a frame");
+    let (bottom_of_top, top_of_status) = (work.top(), work.bottom());
     Bars {
         top: Rect::from_min_max(window.min, egui::pos2(window.right(), bottom_of_top)),
         status: Rect::from_min_max(egui::pos2(window.left(), top_of_status), window.max),
