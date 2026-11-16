@@ -1831,9 +1831,9 @@ gui-macro-iface-down = Move down
 
 gui-macro-iface-drive-add = Drive another parameter
 
-gui-macro-iface-driven = Driven parameter
-
 gui-macro-iface-drive-remove = Stop driving it
+
+gui-macro-iface-driven = Driven parameter
 
 gui-macro-iface-filter = Filter
 
