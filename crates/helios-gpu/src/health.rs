@@ -355,12 +355,12 @@ mod tests {
         }
     }
 
-    fn ctx(adapters: Vec<Adapter>, used: Option<usize>) -> Option<Gpu> {
-        Some(Gpu {
+    fn gpu(adapters: Vec<Adapter>, used: Option<usize>) -> Gpu {
+        Gpu {
             adapters,
             used,
             why_cpu: None,
-        })
+        }
     }
 
     #[test]
@@ -369,17 +369,17 @@ mod tests {
             adapter("llvmpipe (LLVM 19)", AdapterKind::Software),
             adapter("Radeon RX 7600", AdapterKind::Discrete),
         ];
-        let found = AdapterCheck.findings(&ctx(both.clone(), Some(0)));
+        let found = AdapterCheck.findings(&Some(gpu(both.clone(), Some(0))));
         assert_eq!(found[0].level, Level::Warning);
         assert_eq!(found[0].fix.as_ref().unwrap().command, "links.open");
         assert_eq!(
-            AdapterCheck.findings(&ctx(both, Some(1)))[0].level,
+            AdapterCheck.findings(&Some(gpu(both, Some(1))))[0].level,
             Level::Ok
         );
         // Alone, a software adapter is all there is.
         let alone = vec![adapter("Microsoft Basic Render Driver", AdapterKind::Other)];
         assert_eq!(
-            AdapterCheck.findings(&ctx(alone, Some(0)))[0].level,
+            AdapterCheck.findings(&Some(gpu(alone, Some(0))))[0].level,
             Level::Ok
         );
         assert!(AdapterCheck.findings(&None).is_empty());
@@ -415,7 +415,7 @@ mod tests {
                 },
             ]
         });
-        let ctx = ctx(vec![adapter("WARP", AdapterKind::Software)], Some(0));
+        let ctx = Some(gpu(vec![adapter("WARP", AdapterKind::Software)], Some(0)));
         let found = check.findings(&ctx);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "gpu.kernels/sigmoid");

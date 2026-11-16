@@ -287,6 +287,10 @@ impl Library {
 struct Facts {
     volumes: Vec<Volume>,
     library: Option<std::path::PathBuf>,
+    #[expect(
+        clippy::option_option,
+        reason = "as the library's own state: not read, or none chosen"
+    )]
     library_folder: Option<Option<std::path::PathBuf>>,
     vault: Option<std::path::PathBuf>,
     backup: Option<Backup>,

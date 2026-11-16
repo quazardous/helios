@@ -90,8 +90,8 @@ impl Backup {
 }
 
 /// The strategy, when the run read the backups and one is set.
-fn strategy_of(state: &Option<Backup>) -> Option<(&Backup, &Strategy)> {
-    let b = state.as_ref()?;
+fn strategy_of(state: Option<&Backup>) -> Option<(&Backup, &Strategy)> {
+    let b = state?;
     Some((b, b.strategy.as_ref()?))
 }
 
@@ -202,7 +202,7 @@ impl Owned for StrategyMet {
     }
 
     fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
-        let Some((backup, s)) = strategy_of(state) else {
+        let Some((backup, s)) = strategy_of(state.as_ref()) else {
             return Vec::new();
         };
         let short = backup.statuses.iter().filter(|st| !st.met()).count();
@@ -271,7 +271,7 @@ impl Owned for DestinationsSeen {
     }
 
     fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
-        let Some((backup, s)) = strategy_of(state) else {
+        let Some((backup, s)) = strategy_of(state.as_ref()) else {
             return Vec::new();
         };
         let destinations: Vec<&Volume> = backup
@@ -357,7 +357,7 @@ impl Owned for Unverified {
     }
 
     fn findings(&self, state: &Option<Backup>) -> Vec<Finding> {
-        let Some((backup, _)) = strategy_of(state) else {
+        let Some((backup, _)) = strategy_of(state.as_ref()) else {
             return Vec::new();
         };
         let count = backup.statuses.iter().filter(|s| s.unverified > 0).count();
