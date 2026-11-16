@@ -67,6 +67,13 @@ A pull request is merged only when its tests passed on the box and its
      `release` job red later; the release keeper's `snapshots-refresh`
      step catches it before the release, and names the pull request
      (docs/releases.md, "Snapshots before a release").
+     helios-gui's suites cut their pictures to what they test (the
+     dialog, the window, the workbench: `tests/it/shot.rs`), so a change
+     to the shell's chrome (the title bar, the menu bar, the status bar)
+     moves only the `chrome_snapshots` suite's pictures
+     (`test=chrome_snapshots`). A new snapshot of the shell uses
+     `shot::Shots`, never kittest's `snapshot`, which takes the whole
+     window.
    - `cargo xtask manifest check <file>` (or the body on stdin) checks it.
 4. **Prove it on the box yourself** (owner, 2026-11-13: the author who
    wrote the change runs its narrowest tests; it beat batching every pull
