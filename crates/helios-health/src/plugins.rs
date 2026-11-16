@@ -9,7 +9,7 @@ use std::sync::Arc;
 use helios_core::Message;
 use serde_json::json;
 
-use crate::{Check, Context, Declaration, Finding, Fix, Level};
+use crate::{Check, Context, Declaration, Finding, Fix, Level, Registry};
 
 /// The owner of the plugins' check.
 pub const OWNER: &str = "plugins";
@@ -17,6 +17,12 @@ pub const OWNER: &str = "plugins";
 /// The plugin host's checks: each plugin starts and answers.
 pub fn checks() -> Vec<Arc<dyn Check>> {
     vec![Arc::new(Plugins)]
+}
+
+/// Adds the plugin host's check to `registry`, owned by `OWNER`, as listeners of
+/// the health report.
+pub fn register(registry: &mut Registry) {
+    crate::add_owned(registry, OWNER, checks());
 }
 
 pub const PLUGINS: &str = "plugins";

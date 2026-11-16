@@ -35,10 +35,11 @@ It also reads what the close wrote to helios-gui's logs and the bus
 - a pass of the Settings window's viewport after its window went painted
   nothing (egui-pop's "it paints nothing" line): the black window;
 - "the Settings app is closed" is not logged exactly once;
-- for a close the window asks (all ways but `admin`), that line did not
-  come from Helios's listener on `window.close` (`helios.screen`, placed
-  after `admin.window`), which runs in the same call that publishes
-  `window.closed`: not from a later pass that samples the app's state.
+- that line did not come from Helios's listener on `window.close`
+  (`helios.screen`, placed after `admin.window`), which runs in the same
+  call that publishes `window.closed`: not from a later pass that samples
+  the app's state. `admin.close` too closes the window through the bus
+  (egui-pop ADR 0029, slice 3), so every way is held to it.
 
 One JSON line per way in `settings-close.jsonl`, a table in
 `settings-close.md`, the screenshots and helios-gui's logs in `--out`;
@@ -434,18 +435,17 @@ def one(args, comp, agent, way: str, index: int, baseline: Path | None, state: P
         problems.append(
             f'"the Settings app is closed" logged {r["closed_lines"]} times, 1 expected'
         )
-    if way != "admin":
-        if "error" in listener_after:
-            problems.append(listener_after["error"])
-        elif not listener_after.get("after_admin"):
-            problems.append(f"`{LISTENER}` does not run after `{ADMIN_LISTENER}`")
-        elif (listener_after.get("runs") or 0) <= (listener_before.get("runs") or 0):
-            problems.append(
-                f"`{LISTENER}` did not run for this close: the Settings app was not "
-                "closed in the call that publishes window.closed"
-            )
-        elif (listener_after.get("failures") or 0) > (listener_before.get("failures") or 0):
-            problems.append(f"`{LISTENER}` failed")
+    if "error" in listener_after:
+        problems.append(listener_after["error"])
+    elif not listener_after.get("after_admin"):
+        problems.append(f"`{LISTENER}` does not run after `{ADMIN_LISTENER}`")
+    elif (listener_after.get("runs") or 0) <= (listener_before.get("runs") or 0):
+        problems.append(
+            f"`{LISTENER}` did not run for this close: the Settings app was not "
+            "closed in the call that publishes window.closed"
+        )
+    elif (listener_after.get("failures") or 0) > (listener_before.get("failures") or 0):
+        problems.append(f"`{LISTENER}` failed")
     r["ok"] = not problems
     if problems:
         r["why"] = "; ".join(problems)

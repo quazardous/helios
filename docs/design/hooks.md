@@ -346,6 +346,16 @@ go away. The report's order is the listeners' resolved order; a check
 that fails shows as a warning finding naming its owner, as the runner
 does today.
 
+Where it stands (2026-11-16): the point is in (`helios_health::HealthReport`,
+a `collect` emit; `Registry::add` registers each check as a listener
+owned by its module, `Registry::remove_owner` takes a module's checks
+away, and a listener's failure is its check's "failed" problem). The
+health crate lists no module: each module's `register` adds its checks,
+and the node composes them (`helios_node_core::health::checks`). Still
+to do: the checks' code and their gathering move into their owners'
+crates, so `Context`'s per-module fields, `HealthInputs`'s `with_*` and
+`helios-health`'s storage and vault dependencies go.
+
 ### Slice 2: after an import
 
 The desktop's in-process imports publish `library.imported` on the bus

@@ -160,7 +160,7 @@ fn health_runner(
     accounts: Option<&helios_plugin::health::AccountsFn>,
 ) -> helios_health::runner::Runner {
     use helios_health::backup::CardShort;
-    use helios_health::{Findings, Ignored, Registry, runner};
+    use helios_health::{Findings, Ignored, runner};
     // Whether a connector has an account: a source plugin no account
     // uses yet waits for its permissions without anything to warn of.
     let book = library.as_ref().map(Library::accounts);
@@ -190,7 +190,7 @@ fn health_runner(
         .with_snapshots(helios_gui::catalogue::health)
         .into_context();
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
-    let mut registry = Registry::builtin();
+    let mut registry = helios_node_core::health::checks();
     if let Err(problems) = registry.add(
         helios_health::gpu::OWNER,
         Arc::new(helios_health::gpu::Kernels::new(health_kernels())),

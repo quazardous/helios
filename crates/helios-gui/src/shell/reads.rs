@@ -1,6 +1,8 @@
 //! The Settings app's reads through egui-pop's read kernel
 //! (`egui_pop::api::reads`): the Storage page's "In use" (`cache.stats`)
-//! and "Volumes" (`library.volumes`, `library.backupStrategy`) are read
+//! and "Volumes" (`library.volumes`, `library.backupStrategy`), the
+//! Health page's findings (`health.findings`) and the accounts
+//! (`import.accounts`) are read
 //! away from the frame, kept by command and arguments, shown at once
 //! from what was last read and read again in the background; a refresh
 //! never blanks them.
@@ -16,7 +18,9 @@
 //!   fact to the kernel at every frame; `node.resync` (a hole in a node's
 //!   events) makes every value out of date. The storage link's own
 //!   changes (an edit saved, a read after a scan) reach it as
-//!   `storage.volumes.changed` ([`Shell::read_fact`]).
+//!   `storage.volumes.changed` ([`Shell::read_fact`]); the health check's
+//!   `health.*` and the accounts' `account.*` the same way. Nothing calls
+//!   the Settings app's `refresh`: a read follows its events.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -48,6 +52,17 @@ pub const POLICIES: &[(&str, Option<Duration>, &[&str])] = &[
         super::storage_admin::STRATEGY,
         Some(Duration::from_secs(30)),
         &["storage.*", "library.*"],
+    ),
+    // The health check's findings change only when a run starts or ends
+    // or a finding is ignored, each said as `health.*`.
+    (super::health::FINDINGS, None, &["health.*"]),
+    // The accounts: removed or signed out here, said as `account.*`; a
+    // sign-in's progress (connecting, connected) is read again now and
+    // then while shown.
+    (
+        super::accounts_admin::ACCOUNTS,
+        Some(Duration::from_secs(2)),
+        &["account.*"],
     ),
 ];
 

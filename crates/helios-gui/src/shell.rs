@@ -519,6 +519,8 @@ struct Parts {
     /// The plugins installed, for Settings > Plugins: set by
     /// [`ShellBuilder::plugins`] before the application is built.
     plugin_settings: crate::config::plugins::Shared,
+    /// Where a command finishing on a later frame takes its resolver.
+    later: Later,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -1015,6 +1017,7 @@ impl Shell {
                 agent_state,
                 controls,
                 plugin_settings,
+                later,
             },
         }
     }
@@ -1045,6 +1048,7 @@ impl Shell {
             agent_state,
             controls,
             plugin_settings,
+            later,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -1139,6 +1143,7 @@ impl Shell {
             relays,
             forgotten: crate::jobs::Forgotten::default(),
             pointer_choice: false,
+            later,
         };
         let mut shell = Shell {
             core,
@@ -1546,6 +1551,13 @@ impl Shell {
     pub fn texts(&self) -> impl Fn(Message) -> String + Send + Sync + 'static {
         let i18n = self.core.i18n.clone();
         move |m| helios_i18n::message(&i18n, &m)
+    }
+
+    /// Where a handler registered with [`Shell::register`] takes the
+    /// resolver of the command it runs, to finish it on a later frame
+    /// (`command.done` is said then).
+    pub fn later(&self) -> Later {
+        self.core.later.clone()
     }
 
     pub fn register(
@@ -7175,6 +7187,8 @@ impl Shell {
         // What holds the screen, in the log when it changes.
         self.focus.screen.follow(&h);
         for e in events {
+            // A fix the health check waits for, done: it runs again.
+            self.health_heard(&e);
             match trace::event_line(&e.name, &e.data) {
                 Some((true, line)) => log::warn!(target: "helios", "{line}"),
                 Some((false, line)) => log::info!(target: "helios", "{line}"),
