@@ -4,6 +4,8 @@
 //! in the browser's other modes (details, filmstrip, agenda), and the
 //! "Add…" wizard's steps
 //! (`tests/snapshots/`, thresholds in the workspace's `kittest.toml`).
+//! Each picture is the import window alone, not the main window behind
+//! it (`shot::Shots::try_window_shot`).
 //! Regenerate with `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test
 //! it import_snapshots::` (the box's `gui-snapshots` job).
 
@@ -19,6 +21,11 @@ use helios_shell::commands::Origin;
 use helios_storage::Card as Volume;
 use helios_vault::{MemoryStore, Vault};
 use serde_json::{Value, json};
+
+use crate::shot::Shots as _;
+
+/// The import window's title, as its picture is cut to it.
+const IMPORT_PHOTOS: &str = "Import photos";
 
 /// The same folder on every run: the window shows folder names.
 fn temp(name: &str) -> PathBuf {
@@ -143,7 +150,7 @@ fn the_import_window_snapshots() {
         // No source: nothing to import yet.
         let mut h = window(Vec::new(), json!(null), scale);
         assert!(h.state().import_ticked().is_empty());
-        results.add(h.try_snapshot(name("empty", scale)));
+        results.add(h.try_window_shot(name("empty", scale), IMPORT_PHOTOS));
         // A card, ticked first, with its grid; copied.
         let cards = vec![Volume {
             label: "EOS_DIGITAL".into(),
@@ -153,7 +160,7 @@ fn the_import_window_snapshots() {
         let mut h = window(cards, json!(null), scale);
         assert_eq!(h.state().import_counts().selected, 3);
         assert!(h.state().import_copies());
-        results.add(h.try_snapshot(name("card", scale)));
+        results.add(h.try_window_shot(name("card", scale), IMPORT_PHOTOS));
         // The Contents in the browser's other modes.
         if scale == 1.0 {
             for mode in ["details", "filmstrip", "agenda"] {
@@ -161,7 +168,7 @@ fn the_import_window_snapshots() {
                 for _ in 0..4 {
                     h.run();
                 }
-                results.add(h.try_snapshot(name(&format!("card-{mode}"), scale)));
+                results.add(h.try_window_shot(name(&format!("card-{mode}"), scale), IMPORT_PHOTOS));
             }
         }
         // A card whose photos carry marks: in your Library (an icon, top
@@ -175,18 +182,18 @@ fn the_import_window_snapshots() {
         let mut h = window_with(cards, json!(null), scale, |s| s.set_import_known(known));
         let _ = h.get_by_label("IMG_0002.JPG · in your Library");
         let _ = h.get_by_label("IMG_0003.CR2 + IMG_0003.JPG · RAW+JPG");
-        results.add(h.try_snapshot(name("card-marks", scale)));
+        results.add(h.try_window_shot(name("card-marks", scale), IMPORT_PHOTOS));
         // A folder: added where it is.
         let mut h = window(Vec::new(), json!({ "paths": [folder] }), scale);
         assert!(!h.state().import_copies());
-        results.add(h.try_snapshot(name("folder", scale)));
+        results.add(h.try_window_shot(name("folder", scale), IMPORT_PHOTOS));
         // The import profile editor, on the folder's profile.
         h.state_mut().open_import_profiles();
         for _ in 0..4 {
             h.run();
         }
         assert!(h.state().import_profiles_open());
-        results.add(h.try_snapshot(name("profiles", scale)));
+        results.add(h.try_window_shot(name("profiles", scale), IMPORT_PHOTOS));
     }
     // The "Add…" wizard's steps (1x), on the card connector: its kind,
     // the volume, how to import and the name.
@@ -213,7 +220,7 @@ fn the_import_window_snapshots() {
         }
         if let Some(state) = state {
             assert!(h.state().import_wizard_open(), "{state}");
-            results.add(h.try_snapshot(name(state, 1.0)));
+            results.add(h.try_window_shot(name(state, 1.0), IMPORT_PHOTOS));
         }
     }
     h.query_all_by_label("Add the source")

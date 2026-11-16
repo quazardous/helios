@@ -32,6 +32,8 @@ use helios_vault::promises::{Promise, State};
 use helios_vault::{MemoryStore, Vault};
 use serde_json::{Value, json};
 
+use crate::shot::Shots as _;
+
 /// The import history's record the stand-in import settles with.
 const HISTORY: &str = "01763130000-0004242-000000001";
 
@@ -466,7 +468,7 @@ fn activity_snapshots() {
         open(&mut h, id);
         // The spinners repaint for ever: a few frames, not a settled run.
         h.run_steps(4);
-        results.add(h.try_snapshot(name));
+        results.add(h.try_window_shot(name, "Activity"));
     }
 }
 

@@ -25,6 +25,8 @@ use helios_shell::commands::Origin;
 use helios_thumbs::{Key as ThumbKey, ThumbCache};
 use serde_json::{Value, json};
 
+use crate::shot::Shots as _;
+
 const PHOTOS: [&str; 3] = ["a", "b", "c"];
 
 fn names() -> Vec<String> {
@@ -265,11 +267,11 @@ fn compare_snapshots() {
         run(&mut h, "vault.flag.pick", json!(null));
         h.run();
         let name = format!("compare-three-pop-dark-{}x", scale as u32);
-        results.add(h.try_snapshot(&name));
+        results.add(h.try_body_shot(&name));
         if scale == 1.0 {
             // Zoomed, synchronised: every photo shows the same detail.
             zoom_over(&mut h, "IMG_0001.jpg", 2.5);
-            results.add(h.try_snapshot("compare-zoomed-pop-dark-1x"));
+            results.add(h.try_body_shot("compare-zoomed-pop-dark-1x"));
         }
         drop(loader);
     }

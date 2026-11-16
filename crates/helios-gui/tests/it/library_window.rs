@@ -20,6 +20,8 @@ use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
+use crate::shot::Shots as _;
+
 fn scratch(name: &str) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -237,7 +239,7 @@ fn library_window_snapshots() {
     h.run();
     run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
     h.run_steps(4);
-    results.add(h.try_snapshot("library-window-pop-dark-1x"));
+    results.add(h.try_window_shot("library-window-pop-dark-1x", "Library"));
 }
 
 /// The Metadata section on one photo, then on two whose fields differ
@@ -264,7 +266,7 @@ fn library_metadata_snapshots() {
     h.run();
     run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
     h.run_steps(4);
-    results.add(h.try_snapshot("library-metadata-single"));
+    results.add(h.try_window_shot("library-metadata-single", "Library"));
     h.state_mut()
         .library_mut()
         .with_gallery(WINDOW_GALLERY, |lib| {
@@ -272,7 +274,7 @@ fn library_metadata_snapshots() {
         });
     h.run_steps(4);
     h.get_by_label("2 photos selected");
-    results.add(h.try_snapshot("library-metadata-mixed"));
+    results.add(h.try_window_shot("library-metadata-mixed", "Library"));
 }
 
 /// The Metadata section in the main window's narrow Library panel: every
