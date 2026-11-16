@@ -1151,6 +1151,8 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
             .collect(),
     );
     h.run_steps(3);
+    // Its fill landed: `library.filled`, as the host's says it.
+    h.state_mut().library_filled();
     let mut selected = h.state().library().selection();
     selected.sort();
     let mut expected = ids.clone();

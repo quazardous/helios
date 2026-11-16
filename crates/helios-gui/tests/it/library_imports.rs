@@ -146,6 +146,8 @@ impl Setup {
                 .collect(),
         );
         self.h.run_steps(3);
+        // Its fill landed: `library.filled`, as the host's says it.
+        self.h.state_mut().library_filled();
         let mut new: Vec<String> = all.into_iter().filter(|i| !before.contains(i)).collect();
         new.sort();
         new

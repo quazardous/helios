@@ -1795,8 +1795,7 @@ fn delete_removes_the_selection_from_the_library_and_undo_puts_it_back() {
     // The desktop's loop: the vault's event reads the library again.
     let refill = |h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at| {
         settle(h, persist, at);
-        assert!(persist.take_locations_changed(), "the vault's event heard");
-        persist.ask_fill(h.state(), true);
+        // The vault\'s event heard: `library.changed` reads the Library again.
         settle(h, persist, at + 10.0);
     };
     let in_library =
@@ -2032,8 +2031,7 @@ fn ctrl_brackets_rotate_the_selection_and_undo_turns_it_back() {
     );
     assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
     settle(&mut h, &mut persist, 30.0);
-    assert!(persist.take_locations_changed(), "the vault's event heard");
-    persist.ask_fill(h.state(), true);
+    // The vault\'s event heard: `library.changed` reads the Library again.
     settle(&mut h, &mut persist, 40.0);
     assert_eq!(turns(&persist, 1), 0);
     assert_eq!(shown(&h, 1), 0, "the Library read again shows it");
@@ -2193,8 +2191,7 @@ fn the_versions_strip_switches_and_a_removed_copy_comes_back_with_undo() {
     assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
     settle(&mut h, &mut persist, 30.0);
     assert_eq!(persist.vault().heads(&id(1)).unwrap().len(), 2);
-    assert!(persist.take_locations_changed(), "the vault's event heard");
-    persist.ask_fill(h.state(), true);
+    // The vault\'s event heard: `library.changed` reads the Library again.
     settle(&mut h, &mut persist, 40.0);
     settle(&mut h, &mut persist, 45.0);
     assert_eq!(
@@ -2289,8 +2286,7 @@ fn photos_are_grouped_topped_and_ungrouped_each_undone_and_redone() {
     let undone = history.undo(&request, &user);
     assert!(matches!(undone, Answer::Done(Ok(_))), "{undone:?}");
     assert_eq!(persist.vault().stacks().unwrap().len(), 1);
-    assert!(persist.take_locations_changed(), "the vault's event heard");
-    persist.ask_fill(h.state(), true);
+    // The vault\'s event heard: `library.changed` reads the Library again.
     for at in [30.0, 35.0, 40.0] {
         settle(&mut h, &mut persist, at);
     }
@@ -2335,9 +2331,7 @@ fn two_photos_are_paired_into_one_cell_and_the_step_undone() {
             settle(h, persist, clock);
             clock += 4.0;
         }
-        // The vault's event heard, the Library read again.
-        let _ = persist.take_locations_changed();
-        persist.ask_fill(h.state(), true);
+        // The vault\'s event heard: `library.changed` reads the Library again.
         for _ in 0..3 {
             settle(h, persist, clock);
             clock += 4.0;
@@ -2878,8 +2872,7 @@ fn the_window_keeps_painting_once_every_pair_is_made_and_on_the_next_launch() {
             settle(h, persist, clock);
             clock += 4.0;
         }
-        let _ = persist.take_locations_changed();
-        persist.ask_fill(h.state(), true);
+        // The vault\'s event heard: `library.changed` reads the Library again.
         for _ in 0..3 {
             settle(h, persist, clock);
             clock += 4.0;
