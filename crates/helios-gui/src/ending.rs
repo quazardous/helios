@@ -14,30 +14,46 @@
 //! the interface's thread), and the quit goes as usual, the crash marker
 //! taken away by the `app.exit` step. A quit not done by
 //! [`DEADLINE`], a second request, or a request before the window is
-//! open, end the process at once, the session marked clean first
-//! ([`mark_clean`]): the system asked, nothing crashed.
+//! open, end the process at once ([`Ending::end_now`]). The session is
+//! marked clean first ([`mark_clean`]: the system asked, nothing
+//! crashed) only when the library is closed, or there is none
+//! ([`Ending::library`]); ended with the library open, the session is
+//! left marked as not ended cleanly ([`mark_unclean`]): the next start
+//! reports it, and the library checks itself as it opens.
 
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+/// The window's own share of the quit: the end splash's steps on the
+/// interface's thread (the last changes written, the interface's
+/// settings saved).
+pub const WINDOW_SHARE: Duration = Duration::from_secs(3);
+
 /// How long the quit a request started may take before the process
-/// ends anyway: the window closing and the vault's own deadline
-/// (`quit::VAULT_DEADLINE`) fit well within it.
-pub const DEADLINE: Duration = Duration::from_secs(8);
+/// ends anyway: the window's share, then the node's stop, its jobs
+/// cancelled and the library closed, each within its own deadline
+/// (`helios_node_core::node::STOP_DEADLINE`).
+pub const DEADLINE: Duration = WINDOW_SHARE.saturating_add(helios_node_core::node::STOP_DEADLINE);
 
 /// What closes the window: true when it was asked, false when there is
 /// no window yet.
 pub type Close = Box<dyn Fn() -> bool + Send + Sync>;
 /// What ends the process at once, with an exit code.
 pub type Exit = Box<dyn Fn(i32) + Send + Sync>;
+/// Whether the library is closed (its clean-shutdown marker written).
+pub type Closed = Box<dyn Fn() -> bool + Send + Sync>;
 
 /// The requests to end, and what they do.
 pub struct Ending {
     close: Close,
     exit: Exit,
     deadline: Duration,
+    /// The crash directory, where the session's marker is.
+    crashes: Option<PathBuf>,
+    /// The library open, if any: whether it is closed.
+    library: Mutex<Option<Closed>>,
     asked: AtomicBool,
     finished: AtomicBool,
 }
@@ -53,14 +69,72 @@ impl std::fmt::Debug for Ending {
 }
 
 impl Ending {
-    pub fn new(close: Close, exit: Exit, deadline: Duration) -> Arc<Ending> {
+    /// `crashes`: the crash directory, where the session's marker is.
+    pub fn new(
+        close: Close,
+        exit: Exit,
+        deadline: Duration,
+        crashes: Option<PathBuf>,
+    ) -> Arc<Ending> {
         Arc::new(Ending {
             close,
             exit,
             deadline,
+            crashes,
+            library: Mutex::new(None),
             asked: AtomicBool::new(false),
             finished: AtomicBool::new(false),
         })
+    }
+
+    /// A library is being opened, or is open, from now on: `closed` says
+    /// whether it is closed. Until it is, a process ended now leaves the
+    /// session marked as not ended cleanly.
+    pub fn library(&self, closed: Closed) {
+        *self.library.lock().unwrap_or_else(PoisonError::into_inner) = Some(closed);
+    }
+
+    /// No library after all (its opening failed): nothing to close.
+    pub fn no_library(&self) {
+        *self.library.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Whether the process may end with the session marked clean: no
+    /// library, or it is closed.
+    pub fn library_closed(&self) -> bool {
+        self.library
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_none_or(|closed| closed())
+    }
+
+    /// The session's mark as the process ends now: clean when the
+    /// library is closed (or there is none), else left marked as not
+    /// ended cleanly. Whether it was marked clean.
+    pub fn mark_session(&self) -> bool {
+        let clean = self.library_closed();
+        if clean {
+            if let Some(dir) = &self.crashes {
+                mark_clean(dir);
+            }
+        } else {
+            log::warn!(
+                target: "helios::quit",
+                "the process ends with the library open: the session is left marked as not ended cleanly"
+            );
+            if let Some(dir) = &self.crashes {
+                mark_unclean(dir);
+            }
+        }
+        clean
+    }
+
+    /// Ends the process now, with `code`, the session marked as it
+    /// stands ([`Ending::mark_session`]).
+    pub fn end_now(&self, code: i32) {
+        self.mark_session();
+        (self.exit)(code);
     }
 
     /// The system asks Helios to end (`why`, for the log); `code` is the
@@ -71,12 +145,12 @@ impl Ending {
         }
         if self.asked.swap(true, Ordering::SeqCst) {
             log::warn!(target: "helios::quit", "{why} again: ending now");
-            (self.exit)(code);
+            self.end_now(code);
             return;
         }
         if !(self.close)() {
             log::info!(target: "helios::quit", "{why} before the window opened: ending now");
-            (self.exit)(code);
+            self.end_now(code);
             return;
         }
         log::info!(target: "helios::quit", "{why}: closing");
@@ -90,7 +164,7 @@ impl Ending {
                         "{} s after the request the quit is not done: ending now",
                         me.deadline.as_secs()
                     );
-                    (me.exit)(code);
+                    me.end_now(code);
                 }
             });
         if let Err(e) = watch {
@@ -128,6 +202,22 @@ pub fn mark_clean(dir: &Path) {
     let pid = std::process::id();
     for name in [format!("session-{pid}.json"), format!("panic-{pid}.json")] {
         let _ = std::fs::remove_file(dir.join(name));
+    }
+}
+
+/// Marks this session as not ended cleanly in the crash directory `dir`:
+/// its marker is put back if the `app.exit` step already took it (the
+/// window's steps done, the library still open), so the next start
+/// reports a session that ended without closing.
+pub fn mark_unclean(dir: &Path) {
+    use egui_pop::platform::crash::{self, Report};
+    let pid = std::process::id();
+    if dir.join(format!("session-{pid}.json")).exists() {
+        return;
+    }
+    let report = Report::new("Helios", env!("CARGO_PKG_VERSION"));
+    if let Err(e) = crash::simulate(dir, pid, &report) {
+        log::warn!(target: "helios::quit", "the session cannot be marked as not ended cleanly: {e}");
     }
 }
 
@@ -194,7 +284,7 @@ mod windows {
         if let Some(ending) = ENDING.get() {
             ending.request(why, 0);
             if !ending.wait(wait) {
-                (ending.exit)(0);
+                ending.end_now(0);
             }
         }
     }
@@ -313,6 +403,7 @@ mod tests {
                 let _ = exited.lock().unwrap().send(code);
             }),
             deadline,
+            None,
         );
         (e, closes, exits)
     }
@@ -374,6 +465,72 @@ mod tests {
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         assert!(crash::collect(&dir, None).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An ending whose forced end marks the session in `dir`, the library
+    /// said closed or not by `closed`.
+    fn ending_marking(
+        dir: &Path,
+        closed: bool,
+        deadline: Duration,
+    ) -> (Arc<Ending>, mpsc::Receiver<i32>) {
+        let (exited, exits) = mpsc::channel();
+        let exited = Mutex::new(exited);
+        let e = Ending::new(
+            Box::new(|| true),
+            Box::new(move |code| {
+                let _ = exited.lock().unwrap().send(code);
+            }),
+            deadline,
+            Some(dir.to_path_buf()),
+        );
+        e.library(Box::new(move || closed));
+        (e, exits)
+    }
+
+    fn crash_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("helios-ending-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn marker(dir: &Path) -> PathBuf {
+        dir.join(format!("session-{}.json", std::process::id()))
+    }
+
+    /// The quit passed its deadline with the library still open (a job
+    /// slow to stop), the window's steps done (the `app.exit` step took
+    /// the marker): the process ends with the session marked as not
+    /// ended cleanly, so the next start reports it.
+    #[test]
+    fn a_forced_end_with_the_library_open_leaves_the_session_unclean() {
+        let dir = crash_dir("open");
+        let (e, exits) = ending_marking(&dir, false, SHORT);
+        e.request("SIGTERM", 143);
+        assert_eq!(exits.recv_timeout(Duration::from_secs(10)), Ok(143));
+        assert!(marker(&dir).is_file(), "the session is left unclean");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The same past the library's close: the session is marked clean.
+    #[test]
+    fn a_forced_end_after_the_library_closed_marks_the_session_clean() {
+        use egui_pop::platform::crash::{self, Report};
+        let dir = crash_dir("closed");
+        crash::simulate(&dir, std::process::id(), &Report::new("Helios", "0")).unwrap();
+        let (e, exits) = ending_marking(&dir, true, SHORT);
+        e.request("SIGTERM", 143);
+        assert_eq!(exits.recv_timeout(Duration::from_secs(10)), Ok(143));
+        assert!(!marker(&dir).exists(), "the session is marked clean");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The process deadline leaves the node its whole stop: the jobs
+    /// stopped within theirs, then the library closed.
+    #[test]
+    fn the_process_deadline_fits_the_nodes_stop() {
+        assert!(DEADLINE >= helios_node_core::node::STOP_DEADLINE + WINDOW_SHARE);
     }
 
     #[cfg(unix)]

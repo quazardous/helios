@@ -1,0 +1,3 @@
+kind: fixed
+
+Quitting no longer waits without limit on background jobs: each is stopped as a step of its own on the closing screen ("Stopping the backups", "Stopping the health check"…), within its own deadline, and the library is closed after them. When the system asks Helios to end (logout, shutdown, `kill`), the process now gives the quit long enough to close the library, and should it still end with the library open, the next start reports that the session did not end cleanly instead of treating it as a clean exit. Events heard from other threads while the closing screen is up are no longer left unhandled.

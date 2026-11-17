@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use helios_core::Message;
 use helios_core::bus::Envelope;
 use helios_core::jobs::{
     CANCELLED, FAILED, FINISHED, ITEM_FAILED, PAUSED, PROGRESS, RESUMED, STARTED,
@@ -398,19 +399,44 @@ impl JobPromises {
         }
     }
 
-    /// Stops mirroring once what was heard is written; waits for it.
+    /// Stops mirroring once what was heard is written; waits for it, at
+    /// most [`MIRROR_STOP`].
     pub fn stop(&self) {
+        self.stop_within(MIRROR_STOP);
+    }
+
+    /// Stops mirroring once what was heard is written; waits for it, at
+    /// most `deadline`: whether it stopped. Past it, the mirror's thread
+    /// is left (logged): the jobs it did not settle stay unsettled in the
+    /// vault, and the next start settles them `interrupted`, as after a
+    /// crash ([`crate::promises`]).
+    pub fn stop_within(&self, deadline: Duration) -> bool {
         self.stop.store(true, Ordering::SeqCst);
-        let thread = self
-            .thread
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        if let Some(t) = thread {
-            let _ = t.join();
+        let mut thread = self.thread.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(t) = thread.take() else {
+            return true;
+        };
+        let until = Instant::now() + deadline;
+        while !t.is_finished() {
+            if Instant::now() >= until {
+                log::warn!(
+                    target: "helios::node",
+                    "the jobs' mirror did not stop within {} ms: left, its last jobs settle at the next start",
+                    deadline.as_millis()
+                );
+                // Kept, so that a later stop waits for it again.
+                *thread = Some(t);
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
+        let _ = t.join();
+        true
     }
 }
+
+/// How long the mirror's stop waits for its last writes.
+pub const MIRROR_STOP: Duration = Duration::from_secs(2);
 
 impl Drop for JobPromises {
     fn drop(&mut self) {
@@ -424,13 +450,20 @@ impl NodeJobs for JobPromises {
         Vec::new()
     }
 
-    fn cancel_all(&self) {
-        self.stop();
+    fn name(&self) -> Message {
+        Message::new("node-end-mirror", "Saving the progress of the jobs")
     }
 
-    fn wait(&self, _deadline: Duration) -> bool {
-        self.stop();
-        true
+    /// The mirror is stopped by [`NodeJobs::wait`]: it writes what it
+    /// heard first.
+    fn cancel_all(&self) {}
+
+    fn wait(&self, deadline: Duration) -> bool {
+        self.stop_within(deadline)
+    }
+
+    fn stop_within(&self) -> Duration {
+        MIRROR_STOP
     }
 }
 

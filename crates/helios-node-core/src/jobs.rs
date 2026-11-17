@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use helios_core::Message;
 use helios_core::jobs::Jobs;
 use helios_health::runner::Runner;
 use helios_library::backup::{self, Gate};
@@ -36,8 +37,9 @@ use crate::node::{Link, NodeJobs};
 use crate::volumes;
 
 /// How long the node's stop waits for a cancelled backup to stop: it
-/// stops before its next photo, so one copy at most.
-const CANCEL_WAIT: Duration = Duration::from_secs(30);
+/// stops before its next photo, so one copy at most. Past it the run is
+/// left (its copy recorded at the next run) and the library closes.
+const BACKUP_STOP: Duration = Duration::from_secs(6);
 
 /// Runs counted, and their ends heard.
 #[derive(Default)]
@@ -207,22 +209,27 @@ where
             .collect()
     }
 
-    /// The runs stop before their next photo, and none starts any more;
-    /// waits for them, so that their last write reaches the vault before
-    /// it closes.
+    fn name(&self) -> Message {
+        Message::new("node-end-backups", "Stopping the backups")
+    }
+
+    /// The runs stop before their next photo, and none starts any more.
     fn cancel_all(&self) {
         self.cancel.store(true, Ordering::SeqCst);
         for id in self.running() {
             // A job that just ended refuses: nothing to do.
             let _ = self.jobs.cancel(&id);
         }
-        if !self.runs.wait(CANCEL_WAIT) {
-            log::warn!(target: "helios::node", "a cancelled backup did not stop in time");
-        }
     }
 
     fn wait(&self, deadline: Duration) -> bool {
         self.runs.wait(deadline)
+    }
+
+    /// A cancelled run ends its photo under way and records its copy, so
+    /// that its last write reaches the vault before it closes.
+    fn stop_within(&self) -> Duration {
+        BACKUP_STOP
     }
 }
 
@@ -289,11 +296,14 @@ impl NodeJobs for Health {
         Vec::new()
     }
 
-    /// The schedule stops; a run under way, which only reads, ends before
-    /// the vault closes.
+    fn name(&self) -> Message {
+        Message::new("node-end-health", "Stopping the health check")
+    }
+
+    /// The schedule stops; a run under way, which only reads, is waited
+    /// for ([`NodeJobs::wait`]) before the vault closes.
     fn cancel_all(&self) {
         self.halt();
-        let _ = self.runner.wait(CANCEL_WAIT);
     }
 
     fn wait(&self, deadline: Duration) -> bool {

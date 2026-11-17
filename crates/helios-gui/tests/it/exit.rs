@@ -184,7 +184,7 @@ fn quitting_closes_the_vault_through_the_node() {
 /// flush and the vault closed, each step marked. The bound: none of these
 /// waits on a job or a deadline, so they take milliseconds; 2 s leaves a
 /// debug build on a loaded box ample room, and stays under the node's own
-/// deadline (`quit::VAULT_DEADLINE`, 3 s), past which the black window the
+/// deadline (`quit::NODE_DEADLINE`), past which the black window the
 /// owner saw would come back.
 #[test]
 fn a_quit_with_nothing_running_ends_quickly() {
@@ -269,4 +269,36 @@ fn quitting_during_an_export_asks_then_the_node_cancels_it() {
     let written = std::fs::read_dir(&out).map_or(0, Iterator::count);
     assert_eq!(written, 0, "cancelled: nothing written");
     let _ = std::fs::remove_dir_all(&out);
+}
+
+/// A local listener of the interface's thread, queued by an emit on
+/// another thread while the end splash is up (the shell's own pass no
+/// longer drawn): the host's pass runs it (`Shell::run_pending`, called
+/// every pass by the main window, splash or not), before the exit.
+#[test]
+fn a_listener_queued_from_another_thread_runs_without_the_shells_pass() {
+    use helios_gui::account_gone::{self, CANCEL_PICKING, Gone, How};
+    let shell = Shell::builder(helios_panels(), None).build();
+    let bus = shell.app().handle().bus();
+    let ran = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen = ran.clone();
+    account_gone::listen_local(&*bus, CANCEL_PICKING, move |gone, _| {
+        seen.borrow_mut().push(gone.account.clone());
+    })
+    .unwrap();
+    let from = bus.clone();
+    std::thread::spawn(move || {
+        account_gone::pass(
+            &*from,
+            Gone {
+                account: "a".into(),
+                how: How::SignedOut,
+            },
+        );
+    })
+    .join()
+    .unwrap();
+    assert!(ran.borrow().is_empty(), "queued for the interface's thread");
+    shell.run_pending();
+    assert_eq!(*ran.borrow(), ["a"], "ran on the host's pass");
 }
