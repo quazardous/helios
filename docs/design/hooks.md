@@ -518,11 +518,13 @@ Where it stands (2026-11-17): done for the switch itself.
 `Persist::close_image` pass on the shell's bus before anything of the
 next image loads. Their listeners are named and placed (`ORDER`):
 `edit.save` first (the step not saved yet written through the node and
-its answer waited for inside the pass: a refused write refuses the
+its answer waited for inside the pass, then the snapshots pending at
+that step pinned and kept the same way: a refused write refuses the
 request with its reason, and the image stays open, its edit marked
-unsaved), then `history.scope` (the value store's steps and the
-snapshot book cleared, so the next image's undo never walks into this
-one's steps). A refusal stops the listeners after it. The journal says
+unsaved), then `history.scope` (the image's steps of the value store
+and the snapshot book cleared, so the next image's undo never walks
+into this one's steps; the workspace's steps, graph edits, stay
+undoable). A refusal stops the listeners after it. The journal says
 `image.closed` (with `from`, `to` and `ran`), `image.opened`, or
 `image.refused` (with who refused and why). The order is a reviewed
 dump (`crates/helios-gui/tests/bus/darkroom.txt`).
