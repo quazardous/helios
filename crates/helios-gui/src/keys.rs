@@ -185,6 +185,17 @@ pub fn defaults() -> Vec<(String, String, String)> {
             &format!("{} && !textInputFocus", behind_no_picker(&library)),
         );
     }
+    // Escape leaves Compare, as Lightroom's Survey and Compare views:
+    // not while a pushed mode, an overlay, a field, zen mode or a tip's
+    // card wants it (egui-pop's own Escape bindings).
+    bind(
+        "Escape",
+        crate::comparison::LEAVE_COMMAND,
+        &format!(
+            "{} && !modePushed && !overlayOpen && !textInputFocus && !workbenchZen && !tipShown",
+            behind_no_picker(&comparison)
+        ),
+    );
     bind("Right", "compare.next", &behind_no_picker(&comparison));
     bind("Left", "compare.previous", &behind_no_picker(&comparison));
     // Next and previous image while culling; in the grid Space selects.

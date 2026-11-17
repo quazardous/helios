@@ -662,7 +662,13 @@ is the host's (`main.rs`), outside the shell, and one per process too.
 - the comparison (2026-11-11): the photos the Compare place names, the
   active one, the best, the zoom and pan and whether they are
   synchronised (`crate::comparison::Comparison`), which the Compare panel
-  draws; a Compare window of its own takes it over with slice 4.
+  draws; a Compare window of its own takes it over with slice 4. The
+  Compare place is entered above the place the user is in, so it is
+  left back there (2026-11-17): Escape (`compare.leave`, through the
+  keymap), the Compare command again (C, the gallery bar's button: a
+  toggle), the view's "Back to grid", the Compare panel closed, the
+  stack's back, or the grid chosen. A workspace reopened on a
+  comparison is left the same way, to its root.
 
 **The seams slice 4 uses.** A focus is made by `Focus::new` from a
 `Seed` (its window, workspace, library view, viewport and the panels'
