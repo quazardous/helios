@@ -1522,6 +1522,17 @@ impl Shell {
         &self.core.app
     }
 
+    /// Runs the bus's local listeners that emits on other threads queued
+    /// for this thread (the interface's), in their order. The host calls
+    /// it every pass, the end splash's included, where the shell's own
+    /// pass (whose egui-pop logic also runs them) is not drawn.
+    pub fn run_pending(&self) {
+        let ran = self.core.app.handle().run_pending();
+        if !ran.is_empty() {
+            log::debug!(target: "helios", "{} local listeners queued from other threads ran", ran.len());
+        }
+    }
+
     /// The parameters' clipboard endpoint (a command or a test pins the
     /// parameter it copies or pastes onto).
     pub fn clip_param(&self) -> &crate::clipboard::param::Endpoint {

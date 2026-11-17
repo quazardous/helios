@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
+use helios_core::Message;
 use helios_core::jobs::Jobs;
 use helios_library::map::{Record, Recorder};
 use helios_library::map_job::{BusLoad, Disk, Feed, Job, Status, SystemPower};
@@ -225,8 +226,14 @@ impl NodeJobs for ImageMap {
         Vec::new()
     }
 
+    fn name(&self) -> Message {
+        Message::new("node-end-map", "Stopping the image map")
+    }
+
+    /// Both asked to stop; the node's stop waits for them
+    /// ([`NodeJobs::wait`]).
     fn cancel_all(&self) {
-        self.halt(Duration::from_secs(10));
+        self.stop.store(true, Ordering::SeqCst);
     }
 
     fn wait(&self, deadline: Duration) -> bool {

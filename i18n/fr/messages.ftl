@@ -1391,9 +1391,19 @@ node-command-unknown = aucune commande `{ $id }`
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
 
+node-end-backups = Arrêt des sauvegardes
+
+node-end-exports = Arrêt des exports
+
+node-end-health = Arrêt du bilan de santé
+
 node-end-jobs = Arrêt des tâches de fond
 
 node-end-jobs-waiting = Attente de la fin de { $count } tâches en cours
+
+node-end-map = Arrêt de la carte des images
+
+node-end-mirror = Enregistrement de l’avancement des tâches
 
 node-end-vault = Enregistrement et fermeture de la bibliothèque
 

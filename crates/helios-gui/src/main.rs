@@ -330,10 +330,11 @@ static QUIT_ASKED: AtomicBool = AtomicBool::new(false);
 
 /// SIGTERM, SIGINT and SIGHUP (on Windows, the console's events and the
 /// session's end) close Helios as Ctrl+Q does; ended before the window
-/// opens or past the deadline, the session is marked clean all the same.
+/// opens or past the deadline, the session is marked clean only if the
+/// library is closed (or there is none), else left marked as not ended
+/// cleanly ([`helios_gui::ending::Ending::mark_session`]).
 fn listen_for_ending() -> Arc<helios_gui::ending::Ending> {
     use helios_gui::ending::{DEADLINE, Ending};
-    let crashes = platform::crash_dir();
     let ending = Ending::new(
         Box::new(|| {
             let Some(ctx) = WINDOW.get() else {
@@ -344,13 +345,9 @@ fn listen_for_ending() -> Arc<helios_gui::ending::Ending> {
             ctx.request_repaint();
             true
         }),
-        Box::new(move |code| {
-            if let Some(dir) = &crashes {
-                helios_gui::ending::mark_clean(dir);
-            }
-            std::process::exit(code);
-        }),
+        Box::new(|code| std::process::exit(code)),
         DEADLINE,
+        platform::crash_dir(),
     );
     if let Err(e) = helios_gui::ending::listen(ending.clone()) {
         warn(&format!("the system's requests to end are not heard: {e}"));
@@ -1342,6 +1339,12 @@ impl App {
 /// now" was chosen: a step that never ends does not hold the window.
 const END_LIMIT: std::time::Duration = std::time::Duration::from_mins(1);
 
+/// How long the work after the window waits for the start's work to hand
+/// the library's node over (a window closed while the library opens,
+/// its migrations included): past it, the process ends without stopping
+/// the node.
+const BOOT_HANDOVER: std::time::Duration = std::time::Duration::from_mins(2);
+
 impl App {
     /// Helios quits: the window stays and shows the end splash, its steps
     /// run (the shell draws no more: work waiting for a frame, thumbnails
@@ -1427,6 +1430,14 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// Every pass, the end splash's included: the bus's local listeners
+    /// that other threads queued for this one run.
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.shell_exited {
+            self.shell.run_pending();
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let _stall = helios_gui::stall::frame("the main window's pass");
         if self.end.is_some() {
@@ -1876,6 +1887,7 @@ fn main() -> Result<(), String> {
             config: config.clone(),
             window_commands: window_commands.clone(),
             node_kept,
+            ending: ending.clone(),
         };
         std::thread::Builder::new()
             .name("helios-boot".into())
@@ -1919,7 +1931,21 @@ fn main() -> Result<(), String> {
             // The start's work hands the node over once it is open (none
             // without a library): a window closed during the start waits
             // for it here.
-            let kept = node_to_stop.recv().ok().flatten();
+            // At most BOOT_HANDOVER: past it, the node is not stopped
+            // (the library is left open, and checks itself at its next
+            // opening; the session is not marked clean).
+            let kept = match node_to_stop.recv_timeout(BOOT_HANDOVER) {
+                Ok(kept) => kept,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    warn(&format!(
+                        "quit: the start's work did not hand the library over within {} s; \
+                         the process ends with it open",
+                        BOOT_HANDOVER.as_secs()
+                    ));
+                    None
+                }
+            };
             let mut finisher = quit::Finisher::default();
             if let Some((node, advertised)) = kept {
                 // No client finds the node any more once it stops.
@@ -1929,7 +1955,7 @@ fn main() -> Result<(), String> {
                     quit::mark("node left (quit now)");
                     drop(node);
                 } else {
-                    finisher.spawn("node stopped", quit::VAULT_DEADLINE, move || node.stop());
+                    finisher.spawn("node stopped", quit::NODE_DEADLINE, move || node.stop());
                 }
             }
             for left in finisher.finish() {
@@ -1948,6 +1974,7 @@ fn main() -> Result<(), String> {
         })
     };
     let watched = after_window.clone();
+    let watched_ending = ending.clone();
     let window_settings = ui_settings.clone();
     let ran = helios_gui::shell::open_window("helios-gui", options, Some(&window_settings), move |cc| {
         start::mark("window open on the boot splash");
@@ -2477,11 +2504,9 @@ fn main() -> Result<(), String> {
             } else {
                 quit::GRACE
             };
-            watched.watch(grace, || {
+            watched.watch(grace, move || {
                 quit::mark("eframe did not return: the process ends");
-                if let Some(dir) = platform::crash_dir() {
-                    helios_gui::ending::mark_clean(&dir);
-                }
+                watched_ending.mark_session();
                 std::process::exit(0);
             });
         }))
@@ -2512,6 +2537,8 @@ struct BootFrom {
     window_commands: helios_gui::window_commands::Bridge,
     /// Where the node goes for the end's work.
     node_kept: std::sync::mpsc::Sender<NodeKept>,
+    /// The system's requests to end: told whether the library is closed.
+    ending: Arc<helios_gui::ending::Ending>,
 }
 
 /// What the start's work hands the window: the library opened by its
@@ -2552,6 +2579,7 @@ fn boot(from: BootFrom) -> Booted {
         config,
         window_commands,
         node_kept,
+        ending,
     } = from;
     let bus = Arc::new(helios_core::Bus::new());
     // A library that cannot be opened leaves Helios without one: the
@@ -2559,6 +2587,11 @@ fn boot(from: BootFrom) -> Booted {
     // library (docs/design/node-client-split.md, choice A): it saves it
     // on its own schedule and closes it when it stops; the window is its
     // client, linked to it by `Persist`.
+    // From here until the node closes it, the library is open: a process
+    // ended in between leaves the session marked as not ended cleanly.
+    if library_file.is_some() {
+        ending.library(Box::new(|| false));
+    }
     let (node, no_library) = match library_file
         .as_deref()
         .map(helios_gui::platform::open_library)
@@ -2623,6 +2656,13 @@ fn boot(from: BootFrom) -> Booted {
     // The GUI connects to the node as it starts, and disconnects as it
     // ends (`on_exit`); the shell asks the node to quit.
     let node_link = node.as_ref().map(LocalNode::link);
+    match &node_link {
+        Some(link) => {
+            let link = link.clone();
+            ending.library(Box::new(move || link.closed()));
+        }
+        None => ending.no_library(),
+    }
     let node_client = node.as_ref().map(LocalNode::connect);
     let _ = node_kept.send(node.map(|n| (n, advertised)));
     let persist = library.clone().map(Persist::on_library);

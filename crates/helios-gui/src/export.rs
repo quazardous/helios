@@ -260,6 +260,10 @@ impl Exporter {
 }
 
 impl crate::node::NodeJobs for Exporter {
+    fn name(&self) -> helios_core::Message {
+        helios_core::Message::new("node-end-exports", "Stopping the exports")
+    }
+
     fn running(&self) -> Vec<String> {
         let running = self.jobs.cancellable();
         let mut batches = self.batches.lock().expect("batches lock");
@@ -278,6 +282,12 @@ impl crate::node::NodeJobs for Exporter {
 
     fn wait(&self, deadline: std::time::Duration) -> bool {
         Exporter::wait(self, deadline)
+    }
+
+    /// Cancelled, not waited for: a cancelled export writes nothing to
+    /// the vault, and its render under way ends on its own.
+    fn stop_within(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
     }
 }
 

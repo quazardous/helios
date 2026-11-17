@@ -3371,9 +3371,19 @@ node-command-unknown = no command `{ $id }`
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 
+node-end-backups = Stopping the backups
+
+node-end-exports = Stopping the exports
+
+node-end-health = Stopping the health check
+
 node-end-jobs = Stopping background jobs
 
 node-end-jobs-waiting = Waiting for { $count } running jobs to finish
+
+node-end-map = Stopping the image map
+
+node-end-mirror = Saving the progress of the jobs
 
 node-end-vault = Saving and closing the library
 

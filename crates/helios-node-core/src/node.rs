@@ -73,16 +73,56 @@ pub fn open_library(path: &std::path::Path) -> Result<helios_vault_sqlite::Sqlit
     helios_vault_sqlite::SqliteStore::open(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// How long the node's stop waits for one adopter's jobs once asked to
+/// stop them, unless it says otherwise ([`NodeJobs::stop_within`]).
+pub const JOB_STOP: Duration = Duration::from_secs(2);
+
+/// How long the node's stop waits for all its jobs together once asked
+/// to stop them: past it, the jobs not stopped are left (their thread
+/// runs on; a write they try after the vault closed is refused) and the
+/// library closes all the same.
+pub const JOBS_STOP: Duration = Duration::from_secs(10);
+
+/// How long the library's close (its last flush, the clean-shutdown
+/// marker, the log checkpointed) is given once the jobs are settled.
+pub const LIBRARY_CLOSE: Duration = Duration::from_secs(3);
+
+/// The longest the node's stop takes once it begins, its jobs cancelled
+/// (a confirmed quit, the system ending Helios, the host's last word):
+/// the jobs' stop, then the library's close. A process deadline that
+/// should see the library closed is at least this.
+pub const STOP_DEADLINE: Duration = JOBS_STOP.saturating_add(LIBRARY_CLOSE);
+
+/// How long a quit that waits for the running jobs (not cancelling
+/// them) waits: past it, they are cancelled as a confirmed quit would,
+/// within [`JOBS_STOP`].
+pub const WAIT_FOR_JOBS: Duration = Duration::from_mins(10);
+
 /// Work the node runs for its clients, which outlives their windows
 /// (exports, backups, the health check): what a quit asks
 /// about, and what the node's stop cancels or waits for.
+///
+/// The node's stop settles each adopter in turn, as a step of its own
+/// on the end splash ([`NodeJobs::name`]): [`NodeJobs::cancel_all`],
+/// then [`NodeJobs::wait`] up to [`NodeJobs::stop_within`] (and never
+/// past [`JOBS_STOP`] for all of them). An adopter whose stop takes
+/// longer is left, logged by name: it never holds the library open.
 pub trait NodeJobs: Send + Sync {
+    /// What the end splash shows while the node stops them.
+    fn name(&self) -> Message {
+        Message::new("node-end-jobs", "Stopping background jobs")
+    }
     /// The jobs running that a quit would cancel, by id.
     fn running(&self) -> Vec<String>;
-    /// Cancels every job running.
+    /// Asks every job running to stop; returns without waiting for them
+    /// (the node's stop waits, bounded, with [`NodeJobs::wait`]).
     fn cancel_all(&self);
     /// Waits until every job ended, at most `deadline`; whether they did.
     fn wait(&self, deadline: Duration) -> bool;
+    /// How long the node's stop waits for them once cancelled.
+    fn stop_within(&self) -> Duration {
+        JOB_STOP
+    }
 }
 
 /// What the node's stop does with its running jobs.
@@ -104,8 +144,10 @@ struct State {
     quit: Option<AtQuit>,
     /// Stop now, clients or not (the host ending the process).
     force: bool,
-    /// The vault is shut down.
+    /// The node stopped (its vault shut down, or failing to).
     stopped: bool,
+    /// The vault closed cleanly: its clean-shutdown marker written.
+    closed: bool,
     /// Flushes done, the last one at the stop included.
     flushes: u64,
 }
@@ -153,42 +195,112 @@ impl Life {
             .clone()
     }
 
-    /// Before the last flush: the jobs cancelled when the quit said so,
-    /// waited for otherwise. Cancelled exports are not waited for: they
-    /// write nothing to the vault, and their renders under way end on
-    /// their own. A job whose last step writes to the vault (a backup
-    /// recording its copy) waits in its own `cancel_all`.
+    /// Before the last flush: the jobs cancelled when the quit said so
+    /// (or the stop was forced), waited for otherwise, at most
+    /// [`WAIT_FOR_JOBS`], then cancelled. Each adopter is stopped as a
+    /// step of its own, bounded ([`stop_one`]): what is not stopped in
+    /// time is left, and the library closes all the same. Cancelled
+    /// exports are not waited for: they write nothing to the vault, and
+    /// their renders under way end on their own. A job whose last step
+    /// writes to the vault (a backup recording its copy) has that write
+    /// waited for, within its share.
     fn settle_jobs(&self) {
         let jobs = self.jobs();
+        let waiting = self.read(|s| s.quit == Some(AtQuit::Wait) && !s.force);
+        if waiting {
+            wait_for_jobs(&jobs);
+        }
         // Leaving them is safe: what they wrote is in the vault, the rest
         // is done again (an export asked again, a backup run again).
-        let step = crate::phases::end()
-            .begin(Message::new("node-end-jobs", "Stopping background jobs"))
-            .can_skip();
-        if self.read(|s| s.quit == Some(AtQuit::Cancel)) {
-            for j in &jobs {
-                j.cancel_all();
-            }
-            return;
-        }
+        let until = std::time::Instant::now() + JOBS_STOP;
         for j in &jobs {
-            let running = j.running().len();
-            if running > 0 {
-                crate::quit::mark("the node waits for its running jobs");
-                step.why(
-                    Message::new(
-                        "node-end-jobs-waiting",
-                        "Waiting for { $count } running jobs to finish",
-                    )
-                    .with("count", running as f64),
-                );
-            }
-            while !j.wait(Duration::from_mins(1)) {
-                log::info!(target: "helios::node", "still waiting for running jobs");
-            }
+            stop_one(j, until);
         }
     }
 }
+
+/// A quit that leaves the running jobs to finish: waited for, all
+/// together at most [`WAIT_FOR_JOBS`].
+fn wait_for_jobs(jobs: &[Arc<dyn NodeJobs>]) {
+    let until = std::time::Instant::now() + WAIT_FOR_JOBS;
+    let step = crate::phases::end()
+        .begin(Message::new("node-end-jobs", "Stopping background jobs"))
+        .can_skip();
+    for j in jobs {
+        let running = j.running().len();
+        if running == 0 {
+            continue;
+        }
+        crate::quit::mark("the node waits for its running jobs");
+        step.why(
+            Message::new(
+                "node-end-jobs-waiting",
+                "Waiting for { $count } running jobs to finish",
+            )
+            .with("count", running as f64),
+        );
+        loop {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                log::warn!(
+                    target: "helios::node",
+                    "the running jobs did not finish in {} min: they are cancelled",
+                    WAIT_FOR_JOBS.as_secs() / 60
+                );
+                return;
+            }
+            if j.wait(left.min(Duration::from_mins(1))) {
+                break;
+            }
+            log::info!(target: "helios::node", "still waiting for running jobs");
+        }
+    }
+}
+
+/// One adopter's jobs stopped, as a step of the end splash named after
+/// them: cancelled, then waited for up to their share, never past
+/// `until`, on a thread of their own so that an adopter whose cancel or
+/// wait does not return in time is left (logged by name), not waited
+/// for. Whether they stopped in time.
+fn stop_one(j: &Arc<dyn NodeJobs>, until: std::time::Instant) -> bool {
+    let name = j.name();
+    let step = crate::phases::end().begin(name.clone()).can_skip();
+    let left = until.saturating_duration_since(std::time::Instant::now());
+    // Cancelled only (an adopter whose jobs are not waited for): the
+    // cancel itself is given a moment.
+    let wait = j.stop_within();
+    let share = if wait.is_zero() { CANCEL_ONLY } else { wait }.min(left);
+    let (done, stopped) = std::sync::mpsc::channel();
+    let job = j.clone();
+    let spawned = std::thread::Builder::new()
+        .name("helios-node-job-stop".into())
+        .spawn(move || {
+            job.cancel_all();
+            let _ = done.send(wait.is_zero() || job.wait(share));
+        });
+    let in_time = match spawned {
+        Ok(_) => stopped.recv_timeout(share).unwrap_or(false),
+        Err(e) => {
+            log::warn!(target: "helios::node", "no thread to stop jobs on: {e}");
+            false
+        }
+    };
+    drop(step);
+    if !in_time {
+        log::warn!(
+            target: "helios::node",
+            "{}: not stopped within {} ms; left, the library closes without them",
+            name.english,
+            share.as_millis()
+        );
+        crate::quit::mark("background jobs left at their deadline");
+    }
+    in_time
+}
+
+/// How long an adopter whose jobs are only cancelled, not waited for
+/// ([`NodeJobs::stop_within`] zero), is given for the cancel.
+const CANCEL_ONLY: Duration = Duration::from_millis(500);
 
 /// A client's way to the node's life, without its vault's type: what the
 /// shell holds to ask the node to quit.
@@ -231,6 +343,12 @@ impl Link {
     /// Whether the node stopped (its vault shut down).
     pub fn stopped(&self) -> bool {
         self.0.read(|s| s.stopped)
+    }
+
+    /// Whether the node closed its vault cleanly (the clean-shutdown
+    /// marker written): what a process ending now may count on.
+    pub fn closed(&self) -> bool {
+        self.0.read(|s| s.closed)
     }
 
     /// The node's flushes so far.
@@ -455,6 +573,7 @@ fn close<S: Store>(vault: &Vault<S>, life: &Life) {
             s.flushes += 1;
         }
         s.stopped = true;
+        s.closed = done.is_ok();
     });
     crate::quit::mark("vault closed by the node");
 }
@@ -541,6 +660,97 @@ mod tests {
             Vault::new(again).config_layer("user").unwrap().as_deref(),
             Some("b = 2")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A job whose stop does not end in time: a backup stuck copying to
+    /// a slow disk, which neither its cancel nor its wait gets out of
+    /// before the test lets it go.
+    struct Stuck {
+        released: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl Stuck {
+        fn hold(&self, limit: Duration) -> bool {
+            let (released, woken) = &*self.released;
+            let held = released.lock().unwrap_or_else(PoisonError::into_inner);
+            let (held, _) = woken
+                .wait_timeout_while(held, limit, |r| !*r)
+                .unwrap_or_else(PoisonError::into_inner);
+            *held
+        }
+
+        fn release(released: &Arc<(Mutex<bool>, Condvar)>) {
+            *released.0.lock().unwrap() = true;
+            released.1.notify_all();
+        }
+    }
+
+    impl NodeJobs for Stuck {
+        fn running(&self) -> Vec<String> {
+            vec!["backup-1".into()]
+        }
+
+        fn cancel_all(&self) {
+            self.hold(Duration::from_mins(1));
+        }
+
+        fn wait(&self, deadline: Duration) -> bool {
+            self.hold(deadline)
+        }
+    }
+
+    /// The longest the node's stop may take: what the process deadline
+    /// a signal gives (helios-gui's `ending::DEADLINE`) is made from.
+    const PROCESS_DEADLINE: Duration = STOP_DEADLINE;
+
+    /// A quit confirmed while a job's stop hangs: the node stops the job
+    /// within its deadline and still closes the library cleanly, before
+    /// the process would be ended.
+    #[test]
+    fn a_job_stuck_stopping_does_not_keep_the_library_open_past_the_process_deadline() {
+        let dir = scratch("stuck-cancel");
+        let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+        let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        let link = node.link();
+        let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
+        link.adopt(Arc::new(Stuck {
+            released: released.clone(),
+        }));
+        let client = node.connect();
+        link.quit_cancelling_jobs();
+        drop(client);
+        let stopped = link.wait_stopped(PROCESS_DEADLINE);
+        Stuck::release(&released);
+        assert!(stopped, "the library closed before the process deadline");
+        node.stop();
+        let again = SqliteStore::open(&dir.join("vault.db")).unwrap();
+        assert!(!again.report().unclean_shutdown, "closed cleanly");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The host's last word (`stop`, no quit asked: eframe ending on an
+    /// error) with a job that does not end: the stop does not wait for
+    /// it without a limit.
+    #[test]
+    fn the_hosts_stop_does_not_wait_for_a_stuck_job_without_a_limit() {
+        let dir = scratch("stuck-stop");
+        let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+        let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        let link = node.link();
+        let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
+        link.adopt(Arc::new(Stuck {
+            released: released.clone(),
+        }));
+        let (done, stopped) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            node.stop();
+            let _ = done.send(());
+        });
+        let in_time = stopped.recv_timeout(PROCESS_DEADLINE).is_ok();
+        Stuck::release(&released);
+        assert!(in_time, "the stop ended within the process deadline");
+        assert!(link.stopped());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
