@@ -258,7 +258,7 @@ mod tests {
         bus.listen_local::<Ask>(
             "only",
             ListenOpts::new(),
-            |(), _: &mut Asked| -> Result<(), HookError> { Err(HookError("broken".into())) },
+            |(), _: &mut Asked| -> Result<(), HookError> { Err(HookError::failed("broken")) },
         )
         .unwrap();
         let asked = pass::<Ask>(&bus, (), Asked::default());
