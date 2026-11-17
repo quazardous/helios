@@ -793,10 +793,10 @@ pub struct GraphPanel {
     state: GraphState,
     app: Option<AppHandle>,
     catalogue: Catalogue,
-    /// The workspace's state as last read (its sequence number), and its
-    /// template.
-    seen: Option<u64>,
+    /// The workspace's template, as `workspace.applied` last gave it.
     template: Option<Template>,
+    /// The workspace's own composites (its macros), as last given.
+    own: Vec<helios_template::CompositeFile>,
     /// Moves handed to the workspace, shown until its state changes.
     moved: BTreeMap<String, [f32; 2]>,
     /// The selection value as last followed.
@@ -828,8 +828,8 @@ impl Default for GraphPanel {
             state: GraphState::new(),
             app: None,
             catalogue: crate::templates::modules(),
-            seen: None,
             template: None,
+            own: Vec::new(),
             moved: BTreeMap::new(),
             selection: None,
             gesture: None,
@@ -919,41 +919,32 @@ impl GraphPanel {
         &self.state
     }
 
-    /// Reads the workspace's template again when its state changed.
-    fn follow_workspace(&mut self, store: &Store) {
-        let entry = store.get(crate::shell::WORKSPACE_STATE);
-        let seq = entry.map(|e| e.seq);
-        if seq == self.seen && (self.template.is_some() || entry.is_none()) {
-            return;
-        }
-        self.seen = seq;
+    /// Follows the workspace's state applied (`workspace.applied`'s
+    /// `graph.template` listener; `json` is `State::to_json`): its
+    /// template and its own composites read again.
+    pub fn follow_workspace(&mut self, json: &Json) {
         self.moved.clear();
-        let json = entry.and_then(|e| match &e.value {
-            helios_core::Value::Text(t) => serde_json::from_str::<Json>(t).ok(),
-            _ => None,
-        });
-        self.template = json
-            .as_ref()
-            .and_then(|j| serde_json::from_value(j["template"].clone()).ok());
-        // The user's library, then the workspace's own composites (its
-        // macros, standing over a library file of the same version), join
-        // the modules.
+        self.template = serde_json::from_value(json["template"].clone()).ok();
+        self.own = serde_json::from_value(json["composites"].clone()).unwrap_or_default();
+        self.join_catalogue();
+    }
+
+    /// The user's library, then the workspace's own composites (its
+    /// macros, standing over a library file of the same version), join
+    /// the modules.
+    fn join_catalogue(&mut self) {
         self.catalogue =
             helios_template::library::with_library(crate::templates::modules(), &self.library);
-        let composites: Vec<helios_template::CompositeFile> = json
-            .as_ref()
-            .and_then(|j| serde_json::from_value(j["composites"].clone()).ok())
-            .unwrap_or_default();
-        for f in composites {
-            self.catalogue.add_composite(f);
+        for f in &self.own {
+            self.catalogue.add_composite(f.clone());
         }
     }
 
     /// The user's library of composites, read again by the shell: the add
-    /// menu offers it from the next frame.
+    /// menu offers it at once.
     pub fn set_library(&mut self, library: Vec<helios_template::CompositeFile>) {
         self.library = library;
-        self.seen = None;
+        self.join_catalogue();
     }
 
     /// The headers, read again a few times a second.
@@ -995,7 +986,6 @@ impl GraphPanel {
         let ctx = ui.ctx().clone();
         let (model, wires, selected) = {
             let mut store = lock(values);
-            self.follow_workspace(&store);
             let Some(t) = &self.template else {
                 drop(store);
                 ui.centered_and_justified(|ui| {

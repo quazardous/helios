@@ -133,11 +133,10 @@ pub fn entries(
     out
 }
 
-/// What the panel reads of the workspace's state (the store's
-/// `WORKSPACE_STATE`), parsed again only when it changes.
+/// What the panel reads of the workspace's state, as
+/// `workspace.applied` last gave it.
 #[derive(Default)]
 struct Seen {
-    text: String,
     /// The workspace's own composites.
     own: Vec<CompositeFile>,
     /// Its network's composite nodes, by name.
@@ -145,17 +144,7 @@ struct Seen {
 }
 
 impl Seen {
-    fn follow(&mut self, store: &Store) {
-        let Some(Value::Text(text)) = store.get(crate::shell::WORKSPACE_STATE).map(|e| &e.value)
-        else {
-            *self = Seen::default();
-            return;
-        };
-        if *text == self.text {
-            return;
-        }
-        let json: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
-        self.text.clone_from(text);
+    fn follow(&mut self, json: &serde_json::Value) {
         self.own = serde_json::from_value(json["composites"].clone()).unwrap_or_default();
         self.nodes = json["template"]["network"]["nodes"]
             .as_array()
@@ -334,6 +323,13 @@ impl Panel {
         self.session_writes.push((id, doc));
     }
 
+    /// Follows the workspace's state applied (`workspace.applied`'s
+    /// `workshops.composites` listener; `json` is `State::to_json`): its
+    /// own composites and its network's composite nodes read again.
+    pub fn follow_workspace(&mut self, json: &serde_json::Value) {
+        self.seen.follow(json);
+    }
+
     /// The user's library, read again by the shell.
     pub fn set_library(&mut self, library: Vec<CompositeFile>) {
         self.library = library;
@@ -347,7 +343,6 @@ impl Panel {
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let selection = {
             let store = values.lock().unwrap_or_else(PoisonError::into_inner);
-            self.seen.follow(&store);
             crate::modules::selected(&store)
         };
         ui.muted(text(Message::new(
