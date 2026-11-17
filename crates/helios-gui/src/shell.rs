@@ -952,6 +952,11 @@ impl Shell {
             // The import focus opens an OS window of its own: on Wayland,
             // a present mode that never stalls every window behind one.
             .multi_window(true)
+            // A detached panel's window is built transparent where an
+            // image surface can sit below it (Wayland), so a detached
+            // viewer gets its own, for the screen it is on; elsewhere it
+            // stays opaque and says why (`crate::display`).
+            .transparent_panel_windows(crate::display::TRANSPARENT_WINDOW)
             // On macOS the menus are in the system's menu bar
             // (`crate::macos`), not drawn in the window.
             .menu_bar(!cfg!(target_os = "macos"))

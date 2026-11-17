@@ -21,10 +21,27 @@
 //! listener ([`ROUTE_LISTENER`], also on `screen.added` and
 //! `screen.removed`) places it there. On a screen said to show sRGB only
 //! (`display/screens/<name>`, [`ScreenColour`]) the window wants sRGB;
-//! elsewhere it wants what the setting asks. Only the main window gets an
-//! image surface of its own for now (egui-pop's `image_surface`), so a
-//! detached viewer on a wide-gamut screen wants Rec.2020 and says why it
-//! draws sRGB.
+//! elsewhere it wants what the setting asks. Each window drawing the
+//! image gets an image surface of its own, negotiated for what that
+//! window wants (egui-pop's `image_surface`, per window): the main
+//! window's from its handles at install, another window's (a detached
+//! viewer, the Compare window) the first frame it draws a wide image,
+//! from the handles Helios's event loop pairs with its viewport
+//! (`egui_pop::api::runner::host`, read through
+//! `image_surface::set_window_source`); it goes when the window closes.
+//! A detached panel's window is built transparent where a surface can
+//! sit below it (`AppBuilder::transparent_panel_windows`). Per system:
+//!
+//! - Wayland with colour management (KDE Plasma, sway, Weston: `tagged`;
+//!   GNOME, Hyprland: `wsi`): each window gets its own surface, for the
+//!   screen it is on;
+//! - Wayland without it: sRGB, "no colour management";
+//! - X11, Windows, macOS: panel windows stay opaque, the image draws
+//!   sRGB in the window's surface, and the route says why (the image
+//!   surface is a Wayland subsurface; there is none there).
+//!
+//! In every case the window's route says why it is not wider
+//! (`helios.display`'s `windows`, egui-pop's `windows.list`).
 //!
 //! The debug bridge's `helios.display` collector says what the display
 //! offers (`helios_display::probe`: the session, the compositor's colour
@@ -145,7 +162,8 @@ impl ImageSurfaceSwitch {
     }
 }
 
-/// Installs the image's own surface for the main window: after egui-pop's
+/// Installs the image's own surface for the main window, and says where
+/// other windows' handles are read for theirs: after egui-pop's
 /// `gpu::install`, on the same render state, with the window's handles
 /// (eframe's frame). Returns what the platform offers; why there is none
 /// in `unavailable` (X11, no colour management, another system).
@@ -157,14 +175,30 @@ pub fn install_image_surface(
          + image_surface::raw_window_handle::HasDisplayHandle
      ),
 ) -> image_surface::Offer {
-    image_surface::install(
+    let offer = image_surface::install(
         ctx,
         rs,
         window,
         image_surface::Options {
             transparent_window: TRANSPARENT_WINDOW,
         },
-    )
+    );
+    set_window_source(ctx);
+    offer
+}
+
+/// Says where every other window's handles are read for its own image
+/// surface: egui-pop's runner (`egui_pop::api::runner::window`), which
+/// Helios's event loop feeds (`crate::event_loop`). A detached panel's
+/// window says how it was built (transparent on Wayland, opaque
+/// elsewhere and why), which wins over these options; any other window is
+/// taken as opaque. [`install_image_surface`] calls it.
+pub fn set_window_source(ctx: &egui::Context) {
+    image_surface::set_window_source(
+        ctx,
+        image_surface::Options::default(),
+        egui_pop::api::runner::window,
+    );
 }
 
 /// Takes the image surface of `window` down (the main window's is
@@ -278,8 +312,11 @@ fn route_of(
             reason: image.and_then(|i| i.why),
         };
     }
+    // The window's own offer first (a detached viewer's), then the main
+    // window's (the platform has none: X11, another system).
     let why = image
         .and_then(|i| i.why)
+        .or_else(|| image_surface::offer_of(ctx, window).and_then(|o| o.unavailable))
         .or_else(|| image_surface::offer(ctx).and_then(|o| o.unavailable));
     srgb(why.unwrap_or_else(|| {
         match image_surface::offer(ctx) {

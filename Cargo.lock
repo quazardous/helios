@@ -1241,6 +1241,7 @@ dependencies = [
  "egui-pop-hooks",
  "egui-pop-model",
  "egui-pop-win32",
+ "egui-pop-winit",
  "egui_stack",
  "image",
  "log",
@@ -1249,6 +1250,7 @@ dependencies = [
  "serde",
  "serde_json",
  "web-time",
+ "winit",
 ]
 
 [[package]]
@@ -1459,6 +1461,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "761b532870296c14e9f0df76bad8a85597a3d2461422050cd326b0155fa609a9"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "egui-pop-winit"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c130fbd55d318d9ef3b8c6536151f5ba4071fb60315d281be7edaa1ed879588"
+dependencies = [
+ "raw-window-handle",
+ "winit",
 ]
 
 [[package]]
