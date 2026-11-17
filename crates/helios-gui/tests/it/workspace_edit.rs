@@ -374,6 +374,7 @@ fn save_as_template_reviews_then_writes_a_bundle_that_creates_the_same_workspace
 fn parts_are_added_through_their_review_as_one_undo_step() {
     let root = temp("import");
     let (mut h, _, files) = window(&root, "helios.portrait-retouch");
+    crate::host::listen_network(h.state());
     // An agent's dry run: the changes and the conflicts, nothing done.
     let dry = h
         .state_mut()
@@ -419,12 +420,17 @@ fn parts_are_added_through_their_review_as_one_undo_step() {
         h.state().layout().area_of(&panel("helios.vault")),
         Some(Area::Center)
     );
-    assert!(h.state_mut().take_network_changed());
+    assert_eq!(
+        crate::host::network_changed(),
+        1,
+        "the network change reaches its follower once"
+    );
     assert_eq!(files.load().unwrap().bundle.template.network, t.network);
     // The parts of the workspace now, as agents list them.
     let parts = h.state().workspace_parts(None).unwrap();
     assert_eq!(parts["parts"][0]["part"], json!("network"));
     undo(&mut h);
+    assert_eq!(crate::host::network_changed(), 1, "the undo's, once");
     assert_eq!(
         h.state()
             .workspace_state()

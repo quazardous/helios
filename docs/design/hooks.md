@@ -611,23 +611,27 @@ drawn: a hidden panel read a change late).
 Where it stands (2026-11-17): done. `helios_gui::workspace_applied`
 declares one point (`POINTS`), `workspace.applied`, passed once by
 the shell once the state is applied, with what changed (`Changed`:
-tools, library, network, sub-workspaces, composites, layout, name;
-all of them when the workspace opened). Its listeners (`ORDER`) each
+tools, library, network, nodes, sub-workspaces, composites, layout,
+name; all of them when the workspace opened; `nodes` is what an image
+goes through: the network's nodes and links, or the composites, not
+the nodes' positions). Its listeners (`ORDER`) each
 run only for the parts they read: `workspace.keys` (tools; the
 shortcuts editor's follower then takes no step for keys an undo put
 back), `contexts.subworkspaces` and `contexts.scope` (sub-workspaces;
 the list, then the store's scope that reads it), `graph.template`
-(network, sub-workspaces, composites) and `workshops.composites`
-(network, composites). The pass is said on the journal with `changed`
+(network, sub-workspaces, composites), `workshops.composites`
+(network, composites), `library.heads` (nodes: the Compare panel's
+renders made again) and the host's `darkroom.network` (nodes: the image
+shown goes through the new network in place, or is opened again). The pass is said on the journal with `changed`
 and the listeners that ran (`ran`). The order is a reviewed dump
 (`crates/helios-gui/tests/bus/workspace.txt`).
 
 Left, and why: the shell still notices an undo or a redo of the state
 by the store's sequence number of its path, once per pass (a number,
 no longer the text): the value store has no path listener yet (ADR
-0016 names it). The image going through a changed network
-(`take_network_changed`) is the darkroom's, with the image's opening
-(slice 2f). The workshop session (`follow_session`) follows the value
+0016 names it). The host's listener only marks the change: the image
+is passed through the new network after the shell's pass, by the host,
+which holds the image (2026-11-17). The workshop session (`follow_session`) follows the value
 store's history, not the workspace's state.
 
 ### Slice 3: one module catalogue
