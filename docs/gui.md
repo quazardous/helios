@@ -1034,7 +1034,7 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library, culling | `Right`, `Left`, `S` | next, previous image (not in Compare); open or close a stack |
 | library, culling | `B` | the selected photos in or out of the quick collection (`library.quick.toggle`, Lightroom) |
 | library | `C` | compare the selected photos (`library.compare`); in Compare, leave it |
-| Compare | `Escape` | leave Compare, back to the grid (`compare.leave`); not while a pushed mode, an overlay, a field, zen mode or a tip wants Escape |
+| Compare | `Escape` | leave Compare, back to the grid (`compare.leave`); not while a pushed mode, an overlay, a field, zen mode, a tip or a mask path being drawn wants Escape |
 | library | `Ctrl+Shift+A`, `Ctrl+I` | select none, invert the selection (`library.select.none`, `library.select.invert`, darktable); not while a text field is typed in |
 | library | `Delete` | remove the selected photos from the Library, their files untouched (`library.remove`, Lightroom, darktable); Ctrl+Z puts them back; not while a text field is typed in |
 | library | `Ctrl+Alt+Shift+Delete` | Move to Trash…: the selected photos' files to the system trash, asked first (`library.trash`, Lightroom's "Remove and Delete from Disk"); not while a text field is typed in |
