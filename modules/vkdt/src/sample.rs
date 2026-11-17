@@ -89,7 +89,7 @@ pub fn texel(image: &Image, domain: &Domain, x: i64, y: i64, c: usize) -> f32 {
 }
 
 /// Bilinear at relative position `(px, py)` of `domain` (pixel centres at
-/// whole numbers), mirrored at the edges: vkdt's `textureLod` with its
+/// whole numbers), mirrored at the edges: vkdt's texture lookup with its
 /// linear sampler.
 pub fn bilinear(image: &Image, domain: &Domain, px: f32, py: f32, c: usize) -> f32 {
     let (x0, y0) = (px.floor(), py.floor());

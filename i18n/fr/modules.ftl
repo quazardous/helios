@@ -514,6 +514,22 @@ param-vkdt-grade-sh-pivot =
     .description = où les ombres deviennent tons moyens (zones log)
     .label = pivot des ombres
 
+param-vkdt-llap-clarity =
+    .description = le contraste local dans les tons moyens
+    .label = clarté
+
+param-vkdt-llap-highlights =
+    .description = la pente sous chaque niveau de gris : au-dessus de 1, assombrit le détail des hautes lumières
+    .label = hautes lumières
+
+param-vkdt-llap-shadows =
+    .description = la pente au-dessus de chaque niveau de gris : au-dessus de 1, éclaircit le détail des ombres
+    .label = ombres
+
+param-vkdt-llap-sigma =
+    .description = la largeur des courbes de tons autour de chaque niveau de gris
+    .label = sigma
+
 param-vkdt-usm-amount =
     .description = à quel point augmenter la netteté
     .label = quantité

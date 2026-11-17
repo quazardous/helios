@@ -129,6 +129,7 @@ and against each other by the backend contract tests.
 | `grade` | `vkdt_grade` | lift, gamma, gain, offset; classic and zoned log modes | |
 | `filmcurv` | `vkdt_filmcurv` | the Weibull curve; colour modes hsl (the default) and per channel | colour modes darktable UCS, Munsell, AgX and lum ratio; the `dspy` curve plot |
 | `colour` | `vkdt_colour` | camera matrix (image, Rec.2020, XYZ, Rec.709), CAT16 white balance (as shot or given), exposure, saturation in darktable UCS, highlight clip | the CLUT and its temperature, the RBF mapping (colour checker), the picker inputs, the gamut limits (spectral tables), non-linear input curves |
+| `llap` | `vkdt_llap` | all (a composite of vkdt's kernels, read at afc3425): ten tone curves, the pyramid as deep as the image allows, mirrored lookups; `curve` and `reduce` on the GPU | `expand`, `assemble` and `colour` on the GPU (they read two images) |
 
 **The white balance rule for mixed chains** (2026-10-27). vkdt does not
 balance the raw data: its loader leaves camera RGB as it is, and `colour`
