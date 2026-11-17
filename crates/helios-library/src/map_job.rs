@@ -324,6 +324,24 @@ impl Load for BusLoad {
     }
 }
 
+/// What a background loop says it does, for whoever shows it (the
+/// node's standing promise in the Activity focus): how many items so far
+/// and the one at hand, or what it waits on. Said on every turn of the
+/// loop, so a listener also knows it is alive.
+pub trait Status: Send {
+    /// Working on `item`, `done` so far.
+    fn working(&mut self, done: u64, item: &str);
+    /// Waiting on `why` (nothing to do, another job, the battery, a
+    /// pause), `done` so far.
+    fn waiting(&mut self, done: u64, why: &str);
+}
+
+/// What the map's job says while it has nothing to do.
+pub const UP_TO_DATE: &str = "Up to date: waiting for something new or the next pass";
+
+/// What the map's job says once cancelled.
+pub const CANCELLED_WAIT: &str = "Cancelled: waiting for something new or the next pass";
+
 /// Whether the machine runs on battery.
 pub trait Power: Send {
     fn on_battery(&mut self) -> bool;
@@ -557,6 +575,7 @@ pub struct Job<M: Map> {
     volumes: Vec<Volume>,
     load: Box<dyn Load>,
     power: Box<dyn Power>,
+    status: Box<dyn Status>,
     feed: Feed,
     settings: Settings,
     clock: Box<dyn Fn() -> u64 + Send>,
@@ -598,6 +617,7 @@ impl<M: Map> Job<M> {
             volumes,
             load: Box::new(Never),
             power: Box::new(Never),
+            status: Box::new(Never),
             feed,
             settings,
             clock: Box::new(|| {
@@ -633,6 +653,13 @@ impl<M: Map> Job<M> {
     #[must_use]
     pub fn power(mut self, power: Box<dyn Power>) -> Self {
         self.power = power;
+        self
+    }
+
+    /// Says what it does or waits on to `status`, on every turn.
+    #[must_use]
+    pub fn status(mut self, status: Box<dyn Status>) -> Self {
+        self.status = status;
         self
     }
 
@@ -1034,11 +1061,14 @@ impl<M: Map> Job<M> {
         let mut listed = 0u64;
         let mut shown = Instant::now();
         let mut idle_since: Option<Instant> = None;
+        // Files read and folders listed since the job started, every run.
+        let mut all = 0u64;
         while !stop.load(Ordering::SeqCst) {
             if cancel.swap(false, Ordering::SeqCst) {
                 if let Some(r) = report.take() {
                     r.cancelled();
                 }
+                self.status.waiting(all, CANCELLED_WAIT);
                 self.queue.clear();
                 self.wait_for_news(stop, Duration::from_secs(PRUNE_EVERY));
                 continue;
@@ -1050,6 +1080,7 @@ impl<M: Map> Job<M> {
                     {
                         r.paused(&why);
                     }
+                    self.status.waiting(all, &why);
                     paused = Some(why);
                     self.wait_for_news(stop, Duration::from_secs(5));
                 }
@@ -1059,6 +1090,7 @@ impl<M: Map> Job<M> {
                         r.finished();
                     }
                     paused = None;
+                    self.status.waiting(all, UP_TO_DATE);
                     let since = *idle_since.get_or_insert_with(Instant::now);
                     let wait = Duration::from_secs(PRUNE_EVERY).saturating_sub(since.elapsed());
                     self.wait_for_news(stop, wait.max(Duration::from_secs(1)));
@@ -1101,6 +1133,8 @@ impl<M: Map> Job<M> {
                         }
                         Next::Paused(_) | Next::Idle => unreachable!("matched above"),
                     };
+                    all += 1;
+                    self.status.working(all, &name);
                     if shown.elapsed() > Duration::from_millis(500) {
                         shown = Instant::now();
                         r.progress(Progress::new().done(read + listed).item(&name).step(step));
@@ -1139,6 +1173,11 @@ impl Load for Never {
     fn busy(&mut self) -> Option<String> {
         None
     }
+}
+
+impl Status for Never {
+    fn working(&mut self, _: u64, _: &str) {}
+    fn waiting(&mut self, _: u64, _: &str) {}
 }
 
 impl Power for Never {
