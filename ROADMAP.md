@@ -43,6 +43,17 @@ astrophotography, scientific imaging) stay possible without being built:
 photo editing remains the only application that drives the work, per the
 second-system safeguard below.
 
+**A no-brainer desk that each user shapes** (2026-11-17, decided by the
+owner). The interface aims to need no thinking:
+- drag and drop works in every direction. Photos and panels move between
+  galleries, quick collections, comparisons, queues, graph nodes and
+  windows.
+- each user builds the desk that suits them. Any panel can be opened
+  several times, anywhere, on any screen, and a Studio keeps that desk as
+  it is, mess included, to come back to later.
+
+Interaction conventions follow established apps' habits.
+
 ### Two repositories
 
 1. **The darktable fork**

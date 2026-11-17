@@ -1451,8 +1451,8 @@ impl Shell {
             WINDOW,
             move |did| {
                 let mut w = state.try_borrow_mut().map_err(|_| {
-                    egui_pop::api::bus::bus_contract::HookError(
-                        "the import window is being drawn".into(),
+                    egui_pop::api::bus::bus_contract::HookError::failed(
+                        "the import window is being drawn",
                     )
                 })?;
                 if w.open {
