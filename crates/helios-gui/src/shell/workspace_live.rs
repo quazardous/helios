@@ -424,6 +424,22 @@ impl Shell {
         }
     }
 
+    /// The listener of egui-pop's `layout.changed` keeping the copy of the
+    /// layout with the workspace's state ([`LAYOUT_COPY`]), after
+    /// egui-pop saved its own document (`layout.save`, the one owner of
+    /// that save): said once per change, once its gesture ended, so
+    /// nothing here compares the layout each pass. The copy needs the
+    /// shell, so it is taken at the shell's next turn of the pass.
+    ///
+    /// [`LAYOUT_COPY`]: crate::workspace_applied::LAYOUT_COPY
+    pub(super) fn listen_layout_changed(&mut self) {
+        let due = self.focus.layout_copy_due.clone();
+        let bus = self.core.app.handle().bus();
+        if let Err(e) = crate::workspace_applied::listen_layout_copy(&*bus, move || due.set(true)) {
+            self.notes.push(format!("layout.changed: {e}"));
+        }
+    }
+
     /// Writes the copy of the layout kept with the workspace's state as
     /// the layout shown (egui-pop just saved its own document), so a
     /// reload never brings back an older one. Not while the files hold a

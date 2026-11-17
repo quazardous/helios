@@ -221,6 +221,21 @@ fn the_workspace_points_listeners_run_in_a_declared_order() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// The listeners of egui-pop's `layout.changed` as the desktop registers
+/// them: egui-pop's save of the layout's document, then the workspace's
+/// copy of it (`tests/bus/layout.txt`).
+#[test]
+fn the_layout_point_saves_then_copies() {
+    let root = temp("layout-order");
+    let h = window(&root);
+    assert_eq!(
+        helios_gui::workspace_applied::layout_order(&*h.state().app().handle().bus()),
+        include_str!("../bus/layout.txt")
+    );
+    drop(h);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 /// A change of the layout is saved once and copied once, after its
 /// command, and nothing more while nothing changes.
 #[test]

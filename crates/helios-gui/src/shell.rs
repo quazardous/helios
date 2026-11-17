@@ -1268,6 +1268,9 @@ impl Shell {
         shell.listen_window_closes();
         // Who follows a workspace's state applied, in order.
         shell.listen_workspace_applied();
+        // The workspace's copy of the layout follows egui-pop's save of
+        // each change (`layout.changed`).
+        shell.listen_layout_changed();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
@@ -7330,7 +7333,9 @@ impl Shell {
             self.warn(n);
         }
         self.workbench_refusals(&ctx);
-        self.save_layout_on_change(&ctx);
+        if self.focus.layout_copy_due.take() {
+            self.keep_layout_copy();
+        }
         self.engine_notices(&ctx);
         self.copied_image();
         self.job_notices();
@@ -7440,30 +7445,6 @@ impl Shell {
     /// The Graph panel's state (its view, selection and folds).
     pub fn graph_panel(&self) -> std::cell::Ref<'_, crate::graph::GraphPanel> {
         self.focus.graph.borrow()
-    }
-
-    /// Saves the workspace's layout once it changed (egui-pop's
-    /// `layout.save` step), when no button is held (a splitter dragged
-    /// is saved where it is let go): a kill loses no arrangement.
-    fn save_layout_on_change(&mut self, ctx: &Egui) {
-        if self.focus.workspace.get().is_none() || ctx.input(|i| i.pointer.any_down()) {
-            return;
-        }
-        let layout = self.layout();
-        if self.focus.layout_saved.as_ref() == Some(&layout) {
-            return;
-        }
-        if let Err(e) = step_result(self.core.app.save_layout()) {
-            self.warn(
-                Message::new(
-                    "gui-layout-not-saved",
-                    "The layout was not saved: { $error }",
-                )
-                .with("error", e),
-            );
-        }
-        self.focus.layout_saved = Some(layout);
-        self.keep_layout_copy();
     }
 
     /// What the workbench refused this frame, said in the status bar:
