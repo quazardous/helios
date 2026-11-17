@@ -24,9 +24,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use egui_pop::core::fold::Fold;
 use egui_pop::core::icon::{Icon, Size, Tone};
+use egui_pop::core::kit;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets;
 use helios_connect::account::AccountState;
 use helios_core::Message;
+use helios_ui::{Action, Scroll};
 
 use super::{Event, ImportWindow, MenuAsked, Words, account_event, menu_items, name_of};
 use crate::backup_end::CardState;
@@ -39,10 +45,10 @@ fn icon(name: &str, fallback: Icon) -> Icon {
 }
 
 /// What an item's detail line says, beside its text: an account's state
-/// mark, coloured.
+/// mark, in its tone.
 struct Mark {
     text: &'static str,
-    colour: egui::Color32,
+    tone: kit::Tone,
 }
 
 /// One source in a panel: what every item shows, whatever its kind.
@@ -132,20 +138,15 @@ fn item_ui(
                         .galley(at.min, galley, text_colour);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
+                        // Not selectable, so a click on the line is the
+                        // item's; cut at the item's end.
+                        ui.style_mut().interaction.selectable_labels = false;
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                         if let Some(mark) = &item.mark {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(mark.text).small().color(mark.colour),
-                                )
-                                .selectable(false),
-                            );
+                            ui.text_tone(mark.tone, mark.text);
                         }
                         for part in &item.detail {
-                            ui.add(
-                                egui::Label::new(egui::RichText::new(part).small().weak())
-                                    .selectable(false)
-                                    .truncate(),
-                            );
+                            ui.meta(part);
                         }
                     });
                 },
@@ -164,22 +165,22 @@ fn item_ui(
                     .selected(pinned)
                     .sense_click(),
             );
-            if button.on_hover_text(text).clicked() {
+            if button.tip(text).clicked() {
                 pin = true;
             }
         }
     }
     let response = match &item.hover {
-        Some(h) => response.on_hover_text(h),
+        Some(h) => response.tip(h),
         None => response,
     };
     ItemAsked { response, pin }
 }
 
-/// A panel: its header, open at first, its items or what it lacks.
+/// A panel: its header band, open at first, its items or what it lacks.
+/// Its open state is kept where egui's collapsing header kept it.
 fn panel(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
-    egui::CollapsingHeader::new(egui::RichText::new(title).strong())
-        .id_salt(("helios.import.sources.panel", title))
+    Fold::new(("helios.import.sources.panel", title), title)
         .default_open(true)
         .show(ui, add);
 }
@@ -246,7 +247,7 @@ impl ImportWindow {
             // Its own choices, marked.
             mark: self.sources.has_own(path).then_some(Mark {
                 text: "●",
-                colour: egui::Color32::GRAY,
+                tone: kit::Tone::Muted,
             }),
             hover: Some(if self.sources.has_own(path) {
                 format!("{}\n{}", path.display(), words.choices.own_choices)
@@ -276,7 +277,6 @@ impl ImportWindow {
         &mut self,
         account: &helios_connect::account::Account,
         saved: &BTreeMap<String, String>,
-        ui: &egui::Ui,
     ) -> Item {
         let t = |m: Message| match self.texts.as_ref() {
             Some(t) => t(m),
@@ -284,10 +284,10 @@ impl ImportWindow {
         };
         let attention = matches!(account.state, AccountState::NeedsAttention { .. })
             || self.accounts.identity_missing(account);
-        let (mark, colour) = match account.state {
-            _ if attention => ("▲", ui.visuals().warn_fg_color),
-            AccountState::Connected => ("●", ui.visuals().text_color()),
-            _ => ("○", ui.visuals().weak_text_color()),
+        let (mark, tone) = match account.state {
+            _ if attention => ("▲", kit::Tone::Warning),
+            AccountState::Connected => ("●", kit::Tone::Neutral),
+            _ => ("○", kit::Tone::Muted),
         };
         let name = saved
             .get(&account.id)
@@ -326,7 +326,7 @@ impl ImportWindow {
             icon: icon("cloud", Icon::Circle),
             name,
             detail,
-            mark: Some(Mark { text: mark, colour }),
+            mark: Some(Mark { text: mark, tone }),
             hover: account.email().map(str::to_owned),
         }
     }
@@ -384,11 +384,12 @@ fn folder_menu(
     response.context_menu(|ui| {
         if kept {
             asked = menu_items(ui, words, auto);
-            ui.separator();
+            ui.divider();
         }
-        if ui
-            .button(&words.forget)
-            .on_hover_text(&words.forget_hint)
+        // The action's button, which egui's menu style draws as a menu's
+        // item.
+        if helios_ui::action(ui, Action::Secondary, &words.forget)
+            .tip(&words.forget_hint)
             .clicked()
         {
             *event = Some(Event::Forget(path.to_path_buf()));
@@ -429,7 +430,7 @@ fn account_menu(
         id,
         &mut |ui: &mut egui::Ui| {
             if kept && saved {
-                ui.separator();
+                ui.divider();
                 item = menu_items(ui, words, auto);
             }
         },
@@ -457,40 +458,33 @@ fn albums_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, id: &str) {
     };
     let b = &words.grid.browse;
     let selected = w.albums.selected(id).map(|s| s.id.clone());
-    let indent = 28.0;
     let mut chosen = None;
     let mut more = false;
-    for album in &listed.albums {
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
-            ui.add(icon("images", Icon::Folder).size(Size::Inline));
-            let on = selected.as_deref() == Some(album.source.id.as_str());
-            if ui.selectable_label(on, &album.source.label).clicked() && !on {
-                chosen = Some(album.source.clone());
-            }
-            if let Some(n) = album.count {
-                ui.weak(n.to_string());
-            }
-        });
-    }
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
+    // Indented under their account's item.
+    ui.indent(("helios.import.albums", id), |ui| {
+        for album in &listed.albums {
+            ui.horizontal(|ui| {
+                ui.add(icon("images", Icon::Folder).size(Size::Inline));
+                let on = selected.as_deref() == Some(album.source.id.as_str());
+                if widgets::selectable_label(ui, on, &album.source.label).clicked() && !on {
+                    chosen = Some(album.source.clone());
+                }
+                if let Some(n) = album.count {
+                    ui.muted(n.to_string());
+                }
+            });
+        }
         if listed.reading {
-            ui.weak(&b.albums_reading);
+            ui.muted(&b.albums_reading);
         } else if let Some(why) = &listed.failed {
-            ui.weak(format!("{} {why}", b.albums_failed));
+            ui.muted(format!("{} {why}", b.albums_failed));
         } else if listed.albums.is_empty() {
-            ui.weak(&b.albums_none);
+            ui.muted(&b.albums_none);
+        }
+        if listed.more() && helios_ui::action(ui, Action::Secondary, &b.albums_more).clicked() {
+            more = true;
         }
     });
-    if listed.more() {
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
-            if ui.button(&b.albums_more).clicked() {
-                more = true;
-            }
-        });
-    }
     if let Some(source) = chosen {
         w.select_album(id, source);
     }
@@ -507,165 +501,160 @@ pub(super) fn sources_ui(
     event: &mut Option<Event>,
 ) {
     ui.horizontal(|ui| {
-        ui.heading(&words.sources);
+        ui.text_role(TextRole::Title, &words.sources);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .button(&words.add)
-                .on_hover_text(&words.add_hint)
+            if helios_ui::action(ui, Action::Secondary, &words.add)
+                .tip(&words.add_hint)
                 .clicked()
             {
                 w.open_wizard();
             }
         });
     });
-    egui::ScrollArea::vertical()
-        .id_salt("helios.import.sources")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            // The registry's sources: the cards detected, the folders
-            // given (recent and favourite).
-            let mut places = w.memory.recent.clone();
-            places.extend(w.memory.favourites.iter().cloned());
-            w.connectors.set_places(places);
-            let sources = w.connectors.sources();
-            let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
-            let label_of = |path: &Path| {
-                given
-                    .iter()
-                    .find(|(s, _)| s.root.as_deref() == Some(path))
-                    .map(|(s, _)| s.label.clone())
-            };
-            let named = w.sources.named();
-            let saved_accounts: BTreeMap<String, String> = named
+    helios_ui::scroll(ui, "helios.import.sources", Scroll::Region, |ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        // The registry's sources: the cards detected, the folders
+        // given (recent and favourite).
+        let mut places = w.memory.recent.clone();
+        places.extend(w.memory.favourites.iter().cloned());
+        w.connectors.set_places(places);
+        let sources = w.connectors.sources();
+        let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
+        let label_of = |path: &Path| {
+            given
                 .iter()
-                .filter_map(|(k, name)| match k {
-                    SourceKey::Account(id) => Some((id.clone(), name.clone())),
-                    SourceKey::Folder(_) => None,
-                })
-                .collect();
-            let accounts = if w.accounts.has_book() {
-                w.accounts.listed().to_vec()
-            } else {
-                Vec::new()
-            };
-            let mut account_items = Vec::new();
-            for a in &accounts {
-                account_items.push(w.account_item(a, &saved_accounts, ui));
+                .find(|(s, _)| s.root.as_deref() == Some(path))
+                .map(|(s, _)| s.label.clone())
+        };
+        let named = w.sources.named();
+        let saved_accounts: BTreeMap<String, String> = named
+            .iter()
+            .filter_map(|(k, name)| match k {
+                SourceKey::Account(id) => Some((id.clone(), name.clone())),
+                SourceKey::Folder(_) => None,
+            })
+            .collect();
+        let accounts = if w.accounts.has_book() {
+            w.accounts.listed().to_vec()
+        } else {
+            Vec::new()
+        };
+        let mut account_items = Vec::new();
+        for a in &accounts {
+            account_items.push(w.account_item(a, &saved_accounts));
+        }
+        let card_items: Vec<Item> = detected
+            .iter()
+            .filter_map(|(source, _)| {
+                let root = source.root.as_ref()?;
+                let mut item = w.folder_item(root, Some(source.label.clone()), words);
+                let mut detail = Vec::new();
+                if let Some(b) = source.capacity {
+                    detail.push(helios_storage::capacity_text(b));
+                }
+                // The card's volume, briefly: the same card wherever
+                // it is mounted.
+                if let Some(id) = w
+                    .sources
+                    .card_at(root)
+                    .and_then(|m| crate::shell::import_sources::brief_id(&m.id))
+                {
+                    detail.push(id);
+                }
+                if !detail.is_empty() {
+                    item.detail = vec![detail.join(" · ")];
+                }
+                // Whether it may be formatted, from the one card list.
+                if let Some(state) = w.card_list.state_of(root) {
+                    item.detail.push(match state {
+                        CardState::Safe => words.card_safe.clone(),
+                        CardState::Waiting => words.card_waiting.clone(),
+                    });
+                }
+                item.icon = icon("sd-card", Icon::Disc);
+                Some(item)
+            })
+            .collect();
+        // Favorites: the folders and accounts pinned.
+        panel(ui, &words.favourites, |ui| {
+            let mut any = false;
+            for path in w.memory.favourites.clone() {
+                // Another card mounted where a pinned card was is not
+                // the favourite.
+                if !w.memory.favourite(&path, &w.sources.mounted) {
+                    continue;
+                }
+                let item = w.folder_item(&path, label_of(&path), words);
+                show_item(ui, w, words, &item, event);
+                any = true;
             }
-            let card_items: Vec<Item> = detected
+            let pinned: Vec<&Item> = account_items.iter().filter(|i| w.pinned(&i.key)).collect();
+            for item in pinned {
+                show_item(ui, w, words, item, event);
+                any = true;
+            }
+            if !any {
+                ui.muted(&words.no_favourites);
+            }
+        });
+        // History: the folders imported from lately, then the imports.
+        let history_title = words.history.clone();
+        panel(ui, &history_title, |ui| {
+            for path in w.history.recent_folders(&w.sources.mounted) {
+                let item = w.folder_item(&path, label_of(&path), words);
+                show_item(ui, w, words, &item, event);
+            }
+            if let Some(texts) = w.texts.clone() {
+                let hw = crate::shell::import_history::Words::new(&|m| texts(m));
+                if let Some(id) =
+                    crate::shell::import_history::history_ui(ui, &w.history, &hw, &|m| texts(m))
+                {
+                    *event = Some(Event::Again(id));
+                }
+            }
+        });
+        // Folders: those saved, then those given lately.
+        panel(ui, &words.folders, |ui| {
+            let mut shown: Vec<PathBuf> = Vec::new();
+            let mut folders: Vec<PathBuf> = named
                 .iter()
-                .filter_map(|(source, _)| {
-                    let root = source.root.as_ref()?;
-                    let mut item = w.folder_item(root, Some(source.label.clone()), words);
-                    let mut detail = Vec::new();
-                    if let Some(b) = source.capacity {
-                        detail.push(helios_storage::capacity_text(b));
-                    }
-                    // The card's volume, briefly: the same card wherever
-                    // it is mounted.
-                    if let Some(id) = w
-                        .sources
-                        .card_at(root)
-                        .and_then(|m| crate::shell::import_sources::brief_id(&m.id))
-                    {
-                        detail.push(id);
-                    }
-                    if !detail.is_empty() {
-                        item.detail = vec![detail.join(" · ")];
-                    }
-                    // Whether it may be formatted, from the one card list.
-                    if let Some(state) = w.card_list.state_of(root) {
-                        item.detail.push(match state {
-                            CardState::Safe => words.card_safe.clone(),
-                            CardState::Waiting => words.card_waiting.clone(),
-                        });
-                    }
-                    item.icon = icon("sd-card", Icon::Disc);
-                    Some(item)
+                .filter_map(|(k, _)| match k {
+                    SourceKey::Folder(p) => Some(p.clone()),
+                    SourceKey::Account(_) => None,
                 })
                 .collect();
-            // Favorites: the folders and accounts pinned.
-            panel(ui, &words.favourites, |ui| {
-                let mut any = false;
-                for path in w.memory.favourites.clone() {
-                    // Another card mounted where a pinned card was is not
-                    // the favourite.
-                    if !w.memory.favourite(&path, &w.sources.mounted) {
-                        continue;
-                    }
-                    let item = w.folder_item(&path, label_of(&path), words);
-                    show_item(ui, w, words, &item, event);
-                    any = true;
+            folders.extend(w.sources.folders());
+            folders.extend(w.memory.recent.iter().cloned());
+            for path in folders {
+                if shown.contains(&path) || w.is_card(&path) {
+                    continue;
                 }
-                let pinned: Vec<&Item> =
-                    account_items.iter().filter(|i| w.pinned(&i.key)).collect();
-                for item in pinned {
-                    show_item(ui, w, words, item, event);
-                    any = true;
-                }
-                if !any {
-                    ui.weak(&words.no_favourites);
-                }
-            });
-            // History: the folders imported from lately, then the imports.
-            let history_title = words.history.clone();
-            panel(ui, &history_title, |ui| {
-                for path in w.history.recent_folders(&w.sources.mounted) {
-                    let item = w.folder_item(&path, label_of(&path), words);
-                    show_item(ui, w, words, &item, event);
-                }
-                if let Some(texts) = w.texts.clone() {
-                    let hw = crate::shell::import_history::Words::new(&|m| texts(m));
-                    if let Some(id) =
-                        crate::shell::import_history::history_ui(ui, &w.history, &hw, &|m| texts(m))
-                    {
-                        *event = Some(Event::Again(id));
-                    }
-                }
-            });
-            // Folders: those saved, then those given lately.
-            panel(ui, &words.folders, |ui| {
-                let mut shown: Vec<PathBuf> = Vec::new();
-                let mut folders: Vec<PathBuf> = named
-                    .iter()
-                    .filter_map(|(k, _)| match k {
-                        SourceKey::Folder(p) => Some(p.clone()),
-                        SourceKey::Account(_) => None,
-                    })
-                    .collect();
-                folders.extend(w.sources.folders());
-                folders.extend(w.memory.recent.iter().cloned());
-                for path in folders {
-                    if shown.contains(&path) || w.is_card(&path) {
-                        continue;
-                    }
-                    let item = w.folder_item(&path, label_of(&path), words);
-                    show_item(ui, w, words, &item, event);
-                    shown.push(path);
-                }
-                if shown.is_empty() {
-                    ui.weak(&words.no_folders);
-                }
-            });
-            panel(ui, &words.cards, |ui| {
-                if card_items.is_empty() {
-                    ui.weak(&words.no_cards);
-                }
-                for item in &card_items {
-                    show_item(ui, w, words, item, event);
-                }
-            });
-            panel(ui, &words.services, |ui| {
-                for item in &account_items {
-                    show_item(ui, w, words, item, event);
-                    if let SourceKey::Account(id) = &item.key {
-                        albums_ui(ui, w, words, id);
-                    }
-                }
-                if account_items.is_empty() {
-                    ui.weak(&words.no_services);
-                }
-            });
+                let item = w.folder_item(&path, label_of(&path), words);
+                show_item(ui, w, words, &item, event);
+                shown.push(path);
+            }
+            if shown.is_empty() {
+                ui.muted(&words.no_folders);
+            }
         });
+        panel(ui, &words.cards, |ui| {
+            if card_items.is_empty() {
+                ui.muted(&words.no_cards);
+            }
+            for item in &card_items {
+                show_item(ui, w, words, item, event);
+            }
+        });
+        panel(ui, &words.services, |ui| {
+            for item in &account_items {
+                show_item(ui, w, words, item, event);
+                if let SourceKey::Account(id) = &item.key {
+                    albums_ui(ui, w, words, id);
+                }
+            }
+            if account_items.is_empty() {
+                ui.muted(&words.no_services);
+            }
+        });
+    });
 }
