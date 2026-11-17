@@ -86,6 +86,9 @@ use crate::library_history::{LIBRARY, LibraryHistory};
 /// The scope of Helios's value store: the open image's edit.
 pub const EDIT: ScopeId = ScopeId::from_static("edit");
 
+/// How a snapshot's restore step starts: its label is kept as it is.
+const RESTORE: &str = "Restore ";
+
 /// Helios's value store as egui-pop's history owner.
 #[derive(Clone)]
 pub struct HeliosHistory {
@@ -156,6 +159,8 @@ impl HeliosHistory {
         let store = self.lock();
         self.stamp(&store);
         let mut line = line_of(&store);
+        self.relabel(&store, &mut line.undo);
+        self.relabel(&store, &mut line.redo);
         let stamps = self.stamps.lock().unwrap_or_else(PoisonError::into_inner);
         for s in line.undo.iter_mut().chain(line.redo.iter_mut()) {
             s.at = stamps.1.get(&s.id).copied().unwrap_or_default();
@@ -214,7 +219,8 @@ impl HeliosHistory {
     ) -> Answer {
         let mut store = self.lock();
         Answer::Done(Self::check(&store, request).and_then(|()| {
-            let steps = f(&mut store)?;
+            let mut steps = f(&mut store)?;
+            self.relabel(&store, &mut steps);
             let line = line_of(&store);
             Ok(Walked {
                 scope: EDIT,
@@ -430,7 +436,7 @@ fn restore(
             ),
         ));
     }
-    let label = format!("Restore “{}”", taken.name);
+    let label = format!("{RESTORE}“{}”", taken.name);
     let o = to_helios(origin);
     if dry_run {
         return Ok(vec![StepInfo::new(
@@ -473,6 +479,46 @@ fn say(i18n: Option<&I18n>, m: &Message) -> String {
     i18n.map_or_else(|| m.english.clone(), |i| helios_i18n::message(i, m))
 }
 
+/// A bypass's state through `i18n`: bypassed or applied.
+fn bypass_state(i18n: Option<&I18n>, v: &Value) -> String {
+    say(
+        i18n,
+        &if v.as_bool() == Some(true) {
+            Message::new("gui-history-preview-bypassed", "bypassed")
+        } else {
+            Message::new("gui-history-preview-applied", "applied")
+        },
+    )
+}
+
+/// A node parameter's name through `i18n` (its label, and its node when
+/// that is not named after its module); the descriptor's label for
+/// another value.
+fn param_what(i18n: Option<&I18n>, path: &str, d: &helios_values::Descriptor) -> String {
+    match (
+        path.strip_prefix("node/").and_then(|r| r.rsplit_once('/')),
+        &d.module,
+    ) {
+        (Some((node, param)), Some(module)) => {
+            let key = helios_i18n::ids::param_label(module, param);
+            let label = i18n
+                .and_then(|i| i.get(&key.key(), &[]))
+                .unwrap_or_else(|| d.label.clone());
+            // The node named only when it is not the module's only one.
+            if node == module {
+                return label;
+            }
+            say(
+                i18n,
+                &Message::new("gui-history-preview-param", "{ $label } ({ $node })")
+                    .with("label", label)
+                    .with("node", node.to_string()),
+            )
+        }
+        _ => d.label.clone(),
+    }
+}
+
 /// One value that differs at the point previewed, as the History panel
 /// lists it: a parameter by its label (and its node, when that is not
 /// named after its module), a bypass by its node.
@@ -480,20 +526,10 @@ fn preview_change(store: &Store, i18n: Option<&I18n>, path: &str, then: &Value) 
     let entry = store.get(path);
     let now = entry.map_or(Value::Bool(false), |e| e.value.clone());
     if let Some(node) = path.strip_prefix(helios_values::BYPASS) {
-        let state = |v: &Value| {
-            say(
-                i18n,
-                &if v.as_bool() == Some(true) {
-                    Message::new("gui-history-preview-bypassed", "bypassed")
-                } else {
-                    Message::new("gui-history-preview-applied", "applied")
-                },
-            )
-        };
         return PreviewChange {
             what: node.to_string(),
-            then: state(then),
-            now: state(&now),
+            then: bypass_state(i18n, then),
+            now: bypass_state(i18n, &now),
         };
     }
     let Some(d) = entry.map(|e| &e.descriptor) else {
@@ -505,36 +541,66 @@ fn preview_change(store: &Store, i18n: Option<&I18n>, path: &str, then: &Value) 
     };
     let locale = i18n.map_or_else(|| "en".to_string(), I18n::locale);
     let shown = |v: &Value| crate::params::shown_in(&locale, d, v);
-    let what = match (
-        path.strip_prefix("node/").and_then(|r| r.rsplit_once('/')),
-        &d.module,
-    ) {
-        (Some((node, param)), Some(module)) => {
-            let key = helios_i18n::ids::param_label(module, param);
-            let label = i18n
-                .and_then(|i| i.get(&key.key(), &[]))
-                .unwrap_or_else(|| d.label.clone());
-            // The node named only when it is not the module's only one.
-            if node == module {
-                return PreviewChange {
-                    what: label,
-                    then: shown(then),
-                    now: shown(&now),
-                };
-            }
-            say(
-                i18n,
-                &Message::new("gui-history-preview-param", "{ $label } ({ $node })")
-                    .with("label", label)
-                    .with("node", node.to_string()),
-            )
-        }
-        _ => d.label.clone(),
-    };
     PreviewChange {
-        what,
+        what: param_what(i18n, path, d),
         then: shown(then),
         now: shown(&now),
+    }
+}
+
+/// What a step did, as an edit reads in the History panel and the Edit
+/// menu: the one value it changed and where it left it ("Exposure +0.30
+/// EV", "Exposure bypassed"), in the interface's language. `None` keeps
+/// the step's own label: a step changing several values (a reset, an
+/// agent's batch), one an agent's request named, a snapshot restored, a
+/// value no descriptor describes.
+fn edit_label(store: &Store, i18n: Option<&I18n>, step: &Step) -> Option<Label> {
+    if step.group.is_some() || step.label.starts_with(RESTORE) {
+        return None;
+    }
+    let [path] = step.paths()[..] else {
+        return None;
+    };
+    let (_, _, now) = step.changes.iter().rev().find(|(p, _, _)| p == path)?;
+    let (what, value) = if let Some(node) = path.strip_prefix(helios_values::BYPASS) {
+        (node.to_string(), bypass_state(i18n, now))
+    } else {
+        let d = &store.get(path)?.descriptor;
+        let locale = i18n.map_or_else(|| "en".to_string(), I18n::locale);
+        (
+            param_what(i18n, path, d),
+            crate::params::shown_in(&locale, d, now),
+        )
+    };
+    // A label starts with a capital, as darktable's history items do.
+    let mut chars = what.chars();
+    let what = chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect::<String>())
+        .unwrap_or_default();
+    let m = Message::new("gui-history-edit", "{ $what } { $value }")
+        .with("what", what)
+        .with("value", value);
+    Some(Label::text(say(i18n, &m)))
+}
+
+impl HeliosHistory {
+    /// Labels `steps` as edits ([`edit_label`]), each found in the store
+    /// by its id.
+    fn relabel(&self, store: &Store, steps: &mut [StepInfo]) {
+        let i18n = self.i18n.as_ref();
+        let replaced = store.replaced_steps();
+        for info in steps {
+            let step = store
+                .undo_steps()
+                .iter()
+                .chain(store.redo_steps())
+                .find(|s| s.id == info.id)
+                .or_else(|| replaced.iter().map(|(_, s)| *s).find(|s| s.id == info.id));
+            if let Some(label) = step.and_then(|s| edit_label(store, i18n, s)) {
+                info.label = label;
+            }
+        }
     }
 }
 
@@ -689,12 +755,15 @@ impl History for HeliosHistory {
         if *scope != EDIT {
             return Vec::new();
         }
-        self.lock()
+        let store = self.lock();
+        store
             .replaced_steps()
             .into_iter()
-            .map(|(after, s)| Replaced {
-                step: step_info(s),
-                after,
+            .map(|(after, s)| {
+                let mut step = [step_info(s)];
+                self.relabel(&store, &mut step);
+                let [step] = step;
+                Replaced { step, after }
             })
             .collect()
     }

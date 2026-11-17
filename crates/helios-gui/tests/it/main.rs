@@ -45,6 +45,7 @@ mod fullscreen;
 mod graph_panel;
 mod gui;
 mod health;
+mod history_panel;
 mod history_preview;
 mod image_tools;
 mod import;

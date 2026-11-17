@@ -400,10 +400,7 @@ fn undo_through_the_host_skips_the_view_and_takes_back_the_edit() {
     // Edit > Undo names the edit, not the zoom.
     let handle = h.state().app().handle();
     let undo = handle.command(&egui_pop::api::app::CMD_UNDO).unwrap();
-    assert_eq!(
-        handle.command_title(&undo),
-        "Undo set node/exposure/exposure"
-    );
+    assert_eq!(handle.command_title(&undo), "Undo Exposure +1.00 EV");
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.step();
     h.step();
