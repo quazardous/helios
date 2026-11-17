@@ -261,32 +261,34 @@ impl Library {
         let selection = self.targets().is_ok();
         let mut chosen = None;
         let mut runs: Vec<(&'static str, serde_json::Value)> = Vec::new();
-        egui::CollapsingHeader::new(word(Message::new("gui-library-keywords", "Keywords")))
-            .id_salt("helios.library.keywords")
-            .show(ui, |ui| {
-                let counts = self.keyword_counts().clone();
-                if counts.is_empty() {
-                    ui.weak(word(Message::new(
-                        "gui-library-keywords-none",
-                        "No keyword yet: write levels with | (Animals|Dog)",
-                    )));
-                    return;
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.library.keywords.scroll")
-                    .max_height(200.0)
-                    .show(ui, |ui| {
-                        self.keyword_rows(
-                            ui,
-                            &counts,
-                            None,
-                            selected.as_deref(),
-                            selection,
-                            &mut chosen,
-                            &mut runs,
-                        );
-                    });
-            });
+        egui_pop::core::fold::Fold::new(
+            "helios.library.keywords",
+            word(Message::new("gui-library-keywords", "Keywords")),
+        )
+        .show(ui, |ui| {
+            let counts = self.keyword_counts().clone();
+            if counts.is_empty() {
+                ui.weak(word(Message::new(
+                    "gui-library-keywords-none",
+                    "No keyword yet: write levels with | (Animals|Dog)",
+                )));
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("helios.library.keywords.scroll")
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    self.keyword_rows(
+                        ui,
+                        &counts,
+                        None,
+                        selected.as_deref(),
+                        selection,
+                        &mut chosen,
+                        &mut runs,
+                    );
+                });
+        });
         if let Some(path) = chosen {
             let same = selected.as_deref() == Some(path.as_str());
             runs.push((
