@@ -124,11 +124,12 @@ fn opts(after: Option<&str>) -> ListenOpts {
     }
 }
 
-fn place(order: &[(&str, Option<&'static str>)], id: &str) -> Option<Option<&'static str>> {
-    order
-        .iter()
-        .find(|(listener, _)| *listener == id)
-        .map(|(_, after)| *after)
+/// Listener `id`'s entry in `order`: its id, and the one it runs after.
+fn place<'o>(
+    order: &'o [(&'static str, Option<&'static str>)],
+    id: &str,
+) -> Option<&'o (&'static str, Option<&'static str>)> {
+    order.iter().find(|(listener, _)| *listener == id)
 }
 
 /// Registers `run` as the listener `id` of [`BackupEnded`] (one of
@@ -143,7 +144,7 @@ pub fn listen_ended(
     id: &'static str,
     run: impl Fn(&BackupEnd, &mut Reactions) + 'static,
 ) -> Result<(), String> {
-    let Some(after) = place(ORDER, id) else {
+    let Some(&(_, after)) = place(ORDER, id) else {
         return Err(format!("`{id}` is not a listener of {ENDED}"));
     };
     declare(bus);
@@ -169,7 +170,7 @@ pub fn listen_local(
     id: &'static str,
     run: impl Fn(&SafeCards, &mut Reactions) + 'static,
 ) -> Result<(), String> {
-    let Some(after) = place(SAFE_ORDER, id) else {
+    let Some(&(_, after)) = place(SAFE_ORDER, id) else {
         return Err(format!("`{id}` is not a listener of {SAFE}"));
     };
     declare(bus);
