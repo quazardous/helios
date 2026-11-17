@@ -44,6 +44,10 @@ use std::sync::{Arc, OnceLock};
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
 use egui_pop::api::bus::drag::{self, Seen};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets;
+use helios_ui::{Action, Scroll};
 
 use crate::thumb_textures::Resident;
 use egui_pop::views::library::compare::{CompareView, Pane};
@@ -1036,9 +1040,13 @@ fn volume_row(
     let online = volume.online;
     egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
         .show_header(ui, |ui| {
-            let label = egui::RichText::new(text).strong();
-            let label = if online { label } else { label.weak() };
-            let row = ui.add(egui::Label::new(label).sense(egui::Sense::click()));
+            // Offline, greyed: its photos are not at hand.
+            let role = if online {
+                TextRole::Section
+            } else {
+                TextRole::Muted
+            };
+            let row = ui.text_role(role, text).interact(egui::Sense::click());
             // Known volumes only: "Other folders" is no place on disk.
             if volume.id.is_some() {
                 let mount = volume.mount.as_ref().map(|m| m.display().to_string());
@@ -1069,7 +1077,7 @@ fn folder_row(
     let text = format!("{} {}", node.name, node.count);
     let on = selected == Some(node.path.as_str());
     let mut row = |ui: &mut Ui| {
-        let r = ui.selectable_label(on, text.clone());
+        let r = widgets::selectable_label(ui, on, text.clone());
         folder_menu(&r, Some(&node.path), online);
         if r.clicked() {
             *chosen = Some(node.path.clone());
@@ -1619,7 +1627,7 @@ fn hover_over(
     // while something is dragged, so it is shown here, not through
     // `on_hover_text`; it is no window, popup or menu of the panel's.
     egui::Tooltip::for_widget(row).at_pointer().show(|ui| {
-        ui.label(text);
+        ui.text_role(TextRole::Body, text);
     });
 }
 
@@ -2828,7 +2836,7 @@ impl Library {
             if r.hovered()
                 && let Some(note) = self.presence_note(&e.id)
             {
-                r.on_hover_text(crate::i18n::text(ui.ctx(), note));
+                r.tip(crate::i18n::text(ui.ctx(), note));
                 return;
             }
         }
@@ -4025,7 +4033,7 @@ impl Library {
         if options.has_search() || (import.is_some() && options.has_sources()) {
             ui.horizontal_wrapped(|ui| {
                 if let Some(import) = import.filter(|_| options.has_sources())
-                    && ui.button(import).clicked()
+                    && helios_ui::action(ui, Action::Secondary, &import).clicked()
                 {
                     self.import_asked = true;
                 }
@@ -4044,15 +4052,18 @@ impl Library {
         if options.sort_count {
             ui.horizontal_wrapped(|ui| {
                 self.sort_menu(ui);
-                ui.weak(count);
+                ui.muted(count);
             });
         }
         if options.view_options {
             ui.horizontal_wrapped(|ui| {
-                ui.checkbox(&mut self.auto_advance, advance);
+                widgets::checkbox(ui, &mut self.auto_advance, advance.as_str());
                 if ui
-                    .add_enabled(can_compare, egui::Button::new(compare))
-                    .on_hover_text(compare_hint)
+                    .add_enabled_ui(can_compare, |ui| {
+                        helios_ui::action(ui, Action::Secondary, &compare)
+                    })
+                    .inner
+                    .tip(compare_hint)
                     .clicked()
                 {
                     crate::dialogs::request(
@@ -4101,10 +4112,12 @@ impl Library {
                 continue;
             }
             ui.horizontal_wrapped(|ui| {
-                ui.weak(crate::i18n::text(&ctx, key.label.clone()));
+                ui.muted(crate::i18n::text(&ctx, key.label.clone()));
                 for (value, n) in values {
                     let shown = key.shown(&ctx, value);
-                    if ui.small_button(format!("{shown} {n}")).clicked() {
+                    if helios_ui::row_action(ui, Action::Secondary, &format!("{shown} {n}"))
+                        .clicked()
+                    {
                         add = Some(key.term_of(value));
                     }
                 }
@@ -4128,6 +4141,9 @@ impl Library {
         let title = crate::i18n::text(ui.ctx(), Message::new("gui-library-folders", "Folders"));
         let selected = self.folder();
         let mut chosen = None;
+        // Raw egui left on purpose: egui-pop has no fold brick for a
+        // group that opens and closes inside a panel (its `Sections`
+        // stack is a whole side bar's layout, a redesign of this one).
         egui::CollapsingHeader::new(title)
             .id_salt("helios.library.folders")
             .show(ui, |ui| {
@@ -4141,14 +4157,11 @@ impl Library {
                     }
                     return;
                 };
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.library.folders.scroll")
-                    .max_height(200.0)
-                    .show(ui, |ui| {
-                        for volume in &tree {
-                            volume_row(ui, volume, selected.as_deref(), &mut chosen);
-                        }
-                    });
+                helios_ui::scroll(ui, "helios.library.folders.scroll", Scroll::Section, |ui| {
+                    for volume in &tree {
+                        volume_row(ui, volume, selected.as_deref(), &mut chosen);
+                    }
+                });
             });
         if let Some(path) = chosen {
             // Through the shell: the folder is kept with the workspace.
@@ -4185,36 +4198,35 @@ impl Library {
         let mut create = false;
         let mut create_smart = false;
         let mut create_set = false;
+        // Raw egui left on purpose: egui-pop has no fold brick for a
+        // group that opens and closes inside a panel (its `Sections`
+        // stack is a whole side bar's layout, a redesign of this one).
         egui::CollapsingHeader::new(word(Message::new("gui-library-albums", "Albums")))
             .id_salt("helios.library.albums")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    create = ui
-                        .button(word(Message::new("gui-library-album-new", "New album…")))
-                        .clicked();
-                    create_smart = ui
-                        .button(word(Message::new(
-                            "gui-library-album-new-smart",
-                            "New smart album…",
-                        )))
-                        .clicked();
-                    create_set = ui
-                        .button(word(Message::new("gui-library-set-new", "New set…")))
-                        .clicked();
+                    let mut button =
+                        |m: Message| helios_ui::action(ui, Action::Secondary, &word(m)).clicked();
+                    create = button(Message::new("gui-library-album-new", "New album…"));
+                    create_smart = button(Message::new(
+                        "gui-library-album-new-smart",
+                        "New smart album…",
+                    ));
+                    create_set = button(Message::new("gui-library-set-new", "New set…"));
                 });
                 // The quick collection, always there, pinned first.
                 let quick = helios_vault::collections::QUICK;
                 let count = self.quick_count();
                 let name = word(Message::new("gui-library-quick", "Quick collection"));
-                let r = ui
-                    .selectable_label(
-                        selected.as_deref() == Some(quick),
-                        format!("⚡ {name} {count}"),
-                    )
-                    .on_hover_text(word(Message::new(
-                        "gui-library-quick-tip",
-                        "B adds the selected photos or takes them out",
-                    )));
+                let r = widgets::selectable_label(
+                    ui,
+                    selected.as_deref() == Some(quick),
+                    format!("⚡ {name} {count}"),
+                )
+                .tip(word(Message::new(
+                    "gui-library-quick-tip",
+                    "B adds the selected photos or takes them out",
+                )));
                 quick_menu(&r, selection, count > 0);
                 drop_target(&r, DropOn::Quick, None, &self.drop_hover);
                 if r.clicked() {
@@ -4224,26 +4236,16 @@ impl Library {
                     return;
                 };
                 if albums.is_empty() {
-                    ui.weak(word(Message::new(
+                    ui.muted(word(Message::new(
                         "gui-library-albums-none",
                         "No album yet",
                     )));
                     return;
                 }
                 let tree = AlbumTree::of(albums);
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.library.albums.scroll")
-                    .max_height(200.0)
-                    .show(ui, |ui| {
-                        self.album_rows(
-                            ui,
-                            &tree,
-                            None,
-                            selected.as_deref(),
-                            selection,
-                            &mut chosen,
-                        );
-                    });
+                helios_ui::scroll(ui, "helios.library.albums.scroll", Scroll::Section, |ui| {
+                    self.album_rows(ui, &tree, None, selected.as_deref(), selection, &mut chosen);
+                });
             });
         let run = |command: &str, args: serde_json::Value| {
             crate::dialogs::request(
@@ -4292,27 +4294,27 @@ impl Library {
         let word = |m: Message| crate::i18n::text(&ctx, m);
         let selected = self.import_session();
         let mut chosen = None;
+        // Raw egui left on purpose: egui-pop has no fold brick for a
+        // group that opens and closes inside a panel (its `Sections`
+        // stack is a whole side bar's layout, a redesign of this one).
         egui::CollapsingHeader::new(word(Message::new("gui-library-imports", "Imports")))
             .id_salt("helios.library.imports")
             .show(ui, |ui| {
                 if self.imports.is_empty() {
-                    ui.weak(word(Message::new(
+                    ui.muted(word(Message::new(
                         "gui-library-imports-none",
                         "No import yet",
                     )));
                     return;
                 }
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.library.imports.scroll")
-                    .max_height(200.0)
-                    .show(ui, |ui| {
-                        for session in &self.imports {
-                            let on = selected.as_deref() == Some(session.id.as_str());
-                            if ui.selectable_label(on, session.line()).clicked() {
-                                chosen = Some(session.id.clone());
-                            }
+                helios_ui::scroll(ui, "helios.library.imports.scroll", Scroll::Section, |ui| {
+                    for session in &self.imports {
+                        let on = selected.as_deref() == Some(session.id.as_str());
+                        if widgets::selectable_label(ui, on, session.line()).clicked() {
+                            chosen = Some(session.id.clone());
                         }
-                    });
+                    }
+                });
             });
         if let Some(id) = chosen {
             let same = selected.as_deref() == Some(id.as_str());
@@ -4347,9 +4349,9 @@ impl Library {
             let on = selected == Some(album.id.as_str());
             let movable = tree.has_sets_for(album);
             if !album.is_set() {
-                let mut r = ui.selectable_label(on, text);
+                let mut r = widgets::selectable_label(ui, on, text);
                 if album.is_smart() {
-                    r = r.on_hover_text(word(Message::new(
+                    r = r.tip(word(Message::new(
                         "gui-library-album-smart-tip",
                         "Smart album: its rules choose its photos",
                     )));
@@ -4385,12 +4387,10 @@ impl Library {
                 toggle.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, &name)
                 });
-                let r = ui
-                    .selectable_label(on, text.clone())
-                    .on_hover_text(word(Message::new(
-                        "gui-library-set-tip",
-                        "Album set: its albums' photos together",
-                    )));
+                let r = widgets::selectable_label(ui, on, text.clone()).tip(word(Message::new(
+                    "gui-library-set-tip",
+                    "Album set: its albums' photos together",
+                )));
                 album_menu(&r, album, selection, movable);
                 drop_target(
                     &r,
@@ -4420,9 +4420,9 @@ impl Library {
         let mut chosen = self.view.sort;
         let current = word(sort_label(self.view.sort.by));
         let tip = word(Message::new("gui-library-sort-tip", "Sort by"));
-        let menu = egui::ComboBox::from_id_salt("helios.library.sort")
-            .selected_text(current.clone())
-            .show_ui(ui, |ui| {
+        let combo = widgets::combo_box("helios.library.sort").selected_text(current.clone());
+        let menu = ui
+            .combo_box(combo, |ui| {
                 for by in Sort::ALL.into_iter().filter(|s| *s != Sort::Id) {
                     // Sharpness starts with the sharpest.
                     let descending = if by == Sort::Focus && self.view.sort.by != Sort::Focus {
@@ -4430,7 +4430,8 @@ impl Library {
                     } else {
                         self.view.sort.descending
                     };
-                    ui.selectable_value(
+                    widgets::selectable_value(
+                        ui,
                         &mut chosen,
                         Order { by, descending },
                         word(sort_label(by)),
@@ -4438,7 +4439,7 @@ impl Library {
                 }
             })
             .response
-            .on_hover_text(&tip);
+            .tip(&tip);
         // Named for screen readers (and tests): "Sort by", its value the
         // sort chosen.
         menu.widget_info(|| {
@@ -4464,7 +4465,7 @@ impl Library {
             )
         };
         let tip = word(tip);
-        let flip = ui.add(egui::Button::new(arrow)).on_hover_text(&tip);
+        let flip = helios_ui::action(ui, Action::Secondary, arrow).tip(&tip);
         flip.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &tip));
         if flip.clicked() {
             chosen.descending = !chosen.descending;
@@ -4590,7 +4591,7 @@ impl Library {
                     "No photos yet: import a card or a folder, or drop photos on the window",
                 ),
             );
-            ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+            ui.muted(text);
             self.import_button(ui);
             return;
         }
@@ -4868,7 +4869,7 @@ impl Library {
             ui.ctx(),
             Message::new("gui-library-import-photos", "Import photos…"),
         );
-        if ui.button(label).clicked() {
+        if helios_ui::action(ui, Action::Secondary, &label).clicked() {
             self.import_asked = true;
         }
     }
@@ -4879,7 +4880,7 @@ impl Library {
         if self.entries.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 self.import_button(ui);
-                ui.weak(crate::i18n::text(
+                ui.muted(crate::i18n::text(
                     ui.ctx(),
                     Message::new("gui-library-none", "No images"),
                 ));
@@ -4942,7 +4943,7 @@ impl Library {
             .filter(|k| self.index.contains_key(k))
             .collect();
         if keys.len() < 2 {
-            ui.weak(crate::i18n::text(
+            ui.muted(crate::i18n::text(
                 ui.ctx(),
                 Message::new(
                     "gui-library-compare-hint",
@@ -4973,17 +4974,18 @@ impl Library {
         let best = cmp.best().map(String::from).filter(|b| keys.contains(b));
         let mut keep = false;
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut cmp.synced, sync);
+            widgets::checkbox(ui, &mut cmp.synced, sync.as_str());
             keep = ui
-                .add_enabled(best.is_some(), egui::Button::new(keep_text))
+                .add_enabled_ui(best.is_some(), |ui| {
+                    helios_ui::action(ui, Action::Secondary, &keep_text)
+                })
+                .inner
                 .clicked();
-            ui.separator();
+            ui.divider();
             // The active photo, chosen by its name (or the arrow keys).
             for (i, k) in keys.iter().enumerate() {
                 let name = self.at(k).map_or(k.as_str(), |i| &self.entries[i].name);
-                if ui
-                    .selectable_label(i == cmp.active_index(keys.len()), name)
-                    .clicked()
+                if widgets::selectable_label(ui, i == cmp.active_index(keys.len()), name).clicked()
                 {
                     cmp.set_active(i);
                 }
@@ -5076,7 +5078,7 @@ impl Library {
         );
         let mut asked = Vec::new();
         ui.horizontal_wrapped(|ui| {
-            ui.strong(&entry.name);
+            ui.text_role(TextRole::Section, &entry.name);
             if let Some(rating) = RatingStars::new(marks.rating)
                 .label(rating)
                 .show(ui)
