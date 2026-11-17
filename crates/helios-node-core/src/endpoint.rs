@@ -874,4 +874,137 @@ mod tests {
             .unwrap_err();
         assert_eq!(bad.code, rpc::code::ORIGIN_REFUSED);
     }
+
+    /// A service with [`Windows`], and its bus.
+    fn service_with_windows() -> (Arc<dyn Service>, Arc<Bus>) {
+        let bus = Arc::new(Bus::new());
+        let service = VaultService::new(
+            Arc::new(Vault::new(helios_vault::MemoryStore::default())),
+            bus.clone(),
+            Jobs::new(bus.clone()),
+            "test",
+        )
+        .with_windows(Arc::new(Windows));
+        (Arc::new(service), bus)
+    }
+
+    /// A connection to the endpoint (another process: the CLI, an agent's
+    /// shell, a script) cannot name itself the person at the desktop: the
+    /// `user` origin is the desktop's own, in-process calls alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_connection_cannot_claim_the_user_origin() {
+        use helios_inspect::transport::{Address, Listen};
+        let (service, _bus) = service_with_windows();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("helios-origin-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("commands.sock");
+        let older = |_: Value, _: &mut Connection<'_>| None;
+        let _bound = helios_inspect::transport::serve_rpc_at(
+            &Listen::Unix(socket.clone()),
+            None,
+            older,
+            service.clone(),
+        )
+        .unwrap();
+        let connect = |origin: &str| {
+            Client::connect(&Address::Unix(socket.clone()))
+                .unwrap()
+                .with_origin(origin)
+        };
+        let agent = connect("agent:test");
+        // A window command asked as the user: refused, never run as one.
+        let claimed = agent
+            .request(
+                "command.run",
+                json!({ "id": "view.zoom", "origin": "user" }),
+            )
+            .map(|answer| answer["as"].clone());
+        let refused = claimed.expect_err("a connection ran a command as the user");
+        assert_eq!(refused.code, rpc::code::ORIGIN_REFUSED, "{refused:?}");
+        // A node command whose call names the user: refused too.
+        let refused = connect("user")
+            .request("library.stacks.list", json!({}))
+            .map(|answer| answer["origin"].clone())
+            .expect_err("a connection ran a node command as the user");
+        assert_eq!(refused.code, rpc::code::ORIGIN_REFUSED, "{refused:?}");
+        // As the agent it names, it runs.
+        let ran = agent
+            .request("command.run", json!({ "id": "view.zoom" }))
+            .unwrap();
+        assert_eq!(ran["as"], "agent:test");
+        // The desktop's own calls, in process, are the user's.
+        let desktop = Client::in_process(service).with_origin("user");
+        let ran = desktop
+            .request("command.run", json!({ "id": "view.zoom" }))
+            .unwrap();
+        assert_eq!(ran["as"], "user");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One table of origins: the node's commands and the windows' accept
+    /// the same names.
+    #[test]
+    fn the_node_and_the_windows_accept_the_same_origins() {
+        let (service, _bus) = service_with_windows();
+        let client = Client::in_process(service);
+        for origin in [
+            "user",
+            "cli",
+            "control",
+            "midi",
+            "agent:mcp",
+            "script:x",
+            "remote:phone",
+            "",
+            "agent:",
+            "remote:",
+            "robot",
+            "agent:two words",
+        ] {
+            let node = crate::commands::check_origin(origin).is_ok();
+            let window = client
+                .request(
+                    "command.run",
+                    json!({ "id": "view.zoom", "origin": origin }),
+                )
+                .is_ok();
+            assert_eq!(node, window, "`{origin}`: node {node}, window {window}");
+        }
+    }
+
+    /// A window run refused is journaled as refused, with its reason,
+    /// never as run.
+    #[test]
+    fn a_refused_window_run_is_journaled_as_refused() {
+        let (service, bus) = service_with_windows();
+        let heard = bus.subscribe();
+        let client = Client::in_process(service).with_origin("agent:test");
+        client
+            .request("command.run", json!({ "id": "export", "window": "import" }))
+            .unwrap_err();
+        client
+            .request("command.run", json!({ "id": "view.zoom" }))
+            .unwrap();
+        let events: Vec<_> = std::iter::from_fn(|| heard.try_recv().ok()).collect();
+        let of = |id: &str| -> Vec<(String, Value)> {
+            events
+                .iter()
+                .filter(|e| e.payload["id"] == id)
+                .map(|e| (e.kind.to_string(), e.payload.clone()))
+                .collect()
+        };
+        let export = of("export");
+        assert_eq!(export.len(), 1, "{export:?}");
+        assert_eq!(export[0].0, "control.command.refused", "{export:?}");
+        assert_eq!(export[0].1["reason"], "Only in the Helios window");
+        assert_eq!(export[0].1["origin"], "agent:test");
+        let zoom = of("view.zoom");
+        assert_eq!(zoom.len(), 1, "{zoom:?}");
+        assert_eq!(zoom[0].0, "control.command", "{zoom:?}");
+    }
 }

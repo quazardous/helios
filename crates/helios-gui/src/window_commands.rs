@@ -392,6 +392,10 @@ mod tests {
         assert_eq!(origin_of("script:batch"), Origin::Script("batch".into()));
         assert_eq!(origin_of("user"), Origin::User);
         assert_eq!(origin_of("cli"), Origin::Remote("cli".into()));
+        // The node's names, one table: a MIDI device is `midi`, a remote
+        // is named after its prefix.
+        assert_eq!(origin_of("midi"), Origin::Midi);
+        assert_eq!(origin_of("remote:phone"), Origin::Remote("phone".into()));
         assert!(check_window("import").is_ok());
         assert!(check_window("").is_err());
         assert_eq!(params_schema(&Value::Null), json!({ "type": "object" }));
