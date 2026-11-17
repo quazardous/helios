@@ -2015,9 +2015,13 @@ fn a_turn_asked_in_the_library_is_heard_in_the_pass_it_is_made() {
     settle(&mut h, &mut persist, 1.0);
     assert!(!persist.busy(), "nothing waits before the ask");
     h.state_mut().library_mut().select_ids(&[id(1).hex()]);
-    run(&mut h, "library.rotateRight", json!(null));
-    assert_eq!(h.state().app().handle().asks_waiting(), 1, "asked");
-    // One pass: the ask heard after the drawing.
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    settle(&mut h, &mut persist, 1.5);
+    assert!(!persist.busy(), "nothing waits before the key");
+    // Ctrl+] in the grid, seen while the Library draws: one pass, the
+    // ask heard after the drawing.
+    h.key_press_modifiers(egui::Modifiers::CTRL, Key::CloseBracket);
     h.step();
     assert_eq!(h.state().app().handle().asks_waiting(), 0, "heard");
     assert!(persist.busy(), "its write waits for the node");
