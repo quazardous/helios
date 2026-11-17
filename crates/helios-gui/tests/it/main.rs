@@ -14,6 +14,7 @@
 
 mod accounts;
 mod activity_focus;
+mod background_jobs;
 mod batch_undo;
 mod caches;
 mod calibrate;
