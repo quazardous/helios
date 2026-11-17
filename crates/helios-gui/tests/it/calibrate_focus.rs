@@ -60,10 +60,23 @@ struct Setup {
 }
 
 /// The node's service behind a writer another one may hold: each call
-/// waits for `held`, as a call waits for a vault another writer holds.
+/// waits for `writer`, as a call waits for a vault another writer holds.
+/// A call made on the frame's thread fails at once instead (`frame`: the
+/// thread that runs the frames, once a test sets it): there it would wait
+/// on the vault, and on the frame's own writer, deadlocked.
 struct Held {
     service: Arc<dyn helios_inspect::rpc::Service>,
-    held: Arc<std::sync::Mutex<()>>,
+    writer: Arc<std::sync::Mutex<()>>,
+    probe: Arc<Probe>,
+}
+
+/// What [`Held`] saw: the frame's thread, the calls that waited for the
+/// writer off it, and those made on it.
+#[derive(Default)]
+struct Probe {
+    frame: std::sync::OnceLock<std::thread::ThreadId>,
+    waited: std::sync::atomic::AtomicUsize,
+    on_frame: std::sync::atomic::AtomicUsize,
 }
 
 impl helios_inspect::rpc::Service for Held {
@@ -73,7 +86,15 @@ impl helios_inspect::rpc::Service for Held {
         params: Value,
         call: &helios_inspect::rpc::Call,
     ) -> Result<Value, helios_inspect::rpc::Error> {
-        let _writer = self.held.lock().unwrap();
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.probe.frame.get() == Some(&std::thread::current().id()) {
+            self.probe.on_frame.fetch_add(1, SeqCst);
+            panic!("`{method}` asked the vault on the frame's thread");
+        }
+        let _writer = self.writer.try_lock().unwrap_or_else(|_| {
+            self.probe.waited.fetch_add(1, SeqCst);
+            self.writer.lock().unwrap()
+        });
         self.service.call(method, params, call)
     }
 }
@@ -81,11 +102,11 @@ impl helios_inspect::rpc::Service for Held {
 /// A shell with the calibration commands run by a node over `vault`, as
 /// the desktop wires them.
 fn shell() -> (Shell, Setup) {
-    shell_held(Arc::default())
+    shell_held(Arc::default(), Arc::default())
 }
 
-/// [`shell`], its node's calls waiting for `held`.
-fn shell_held(held: Arc<std::sync::Mutex<()>>) -> (Shell, Setup) {
+/// [`shell`], its node's calls waiting for `held`, seen by `probe`.
+fn shell_held(held: Arc<std::sync::Mutex<()>>, probe: Arc<Probe>) -> (Shell, Setup) {
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let bus = Arc::new(helios_core::Bus::new());
     let mut shell = Shell::new(helios_panels(), None);
@@ -110,7 +131,8 @@ fn shell_held(held: Arc<std::sync::Mutex<()>>) -> (Shell, Setup) {
                     helios_core::jobs::Jobs::new(bus.clone()),
                     "test",
                 )),
-                held,
+                writer: held,
+                probe,
             }))
             .with_origin("user"),
         )),
@@ -363,24 +385,39 @@ fn the_calibration_focus_opens_in_its_own_window() {
 }
 
 /// While another writer holds the vault, the focus's asks wait off the
-/// frame: each frame stays short, the window says it waits, and the dry
-/// run's report and a save land once the vault is released.
+/// frame: frames go on, the window says it waits, and the dry run's
+/// report and a save land once the vault is released.
+///
+/// A fact, not a time: the writer is this test's thread, which also runs
+/// the frames, so a frame that waited on the vault would never end, and
+/// one that asked it on the frame's thread fails at once ([`Held`]). That
+/// frames end while it is held, the asks waiting off the frame for it,
+/// is the proof; a frame's duration would only measure the machine's load.
 #[test]
 fn the_calibration_focus_waits_off_the_frame_while_the_vault_is_held() {
-    use std::time::{Duration, Instant};
+    use std::sync::atomic::Ordering::SeqCst;
     let (dir, picture) = chart_picture("calibrate-held");
     let held = Arc::new(std::sync::Mutex::new(()));
-    let (shell, setup) = shell_held(held.clone());
+    let probe = Arc::new(Probe::default());
+    probe.frame.set(std::thread::current().id()).unwrap();
+    let (shell, setup) = shell_held(held.clone(), probe.clone());
     let mut h = headless::harness(shell, vec2(1400.0, 900.0));
     h.run();
-    let short = |h: &mut Harness<'_, Shell>| {
-        let start = Instant::now();
+    // Frames while the writer holds the vault, until `n` asks wait for it
+    // off the frame (within a minute: a deadline, not a measure).
+    let held_frames = |h: &mut Harness<'_, Shell>, n: usize| {
+        let end = std::time::Instant::now() + std::time::Duration::from_mins(1);
         h.run();
-        let took = start.elapsed();
-        assert!(
-            took < Duration::from_millis(500),
-            "a frame waited on the vault: {took:?}"
-        );
+        while probe.waited.load(SeqCst) < n {
+            assert!(
+                std::time::Instant::now() < end,
+                "no ask waits for the vault"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            h.step();
+        }
+        h.run();
+        assert_eq!(probe.on_frame.load(SeqCst), 0, "a frame asked the vault");
     };
     let writer = held.lock().unwrap();
     h.state_mut()
@@ -390,9 +427,7 @@ fn the_calibration_focus_waits_off_the_frame_while_the_vault_is_held() {
             Origin::User,
         )
         .unwrap();
-    for _ in 0..5 {
-        short(&mut h);
-    }
+    held_frames(&mut h, 1);
     let s = state(&h);
     assert_eq!(
         (s["open"].clone(), s["busy"].clone()),
@@ -416,14 +451,14 @@ fn the_calibration_focus_waits_off_the_frame_while_the_vault_is_held() {
     h.run();
     h.query(field("Profile name")).unwrap().type_text("Held");
     h.run();
+    let waited = probe.waited.load(SeqCst);
     h.get_by_label("Save the profile").click();
-    for _ in 0..5 {
-        short(&mut h);
-    }
+    held_frames(&mut h, waited + 1);
     assert_eq!(state(&h)["busy"], true);
     assert!(setup.history.line().undo.is_empty());
     drop(writer);
     settle(&mut h);
+    assert_eq!(probe.on_frame.load(SeqCst), 0, "a frame asked the vault");
     assert_eq!(setup.vault.calibration_profiles().unwrap().len(), 1);
     assert_eq!(state(&h)["profiles"][0]["name"], "Held");
     assert_eq!(
