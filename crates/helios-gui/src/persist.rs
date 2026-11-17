@@ -53,6 +53,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use egui_pop::api::bus::bus_contract;
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_inspect::cache::ReadCache;
 use helios_inspect::client::{Client, Pending};
@@ -110,6 +111,13 @@ pub fn who(origin: &helios_shell::commands::Origin) -> String {
     }
 }
 
+/// The owner of the listeners this layer registers for the panels' asks.
+pub const BUS_OWNER: &str = "helios.persist";
+/// The listener that sends the Stacks panel's asks to the node.
+pub const STACKS: &str = "persist.stacks";
+/// The listener that sends the Library's writes to the node.
+pub const LIBRARY: &str = "persist.library";
+
 /// How often a gesture still going (a drag) is saved, in seconds.
 pub const FLUSH_SECONDS: f64 = 1.0;
 
@@ -135,11 +143,16 @@ pub struct Persist<S: Store> {
     /// The bus `library.changed`'s listeners are registered on (the
     /// shell's), once.
     listening: Option<Arc<dyn egui_pop::api::bus::bus_contract::Bus>>,
+    /// The bus the panels' asks' listeners are registered on (the
+    /// shell's), once ([`Persist::listen_asks`]).
+    asking: Mutex<Option<Arc<dyn egui_pop::api::bus::bus_contract::Bus>>>,
     /// The desktop's node, in this process: the library's writes go
     /// through it.
     node: Arc<Client>,
-    /// The writes waiting their turn, in the order made.
-    writes: VecDeque<Write>,
+    /// The writes waiting their turn, in the order made; shared with the
+    /// listeners of the asks made while the panels drew (`stacks.answer`,
+    /// `library.write`), which add theirs in the pass they are heard.
+    writes: Arc<Mutex<VecDeque<Write>>>,
     /// The write the node runs now.
     writing: Option<(Write, Pending)>,
     /// The reads back of written images, with the images each names.
@@ -156,8 +169,9 @@ pub struct Persist<S: Store> {
     /// each takes and the facet counts.
     searching: Vec<(String, Receiver<Result<Searched, String>>)>,
     /// The library's other reads through the node (the Library's filter
-    /// history, the folders' counts), answered at a coming frame.
-    asked: Vec<(Asked, Pending)>,
+    /// history, the folders' counts), answered at a coming frame; shared
+    /// with `library.write`'s listener (a trash asked first).
+    asked: Arc<Mutex<Vec<(Asked, Pending)>>>,
 }
 
 /// A read of the library sent to the node, shown when it is answered.
@@ -1161,29 +1175,93 @@ fn record_versions_step(
     }
 }
 
-/// Asks before removing a copy of a photo: its number and name.
-fn ask_remove_version(shell: &mut Shell, image: &str, version: &str) {
-    let head = {
-        let lib = shell.library_mut();
-        lib.versions_of(image)
-            .and_then(|heads| heads.iter().find(|h| h.version == version))
-            .map_or(0, |h| h.number)
+/// A write the Library asked, heard on `library.write`: added to the
+/// writes waiting their turn, asked at the time it is heard; a trash not
+/// confirmed asks the node what it would do first, a version's removal
+/// not confirmed asks the user.
+fn write_asked(
+    writes: &Mutex<VecDeque<Write>>,
+    asked: &Mutex<Vec<(Asked, Pending)>>,
+    node: &Client,
+    library: &crate::shell::LibraryParts,
+    write: crate::library_write::WriteAsk,
+) {
+    use crate::library::VersionAsk;
+    use crate::library_write::WriteAsk as W;
+    let now = seconds_now();
+    let write = match write {
+        W::Remove(images, batch) => Write::Remove(images, now, batch),
+        W::Rotate(images, turn, batch) => Write::Rotate(images, turn, now, batch),
+        W::Duplicate(images, from) => Write::Duplicate(images, from),
+        W::Trash(ask) if ask.confirmed => Write::Trash(ask.images),
+        W::Trash(ask) => {
+            // Asked first: the node says which files would go and which
+            // stay, then the question names them.
+            let pending = node.call(
+                helios_node_core::library::TRASH,
+                json!({ "images": &ask.images, "plan": true }),
+            );
+            held(asked).push((Asked::TrashPlan(ask), pending));
+            return;
+        }
+        W::Stack(ask, batch) => Write::Stack(ask, now, batch),
+        W::Keyword(ask, batch) => Write::Keyword(ask, now, batch),
+        W::Meta(edit, batch) => Write::Meta(edit, now, batch),
+        W::Pair(ask, batch) => Write::Pair(ask, now, batch),
+        W::Version(VersionAsk::Switch { image, version }, batch) => {
+            Write::SwitchVersion(image, version, now, batch)
+        }
+        W::Version(
+            VersionAsk::Remove {
+                image,
+                version,
+                confirmed: true,
+            },
+            batch,
+        ) => Write::RemoveVersion(image, version, now, batch),
+        W::Version(VersionAsk::Remove { image, version, .. }, _) => {
+            ask_remove_version(&library.library(), &image, &version);
+            return;
+        }
+        W::Album(edit, batch) => Write::Album(edit, now, batch),
+        W::Expand(stack, expanded) => Write::Expand(stack, expanded),
+        W::Templates(list) => Write::Document {
+            ns: helios_vault::meta::TEMPLATES_NS,
+            key: helios_vault::meta::TEMPLATES_KEY,
+            document: Some(crate::library::Template::document(&list)),
+        },
     };
+    held(writes).push_back(write);
+}
+
+/// Asks before removing a copy of a photo: its number and name, in the
+/// dialog the shell answers after the drawing.
+fn ask_remove_version(library: &crate::library::Library, image: &str, version: &str) {
+    let Some(app) = egui_pop::api::bus::asking() else {
+        log::error!(target: "helios", "a version's removal asked outside a pass: not asked");
+        return;
+    };
+    let ctx = app.egui();
+    let text = |m: Message| crate::i18n::text(&ctx, m);
+    let head = library
+        .versions_of(image)
+        .and_then(|heads| heads.iter().find(|h| h.version == version))
+        .map_or(0, |h| h.number);
     let confirm = crate::dialogs::Confirm {
-        title: shell.text(
+        title: text(
             Message::new("gui-version-remove-title", "Remove version { $number }?")
                 .with("number", head),
         ),
-        detail: shell.text(Message::new(
+        detail: text(Message::new(
             "gui-version-remove-detail",
             "This copy of the photo and the edits only it holds leave the Library; the file and the other versions stay. Undo brings it back.",
         )),
-        verb: shell.text(Message::new("gui-version-remove-verb", "Remove Version")),
+        verb: text(Message::new("gui-version-remove-verb", "Remove Version")),
         danger: true,
         command: crate::library::REMOVE_VERSION_COMMAND.to_owned(),
         args: json!({ "image": image, "version": version, "confirmed": true }),
     };
-    shell.confirm(confirm);
+    crate::dialogs::request(&ctx, crate::dialogs::Request::Confirm(confirm));
 }
 
 /// Says the files were not moved to the trash, and why.
@@ -1361,15 +1439,16 @@ impl<S: Store + 'static> Persist<S> {
             darkroom: None,
             changes: crate::library_changed::Publisher::channel(),
             listening: None,
+            asking: Mutex::new(None),
             node,
-            writes: VecDeque::new(),
+            writes: Arc::default(),
             writing: None,
             reading: Vec::new(),
             reader,
             reads,
             filled: None,
             searching: Vec::new(),
-            asked: Vec::new(),
+            asked: Arc::default(),
         }
     }
 
@@ -1388,12 +1467,12 @@ impl<S: Store + 'static> Persist<S> {
     /// comes back at the next frame to pick its answer up.
     pub fn busy(&self) -> bool {
         self.writing.is_some()
-            || !self.writes.is_empty()
+            || !held(&self.writes).is_empty()
             || !self.reading.is_empty()
             || held(&self.reads.filling).is_some()
             || !self.searching.is_empty()
             || held(&self.reads.stacking).is_some()
-            || !self.asked.is_empty()
+            || !held(&self.asked).is_empty()
     }
 
     /// Waits until the node has answered every call made, and shows what
@@ -1429,7 +1508,7 @@ impl<S: Store + 'static> Persist<S> {
             self.written(shell, write, answer);
         }
         if self.writing.is_none()
-            && let Some(write) = self.writes.pop_front()
+            && let Some(write) = held(&self.writes).pop_front()
         {
             let (method, params) = write.call();
             let pending = self.node.call(method, params);
@@ -1444,13 +1523,18 @@ impl<S: Store + 'static> Persist<S> {
         }
         self.reading = still;
         let mut still = Vec::new();
-        for (asked, pending) in std::mem::take(&mut self.asked) {
+        let asked = std::mem::take(&mut *held(&self.asked));
+        for (asked, pending) in asked {
             match pending.poll() {
                 None => still.push((asked, pending)),
                 Some(answer) => show_asked(shell, &asked, answer),
             }
         }
-        self.asked = still;
+        // Asked meanwhile (shown answers ask again): kept after.
+        let mut asked = held(&self.asked);
+        still.append(&mut asked);
+        *asked = still;
+        drop(asked);
         self.pump_reads(shell);
     }
 
@@ -1885,11 +1969,12 @@ impl<S: Store + 'static> Persist<S> {
                 return;
             }
         };
+        let writes = held(&self.writes);
         let coming: BTreeSet<&str> = self
             .writing
             .iter()
             .map(|(w, _)| w)
-            .chain(&self.writes)
+            .chain(writes.iter())
             .flat_map(Write::images)
             .collect();
         let mut library = shell.library_mut();
@@ -2061,6 +2146,7 @@ impl<S: Store + 'static> Persist<S> {
     /// It waits for the node: the host asks [`Persist::ask_fill`] instead,
     /// read off the UI thread.
     pub fn fill_library(&self, shell: &mut Shell) -> Result<Vec<(String, PathBuf)>, String> {
+        self.listen_asks(shell);
         let shown = self.reads.shown.lock().expect("library lock").take();
         let fetched = fetch(&self.reader, shown, shell.library().sort(), &known(shell))?;
         self.apply(shell, fetched)
@@ -2098,6 +2184,8 @@ impl<S: Store + 'static> Persist<S> {
         shell: &mut Shell,
         rows: LibraryRows,
     ) -> Result<Vec<(String, PathBuf)>, String> {
+        // The Library shown asks its writes from now on.
+        self.listen_asks(shell);
         // Read before the library's sort changed (on the thread reading it
         // as the window opens): read again in the sort, next frame.
         if rows.order != shell.library().sort() {
@@ -2194,46 +2282,84 @@ impl<S: Store + 'static> Persist<S> {
     /// The versions strip's reads and what was asked of photos'
     /// versions: a switch or a confirmed removal written, a removal not
     /// confirmed asked first.
-    fn ask_versions(&mut self, shell: &mut Shell, now: f64) {
-        use crate::library::VersionAsk;
+    fn ask_versions(&mut self, shell: &mut Shell) {
         if let Some(image) = shell.library_mut().take_versions_wanted() {
             let pending = self.node.call(
                 helios_node_core::library::VERSIONS_LIST,
                 json!({ "image": image }),
             );
-            self.asked.push((Asked::Versions(image), pending));
-        }
-        let asks = shell.library_mut().take_version_asks();
-        for (ask, batch) in asks {
-            match ask {
-                VersionAsk::Switch { image, version } => self
-                    .writes
-                    .push_back(Write::SwitchVersion(image, version, now, batch)),
-                VersionAsk::Remove {
-                    image,
-                    version,
-                    confirmed: true,
-                } => self
-                    .writes
-                    .push_back(Write::RemoveVersion(image, version, now, batch)),
-                VersionAsk::Remove { image, version, .. } => {
-                    ask_remove_version(shell, &image, &version);
-                }
-            }
+            held(&self.asked).push((Asked::Versions(image), pending));
         }
     }
 
-    /// Sends what the Stacks panel asked to the node: a proposal, an
-    /// answer, as the user. Each is written in its turn with the library's
-    /// other writes; the proposals waiting are read again once answered.
-    fn answer_stacks(&mut self, shell: &mut Shell) {
-        use crate::stack_review::Request;
-        let requests = shell.stack_review_mut().take_requests();
-        self.writes.extend(requests.into_iter().map(|r| match r {
-            Request::Suggest { images } => Write::Suggest(images),
-            Request::Accept { decision, groups } => Write::Accept(decision, groups),
-            Request::Decline { decision } => Write::Decline(decision),
-        }));
+    /// The order the listeners of the asks made while the panels drew
+    /// (`stacks.answer`, `library.write`) run in on the shell's bus.
+    pub fn asks_order(&self, shell: &Shell) -> String {
+        let bus = self.listen_asks(shell);
+        bus_contract::order_dump(
+            &*bus,
+            &[
+                crate::decisions::ANSWER,
+                crate::stack_review::ANSWER,
+                crate::library_write::WRITE,
+            ],
+        )
+    }
+
+    /// Registers the listeners of the asks the panels make while they
+    /// draw, on the shell's bus, once: each adds what was asked to the
+    /// writes waiting their turn, in ask order, in the pass it is heard
+    /// (after the drawing). `stacks.answer` (`persist.stacks`): a
+    /// proposal asked, accepted or declined in the Stacks panel;
+    /// `library.write` (`persist.library`): what the Library asks written
+    /// (a removal, a turn, a stack, an album…), a trash or a version's
+    /// removal not confirmed asked first. Registered by the host before
+    /// the first pass ([`Persist::frame`] does it too). The bus.
+    pub fn listen_asks(&self, shell: &Shell) -> Arc<dyn bus_contract::Bus> {
+        use crate::stack_review::{Request, StacksAnswer};
+        let bus = shell.app().handle().bus();
+        if held(&self.asking)
+            .as_ref()
+            .is_some_and(|b| Arc::ptr_eq(b, &bus))
+        {
+            return bus;
+        }
+        crate::stack_review::declare(&*bus);
+        crate::decisions::declare(&*bus);
+        let writes = self.writes.clone();
+        bus.unlisten(crate::stack_review::ANSWER, STACKS);
+        let listened = bus.listen_local::<StacksAnswer>(
+            STACKS,
+            bus_contract::ListenOpts::new().owner(BUS_OWNER),
+            crate::request::listener(STACKS, move |r: &Request, _| {
+                held(&writes).push_back(match r.clone() {
+                    Request::Suggest { images } => Write::Suggest(images),
+                    Request::Accept { decision, groups } => Write::Accept(decision, groups),
+                    Request::Decline { decision } => Write::Decline(decision),
+                });
+                Ok(())
+            }),
+        );
+        if let Err(e) = listened {
+            log::error!(target: "helios", "{}: {e}", crate::stack_review::ANSWER);
+        }
+        crate::library_write::declare(&*bus);
+        let (writes, asked, node) = (self.writes.clone(), self.asked.clone(), self.node.clone());
+        let library = shell.library_parts();
+        bus.unlisten(crate::library_write::WRITE, LIBRARY);
+        let listened = bus.listen_local::<crate::library_write::LibraryWrite>(
+            LIBRARY,
+            bus_contract::ListenOpts::new().owner(BUS_OWNER),
+            crate::request::listener(LIBRARY, move |w: &crate::library_write::WriteAsk, _| {
+                write_asked(&writes, &asked, &node, &library, w.clone());
+                Ok(())
+            }),
+        );
+        if let Err(e) = listened {
+            log::error!(target: "helios", "{}: {e}", crate::library_write::WRITE);
+        }
+        *held(&self.asking) = Some(bus.clone());
+        bus
     }
 
     /// Shows an image's network in the viewport with the image's saved
@@ -2403,7 +2529,7 @@ impl<S: Store + 'static> Persist<S> {
         // Sent after the edit's steps they pin: a refusal is said once,
         // the next change writes the whole list again.
         if let Some((image, pinned)) = pin_book(e, shell.values(), shell.snapshots()) {
-            self.writes.push_back(Write::Snapshots(image, pinned));
+            held(&self.writes).push_back(Write::Snapshots(image, pinned));
         }
     }
 
@@ -2412,11 +2538,8 @@ impl<S: Store + 'static> Persist<S> {
     fn settle_edits(&mut self, shell: &mut Shell) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let edits = |p: &Self| {
-            p.writing
-                .iter()
-                .map(|(w, _)| w)
-                .chain(&p.writes)
-                .any(|w| matches!(w, Write::Edit(_) | Write::Snapshots(..)))
+            let edit = |w: &Write| matches!(w, Write::Edit(_) | Write::Snapshots(..));
+            p.writing.iter().any(|(w, _)| edit(w)) || held(&p.writes).iter().any(edit)
         };
         while edits(self) && std::time::Instant::now() < deadline {
             self.pump(shell);
@@ -2614,21 +2737,14 @@ impl<S: Store + 'static> Persist<S> {
                 "library.fields.get",
                 json!({ "images": [image], "fields": helios_vault::capture::NAMES }),
             );
-            self.asked.push((Asked::Exif(image), pending));
+            held(&self.asked).push((Asked::Exif(image), pending));
         }
         if shell.library_mut().take_templates_wanted() {
             let pending = self.node.call(
                 "library.documents.get",
                 json!({ "ns": TEMPLATES_NS, "key": TEMPLATES_KEY }),
             );
-            self.asked.push((Asked::Templates, pending));
-        }
-        if let Some(list) = shell.library_mut().take_templates_write() {
-            self.writes.push_back(Write::Document {
-                ns: TEMPLATES_NS,
-                key: TEMPLATES_KEY,
-                document: Some(crate::library::Template::document(&list)),
-            });
+            held(&self.asked).push((Asked::Templates, pending));
         }
     }
 
@@ -2643,11 +2759,10 @@ impl<S: Store + 'static> Persist<S> {
             let pending = self
                 .node
                 .call("library.documents.get", json!({ "ns": NS, "key": KEY }));
-            self.asked.push((Asked::FilterHistory, pending));
+            held(&self.asked).push((Asked::FilterHistory, pending));
         }
         // Not written over the stored one before it is read.
-        let reading = self
-            .asked
+        let reading = held(&self.asked)
             .iter()
             .any(|(asked, _)| matches!(asked, Asked::FilterHistory));
         if reading {
@@ -2655,7 +2770,7 @@ impl<S: Store + 'static> Persist<S> {
         }
         let write = shell.library_mut().take_filter_history_write();
         if let Some(history) = write {
-            self.writes.push_back(Write::Document {
+            held(&self.writes).push_back(Write::Document {
                 ns: NS,
                 key: KEY,
                 document: Some(history.to_json()),
@@ -2668,10 +2783,7 @@ impl<S: Store + 'static> Persist<S> {
     /// reads the albums when the Library wants them (an album changed,
     /// or `library.changed`'s `library.albums`: an import, an undo, a
     /// redo).
-    fn edit_albums(&mut self, shell: &mut Shell, now: f64) {
-        for (edit, batch) in shell.library_mut().take_album_edits() {
-            self.writes.push_back(Write::Album(edit, now, batch));
-        }
+    fn edit_albums(&mut self, shell: &mut Shell) {
         self.keep_filter_history(shell);
         self.read_albums_if_wanted(shell);
     }
@@ -2681,16 +2793,21 @@ impl<S: Store + 'static> Persist<S> {
     fn read_albums_if_wanted(&mut self, shell: &mut Shell) {
         if shell.library_mut().take_albums_wanted() {
             let pending = self.node.call("library.albums.list", json!({}));
-            self.asked.push((Asked::Albums, pending));
+            held(&self.asked).push((Asked::Albums, pending));
         }
     }
 
     /// Writes what the user changed and shows what other writers did;
     /// `now` is the time in seconds (since the epoch for a real clock).
     pub fn frame(&mut self, shell: &mut Shell, now: f64) {
+        // The asks made while the panels drew, heard: drained after the
+        // drawing by the application already; here for a host that asked
+        // outside a pass (a test, a command run between frames).
+        self.listen_asks(shell);
+        shell.app().handle().drain_asks();
         let changes = shell.take_library_changes();
         if !changes.is_empty() {
-            self.writes.push_back(Write::Fields(changes));
+            held(&self.writes).push_back(Write::Fields(changes));
         }
         if let Some(e) = &mut self.editing {
             e.session.set_meta(shell.session_meta());
@@ -2698,70 +2815,8 @@ impl<S: Store + 'static> Persist<S> {
         self.save_edit(shell, now);
         self.write_sessions(shell);
         self.pin_snapshots(shell);
-        self.answer_stacks(shell);
-        let removals = shell.library_mut().take_removals();
-        self.writes.extend(
-            removals
-                .into_iter()
-                .map(|(images, batch)| Write::Remove(images, now, batch)),
-        );
-        let rotations = shell.library_mut().take_rotations();
-        self.writes.extend(
-            rotations
-                .into_iter()
-                .map(|(images, turn, batch)| Write::Rotate(images, turn, now, batch)),
-        );
-        self.ask_versions(shell, now);
-        let stack_asks = shell.library_mut().take_stack_asks();
-        self.writes.extend(
-            stack_asks
-                .into_iter()
-                .map(|(ask, batch)| Write::Stack(ask, now, batch)),
-        );
-        let keyword_asks = shell.library_mut().take_keyword_asks();
-        self.writes.extend(
-            keyword_asks
-                .into_iter()
-                .map(|(ask, batch)| Write::Keyword(ask, now, batch)),
-        );
-        let meta_edits = shell.library_mut().take_meta_edits();
-        self.writes.extend(
-            meta_edits
-                .into_iter()
-                .map(|(edit, batch)| Write::Meta(edit, now, batch)),
-        );
+        self.ask_versions(shell);
         self.keep_templates(shell);
-        let pair_asks = shell.library_mut().take_pair_asks();
-        self.writes.extend(
-            pair_asks
-                .into_iter()
-                .map(|(ask, batch)| Write::Pair(ask, now, batch)),
-        );
-        let duplicates = shell.library_mut().take_duplicates();
-        self.writes.extend(
-            duplicates
-                .into_iter()
-                .map(|(images, from)| Write::Duplicate(images, from)),
-        );
-        for ask in shell.library_mut().take_trash_asks() {
-            if ask.confirmed {
-                self.writes.push_back(Write::Trash(ask.images));
-            } else {
-                // Asked first: the node says which files would go and
-                // which stay, then the question names them.
-                let pending = self.node.call(
-                    helios_node_core::library::TRASH,
-                    json!({ "images": ask.images, "plan": true }),
-                );
-                self.asked.push((Asked::TrashPlan(ask), pending));
-            }
-        }
-        let expansions = shell.library_mut().take_expansions();
-        self.writes.extend(
-            expansions
-                .into_iter()
-                .map(|(stack, expanded)| Write::Expand(stack, expanded)),
-        );
         self.pump(shell);
         // The library sorted another way: read again in that order.
         if shell.library_mut().take_resort() {
@@ -2771,9 +2826,9 @@ impl<S: Store + 'static> Persist<S> {
         // through the node and shown at a coming frame.
         if shell.library_mut().take_folders_wanted() {
             let pending = self.node.call("library.folders", json!({}));
-            self.asked.push((Asked::Folders, pending));
+            held(&self.asked).push((Asked::Folders, pending));
         }
-        self.edit_albums(shell, now);
+        self.edit_albums(shell);
         let queries = shell.library_mut().take_queries();
         for (gallery, query) in queries {
             // How many photos carry each value of each facet, then the
@@ -2828,7 +2883,7 @@ impl<S: Store + 'static> Persist<S> {
     /// writes (`library.workshop.sessions.set`).
     fn write_sessions(&mut self, shell: &mut Shell) {
         for (id, record) in shell.take_session_writes() {
-            self.writes.push_back(Write::Session(id, record));
+            held(&self.writes).push_back(Write::Session(id, record));
         }
     }
 
@@ -2853,7 +2908,7 @@ impl<S: Store + 'static> Persist<S> {
         // Written by the node in its turn, off the UI thread; its answer
         // is picked up at a coming frame ([`Persist::written`]).
         if let Some(step) = step {
-            self.writes.push_back(Write::Edit(Box::new(step)));
+            held(&self.writes).push_back(Write::Edit(Box::new(step)));
         }
     }
 
@@ -2891,7 +2946,7 @@ impl<S: Store + 'static> Persist<S> {
                     e.session = e.confirmed.clone();
                     e.unsaved = true;
                 }
-                self.writes
+                held(&self.writes)
                     .retain(|w| !matches!(w, Write::Edit(s) if s.version.image == image));
                 shell.notify(
                     Level::Error,

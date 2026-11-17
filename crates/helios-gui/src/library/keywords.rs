@@ -24,7 +24,8 @@ use egui_pop::api::bus::drag::{self, Seen};
 use helios_core::Message;
 use helios_vault::keywords::{self, SEPARATOR};
 
-use super::{Batch, DraggedPhotos, DropOn, Library, drop_target, quoted, tokens};
+use super::{DraggedPhotos, DropOn, Library, drop_target, quoted, tokens};
+use crate::library_write::WriteAsk;
 
 /// Scopes the library to a keyword branch (`path`; null: none).
 pub const KEYWORD_COMMAND: &str = "library.keyword";
@@ -237,13 +238,10 @@ impl Library {
         {
             self.set_keyword(Some(&moved));
         }
-        self.keyword_asks
-            .push((ask, crate::library_history::current_batch()));
-    }
-
-    /// What was asked of the keyword branches since, each with its batch.
-    pub fn take_keyword_asks(&mut self) -> Vec<(KeywordAsk, Batch)> {
-        std::mem::take(&mut self.keyword_asks)
+        self.ask_write(WriteAsk::Keyword(
+            ask,
+            crate::library_history::current_batch(),
+        ));
     }
 
     /// The Keywords section: the keyword tree with each branch's count; a
@@ -574,7 +572,7 @@ mod tests {
         );
         assert_eq!(lib.ask_merge_keyword("Animals|Dog", "Pets|Dog"), Ok(1));
         let asks: Vec<KeywordAsk> = lib
-            .take_keyword_asks()
+            .asked_keyword_asks()
             .into_iter()
             .map(|(a, _)| a)
             .collect();

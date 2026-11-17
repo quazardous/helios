@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use egui::vec2;
+use egui_kittest::kittest::Queryable;
 use helios_core::Bus;
 use helios_gui::persist::Persist;
 use helios_gui::{Shell, headless, helios_panels};
@@ -180,6 +181,43 @@ fn accepting_with_nothing_checked_is_refused() {
     }
     let refused = shell.stack_review_mut().accept_checked(&d.id);
     assert!(refused.unwrap_err().contains("decline"));
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What the Stacks panel asks is a deferred request (`stacks.answer`):
+/// a click on Suggest stacks is heard after the drawing in the same
+/// pass, its write waiting for the node by the host's turn; then the
+/// proposal is made.
+#[test]
+fn a_suggestion_asked_in_the_panel_is_heard_in_the_pass_it_is_made() {
+    let (dir, shell, mut persist, _, _) = setup("same-pass");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.stacks.focus", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    persist.frame_settled(h.state_mut(), 1.0);
+    h.run();
+    assert!(!persist.busy(), "nothing waits before the click");
+    h.get_by_label("Suggest stacks").click();
+    // One pass: the click seen while the panel draws, heard after.
+    h.step();
+    assert_eq!(h.state().app().handle().asks_waiting(), 0, "heard");
+    assert!(persist.busy(), "the proposal's write waits for the node");
+    persist.frame_settled(h.state_mut(), 2.0);
+    assert_eq!(h.state().stack_review().decisions().len(), 1);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The listeners of the asks the panels make while they draw, as the
+/// desktop registers them, in the order they run: a reviewed dump
+/// (`tests/bus/asks.txt`).
+#[test]
+fn the_panels_asks_listeners_are_declared() {
+    let (dir, shell, persist, _, _) = setup("asks-order");
+    assert_eq!(persist.asks_order(&shell), include_str!("../bus/asks.txt"));
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -12,8 +12,10 @@
 //! every best option the model is at least that sure of.
 //!
 //! The panel holds the edit's decisions ([`Book`]), not the graph: what
-//! the user asks is queued ([`Decisions::take_requests`]) and the shell
-//! answers it through the book on the viewport's graph, as the
+//! the user asks is a request on the bus ([`AnswerDecision`],
+//! `decisions.answer`), asked while the panel draws and heard after it in
+//! the same pass (`Defer`); the shell's listener answers it through the
+//! book on the viewport's graph, as the
 //! `decision.*` commands agents run do, so the render goes on once the
 //! last decision on its way is answered. Cards are made again from the
 //! book each frame ([`Decisions::refresh`]): an answer from anywhere (an
@@ -44,6 +46,44 @@ pub const MARK: &str = "helios.status.decisions";
 
 /// The confidence "Accept all above" starts at.
 pub const THRESHOLD: f64 = 0.8;
+
+/// The request a decision's answer is asked on.
+pub const ANSWER: &str = "decisions.answer";
+/// Its listener, the shell's: the answer through the book on the
+/// viewport's graph.
+pub const ANSWERED_BY: &str = "shell.decision";
+/// The owner of the listener.
+pub const BUS_OWNER: &str = "helios.decisions";
+
+/// What the user answers in the Decisions panel: a request, asked while
+/// the panel draws, heard after it.
+pub struct AnswerDecision;
+
+impl egui_pop::api::bus::bus_contract::Point for AnswerDecision {
+    const ID: &'static str = ANSWER;
+    type Input = Request;
+    type Value = crate::request::Heard;
+    const KIND: egui_pop::api::bus::bus_contract::PointKind =
+        egui_pop::api::bus::bus_contract::PointKind::Request;
+}
+
+/// The Decisions panel's point, its contract with the application's bus:
+/// declared by [`declare`].
+pub const POINTS: &[egui_pop::api::bus::bus_contract::PointDecl] = &[
+    egui_pop::api::bus::bus_contract::PointDecl::of::<AnswerDecision>(
+        "A decision answered in the Decisions panel (accepted, corrected, all above a confidence): heard after the drawing, answered through the book on the viewport's graph",
+    ),
+];
+
+/// Declares [`POINTS`] on `bus` (once).
+pub fn declare(bus: &dyn egui_pop::api::bus::bus_contract::Bus) {
+    use egui_pop::api::bus::bus_contract::{self, Refused};
+    for refused in bus_contract::declare_all(bus, POINTS) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!(target: "helios", "decisions: {refused}");
+        }
+    }
+}
 
 /// What the user asked of the decisions, for the shell.
 #[derive(Clone, Debug, PartialEq)]
@@ -97,7 +137,8 @@ pub struct Decisions {
     /// The answer forms open, by node: the values as edited.
     forms: BTreeMap<String, Params>,
     threshold: f64,
-    requests: Vec<Request>,
+    /// The application's bus, where the answers are asked.
+    bus: Option<std::sync::Arc<dyn egui_pop::api::bus::bus_contract::Bus>>,
 }
 
 impl Default for Decisions {
@@ -107,7 +148,7 @@ impl Default for Decisions {
             cards: Vec::new(),
             forms: BTreeMap::new(),
             threshold: THRESHOLD,
-            requests: Vec::new(),
+            bus: None,
         }
     }
 }
@@ -237,9 +278,30 @@ impl Decisions {
             .collect()
     }
 
+    /// Asks on `bus` from now on ([`AnswerDecision`]).
+    pub fn set_bus(&mut self, bus: std::sync::Arc<dyn egui_pop::api::bus::bus_contract::Bus>) {
+        declare(&*bus);
+        self.bus = Some(bus);
+    }
+
+    /// Asks `request` on the bus, answered after the drawing; with no
+    /// bus (a panel made alone), dropped and logged.
+    fn ask(&self, request: Request) {
+        match &self.bus {
+            Some(bus) => {
+                crate::request::ask::<AnswerDecision>(
+                    &**bus,
+                    request,
+                    crate::request::Heard::default(),
+                );
+            }
+            None => log::error!(target: "helios", "{ANSWER}: no bus, {request:?} dropped"),
+        }
+    }
+
     /// Takes one option of a decision's proposal.
     pub fn accept(&mut self, node: &str, option: usize) {
-        self.requests.push(Request::Accept {
+        self.ask(Request::Accept {
             node: node.into(),
             option,
         });
@@ -247,7 +309,7 @@ impl Decisions {
 
     /// Takes the best option of every proposal at least `confidence` sure.
     pub fn accept_above(&mut self, confidence: f64) {
-        self.requests.push(Request::AcceptAbove { confidence });
+        self.ask(Request::AcceptAbove { confidence });
     }
 
     /// Opens a decision's answer form, filled with the model's best
@@ -299,7 +361,7 @@ impl Decisions {
             .forms
             .remove(node)
             .ok_or_else(|| format!("no answer form open for `{node}`"))?;
-        self.requests.push(Request::Decide {
+        self.ask(Request::Decide {
             node: node.into(),
             values,
         });
@@ -370,11 +432,6 @@ impl Decisions {
             );
         }
         Ok(values)
-    }
-
-    /// What the user asked since the last call.
-    pub fn take_requests(&mut self) -> Vec<Request> {
-        std::mem::take(&mut self.requests)
     }
 
     /// The panel: the cards, and "Accept all above" when several

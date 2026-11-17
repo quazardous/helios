@@ -2374,6 +2374,9 @@ fn main() -> Result<(), String> {
             }
             if let Some(p) = &mut persist {
                 p.wake_on_changes(ctx.clone());
+                // The panels' asks (`library.write`, `stacks.answer`)
+                // heard from the first pass on.
+                p.listen_asks(&shell);
             }
             if let Some(p) = &persist
                 && let Err(e) = library_commands(

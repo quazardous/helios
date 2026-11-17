@@ -1162,6 +1162,9 @@ impl Shell {
             controls,
         });
         let shell_bus = jobs.bus().clone();
+        let stack_review = Rc::new(RefCell::new(crate::stack_review::Review::on(
+            app.handle().bus(),
+        )));
         let core = core::Core {
             app,
             registry,
@@ -1181,7 +1184,7 @@ impl Shell {
             machine: helios_profile::Machine::here(&config_dir().join("machine.toml")),
             loaded: None,
             resolved_view,
-            stack_review: Rc::default(),
+            stack_review,
             duplicates: Rc::default(),
             imports: Vec::new(),
             activity,
@@ -1475,6 +1478,7 @@ impl Shell {
             .library
             .borrow_mut()
             .set_app(shell.core.app.handle().clone());
+        shell.listen_decisions();
         if has(&shell, crate::log_panel::PANEL) {
             let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
@@ -1993,58 +1997,45 @@ impl Shell {
         request: crate::decisions::Request,
         origin: &Origin,
     ) -> Result<Value, String> {
-        use crate::decisions::Request;
         let who = match origin {
             Origin::User => "user".to_string(),
             Origin::Agent(id) | Origin::Script(id) | Origin::Remote(id) => id.clone(),
             Origin::Midi => "midi".to_string(),
         };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let mut viewport = self.focus.viewport.borrow_mut();
-        let region = viewport.shown().map(|s| s.extent);
-        let engine = viewport.engine().clone();
-        let mut decisions = self.focus.decisions.borrow_mut();
-        decisions.refresh(viewport.graph());
-        let above: Vec<String> = match &request {
-            Request::AcceptAbove { confidence } => decisions
-                .above(*confidence)
-                .into_iter()
-                .map(String::from)
-                .collect(),
-            _ => Vec::new(),
-        };
-        let answered = viewport
-            .edit_graph(|graph| {
-                let book = decisions.book_mut();
-                match request {
-                    Request::Accept { node, option } => book
-                        .accept(graph, &node, &who, option, now)
-                        .map(|v| json!({ "node": node, "version": v })),
-                    Request::Decide { node, values } => {
-                        let inputs = match region {
-                            Some(r) => helios_decision::input_keys(&engine, graph, &node, r)?,
-                            None => Vec::new(),
-                        };
-                        book.decide(graph, &node, &who, values, inputs, now)
-                            .map(|v| json!({ "node": node, "version": v }))
-                    }
-                    Request::AcceptAbove { .. } => {
-                        let (mut accepted, mut failed) = (Vec::new(), Vec::new());
-                        for node in above {
-                            match book.accept(graph, &node, &who, 0, now) {
-                                Ok(_) => accepted.push(node),
-                                Err(e) => failed.push(json!({ "node": node, "error": e })),
-                            }
+        answer_decision_on(&self.focus.viewport, &self.focus.decisions, request, &who)
+    }
+
+    /// Registers `decisions.answer`'s listener (`shell.decision`) on the
+    /// application's bus, and gives the Decisions panel the bus it asks
+    /// on: what the user answers in the panel is asked while it draws
+    /// and answered after the drawing, in the same pass, through the
+    /// book on the viewport's graph; a refusal is said as a warning.
+    fn listen_decisions(&self) {
+        use crate::decisions::{ANSWER, AnswerDecision, Request};
+        let bus = self.core.app.handle().bus();
+        self.focus.decisions.borrow_mut().set_bus(bus.clone());
+        let (viewport, decisions) = (self.focus.viewport.clone(), self.focus.decisions.clone());
+        bus.unlisten(ANSWER, crate::decisions::ANSWERED_BY);
+        let listened = bus.listen_local::<AnswerDecision>(
+            crate::decisions::ANSWERED_BY,
+            egui_pop::api::bus::bus_contract::ListenOpts::new().owner(crate::decisions::BUS_OWNER),
+            crate::request::listener(crate::decisions::ANSWERED_BY, move |r: &Request, _| {
+                answer_decision_on(&viewport, &decisions, r.clone(), "user")
+                    .map(|_| ())
+                    .inspect_err(|e| {
+                        // Said as the panel's answers always were.
+                        if let Some(app) = egui_pop::api::bus::asking() {
+                            crate::dialogs::request(
+                                &app.egui(),
+                                crate::dialogs::Request::Notify(Level::Warning, e.clone().into()),
+                            );
                         }
-                        Ok(json!({ "accepted": accepted, "failed": failed }))
-                    }
-                }
-            })
-            .ok_or_else(|| "no image is open: no decision to answer".to_string())?;
-        decisions.refresh(viewport.graph());
-        answered
+                    })
+            }),
+        );
+        if let Err(e) = listened {
+            log::error!(target: "helios", "{ANSWER}: {e}");
+        }
     }
 
     /// Makes the Decisions panel's cards again from the book before it
@@ -2056,8 +2047,9 @@ impl Shell {
 
     /// Answers what was asked while the panels and windows were drawn, in
     /// the same pass, once they are: the dialogs channel's asks (a
-    /// dialog, a menu, a notice, a command), the Decisions panel's
-    /// answers, and a toast for each snapshot restored. What an answer
+    /// dialog, a menu, a notice, a command), and a toast for each
+    /// snapshot restored (the Decisions panel's answers are heard on
+    /// `decisions.answer`, after the drawing). What an answer
     /// asks in turn is answered too (a command that opens a dialog). A
     /// dialog or a menu opened here is drawn at the next frame, asked
     /// for at once.
@@ -2066,9 +2058,8 @@ impl Shell {
         // A few rounds: an answer may ask again; more waits a frame.
         for _ in 0..4 {
             let requests = crate::dialogs::take_requests(ctx);
-            let decisions = self.focus.decisions.borrow_mut().take_requests();
             let restored = !crate::edit_snapshots::lock(&self.core.snapshots).restored_none();
-            if requests.is_empty() && decisions.is_empty() && !restored {
+            if requests.is_empty() && !restored {
                 break;
             }
             answered = true;
@@ -2083,11 +2074,6 @@ impl Shell {
                     Request::Run(id, args, origin) => {
                         let _ = self.run(&id, args, origin);
                     }
-                }
-            }
-            for r in decisions {
-                if let Err(e) = self.answer_decision(r, &Origin::User) {
-                    self.warn(e);
                 }
             }
             self.follow_snapshots();
@@ -8166,6 +8152,64 @@ pub(crate) struct LibraryParts {
     storage: Rc<RefCell<storage::StorageRead>>,
     stack_review: Rc<RefCell<crate::stack_review::Review>>,
     import_source: Rc<RefCell<Option<helios_template::ImportDesc>>>,
+}
+
+/// Answers a decision of the open image through its book, as `who`: the
+/// graph shown takes the answer and renders again, its card goes
+/// ([`Shell::answer_decision`], and `decisions.answer`'s listener).
+fn answer_decision_on(
+    viewport: &RefCell<crate::viewport::Viewport>,
+    decisions: &RefCell<crate::decisions::Decisions>,
+    request: crate::decisions::Request,
+    who: &str,
+) -> Result<Value, String> {
+    use crate::decisions::Request;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let mut viewport = viewport.borrow_mut();
+    let region = viewport.shown().map(|s| s.extent);
+    let engine = viewport.engine().clone();
+    let mut decisions = decisions.borrow_mut();
+    decisions.refresh(viewport.graph());
+    let above: Vec<String> = match &request {
+        Request::AcceptAbove { confidence } => decisions
+            .above(*confidence)
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let answered = viewport
+        .edit_graph(|graph| {
+            let book = decisions.book_mut();
+            match request {
+                Request::Accept { node, option } => book
+                    .accept(graph, &node, who, option, now)
+                    .map(|v| json!({ "node": node, "version": v })),
+                Request::Decide { node, values } => {
+                    let inputs = match region {
+                        Some(r) => helios_decision::input_keys(&engine, graph, &node, r)?,
+                        None => Vec::new(),
+                    };
+                    book.decide(graph, &node, who, values, inputs, now)
+                        .map(|v| json!({ "node": node, "version": v }))
+                }
+                Request::AcceptAbove { .. } => {
+                    let (mut accepted, mut failed) = (Vec::new(), Vec::new());
+                    for node in above {
+                        match book.accept(graph, &node, who, 0, now) {
+                            Ok(_) => accepted.push(node),
+                            Err(e) => failed.push(json!({ "node": node, "error": e })),
+                        }
+                    }
+                    Ok(json!({ "accepted": accepted, "failed": failed }))
+                }
+            }
+        })
+        .ok_or_else(|| "no image is open: no decision to answer".to_string())?;
+    decisions.refresh(viewport.graph());
+    answered
 }
 
 impl LibraryParts {

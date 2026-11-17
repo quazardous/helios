@@ -11,6 +11,7 @@ use egui::Ui;
 use helios_core::Message;
 
 use super::Library;
+use crate::library_write::WriteAsk;
 
 /// Removes one of a photo's versions, a copy, with the edits only it
 /// holds (`image`, else the photo under the cursor; `version`, else its
@@ -99,7 +100,7 @@ impl Library {
         if !self.holds(image) {
             return Err(format!("{image} is not in the library"));
         }
-        self.version_asks.push((
+        self.ask_write(WriteAsk::Version(
             VersionAsk::Switch {
                 image: image.to_string(),
                 version: version.to_string(),
@@ -141,7 +142,7 @@ impl Library {
                 .map(|h| h.version.clone())
                 .ok_or("the photo's versions are not read yet: name `version`")?,
         };
-        self.version_asks.push((
+        self.ask_write(WriteAsk::Version(
             VersionAsk::Remove {
                 image: image.clone(),
                 version: version.clone(),
@@ -150,11 +151,6 @@ impl Library {
             crate::library_history::current_batch(),
         ));
         Ok((image, version))
-    }
-
-    /// What was asked of photos' versions since, each with its batch.
-    pub fn take_version_asks(&mut self) -> Vec<(VersionAsk, super::Batch)> {
-        std::mem::take(&mut self.version_asks)
     }
 
     /// The versions strip of the photo under the cursor, when it has more
@@ -270,7 +266,7 @@ mod tests {
             "the current one by default"
         );
         assert_eq!(
-            lib.take_version_asks()
+            lib.asked_version_asks()
                 .into_iter()
                 .map(|(ask, _)| ask)
                 .collect::<Vec<_>>(),

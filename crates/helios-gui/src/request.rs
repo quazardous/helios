@@ -49,6 +49,24 @@ pub trait Refusable {
     fn refusal(&mut self) -> &mut Option<Refusal>;
 }
 
+/// What a request's listeners did, for a request whose value is only
+/// that (an ask the asker does not wait on): the listeners that ran, in
+/// their order, and the refusal if one refused.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Heard {
+    pub ran: Vec<String>,
+    pub refused: Option<Refusal>,
+}
+
+impl Refusable for Heard {
+    fn ran(&mut self) -> &mut Vec<String> {
+        &mut self.ran
+    }
+    fn refusal(&mut self) -> &mut Option<Refusal> {
+        &mut self.refused
+    }
+}
+
 thread_local! {
     /// The passes going on on this thread, innermost last: the listeners
     /// that started in each, in order.
@@ -127,6 +145,29 @@ where
         }
     }
     value
+}
+
+/// Asks the request `P` on `bus` now, heard after the drawing: its
+/// listeners run at the bus's next drain on this thread (bus-contract's
+/// `Defer`; egui-pop drains once per pass after the panels and windows,
+/// and before it quits). For a panel asking while its state is borrowed.
+/// The ask's number. On a bus without `Defer` it is passed at once
+/// ([`pass`]) and `None` is returned.
+///
+/// Fail-closed as [`pass`] is for the listeners wrapped by [`listener`]:
+/// one is not run once the request is refused. The drain reports what
+/// each ask did (refusals and failures logged by egui-pop); the asker
+/// gets nothing back, so a deferred request is one whose answer the
+/// panel does not wait for.
+pub fn ask<P: Point>(bus: &dyn Bus, input: P::Input, value: P::Value) -> Option<u64>
+where
+    P::Value: Refusable + Clone,
+{
+    if let Some(defer) = bus.defer() {
+        return Some(defer.ask::<P>(input, value));
+    }
+    let _ = pass::<P>(bus, input, value);
+    None
 }
 
 /// What went wrong with a listener, in the bus's words, without the
@@ -305,7 +346,7 @@ mod tests {
     }
 
     /// Every request point Helios declares is emitted through [`pass`]
-    /// (fail-closed), never straight on the bus: a raw `alter` would let
+    /// (fail-closed) or asked through [`ask`], never straight on the bus: a raw `alter` would let
     /// a late or failed listener's refusal be lost.
     #[test]
     fn every_request_point_is_passed_through_the_fail_closed_helper() {
@@ -336,7 +377,8 @@ mod tests {
                         raw.push(format!("{}: {emit}::<{point}>", file.display()));
                     }
                 }
-                passed |= text.contains(&format!("request::pass::<{point}>("));
+                passed |= text.contains(&format!("request::pass::<{point}>("))
+                    || text.contains(&format!("request::ask::<{point}>("));
             }
             if !passed {
                 raw.push(format!("{point}: never passed through request::pass"));
