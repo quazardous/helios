@@ -5204,7 +5204,7 @@ impl Library {
     pub(crate) fn asked_rotations(&mut self) -> Vec<(Vec<String>, Turn, Batch)> {
         use crate::library_write::WriteAsk as W;
         self.asked(|w| match w {
-            W::Rotate(i, t, b) => Some((i.clone(), t.clone(), b.clone())),
+            W::Rotate(i, t, b) => Some((i.clone(), *t, b.clone())),
             _ => None,
         })
     }
@@ -5214,7 +5214,7 @@ impl Library {
     ) -> Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)> {
         use crate::library_write::WriteAsk as W;
         self.asked(|w| match w {
-            W::Duplicate(i, f) => Some((i.clone(), f.clone())),
+            W::Duplicate(i, f) => Some((i.clone(), *f)),
             _ => None,
         })
     }

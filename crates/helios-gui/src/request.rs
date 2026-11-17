@@ -163,13 +163,11 @@ pub fn ask<P: Point>(bus: &dyn Bus, input: P::Input, value: P::Value) -> Option<
 where
     P::Value: Refusable + Clone,
 {
-    match bus.defer() {
-        Some(defer) => Some(defer.ask::<P>(input, value)),
-        None => {
-            let _ = pass::<P>(bus, input, value);
-            None
-        }
+    if let Some(defer) = bus.defer() {
+        return Some(defer.ask::<P>(input, value));
     }
+    let _ = pass::<P>(bus, input, value);
+    None
 }
 
 /// What went wrong with a listener, in the bus's words, without the
