@@ -3004,6 +3004,9 @@ fn next_step(
 
 /// How long `edit.save` waits for the node to answer a step.
 const SAVE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+// A save that ends within its own wait is never counted late by the bus
+// (a late `edit.save` refuses the switch).
+const _: () = assert!(SAVE_WAIT.as_secs() < crate::image_open::SAVE_DEADLINE.as_secs());
 
 /// `edit.save`: the step of the edit `e` not saved yet written through
 /// `node`, its answer waited for (the image is about to be left). Written,

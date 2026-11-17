@@ -10,7 +10,10 @@
 //! this one's steps). Only a request that went through is acted on: the
 //! next image loads (its saved edit, the viewport's network: pixels, the
 //! listed exception), and `image.closed` / `image.opened` are said on the
-//! journal with the listeners that ran (`ran`).
+//! journal with the listeners that ran (`ran`). Both requests are
+//! fail-closed ([`crate::request`]): a listener that fails (an error, a
+//! panic, past its deadline: [`SAVE_DEADLINE`] for the save) refuses the
+//! request, and the listeners after it do not run.
 //!
 //! Before, the order lived in a comment at the one place that switched
 //! images (`persist.close_image` first, "what is drawn now is not saved
@@ -56,6 +59,15 @@ pub const SAVE: &str = "edit.save";
 /// the image.
 pub const SCOPE: &str = "history.scope";
 
+/// How long `edit.save` may run before the bus counts it late (a late
+/// listener refuses the switch). The save waits up to 30 s for the
+/// library to answer its step (`persist`'s `SAVE_WAIT`, itself above the
+/// vault's 5 s wait for a busy database and a slow disk's sync), then
+/// fails with its own reason: the deadline is above that wait, so a save
+/// that ends in time on a slow disk is never refused as late, and only a
+/// save stuck past its own wait is.
+pub const SAVE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40);
+
 /// The listeners of both points, each with the one it runs after: the
 /// order they run in.
 pub const ORDER: &[(&str, Option<&str>)] = &[(SAVE, None), (SCOPE, Some(SAVE))];
@@ -90,12 +102,7 @@ pub struct Switch {
     pub at: f64,
 }
 
-/// A refusal: the listener that refused, and why.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Refusal {
-    pub by: String,
-    pub reason: String,
-}
+pub use crate::request::Refusal;
 
 /// What the listeners did, in order; once one refused, the others are
 /// not run.
@@ -108,6 +115,15 @@ pub struct Switched {
     /// The step `edit.save` wrote: the image, and whether its edit
     /// changes it from its original.
     pub saved: Option<(String, bool)>,
+}
+
+impl crate::request::Refusable for Switched {
+    fn ran(&mut self) -> &mut Vec<String> {
+        &mut self.ran
+    }
+    fn refusal(&mut self) -> &mut Option<Refusal> {
+        &mut self.refused
+    }
 }
 
 /// The request to open an image in the darkroom.
@@ -214,25 +230,16 @@ pub fn listen_local(
     };
     declare(bus);
     let opts = || {
-        let opts = ListenOpts::new().owner(BUS_OWNER);
+        let mut opts = ListenOpts::new().owner(BUS_OWNER);
+        if id == SAVE {
+            opts = opts.deadline(SAVE_DEADLINE);
+        }
         match after {
             Some(after) => opts.after(after),
             None => opts,
         }
     };
-    let run = Rc::new(move |switch: &Switch, switched: &mut Switched| {
-        if switched.refused.is_some() {
-            return Ok::<(), HookError>(());
-        }
-        switched.ran.push(id.to_owned());
-        if let Err(reason) = run(switch, switched) {
-            switched.refused = Some(Refusal {
-                by: id.to_owned(),
-                reason,
-            });
-        }
-        Ok(())
-    });
+    let run = Rc::new(crate::request::listener(id, run));
     bus.unlisten(OPEN, id);
     bus.unlisten(CLOSE, id);
     let open = run.clone();
@@ -244,16 +251,16 @@ pub fn listen_local(
 
 /// Passes `switch` through `image.open` (an image asked) or `image.close`
 /// (none) on `bus`: what the listeners did, in order.
+///
+/// Fail-closed ([`crate::request::pass`]): a listener that failed (an
+/// error, a panic, past its deadline) refuses the switch, and the
+/// listeners after it do not run.
 pub fn pass(bus: &dyn Bus, switch: Switch) -> Switched {
-    let (point, altered) = if switch.to.is_some() {
-        (OPEN, bus.alter::<ImageOpen>(switch, Switched::default()))
+    if switch.to.is_some() {
+        crate::request::pass::<ImageOpen>(bus, switch, Switched::default())
     } else {
-        (CLOSE, bus.alter::<ImageClose>(switch, Switched::default()))
-    };
-    for failure in &altered.failures {
-        log::warn!(target: "helios", "{point}: {failure}");
+        crate::request::pass::<ImageClose>(bus, switch, Switched::default())
     }
-    altered.value
 }
 
 /// Registers `run` as the follower `id` (one of [`FOLLOWERS`]) of both
