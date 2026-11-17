@@ -59,6 +59,7 @@ pub use helios_node_core::volumes as node_volumes;
 pub mod node_events;
 pub mod params;
 pub mod persist;
+pub mod photo_panels;
 pub mod platform;
 mod plugins;
 pub mod pointer_choice;
@@ -106,6 +107,11 @@ use egui_pop::model::panels::{Area, PanelSpec};
 /// header or `<panel>.dock`, floated again from their tab's menu or
 /// `<panel>.float`, hidden and shown again with Tab.
 pub const FLOATABLE: [&str; 3] = ["helios.masks", "helios.scopes", "helios.navigator"];
+
+/// The panels that follow the photo shown: from the moment another photo
+/// is selected until their new data lands, the workbench shows them as
+/// not current ([`photo_panels`]).
+pub const FOLLOWS_PHOTO: [&str; 2] = ["helios.scopes", "helios.navigator"];
 
 /// The icon of each of Helios's panels, by name in egui-pop's icon
 /// registry: what the activity bar and the folded side bars show
