@@ -100,8 +100,11 @@ fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
             .iter()
             .filter(|n| n.contains("helios."))
             .collect::<Vec<_>>(),
-        ["new palette `helios.masks` floats"],
-        "only the panel declared since is placed"
+        [
+            "new panel `helios.filters` placed in its default area",
+            "new palette `helios.masks` floats"
+        ],
+        "only the panels declared since are placed"
     );
     // Written back as egui-pop's document, it reads the same.
     let again = Layout::from_json(&open.to_json()).unwrap();
