@@ -205,6 +205,24 @@ fn a_pending_decision_shows_a_card_and_accept_lets_the_render_through() {
     assert!(h.query_by_label_contains("No decision waiting").is_some());
 }
 
+/// A card's Accept clicked while the panel is drawn is answered in the
+/// same frame, once the panels are drawn: never left for the next one.
+#[test]
+fn a_click_on_accept_is_answered_in_the_frame_it_is_made() {
+    let mut h = harness(shell(&[("sky", Some(0.9))]));
+    until(&mut h, |s| failed(s) > 0);
+    h.get_by_label("Accept").click();
+    // One frame: the click is seen while the panel draws, answered after.
+    h.step();
+    assert_eq!(
+        decider(h.state(), "sky"),
+        Decider::Accepted {
+            who: "user".into(),
+            model: model()
+        }
+    );
+}
+
 #[test]
 fn correct_records_the_corrected_answer() {
     let mut h = harness(shell(&[("sky", Some(0.6))]));

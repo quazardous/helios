@@ -33,7 +33,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
     (
         "follow_decisions",
-        "stays: an inbox of the cards' clicks; its refresh waits for a network-shown-changed event",
+        "waits: a network-shown-changed event for its refresh (the cards' clicks are answered in the pass they are made, by `answer_asks`)",
     ),
     // Waits for an event that does not exist yet.
     (
@@ -75,10 +75,6 @@ const ALLOWED: &[(&str, &str)] = &[
     (
         "follow_queue",
         "waits: the value store's path listener for the selection (ADR 0016) and a jobs-centre point",
-    ),
-    (
-        "follow_snapshots",
-        "waits: the restore saying its own toast (the shell's inboxes as bus requests)",
     ),
 ];
 
@@ -153,7 +149,8 @@ fn the_scan_finds_calls_named_or_listed() {
 
 /// Every per-pass follower left in `Shell::ui` is listed with its
 /// reason; a new one fails here, and one moved to an event leaves the
-/// list (19 per-pass followers before the first moves, 17 now).
+/// list (19 per-pass followers before the first moves, 16 now: the
+/// snapshots' toasts are said with the asks answered after the panels).
 #[test]
 fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
     let found = followers();
@@ -185,14 +182,18 @@ fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
         "listed but no longer called in `Shell::ui`: {gone:?}; take them off the list"
     );
     assert!(ALLOWED.iter().all(|(_, why)| !why.is_empty()));
-    assert_eq!(found.len(), 17, "{found:?}");
+    assert_eq!(found.len(), 16, "{found:?}");
 }
 
 /// The followers moved to events are not called each pass.
 #[test]
 fn the_followers_moved_to_events_are_not_called_each_pass() {
     let found = followers();
-    for moved in ["follow_subworkspaces", "follow_import_sessions"] {
+    for moved in [
+        "follow_subworkspaces",
+        "follow_import_sessions",
+        "follow_snapshots",
+    ] {
         assert!(
             !found.iter().any(|f| f == moved),
             "{moved} is called in `ui`"
