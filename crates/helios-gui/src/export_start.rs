@@ -18,7 +18,7 @@
 //! runs.
 
 use egui_pop::api::bus::bus_contract::{
-    self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
+    self, Bus, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
 use serde_json::{Value, json};
 
@@ -49,11 +49,7 @@ pub struct Asked {
 
 /// A refusal: the listener that refused (or the point, when none ran),
 /// and why.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Refusal {
-    pub by: String,
-    pub reason: String,
-}
+pub use crate::request::Refusal;
 
 /// What the listeners did.
 #[derive(Clone, Debug, Default)]
@@ -62,6 +58,15 @@ pub struct Started {
     pub ran: Vec<String>,
     /// The request was refused, by whom and why.
     pub refused: Option<Refusal>,
+}
+
+impl crate::request::Refusable for Started {
+    fn ran(&mut self) -> &mut Vec<String> {
+        &mut self.ran
+    }
+    fn refusal(&mut self) -> &mut Option<Refusal> {
+        &mut self.refused
+    }
 }
 
 /// The request to start an export.
@@ -105,32 +110,18 @@ pub fn listen_local(
     bus.listen_local::<ExportStart>(
         RUN,
         ListenOpts::new().owner(BUS_OWNER),
-        move |asked, started| {
-            if started.refused.is_some() {
-                return Ok::<(), HookError>(());
-            }
-            started.ran.push(RUN.to_owned());
-            if let Err(reason) = run(asked) {
-                started.refused = Some(Refusal {
-                    by: RUN.to_owned(),
-                    reason,
-                });
-            }
-            Ok(())
-        },
+        crate::request::listener(RUN, move |asked, _: &mut Started| run(asked)),
     )
     .map_err(|e| e.to_string())
 }
 
 /// Passes `asked` through `export.start` on `bus`: what the listeners
 /// did; refused by the point itself when none ran ([`NO_LIBRARY`]).
+/// Fail-closed ([`crate::request::pass`]): a listener that failed (an
+/// error, a panic, past its deadline) refuses the export.
 pub fn pass(bus: &dyn Bus, asked: Asked) -> Started {
     declare(bus);
-    let altered = bus.alter::<ExportStart>(asked, Started::default());
-    for failure in &altered.failures {
-        log::warn!(target: "helios", "{START}: {failure}");
-    }
-    let mut started = altered.value;
+    let mut started = crate::request::pass::<ExportStart>(bus, asked, Started::default());
     if started.ran.is_empty() && started.refused.is_none() {
         started.refused = Some(Refusal {
             by: START.to_owned(),

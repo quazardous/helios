@@ -2602,6 +2602,12 @@ impl<S: Store + 'static> Persist<S> {
         self.editing.as_ref().map(|e| &e.session)
     }
 
+    /// Whether the edit open is marked unsaved: its last save failed, and
+    /// it is saved again at the next frame or switch.
+    pub fn unsaved(&self) -> bool {
+        self.editing.as_ref().is_some_and(|e| e.unsaved)
+    }
+
     /// Reads the metadata templates once, writes them back each time they
     /// change (a library document through the node, outside the
     /// library's history), and reads the capture details the Metadata
@@ -2998,6 +3004,9 @@ fn next_step(
 
 /// How long `edit.save` waits for the node to answer a step.
 const SAVE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+// A save that ends within its own wait is never counted late by the bus
+// (a late `edit.save` refuses the switch).
+const _: () = assert!(SAVE_WAIT.as_secs() < crate::image_open::SAVE_DEADLINE.as_secs());
 
 /// `edit.save`: the step of the edit `e` not saved yet written through
 /// `node`, its answer waited for (the image is about to be left). Written,
