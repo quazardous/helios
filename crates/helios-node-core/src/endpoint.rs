@@ -53,6 +53,19 @@ impl Event for CommandRan<'_> {
     const KIND: &'static str = "control.command";
 }
 
+/// A command run refused, by whom, and why: journaled after the refusal,
+/// so a refused run is never journaled as run ([`CommandRan`]).
+#[derive(Serialize)]
+pub struct CommandRefused<'a> {
+    pub id: &'a str,
+    pub origin: &'a str,
+    pub reason: &'a str,
+}
+
+impl Event for CommandRefused<'_> {
+    const KIND: &'static str = "control.command.refused";
+}
+
 /// An import done through the node ended: its report (the files it
 /// added, located, whether it was cancelled...).
 #[derive(Serialize)]
@@ -213,13 +226,17 @@ fn with_changes(mut answer: Value, changes: &Changes) -> Value {
     answer
 }
 
-/// Whether `origin` names who runs a call: `user`, `cli`, `control`,
-/// `midi`, `agent:NAME`, `script:NAME` or `remote:NAME`.
-fn is_origin(origin: &str) -> bool {
-    matches!(origin, "user" | "cli" | "control" | "midi")
-        || ["agent:", "script:", "remote:"]
-            .iter()
-            .any(|p| origin.strip_prefix(p).is_some_and(|name| !name.is_empty()))
+/// The origin `origin` names, as `call` may run it: one of the origins
+/// of [`helios_shell::policy`], and never `user` over a connection (who
+/// connected decides that, not what the call says).
+fn admitted(origin: &str, call: &Call) -> Result<(), Error> {
+    let named = helios_shell::policy::origin(origin)
+        .map_err(|e| Error::new(rpc::code::ORIGIN_REFUSED, e))?;
+    if call.over_connection() {
+        helios_shell::policy::over_connection(&named)
+            .map_err(|e| Error::new(rpc::code::ORIGIN_REFUSED, e))?;
+    }
+    Ok(())
 }
 
 fn now() -> u64 {
@@ -334,6 +351,7 @@ impl<S: Store + Send + 'static> VaultService<S> {
             .as_str()
             .unwrap_or_else(|| origin_of(params))
             .to_string();
+        admitted(&origin, call)?;
         let mut args = match &params["params"] {
             Value::Null => json!({}),
             v => v.clone(),
@@ -349,21 +367,33 @@ impl<S: Store + Send + 'static> VaultService<S> {
         let Some(windows) = self.windows.as_ref().filter(|_| scope != Some("node")) else {
             return Err(Error::method_not_found(id));
         };
-        if !is_origin(&origin) {
-            return Err(refused_origin(&origin));
-        }
         let window = params["window"].as_str().unwrap_or(MAIN_WINDOW);
-        self.bus.publish(
-            SOURCE,
-            None,
-            &CommandRan {
-                id,
-                origin: &origin,
-            },
-        );
-        let mut answer = windows
-            .run(id, args, &origin, window)
-            .map_err(|e| Error::new(rpc::code::REFUSED, e))?;
+        // Journaled once its outcome is known: run, or refused and why.
+        let mut answer = match windows.run(id, args, &origin, window) {
+            Ok(answer) => {
+                self.bus.publish(
+                    SOURCE,
+                    None,
+                    &CommandRan {
+                        id,
+                        origin: &origin,
+                    },
+                );
+                answer
+            }
+            Err(reason) => {
+                self.bus.publish(
+                    SOURCE,
+                    None,
+                    &CommandRefused {
+                        id,
+                        origin: &origin,
+                        reason: &reason,
+                    },
+                );
+                return Err(Error::new(rpc::code::REFUSED, reason));
+            }
+        };
         if !answer.is_object() {
             answer = json!({ "result": answer });
         }
@@ -452,14 +482,6 @@ impl<S: Store + Send + 'static> VaultService<S> {
     }
 }
 
-/// A call refused for the origin it names.
-fn refused_origin(origin: &str) -> Error {
-    Error::new(
-        rpc::code::ORIGIN_REFUSED,
-        format!("`{origin}` is not an origin: user, cli, control, agent:NAME or script:NAME"),
-    )
-}
-
 /// The origin a call's params carry (`_meta.origin`), else [`CONTROL`].
 fn origin_of(params: &Value) -> &str {
     params["_meta"]["origin"].as_str().unwrap_or(CONTROL)
@@ -477,9 +499,7 @@ impl<S: Store + Send + 'static> Service for VaultService<S> {
             return Err(Error::method_not_found(method));
         };
         let origin = origin_of(&params).to_string();
-        if !is_origin(&origin) {
-            return Err(refused_origin(&origin));
-        }
+        admitted(&origin, call)?;
         let mut checked = params.clone();
         if let Some(fields) = checked.as_object_mut() {
             fields.remove("_meta");
@@ -683,24 +703,6 @@ mod tests {
     use helios_inspect::client::Client;
 
     use super::*;
-
-    #[test]
-    fn origins_are_checked() {
-        for ok in [
-            "user",
-            "cli",
-            "control",
-            "midi",
-            "agent:mcp",
-            "script:x",
-            "remote:phone",
-        ] {
-            assert!(is_origin(ok), "{ok}");
-        }
-        for bad in ["", "agent:", "remote:", "robot"] {
-            assert!(!is_origin(bad), "{bad}");
-        }
-    }
 
     #[test]
     fn the_service_runs_the_library_commands_and_announces_them() {

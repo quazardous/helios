@@ -1383,7 +1383,7 @@ node-command-needs-vault = le nœud ne garde aucun coffre : lancez-le avec --vau
 
 node-command-needs-window = aucune fenêtre du bureau ne tient cet espace de travail
 
-node-command-origin = `{ $origin }` n’est pas une origine : user, cli, control, agent:NOM ou script:NOM
+node-command-origin = `{ $origin }` n’est pas une origine : user, cli, control, midi, agent:NOM, script:NOM ou remote:NOM
 
 node-command-params = `{ $id }` a refusé ses paramètres : { $error }
 

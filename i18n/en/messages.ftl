@@ -3363,7 +3363,7 @@ node-command-needs-vault = the node keeps no vault: start it with --vault
 
 node-command-needs-window = no desktop window holds this workspace
 
-node-command-origin = `{ $origin }` is not an origin: user, cli, control, agent:NAME or script:NAME
+node-command-origin = `{ $origin }` is not an origin: user, cli, control, midi, agent:NAME, script:NAME or remote:NAME
 
 node-command-params = `{ $id }` refused its params: { $error }
 

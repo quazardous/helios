@@ -2898,6 +2898,7 @@ dependencies = [
  "helios-load",
  "helios-module-whitebalance",
  "helios-photo",
+ "helios-shell",
  "helios-storage",
  "helios-testkit",
  "helios-vault",
