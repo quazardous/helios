@@ -26,11 +26,16 @@
 use std::collections::BTreeMap;
 
 use egui::Ui;
+use egui_pop::core::input::Input;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets;
 use egui_pop::views::library::ColorLabel;
 use egui_pop::views::library::marks::RatingStars;
 use egui_pop::views::library::tags::TagInput;
 use egui_pop::views::library::{Flag, Marks};
 use helios_core::Message;
+use helios_ui::{Action, Scroll};
 use helios_vault::meta::{COPYRIGHT, CREATOR, DESCRIPTION, TEXT_FIELDS, TITLE};
 use serde_json::{Map, Value, json};
 
@@ -427,12 +432,9 @@ impl Library {
             // Its own scroll, a share of the panel's height: the grid
             // below keeps its room, and the panel never scrolls the
             // search field away.
-            let max = (ui.available_height() * 0.4).clamp(120.0, 320.0);
-            egui::ScrollArea::vertical()
-                .id_salt("helios.library.metadata.scroll")
-                .max_height(max)
-                .auto_shrink([false, true])
-                .show(ui, |ui| self.metadata_body(ui));
+            helios_ui::scroll(ui, "helios.library.metadata.scroll", Scroll::Form, |ui| {
+                self.metadata_body(ui);
+            });
             // The versions strip below the scroll, always in view.
             if let Ok(keys) = self.targets()
                 && let [one] = keys.as_slice()
@@ -446,7 +448,7 @@ impl Library {
         let ctx = ui.ctx().clone();
         let word = |m: Message| crate::i18n::text(&ctx, m);
         let Ok(keys) = self.targets() else {
-            ui.weak(word(Message::new(
+            ui.muted(word(Message::new(
                 "gui-library-no-cursor",
                 "No image under the cursor",
             )));
@@ -463,12 +465,15 @@ impl Library {
         };
         let mixed = word(Message::new("gui-library-meta-mixed", "‹mixed›"));
         if entries.len() == 1 {
-            ui.strong(&first.name);
+            ui.text_role(TextRole::Section, &first.name);
         } else {
-            ui.strong(word(
-                Message::new("gui-library-meta-photos", "{ $count } photos selected")
-                    .with("count", entries.len()),
-            ));
+            ui.text_role(
+                TextRole::Section,
+                word(
+                    Message::new("gui-library-meta-photos", "{ $count } photos selected")
+                        .with("count", entries.len()),
+                ),
+            );
         }
         let cursor = self
             .selected()
@@ -508,12 +513,12 @@ impl Library {
             ));
             let name = word(Message::new("gui-library-meta-rating", "Rating"));
             let out = RatingStars::new(marks.rating).label(name).show(ui);
-            out.response.clone().on_hover_text(&tip);
+            let _ = out.response.clone().tip(&tip);
             if let Some(r) = out.changed {
                 edit.fields.insert("rating".into(), json!(r));
             }
             if matches!(rating, Some(Shared::Mixed)) {
-                ui.weak(&mixed).on_hover_text(&tip);
+                let _ = ui.muted(&mixed).tip(&tip);
             }
         });
         ui.horizontal_wrapped(|ui| {
@@ -538,7 +543,7 @@ impl Library {
                 }
             }
             if some_labels {
-                ui.weak(&mixed).on_hover_text(&tip);
+                let _ = ui.muted(&mixed).tip(&tip);
             }
         });
         // The flag on its own row: beside the labels it ran past a narrow
@@ -556,7 +561,7 @@ impl Library {
                 edit.fields.insert("flag".into(), json!(flag_word(f)));
             }
             if matches!(flag, Some(Shared::Mixed)) {
-                ui.weak(&mixed).on_hover_text(&tip);
+                let _ = ui.muted(&mixed).tip(&tip);
             }
         });
         for field in TEXT_FIELDS {
@@ -582,7 +587,7 @@ impl Library {
         edit.keywords_add.extend(out.added);
         edit.keywords_remove.extend(out.removed);
         if some {
-            ui.weak(word(Message::new(
+            ui.muted(word(Message::new(
                 "gui-library-meta-some-keywords",
                 "Some photos have other keywords too: they are kept",
             )));
@@ -647,20 +652,17 @@ impl Library {
             .entry(field)
             .or_insert_with(|| shown.clone());
         let mut out = None;
-        ui.label(&name);
+        ui.text_role(TextRole::Body, &name);
         let edit = if field == DESCRIPTION {
-            egui::TextEdit::multiline(draft).desired_rows(2)
+            Input::multiline(draft, &name)
         } else {
-            egui::TextEdit::singleline(draft)
+            Input::text(draft, &name)
         };
-        let mut edit = edit
-            .id_salt(format!("helios.library.meta.{field}"))
-            .desired_width(f32::INFINITY);
+        let mut edit = edit.id_salt(format!("helios.library.meta.{field}"));
         if matches!(shared, Some(Shared::Mixed)) {
-            edit = edit.hint_text(mixed);
+            edit = edit.placeholder(mixed);
         }
-        let r = ui.add(edit).on_hover_text(&tip);
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &name));
+        let r = edit.show(ui).response.tip(&tip);
         let done = r.lost_focus();
         if done {
             let typed = draft.trim().to_string();
@@ -737,15 +739,11 @@ impl Library {
         if rows.is_empty() {
             return;
         }
-        egui::Grid::new("helios.library.meta.exif")
-            .num_columns(2)
-            .show(ui, |ui| {
-                for (m, v) in rows {
-                    ui.weak(crate::i18n::text(ui.ctx(), m));
-                    ui.label(v);
-                    ui.end_row();
-                }
-            });
+        let rows: Vec<(String, String)> = rows
+            .into_iter()
+            .map(|(m, v)| (crate::i18n::text(ui.ctx(), m), v))
+            .collect();
+        helios_ui::details(ui, "helios.library.meta.exif", &rows);
     }
 
     /// The templates: one to apply or delete, and the shared fields saved
@@ -773,27 +771,33 @@ impl Library {
                 .template
                 .clone()
                 .filter(|t| names.contains(t));
-            let combo = egui::ComboBox::from_id_salt("helios.library.meta.template")
-                .selected_text(chosen.clone().unwrap_or(none))
-                .show_ui(ui, |ui| {
+            let combo = widgets::combo_box("helios.library.meta.template")
+                .selected_text(chosen.clone().unwrap_or(none));
+            let combo = ui
+                .combo_box(combo, |ui| {
                     for n in &names {
-                        ui.selectable_value(&mut self.meta_panel.template, Some(n.clone()), n);
+                        widgets::selectable_value(
+                            ui,
+                            &mut self.meta_panel.template,
+                            Some(n.clone()),
+                            n,
+                        );
                     }
                 })
-                .response
-                .on_hover_text(&tip);
-            combo.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &tip));
+                .response;
+            egui_pop::core::a11y::name(&combo, egui::Role::ComboBox, &tip);
+            let _ = combo.tip(&tip);
             let apply = word(Message::new("gui-library-meta-template-apply", "Apply"));
             let apply_tip = word(Message::new(
                 "gui-library-meta-template-apply-tip",
                 "Apply the template to the selected photos (one undo step)",
             ));
             let r = ui
-                .add_enabled(chosen.is_some(), egui::Button::new(&apply))
-                .on_hover_text(&apply_tip);
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Button, chosen.is_some(), &apply_tip)
-            });
+                .add_enabled_ui(chosen.is_some(), |ui| {
+                    helios_ui::action(ui, Action::Secondary, &apply)
+                })
+                .inner
+                .tip(&apply_tip);
             if r.clicked() {
                 run(ui.ctx(), TEMPLATE_APPLY_COMMAND, json!({ "name": chosen }));
             }
@@ -803,11 +807,11 @@ impl Library {
                 "Delete the template chosen",
             ));
             let r = ui
-                .add_enabled(chosen.is_some(), egui::Button::new(&delete))
-                .on_hover_text(&delete_tip);
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Button, chosen.is_some(), &delete_tip)
-            });
+                .add_enabled_ui(chosen.is_some(), |ui| {
+                    helios_ui::action(ui, Action::Danger, &delete)
+                })
+                .inner
+                .tip(&delete_tip);
             if r.clicked() {
                 run(ui.ctx(), TEMPLATE_DELETE_COMMAND, json!({ "name": chosen }));
             }
@@ -818,15 +822,13 @@ impl Library {
                 "The new template's name",
             ));
             let hint = word(Message::new("gui-library-meta-template-name", "Template name"));
-            let r = ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.meta_panel.new_template)
-                        .id_salt("helios.library.meta.template.name")
-                        .hint_text(&hint)
-                        .desired_width(120.0),
-                )
-                .on_hover_text(&name_tip);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &name_tip));
+            let _ = Input::text(&mut self.meta_panel.new_template, &name_tip)
+                .id_salt("helios.library.meta.template.name")
+                .placeholder(&hint)
+                .width(120.0)
+                .show(ui)
+                .response
+                .tip(&name_tip);
             let save = word(Message::new("gui-library-meta-template-save", "Save as template"));
             let save_tip = word(Message::new(
                 "gui-library-meta-template-save-tip",
@@ -834,9 +836,11 @@ impl Library {
             ));
             let can = !self.meta_panel.new_template.trim().is_empty();
             let r = ui
-                .add_enabled(can, egui::Button::new(&save))
-                .on_hover_text(&save_tip);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can, &save_tip));
+                .add_enabled_ui(can, |ui| {
+                    helios_ui::action(ui, Action::Secondary, &save)
+                })
+                .inner
+                .tip(&save_tip);
             if r.clicked() {
                 let name = std::mem::take(&mut self.meta_panel.new_template);
                 run(ui.ctx(), TEMPLATE_SAVE_COMMAND, json!({ "name": name.trim() }));
