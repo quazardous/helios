@@ -13,12 +13,22 @@
 //! apart. The commander layout and the filmstrip add more later.
 //!
 //! [`GalleryOptions`] is what a host asks of the gallery it draws: its
-//! id, and a more or less complete search depending on where it is
-//! hosted.
+//! id, which of its two parts, and a more or less complete search
+//! depending on where it is hosted.
+//!
+//! A gallery is an explorer of two linked parts (owner, 2026-11-17): its
+//! **Filters** (the search, the filters and the sources, nothing else)
+//! and its **Results** (the photos, shown as thumbnails at a size or as
+//! a list, with the view's options in its bar). The main window draws
+//! them as two panels ([`EXPLORER`]: `helios.filters` and
+//! `helios.vault`), linked by the gallery id they both draw; the Library
+//! window draws its gallery's two parts side by side. A second explorer
+//! is a second pair naming another gallery id.
 
 use egui_pop::views::library::LibraryState;
 use egui_pop::views::library::filter::{Filter, SearchState};
-use helios_template::{LibraryDesc, ViewDesc};
+use egui_pop::views::list::ListState;
+use helios_template::{LibraryDesc, ResultsDesc, ResultsMode, ViewDesc};
 use helios_vault::fields::Query;
 use std::collections::HashSet;
 
@@ -27,6 +37,40 @@ pub const MAIN_GALLERY: &str = "main";
 
 /// The Library window's gallery.
 pub const WINDOW_GALLERY: &str = "window";
+
+/// The main window's Filters panel: the main gallery's search, filters
+/// and sources.
+pub const FILTERS_PANEL: &str = "helios.filters";
+
+/// The main window's Results panel: the main gallery's photos.
+pub const RESULTS_PANEL: &str = "helios.vault";
+
+/// One explorer of the main window: a Filters panel and the Results
+/// panel it feeds, linked by the gallery both draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Explorer {
+    /// The gallery both panels draw.
+    pub gallery: &'static str,
+    /// The Filters panel's id.
+    pub filters: &'static str,
+    /// The Results panel's id.
+    pub results: &'static str,
+}
+
+/// The main window's explorer (more come with gallery instances).
+pub const EXPLORER: Explorer = Explorer {
+    gallery: MAIN_GALLERY,
+    filters: FILTERS_PANEL,
+    results: RESULTS_PANEL,
+};
+
+/// The explorers of the main window, by panel: the one whose Filters or
+/// Results panel `panel` is.
+pub fn explorer_of(panel: &str) -> Option<Explorer> {
+    [EXPLORER]
+        .into_iter()
+        .find(|e| e.filters == panel || e.results == panel)
+}
 
 /// What the workspace keeps for the gallery `id`: the main panel's at the
 /// top of `library` (where a workspace written before the views were
@@ -40,6 +84,8 @@ pub fn view_of(library: Option<&LibraryDesc>, id: &str) -> ViewDesc {
             query: l.query.clone(),
             folder: l.folder.clone(),
             collection: l.collection.clone(),
+            auto_advance: None,
+            results: l.results.clone(),
         }
     } else {
         l.views.get(id).cloned().unwrap_or_default()
@@ -53,10 +99,51 @@ pub fn set_view(library: &mut LibraryDesc, id: &str, view: ViewDesc) {
         library.query = view.query;
         library.folder = view.folder;
         library.collection = view.collection;
+        library.results = view.results;
+        if let Some(on) = view.auto_advance {
+            library.auto_advance = on;
+        }
     } else if view.is_empty() {
         library.views.remove(id);
     } else {
         library.views.insert(id.to_string(), view);
+    }
+}
+
+/// Whether culling auto-advances in the gallery `id`, as the workspace
+/// keeps it: its own value, else the library's (the main view's, which
+/// a workspace written before each view had its own shares with all).
+pub fn auto_advance_of(library: Option<&LibraryDesc>, id: &str) -> bool {
+    let Some(l) = library else {
+        return false;
+    };
+    if id == MAIN_GALLERY {
+        return l.auto_advance;
+    }
+    l.views
+        .get(id)
+        .and_then(|v| v.auto_advance)
+        .unwrap_or(l.auto_advance)
+}
+
+/// Writes whether culling auto-advances in the gallery `id`. The main
+/// view's value is the library's, which the other views without their
+/// own follow: changing it gives each known view its own first, so it
+/// changes the main view only.
+pub fn set_auto_advance(library: &mut LibraryDesc, id: &str, on: bool) {
+    if id == MAIN_GALLERY {
+        for other in [WINDOW_GALLERY] {
+            let mut view = view_of(Some(library), other);
+            if view.auto_advance.is_none() && library.auto_advance != on {
+                view.auto_advance = Some(library.auto_advance);
+                set_view(library, other, view);
+            }
+        }
+        library.auto_advance = on;
+    } else {
+        let mut view = view_of(Some(library), id);
+        view.auto_advance = (on != library.auto_advance).then_some(on);
+        set_view(library, id, view);
     }
 }
 
@@ -93,22 +180,72 @@ pub struct GalleryOptions {
     /// The gallery's id: the state it draws and the workspace keeps
     /// (`main`, `window`; later `pane-1`, `filmstrip`).
     pub id: &'static str,
+    /// Which of the gallery's parts the host draws.
+    pub parts: Parts,
     pub search: SearchMode,
     pub sources: SourcesPlace,
     /// The sort menu and the count of photos shown.
     pub sort_count: bool,
-    /// The view options: auto-advance and Compare (a View menu once the
-    /// bar is regrouped).
+    /// The view options in the Results bar: how the results show
+    /// (thumbnails or a list, their size), auto-advance and Compare.
     pub view_options: bool,
     /// The current photo's marks, metadata and versions under the
     /// sources (they move to the metadata panel later).
     pub marks: bool,
 }
 
+/// Which parts of a gallery a host draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Parts {
+    /// The search, the filters and the sources: no photos.
+    Filters,
+    /// The photos and the view's bar.
+    Results,
+    /// Both, side by side: the Filters in a column at the start, the
+    /// Results taking the rest.
+    Both,
+}
+
+impl Parts {
+    /// Whether the host draws the Filters.
+    pub fn filters(self) -> bool {
+        self != Parts::Results
+    }
+
+    /// Whether the host draws the Results.
+    pub fn results(self) -> bool {
+        self != Parts::Filters
+    }
+}
+
 impl GalleryOptions {
-    /// The main window's Library panel.
+    /// The main window's Filters panel.
+    pub const FILTERS_PANEL: GalleryOptions = GalleryOptions {
+        id: MAIN_GALLERY,
+        parts: Parts::Filters,
+        search: SearchMode::Compact,
+        sources: SourcesPlace::Header,
+        sort_count: false,
+        view_options: false,
+        marks: true,
+    };
+
+    /// The main window's Results panel.
+    pub const RESULTS_PANEL: GalleryOptions = GalleryOptions {
+        id: MAIN_GALLERY,
+        parts: Parts::Results,
+        search: SearchMode::None,
+        sources: SourcesPlace::None,
+        sort_count: true,
+        view_options: true,
+        marks: false,
+    };
+
+    /// Both parts of the main gallery in one place (a test, an agent's
+    /// look at the whole view).
     pub const MAIN_PANEL: GalleryOptions = GalleryOptions {
         id: MAIN_GALLERY,
+        parts: Parts::Both,
         search: SearchMode::Compact,
         sources: SourcesPlace::Header,
         sort_count: true,
@@ -120,6 +257,7 @@ impl GalleryOptions {
     /// restriction and selection), with the full search.
     pub const LIBRARY_WINDOW: GalleryOptions = GalleryOptions {
         id: WINDOW_GALLERY,
+        parts: Parts::Both,
         search: SearchMode::Full,
         sources: SourcesPlace::Panel,
         sort_count: true,
@@ -130,6 +268,7 @@ impl GalleryOptions {
     /// A grid with nothing around it: no search, no sources, no options.
     pub const BARE: GalleryOptions = GalleryOptions {
         id: "bare",
+        parts: Parts::Results,
         search: SearchMode::None,
         sources: SourcesPlace::None,
         sort_count: false,
@@ -181,6 +320,17 @@ pub struct Gallery {
     /// What is typed in the Metadata section, for this gallery's
     /// selection.
     pub(super) meta: super::metadata::MetaDrafts,
+    /// Culling: after a mark from the keyboard, the cursor moves to the
+    /// next image of this gallery.
+    pub(super) auto_advance: bool,
+    /// How the Results show the photos: thumbnails (their size is
+    /// `state`'s) or a list.
+    pub(super) mode: ResultsMode,
+    /// The list's state, in list mode (its selection follows `state`'s).
+    pub(super) list: ListState<String>,
+    /// How the results show changed since the workspace last kept it
+    /// ([`super::Library::take_results_changes`]).
+    pub(super) results_changed: bool,
 }
 
 impl Gallery {
@@ -199,7 +349,32 @@ impl Gallery {
             sort: super::DEFAULT_SORT,
             resort: None,
             meta: super::metadata::MetaDrafts::default(),
+            auto_advance: false,
+            mode: ResultsMode::Thumbnails,
+            list: ListState::new(),
+            results_changed: false,
         }
+    }
+
+    /// How the Results show the photos, as the workspace keeps it.
+    pub fn results(&self) -> ResultsDesc {
+        let size = self.state.size().round() as u16;
+        let default = egui_pop::views::library::grid::DEFAULT_SIZE.round() as u16;
+        ResultsDesc {
+            mode: self.mode,
+            size: (size != default).then_some(size),
+        }
+    }
+
+    /// Shows the photos as `results` says (thumbnails at the default
+    /// size when it says nothing).
+    pub fn set_results(&mut self, results: &ResultsDesc) {
+        self.mode = results.mode;
+        self.state.set_size(
+            results
+                .size
+                .map_or(egui_pop::views::library::grid::DEFAULT_SIZE, f32::from),
+        );
     }
 }
 
@@ -245,4 +420,22 @@ mod tests {
         assert!(l.views.is_empty(), "an empty view is none at all");
         assert_eq!(l, old);
     }
+
+    #[test]
+    fn auto_advance_is_kept_per_view_and_an_old_workspace_shares_it() {
+        // Written before each view had its own: every view takes it.
+        let mut l: LibraryDesc =
+            serde_json::from_value(serde_json::json!({ "auto_advance": true })).unwrap();
+        assert!(auto_advance_of(Some(&l), MAIN_GALLERY));
+        assert!(auto_advance_of(Some(&l), WINDOW_GALLERY));
+        // Off in the main view: the window keeps its on.
+        set_auto_advance(&mut l, MAIN_GALLERY, false);
+        assert!(!auto_advance_of(Some(&l), MAIN_GALLERY));
+        assert!(auto_advance_of(Some(&l), WINDOW_GALLERY));
+        // Off in the window too: nothing of its own left to keep.
+        set_auto_advance(&mut l, WINDOW_GALLERY, false);
+        assert!(!auto_advance_of(Some(&l), WINDOW_GALLERY));
+        assert_eq!(l, LibraryDesc::default());
+    }
+
 }

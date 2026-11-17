@@ -161,9 +161,13 @@ fn the_library_s_bar_and_empty_text_stay_in_its_narrow_panel() {
     // in a row as tall as its button, no measure of a line).
     let line = h.ctx.global_style().text_styles[&egui::TextStyle::Body].size;
     assert!(text.height() >= 2.0 * line, "wrapped: {text:?}");
-    // The search bar above it wraps rather than widen the panel.
-    for part in ["Search images", "Auto-advance"] {
-        let parts: Vec<egui::Rect> = h.query_all_by_label(part).map(|n| n.rect()).collect();
+    // The Results bar above it wraps rather than widen the panel (the
+    // search is in the Filters panel, above it).
+    for part in ["View as", "Auto-advance"] {
+        let parts: Vec<egui::Rect> = h
+            .query_all_by_label_contains(part)
+            .map(|n| n.rect())
+            .collect();
         assert!(!parts.is_empty(), "no `{part}`");
         for r in parts {
             assert!(inside(r), "`{part}` {r:?} in {panel:?}");

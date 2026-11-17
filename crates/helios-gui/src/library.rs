@@ -45,6 +45,7 @@ use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
 use egui_pop::api::bus::drag::{self, Seen};
 use egui_pop::core::fold::{Fold, TreeRow};
+use egui_pop::core::icon::{IconWidget, Source as IconSource, Tone as IconTone};
 use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::{TextRole, UiPop as _};
 use egui_pop::core::widgets;
@@ -64,6 +65,7 @@ use egui_pop::views::library::{
 use helios_core::{Image, Message, Region};
 
 use crate::head_render::HeadRender;
+use helios_template::ResultsMode;
 use helios_vault::capture::CAPTURED;
 use helios_vault::cull;
 pub use helios_vault::fields::Op;
@@ -71,7 +73,7 @@ use helios_vault::fields::{
     COPYRIGHT, CREATOR, DESCRIPTION, LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED,
     ROTATION, TAGS, TITLE,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 mod batch;
 mod gallery;
@@ -94,8 +96,9 @@ pub use batch::{
 };
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
 pub use gallery::{
-    Gallery, GalleryOptions, MAIN_GALLERY, SearchMode, SourcesPlace, WINDOW_GALLERY, set_view,
-    view_of,
+    EXPLORER, Explorer, FILTERS_PANEL, Gallery, GalleryOptions, MAIN_GALLERY, Parts, RESULTS_PANEL,
+    SearchMode, SourcesPlace, WINDOW_GALLERY, auto_advance_of, explorer_of, set_auto_advance,
+    set_view, view_of,
 };
 pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use keywords::{
@@ -117,6 +120,27 @@ pub const LIBRARY: &str = "helios.library";
 /// What the search field's box holds beside its text (its icon, its "+"
 /// and their spacing), so the bar can give the text what is left.
 const SEARCH_BESIDE: f32 = 72.0;
+
+/// The Filters column's width where a host draws both parts of a gallery
+/// side by side (the Library window), a third of the room at most.
+const FILTERS_WIDTH: f32 = 280.0;
+
+/// The command turning culling's auto-advance on or off in the gallery
+/// the user works in.
+pub const AUTO_ADVANCE_COMMAND: &str = "vault.autoAdvance";
+
+/// The thumbnail sizes the Results' view menu offers, in points.
+const THUMB_SIZES: [u16; 4] = [80, 128, 192, 288];
+
+/// The name of a thumbnail size of [`THUMB_SIZES`] in the view menu.
+fn thumb_size_name(points: u16) -> Message {
+    match points {
+        80 => Message::new("gui-library-view-small", "Small thumbnails"),
+        128 => Message::new("gui-library-view-medium", "Medium thumbnails"),
+        192 => Message::new("gui-library-view-large", "Large thumbnails"),
+        _ => Message::new("gui-library-view-huge", "Extra large thumbnails"),
+    }
+}
 
 /// The labels, in the order darktable gives them F1 to F5.
 /// The keys the grid and the filmstrip read themselves: the thumbnails'
@@ -1724,8 +1748,6 @@ pub struct Library {
     /// ([`Library::search_keys_mut`]).
     search_keys: SearchKeys,
     pub entries: Vec<Entry>,
-    /// Culling: after a mark, the cursor moves to the next image.
-    pub auto_advance: bool,
     /// The active photo of the comparison chosen in the Compare place:
     /// what the marks act on there, instead of the gallery's selection,
     /// which Compare leaves alone ([`Library::set_compare_active`]).
@@ -1957,7 +1979,6 @@ impl Default for Library {
             parked: Vec::new(),
             focused: GalleryOptions::MAIN_PANEL.id.to_string(),
             search_keys: SearchKeys::builtin(),
-            auto_advance: false,
             compare_active: None,
             notes: Vec::new(),
             drop_hover: std::cell::Cell::new(None),
@@ -2176,6 +2197,47 @@ impl PresenceWords {
 }
 
 /// The images the views show.
+/// What a Results view drew this pass: its response and what its steps
+/// ran.
+struct Drawn {
+    response: egui::Response,
+    signals: Vec<Signal<String>>,
+}
+
+/// The photos a Results list shows, in the gallery's order.
+struct ListedPhotos<'a> {
+    entries: &'a [Entry],
+    order: &'a [usize],
+}
+
+impl egui_pop::views::list::ListRows<String> for ListedPhotos<'_> {
+    fn len(&self) -> usize {
+        self.order.len()
+    }
+
+    fn key(&self, row: usize) -> String {
+        self.entries[self.order[row]].id.clone()
+    }
+
+    fn label(&self, row: usize) -> String {
+        self.entries[self.order[row]].name.clone()
+    }
+
+    fn trailing(&self, row: usize) -> Option<String> {
+        let e = &self.entries[self.order[row]];
+        let stars = "★".repeat(e.rating.clamp(0, 5) as usize);
+        let flag = if e.rejected {
+            " ✕"
+        } else if e.picked {
+            " ⚑"
+        } else {
+            ""
+        };
+        let text = format!("{stars}{flag}");
+        (!text.is_empty()).then_some(text)
+    }
+}
+
 struct Items<'a> {
     entries: &'a [Entry],
     order: &'a [usize],
@@ -2425,6 +2487,46 @@ impl Library {
     /// The facet counts of the filter, as the vault counted them.
     pub fn set_facets(&mut self, facets: helios_vault::Facets) {
         self.view.facets = Some(facets);
+    }
+
+    /// Whether culling auto-advances in the gallery in force (the one
+    /// the user works in, outside a pass): after a rating, flag or
+    /// reject from the keyboard, the cursor moves to the next photo.
+    pub fn auto_advance(&self) -> bool {
+        self.view.auto_advance
+    }
+
+    /// Turns auto-advance on or off in the gallery in force; the other
+    /// galleries keep theirs.
+    pub fn set_auto_advance(&mut self, on: bool) {
+        self.view.auto_advance = on;
+    }
+
+    /// How the gallery in force shows its results.
+    pub fn results(&self) -> helios_template::ResultsDesc {
+        self.view.results()
+    }
+
+    /// Shows the gallery in force's results as `results` says (from the
+    /// workspace: nothing to keep again).
+    pub fn set_results(&mut self, results: &helios_template::ResultsDesc) {
+        self.view.set_results(results);
+        self.view.results_changed = false;
+    }
+
+    /// The galleries whose results the user showed another way (mode,
+    /// size) since the last call, with how they show now: for the host
+    /// to keep with the workspace.
+    pub fn take_results_changes(&mut self) -> Vec<(String, helios_template::ResultsDesc)> {
+        let mut out = Vec::new();
+        let galleries = std::iter::once((&self.view_id, &mut self.view))
+            .chain(self.parked.iter_mut().map(|(id, g)| (&*id, g)));
+        for (id, g) in galleries {
+            if std::mem::take(&mut g.results_changed) {
+                out.push((id.clone(), g.results()));
+            }
+        }
+        out
     }
 
     /// The id of the gallery in force: the one the filter, restriction
@@ -3765,7 +3867,8 @@ impl Library {
                 Signal::Activate { key } => self.activated = Some(key),
                 // A selection: the gallery's state holds it, cursor
                 // included, already.
-                Signal::Select { .. } | Signal::Zoom { .. } | Signal::DragOut { .. } => {}
+                Signal::Zoom { .. } => self.view.results_changed = true,
+                Signal::Select { .. } | Signal::DragOut { .. } => {}
                 Signal::Vetoed { step, reason } => self.notes.push(format!("{step}: {reason}")),
             }
         }
@@ -3834,7 +3937,7 @@ impl Library {
         self.mark(mark)?;
         // In Compare the mark went to its active photo: the gallery's
         // cursor stays where it was.
-        if self.auto_advance && self.compare_target().is_none() {
+        if self.view.auto_advance && self.compare_target().is_none() {
             self.step(1);
         }
         Ok(())
@@ -4028,22 +4131,60 @@ impl Library {
         }
     }
 
-    /// The search field; the sort and the count; auto-advance and
-    /// Compare. Each group on a line of its own, so a narrow panel does
-    /// not wrap the count away from what it counts.
-    fn toolbar(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+    /// The Filters' search field: what the gallery shows, typed.
+    fn search_bar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
-        let advance = crate::i18n::text(
-            &ctx,
-            Message::new("gui-library-auto-advance", "Auto-advance"),
-        );
+        let mut asked = None;
+        // Wrapped, the field no wider than what is left of the line: a
+        // narrow panel takes the bar on several lines rather than widen
+        // its content past its edge (and cut what comes under it).
+        ui.horizontal_wrapped(|ui| {
+            // The field's box holds its icon and its "+" beside the text.
+            let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
+            let mut field = SearchField::new(LIBRARY).label(search).width(width);
+            if let Some(app) = &self.app {
+                field = field.app(app);
+            }
+            asked = field.show(ui, &mut self.view.search).changed;
+        });
+        let now = ctx.input(|i| i.time);
+        if let Some(filter) = asked {
+            self.view.typed = Some((filter.clone(), now));
+            self.filtered(filter);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                crate::recent_filters::TYPED_REST,
+            ));
+        }
+        // A filter typed counts as used once it rests.
+        if self.view.typed.as_ref().is_some_and(|(f, at)| {
+            now - at >= crate::recent_filters::TYPED_REST && *f == self.view.filter
+        }) {
+            self.record_filter();
+        }
+    }
+
+    /// The Results' bar: the count and the sort on a line; then how the
+    /// results show (thumbnails at a size, or a list), auto-advance,
+    /// Compare and Import. Each group on a line of its own, so a narrow
+    /// panel does not wrap the count away from what it counts.
+    fn results_bar(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+        let ctx = ui.ctx().clone();
         let count = crate::i18n::text(
             &ctx,
             Message::new("gui-library-count", "{ $shown } of { $total }")
                 .with("shown", self.view.order.len())
                 .with("total", self.entries.len()),
         );
+        if options.sort_count {
+            ui.horizontal_wrapped(|ui| {
+                self.sort_menu(ui);
+                ui.muted(count);
+            });
+        }
+        if !options.view_options {
+            return;
+        }
         let import = self
             .import_offered
             .then(|| crate::i18n::text(&ctx, Message::new("gui-library-import", "Import…")));
@@ -4073,70 +4214,115 @@ impl Library {
             )
         };
         let can_compare = comparing || self.view.state.selection().len() >= 2;
-        let mut asked = None;
-        // Wrapped, the field no wider than what is left of the line: a
-        // narrow panel takes the bar on several lines rather than widen
-        // its content past its edge (and cut what comes under it).
-        if options.has_search() || (import.is_some() && options.has_sources()) {
-            ui.horizontal_wrapped(|ui| {
-                if let Some(import) = import.filter(|_| options.has_sources())
-                    && helios_ui::action(ui, Action::Secondary, &import).clicked()
-                {
-                    self.import_asked = true;
-                }
-                if !options.has_search() {
-                    return;
-                }
-                // The field's box holds its icon and its "+" beside the text.
-                let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
-                let mut field = SearchField::new(LIBRARY).label(search).width(width);
-                if let Some(app) = &self.app {
-                    field = field.app(app);
-                }
-                asked = field.show(ui, &mut self.view.search).changed;
-            });
+        ui.horizontal_wrapped(|ui| {
+            self.view_menu(ui);
+            self.auto_advance_toggle(ui);
+            if ui
+                .add_enabled_ui(can_compare, |ui| {
+                    helios_ui::action(ui, Action::Secondary, &compare)
+                })
+                .inner
+                .tip(compare_hint)
+                .clicked()
+            {
+                crate::dialogs::request(
+                    ui.ctx(),
+                    crate::dialogs::Request::Run(
+                        crate::comparison::COMMAND.into(),
+                        Value::Null,
+                        helios_shell::commands::Origin::User,
+                    ),
+                );
+            }
+            if let Some(import) = import
+                && helios_ui::action(ui, Action::Secondary, &import).clicked()
+            {
+                self.import_asked = true;
+            }
+        });
+    }
+
+    /// How the results show, as a file browser's dialog offers it:
+    /// thumbnails at a few sizes, or a list. A size zoomed to (Ctrl and
+    /// the wheel, + and -) shows as one more choice.
+    fn view_menu(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        let word = |m: Message| crate::i18n::text(&ctx, m);
+        let size = self.view.state.size().round() as u16;
+        let mut current = match self.view.mode {
+            ResultsMode::List => None,
+            ResultsMode::Thumbnails => Some(size),
+        };
+        let mut options: Vec<(Option<u16>, String)> = THUMB_SIZES
+            .iter()
+            .map(|&points| (Some(points), word(thumb_size_name(points))))
+            .collect();
+        if let Some(s) = current
+            && !THUMB_SIZES.contains(&s)
+        {
+            let custom = word(
+                Message::new("gui-library-view-custom", "Thumbnails, { $size } points")
+                    .with("size", u32::from(s)),
+            );
+            let at = THUMB_SIZES.iter().filter(|&&p| p < s).count();
+            options.insert(at, (Some(s), custom));
         }
-        if options.sort_count {
-            ui.horizontal_wrapped(|ui| {
-                self.sort_menu(ui);
-                ui.muted(count);
-            });
-        }
-        if options.view_options {
-            ui.horizontal_wrapped(|ui| {
-                widgets::checkbox(ui, &mut self.auto_advance, advance.as_str());
-                if ui
-                    .add_enabled_ui(can_compare, |ui| {
-                        helios_ui::action(ui, Action::Secondary, &compare)
-                    })
-                    .inner
-                    .tip(compare_hint)
-                    .clicked()
-                {
-                    crate::dialogs::request(
-                        ui.ctx(),
-                        crate::dialogs::Request::Run(
-                            crate::comparison::COMMAND.into(),
-                            Value::Null,
-                            helios_shell::commands::Origin::User,
-                        ),
-                    );
+        options.push((None, word(Message::new("gui-library-view-list", "List"))));
+        let name = word(Message::new("gui-library-view", "View as"));
+        let tip = word(Message::new(
+            "gui-library-view-tip",
+            "Show the results as thumbnails of a size, or as a list",
+        ));
+        if helios_ui::choice(ui, "helios.library.view", &name, &mut current, &options)
+            .tip(&tip)
+            .changed()
+        {
+            match current {
+                Some(points) => {
+                    self.view.mode = ResultsMode::Thumbnails;
+                    self.view.state.set_size(f32::from(points));
                 }
-            });
+                None => self.view.mode = ResultsMode::List,
+            }
+            self.view.results_changed = true;
         }
-        let now = ctx.input(|i| i.time);
-        if let Some(filter) = asked {
-            self.view.typed = Some((filter.clone(), now));
-            self.filtered(filter);
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                crate::recent_filters::TYPED_REST,
-            ));
-        }
-        // A filter typed counts as used once it rests.
-        if self.view.typed.as_ref().is_some_and(|(f, at)| {
-            now - at >= crate::recent_filters::TYPED_REST && *f == self.view.filter
-        }) {
-            self.record_filter();
+    }
+
+    /// Auto-advance, a discreet toggle: the fast-forward icon, muted off
+    /// and in the accent on; named, and said pressed or not, for screen
+    /// readers. It runs `vault.autoAdvance`, which turns it on or off in
+    /// the gallery the user works in (this one) and keeps it with that
+    /// view in the workspace.
+    fn auto_advance_toggle(&mut self, ui: &mut Ui) {
+        let on = self.view.auto_advance;
+        let tip = self.mark_tip(
+            ui.ctx(),
+            Message::new(
+                "gui-library-auto-advance-tip",
+                "Auto-advance: after a rating, flag or reject from the keyboard, go to the next photo",
+            ),
+            AUTO_ADVANCE_COMMAND,
+        );
+        let tone = if on {
+            IconTone::Accent
+        } else {
+            IconTone::Muted
+        };
+        let response = ui.add(
+            IconWidget::new(IconSource::named("phosphor:fast-forward", "library bar"))
+                .tone(tone)
+                .label(&tip)
+                .selected(on),
+        );
+        if response.clicked() {
+            crate::dialogs::request(
+                ui.ctx(),
+                crate::dialogs::Request::Run(
+                    AUTO_ADVANCE_COMMAND.into(),
+                    json!({ "on": !on }),
+                    helios_shell::commands::Origin::User,
+                ),
+            );
         }
     }
 
@@ -4572,9 +4758,10 @@ impl Library {
         )
     }
 
-    /// The Library panel: the search field, the sections (the Metadata
-    /// section edits the selection), and the
-    /// thumbnail grid with the culling keys.
+    /// The main gallery's two parts side by side: its Filters (the
+    /// search field, the sections; the Metadata section edits the
+    /// selection) and its Results (the thumbnail grid or the list, with
+    /// the culling keys).
     pub fn grid(&mut self, ui: &mut Ui) {
         self.show(ui, &GalleryOptions::MAIN_PANEL);
     }
@@ -4597,25 +4784,75 @@ impl Library {
         self.activate_focused();
     }
 
-    /// [`Library::show`], its gallery in force.
+    /// [`Library::show`], its gallery in force: the parts its host asks.
     fn show_view(&mut self, ui: &mut Ui, options: &GalleryOptions) {
         self.receive(ui.ctx());
-        // The search field (with the import button) and the marks bar
-        // stay in place while the library is empty.
-        self.toolbar(ui, options);
-        if options.has_search() {
-            self.restrictions_line(ui);
-            self.facets_bar(ui);
+        match options.parts {
+            Parts::Filters => self.filters_part(ui, options),
+            Parts::Results => self.results_part(ui, options),
+            Parts::Both => {
+                // The Filters in a column at the start, the Results
+                // taking the rest, a line between them; each column in
+                // its own rect, clipped there.
+                let gap = ui.spacing().item_spacing.x;
+                let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                let filters_w = FILTERS_WIDTH.min(rect.width() / 3.0).max(0.0);
+                let filters =
+                    egui::Rect::from_min_size(rect.min, egui::vec2(filters_w, rect.height()));
+                let results = egui::Rect::from_min_max(
+                    egui::pos2(filters.max.x + 2.0 * gap, rect.min.y),
+                    rect.max,
+                );
+                let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+                ui.painter()
+                    .vline(filters.max.x + gap, rect.y_range(), stroke);
+                let mut column = |salt: &str, rect: egui::Rect| {
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(salt)
+                            .max_rect(rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    child.set_clip_rect(rect.intersect(child.clip_rect()));
+                    child
+                };
+                let mut f = column("helios.library.filters", filters);
+                self.filters_part(&mut f, options);
+                let mut r = column("helios.library.results", results);
+                self.results_part(&mut r, options);
+            }
         }
-        if options.has_sources() {
-            self.folders_section(ui);
-            self.albums_section(ui);
-            self.keywords_section(ui);
-            self.imports_section(ui);
-        }
-        if options.marks {
-            self.metadata_section(ui);
-        }
+    }
+
+    /// The gallery's Filters: the search field, what restricts the view,
+    /// the facets, the sources and (until they move to the metadata
+    /// panel) the current photo's marks. No photos.
+    fn filters_part(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+        let id = format!("helios.library.filters.{}", options.id);
+        helios_ui::scroll(ui, &id, Scroll::Region, |ui| {
+            if options.has_search() {
+                self.search_bar(ui);
+                self.restrictions_line(ui);
+                self.facets_bar(ui);
+            }
+            if options.has_sources() {
+                self.folders_section(ui);
+                self.albums_section(ui);
+                self.keywords_section(ui);
+                self.imports_section(ui);
+            }
+            if options.marks {
+                self.metadata_section(ui);
+            }
+        });
+    }
+
+    /// The gallery's Results: its bar, then the photos as thumbnails or
+    /// as a list, with the culling keys.
+    fn results_part(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+        // The bar (with the import button) stays in place while the
+        // library is empty.
+        self.results_bar(ui, options);
         if self.entries.is_empty() {
             let text = crate::i18n::text(
                 ui.ctx(),
@@ -4644,7 +4881,9 @@ impl Library {
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
         let keymap = grid_keys();
         let words = PresenceWords::of(ui.ctx());
-        let out = {
+        let out = if self.view.mode == ResultsMode::List {
+            self.results_list(ui, &label)
+        } else {
             let items = Items {
                 entries: &self.entries,
                 order: &self.view.order,
@@ -4668,7 +4907,12 @@ impl Library {
             if let Some(app) = &self.app {
                 grid = grid.app(app);
             }
-            grid.show(ui, &mut self.view.state, &items, &thumbs)
+            let out = grid.show(ui, &mut self.view.state, &items, &thumbs);
+            (out.response, out.signals)
+        };
+        let out = Drawn {
+            response: out.0,
+            signals: out.1,
         };
         self.after_pass(ui.ctx());
         let in_view = self.in_view.borrow().clone();
@@ -4905,6 +5149,40 @@ impl Library {
         if helios_ui::action(ui, Action::Secondary, &label).clicked() {
             self.import_asked = true;
         }
+    }
+
+    /// The Results as a list (egui-pop's list view): a row per photo,
+    /// its name, its stars and its flag; the selection is the gallery's,
+    /// as in the grid.
+    fn results_list(&mut self, ui: &mut Ui, label: &str) -> (egui::Response, Vec<Signal<String>>) {
+        use egui_pop::views::list::{ListView, Signal as ListSignal};
+        let selection = self.view.state.selection();
+        let (keys, cursor) = (selection.keys().to_vec(), selection.cursor().cloned());
+        self.view.list.set_selection(keys, cursor);
+        let mut rows = ListedPhotos {
+            entries: &self.entries,
+            order: &self.view.order,
+        };
+        let mut list = ListView::new("list")
+            .label(label)
+            .mode(egui_pop::views::Mode::Multiple);
+        if let Some(app) = &self.app {
+            list = list.app(app);
+        }
+        let out = list.show(ui, &mut self.view.list, &mut rows);
+        let mut signals = Vec::new();
+        for s in out.signals {
+            match s {
+                ListSignal::Select { keys, cursor } => {
+                    self.view.state.set_selection(keys.clone(), cursor.clone());
+                    signals.push(Signal::Select { keys, cursor });
+                }
+                ListSignal::Vetoed { step, reason } => {
+                    signals.push(Signal::Vetoed { step, reason });
+                }
+            }
+        }
+        (out.response, signals)
     }
 
     /// The Filmstrip panel: one row, the grid's selection.

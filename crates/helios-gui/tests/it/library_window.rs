@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use egui::{ViewportId, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::api::windows::WindowId;
 use helios_gui::library::{Entry, WINDOW_GALLERY};
 use helios_gui::shell::{LIBRARY_WINDOW, LIBRARY_WINDOW_COMMAND};
@@ -129,6 +129,35 @@ fn the_library_window_s_selection_is_the_one_commands_act_on() {
     let library = h.state().library();
     assert_eq!(library.entries[1].rating, 4);
     assert_eq!(library.entries[0].rating, 0, "only the selection");
+}
+
+#[test]
+fn auto_advance_ticked_in_the_library_window_is_that_window_s_only() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    // The toggle in the window's Results bar, by its name (accesskit).
+    let toggle = h
+        .get_by_role_and_label(egui::accesskit::Role::Window, "Library")
+        .get_by_label_contains("Auto-advance");
+    assert_eq!(
+        toggle.accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::False)
+    );
+    let at = toggle.rect().center();
+    click_at(&mut h, at);
+    h.run_steps(3);
+    let mut lib = h.state().library_mut();
+    assert!(
+        lib.with_gallery(WINDOW_GALLERY, |l| l.auto_advance()),
+        "on in the window"
+    );
+    assert!(
+        !lib.with_gallery(helios_gui::library::MAIN_GALLERY, |l| l.auto_advance()),
+        "the main window's Results keep theirs"
+    );
 }
 
 #[test]

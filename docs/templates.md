@@ -257,7 +257,16 @@ What the workspace sets for the library (optional):
   its other settings changing keep the search typed. Validation refuses
   a query with no criterion, a word it does not know, more than 5 stars
   and a tag with a space (the search field could not show it).
-- `auto_advance` starts culling with auto-advance on.
+- `auto_advance` starts culling with auto-advance on: in the main
+  window's Library view, and in every other view that sets none of its
+  own (2026-11-17: each view has its own, `views.<id>.auto_advance`;
+  the Results bar's toggle and `vault.autoAdvance` write the view the
+  user works in, one undo step).
+- `results` (2026-11-17) is how the main window's Library view shows
+  its photos: `{"mode": "list"}` or thumbnails of a `size` in points
+  (48 to 512), `{"size": 192}`; thumbnails at the default size when
+  absent. The other views' is `views.<id>.results`. The Results bar's
+  "View as" menu and a zoom write it.
 - `compare` (2026-11-11) makes the workspace a Compare focus: it opens
   in the Compare place (`helios.comparison`), two to four photos side by
   side, the selection's until photos are chosen (`library.compare`, `C`).

@@ -193,8 +193,26 @@ pub fn darkroom(specs: &[PanelSpec]) -> Layout {
             if let Some(at) = panels.iter().position(|p| p.as_str() == modules) {
                 panels.insert(at + 1, PANEL_HISTORY);
             }
+            // The Library's Filters above its Results, both in view: an
+            // explorer's two panels side by side, never tabs of one group.
+            let filters = panels
+                .iter()
+                .position(|p| p.as_str() == crate::library::FILTERS_PANEL)
+                .filter(|_| panels.len() > 1)
+                .map(|at| panels.remove(at));
             let active = panels.iter().position(|p| p.as_str() == image).unwrap_or(0);
-            (!panels.is_empty()).then_some((area, Node::Tabs { panels, active }))
+            let tabs = Node::Tabs { panels, active };
+            let node = match filters {
+                Some(filters) => Node::Split {
+                    vertical: true,
+                    ratio: FILTERS_SHARE,
+                    a: Box::new(Node::tab(filters)),
+                    b: Box::new(tabs),
+                },
+                None => tabs,
+            };
+            (!matches!(&node, Node::Tabs { panels, .. } if panels.is_empty()))
+                .then_some((area, node))
         })
         .collect();
     Layout {
@@ -208,11 +226,16 @@ pub fn darkroom(specs: &[PanelSpec]) -> Layout {
     }
 }
 
+/// The share of a side's height the Library's Filters panel opens with,
+/// above the panels under it.
+const FILTERS_SHARE: f32 = 0.4;
+
 /// The library layout of these panels (see [`LIBRARY`]).
 pub fn library(specs: &[PanelSpec]) -> Layout {
     only(
         specs,
         &[
+            (Area::StartSide, "helios.filters"),
             (Area::Center, "helios.vault"),
             (Area::EndSide, "helios.stacks"),
         ],

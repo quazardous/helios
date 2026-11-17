@@ -19,6 +19,7 @@
   "hidden": [
     "helios.graph",
     "helios.vault",
+    "helios.filters",
     "helios.modules",
     "helios.masks",
     "helios.queue",

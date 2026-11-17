@@ -250,7 +250,13 @@ fn a_workspace_from_import_cull_dedupe_is_laid_out_and_set_for_culling() {
     shell.load_layout().unwrap();
     shell.apply_template_tools(&kept.template.meta.name, &kept.template.tools);
     shell.apply_template_library(kept.template.library.as_ref());
-    assert!(shell.library().auto_advance);
+    assert!(shell.library().auto_advance());
+    // Written before each view had its own: every view takes it.
+    assert!(
+        shell
+            .library_mut()
+            .with_gallery(helios_gui::library::WINDOW_GALLERY, |l| l.auto_advance())
+    );
     assert!(shell.suggests_stacks());
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();

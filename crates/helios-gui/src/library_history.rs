@@ -68,7 +68,12 @@ use helios_vault::{Changes, Replayed};
 pub const LIBRARY: ScopeId = ScopeId::from_static("library");
 
 /// The panels that make the library's scope active.
-pub const FOCUS: &[&str] = &["helios.vault", "helios.filmstrip", "helios.duplicates"];
+pub const FOCUS: &[&str] = &[
+    "helios.vault",
+    "helios.filters",
+    "helios.filmstrip",
+    "helios.duplicates",
+];
 
 /// Step ids start here, apart from the value store's (egui-pop wants
 /// them unique within the owner).

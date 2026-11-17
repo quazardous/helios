@@ -2763,6 +2763,14 @@ impl<S: Store + 'static> Persist<S> {
                 .map(|(stack, expanded)| Write::Expand(stack, expanded)),
         );
         self.pump(shell);
+        // A view's results shown another way (thumbnails, list, a
+        // size): kept with that view in the workspace.
+        let changes = shell.library_mut().take_results_changes();
+        for (gallery, results) in changes {
+            if let Err(e) = shell.keep_library_results(&gallery, results) {
+                log::warn!(target: "helios", "library results not kept: {e}");
+            }
+        }
         // The library sorted another way: read again in that order.
         if shell.library_mut().take_resort() {
             self.ask_fill(shell, false);
