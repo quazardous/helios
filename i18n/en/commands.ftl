@@ -265,6 +265,9 @@ command-import-history-list =
 command-import-reconnect =
     .title = Connect an import account again, from the step that failed (`account`)
 
+command-import-signOut =
+    .title = Sign an import account out: its keys and tokens are forgotten, it stays listed (`account`); a choice of photos under way on it is cancelled first
+
 command-import-sources-add =
     .title = Add an import source, as the import window's "Add…" wizard does: `connector` (its id) and what its setup asks (`path`: a folder, or a volume's mount point; `volume`: a mounted volume's id or label; `account`: an account of the connector), then `name` (else the folder's, volume's or account's), `profile` (an import profile's id; else the connector's default, else `everyday`), `auto` (true: the automatic import the connector offers) and `params` (the connector's own parameters); selected in the import window when it is open
 

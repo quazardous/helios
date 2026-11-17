@@ -31,6 +31,12 @@
 //!   again, from the step that failed.
 //! - `import.signOut`: forgets `account`'s secrets; it stays listed, not
 //!   connected.
+//!
+//! `import.signOut` and `import.disconnect` pass the account once through
+//! `account.signedOut` or `account.removed` ([`crate::account_gone`]): a
+//! choice of photos under way on it is cancelled first, then its secrets
+//! forgotten, then the import window, the Storage and Settings pages and
+//! the health checks follow, in that order.
 //! - `import.connection` (read-only): the connection running, `null`
 //!   when none: `account`, `state` (`working`, `form`, `browser`,
 //!   `connected`, `failed`, `cancelled`), `step`, and `fields`, `error`,
@@ -65,6 +71,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::import_accounts::{Asked, Current, Labels, OauthConnectors, state_text};
+use crate::account_gone::{self, How};
 
 /// Lists the accounts (read-only).
 pub const ACCOUNTS: &str = "import.accounts";
@@ -88,10 +95,6 @@ pub const ACCOUNT_CONNECTORS: &str = "import.accountConnectors";
 pub const RENAME: &str = "import.renameAccount";
 /// Disconnects an account, and keeps or forgets its sources.
 pub const DISCONNECT: &str = "import.disconnect";
-/// Said once an account is removed (its saved sources forgotten).
-pub const ACCOUNT_REMOVED: &str = "account.removed";
-/// Said once an account is signed out, its saved sources kept.
-pub const ACCOUNT_SIGNED_OUT: &str = "account.signedOut";
 
 fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
@@ -143,7 +146,8 @@ impl Shell {
                 w.accounts.identity.clone(),
             )
         };
-        self.register_account_commands(&book, &secrets, web.clone(), &current, &labels, &identity);
+        self.register_account_commands(&book, &current, &labels, &identity);
+        self.listen_account_points(&book, &secrets, web.clone());
         let oauth = self.import.get_mut().accounts.oauth.clone();
         self.register_client_commands(&secrets, web, &oauth, &labels);
     }
@@ -238,8 +242,6 @@ impl Shell {
     fn register_account_commands(
         &mut self,
         book: &Arc<dyn AccountBook>,
-        secrets: &Arc<dyn Secrets>,
-        web: Option<Arc<dyn WebSteps>>,
         current: &Current,
         labels: &Labels,
         identity: &super::import_accounts::IdentityConnectors,
@@ -319,22 +321,6 @@ impl Shell {
                 Ok(json!({ "account": id, "name": name.trim(), "before": before }))
             },
         );
-        let (b, s) = (book.clone(), secrets.clone());
-        let sign_out = self.register(
-            CommandSpec::new(
-                SIGN_OUT,
-                "Sign an import account out: its keys and tokens are forgotten, it stays listed (`account`)",
-                "Library",
-            ),
-            move |args, _| {
-                let id = arg(args, "account")?;
-                let account = match &web {
-                    Some(web) => web.sign_out(b.as_ref(), s.as_ref(), id)?,
-                    None => helios_connect::account::sign_out(b.as_ref(), s.as_ref(), id)?,
-                };
-                Ok(json!({ "account": account.id, "state": account.state.name() }))
-            },
-        );
         let c = current.clone();
         let connection = self.register(
             CommandSpec::new(
@@ -373,7 +359,7 @@ impl Shell {
                 })
             },
         );
-        for r in [listed, connectors, rename, sign_out, connection, answer] {
+        for r in [listed, connectors, rename, connection, answer] {
             if let Err(e) = r {
                 log::warn!("import accounts: {e}");
             }
@@ -456,6 +442,7 @@ impl Shell {
     pub(super) fn account_command(&mut self, command: &str, args: &Value) -> Result<Value, String> {
         let (connector, account) = match command {
             DISCONNECT => return self.disconnect_account(args),
+            SIGN_OUT => return self.sign_out_account(args),
             ADD_SOURCE => (arg(args, "connector")?.to_owned(), None),
             RECONNECT => {
                 let id = arg(args, "account")?.to_owned();
@@ -494,6 +481,135 @@ impl Shell {
 }
 
 impl Shell {
+    /// `import.signOut`, on the interface thread: the account signed out
+    /// through `account.signedOut`; it stays listed, not connected.
+    fn sign_out_account(&mut self, args: &Value) -> Result<Value, String> {
+        let id = arg(args, "account")?.to_owned();
+        let book = self
+            .import
+            .get()
+            .accounts
+            .book
+            .clone()
+            .ok_or("accounts need a library open")?;
+        if book.account(&id)?.is_none() {
+            return Err(format!("no account {id}"));
+        }
+        self.account_gone(&id, How::SignedOut)?;
+        let state = book
+            .account(&id)?
+            .map_or(AccountState::NotConnected, |a| a.state);
+        Ok(json!({ "account": id, "state": state.name() }))
+    }
+
+    /// The account `id` signed out or removed: passed once through its
+    /// point (`account.signedOut`, `account.removed`), its listeners in
+    /// their declared order, then said on the journal with those that
+    /// ran. What failed (a keyring that refused) is the answer.
+    pub(super) fn account_gone(&mut self, id: &str, how: How) -> Result<(), String> {
+        let bus = self.core.app.handle().bus();
+        let reactions = account_gone::pass(
+            &*bus,
+            account_gone::Gone {
+                account: id.to_owned(),
+                how,
+            },
+        );
+        self.core.app.handle().publish(
+            "helios",
+            None,
+            account_gone::name(how),
+            json!({ "account": id, "ran": reactions.ran }),
+        );
+        match reactions.failed.into_iter().next() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// The listeners of `account.signedOut` and `account.removed`
+    /// ([`crate::account_gone`]), each in its declared place, over the
+    /// accounts in `book`, their secrets in `secrets`, revoked through
+    /// `web` where the service can.
+    fn listen_account_points(
+        &mut self,
+        book: &Arc<dyn AccountBook>,
+        secrets: &Arc<dyn Secrets>,
+        web: Option<Arc<dyn WebSteps>>,
+    ) {
+        let bus = self.core.app.handle().bus();
+        let window = self.import.state.clone();
+        let mut listened = vec![account_gone::listen_local(
+            &*bus,
+            account_gone::CANCEL_PICKING,
+            move |gone, _| window.borrow_mut().accounts.cancel_for(&gone.account),
+        )];
+        let (b, s) = (book.clone(), secrets.clone());
+        listened.push(account_gone::listen_local(
+            &*bus,
+            account_gone::CREDENTIALS,
+            move |gone, reactions| {
+                let id = gone.account.as_str();
+                let signed_out = match &web {
+                    Some(web) => web.sign_out(b.as_ref(), s.as_ref(), id).map(drop),
+                    None => helios_connect::account::sign_out(b.as_ref(), s.as_ref(), id).map(drop),
+                };
+                let done = signed_out.and_then(|()| match gone.how {
+                    How::SignedOut => Ok(()),
+                    How::Removed => helios_connect::account::remove(b.as_ref(), s.as_ref(), id),
+                });
+                if let Err(e) = done {
+                    reactions.failed.push(e);
+                }
+            },
+        ));
+        let window = self.import.state.clone();
+        listened.push(account_gone::listen_local(
+            &*bus,
+            account_gone::SOURCES,
+            move |gone, _| {
+                let mut w = window.borrow_mut();
+                let removed = gone.how == How::Removed;
+                if removed {
+                    let using: Vec<super::import_sources::SourceKey> = w
+                        .sources
+                        .list
+                        .iter()
+                        .filter(|s| s.account.as_deref() == Some(gone.account.as_str()))
+                        .filter_map(super::import_sources::SavedSource::key)
+                        .collect();
+                    for key in &using {
+                        w.forget_source(key);
+                    }
+                }
+                w.accounts.follow_gone(&gone.account, removed);
+            },
+        ));
+        let app = self.core.app.handle().clone();
+        listened.push(account_gone::listen_local(
+            &*bus,
+            account_gone::STORAGE,
+            // The volumes are named by the accounts behind them.
+            move |_, _| read_fact(&app, super::reads::VOLUMES_CHANGED),
+        ));
+        let app = self.core.app.handle().clone();
+        listened.push(account_gone::listen_local(
+            &*bus,
+            account_gone::SETTINGS,
+            move |gone, _| read_fact(&app, account_gone::name(gone.how)),
+        ));
+        let runner = self.core.health.cards_runner.clone();
+        listened.push(account_gone::listen_local(
+            &*bus,
+            account_gone::HEALTH,
+            move |_, _| super::health::recheck_accounts(&runner),
+        ));
+        for e in listened.into_iter().filter_map(Result::err) {
+            self.notes
+                .push(format!("{}: {e}", account_gone::SIGNED_OUT));
+        }
+    }
+
     /// `import.disconnect`, on the interface thread: the account signed
     /// out (its token revoked where the service can, its secrets
     /// forgotten), then its sources kept with it, or both forgotten.
@@ -503,7 +619,7 @@ impl Shell {
         if asked.is_some_and(|s| s != "keep" && s != "forget") {
             return Err("`sources` is \"keep\" or \"forget\"".into());
         }
-        let mut w = self.import.get_mut();
+        let w = self.import.get_mut();
         let book = w
             .accounts
             .book
@@ -529,30 +645,27 @@ impl Shell {
                 ));
             }
         };
-        w.accounts.sign_out(&id)?;
-        if !keep {
-            for key in &using {
-                w.forget_source(key);
-            }
-            book.remove(&id)?;
-        }
         drop(w);
-        // Said on the bus: the Settings app's account reads follow it.
-        let said = if keep {
-            ACCOUNT_SIGNED_OUT
-        } else {
-            ACCOUNT_REMOVED
-        };
-        self.core
-            .app
-            .handle()
-            .publish("helios", None, said, json!({ "account": id }));
-        self.read_fact(said);
+        // Said once on the bus: its picking cancelled first, then its
+        // secrets, the import window, the Storage and Settings pages and
+        // the health checks, in order (`crate::account_gone`).
+        let how = if keep { How::SignedOut } else { How::Removed };
+        self.account_gone(&id, how)?;
         Ok(json!({
             "account": id,
             "removed": !keep,
             "sources": if using.is_empty() { "none" } else if keep { "kept" } else { "forgotten" },
         }))
+    }
+}
+
+/// A fact the Settings app's reads follow, given to its read kernel.
+fn read_fact(app: &egui_pop::api::app::AppHandle, name: &str) {
+    if let Some(k) = app
+        .service(&egui_pop::api::admin::ADMIN)
+        .and_then(|a| a.reads())
+    {
+        k.event(name);
     }
 }
 

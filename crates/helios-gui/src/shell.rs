@@ -3650,6 +3650,10 @@ impl Shell {
                 "Connect an import account again, from the step that failed (`account`)",
             ),
             (
+                accounts_admin::SIGN_OUT,
+                "Sign an import account out: its keys and tokens are forgotten, it stays listed (`account`); a choice of photos under way on it is cancelled first",
+            ),
+            (
                 accounts_admin::DISCONNECT,
                 "Disconnect an import account (`account`): its token revoked where the service allows, its secrets forgotten; the saved sources using it are kept with it, not connected (`sources`: \"keep\") or forgotten with it (\"forget\"); an account no source uses is forgotten",
             ),

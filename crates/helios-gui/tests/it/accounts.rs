@@ -736,6 +736,8 @@ struct Picks {
     sessions: Arc<std::sync::atomic::AtomicU32>,
     expired: u32,
     end: End,
+    /// How many pickings saw their cancel.
+    cancelled: Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// How the fake service's page ends.
@@ -797,6 +799,7 @@ impl helios_connect::ConnectorProvider for Picks {
             expired: self.expired,
             end: self.end,
             current: std::sync::Mutex::new(0),
+            cancelled: self.cancelled.clone(),
         }))
     }
 }
@@ -806,6 +809,7 @@ struct PickConnector {
     expired: u32,
     end: End,
     current: std::sync::Mutex<u32>,
+    cancelled: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl helios_connect::Connector for PickConnector {
@@ -817,6 +821,7 @@ impl helios_connect::Connector for PickConnector {
                 sessions: Arc::default(),
                 expired: 0,
                 end: End::Wait,
+                cancelled: Arc::default(),
             }
             .manifest()
             .caps,
@@ -905,6 +910,8 @@ impl helios_connect::Connector for PickConnector {
         }
         while Instant::now() < deadline {
             if cancel.is_cancelled() {
+                self.cancelled
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 return Err(helios_connect::ConnectorError::Cancelled);
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -941,6 +948,7 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
         sessions: sessions.clone(),
         expired: 1,
         end: End::Wait,
+        cancelled: Arc::default(),
     }));
     shell.set_import_browser(opened.opener());
     shell.set_import_remote(Arc::new(
@@ -1183,11 +1191,43 @@ fn picking_world_with(
     Imported,
     Arc<std::sync::atomic::AtomicU32>,
 ) {
+    let w = picking_world_whole(sources, end, state);
+    (w.h, w.opened, w.folder, w.imported, w.sessions)
+}
+
+/// What [`picking_world_whole`] made: the window, and what the test
+/// reads of its fakes.
+struct PickingWorld {
+    h: Harness<'static, Shell>,
+    opened: Opened,
+    folder: Arc<Folder>,
+    imported: Imported,
+    sessions: Arc<std::sync::atomic::AtomicU32>,
+    /// How many pickings saw their cancel.
+    cancelled: Arc<std::sync::atomic::AtomicU32>,
+    book: Arc<MemoryAccounts>,
+    secrets: Arc<MemorySecrets>,
+    /// The account's id; its token is in `secrets`.
+    account: String,
+}
+
+/// The token the account of [`picking_world_whole`] is signed in with.
+const PICK_TOKEN: &str = "tok-picks-fake";
+
+/// [`picking_world_with`], with the fakes' handles: the account signed
+/// in with [`PICK_TOKEN`] in the keyring.
+fn picking_world_whole(sources: Option<String>, end: End, state: AccountState) -> PickingWorld {
     let book = Arc::new(MemoryAccounts::default());
+    let secrets = Arc::new(MemorySecrets::default());
     let mut account = helios_connect::account::Account::new(PICKS, "ann@example.org", &[]);
     account.state = state;
+    account.secrets.push("refresh_token".into());
     book.save(&account).unwrap();
+    secrets
+        .set(&account.id, "refresh_token", PICK_TOKEN)
+        .unwrap();
     let sessions = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let cancelled = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let (opened, folder, imported) = (
         Opened::default(),
         // Helios's first-run setup done: the library has its folder, so
@@ -1200,6 +1240,7 @@ fn picking_world_with(
         sessions: sessions.clone(),
         expired: 0,
         end,
+        cancelled: cancelled.clone(),
     }));
     shell.set_import_browser(opened.opener());
     let seen = imported.clone();
@@ -1224,7 +1265,7 @@ fn picking_world_with(
         items.iter().map(|i| i.id.0 == "p1").collect()
     }));
     shell.set_import_library_folder(folder.clone());
-    shell.set_import_accounts(book, Arc::new(MemorySecrets::default()));
+    shell.set_import_accounts(book.clone(), secrets.clone());
     if let Some(doc) = sources {
         let doc = doc.replace("{account}", &account.id);
         shell.keep_import_sources_with(
@@ -1242,7 +1283,17 @@ fn picking_world_with(
         shown(h, "ann@example.org")
     });
     click(&mut h, "ann@example.org");
-    (h, opened, folder, imported, sessions)
+    PickingWorld {
+        h,
+        opened,
+        folder,
+        imported,
+        sessions,
+        cancelled,
+        book,
+        secrets,
+        account: account.id,
+    }
 }
 
 /// The whole flow from a fresh profile past Helios's first-run setup (no
@@ -1580,6 +1631,133 @@ fn choosing_waits_on_a_status_line_and_cancel_goes_back() {
     assert!(imported.lock().unwrap().is_empty());
 }
 
+/// A picking under way on the account, its service's page open: what
+/// [`signing_out_during_a_pick_cancels_it_first`] and
+/// [`removing_an_account_during_a_pick_cancels_it_first`] start from.
+fn picking_under_way() -> PickingWorld {
+    let mut w = picking_world_whole(None, End::Wait, AccountState::Connected);
+    until(&mut w.h, CHOOSE, |h| shown(h, CHOOSE));
+    w.h.get_by_label(CHOOSE).click();
+    until(&mut w.h, "the status line", |h| {
+        shown(
+            h,
+            "Choose your photos in the browser, press Done there, then come back here.",
+        )
+    });
+    assert_eq!(w.cancelled.load(std::sync::atomic::Ordering::SeqCst), 0);
+    w
+}
+
+/// Waits for the picking's thread to see its cancel: it ends at once,
+/// never at its deadline half an hour later.
+fn until_pick_cancelled(w: &mut PickingWorld) {
+    let cancelled = w.cancelled.clone();
+    until(&mut w.h, "the picking cancelled", move |_| {
+        cancelled.load(std::sync::atomic::Ordering::SeqCst) == 1
+    });
+}
+
+/// Signing an account out while its photos are being chosen: the picking
+/// is cancelled (its thread ends at once, never left to run on a signed-out
+/// account), the keyring forgets its token, and the import window says it
+/// is not connected in the same pass.
+#[test]
+fn signing_out_during_a_pick_cancels_it_first() {
+    let mut w = picking_under_way();
+    let id = w.account.clone();
+    run(
+        &mut w.h,
+        "import.signOut",
+        json!({ "account": id }),
+        Origin::User,
+    )
+    .unwrap();
+    assert!(
+        shown(&w.h, "This account is not connected."),
+        "the Detail column follows in the same pass"
+    );
+    assert!(!shown(
+        &w.h,
+        "Choose your photos in the browser, press Done there, then come back here."
+    ));
+    assert_eq!(w.secrets.get(&id, "refresh_token").unwrap(), None);
+    assert_eq!(
+        w.book.account(&id).unwrap().unwrap().state,
+        AccountState::NotConnected
+    );
+    until_pick_cancelled(&mut w);
+    // Still listed, to connect again.
+    assert!(shown(&w.h, "ann@example.org"));
+}
+
+/// Removing an account (Settings > Accounts' Disconnect, no source using
+/// it) while its photos are being chosen: the picking is cancelled, its
+/// token and document forgotten, and the import window's Sources column
+/// no longer lists it in the same pass.
+#[test]
+fn removing_an_account_during_a_pick_cancels_it_first() {
+    let mut w = picking_under_way();
+    let id = w.account.clone();
+    run(
+        &mut w.h,
+        "import.disconnect",
+        json!({ "account": id }),
+        Origin::User,
+    )
+    .unwrap();
+    assert!(
+        !shown(&w.h, "ann@example.org"),
+        "the Sources column follows in the same pass"
+    );
+    assert!(w.book.account(&id).unwrap().is_none());
+    assert_eq!(w.secrets.get(&id, "refresh_token").unwrap(), None);
+    until_pick_cancelled(&mut w);
+}
+
+/// The listeners of `account.signedOut` and `account.removed` as the
+/// desktop registers them, in the order they run: a reviewed dump
+/// (`tests/bus/accounts.txt`). The picking cancelled first, then the
+/// secrets, then whoever shows the account.
+#[test]
+fn the_account_points_listeners_run_in_a_declared_order() {
+    let (_world, h) = world();
+    assert_eq!(
+        helios_gui::account_gone::order(&*h.state().app().handle().bus()),
+        include_str!("../bus/accounts.txt")
+    );
+}
+
+/// Signing out is said once on the journal, with the listeners that ran
+/// in their order.
+#[test]
+fn signing_out_is_said_once_with_the_listeners_that_ran() {
+    let mut w = picking_under_way();
+    let id = w.account.clone();
+    let since = w.h.state().app().handle().last_event();
+    run(
+        &mut w.h,
+        "import.signOut",
+        json!({ "account": id }),
+        Origin::User,
+    )
+    .unwrap();
+    let said: Vec<_> =
+        w.h.state()
+            .app()
+            .handle()
+            .events_since(since)
+            .into_iter()
+            .filter(|e| e.name == "account.signedOut")
+            .collect();
+    assert_eq!(said.len(), 1, "said once");
+    let ran: Vec<&str> = helios_gui::account_gone::ORDER
+        .iter()
+        .map(|(id, _, _)| *id)
+        .collect();
+    assert_eq!(said[0].data["ran"], json!(ran));
+    assert_eq!(said[0].data["account"], json!(id));
+}
+
 /// Left without Done: said plainly, and the primary action again.
 #[test]
 fn nothing_chosen_says_so_and_offers_to_choose_again() {
@@ -1764,6 +1942,7 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
         sessions: Arc::default(),
         expired: 0,
         end: End::Done,
+        cancelled: Arc::default(),
     })));
     shell.set_import_remote(Arc::new(
         |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| {
@@ -1934,6 +2113,7 @@ fn a_failed_picking_and_a_warning_notice_are_written_to_the_log_file() {
         sessions: Arc::default(),
         expired: 1,
         end: End::Wait,
+        cancelled: Arc::default(),
     }));
     shell.set_import_browser(Opened::default().opener());
     shell.set_import_remote(Arc::new(

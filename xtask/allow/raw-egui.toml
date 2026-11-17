@@ -22,7 +22,6 @@
 "pointer_choice.rs" = 6
 "promise_line.rs" = 13
 "queue.rs" = 18
-"rule_editor_ui.rs" = 34
 "scopes.rs" = 4
 "shell.rs" = 5
 "shell/import_browsers.rs" = 7

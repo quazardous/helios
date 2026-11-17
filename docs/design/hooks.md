@@ -470,7 +470,33 @@ that became safe through `card.safe`: `cards.toast` (toast, Log),
 pass. Both are said on the journal with the listeners that ran (`ran`).
 The order is a reviewed dump (`crates/helios-gui/tests/bus/backups.txt`).
 
-### Slice 2e: an image opened or closed in the darkroom
+### Slice 2e: an import account signed out or removed
+
+Signing an account out wrote the account book and the keyring directly
+(`sign_out`, then `forget_source` per source and `book.remove` for a
+removal); the Settings app's rows followed `account.*` on the journal,
+nothing else did. A choice of photos under way on the account (the
+service's page, its thread waiting half an hour) was left running: it
+went on after the sign-out, and a token found gone could write the
+account back as "needs attention".
+
+Where it stands (2026-11-17): done. `helios_gui::account_gone` declares
+two points (`POINTS`), `account.signedOut` and `account.removed`, with
+one listener order for both (`ORDER`): `import.cancel-picking` (the
+picking cancelled, a sign-in running on the account given up, its
+photos chosen and not imported given up), `accounts.credentials` (the
+token revoked where the service can, the keyring's secrets forgotten,
+the account written "not connected" or forgotten), `import.sources` (the
+import window's Sources and Detail columns in the same pass, a removed
+account's saved sources forgotten), `storage.owners` (the Storage page's
+volumes named by their accounts), `settings.accounts` (Settings >
+Accounts' rows) and `health.accounts` (the plugin checks handed the
+accounts). `import.signOut` and `import.disconnect` check the request,
+then pass the point once on the interface's thread; the pass is said on
+the journal with the listeners that ran (`ran`). The order is a reviewed
+dump (`crates/helios-gui/tests/bus/accounts.txt`).
+
+### Slice 2f: an image opened or closed in the darkroom
 
 Switching images saved the edit open only on one path: the desktop's
 opening of a raw called `persist.close_image` first, an order that lived

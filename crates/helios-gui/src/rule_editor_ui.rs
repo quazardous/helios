@@ -7,7 +7,13 @@
 //! A tree does not fit the declarative forms (flat fields, one command):
 //! this is the one hand-drawn dialog of the Library.
 
-use egui::{Rect, RichText};
+use egui::{Rect, Ui};
+use egui_pop::core::input::Input;
+use egui_pop::core::overlay::{self, Kind as OverlayKind, OverlaySpec};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
+use egui_pop::core::widgets;
+use helios_ui::{Action, Scroll};
 use helios_vault::rules::{Match, RULE_FIELDS, RuleKind, Unit, rule_field};
 use serde_json::{Value, json};
 
@@ -178,57 +184,84 @@ pub fn show(
 ) -> (Option<Value>, Rect) {
     let mut asked = None;
     let faults = editor.faults();
-    let shown = egui::Modal::new(egui::Id::unique(RECT)).show(ctx, |ui| {
-        ui.set_min_width(560.0);
-        ui.heading(format!("{} · {}", words.title, editor.name));
-        ui.add_space(6.0);
-        egui::ScrollArea::vertical()
-            .max_height(ctx.content_rect().height() * 0.6)
-            .show(ui, |ui| {
-                let mut path = Vec::new();
-                node(
-                    ui,
-                    &editor.tree,
-                    &mut path,
-                    0,
-                    &faults,
-                    albums,
-                    words,
-                    &mut asked,
-                );
-            });
-        ui.add_space(8.0);
-        ui.separator();
+    let title = format!("{} · {}", words.title, editor.name);
+    // Escape or a click beside it cancels, as Cancel does.
+    let mut spec = OverlaySpec::new(RECT, &title, OverlayKind::Modal).width(DIALOG_WIDTH);
+    spec.dismiss_on_outside = true;
+    let mut open = true;
+    overlay::show(ctx, &spec, &mut open, None, |ui| {
+        ui.text_role(TextRole::Title, title.clone());
+        ui.space_role(Space::Inline);
+        helios_ui::scroll(ui, "helios.rule_editor.tree", Scroll::Dialog, |ui| {
+            let mut path = Vec::new();
+            node(
+                ui,
+                &editor.tree,
+                &mut path,
+                0,
+                &faults,
+                albums,
+                words,
+                &mut asked,
+            );
+        });
+        ui.space_role(Space::Group);
+        ui.divider();
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(editor.can_undo(), egui::Button::new(&words.undo))
-                .clicked()
-            {
+            let button = |ui: &mut Ui, enabled: bool, kind: Action, word: &str| {
+                ui.add_enabled_ui(enabled, |ui| helios_ui::action(ui, kind, word))
+                    .inner
+                    .clicked()
+            };
+            if button(ui, editor.can_undo(), Action::Secondary, &words.undo) {
                 asked = Some(json!({ "edit": "undo" }));
             }
-            if ui
-                .add_enabled(editor.can_redo(), egui::Button::new(&words.redo))
-                .clicked()
-            {
+            if button(ui, editor.can_redo(), Action::Secondary, &words.redo) {
                 asked = Some(json!({ "edit": "redo" }));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(faults.is_empty(), egui::Button::new(&words.apply))
-                    .clicked()
-                {
+                if button(ui, faults.is_empty(), Action::Primary, &words.apply) {
                     asked = Some(json!({ "edit": "apply" }));
                 }
-                if ui.button(&words.cancel).clicked() {
+                if button(ui, true, Action::Secondary, &words.cancel) {
                     asked = Some(json!({ "edit": "cancel" }));
                 }
             });
         });
     });
-    if shown.should_close() && asked.is_none() {
+    if !open && asked.is_none() {
         asked = Some(json!({ "edit": "cancel" }));
     }
-    (asked, shown.response.rect)
+    let rect = overlay::rect(ctx, spec.id).unwrap_or(Rect::NOTHING);
+    (asked, rect)
+}
+
+/// How wide the dialog is, in points.
+const DIALOG_WIDTH: f32 = 560.0;
+
+/// A drop-down named `name` for screen readers, showing `shown`, one row
+/// per option (its key and its word): egui-pop's combo box and rows.
+/// The key picked, when it is not `current`.
+fn pick<'a, K: PartialEq>(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    shown: &str,
+    name: &str,
+    current: &K,
+    options: impl IntoIterator<Item = (&'a K, &'a str)>,
+) -> Option<&'a K> {
+    let mut picked = None;
+    let r = ui
+        .combo_box(widgets::combo_box(salt).selected_text(shown), |ui| {
+            for (k, w) in options {
+                if widgets::selectable_label(ui, k == current, w).clicked() && k != current {
+                    picked = Some(k);
+                }
+            }
+        })
+        .response;
+    Words::name(ui, &r, name);
+    picked
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -245,27 +278,20 @@ fn node(
     let at = json!(path);
     match n {
         Node::Group { mode, rules } => {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.card(Tone::Neutral, |ui| {
                 ui.horizontal(|ui| {
-                    let r = egui::ComboBox::from_id_salt(("rule-match", path.clone()))
-                        .selected_text(Words::of(&words.matches, mode))
-                        .show_ui(ui, |ui| {
-                            for (m, w) in &words.matches {
-                                if ui.selectable_label(m == mode, w).clicked() && m != mode {
-                                    *asked = Some(
-                                        json!({ "edit": "match", "at": at, "match": m.name() }),
-                                    );
-                                }
-                            }
-                        })
-                        .response;
-                    Words::name(ui, &r, &words.match_name);
-                    ui.label(&words.of_rules);
-                    if ui.small_button(&words.add_condition).clicked() {
+                    let options = words.matches.iter().map(|(m, w)| (m, w.as_str()));
+                    let shown = Words::of(&words.matches, mode);
+                    let salt = ("rule-match", path.clone());
+                    if let Some(m) = pick(ui, salt, shown, &words.match_name, mode, options) {
+                        *asked = Some(json!({ "edit": "match", "at": at, "match": m.name() }));
+                    }
+                    ui.text_role(TextRole::Body, &words.of_rules);
+                    if small(ui, true, &words.add_condition).clicked() {
                         *asked = Some(json!({ "edit": "add_condition", "at": at }));
                     }
                     if path.len() + 2 <= helios_vault::rules::MAX_DEPTH
-                        && ui.small_button(&words.add_group).clicked()
+                        && small(ui, true, &words.add_group).clicked()
                     {
                         *asked = Some(json!({ "edit": "add_group", "at": at }));
                     }
@@ -290,18 +316,18 @@ fn node(
                     .iter()
                     .find(|(f, _)| *f == d.field)
                     .map_or(d.field.as_str(), |(_, w)| w.as_str());
-                let field_id = id("field");
-                let r = egui::ComboBox::from_id_salt(field_id)
-                    .selected_text(field_word)
-                    .show_ui(ui, |ui| {
-                        for (f, w) in &words.fields {
-                            if ui.selectable_label(*f == d.field, w).clicked() && *f != d.field {
-                                *asked = Some(json!({ "edit": "field", "at": at, "field": f }));
-                            }
-                        }
-                    })
-                    .response;
-                Words::name(ui, &r, &words.field_name);
+                let options = words.fields.iter().map(|(f, w)| (f, w.as_str()));
+                let current = d.field.as_str();
+                if let Some(f) = pick(
+                    ui,
+                    id("field"),
+                    field_word,
+                    &words.field_name,
+                    &current,
+                    options,
+                ) {
+                    *asked = Some(json!({ "edit": "field", "at": at, "field": f }));
+                }
                 let kind = rule_field(&d.field).ok().map(|f| f.kind);
                 if let Some(kind) = kind {
                     let op_word = words
@@ -309,32 +335,25 @@ fn node(
                         .iter()
                         .find(|(o, _)| *o == d.op)
                         .map_or(d.op.as_str(), |(_, w)| w.as_str());
-                    let r = egui::ComboBox::from_id_salt(id("op"))
-                        .selected_text(op_word)
-                        .show_ui(ui, |ui| {
-                            for o in kind.ops() {
-                                let w = words
-                                    .ops
-                                    .iter()
-                                    .find(|(k, _)| k == o)
-                                    .map_or(*o, |(_, w)| w.as_str());
-                                if ui.selectable_label(*o == d.op, w).clicked() && *o != d.op {
-                                    *asked = Some(json!({ "edit": "op", "at": at, "op": o }));
-                                }
-                            }
-                        })
-                        .response;
-                    Words::name(ui, &r, &words.op_name);
+                    let options = kind.ops().iter().map(|o| {
+                        let w = words
+                            .ops
+                            .iter()
+                            .find(|(k, _)| k == o)
+                            .map_or(*o, |(_, w)| w.as_str());
+                        (o, w)
+                    });
+                    let current = d.op.as_str();
+                    if let Some(o) = pick(ui, id("op"), op_word, &words.op_name, &current, options)
+                    {
+                        *asked = Some(json!({ "edit": "op", "at": at, "op": o }));
+                    }
                     value(ui, kind, d, &at, path, albums, words, asked);
                 }
                 moves(ui, path, siblings, words, asked);
             });
             if let Some((_, why)) = faults.iter().find(|(p, _)| p == path) {
-                ui.label(
-                    RichText::new(why)
-                        .small()
-                        .color(ui.visuals().error_fg_color),
-                );
+                ui.text_tone(Tone::Danger, why.as_str());
             }
         }
     }
@@ -355,14 +374,16 @@ fn value(
     let id = |what: &'static str| (what, path.to_vec());
     let typed = |ui: &mut egui::Ui, text: &str, key: &str, width: f32| -> Option<Value> {
         let mut s = text.to_string();
-        let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(width));
         let name = if key == "high" {
             &words.high_name
         } else {
             &words.value_name
         };
-        Words::name(ui, &r, name);
-        r.changed().then(|| {
+        let out = Input::text(&mut s, name)
+            .id_salt(("rule-typed", key.to_string(), path.to_vec()))
+            .width(width)
+            .show(ui);
+        out.changed.then(|| {
             let mut args = json!({ "edit": "value", "at": at, "value": d.value });
             args[key] = json!(s);
             args
@@ -373,19 +394,9 @@ fn value(
             .iter()
             .find(|(v, _)| *v == d.value)
             .map_or(d.value.as_str(), |(_, w)| w.as_str());
-        let mut out = None;
-        let r = egui::ComboBox::from_id_salt(salt)
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                for (v, w) in choices {
-                    if ui.selectable_label(*v == d.value, w).clicked() && *v != d.value {
-                        out = Some(json!({ "edit": "value", "at": at, "value": v }));
-                    }
-                }
-            })
-            .response;
-        Words::name(ui, &r, &words.value_name);
-        out
+        let options = choices.iter().map(|(v, w)| (v, w.as_str()));
+        pick(ui, salt, shown, &words.value_name, &d.value, options)
+            .map(|v| json!({ "edit": "value", "at": at, "value": v }))
     };
     let mut ask = |a: Option<Value>| {
         if a.is_some() {
@@ -402,24 +413,18 @@ fn value(
             if d.value == "last" {
                 ask(typed(ui, &d.high, "high", 48.0));
                 let unit = Unit::parse(&d.unit).unwrap_or(Unit::Days);
-                let r = egui::ComboBox::from_id_salt(id("unit"))
-                    .selected_text(Words::of(&words.units, &unit))
-                    .show_ui(ui, |ui| {
-                        for (u, w) in &words.units {
-                            if ui.selectable_label(*u == unit, w).clicked() && *u != unit {
-                                ask(Some(json!({
-                                    "edit": "value", "at": at, "value": d.value, "unit": u.name(),
-                                })));
-                            }
-                        }
-                    })
-                    .response;
-                Words::name(ui, &r, &words.unit_name);
+                let options = words.units.iter().map(|(u, w)| (u, w.as_str()));
+                let shown = Words::of(&words.units, &unit);
+                if let Some(u) = pick(ui, id("unit"), shown, &words.unit_name, &unit, options) {
+                    ask(Some(json!({
+                        "edit": "value", "at": at, "value": d.value, "unit": u.name(),
+                    })));
+                }
             }
         }
         (RuleKind::Number | RuleKind::Date | RuleKind::Imported, "between") => {
             ask(typed(ui, &d.value, "value", 96.0));
-            ui.label(&words.and);
+            ui.text_role(TextRole::Body, &words.and);
             ask(typed(ui, &d.high, "high", 96.0));
         }
         (RuleKind::Flag, _) => {
@@ -456,21 +461,22 @@ fn moves(
         return;
     };
     let at = json!(path);
-    if ui
-        .add_enabled(i > 0, egui::Button::new("↑").small())
-        .on_hover_text(&words.up)
-        .clicked()
-    {
+    if small(ui, i > 0, "↑").tip(&words.up).clicked() {
         *asked = Some(json!({ "edit": "move", "at": at, "to": i - 1 }));
     }
-    if ui
-        .add_enabled(i + 1 < siblings, egui::Button::new("↓").small())
-        .on_hover_text(&words.down)
-        .clicked()
-    {
+    if small(ui, i + 1 < siblings, "↓").tip(&words.down).clicked() {
         *asked = Some(json!({ "edit": "move", "at": at, "to": i + 1 }));
     }
-    if ui.small_button("×").on_hover_text(&words.remove).clicked() {
+    if small(ui, true, "×").tip(&words.remove).clicked() {
         *asked = Some(json!({ "edit": "remove", "at": at }));
     }
+}
+
+/// A small button in a rule's row, greyed when not `enabled`: helios-ui's
+/// row action.
+fn small(ui: &mut Ui, enabled: bool, label: &str) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        helios_ui::row_action(ui, Action::Secondary, label)
+    })
+    .inner
 }
