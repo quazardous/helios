@@ -107,7 +107,9 @@ fn main() {
             &a.out.join("thumb-cache"),
             &a.start,
         )],
-        "decode" => decode(&files, a.renders, &a.out.join("thumb-cache-decode")),
+        // Throwaway (perf #5256): the decode part measures opening a photo.
+        "decode" => open_bench(&files, a.renders),
+        "grid" if std::env::var_os("OPEN_BENCH_GRID").is_none() => vec![json!({"part": "grid", "skipped": true})],
         other => {
             eprintln!("thumb_bench: unknown part {other}");
             std::process::exit(2);
@@ -528,5 +530,169 @@ fn decode(files: &[PathBuf], renders: usize, cache_dir: &Path) -> Vec<Value> {
         "render256_ms": stats(render_ms),
         "rss_peak_bytes": rss_peak,
     }));
+    lines
+}
+
+
+/// Throwaway (perf #5256): per corpus raw, the open path's costs, CPU
+/// engine (no accelerator, unless one opens), a fresh engine per raw.
+fn open_bench(files: &[PathBuf], n: usize) -> Vec<Value> {
+    use helios_core::{Bus, Engine, Image, Region, Value as P};
+    let bundle = helios_gui::templates::find("helios.develop").expect("the template");
+    let gpu = if std::env::var_os("OPEN_BENCH_NO_GPU").is_some() {
+        None
+    } else {
+        match helios_gpu::shared::gpu() {
+            Ok(g) => Some(g),
+            Err(e) => {
+                eprintln!("open_bench: no GPU: {e}");
+                None
+            }
+        }
+    };
+    let engine_new = || {
+        let e = Arc::new(Engine::new(Arc::new(Bus::new())));
+        if let Some(g) = &gpu {
+            e.attach_accelerator(g.clone());
+        }
+        e
+    };
+    let threads = std::thread::available_parallelism().map_or(0, |n| n.get());
+    let mut lines = vec![json!({"part": "open", "gpu": gpu.as_ref().map(|g| g.adapter.to_string()), "threads": threads})];
+    let names = [
+        "rawprepare", "whitebalance", "highlights", "demosaic", "colorin", "chartprofile",
+        "channelmixerrgb", "cameracolour", "flip", "exposure", "cameratone", "sigmoid",
+    ];
+    let mut done = 0;
+    let mut sorted: Vec<&PathBuf> = files.iter().collect();
+    // Biggest files first: the 45+ MP raws are among them.
+    sorted.sort_by_key(|p| std::cmp::Reverse(std::fs::metadata(p).map_or(0, |m| m.len())));
+    for path in sorted {
+        if done >= n {
+            break;
+        }
+        let name = path.file_name().map(|f| f.to_string_lossy().into_owned());
+        let _ = std::fs::read(path); // page cache, as a library on a local disk
+        let t = Instant::now();
+        let loaded = helios_load::load(path);
+        let load_ms = ms(t.elapsed());
+        let Ok(loaded) = loaded else { continue };
+        let mp = f64::from(loaded.image.region().width) * f64::from(loaded.image.region().height) / 1e6;
+        drop(loaded);
+        let t = Instant::now();
+        let built = helios_gui::templates::develop_file(path, &bundle);
+        let graph_ms = ms(t.elapsed());
+        let Ok((graph, node)) = built else {
+            lines.push(json!({"part": "open", "file": name, "error": built.err()}));
+            continue;
+        };
+        let Ok(Some(extent)) = graph.extent(node) else { continue };
+        done += 1;
+        // The viewport at 1920x1080: fit scale; a proxy at a power of two
+        // below a quarter of it; the preview at 256 px.
+        let fit = (1920.0 / f64::from(extent.width)).min(1080.0 / f64::from(extent.height)).min(1.0);
+        let mut proxy = 1.0;
+        while proxy > fit / 4.0 {
+            proxy /= 2.0;
+        }
+        let at = |s: f64| {
+            Region::new(0, 0, ((f64::from(extent.width) * s).ceil() as u32).max(1), ((f64::from(extent.height) * s).ceil() as u32).max(1))
+        };
+        let (pscale, preg) = helios_gui::preview::plan(extent);
+        let graph = Arc::new(graph);
+        // 1. As the GUI: the viewport thread (proxy, then fit) and the
+        // preview thread (256 px) at once on one fresh engine.
+        let concurrent = |engine: &Arc<Engine>, g: &Arc<helios_core::Graph>, with_proxy: bool| {
+            let start = Instant::now();
+            let (e1, g1) = (engine.clone(), g.clone());
+            let view = std::thread::spawn(move || {
+                let mut r = (None, 0.0);
+                if with_proxy {
+                    let _ = e1.render_at(&g1, node, "output", at(proxy), proxy);
+                    r.0 = Some(ms(start.elapsed()));
+                }
+                let _ = e1.render_at(&g1, node, "output", at(fit), fit);
+                r.1 = ms(start.elapsed());
+                r
+            });
+            let (e2, g2) = (engine.clone(), g.clone());
+            let prev = std::thread::spawn(move || {
+                let im = e2.render_at(&g2, node, "output", preg, pscale);
+                (ms(start.elapsed()), im.ok())
+            });
+            let (pv_ms, pv) = prev.join().unwrap();
+            let t = Instant::now();
+            let h = pv.as_ref().map(|im| helios_scopes::histogram(im, 256, helios_scopes::Scale::default()));
+            let hist_ms = ms(t.elapsed());
+            let (proxy_ms, fit_ms) = view.join().unwrap();
+            drop(h);
+            (proxy_ms, fit_ms, pv_ms, hist_ms, pv)
+        };
+        let engine = engine_new();
+        let (proxy_ms, fit_ms, preview_ms, hist_ms, pv) = concurrent(&engine, &graph, true);
+        // 2. Scopes' compute alone, on the preview and on a fit render.
+        let scope_times = |im: &Image| {
+            let s = helios_scopes::Scale::default();
+            let t = Instant::now();
+            let _ = helios_scopes::histogram(im, 256, s);
+            let h = ms(t.elapsed());
+            let t = Instant::now();
+            let _ = helios_scopes::waveform(im, 512, 512, s);
+            let w = ms(t.elapsed());
+            let t = Instant::now();
+            let _ = helios_scopes::parade(im, 170, 512, s);
+            let p = ms(t.elapsed());
+            json!({"histogram": h, "waveform": w, "parade": p, "size": [im.region().width, im.region().height]})
+        };
+        let on_preview = pv.as_ref().map(scope_times);
+        let fit_img = engine.render_at(&graph, node, "output", at(fit), fit).ok();
+        let on_fit = fit_img.as_ref().map(scope_times);
+        // 3. A slider: exposure +0.5 EV, both renders again on the warm engine.
+        let mut g2 = (*graph).clone();
+        let slider = g2.find("exposure").map(|id| {
+            let _ = g2.set_param(id, "exposure", P::Float(0.5));
+            let g2 = Arc::new(g2);
+            let (_, fit2, pv2, h2, _) = concurrent(&engine, &g2, false);
+            json!({"fit_ms": fit2, "preview_ms": pv2, "histogram_ms": h2})
+        });
+        drop(engine);
+        // 4. The preview alone, cold (the viewport not rendering).
+        let engine = engine_new();
+        let t = Instant::now();
+        let _ = engine.render_at(&graph, node, "output", preg, pscale);
+        let preview_alone_ms = ms(t.elapsed());
+        drop(engine);
+        // 5. Stages at fit scale, cold, each node rendered after the one
+        // before on one engine: the time each adds.
+        let engine = engine_new();
+        let mut stages = serde_json::Map::new();
+        for st in names {
+            if let Some(id) = graph.find(st) {
+                let t = Instant::now();
+                let r = engine.render_at(&graph, id, "output", at(fit), fit);
+                stages.insert(st.into(), match r { Ok(_) => json!(ms(t.elapsed())), Err(e) => json!(e.to_string()) });
+            }
+        }
+        // 6. The same stages at 256 px (the preview), cold.
+        let engine = engine_new();
+        let mut stages_preview = serde_json::Map::new();
+        for st in names {
+            if let Some(id) = graph.find(st) {
+                let t = Instant::now();
+                let r = engine.render_at(&graph, id, "output", preg, pscale);
+                stages_preview.insert(st.into(), match r { Ok(_) => json!(ms(t.elapsed())), Err(e) => json!(e.to_string()) });
+            }
+        }
+        drop(engine);
+        lines.push(json!({
+            "part": "open", "file": name, "mp": (mp * 10.0).round() / 10.0,
+            "load_ms": load_ms, "graph_ms": graph_ms, "fit": fit, "proxy": proxy,
+            "concurrent": {"proxy_ms": proxy_ms, "fit_ms": fit_ms, "preview_ms": preview_ms, "histogram_ms": hist_ms},
+            "preview_alone_ms": preview_alone_ms,
+            "scopes_on_preview": on_preview, "scopes_on_fit": on_fit,
+            "slider": slider, "stages_fit": stages, "stages_preview": stages_preview,
+        }));
+        eprintln!("{}", lines.last().unwrap());
+    }
     lines
 }
