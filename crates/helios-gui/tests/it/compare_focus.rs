@@ -3,7 +3,7 @@
 //! button opens them side by side in the Compare place, zoom follows
 //! across the photos until the sync is turned off, the arrow keys move
 //! the active photo, and the active photo is rated from its marks and
-//! from the keys. File > New workspace lists "Compare", and a workspace
+//! from the keys, the gallery's selection and cursor left alone. File > New workspace lists "Compare", and a workspace
 //! made from it opens in Compare.
 //!
 //! The snapshots (`tests/snapshots/compare-*.png`, thresholds in the
@@ -104,8 +104,14 @@ fn compare_three_photos_sync_their_zoom_and_rate_the_active_one() {
     let photos = h.state().comparison().photos().to_vec();
     assert_eq!(photos, names(), "the three selected photos compared");
     assert_eq!(place(&h), "helios.comparison");
-    // The first photo is active and selected: the culling keys mark it.
-    assert_eq!(h.state().library().selection(), ["a"]);
+    // The first photo is active, the culling keys' target; the
+    // gallery's selection stays as it was.
+    let active = |h: &Harness<'_, Shell>| {
+        let c = h.state().comparison();
+        c.active(c.photos()).cloned()
+    };
+    assert_eq!(active(&h).as_deref(), Some("a"));
+    assert_eq!(h.state().library().selection(), names());
     // Synchronised by default: zooming one zooms every photo.
     assert!(h.state().comparison().synced);
     zoom_over(&mut h, "IMG_0001.jpg", 2.0);
@@ -128,22 +134,23 @@ fn compare_three_photos_sync_their_zoom_and_rate_the_active_one() {
         .click();
     h.run();
     assert!(h.state().comparison().synced);
-    // The arrow keys move the active photo, the selection with it.
+    // The arrow keys move the active photo, the selection left alone.
     run(&mut h, "helios.compare.focus", json!(null));
     h.run();
     h.key_press(Key::ArrowRight);
     h.run();
     h.run();
-    assert_eq!(h.state().library().selection(), ["b"]);
+    assert_eq!(active(&h).as_deref(), Some("b"));
     h.key_press(Key::ArrowLeft);
     h.key_press(Key::ArrowLeft);
     h.run();
     h.run();
-    assert_eq!(h.state().library().selection(), ["c"], "wraps around");
+    assert_eq!(active(&h).as_deref(), Some("c"), "wraps around");
     h.key_press(Key::ArrowLeft);
     h.run();
     h.run();
-    assert_eq!(h.state().library().selection(), ["b"]);
+    assert_eq!(active(&h).as_deref(), Some("b"));
+    assert_eq!(h.state().library().selection(), names());
     // Rated from its marks: the stars of the active photo.
     h.get_by_role_and_label(Role::Slider, "Active photo's rating")
         .click();
@@ -175,7 +182,7 @@ fn compare_needs_two_known_photos_and_leaves_with_its_place() {
     run(&mut h, "library.compare", json!({ "images": ["c", "a"] }));
     h.run();
     assert_eq!(h.state().comparison().photos(), ["c", "a"]);
-    assert_eq!(h.state().library().selection(), ["c"]);
+    assert_eq!(h.state().library().selection(), ["a"], "left alone");
     // Leaving the place leaves the photos: the Compare tab compares the
     // selection again.
     run(&mut h, "view.library", json!(null));
@@ -369,4 +376,113 @@ fn compare_snapshots() {
         }
         drop(loader);
     }
+}
+
+/// What the gallery (and the filmstrip, which draws it) holds: its
+/// selection and the photo under its cursor.
+fn gallery(h: &Harness<'_, Shell>) -> (Vec<String>, Option<String>) {
+    let lib = h.state().library();
+    let cursor = lib.selected().map(|i| lib.entries[i].id.clone());
+    (lib.selection(), cursor)
+}
+
+/// Inside Compare as a user culls: the arrow keys move the active
+/// photo, a key rates it, its pane is marked best and the best kept,
+/// then Escape leaves.
+fn cull_in_compare(h: &mut Harness<'_, Shell>) {
+    run(h, "helios.compare.focus", json!(null));
+    h.run();
+    h.key_press(Key::ArrowRight);
+    h.run();
+    h.run();
+    h.key_press(Key::Num4);
+    h.run();
+    let active = h.state().comparison().photos()[1].clone();
+    assert_eq!(rating(h, &active), 4, "the key rates the active photo");
+    h.get_all_by_role_and_label(Role::CheckBox, "Best of the comparison")
+        .nth(1)
+        .expect("each pane has its best marker")
+        .click();
+    h.run();
+    assert_eq!(h.state().comparison().best(), Some(active.as_str()));
+    h.get_by_role_and_label(Role::Button, "Keep the best: pick it, reject the others")
+        .click();
+    h.run();
+    h.run();
+    run(h, "helios.compare.focus", json!(null));
+    h.run();
+    h.key_press(Key::Escape);
+    h.run();
+    h.run();
+    assert_on_grid(h, "Escape");
+}
+
+/// The owner's example: browsing the filmstrip to a photo, comparing two
+/// others, culling them in Compare and leaving it moves neither the
+/// filmstrip's cursor nor its selection; Compare keeps its own active
+/// photo.
+#[test]
+fn compare_leaves_the_galleries_cursor_and_selection_alone() {
+    const SIX: [&str; 6] = ["a", "b", "c", "d", "e", "f"];
+    let dir = temp("own-cursor");
+    let mut shell = Shell::builder(helios_panels(), Some(dir.join("ui")))
+        .workspace(&dir.join("photos"))
+        .build();
+    shell.load_layout().unwrap();
+    shell.set_library(
+        SIX.iter()
+            .enumerate()
+            .map(|(n, id)| Entry {
+                id: (*id).into(),
+                name: format!("IMG_000{}.jpg", n + 1),
+                ..Entry::default()
+            })
+            .collect(),
+    );
+    let mut h = headless::harness_at(shell, vec2(1280.0, 800.0), 1.0);
+    h.run();
+    // Browsing the filmstrip to the fourth photo, with its keys.
+    run(&mut h, "helios.filmstrip.focus", json!(null));
+    h.run();
+    h.key_press(Key::ArrowRight);
+    h.run();
+    for _ in 0..3 {
+        h.key_press(Key::ArrowRight);
+        h.run();
+    }
+    let browsing = gallery(&h);
+    assert_eq!(
+        browsing.1.as_deref(),
+        Some("d"),
+        "browsed to d: {browsing:?}"
+    );
+    // Two other photos compared, by their ids: the cursor stays on d.
+    run(&mut h, "library.compare", json!({ "images": ["a", "b"] }));
+    h.run();
+    h.run();
+    assert_eq!(place(&h), "helios.comparison");
+    assert_eq!(gallery(&h), browsing, "entering Compare");
+    cull_in_compare(&mut h);
+    assert_eq!(
+        gallery(&h),
+        browsing,
+        "after culling in Compare and leaving it"
+    );
+    // Two photos selected, compared from the gallery bar's button.
+    h.state()
+        .library_mut()
+        .select_ids(&["e".to_string(), "f".to_string()]);
+    h.run();
+    let selected = gallery(&h);
+    h.get_by_role_and_label(Role::Button, "Compare").click();
+    h.run();
+    h.run();
+    assert_eq!(h.state().comparison().photos(), ["e", "f"]);
+    assert_eq!(gallery(&h), selected, "entering Compare");
+    cull_in_compare(&mut h);
+    assert_eq!(
+        gallery(&h),
+        selected,
+        "after culling in Compare and leaving it"
+    );
 }

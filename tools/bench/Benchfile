@@ -1282,6 +1282,40 @@ done"""
 mounts = { "target/${branch:-main}" = "/target", raw-corpus = "/corpus" }
 timeout = "1h"
 
+# how long opening a photo takes (docs/performance.md): each corpus raw,
+# the largest first, opened `runs=` times on a fresh engine as the desktop
+# opens it (decode, graph, the viewport's proxy and fit beside the 256 px
+# preview and its histogram, then one slider), the engine's trace spans
+# giving the decode, the graph build and each demosaic call. The medians
+# per raw in /out/open-timing.md, each run in /out/open-timing.jsonl
+# (crates/helios-gui/examples/open_timing.rs)
+[jobs.open-timing-build]
+about = "builds the photo-open timing bench (open_timing, release) for open-timing to measure"
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 8
+memory = "8g"
+cwd = "/work/${src:-helios}"
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui --example open_timing"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "1h"
+
+# the measure only (a timing job: the box's cap and cool-down apply), on the
+# binary `open-timing-build` left in the branch's target; run it after_ok
+# that build (`run open-timing-build branch=B -- open-timing branch=B`)
+[jobs.open-timing]
+about = "each corpus raw opened as the desktop opens it: decode, graph, proxy, preview, histogram, fit, demosaic, one slider"
+checkouts = ["helios"]
+cores = 8
+memory = "8g"
+timing = true
+cwd = "/work/${src:-helios}"
+command = """test -x /target/release/examples/open_timing || { echo "open_timing is not built: run open-timing-build branch=${branch:-main} first" >&2; exit 2; } && \
+/target/release/examples/open_timing --corpus /corpus --out /out --runs ${runs:-3} --n ${n:-1000}"""
+mounts = { "target/${branch:-main}" = "/target", raw-corpus = "/corpus" }
+timeout = "30m"
+
 # the per-branch history (in the target cache) says which tests got slower
 [jobs.test-times]
 about = "the test suite's timings, the slowest tests listed"

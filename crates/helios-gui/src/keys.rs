@@ -187,12 +187,14 @@ pub fn defaults() -> Vec<(String, String, String)> {
     }
     // Escape leaves Compare, as Lightroom's Survey and Compare views:
     // not while a pushed mode, an overlay, a field, zen mode or a tip's
-    // card wants it (egui-pop's own Escape bindings).
+    // card wants it (egui-pop's own Escape bindings), nor while a mask
+    // path is drawn (`mask.cancel` below stops it). Each of those tests
+    // makes the clauses exclusive, so the keymap holds no conflict.
     bind(
         "Escape",
         crate::comparison::LEAVE_COMMAND,
         &format!(
-            "{} && !modePushed && !overlayOpen && !textInputFocus && !workbenchZen && !tipShown",
+            "{} && !modePushed && !overlayOpen && !textInputFocus && !workbenchZen && !tipShown && maskTool != 'path'",
             behind_no_picker(&comparison)
         ),
     );

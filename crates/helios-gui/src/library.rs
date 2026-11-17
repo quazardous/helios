@@ -1726,6 +1726,10 @@ pub struct Library {
     pub entries: Vec<Entry>,
     /// Culling: after a mark, the cursor moves to the next image.
     pub auto_advance: bool,
+    /// The active photo of the comparison chosen in the Compare place:
+    /// what the marks act on there, instead of the gallery's selection,
+    /// which Compare leaves alone ([`Library::set_compare_active`]).
+    compare_active: Option<String>,
     /// Marks a plugin refused, to say.
     pub notes: Vec<String>,
     /// The Albums section's row photos are dragged over this pass, and
@@ -1924,6 +1928,7 @@ impl Default for Library {
             focused: GalleryOptions::MAIN_PANEL.id.to_string(),
             search_keys: SearchKeys::builtin(),
             auto_advance: false,
+            compare_active: None,
             notes: Vec::new(),
             drop_hover: std::cell::Cell::new(None),
             import_offered: false,
@@ -3587,9 +3592,27 @@ impl Library {
         self.select(index);
     }
 
-    /// What a mark or a copy acts on: the selection, else the cursor's
-    /// image.
+    /// The Compare place's active photo, what the marks act on while it
+    /// is shown (none: the gallery's selection again). Compare never
+    /// writes a gallery's selection or cursor: the filmstrip keeps its
+    /// place while photos are compared.
+    pub fn set_compare_active(&mut self, id: Option<String>) {
+        self.compare_active = id;
+    }
+
+    /// The Compare place's active photo, while it is shown.
+    fn compare_target(&self) -> Option<&String> {
+        self.compare_active
+            .as_ref()
+            .filter(|k| self.index.contains_key(*k) && self.comparing())
+    }
+
+    /// What a mark or a copy acts on: in the Compare place its active
+    /// photo, else the selection, else the cursor's image.
     pub fn targets(&self) -> Result<Vec<String>, String> {
+        if let Some(active) = self.compare_target() {
+            return Ok(vec![active.clone()]);
+        }
         let sel = self.view.state.selection();
         let keys: Vec<String> = if sel.is_empty() {
             sel.cursor().cloned().into_iter().collect()
@@ -3777,7 +3800,9 @@ impl Library {
     /// auto-advance on, the cursor moves to the next image.
     fn command_mark(&mut self, mark: Mark<String>) -> Result<(), String> {
         self.mark(mark)?;
-        if self.auto_advance {
+        // In Compare the mark went to its active photo: the gallery's
+        // cursor stays where it was.
+        if self.auto_advance && self.compare_target().is_none() {
             self.step(1);
         }
         Ok(())
@@ -4907,9 +4932,10 @@ impl Library {
     /// picks it and rejects the others.
     ///
     /// The comparison is the focus's ([`Comparison`]); with photos chosen
-    /// (the Compare place), the selection is the active photo, so the
-    /// culling keys mark it and a click in the filmstrip on one of them
-    /// makes it active, as in Lightroom's Survey view.
+    /// (the Compare place), the culling keys mark its active photo and a
+    /// click in the filmstrip on one of them makes it active, as in
+    /// Lightroom's Survey view. It never writes the gallery's selection
+    /// or cursor: the filmstrip keeps its place.
     pub fn compare_ui(&mut self, ui: &mut Ui, cmp: &mut Comparison) {
         self.receive(ui.ctx());
         let comparing = self.comparing();
@@ -4933,14 +4959,16 @@ impl Library {
             return;
         }
         let chosen = !cmp.photos().is_empty();
-        // A photo of the comparison selected elsewhere becomes active.
+        // A photo of the comparison selected elsewhere (a click in the
+        // filmstrip) becomes active, once, when the selection changes:
+        // the active photo is the comparison's own.
         if chosen
+            && cmp.selection_changed(&selection)
             && let [one] = selection.as_slice()
             && let Some(i) = keys.iter().position(|k| k == one)
         {
             cmp.set_active(i);
         }
-        let before = cmp.active_index(keys.len());
         self.feed_in_view(keys.clone(), false);
         let ctx = ui.ctx().clone();
         let sync = crate::i18n::text(&ctx, Message::new("gui-library-sync", "Sync zoom and pan"));
@@ -5039,10 +5067,9 @@ impl Library {
         if keep && let Some(best) = best {
             self.keep_best(&best, &keys);
         }
-        // The selection follows the active photo of a chosen comparison.
-        if chosen && active != before {
-            self.select_ids(std::slice::from_ref(&keys[active]));
-        }
+        // The marks follow the active photo of a chosen comparison; the
+        // gallery's selection and cursor stay as they were.
+        self.compare_active = chosen.then(|| keys[active].clone());
     }
 
     /// The active photo's marks in the Compare panel: its name, stars,

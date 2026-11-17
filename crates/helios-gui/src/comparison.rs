@@ -25,7 +25,8 @@ pub const COMMAND: &str = "library.compare";
 /// (a toggle) and the Compare panel closed do.
 pub const LEAVE_COMMAND: &str = "compare.leave";
 
-/// The comparison of one focus.
+/// The comparison of one focus. It never writes a gallery's selection
+/// or cursor: its active photo is its own.
 #[derive(Clone, Debug)]
 pub struct Comparison {
     /// The photos compared, in order. Empty: the selection is compared
@@ -39,6 +40,9 @@ pub struct Comparison {
     pub synced: bool,
     /// The zoom and pan of each photo, or the shared one when synced.
     pub(crate) view: CompareState,
+    /// The gallery's selection when last seen (none: not yet, for these
+    /// photos), so only a new one makes a photo active.
+    seen: Option<Vec<String>>,
 }
 
 impl Default for Comparison {
@@ -49,6 +53,7 @@ impl Default for Comparison {
             best: None,
             synced: true,
             view: CompareState::new(),
+            seen: None,
         }
     }
 }
@@ -72,6 +77,19 @@ impl Comparison {
         self.active = 0;
         self.best = self.best.take().filter(|b| self.photos.contains(b));
         self.view.reset();
+        self.seen = None;
+    }
+
+    /// Whether the gallery's `selection` changed since last seen (not on
+    /// the first sight of it): a photo of the comparison selected
+    /// elsewhere then becomes active, while the arrows keep moving the
+    /// comparison's own active photo, the selection untouched.
+    pub fn selection_changed(&mut self, selection: &[String]) -> bool {
+        let changed = self.seen.as_deref().is_some_and(|s| s != selection);
+        if self.seen.as_deref() != Some(selection) {
+            self.seen = Some(selection.to_vec());
+        }
+        changed
     }
 
     /// The photos shown: the chosen ones, else the selection's two to
