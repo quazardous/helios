@@ -18,10 +18,7 @@ const APPLIED: &str = "workspace.applied";
 const CIRCLE: CommandId = CommandId::from_static("mask.add.circle");
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "helios-wsapplied-{name}-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("helios-wsapplied-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -165,4 +162,20 @@ fn assert_network(said: &Value) {
         ["graph.template", "workshops.composites"],
         "{said}"
     );
+}
+
+/// The listeners of `workspace.applied` as the desktop registers them,
+/// in the order they run: a reviewed dump (`tests/bus/workspace.txt`).
+/// The keys first, then the places (the list before the scope that
+/// reads it), then the graph and the Workshops panel.
+#[test]
+fn the_workspace_points_listeners_run_in_a_declared_order() {
+    let root = temp("order");
+    let h = window(&root);
+    assert_eq!(
+        helios_gui::workspace_applied::order(&*h.state().app().handle().bus()),
+        include_str!("../bus/workspace.txt")
+    );
+    drop(h);
+    std::fs::remove_dir_all(&root).unwrap();
 }

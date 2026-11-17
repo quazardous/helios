@@ -31,6 +31,7 @@ use super::{Shell, lock};
 /// out (`None`).
 pub type Moves = BTreeMap<String, Option<helios_core::Value>>;
 use crate::dialogs::{Choice, Field, Picker};
+use crate::workspace_applied::{self, Changed};
 
 /// The value the workspace's state is kept in.
 pub const STATE: &str = "workspace/state";
@@ -82,6 +83,9 @@ pub(super) struct Edited {
     pub(super) config: PathBuf,
     /// The state's text as last applied.
     applied: String,
+    /// The value store's sequence number of the state as last applied:
+    /// the state is read again only when it moved.
+    applied_seq: Option<u64>,
     /// The template it was made from, if it was.
     origin: Option<Bundle>,
     /// Its network changed since it was last taken: the image shown goes
@@ -99,9 +103,6 @@ pub(super) struct Edited {
     pub(super) known: helios_template::workspace::Hashes,
     /// Its endpoint for agents and the watcher of its files.
     pub(super) live: Option<super::workspace_live::Live>,
-    /// egui-pop's workspace keymap layer as the workspace's keys last
-    /// loaded it: a difference is a change made in the shortcuts editor.
-    keys_loaded: Vec<(String, String, String)>,
     /// The user's library of composites (`<config>/composites/`) as last
     /// read: when the workspace opened, and after a macro published.
     pub(super) library: Vec<helios_template::CompositeFile>,
@@ -126,6 +127,16 @@ fn parse(text: &str) -> Result<State, String> {
 
 fn text<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str)
+}
+
+/// egui-pop's workspace keymap layer, as compared: keys, command,
+/// clause.
+fn layer_keys(app: &egui_pop::api::AppHandle) -> Vec<(String, String, String)> {
+    app.export_keymap(Layer::Workspace)
+        .bindings
+        .into_iter()
+        .filter_map(|b| Some((b.keys, b.command?, b.when)))
+        .collect()
 }
 
 fn no_workspace() -> String {
@@ -165,13 +176,13 @@ impl Shell {
             files,
             config: config.into(),
             applied: text,
+            applied_seq: None,
             origin,
             network_changed: false,
             kept: BTreeSet::new(),
             disk,
             known,
             live: Some(live),
-            keys_loaded: Vec::new(),
             library: Vec::new(),
         });
         self.know_workspace_files(true, true);
@@ -181,7 +192,8 @@ impl Shell {
         self.keep_layout_copy();
         self.read_library();
         self.offer_workspace_keys();
-        self.keys_loaded();
+        // Said once opened: every part changed, each listener follows.
+        self.workspace_applied(Changed::ALL, &state);
         // The workspace's own values of the settings (the Settings app's
         // `workspace` value scope), beside its files.
         crate::config::open_workspace(self.core.app.handle(), Some(settings_file));
@@ -218,23 +230,13 @@ impl Shell {
 
     /// egui-pop's workspace layer, as compared: keys, command, clause.
     fn layer_keys(&self) -> Vec<(String, String, String)> {
-        self.core
-            .app
-            .handle()
-            .export_keymap(Layer::Workspace)
-            .bindings
-            .into_iter()
-            .filter_map(|b| Some((b.keys, b.command?, b.when)))
-            .collect()
+        layer_keys(self.core.app.handle())
     }
 
     /// Remembers egui-pop's workspace layer as the workspace's keys
     /// loaded it.
     fn keys_loaded(&mut self) {
-        let keys = self.layer_keys();
-        if let Some(edit) = &mut self.focus.edit {
-            edit.keys_loaded = keys;
-        }
+        *self.focus.keys_loaded.borrow_mut() = self.layer_keys();
     }
 
     /// Once per frame: keys changed for the workspace in the shortcuts
@@ -242,11 +244,11 @@ impl Shell {
     /// files (`tools.keymap`, a removal written `-<command>`).
     pub(super) fn follow_workspace_keys(&mut self) {
         use helios_profile::{System, local_keys};
-        let Some(edit) = &self.focus.edit else {
+        if self.focus.edit.is_none() {
             return;
-        };
+        }
         let now = self.layer_keys();
-        if now == edit.keys_loaded {
+        if now == *self.focus.keys_loaded.borrow() {
             return;
         }
         let made = self.workspace_step("change the workspace's keys", &Origin::User, |state| {
@@ -466,16 +468,31 @@ impl Shell {
 
     /// Applies the state the value store holds when it is not the one
     /// applied (an edit, an undo, a redo): written to the workspace's
-    /// files at once, its tools, library, layout and name put in place.
+    /// files at once, its tools, library, layout and name put in place,
+    /// then said once through `workspace.applied` (its followers
+    /// listen there). The state is read only when its sequence number
+    /// moved.
     pub(super) fn sync_workspace(&mut self) {
         let Some(edit) = &self.focus.edit else {
             return;
         };
-        let value = lock(&self.core.values).get(STATE).map(|e| e.value.clone());
-        let Some(helios_core::Value::Text(text)) = value else {
-            return;
+        let (seq, text) = {
+            let store = lock(&self.core.values);
+            let Some(entry) = store.get(STATE) else {
+                return;
+            };
+            if Some(entry.seq) == edit.applied_seq {
+                return;
+            }
+            let helios_core::Value::Text(text) = &entry.value else {
+                return;
+            };
+            (entry.seq, text.clone())
         };
         if text == edit.applied {
+            if let Some(edit) = &mut self.focus.edit {
+                edit.applied_seq = Some(seq);
+            }
             return;
         }
         let (before, next) = match (parse(&edit.applied), parse(&text)) {
@@ -493,17 +510,103 @@ impl Shell {
         if outside.is_none() {
             self.write_workspace(&next);
         }
-        if before.bundle.template.tools != next.bundle.template.tools {
-            self.keys_loaded();
-        }
         let network = before.bundle.template.network != next.bundle.template.network
             || before.bundle.composites != next.bundle.composites;
         if let Some(edit) = &mut self.focus.edit {
             edit.applied = text;
+            edit.applied_seq = Some(seq);
             edit.network_changed |= network;
         }
+        self.workspace_applied(Changed::between(&before, &next), &next);
         if let Some(theirs) = outside {
             self.reload_workspace(theirs);
+        }
+    }
+
+    /// `state` applied, `changed` from the one before: passed once
+    /// through `workspace.applied`, its listeners in their declared order
+    /// (each for the parts it reads), then said on the journal with what
+    /// changed and the listeners that ran.
+    fn workspace_applied(&mut self, changed: Changed, state: &State) {
+        let bus = self.core.app.handle().bus();
+        let reactions = workspace_applied::pass(
+            &*bus,
+            workspace_applied::Workspace {
+                changed,
+                json: std::sync::Arc::new(state.to_json()),
+            },
+        );
+        self.core.app.handle().publish(
+            "helios",
+            None,
+            workspace_applied::APPLIED,
+            json!({ "changed": changed.names(), "ran": reactions.ran }),
+        );
+        for e in reactions.failed {
+            self.warn(e);
+        }
+    }
+
+    /// The listeners of `workspace.applied`
+    /// ([`crate::workspace_applied`]), each in its declared place.
+    pub(super) fn listen_workspace_applied(&mut self) {
+        let bus = self.core.app.handle().bus();
+        let (app, keys) = (
+            self.core.app.handle().clone(),
+            self.focus.keys_loaded.clone(),
+        );
+        let mut listened = vec![workspace_applied::listen_local(
+            &*bus,
+            workspace_applied::KEYS,
+            move |_, _| *keys.borrow_mut() = layer_keys(&app),
+        )];
+        let list = self.focus.subworkspaces.clone();
+        listened.push(workspace_applied::listen_local(
+            &*bus,
+            workspace_applied::SUBWORKSPACES,
+            move |w, _| {
+                list.set(Some(
+                    serde_json::from_value(w.json["template"]["subworkspaces"].clone())
+                        .unwrap_or_default(),
+                ));
+            },
+        ));
+        let (app, values, list) = (
+            self.core.app.handle().clone(),
+            self.core.values.clone(),
+            self.focus.subworkspaces.clone(),
+        );
+        listened.push(workspace_applied::listen_local(
+            &*bus,
+            workspace_applied::SCOPE,
+            move |_, _| crate::contexts::follow_place(&app, &mut lock(&values), &list),
+        ));
+        let graph = self.focus.graph.clone();
+        listened.push(workspace_applied::listen_local(
+            &*bus,
+            workspace_applied::GRAPH,
+            move |w, reactions| match graph.try_borrow_mut() {
+                Ok(mut g) => g.follow_workspace(&w.json),
+                Err(_) => reactions
+                    .failed
+                    .push(format!("{}: the graph is busy", workspace_applied::GRAPH)),
+            },
+        ));
+        let workshops = self.focus.workshops.clone();
+        listened.push(workspace_applied::listen_local(
+            &*bus,
+            workspace_applied::WORKSHOPS,
+            move |w, reactions| match workshops.try_borrow_mut() {
+                Ok(mut p) => p.follow_workspace(&w.json),
+                Err(_) => reactions.failed.push(format!(
+                    "{}: the Workshops panel is busy",
+                    workspace_applied::WORKSHOPS
+                )),
+            },
+        ));
+        for e in listened.into_iter().filter_map(Result::err) {
+            self.notes
+                .push(format!("{}: {e}", workspace_applied::APPLIED));
         }
     }
 
@@ -722,6 +825,7 @@ impl Shell {
         }
         if let Some(edit) = &mut self.focus.edit {
             edit.applied = now_text;
+            edit.applied_seq = None;
             edit.kept.extend(set.into_iter().map(|(p, _)| p));
         }
         self.sync_workspace();

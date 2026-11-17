@@ -496,6 +496,40 @@ then pass the point once on the interface's thread; the pass is said on
 the journal with the listeners that ran (`ran`). The order is a reviewed
 dump (`crates/helios-gui/tests/bus/accounts.txt`).
 
+### Slice 2f: a workspace's state applied
+
+Applying a workspace's state (it opened; an edit, a reset, an agent's
+step; an undo or a redo of one; its files changed outside and taken in)
+put its tools, library, layout and name in place, then remembered the
+keys loaded when its tools changed. Four other parts compared the
+state on their own, each pass: the sub-workspaces (by the store's
+sequence number, at the start of the pass, before the state was
+applied), the place's scope after them, the graph editor and the
+Workshops panel (by the whole text, and only while their panel was
+drawn: a hidden panel read a change late).
+
+Where it stands (2026-11-17): done. `helios_gui::workspace_applied`
+declares one point (`POINTS`), `workspace.applied`, passed once by
+the shell once the state is applied, with what changed (`Changed`:
+tools, library, network, sub-workspaces, composites, layout, name;
+all of them when the workspace opened). Its listeners (`ORDER`) each
+run only for the parts they read: `workspace.keys` (tools; the
+shortcuts editor's follower then takes no step for keys an undo put
+back), `contexts.subworkspaces` and `contexts.scope` (sub-workspaces;
+the list, then the store's scope that reads it), `graph.template`
+(network, sub-workspaces, composites) and `workshops.composites`
+(network, composites). The pass is said on the journal with `changed`
+and the listeners that ran (`ran`). The order is a reviewed dump
+(`crates/helios-gui/tests/bus/workspace.txt`).
+
+Left, and why: the shell still notices an undo or a redo of the state
+by the store's sequence number of its path, once per pass (a number,
+no longer the text): the value store has no path listener yet (ADR
+0016 names it). The image going through a changed network
+(`take_network_changed`) is the darkroom's, with the image's opening
+(slice B8). The workshop session (`follow_session`) follows the value
+store's history, not the workspace's state.
+
 ### Slice 3: one module catalogue
 
 One crate lists the processing modules and what each ships (its
