@@ -609,3 +609,92 @@ fn settings_asked_in_the_import_window_edit_its_focus_and_the_switch_changes_it(
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The main window's passes Helios asks for, as an idle event loop runs
+/// them with no input: each repaint request heard (eframe's rule: current
+/// while the main window ran at most the pass it was asked in). With the
+/// main window `covered` (GNOME under Wayland sends no frame callback to
+/// a window it does not show), the system sends it no redraw: the
+/// request is only owed, and the loop's wake (`main_wake`, as Helios's
+/// event loop runs it) paints it after the grace. The passes run.
+fn main_passes_asked(
+    h: &mut Harness<'static, Shell>,
+    asked: &std::sync::Mutex<Vec<egui::RequestRepaintInfo>>,
+    wake: &mut egui_pop::api::main_wake::MainWake<ViewportId>,
+    covered: bool,
+) -> usize {
+    let mut clock = std::time::Instant::now();
+    let mut ran = 0;
+    while ran < 10 {
+        let now = h.ctx.cumulative_pass_nr_for(ViewportId::ROOT);
+        let due = {
+            let mut a = asked.lock().unwrap();
+            let due = a.iter().any(|i| {
+                i.viewport_id == ViewportId::ROOT && now <= i.current_cumulative_pass_nr + 1
+            });
+            a.retain(|i| i.viewport_id != ViewportId::ROOT || i.current_cumulative_pass_nr > now);
+            due
+        };
+        if due && covered {
+            wake.asked(clock);
+            continue;
+        }
+        if !due {
+            // Nothing asked: the loop sleeps until the owed frame.
+            let Some(at) = wake.next() else { break };
+            clock = clock.max(at);
+            if wake.due(clock).is_none() {
+                break;
+            }
+        }
+        h.input_mut()
+            .viewports
+            .entry(ViewportId::ROOT)
+            .or_default()
+            .focused = Some(false);
+        h.step();
+        ran += 1;
+    }
+    ran
+}
+
+/// Closed from its own window, the Settings window goes with only the
+/// passes Helios asks for itself: no click, no Alt+Tab, no other window
+/// brought forward by the system. Its window goes at a pass of the main
+/// window, which the system does not redraw while it does not show it
+/// (covered by the Settings window, on GNOME under Wayland): the event
+/// loop paints it when its frame is owed too long. Without that, the
+/// window stayed on screen, frozen.
+#[test]
+fn a_closed_settings_window_goes_without_an_outside_event() {
+    use egui_pop::api::main_wake::{MainWake, PassCounter};
+    use std::sync::{Arc, Mutex};
+    for (covered, loop_wakes) in [(false, true), (true, true), (true, false)] {
+        let (mut h, window) = settings_in_their_own_window();
+        main_passes_in_the_back(&mut h, 2);
+        let asked: Arc<Mutex<Vec<egui::RequestRepaintInfo>>> = Arc::default();
+        let heard = asked.clone();
+        h.ctx.set_request_repaint_callback(move |info| {
+            heard.lock().unwrap().push(info);
+        });
+        let mut wake = MainWake::new();
+        wake.set_main(ViewportId::ROOT);
+        wake.set_counter(PassCounter::install(&h.ctx));
+        wake.set_enabled(loop_wakes);
+        window_pass(
+            &mut h,
+            window,
+            Pass {
+                close: true,
+                ..Pass::default()
+            },
+        );
+        let ran = main_passes_asked(&mut h, &asked, &mut wake, covered);
+        assert!(!admin_open(&h), "the Settings closed");
+        let gone = declared(&h).is_empty();
+        assert_eq!(
+            gone, loop_wakes,
+            "covered: {covered}, the loop paints the main window: {loop_wakes}; after the {ran} main passes asked for, the closed window is gone: {gone}"
+        );
+    }
+}
