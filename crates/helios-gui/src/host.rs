@@ -287,6 +287,13 @@ impl Host for HeliosHost {
     }
 
     fn since(&self, seq: Seq) -> Option<Vec<Event>> {
+        let missed = self.bus.missed(seq);
+        if missed > 0 {
+            log::warn!(
+                target: "helios",
+                "bus: a reader at seq {seq} fell behind the journal, {missed} events lost to it"
+            );
+        }
         let events = self
             .bus
             .since(seq)

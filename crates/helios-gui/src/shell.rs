@@ -166,6 +166,31 @@ pub const IN_LIBRARY: &str = "appWindow == 'main' || appWindow == 'library'";
 const HIDPI: f32 = 1.5;
 
 /// About's one-line description of Helios, as the README says it.
+/// The engine's notice kinds, on a subscription of their own: each is
+/// kept until the shell reads it, however many step events the engine
+/// publishes meanwhile (its journal keeps only the latest), and wakes the
+/// window (once the shell's first frame gave its context).
+fn subscribe_engine_notices(
+    engine: &helios_core::Engine,
+) -> (
+    std::sync::mpsc::Receiver<helios_core::Envelope>,
+    Arc<OnceLock<Egui>>,
+) {
+    use helios_core::Event as _;
+    use helios_core::engine::{GpuFellBack, GpuLost};
+    let wake: Arc<OnceLock<Egui>> = Arc::default();
+    let ctx = wake.clone();
+    let notices = engine.bus().subscribe_kinds(
+        &[GpuFellBack::KIND, GpuLost::KIND],
+        Some(Arc::new(move || {
+            if let Some(ctx) = ctx.get() {
+                ctx.request_repaint();
+            }
+        })),
+    );
+    (notices, wake)
+}
+
 fn about_description() -> Message {
     Message::new(
         "gui-about-description",
@@ -1106,6 +1131,7 @@ impl Shell {
         // The viewport engine and its render cache: one per process, every
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
+        let (engine_notices, engine_wake) = subscribe_engine_notices(&engine);
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
         let activity = crate::activity::Activity::default();
@@ -1186,7 +1212,8 @@ impl Shell {
             still: false,
             i18n,
             opens,
-            engine_seen: 0,
+            engine_notices,
+            engine_wake,
             fell_back: BTreeSet::new(),
             about_generation: None,
             jobs,
@@ -4627,10 +4654,14 @@ impl Shell {
 
     /// What the viewport's engine says a user should know: a step whose
     /// GPU version failed (once per module), a GPU lost. Shown as toasts.
-    fn engine_notices(&mut self) {
-        let engine = self.core.engine.clone();
-        for e in engine.bus().since(self.core.engine_seen) {
-            self.core.engine_seen = e.seq;
+    /// Read from the shell's own subscription to those kinds, not from the
+    /// engine bus's journal, which a burst of step events overruns.
+    fn engine_notices(&mut self, ctx: &Egui) {
+        if self.core.engine_wake.get().is_none() {
+            let _ = self.core.engine_wake.set(ctx.clone());
+        }
+        let notices: Vec<_> = self.core.engine_notices.try_iter().collect();
+        for e in notices {
             let message = || serde_json::from_value::<Message>(e.payload["message"].clone()).ok();
             match e.kind {
                 "engine.gpu_fell_back" => {
@@ -7251,7 +7282,7 @@ impl Shell {
         }
         self.workbench_refusals(&ctx);
         self.save_layout_on_change(&ctx);
-        self.engine_notices();
+        self.engine_notices(&ctx);
         self.copied_image();
         self.job_notices();
         self.library_walks_frame(&ctx);
