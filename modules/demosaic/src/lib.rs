@@ -176,37 +176,11 @@ impl Module for Demosaic {
                 output.area() as f64 / 1e6
             )
         });
-        if plan.method == Method::Rcd {
-            let r = input.region();
-            let (stride, planes) = rcd::demosaic(
-                &plan.cfa,
-                r.x,
-                r.y,
-                r.width as usize,
-                r.height as usize,
-                plan.maximum,
-                |col, row| input.pixel(r.x + col as i64, r.y + row as i64)[0],
-            );
-            return Ok(vec![Image::from_fn(output, 4, |x, y, c| {
-                if c == 3 {
-                    return 1.0;
-                }
-                planes[c as usize][(y - r.y) as usize * stride + (x - r.x) as usize]
-            })]);
-        }
-        if plan.method == Method::Markesteijn {
-            let r = input.region();
-            let width = r.width as usize;
-            let pixels =
-                xtrans::demosaic(&plan.cfa, r.x, r.y, width, r.height as usize, |col, row| {
-                    input.pixel(r.x + col as i64, r.y + row as i64)[0]
-                });
-            return Ok(vec![Image::from_fn(output, 4, |x, y, c| {
-                if c == 3 {
-                    return 1.0;
-                }
-                pixels[(y - r.y) as usize * width + (x - r.x) as usize][c as usize]
-            })]);
+        if matches!(plan.method, Method::Rcd | Method::Markesteijn) {
+            let cancel = helios_core::cancel::current();
+            return self
+                .in_tiles(plan, input, output, (TILE, TILE), threads(), &cancel)
+                .map(|image| vec![image]);
         }
         let cfa = &plan.cfa;
         Ok(vec![Image::from_fn(output, 4, |x, y, c| {
@@ -233,6 +207,146 @@ impl Module for Demosaic {
             }
             0.0
         })])
+    }
+}
+
+/// The edge of the square tiles RCD and Markesteijn work in: small enough
+/// for a tile's buffers to stay in the processor's caches (darktable
+/// tiles them so too), large enough that the border each tile computes
+/// again around it stays a small part of the work.
+const TILE: u32 = 256;
+
+/// The threads a demosaic may use: the machine's.
+fn threads() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+}
+
+impl Demosaic {
+    /// RCD or Markesteijn over `output`, in tiles of `tile` (width,
+    /// height) shared among `threads` threads, each thread taking the next
+    /// band of tiles not yet taken. Each tile reads its own input region,
+    /// grown by the algorithm's border, so a pixel comes out the same
+    /// whatever tile holds it: the tiles give the one-tile result bit for
+    /// bit. `cancel` is checked before each tile.
+    fn in_tiles(
+        &self,
+        plan: &Plan,
+        input: &Image,
+        output: Region,
+        tile: (u32, u32),
+        threads: usize,
+        cancel: &helios_core::cancel::Token,
+    ) -> Result<Image, String> {
+        let row = output.width as usize * 4;
+        let mut data = vec![0.0f32; output.area() * 4];
+        let (tile_w, tile_h) = (tile.0.max(1), tile.1.max(1));
+        // One band of tiles: its rows of `data`, from `y` down.
+        let work = |y: u32, chunk: &mut [f32]| {
+            let rows = (chunk.len() / row) as u32;
+            let mut x = 0;
+            while x < output.width {
+                if cancel.is_cancelled() {
+                    return Err(helios_core::cancel::CANCELLED.to_string());
+                }
+                let width = tile_w.min(output.width - x);
+                let piece = Region::new(
+                    output.x + i64::from(x),
+                    output.y + i64::from(y),
+                    width,
+                    rows,
+                );
+                self.tile(plan, input, piece, &mut chunk[x as usize * 4..], row);
+                x += width;
+            }
+            Ok(())
+        };
+        if row == 0 {
+            return Ok(Image::new(output, 4, data));
+        }
+        let band = tile_h as usize * row;
+        let bands = data.len().div_ceil(band);
+        let threads = threads.clamp(1, bands);
+        if threads == 1 {
+            for (i, chunk) in data.chunks_mut(band).enumerate() {
+                work(i as u32 * tile_h, chunk)?;
+            }
+        } else {
+            let chunks: Vec<_> = data
+                .chunks_mut(band)
+                .map(|c| std::sync::Mutex::new(Some(c)))
+                .collect();
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            std::thread::scope(|s| {
+                let worker = || -> Result<(), String> {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(slot) = chunks.get(i) else {
+                            return Ok(());
+                        };
+                        let chunk = slot
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .take()
+                            .expect("each band is taken once");
+                        work(i as u32 * tile_h, chunk)?;
+                    }
+                };
+                let handles: Vec<_> = (0..threads).map(|_| s.spawn(worker)).collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))
+                    .collect::<Result<Vec<()>, String>>()
+            })?;
+        }
+        Ok(Image::new(output, 4, data))
+    }
+
+    /// One tile of RCD or Markesteijn, written to `out` as RGBA rows
+    /// `stride` values apart.
+    fn tile(&self, plan: &Plan, input: &Image, piece: Region, out: &mut [f32], stride: usize) {
+        let r = self.input_region(plan, piece, 0);
+        let at = |col: usize, row: usize| input.pixel(r.x + col as i64, r.y + row as i64)[0];
+        let (dx, dy) = ((piece.x - r.x) as usize, (piece.y - r.y) as usize);
+        let width = piece.width as usize;
+        let rows = out.chunks_mut(stride).take(piece.height as usize);
+        if plan.method == Method::Rcd {
+            let (tile, planes) = rcd::demosaic(
+                &plan.cfa,
+                r.x,
+                r.y,
+                r.width as usize,
+                r.height as usize,
+                plan.maximum,
+                at,
+            );
+            for (y, line) in rows.enumerate() {
+                let start = (y + dy) * tile + dx;
+                for (x, p) in line[..width * 4]
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .enumerate()
+                {
+                    let j = start + x;
+                    *p = [planes[0][j], planes[1][j], planes[2][j], 1.0];
+                }
+            }
+        } else {
+            let tile = r.width as usize;
+            let rgb = xtrans::demosaic(&plan.cfa, r.x, r.y, tile, r.height as usize, at);
+            for (y, line) in rows.enumerate() {
+                let start = (y + dy) * tile + dx;
+                for (x, p) in line[..width * 4]
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .enumerate()
+                {
+                    let [red, green, blue] = rgb[start + x];
+                    *p = [red, green, blue, 1.0];
+                }
+            }
+        }
     }
 }
 
@@ -395,6 +509,94 @@ mod tests {
                     assert!(near, "({x}, {y}) has no {c:?} within two");
                 }
             }
+        }
+    }
+
+    /// What `process` gave before it worked in bands: one tile, the
+    /// whole input, read pixel by pixel.
+    fn one_tile(plan: &Plan, input: &Image, output: Region) -> Image {
+        let r = input.region();
+        let at = |col: usize, row: usize| input.pixel(r.x + col as i64, r.y + row as i64)[0];
+        let (w, h) = (r.width as usize, r.height as usize);
+        if plan.method == Method::Rcd {
+            let (stride, planes) = rcd::demosaic(&plan.cfa, r.x, r.y, w, h, plan.maximum, at);
+            return Image::from_fn(output, 4, |x, y, c| {
+                if c == 3 {
+                    return 1.0;
+                }
+                planes[c as usize][(y - r.y) as usize * stride + (x - r.x) as usize]
+            });
+        }
+        let pixels = xtrans::demosaic(&plan.cfa, r.x, r.y, w, h, at);
+        Image::from_fn(output, 4, |x, y, c| {
+            if c == 3 {
+                return 1.0;
+            }
+            pixels[(y - r.y) as usize * w + (x - r.x) as usize][c as usize]
+        })
+    }
+
+    #[test]
+    fn tiles_give_the_one_tile_result_bit_for_bit() {
+        // Odd sizes and origins, a detailed scene, a white balance above 1.
+        let scene = Image::from_fn(Region::new(-40, -40, 260, 240), 1, |x, y, _| {
+            ((x * 37 + y * 11) % 23) as f32 / 23.0
+                + if (x / 5 + y / 7) % 2 == 0 { 0.3 } else { 0.0 }
+        });
+        for (cfa, out) in [
+            ("GBRG", Region::new(-3, 1, 177, 151)),
+            ("RGGB", Region::new(5, -7, 61, 203)),
+            (XTRANS, Region::new(-1, 3, 173, 157)),
+            (XTRANS, Region::new(7, -5, 59, 199)),
+        ] {
+            let context =
+                context(cfa).with(fields::WHITE_BALANCE, Value::List(vec![2.1, 1.0, 1.6]));
+            let plan = Demosaic.prepare(&Params::new(), &context).unwrap();
+            let input = scene.sample(Demosaic.input_region(&plan, out, 2));
+            let today = one_tile(&plan, &input, out);
+            let token = helios_core::cancel::Token::new();
+            for (tile, threads) in [
+                ((out.width, out.height), 1),
+                ((64, 64), 1),
+                ((64, 64), 4),
+                ((37, 23), 3),
+                ((out.width, 17), 8),
+                ((1000, 1000), 8),
+            ] {
+                let banded = Demosaic
+                    .in_tiles(&plan, &input, out, tile, threads, &token)
+                    .unwrap();
+                assert_eq!(banded.region(), out);
+                let same = banded
+                    .data()
+                    .iter()
+                    .zip(today.data())
+                    .all(|(a, b)| a.to_bits() == b.to_bits());
+                assert!(
+                    same,
+                    "{cfa} {out} in tiles of {tile:?} on {threads} threads"
+                );
+            }
+            let processed = Demosaic.process(&plan, &[&input], out).unwrap().remove(0);
+            assert_eq!(processed.data(), today.data(), "{cfa} {out}");
+        }
+    }
+
+    #[test]
+    fn a_cancelled_render_gives_up() {
+        let out = Region::sized(80, 300);
+        let input = Image::from_fn(out.grow(14), 1, |_, _, _| 0.4);
+        let token = helios_core::cancel::Token::new();
+        token.cancel();
+        for cfa in ["RGGB", XTRANS] {
+            let plan = Demosaic.prepare(&Params::new(), &context(cfa)).unwrap();
+            let need = Demosaic.input_region(&plan, out, 2);
+            let input = input.sample(need);
+            let err = helios_core::cancel::scope(&token, || {
+                Demosaic.process(&plan, &[&input], out).unwrap_err()
+            });
+            assert_eq!(err, helios_core::cancel::CANCELLED, "{cfa}");
+            assert!(Demosaic.process(&plan, &[&input], out).is_ok(), "{cfa}");
         }
     }
 
