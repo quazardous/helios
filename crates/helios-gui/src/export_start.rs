@@ -18,7 +18,7 @@
 //! runs.
 
 use egui_pop::api::bus::bus_contract::{
-    self, Bus, ListenOpts, Point, PointDecl, PointKind, Refused,
+    self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
 use serde_json::{Value, json};
 
@@ -48,25 +48,16 @@ pub struct Asked {
 }
 
 /// A refusal: the listener that refused (or the point, when none ran),
-/// and why.
-pub use crate::request::Refusal;
+/// why, and whether it failed rather than refused (the bus's).
+pub use bus_contract::Refusal;
 
 /// What the listeners did.
 #[derive(Clone, Debug, Default)]
 pub struct Started {
-    /// The listeners that ran, in their order.
+    /// The listeners that went through, in their order.
     pub ran: Vec<String>,
     /// The request was refused, by whom and why.
     pub refused: Option<Refusal>,
-}
-
-impl crate::request::Refusable for Started {
-    fn ran(&mut self) -> &mut Vec<String> {
-        &mut self.ran
-    }
-    fn refusal(&mut self) -> &mut Option<Refusal> {
-        &mut self.refused
-    }
 }
 
 /// The request to start an export.
@@ -83,7 +74,8 @@ impl Point for ExportStart {
 /// declared by [`declare`].
 pub const POINTS: &[PointDecl] = &[PointDecl::of::<ExportStart>(
     "Start an export: the host's exporter plans and runs it; refused with its reason when no library is open",
-)];
+)
+.fail_closed()];
 
 /// Declares [`POINTS`] on `bus` (once; a second desktop on the same bus
 /// finds them there).
@@ -97,7 +89,8 @@ pub fn declare(bus: &dyn Bus) {
 
 /// Registers `run` as the export's listener ([`RUN`]) on `bus`: a local
 /// listener bound to the calling thread (the interface's). `run` refuses
-/// the export with `Err(reason)`. One there already is replaced.
+/// the export with `Err(reason)` (`HookError::refuse`). One there already
+/// is replaced.
 ///
 /// # Errors
 /// The bus refused it.
@@ -110,23 +103,29 @@ pub fn listen_local(
     bus.listen_local::<ExportStart>(
         RUN,
         ListenOpts::new().owner(BUS_OWNER),
-        crate::request::listener(RUN, move |asked, _: &mut Started| run(asked)),
+        move |asked, started: &mut Started| {
+            run(asked).map_err(HookError::refuse)?;
+            started.ran.push(RUN.to_owned());
+            Ok(())
+        },
     )
     .map_err(|e| e.to_string())
 }
 
 /// Passes `asked` through `export.start` on `bus`: what the listeners
 /// did; refused by the point itself when none ran ([`NO_LIBRARY`]).
-/// Fail-closed ([`crate::request::pass`]): a listener that failed (an
+/// Fail-closed (the point is declared so): a listener that failed (an
 /// error, a panic, past its deadline) refuses the export.
 pub fn pass(bus: &dyn Bus, asked: Asked) -> Started {
     declare(bus);
-    let mut started = crate::request::pass::<ExportStart>(bus, asked, Started::default());
+    let altered = bus.alter::<ExportStart>(asked, Started::default());
+    for failure in &altered.failures {
+        log::warn!(target: "helios", "{failure}");
+    }
+    let mut started = altered.value;
+    started.refused = altered.refused;
     if started.ran.is_empty() && started.refused.is_none() {
-        started.refused = Some(Refusal {
-            by: START.to_owned(),
-            reason: NO_LIBRARY.to_owned(),
-        });
+        started.refused = Some(Refusal::new(START, START, None, NO_LIBRARY));
     }
     started
 }
@@ -140,7 +139,7 @@ pub fn said(asked: &Asked, started: &Started) -> Value {
         "ran": started.ran,
     });
     if let Some(r) = &started.refused {
-        data["refused"] = json!({ "by": r.by, "reason": r.reason });
+        data["refused"] = json!({ "by": r.listener, "reason": r.reason, "failed": r.failed });
     }
     data
 }

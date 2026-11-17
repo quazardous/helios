@@ -2019,7 +2019,7 @@ impl Shell {
         let listened = bus.listen_local::<AnswerDecision>(
             crate::decisions::ANSWERED_BY,
             egui_pop::api::bus::bus_contract::ListenOpts::new().owner(crate::decisions::BUS_OWNER),
-            crate::request::listener(crate::decisions::ANSWERED_BY, move |r: &Request, _| {
+            move |r: &Request, _: &mut ()| {
                 answer_decision_on(&viewport, &decisions, r.clone(), "user")
                     .map(|_| ())
                     .inspect_err(|e| {
@@ -2031,7 +2031,8 @@ impl Shell {
                             );
                         }
                     })
-            }),
+                    .map_err(egui_pop::api::bus::bus_contract::HookError::refuse)
+            },
         );
         if let Err(e) = listened {
             log::error!(target: "helios", "{ANSWER}: {e}");

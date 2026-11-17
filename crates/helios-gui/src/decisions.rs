@@ -62,7 +62,7 @@ pub struct AnswerDecision;
 impl egui_pop::api::bus::bus_contract::Point for AnswerDecision {
     const ID: &'static str = ANSWER;
     type Input = Request;
-    type Value = crate::request::Heard;
+    type Value = ();
     const KIND: egui_pop::api::bus::bus_contract::PointKind =
         egui_pop::api::bus::bus_contract::PointKind::Request;
 }
@@ -72,7 +72,8 @@ impl egui_pop::api::bus::bus_contract::Point for AnswerDecision {
 pub const POINTS: &[egui_pop::api::bus::bus_contract::PointDecl] = &[
     egui_pop::api::bus::bus_contract::PointDecl::of::<AnswerDecision>(
         "A decision answered in the Decisions panel (accepted, corrected, all above a confidence): heard after the drawing, answered through the book on the viewport's graph",
-    ),
+    )
+    .fail_closed(),
 ];
 
 /// Declares [`POINTS`] on `bus` (once).
@@ -288,13 +289,18 @@ impl Decisions {
     /// bus (a panel made alone), dropped and logged.
     fn ask(&self, request: Request) {
         match &self.bus {
-            Some(bus) => {
-                crate::request::ask::<AnswerDecision>(
-                    &**bus,
-                    request,
-                    crate::request::Heard::default(),
-                );
-            }
+            Some(bus) => match bus.defer() {
+                Some(defer) => {
+                    defer.ask::<AnswerDecision>(request, ());
+                }
+                // A bus without `Defer`: heard at once.
+                None => {
+                    let out = bus.alter::<AnswerDecision>(request, ());
+                    if let Some(r) = out.refused {
+                        log::warn!(target: "helios", "{r}");
+                    }
+                }
+            },
             None => log::error!(target: "helios", "{ANSWER}: no bus, {request:?} dropped"),
         }
     }
