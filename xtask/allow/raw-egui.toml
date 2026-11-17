@@ -26,7 +26,6 @@
 "shell/import_choices.rs" = 14
 "shell/import_detail.rs" = 1
 "shell/import_history.rs" = 8
-"shell/import_profile_editor.rs" = 38
 "shell/import_profiles.rs" = 28
 "shell/import_window.rs" = 1
 "shell/library_focus.rs" = 2
