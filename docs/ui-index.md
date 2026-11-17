@@ -40,6 +40,7 @@ egui-pop in the lock: 0.11.0.
 |---|---|---|
 | a card, a framed group | `ui.card(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::card` | `add` inside the kit's `card` in a tone (`Tone::Neutral` for the plain card). |
 | a divider, a rule between two sections (separator) | `ui.divider(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::divider` | A divider: a rule across the layout between two sections, in `border.default`, one point wide on whole physical pixels, centred in a space of `Space::Group`. |
+| a group that folds and opens inside a panel (a disclosure, a collapsing header) | `Fold` (egui-pop)<br>`egui_pop::core::fold::Fold` | A group inside a panel whose header row folds and opens its body: a section band (disclosure mark, title, count) with optional actions at its right end, its body indented below it when open. |
 | a list in a side panel's section, a few rows high | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 | a scrolling region | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 |  | `ui.scroll_area(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
@@ -155,6 +156,7 @@ egui-pop in the lock: 0.11.0.
 |---|---|---|
 | a details grid, names and their values | **`helios_ui::details(..)`** (Helios preset)<br>`helios_ui::details` | A details grid: one line per `(name, value)`, the names in a column as wide as the widest, the values taking the rest: egui-pop's grid, its header cells and body text. |
 | a long list, virtualised | `ListView` (egui-pop)<br>`egui_pop::views::list::ListView` | The list widget. |
+| a row of a hand-built tree with its disclosure toggle (a folder tree in a side panel) | `TreeRow` (egui-pop)<br>`egui_pop::core::fold::TreeRow` | A row of a hand-built tree: a branch's toggle, or a leaf's room for one, then the row the caller draws; `TreeRowResponse::body` shows the rows below a branch, indented, when it is open. |
 | a row picked from a short list | `SelectableRow` (egui-pop)<br>`egui_pop::core::widgets::SelectableRow` | A row picked from a short list: its box is the kit's `selectable-row` component, `selected` for the chosen one (never `hover` then, so the choice stays visible under the pointer), its label in the state's `text`. |
 | a sortable column header | `SortHeader` (egui-pop)<br>`egui_pop::core::widgets::SortHeader` | A column's header: its box is the kit's `table-header-cell` component, `selected` while the rows are sorted by it, the direction the kit's `sort-ascending` or `sort-descending` glyph after the title. |
 | a table with sortable, resizable columns | `DataTable` (egui-pop)<br>`egui_pop::views::table::DataTable` | The data table widget. |

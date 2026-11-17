@@ -11,9 +11,8 @@
 "duplicates.rs" = 17
 "graph.rs" = 7
 "jobs.rs" = 10
-"library.rs" = 3
-"library/keywords.rs" = 7
-"library/metadata.rs" = 31
+"library/keywords.rs" = 6
+"library/metadata.rs" = 30
 "library/versions.rs" = 3
 "log_panel.rs" = 5
 "mask_tree.rs" = 18

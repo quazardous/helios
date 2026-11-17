@@ -418,26 +418,28 @@ impl Library {
     pub(super) fn metadata_section(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let word = |m: Message| crate::i18n::text(&ctx, m);
-        egui::CollapsingHeader::new(word(Message::new("gui-library-metadata", "Metadata")))
-            .id_salt("helios.library.metadata")
-            .default_open(true)
-            .show(ui, |ui| {
-                // Its own scroll, a share of the panel's height: the grid
-                // below keeps its room, and the panel never scrolls the
-                // search field away.
-                let max = (ui.available_height() * 0.4).clamp(120.0, 320.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.library.metadata.scroll")
-                    .max_height(max)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| self.metadata_body(ui));
-                // The versions strip below the scroll, always in view.
-                if let Ok(keys) = self.targets()
-                    && let [one] = keys.as_slice()
-                {
-                    self.versions_strip(ui, one);
-                }
-            });
+        egui_pop::core::fold::Fold::new(
+            "helios.library.metadata",
+            word(Message::new("gui-library-metadata", "Metadata")),
+        )
+        .default_open(true)
+        .show(ui, |ui| {
+            // Its own scroll, a share of the panel's height: the grid
+            // below keeps its room, and the panel never scrolls the
+            // search field away.
+            let max = (ui.available_height() * 0.4).clamp(120.0, 320.0);
+            egui::ScrollArea::vertical()
+                .id_salt("helios.library.metadata.scroll")
+                .max_height(max)
+                .auto_shrink([false, true])
+                .show(ui, |ui| self.metadata_body(ui));
+            // The versions strip below the scroll, always in view.
+            if let Ok(keys) = self.targets()
+                && let [one] = keys.as_slice()
+            {
+                self.versions_strip(ui, one);
+            }
+        });
     }
 
     fn metadata_body(&mut self, ui: &mut Ui) {
