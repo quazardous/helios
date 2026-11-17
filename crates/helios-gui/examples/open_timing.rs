@@ -236,10 +236,12 @@ fn concurrent(
     while proxy > fit / 4.0 {
         proxy /= 2.0;
     }
+    // Placed as the viewport places it (`engine_source::region_of`): a
+    // turned image's extent starts off the origin.
     let at = move |s: f64| {
         Region::new(
-            0,
-            0,
+            (extent.x as f64 * s).floor() as i64,
+            (extent.y as f64 * s).floor() as i64,
             ((f64::from(extent.width) * s).ceil() as u32).max(1),
             ((f64::from(extent.height) * s).ceil() as u32).max(1),
         )

@@ -1394,10 +1394,12 @@ impl Engine {
                     | ShapeKind::Composite { .. }
                     | ShapeKind::Bypass { .. } => {}
                     ShapeKind::Reduce { input, scale } => {
+                        let full = r.full_resolution(*scale);
+                        let extent = graph.extent(input.node).ok().flatten();
                         asked
                             .entry(*input)
                             .or_default()
-                            .push(r.full_resolution(*scale));
+                            .push(whole_image_ask(full, extent));
                     }
                     ShapeKind::Pending { inputs } => {
                         for (src, _) in inputs {
@@ -2121,6 +2123,44 @@ impl Engine {
             Work::Pending { .. } => unreachable!("execute answers pending steps itself"),
         }
     }
+}
+
+/// The step a reduce over the whole image reads at full resolution is
+/// grown to a canonical region, so asks at different scales share one
+/// key, and so one computation: their regions run a few pixels past the
+/// image (or stop just short of it), each by a different amount, from
+/// rounding at each scale. Each side is rounded out to this many pixels.
+const WHOLE_IMAGE_MARGIN: i64 = 64;
+
+/// The full-resolution region a reduce asks for (`full`): grown to the
+/// canonical whole-image region when it holds the whole `extent` but for
+/// less than a margin on each side, as is for a part of the image (a
+/// zoomed tile). Growing changes no pixel a reduce reads: a step's pixels
+/// do not depend on its region (what tiling relies on), and the reduce
+/// reads only `full`, held inside.
+///
+/// The canonical region is the extent grown on each side by its overshoot
+/// rounded up to the margin; the right and bottom always by one margin at
+/// least, since rounding a size up at a scale nearly always runs past
+/// them, while the left and top start on the image's own grid.
+fn whole_image_ask(full: Region, extent: Option<Region>) -> Region {
+    const M: i64 = WHOLE_IMAGE_MARGIN;
+    let Some(e) = extent.filter(|e| {
+        !e.is_empty()
+            && full.x <= e.x + M
+            && full.y <= e.y + M
+            && full.right() >= e.right() - M
+            && full.bottom() >= e.bottom() - M
+    }) else {
+        return full;
+    };
+    let round = |over: i64| (over.max(0) + M - 1) / M * M;
+    let (x, y) = (e.x - round(e.x - full.x), e.y - round(e.y - full.y));
+    let (right, bottom) = (
+        e.right() + round(full.right() - e.right()).max(M),
+        e.bottom() + round(full.bottom() - e.bottom()).max(M),
+    );
+    Region::new(x, y, (right - x) as u32, (bottom - y) as u32)
 }
 
 /// A copy to or from the accelerator failed, for `step`: a lost or hung
