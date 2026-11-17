@@ -317,12 +317,12 @@ fn the_metadata_section_fits_the_narrow_library_panel() {
     shell.library_mut().select(0);
     let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
     h.run_steps(4);
-    let panel = h.state().target_rect("helios.vault").unwrap();
-    assert!(panel.width() < 400.0, "the narrow side panel: {panel:?}");
+    let panel = h.state().target_rect("helios.filters").unwrap();
+    assert!(panel.width() < 400.0, "the narrow Filters panel: {panel:?}");
     let inside = |what: &str, r: egui::Rect| {
         assert!(
             r.min.x >= panel.min.x - 0.5 && r.max.x <= panel.max.x + 0.5,
-            "{what} at {r:?} runs past the Library panel {panel:?}"
+            "{what} at {r:?} runs past the Filters panel {panel:?}"
         );
     };
     let marks: Vec<(String, egui::Rect)> = h

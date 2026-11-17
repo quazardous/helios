@@ -1533,6 +1533,8 @@ impl Shell {
         // cascaded over the image; a loaded layout keeps its own.
         let mut layout = shell.core.app.handle().layout();
         if let Some(lead) = crate::workbench::gather_palettes(&mut layout) {
+            // And the Library's Filters above its Results.
+            crate::workbench::split_filters(&mut layout);
             let notes = shell.core.app.handle().set_layout(layout);
             shell.notes.extend(notes);
             shell.focus.palettes_to_place = Some(lead);

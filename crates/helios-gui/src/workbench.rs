@@ -230,6 +230,46 @@ pub fn darkroom(specs: &[PanelSpec]) -> Layout {
 /// above the panels under it.
 const FILTERS_SHARE: f32 = 0.4;
 
+/// Puts the Library's Filters panel above the panels it shares a tab
+/// group with, when that group is an area's whole node: an explorer's
+/// two panels both in view, never two tabs of one group. Whether it moved
+/// it. A new layout made from the panels' areas has them as tabs.
+pub fn split_filters(layout: &mut Layout) -> bool {
+    for (_, node) in &mut layout.areas {
+        let Node::Tabs { panels, active } = node else {
+            continue;
+        };
+        let Some(at) = panels
+            .iter()
+            .position(|p| p.as_str() == crate::library::FILTERS_PANEL)
+        else {
+            continue;
+        };
+        if panels.len() < 2 {
+            continue;
+        }
+        let filters = panels.remove(at);
+        // The tab shown stays shown (the first, if it was the Filters).
+        let shown = match (*active).cmp(&at) {
+            std::cmp::Ordering::Greater => *active - 1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Less => *active,
+        };
+        let rest = Node::Tabs {
+            panels: std::mem::take(panels),
+            active: shown,
+        };
+        *node = Node::Split {
+            vertical: true,
+            ratio: FILTERS_SHARE,
+            a: Box::new(Node::tab(filters)),
+            b: Box::new(rest),
+        };
+        return true;
+    }
+    false
+}
+
 /// The library layout of these panels (see [`LIBRARY`]).
 pub fn library(specs: &[PanelSpec]) -> Layout {
     only(
