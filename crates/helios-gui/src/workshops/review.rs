@@ -199,23 +199,24 @@ impl Panel {
                         let junction = pending
                             .iter()
                             .any(|j| j["image"] == image.as_str() && j["junction"] == slider.as_str());
-                        ui.horizontal_wrapped(|ui| {
-                            let l = ui.text_role(
-                                TextRole::Body,
-                                text(
-                                    Message::new(
-                                        "gui-workshops-review-value",
-                                        "{ $slider }: { $before } before, { $after } after ({ $source })",
-                                    )
-                                    .with("slider", slider.as_str())
-                                    .with("before", number(&p["before"][slider]))
-                                    .with("after", number(after))
-                                    .with("source", text(source_words(source))),
-                                ),
-                            );
-                            if matches!(state, "failed" | "reverted") {
-                                return;
-                            }
+                        let l = ui.text_role(
+                            TextRole::Body,
+                            text(
+                                Message::new(
+                                    "gui-workshops-review-value",
+                                    "{ $slider }: { $before } before, { $after } after ({ $source })",
+                                )
+                                .with("slider", slider.as_str())
+                                .with("before", number(&p["before"][slider]))
+                                .with("after", number(after))
+                                .with("source", text(source_words(source))),
+                            ),
+                        );
+                        if matches!(state, "failed" | "reverted") {
+                            continue;
+                        }
+                        // The value under its line, and its button.
+                        ui.horizontal(|ui| {
                             let key = (image.clone(), slider.clone());
                             let v = self
                                 .review_edits
