@@ -100,6 +100,7 @@ fn main() {
         std::process::exit(1);
     }
     let lines = match a.part.as_str() {
+        "grid" if std::env::var_os("OPEN_BENCH_GRID").is_none() => vec![json!({"part": "grid", "skipped": true})],
         "grid" => vec![grid(
             &files,
             a.n,
@@ -109,7 +110,6 @@ fn main() {
         )],
         // Throwaway (perf #5256): the decode part measures opening a photo.
         "decode" => open_bench(&files, a.renders),
-        "grid" if std::env::var_os("OPEN_BENCH_GRID").is_none() => vec![json!({"part": "grid", "skipped": true})],
         other => {
             eprintln!("thumb_bench: unknown part {other}");
             std::process::exit(2);
@@ -595,7 +595,7 @@ fn open_bench(files: &[PathBuf], n: usize) -> Vec<Value> {
         while proxy > fit / 4.0 {
             proxy /= 2.0;
         }
-        let at = |s: f64| {
+        let at = move |s: f64| {
             Region::new(0, 0, ((f64::from(extent.width) * s).ceil() as u32).max(1), ((f64::from(extent.height) * s).ceil() as u32).max(1))
         };
         let (pscale, preg) = helios_gui::preview::plan(extent);
