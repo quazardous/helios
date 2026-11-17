@@ -989,14 +989,20 @@ fn show_prepared(
     let Prepared {
         image, graph, node, ..
     } = prepared;
-    if let (Some(persist), Some(image)) = (persist, image) {
-        persist
+    match (persist, image) {
+        (Some(persist), Some(image)) => persist
             .open_image(shell, image, graph, node, "output")
-            .map(|_| ())
-    } else {
-        // Not in the library: no profile to offer.
-        helios_gui::calibrate::set_offer(shell.values(), None);
-        shell.set_view_source(graph, node, "output")
+            .map(|_| ()),
+        (persist, _) => {
+            // `image.close`: the image of the library open before is
+            // closed, its edit saved, before this file is shown.
+            if let Some(persist) = persist {
+                persist.close_image(shell, seconds_f64())?;
+            }
+            // Not in the library: no profile to offer.
+            helios_gui::calibrate::set_offer(shell.values(), None);
+            shell.set_view_source(graph, node, "output")
+        }
     }
 }
 
@@ -1202,10 +1208,21 @@ impl App {
         while i < self.preparing.len() {
             let done = match self.preparing[i].ready.try_recv() {
                 Ok(Ready::First(graph, node)) => {
-                    // The image open before is closed first: what is
-                    // drawn now is not saved into its edit.
-                    if let Some(persist) = self.persist.as_mut() {
-                        persist.close_image(&mut self.shell, seconds_f64());
+                    // `image.close`: the image open before is closed (its
+                    // edit saved) before anything of this one is drawn.
+                    // Refused (its edit could not be saved), it stays
+                    // open and this opening is dropped.
+                    let closed = self
+                        .persist
+                        .as_mut()
+                        .map_or(Ok(()), |p| p.close_image(&mut self.shell, seconds_f64()));
+                    if let Err(e) = closed {
+                        let Preparing { library, .. } = self.preparing.remove(i);
+                        if library.is_some() {
+                            self.shell.open_from_library(None);
+                        }
+                        self.shell.notify(helios_gui::dialogs::Level::Warning, e);
+                        continue;
                     }
                     if let Err(e) = self.shell.set_view_source(graph, node, "image") {
                         warn(&format!("no first paint: {e}"));

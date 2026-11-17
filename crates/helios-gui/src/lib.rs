@@ -31,6 +31,7 @@ pub mod history;
 pub mod host;
 pub mod i18n;
 pub mod image_map;
+pub mod image_open;
 pub mod import_browser;
 pub mod import_end;
 pub mod import_remote;

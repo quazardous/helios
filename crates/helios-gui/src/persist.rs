@@ -119,6 +119,12 @@ pub struct Persist<S: Store> {
     bus: Arc<Bus>,
     events: Receiver<Envelope>,
     editing: Option<Editing>,
+    /// The edit open, lent to `image.open` / `image.close`'s `edit.save`
+    /// listener while the request passes ([`Persist::switch`]).
+    desk: Arc<Mutex<Option<Editing>>>,
+    /// The bus `image.open` / `image.close`'s listeners are registered on
+    /// (the shell's), once.
+    darkroom: Option<Arc<dyn egui_pop::api::bus::bus_contract::Bus>>,
     /// Where the desktop says the library changed (an import ended, a
     /// step undone), heard with the vault's events as one change
     /// ([`crate::library_changed`]).
@@ -1351,6 +1357,8 @@ impl<S: Store + 'static> Persist<S> {
             bus,
             events,
             editing: None,
+            desk: Arc::default(),
+            darkroom: None,
             changes: crate::library_changed::Publisher::channel(),
             listening: None,
             node,
@@ -2239,6 +2247,8 @@ impl<S: Store + 'static> Persist<S> {
         node: NodeId,
         port: &str,
     ) -> Result<Option<Version>, String> {
+        // `image.open`: the edit open saved first; refused, it stays open.
+        self.switch(shell, Some(image), seconds_now())?;
         // Opened for the first time, a raw gets its camera's default
         // calibration profile and default camera look (as its first
         // edit, read just below).
@@ -2295,6 +2305,12 @@ impl<S: Store + 'static> Persist<S> {
             gesture: None,
             unsaved: false,
         });
+        shell.app().handle().publish(
+            "helios",
+            None,
+            crate::image_open::OPENED,
+            json!({ "image": image.hex() }),
+        );
         Ok(head)
     }
 
@@ -2426,9 +2442,108 @@ impl<S: Store + 'static> Persist<S> {
     /// Closes the image being edited, its last committed step saved:
     /// what the viewport shows next (a raw's preview drawn while the raw
     /// is made ready) is not saved into its edit.
-    pub fn close_image(&mut self, shell: &mut Shell, now: f64) {
-        self.save_edit(shell, now);
+    ///
+    /// It passes `image.close` ([`crate::image_open`]): the edit saved
+    /// first, its write answered.
+    ///
+    /// # Errors
+    /// The save failed: the image stays open, its edit unsaved; the reason,
+    /// in words.
+    pub fn close_image(&mut self, shell: &mut Shell, now: f64) -> Result<(), String> {
+        self.switch(shell, None, now)
+    }
+
+    /// Passes `image.open` (`to`) or `image.close` (none) on the shell's
+    /// bus: the edit open saved first (`edit.save`, its write answered),
+    /// then its history left (`history.scope`). Refused, the image open
+    /// stays open and the refusal is said on the journal; gone through,
+    /// no image is edited until the next one loads, and `image.closed` is
+    /// said.
+    ///
+    /// # Errors
+    /// A listener refused: the reason, in words.
+    fn switch(&mut self, shell: &mut Shell, to: Option<ImageId>, now: f64) -> Result<(), String> {
+        use crate::image_open::{self as io, Switch};
+        // The steps on their way are written first: the save follows them.
+        self.settle_edits(shell);
+        let bus = self.listen_darkroom(shell);
+        let switch = Switch {
+            from: self.editing.as_ref().map(|e| e.session.image().hex()),
+            to: to.as_ref().map(ImageId::hex),
+            at: now,
+        };
+        *held(&self.desk) = self.editing.take();
+        let switched = io::pass(&*bus, switch.clone());
+        self.editing = held(&self.desk).take();
+        let handle = shell.app().handle().clone();
+        if let Some((image, edited)) = &switched.saved {
+            let mut library = shell.library_mut();
+            library.show_field(
+                image,
+                helios_vault::edit::EDITED,
+                Some(&Value::Bool(*edited)),
+            );
+            library.edit_changed(image);
+        }
+        if let Some(refusal) = &switched.refused {
+            handle.publish("helios", None, io::REFUSED, io::said(&switch, &switched));
+            let reason = if refusal.by == io::SAVE {
+                shell.text(
+                    Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
+                        .with("error", refusal.reason.clone()),
+                )
+            } else {
+                refusal.reason.clone()
+            };
+            return Err(reason);
+        }
         self.editing = None;
+        if switch.from.is_some() {
+            handle.publish("helios", None, io::CLOSED, io::said(&switch, &switched));
+        }
+        Ok(())
+    }
+
+    /// The order `image.open`'s and `image.close`'s listeners run in on
+    /// the shell's bus.
+    pub fn darkroom_order(&mut self, shell: &Shell) -> String {
+        let bus = self.listen_darkroom(shell);
+        crate::image_open::order(&*bus)
+    }
+
+    /// Registers `image.open` / `image.close`'s listeners on the shell's
+    /// bus, once: `edit.save` on the edit lent while the request passes
+    /// (its step written through the node and answered inside the pass),
+    /// `history.scope` on the shell's value store and snapshot book. The
+    /// bus.
+    fn listen_darkroom(&mut self, shell: &Shell) -> Arc<dyn egui_pop::api::bus::bus_contract::Bus> {
+        use crate::image_open as io;
+        let bus = shell.app().handle().bus();
+        if self.darkroom.as_ref().is_some_and(|b| Arc::ptr_eq(b, &bus)) {
+            return bus;
+        }
+        let (desk, values, node) = (self.desk.clone(), shell.values().clone(), self.node.clone());
+        let saved = io::listen_local(&*bus, io::SAVE, move |switch, switched| {
+            let mut desk = held(&desk);
+            let Some(e) = desk.as_mut() else {
+                return Ok(());
+            };
+            switched.saved = save_now(e, &values, &node, switch.at)?;
+            Ok(())
+        });
+        let (values, snapshots) = (shell.values().clone(), shell.snapshots().clone());
+        let scoped = io::listen_local(&*bus, io::SCOPE, move |_, _| {
+            // The next image's values take this one's paths: its steps
+            // must not be undone into them, nor its snapshots restored.
+            held(&values).clear_history();
+            crate::edit_snapshots::lock(&snapshots).clear();
+            Ok(())
+        });
+        for e in [saved, scoped].into_iter().filter_map(Result::err) {
+            log::error!(target: "helios", "{}: {e}", io::OPEN);
+        }
+        self.darkroom = Some(bus.clone());
+        bus
     }
 
     /// The edit being saved, if an image is open.
@@ -2680,95 +2795,14 @@ impl<S: Store + 'static> Persist<S> {
         let Some(e) = &mut self.editing else {
             return;
         };
-        let at = now.max(0.0) as u64;
-        let (committed, label, origin, gesture, current, edited) = {
+        let step = {
             let store = shell.values().lock().expect("value store lock");
-            let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
-            for (path, entry) in store.list("node/") {
-                let Some((node, param)) = path
-                    .strip_prefix("node/")
-                    .and_then(|rest| rest.rsplit_once('/'))
-                else {
-                    continue;
-                };
-                // A node or a parameter the network no longer has is kept
-                // in the store for an undo, never saved.
-                if let Some((module, params)) = e.modules.get(node)
-                    && params.contains(param)
-                {
-                    modules
-                        .entry(node.to_string())
-                        .or_insert_with(|| (module.clone(), Params::new()))
-                        .1
-                        .set(param, entry.value.clone());
-                }
-            }
-            let mut current = edit::from_modules(&modules);
-            // The modules bypassed, marked on their entries.
-            let bypassed: BTreeSet<String> = store
-                .list(helios_values::BYPASS)
-                .into_iter()
-                .filter(|(_, e)| e.value.as_bool() == Some(true))
-                .filter_map(|(p, _)| p.strip_prefix(helios_values::BYPASS).map(String::from))
-                .filter(|n| e.modules.contains_key(n))
-                .collect();
-            edit::mark_bypassed(&mut current, &bypassed);
-            // The Masks panel's labels and locks, kept with the edit.
-            let marks = crate::mask_tree::marks(&store);
-            if !marks.is_empty() {
-                current["marks"] = Value::Object(marks);
-            }
-            let gesture = store
-                .open_gesture()
-                .zip(store.open_gesture_origin())
-                .map(|(label, origin)| (label.to_string(), who(origin)));
-            (
-                store.committed(),
-                store.last_committed().to_string(),
-                store.last_origin().map_or_else(|| WHO.to_string(), who),
-                gesture,
-                current,
-                crate::edit_marks::Marks::read(&store).edited(),
-            )
-        };
-        let step = if committed == e.committed {
-            if let Some((gesture, by)) = gesture {
-                e.gesture = Some((gesture.clone(), by.clone()));
-                let since = *e.flushed_at.get_or_insert(now);
-                if now - since < FLUSH_SECONDS {
-                    return;
-                }
-                e.flushed_at = Some(now);
-                e.session.step_in_progress(current, &gesture, &by, at)
-            } else {
-                e.flushed_at = None;
-                // A gesture ended with no step: cancelled. If it was
-                // saved in progress, the values it put back are saved.
-                let Some((gesture, by)) = e.gesture.take() else {
-                    return;
-                };
-                if !e.session.in_progress() {
-                    return;
-                }
-                e.session
-                    .step(current, &format!("{gesture} (cancelled)"), &by, at)
-            }
-        } else {
-            e.committed = committed;
-            e.flushed_at = None;
-            e.gesture = None;
-            e.session.step(current, &label, &origin, at)
+            next_step(e, &store, now, false)
         };
         // Written by the node in its turn, off the UI thread; its answer
         // is picked up at a coming frame ([`Persist::written`]).
-        e.unsaved = false;
-        if let Some(version) = step {
-            self.writes.push_back(Write::Edit(Box::new(EditStep {
-                version,
-                in_progress: e.session.in_progress(),
-                edited,
-                after: e.session.clone(),
-            })));
+        if let Some(step) = step {
+            self.writes.push_back(Write::Edit(Box::new(step)));
         }
     }
 
@@ -2816,6 +2850,157 @@ impl<S: Store + 'static> Persist<S> {
             }
         }
     }
+}
+
+/// The step to save of the edit `e`, from the value store: a step when
+/// the store committed one; while a gesture goes on, one every
+/// [`FLUSH_SECONDS`] (`force`: at once); none when nothing changed.
+fn next_step(
+    e: &mut Editing,
+    store: &helios_values::Store,
+    now: f64,
+    force: bool,
+) -> Option<EditStep> {
+    let at = now.max(0.0) as u64;
+    let (committed, label, origin, gesture, current, edited) = {
+        let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
+        for (path, entry) in store.list("node/") {
+            let Some((node, param)) = path
+                .strip_prefix("node/")
+                .and_then(|rest| rest.rsplit_once('/'))
+            else {
+                continue;
+            };
+            // A node or a parameter the network no longer has is kept
+            // in the store for an undo, never saved.
+            if let Some((module, params)) = e.modules.get(node)
+                && params.contains(param)
+            {
+                modules
+                    .entry(node.to_string())
+                    .or_insert_with(|| (module.clone(), Params::new()))
+                    .1
+                    .set(param, entry.value.clone());
+            }
+        }
+        let mut current = edit::from_modules(&modules);
+        // The modules bypassed, marked on their entries.
+        let bypassed: BTreeSet<String> = store
+            .list(helios_values::BYPASS)
+            .into_iter()
+            .filter(|(_, e)| e.value.as_bool() == Some(true))
+            .filter_map(|(p, _)| p.strip_prefix(helios_values::BYPASS).map(String::from))
+            .filter(|n| e.modules.contains_key(n))
+            .collect();
+        edit::mark_bypassed(&mut current, &bypassed);
+        // The Masks panel's labels and locks, kept with the edit.
+        let marks = crate::mask_tree::marks(store);
+        if !marks.is_empty() {
+            current["marks"] = Value::Object(marks);
+        }
+        let gesture = store
+            .open_gesture()
+            .zip(store.open_gesture_origin())
+            .map(|(label, origin)| (label.to_string(), who(origin)));
+        (
+            store.committed(),
+            store.last_committed().to_string(),
+            store.last_origin().map_or_else(|| WHO.to_string(), who),
+            gesture,
+            current,
+            crate::edit_marks::Marks::read(store).edited(),
+        )
+    };
+    let step = if committed == e.committed {
+        if let Some((gesture, by)) = gesture {
+            e.gesture = Some((gesture.clone(), by.clone()));
+            let since = *e.flushed_at.get_or_insert(now);
+            if now - since < FLUSH_SECONDS && !force {
+                return None;
+            }
+            e.flushed_at = Some(now);
+            e.session.step_in_progress(current, &gesture, &by, at)
+        } else {
+            e.flushed_at = None;
+            // A gesture ended with no step: cancelled. If it was
+            // saved in progress, the values it put back are saved.
+            let (gesture, by) = e.gesture.take()?;
+            if !e.session.in_progress() {
+                return None;
+            }
+            e.session
+                .step(current, &format!("{gesture} (cancelled)"), &by, at)
+        }
+    } else {
+        e.committed = committed;
+        e.flushed_at = None;
+        e.gesture = None;
+        e.session.step(current, &label, &origin, at)
+    };
+    e.unsaved = false;
+    step.map(|version| EditStep {
+        version,
+        in_progress: e.session.in_progress(),
+        edited,
+        after: e.session.clone(),
+    })
+}
+
+/// How long `edit.save` waits for the node to answer a step.
+const SAVE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `edit.save`: the step of the edit `e` not saved yet written through
+/// `node`, its answer waited for (the image is about to be left). Written,
+/// the image and whether its edit changes it; nothing to save, none.
+///
+/// # Errors
+/// The node refused the step (or did not answer): the edit goes back to
+/// what the node holds, marked unsaved, and the node's reason.
+fn save_now(
+    e: &mut Editing,
+    values: &Arc<Mutex<helios_values::Store>>,
+    node: &Client,
+    now: f64,
+) -> Result<Option<(String, bool)>, String> {
+    // A save that failed before: the edit shown is saved again, as a step.
+    if e.unsaved {
+        e.committed = u64::MAX;
+    }
+    let step = next_step(e, &held(values), now, true);
+    let Some(step) = step else {
+        return Ok(None);
+    };
+    let (image, edited) = (step.version.image.hex(), step.edited);
+    let write = Write::Edit(Box::new(step));
+    let (method, params) = write.call();
+    let answer = node
+        .call(method, params)
+        .wait_timeout(SAVE_WAIT)
+        .unwrap_or_else(|| {
+            Err(helios_inspect::rpc::Error::new(
+                -32603,
+                "the library did not answer within 30 s",
+            ))
+        });
+    match (answer, write) {
+        (Ok(_), Write::Edit(step)) => {
+            e.confirmed = step.after;
+            Ok(Some((image, edited)))
+        }
+        (Err(err), _) => {
+            e.session = e.confirmed.clone();
+            e.unsaved = true;
+            Err(err.message)
+        }
+        (Ok(_), _) => Ok(None),
+    }
+}
+
+/// The time now, in seconds since the epoch.
+fn seconds_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 /// The parameters an edit saves, by node name.
