@@ -10,7 +10,14 @@ all-features = false
 # since a transitive one is out of our hands until the parent moves on.
 unmaintained = "workspace"
 yanked = "warn"
-ignore = []
+ignore = [
+    # chrono is unmaintained (all versions; jiff or time recommended). It is
+    # not a vulnerability: helios-gui formats local dates with it, and rawler
+    # pulls it in regardless, so dropping our direct use would not take it out
+    # of the tree. Revisit when rawler moves off chrono, then migrate
+    # helios-gui to jiff in one pass.
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, no vulnerability; rawler depends on it too; migrate to jiff once rawler moves" },
+]
 
 [licenses]
 # Helios is GPL-3.0-or-later: every license below can be combined with it.
