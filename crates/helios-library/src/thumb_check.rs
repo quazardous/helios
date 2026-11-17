@@ -39,7 +39,10 @@ use helios_storage::exclude::Checker;
 use helios_thumbs::{Key, LARGE, SMALL, ThumbCache};
 use helios_vault::{ImageId, Presence, Sighting, ToRead};
 
-use crate::map_job::{self, Feed, Files, Load, Map, Never, Power, place_of};
+use crate::map_job::{self, Feed, Files, Load, Map, Never, Power, Status, place_of};
+
+/// What the re-check says while it has nothing to do.
+pub const UP_TO_DATE: &str = "Up to date: waiting for what is on screen to change or the next pass";
 
 /// The shortest time between two passes over the Library, in seconds.
 pub const PASS_EVERY: u64 = 3600;
@@ -141,6 +144,7 @@ pub struct Check<M: Map> {
     volumes: Vec<Volume>,
     load: Box<dyn Load>,
     power: Box<dyn Power>,
+    status: Box<dyn Status>,
     feed: Feed,
     clock: Box<dyn Fn() -> u64 + Send>,
     /// When this pass began.
@@ -174,6 +178,7 @@ impl<M: Map> Check<M> {
             volumes,
             load: Box::new(Never),
             power: Box::new(Never),
+            status: Box::new(Never),
             feed,
             clock: Box::new(|| {
                 std::time::SystemTime::now()
@@ -199,6 +204,13 @@ impl<M: Map> Check<M> {
     #[must_use]
     pub fn power(mut self, power: Box<dyn Power>) -> Self {
         self.power = power;
+        self
+    }
+
+    /// Says what it does or waits on to `status`, on every turn.
+    #[must_use]
+    pub fn status(mut self, status: Box<dyn Status>) -> Self {
+        self.status = status;
         self
     }
 
@@ -360,10 +372,16 @@ impl<M: Map> Check<M> {
     /// unchanged files is stats only); what it remade goes to the log.
     pub fn run(mut self, stop: &AtomicBool) {
         let mut remade = 0u64;
+        // Files re-checked since it started, every pass.
+        let mut checked = 0u64;
         while !stop.load(Ordering::SeqCst) {
             match self.next_check() {
-                Next::Paused(_) => self.wait(stop, Duration::from_secs(5)),
+                Next::Paused(why) => {
+                    self.status.waiting(checked, &why);
+                    self.wait(stop, Duration::from_secs(5));
+                }
                 Next::Idle => {
+                    self.status.waiting(checked, UP_TO_DATE);
                     if remade > 0 {
                         log::info!("thumbnail re-check: {remade} thumbnails made again");
                         remade = 0;
@@ -372,6 +390,8 @@ impl<M: Map> Check<M> {
                 }
                 Next::Check(_, s) => {
                     let name = s.path.display().to_string();
+                    checked += 1;
+                    self.status.working(checked, &name);
                     match self.check(*s) {
                         Ok(Verdict::Remade | Verdict::ChangedOutside(true)) => remade += 1,
                         Ok(_) => {}

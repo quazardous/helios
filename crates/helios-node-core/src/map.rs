@@ -13,7 +13,11 @@
 //!   map current).
 //! - Each stands in the node's promises while it runs, with no end and
 //!   no total ([`crate::job_promises::Standing`]): the Activity focus
-//!   lists them, the status bar does not count them.
+//!   lists them, the status bar does not count them. Each says there what
+//!   it does (the file at hand, how many so far) or what it waits on
+//!   (nothing new, another job, the battery, a pause); a watch flags, in
+//!   the log and the note, one that says it works and then says nothing
+//!   past [`crate::job_promises::STALLED`].
 //! - [`recorder`] makes, on a scan's thread, the recorder of what an
 //!   import window's sources list, over the volumes known then.
 
@@ -24,13 +28,13 @@ use std::time::Duration;
 
 use helios_core::jobs::Jobs;
 use helios_library::map::{Record, Recorder};
-use helios_library::map_job::{BusLoad, Disk, Feed, Job, SystemPower};
+use helios_library::map_job::{BusLoad, Disk, Feed, Job, Status, SystemPower};
 use helios_library::thumb_check::{Check, Thumbs};
 use helios_storage::Volume;
 use helios_storage::exclude::{Blacklist, Checker};
 use helios_vault::{Store, Vault};
 
-use crate::job_promises::Standing;
+use crate::job_promises::{STALLED, Standing};
 use crate::node::NodeJobs;
 
 /// The kind of the thumbnail re-check's standing promise.
@@ -58,6 +62,10 @@ fn blacklist(settings: &MapSettings, helios: &[PathBuf]) -> Blacklist {
     })
 }
 
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// The volumes known now: those mounted, merged with the vault's.
 fn known<S: Store>(vault: &Vault<S>) -> Vec<Volume> {
     let mounted = helios_storage::system().volumes();
@@ -67,6 +75,29 @@ fn known<S: Store>(vault: &Vault<S>) -> Vec<Volume> {
 /// The thumbnail cache the re-check keeps, and what to do on its thread
 /// before it starts (list the cache's folder).
 pub type ThumbCheck = (Box<dyn Thumbs>, Box<dyn FnOnce() + Send>);
+
+/// A standing promise as what a background loop says its status to.
+struct Said<S: Store>(Standing<S>);
+
+impl<S: Store> Status for Said<S>
+where
+    Standing<S>: Send,
+{
+    fn working(&mut self, done: u64, item: &str) {
+        self.0.working(done, item);
+    }
+
+    fn waiting(&mut self, done: u64, why: &str) {
+        self.0.waiting(done, why);
+    }
+}
+
+/// The checks of the standing works' watches, each flagging its work when
+/// it went silent while working (`job_promises::StandingWatch::check`).
+type Watches = Arc<Mutex<Vec<Box<dyn Fn(Duration) -> bool + Send>>>>;
+
+/// How often the watch looks at the standing works.
+const WATCH_EVERY: Duration = Duration::from_secs(10);
 
 /// The map's job and the thumbnail re-check, run by the node.
 pub struct ImageMap {
@@ -93,19 +124,25 @@ impl ImageMap {
             stop: Arc::default(),
             running: Arc::default(),
         });
+        let watches: Watches = Arc::default();
         if let Some((cache, before)) = thumbs {
             let checker = Checker::new(blacklist(&settings, &helios));
             let volumes = known(&vault);
             let load = BusLoad::new(jobs.bus());
-            let (vault, feed) = (vault.clone(), feed.clone());
+            let (vault, feed, watches) = (vault.clone(), feed.clone(), watches.clone());
             map.spawn("thumbnail re-check", move |stop| {
-                // A promise with no end while it runs (Activity).
-                let _standing = Standing::start(vault.clone(), THUMBS_KIND, "Thumbnail re-check");
+                // A promise with no end while it runs (Activity), saying
+                // what the re-check does or waits on.
+                let standing = Standing::start(vault.clone(), THUMBS_KIND, "Thumbnail re-check");
+                let watch = standing.watch();
+                lock(&watches).push(Box::new(move |after| watch.check(after)));
                 // The pool lists the cache's folder; the re-check waits for it.
+                standing.working(0, "Listing the thumbnail cache");
                 before();
                 Check::new(vault, Box::new(Disk), cache, checker, volumes, feed)
                     .load(Box::new(load))
                     .power(Box::new(SystemPower))
+                    .status(Box::new(Said(standing)))
                     .run(stop);
             });
         }
@@ -113,9 +150,13 @@ impl ImageMap {
         let volumes = known(&vault);
         let load = BusLoad::new(jobs.bus());
         let listed = vault.clone();
+        let watching = watches.clone();
         map.spawn("image map", move |stop| {
-            let _standing =
+            let standing =
                 Standing::start(vault.clone(), helios_library::map_job::KIND, "Image map");
+            let watch = standing.watch();
+            lock(&watching).push(Box::new(move |after| watch.check(after)));
+            standing.working(0, "Starting");
             Job::new(
                 vault,
                 Box::new(Disk),
@@ -127,7 +168,22 @@ impl ImageMap {
             .volumes_from(move || known(&listed))
             .load(Box::new(load))
             .power(Box::new(SystemPower))
+            .status(Box::new(Said(standing)))
             .run(&jobs, stop);
+        });
+        // The watch: a standing work silent past STALLED while it says it
+        // works is flagged (the log, its note).
+        map.spawn("background watch", move |stop| {
+            let mut looked = std::time::Instant::now();
+            while !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(200));
+                if looked.elapsed() >= WATCH_EVERY {
+                    looked = std::time::Instant::now();
+                    for check in lock(&watches).iter() {
+                        check(STALLED);
+                    }
+                }
+            }
         });
         map
     }

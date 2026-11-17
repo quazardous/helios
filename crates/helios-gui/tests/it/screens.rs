@@ -114,3 +114,103 @@ fn a_monitor_unplugged_is_said_on_the_bus_by_its_name() {
         ]
     );
 }
+
+/// What the loop's slow re-read of the monitors does
+/// (`event_loop::ScreenWatch`): winit has no hot-plug event, so a monitor
+/// unplugged with no event on a Helios window is heard at the next
+/// re-read, within the period; a re-read that finds the same screens
+/// asks for no repaint (idle stays idle).
+#[test]
+fn a_monitor_unplugged_with_no_window_event_is_heard_within_the_period() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use egui_pop::api::bus::ScreenRemoved;
+    use egui_pop::api::bus::bus_contract::{ListenOpts, Point as _};
+    use helios_gui::event_loop::ScreenWatch;
+    use helios_gui::{Shell, headless, helios_panels};
+
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let said = heard.clone();
+    h.state()
+        .app()
+        .handle()
+        .bus()
+        .listen_local::<ScreenRemoved>(
+            "test.removed",
+            ListenOpts::new().owner("test").last(),
+            move |c, ()| {
+                said.lock()
+                    .unwrap()
+                    .push(format!("{} {:?}", ScreenRemoved::ID, c.name));
+                Ok(())
+            },
+        )
+        .unwrap();
+    window::set_screens(vec![panel(), monitor()]);
+    h.run();
+    // Repaints asked from now on, counted.
+    let asked = Arc::new(AtomicUsize::new(0));
+    let count = asked.clone();
+    h.ctx.set_request_repaint_callback(move |_| {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+
+    let mut watch = ScreenWatch::new(Some(h.ctx.clone()));
+    let t0 = Instant::now();
+    let at = watch.next_wake(t0).expect("two screens: watched");
+    let period = at - t0;
+    assert!(
+        (Duration::from_secs(2)..=Duration::from_secs(5)).contains(&period),
+        "{period:?}"
+    );
+    assert!(
+        !watch.wake(t0, || panic!("the monitors read before the period")),
+        "nothing before the period"
+    );
+    // The same screens: nothing told, no repaint.
+    assert!(!watch.wake(at, || vec![panel(), monitor()]));
+    assert_eq!(
+        asked.load(Ordering::Relaxed),
+        0,
+        "no repaint when nothing changed"
+    );
+    // The monitor unplugged, no window event: heard at the next re-read.
+    let at = watch.next_wake(at).expect("still watched");
+    assert!(watch.wake(at, || vec![panel()]));
+    assert!(
+        asked.load(Ordering::Relaxed) > 0,
+        "a repaint, for egui-pop to say it"
+    );
+    h.run();
+    window::set_screens(Vec::new());
+    assert_eq!(
+        *heard.lock().unwrap(),
+        vec!["screen.removed Some(\"DP-1\")".to_string()]
+    );
+}
+
+/// The re-read runs only while it may matter: a Helios window focused, or
+/// more than one screen (a window may sit on one that can go). One screen
+/// and no focus: the loop sleeps until an event.
+#[test]
+fn the_monitors_are_re_read_only_focused_or_with_several_screens() {
+    use std::time::Instant;
+
+    use helios_gui::event_loop::ScreenWatch;
+
+    let id = winit::window::WindowId::dummy();
+    let now = Instant::now();
+    let mut watch = ScreenWatch::new(None);
+    window::set_screens(vec![panel()]);
+    assert_eq!(watch.next_wake(now), None, "one screen, unfocused");
+    watch.focused(id, true);
+    assert!(watch.next_wake(now).is_some(), "focused");
+    watch.focused(id, false);
+    assert_eq!(watch.next_wake(now), None, "focus lost");
+    window::set_screens(vec![panel(), monitor()]);
+    assert!(watch.next_wake(now).is_some(), "two screens");
+    window::set_screens(Vec::new());
+}

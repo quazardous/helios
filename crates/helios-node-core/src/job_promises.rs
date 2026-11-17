@@ -40,7 +40,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use helios_core::bus::Envelope;
-use helios_core::jobs::{CANCELLED, FAILED, FINISHED, ITEM_FAILED, PAUSED, PROGRESS, STARTED};
+use helios_core::jobs::{
+    CANCELLED, FAILED, FINISHED, ITEM_FAILED, PAUSED, PROGRESS, RESUMED, STARTED,
+};
 use helios_vault::promises::{Filter, INTERRUPTED, State};
 use helios_vault::{Store, Vault};
 use serde_json::{Map, Value, json};
@@ -103,6 +105,12 @@ struct Mirrored {
     /// Progress heard and not written yet.
     dirty: bool,
     written: Instant,
+    /// Its last word (started, progress, an item failed, paused, resumed).
+    heard: Instant,
+    /// Paused: it said why, never a stall.
+    paused: bool,
+    /// Said stalled in the log since its last word.
+    flagged: bool,
 }
 
 /// The jobs followed and their promises, on the mirror's thread.
@@ -121,6 +129,9 @@ impl<S: Store> Mirror<S> {
             STARTED => self.started(id, d),
             PROGRESS => {
                 if let Some(m) = self.jobs.get_mut(id) {
+                    m.heard = Instant::now();
+                    m.paused = false;
+                    m.flagged = false;
                     if let Some(done) = d["done"].as_u64() {
                         m.done = done;
                     }
@@ -138,14 +149,26 @@ impl<S: Store> Mirror<S> {
             }
             ITEM_FAILED => {
                 if let Some(m) = self.jobs.get_mut(id) {
+                    m.heard = Instant::now();
+                    m.flagged = false;
                     m.failed
                         .push(json!({ "path": d["item"], "error": d["error"] }));
                 }
             }
             PAUSED => {
                 if let Some(m) = self.jobs.get_mut(id) {
+                    m.heard = Instant::now();
+                    m.paused = true;
+                    m.flagged = false;
                     m.note = d["reason"].as_str().map(String::from);
                     m.dirty = true;
+                }
+            }
+            RESUMED => {
+                if let Some(m) = self.jobs.get_mut(id) {
+                    m.heard = Instant::now();
+                    m.paused = false;
+                    m.flagged = false;
                 }
             }
             FINISHED => {
@@ -248,6 +271,9 @@ impl<S: Store> Mirror<S> {
                             .map(|i| Value::Array(i.clone())),
                         dirty: false,
                         written: Instant::now(),
+                        heard: Instant::now(),
+                        paused: false,
+                        flagged: false,
                     },
                 );
             }
@@ -258,7 +284,18 @@ impl<S: Store> Mirror<S> {
     /// Writes the progress heard, at most every [`EVERY`] a job (`all`:
     /// whatever its last write).
     fn flush(&mut self, all: bool) {
-        for m in self.jobs.values_mut() {
+        for (id, m) in &mut self.jobs {
+            // A job running with no word past STALLED: said once in the
+            // log, with the item it was on.
+            if !m.paused && !m.flagged && m.heard.elapsed() >= STALLED {
+                m.flagged = true;
+                let on = m.note.as_deref().unwrap_or("no item said");
+                log::warn!(
+                    target: "helios::promises",
+                    "job `{id}`: no progress for {} min: {on}",
+                    m.heard.elapsed().as_secs() / 60
+                );
+            }
             if m.dirty && (all || m.written.elapsed() >= EVERY) {
                 if let Err(e) = self.vault.progress_promise(
                     &m.promise,
@@ -397,12 +434,39 @@ impl NodeJobs for JobPromises {
     }
 }
 
+/// How long a work may go without a word while it says it works before
+/// it is flagged: a log line ([`StandingWatch::check`] for a standing
+/// work, which also says it in its promise's note; the mirror for a job).
+pub const STALLED: Duration = Duration::from_mins(5);
+
+/// What a standing work last said, shared with its watch.
+struct Said {
+    done: u64,
+    note: Option<String>,
+    /// Waiting (nothing to do, another job, a pause): never a stall.
+    waiting: bool,
+    /// Its last word, working or waiting.
+    heard: Instant,
+    /// The last write of its promise.
+    written: Option<Instant>,
+    /// Flagged as stalled since its last word.
+    flagged: bool,
+}
+
 /// A promise with no end and no total: work that runs as long as the node
 /// does. Running from [`Standing::start`] until dropped, then settled
 /// `done`. Each start forgets the earlier ones of its kind.
+///
+/// The work says what it does ([`Standing::working`]: the item at hand
+/// and how many so far) or what it waits on ([`Standing::waiting`]); the
+/// promise's note shows it, so the Activity focus never shows a standing
+/// work running with nothing said. A watch ([`Standing::watch`]) flags it
+/// when it says it works and then says nothing past a deadline.
 pub struct Standing<S: Store> {
     vault: Arc<Vault<S>>,
     id: Option<String>,
+    kind: String,
+    said: Arc<Mutex<Said>>,
 }
 
 impl<S: Store> Standing<S> {
@@ -431,7 +495,19 @@ impl<S: Store> Standing<S> {
             .map(|p| p.id)
             .map_err(|e| warn(&format!("{kind}: no promise: {e}")))
             .ok();
-        Self { vault, id }
+        Self {
+            vault,
+            id,
+            kind: kind.into(),
+            said: Arc::new(Mutex::new(Said {
+                done: 0,
+                note: None,
+                waiting: false,
+                heard: Instant::now(),
+                written: None,
+                flagged: false,
+            })),
+        }
     }
 
     /// The promise's id, when it was made.
@@ -439,12 +515,58 @@ impl<S: Store> Standing<S> {
         self.id.as_deref()
     }
 
-    /// What it does now (`done` so far, a note).
+    /// What it does now (`done` so far, a note), written at once.
     pub fn progress(&self, done: u64, note: Option<&str>) {
         if let Some(id) = &self.id
             && let Err(e) = self.vault.progress_promise(id, done, None, note, now())
         {
             warn(&e);
+        }
+    }
+
+    /// Working on `item`, `done` so far: written at most every [`EVERY`].
+    pub fn working(&self, done: u64, item: &str) {
+        self.say(done, item, false);
+    }
+
+    /// Waiting on `why`, `done` so far: written at once when it changes.
+    pub fn waiting(&self, done: u64, why: &str) {
+        self.say(done, why, true);
+    }
+
+    fn say(&self, done: u64, note: &str, waiting: bool) {
+        let write = {
+            let mut said = self.said.lock().unwrap_or_else(PoisonError::into_inner);
+            said.heard = Instant::now();
+            if said.flagged {
+                said.flagged = false;
+                log::info!(target: "helios::promises", "{}: going again: {note}", self.kind);
+            }
+            let changed = said.note.as_deref() != Some(note) || said.waiting != waiting;
+            let due = said.written.is_none_or(|w| w.elapsed() >= EVERY);
+            // A new wait is written at once; the item at hand and the
+            // count at most every EVERY.
+            let write = (changed && (waiting || due)) || (said.done != done && due);
+            if write {
+                said.done = done;
+                said.note = Some(note.to_string());
+                said.waiting = waiting;
+                said.written = Some(Instant::now());
+            }
+            write
+        };
+        if write {
+            self.progress(done, Some(note));
+        }
+    }
+
+    /// A watch on it, for whoever checks it is alive.
+    pub fn watch(&self) -> StandingWatch<S> {
+        StandingWatch {
+            vault: self.vault.clone(),
+            id: self.id.clone(),
+            kind: self.kind.clone(),
+            said: self.said.clone(),
         }
     }
 }
@@ -460,6 +582,48 @@ impl<S: Store> Drop for Standing<S> {
             }
             self.vault.set_promise_live(&id, false);
         }
+    }
+}
+
+/// A watch on a [`Standing`] work: [`StandingWatch::check`] flags it when
+/// it said it works and has said nothing since, past a deadline.
+pub struct StandingWatch<S: Store> {
+    vault: Arc<Vault<S>>,
+    id: Option<String>,
+    kind: String,
+    said: Arc<Mutex<Said>>,
+}
+
+impl<S: Store> StandingWatch<S> {
+    /// Flags the work when it has said nothing for `after` while working
+    /// (once until its next word): a warning in the log and its promise's
+    /// note saying for how long and on what. Waiting is never a stall: it
+    /// said what it waits on. Whether it is flagged now.
+    pub fn check(&self, after: Duration) -> bool {
+        let (done, note) = {
+            let mut said = self.said.lock().unwrap_or_else(PoisonError::into_inner);
+            if said.flagged {
+                return true;
+            }
+            if said.waiting || said.heard.elapsed() < after {
+                return false;
+            }
+            said.flagged = true;
+            let secs = said.heard.elapsed().as_secs();
+            let on = said.note.clone().unwrap_or_else(|| "starting".into());
+            let note = format!("No progress for {} min {} s: {on}", secs / 60, secs % 60);
+            log::warn!(target: "helios::promises", "{}: {note}", self.kind);
+            said.note = Some(note.clone());
+            (said.done, note)
+        };
+        if let Some(id) = &self.id
+            && let Err(e) = self
+                .vault
+                .progress_promise(id, done, None, Some(&note), now())
+        {
+            warn(&e);
+        }
+        true
     }
 }
 
@@ -645,5 +809,56 @@ mod tests {
             "the last one is forgotten"
         );
         assert_ne!(again.id(), Some(id.as_str()));
+    }
+
+    /// The note of standing promise `standing`.
+    fn note_of(vault: &Vault<MemoryStore>, standing: &Standing<MemoryStore>) -> (u64, String) {
+        match vault
+            .promise(standing.id().unwrap())
+            .unwrap()
+            .unwrap()
+            .state
+        {
+            State::Running {
+                done,
+                note: Some(note),
+                ..
+            } => (done, note),
+            other => panic!("not running with a note: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_standing_work_says_what_it_waits_on_and_is_flagged_when_silent_while_working() {
+        let vault = Arc::new(Vault::new(MemoryStore::default()));
+        let map = Standing::start(vault.clone(), "map", "Image map");
+        let watch = map.watch();
+        // A wait is written at once.
+        map.waiting(0, "Up to date");
+        assert_eq!(note_of(&vault, &map), (0, "Up to date".into()));
+        // Waiting is never a stall, however long.
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(!watch.check(Duration::from_millis(10)));
+        // Working, then silent past the deadline: flagged once, the note
+        // naming the item it is on.
+        std::thread::sleep(EVERY);
+        map.working(3, "/photos/a.raw");
+        assert_eq!(note_of(&vault, &map), (3, "/photos/a.raw".into()));
+        assert!(!watch.check(Duration::from_mins(1)), "heard just now");
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(watch.check(Duration::from_millis(10)));
+        let (done, note) = note_of(&vault, &map);
+        assert_eq!(done, 3);
+        assert!(
+            note.starts_with("No progress for 0 min") && note.ends_with(": /photos/a.raw"),
+            "{note}"
+        );
+        // Its next word clears the flag and is written.
+        map.waiting(4, "Waiting for the import job to end");
+        assert!(!watch.check(Duration::from_mins(1)));
+        assert_eq!(
+            note_of(&vault, &map),
+            (4, "Waiting for the import job to end".into())
+        );
     }
 }
