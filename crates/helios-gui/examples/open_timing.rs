@@ -278,7 +278,7 @@ fn concurrent(
                 helios_core::Priority::Interactive,
             )
             .ok()
-            .and_then(|mut h| h.wait(std::time::Duration::from_secs(600)).ok())
+            .and_then(|mut h| h.wait(std::time::Duration::from_mins(10)).ok())
             .and_then(helios_gui::preview::image);
             let at = ms(start);
             if let Some(image) = &image {
