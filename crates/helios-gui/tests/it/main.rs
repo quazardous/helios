@@ -85,6 +85,7 @@ mod normalized;
 mod palettes;
 mod params;
 mod persist;
+mod photo_panels;
 mod picture_orientation;
 mod platform;
 mod plugin_consent;

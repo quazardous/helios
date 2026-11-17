@@ -455,7 +455,8 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
         .unwrap();
     assert_eq!(
         h.state().app().handle().command_title(&undo),
-        "Undo drag exposure"
+        // A one-value step reads as the edit (#5202), not the gesture's name.
+        "Undo Exposure +1.50 EV"
     );
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run();

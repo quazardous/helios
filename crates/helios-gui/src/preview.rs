@@ -26,8 +26,22 @@ struct State {
     done: u64,
     /// The last render and the request it answered.
     image: Option<(u64, Arc<Image>)>,
+    /// Why the last render failed, when it did.
+    failed: Option<String>,
     /// The window to wake when a render lands.
     ctx: Option<egui::Context>,
+}
+
+/// Where the preview stands, for the panels that follow it
+/// ([`crate::photo_panels`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// A graph asked is still rendering.
+    Busy,
+    /// The last render failed: why.
+    Failed(String),
+    /// Every graph asked is rendered.
+    Done,
 }
 
 /// The preview of the viewport's output.
@@ -91,6 +105,18 @@ impl Preview {
             .clone()
     }
 
+    /// Where it stands: rendering, its last render failed, or done.
+    pub fn status(&self) -> Status {
+        let s = self.state.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if s.done < s.asked {
+            Status::Busy
+        } else if let Some(why) = &s.failed {
+            Status::Failed(why.clone())
+        } else {
+            Status::Done
+        }
+    }
+
     /// Waits until every graph asked so far is rendered (or failed);
     /// false when `timeout` passes first.
     pub fn wait(&self, timeout: Duration) -> bool {
@@ -139,12 +165,18 @@ fn work(engine: &Engine, rx: &Receiver<(u64, Shown)>, state: &(Mutex<State>, Con
         let (scale, region) = plan(shown.extent);
         let image = engine
             .render_at(&shown.graph, shown.node, &shown.port, region, scale)
-            .map_err(|e| log::warn!("preview: {e}"))
-            .ok();
+            .map_err(|e| {
+                log::warn!("preview: {e}");
+                e.to_string()
+            });
         let (lock, cv) = state;
         let mut s = lock.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(image) = image {
-            s.image = Some((n, Arc::new(image)));
+        match image {
+            Ok(image) => {
+                s.image = Some((n, Arc::new(image)));
+                s.failed = None;
+            }
+            Err(why) => s.failed = Some(why),
         }
         s.done = n;
         if let Some(ctx) = &s.ctx {
