@@ -5,9 +5,10 @@
 //! `image.close`), its listeners in the order [`ORDER`] declares: the edit
 //! of the image open saved first (`edit.save`: a save that fails refuses
 //! the request with its reason, and the image stays open), then the edit's
-//! history leaves the image (`history.scope`: the value store's steps and
-//! the snapshot book cleared, so the next image's undo never walks into
-//! this one's steps). Only a request that went through is acted on: the
+//! history leaves the image (`history.scope`: the image's steps of the
+//! value store and the snapshot book cleared, so the next image's undo
+//! never walks into this one's steps; the workspace's steps, graph edits,
+//! stay). Only a request that went through is acted on: the
 //! next image loads (its saved edit, the viewport's network: pixels, the
 //! listed exception), and `image.closed` / `image.opened` are said on the
 //! journal with the listeners that ran (`ran`). Both requests are
@@ -55,8 +56,8 @@ pub const BUS_OWNER: &str = "helios.darkroom";
 /// The edit of the image open saved, its write answered: a refused write
 /// refuses the request.
 pub const SAVE: &str = "edit.save";
-/// The edit's history (the value store's steps, the snapshot book) leaves
-/// the image.
+/// The edit's history (the image's steps of the value store, the snapshot
+/// book) leaves the image; the workspace's steps stay.
 pub const SCOPE: &str = "history.scope";
 
 /// How long `edit.save` may run before the bus counts it late (a late

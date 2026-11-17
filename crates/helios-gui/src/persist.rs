@@ -2561,7 +2561,9 @@ impl<S: Store + 'static> Persist<S> {
         let scoped = io::listen_local(&*bus, io::SCOPE, move |_, _| {
             // The next image's values take this one's paths: its steps
             // must not be undone into them, nor its snapshots restored.
-            held(&values).clear_history();
+            // The workspace's steps (graph edits) are not the image's:
+            // they stay.
+            held(&values).leave_image();
             crate::edit_snapshots::lock(&snapshots).clear();
             Ok(())
         });

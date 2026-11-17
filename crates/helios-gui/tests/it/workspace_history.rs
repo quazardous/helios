@@ -57,9 +57,13 @@ fn window(root: &Path) -> (Harness<'static, Shell>, Persist<SqliteStore>, [Image
 
 /// Opens `photo` through the workspace's network as it is now.
 fn open(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, photo: ImageId) {
-    let picture = Image::from_fn(Region::sized(16, 12), 4, |_, _, c| {
-        if c == 3 { 1.0 } else { 0.3 }
-    });
+    let picture = Image::from_fn(
+        Region::sized(16, 12),
+        4,
+        |_, _, c| {
+            if c == 3 { 1.0 } else { 0.3 }
+        },
+    );
     let built = h
         .state()
         .workspace_bundle()
@@ -67,7 +71,13 @@ fn open(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, pho
         .build_with(&templates::modules(), Source::picture(&picture), None)
         .unwrap();
     persist
-        .open_image(h.state_mut(), photo, built.graph, built.view.0, &built.view.1)
+        .open_image(
+            h.state_mut(),
+            photo,
+            built.graph,
+            built.view.0,
+            &built.view.1,
+        )
         .unwrap();
     persist.settle(h.state_mut());
     follow(h);
