@@ -206,10 +206,15 @@ struct Runner<'a> {
 impl Runner<'_> {
     /// The monitors read and told egui-pop, when they changed.
     fn tell_screens(&mut self, event_loop: &ActiveEventLoop) {
-        if self.watch.ctx.is_none() {
-            self.watch.ctx = self.context.borrow().clone();
-        }
+        self.adopt_context();
         self.watch.tell(read_screens(event_loop));
+    }
+
+    /// The watch asks its repaints of eframe's context, once made.
+    fn adopt_context(&mut self) {
+        if self.watch.ctx.is_none() {
+            self.watch.ctx.clone_from(&self.context.borrow());
+        }
     }
 }
 
@@ -237,9 +242,7 @@ impl ApplicationHandler<UserEvent> for Runner<'_> {
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        if self.watch.ctx.is_none() {
-            self.watch.ctx = self.context.borrow().clone();
-        }
+        self.adopt_context();
         self.watch.wake(Instant::now(), || read_screens(event_loop));
         self.eframe.new_events(event_loop, cause);
     }
