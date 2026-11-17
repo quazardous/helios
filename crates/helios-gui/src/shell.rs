@@ -1330,7 +1330,11 @@ impl Shell {
             shell.set_content("helios.viewport", move |ui| {
                 let area = ui.max_rect();
                 let leave = {
+                    // What the image wants in the window it is drawn
+                    // in, from the screen that window is on.
+                    let wanted = crate::display::follow_window(ui.ctx(), &app);
                     let mut viewport = viewport.borrow_mut();
+                    viewport.set_wanted(wanted);
                     viewport.ui(ui, &values);
                     viewport.take_leave()
                 };
@@ -7108,8 +7112,6 @@ impl Shell {
             }
         }
         self.set_context(&ctx);
-        let wanted = crate::display::wanted(crate::display::wide_gamut(self.core.app.handle()));
-        self.focus.viewport.borrow_mut().set_wanted(wanted);
         self.core.app.logic(&ctx);
         // The workspace's sub-workspaces; one shown that is gone is left.
         self.follow_subworkspaces();

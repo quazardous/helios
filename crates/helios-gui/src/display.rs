@@ -14,14 +14,31 @@
 //! management or presented in a colour space the driver declares; the
 //! viewport then draws for that surface's target.
 //!
+//! The route is chosen per window, from the screen the window is on
+//! ([`follow_window`], from the pass of the window the image is drawn
+//! in): a window found on another screen is said on the bus
+//! (`display.window_screen`, [`WindowScreen`]), and the display's
+//! listener ([`ROUTE_LISTENER`], also on `screen.added` and
+//! `screen.removed`) places it there. On a screen said to show sRGB only
+//! (`display/screens/<name>`, [`ScreenColour`]) the window wants sRGB;
+//! elsewhere it wants what the setting asks. Only the main window gets an
+//! image surface of its own for now (egui-pop's `image_surface`), so a
+//! detached viewer on a wide-gamut screen wants Rec.2020 and says why it
+//! draws sRGB.
+//!
 //! The debug bridge's `helios.display` collector says what the display
 //! offers (`helios_display::probe`: the session, the compositor's colour
 //! management) and what the window resolved (wanted, surface, drawn and
 //! why); egui-pop's `viewport` collector, registered here too, gives it
 //! per viewport.
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
+use egui_pop::api::bus::bus_contract::{
+    self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
+};
+use egui_pop::api::bus::{ScreenAdded, ScreenChange, ScreenRemoved};
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::core::debug::FnCollector;
 use egui_pop::model::ids::{PluginId, SettingId};
@@ -166,10 +183,24 @@ pub fn offer() -> &'static helios_display::Offer {
 }
 
 /// The `helios.display` snapshot: the setting, what the display offers,
-/// and what the main window resolved.
+/// what the main window resolved, and each window the image was drawn
+/// in (`windows`: its screen, what that screen shows, what the window
+/// wants there and its route).
 pub fn snapshot(ctx: &egui::Context, wide_gamut: bool) -> Json {
     let offer = offer();
     let r = pop_display::resolution(ctx);
+    let windows: Vec<Json> = placed(ctx)
+        .into_iter()
+        .map(|(window, p)| {
+            json!({
+                "window": window_name(window),
+                "screen": p.screen,
+                "screen_colour": p.colour,
+                "wanted": wanted_on(wide_gamut, p.colour).describe(),
+                "route": route_of(ctx, window, wide_gamut, &p),
+            })
+        })
+        .collect();
     json!({
         "wide_gamut_preview": wide_gamut,
         "session": offer.session,
@@ -183,6 +214,7 @@ pub fn snapshot(ctx: &egui::Context, wide_gamut: bool) -> Json {
             "reason": r.reason(),
         },
         "route": route(ctx, wide_gamut),
+        "windows": windows,
         "expected": helios_display::drawn(offer),
     })
 }
@@ -205,6 +237,23 @@ pub struct ImageRoute {
 /// setting `wide_gamut`: what egui-pop's image surface negotiated for the
 /// main window, and why.
 pub fn route(ctx: &egui::Context, wide_gamut: bool) -> ImageRoute {
+    let root = placed(ctx)
+        .into_iter()
+        .find(|(w, _)| *w == egui::ViewportId::ROOT)
+        .map(|(_, p)| p)
+        .unwrap_or_default();
+    route_of(ctx, egui::ViewportId::ROOT, wide_gamut, &root)
+}
+
+/// Where the image of `window` goes now, placed as it is: on a screen
+/// said to show sRGB only, sRGB; else what egui-pop's image surface
+/// negotiated for that window, and why.
+fn route_of(
+    ctx: &egui::Context,
+    window: egui::ViewportId,
+    wide_gamut: bool,
+    placed: &Placed,
+) -> ImageRoute {
     let srgb = |reason: String| ImageRoute {
         route: "srgb",
         encoding: DisplayTarget::srgb().describe(),
@@ -213,7 +262,11 @@ pub fn route(ctx: &egui::Context, wide_gamut: bool) -> ImageRoute {
     if !wide_gamut {
         return srgb("the Wide-gamut preview setting is off".into());
     }
-    let image = pop_display::image_surface_of(ctx, egui::ViewportId::ROOT);
+    if placed.colour == Some(ScreenColour::Srgb) {
+        let name = placed.screen.as_deref().unwrap_or("?");
+        return srgb(format!("the screen `{name}` shows sRGB only"));
+    }
+    let image = pop_display::image_surface_of(ctx, window);
     if let Some(t) = image.as_ref().and_then(|i| i.target) {
         return ImageRoute {
             route: if t.source == pop_display::TargetSource::Tagged {
@@ -233,9 +286,311 @@ pub fn route(ctx: &egui::Context, wide_gamut: bool) -> ImageRoute {
             None => "no image surface: the viewport draws on the CPU, or the GPU path is not \
                  installed yet"
                 .into(),
-            Some(_) => "the viewport has not drawn the image in the main window yet".into(),
+            Some(_) => "the viewport has not drawn the image in this window yet".into(),
         }
     }))
+}
+
+// --- Per window: the screen it is on, and the route chosen there ---
+
+/// What a screen shows, as far as Helios is told ([`tell_screen_colour`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ScreenColour {
+    /// sRGB only: a wider image is mapped down by the compositor anyway.
+    Srgb,
+    /// A wide gamut (Display P3, Rec.2020), SDR.
+    WideGamut,
+    /// High dynamic range (PQ or HLG), wide gamut.
+    Hdr,
+}
+
+impl ScreenColour {
+    /// Its name in `display/screens/<name>`.
+    pub fn name(self) -> &'static str {
+        match self {
+            ScreenColour::Srgb => "srgb",
+            ScreenColour::WideGamut => "wide-gamut",
+            ScreenColour::Hdr => "hdr",
+        }
+    }
+
+    /// Parses what `display/screens/<name>` holds.
+    pub fn parse(s: &str) -> Option<ScreenColour> {
+        match s {
+            "srgb" => Some(ScreenColour::Srgb),
+            "wide-gamut" => Some(ScreenColour::WideGamut),
+            "hdr" => Some(ScreenColour::Hdr),
+            _ => None,
+        }
+    }
+}
+
+/// Where what each screen shows is kept: `display/screens/<screen>`, a
+/// choice of [`SCREEN_COLOURS`], the screen named as the system names it
+/// ([`screen_key`]).
+pub const SCREENS_KEY: &str = "display/screens";
+
+/// What a screen may be said to show; `unknown` until told.
+pub const SCREEN_COLOURS: [&str; 4] = ["unknown", "srgb", "wide-gamut", "hdr"];
+
+/// The store's path for the screen `name`: its letters and digits, the
+/// rest as `_`.
+pub fn screen_key(name: &str) -> String {
+    let segment: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{SCREENS_KEY}/{segment}")
+}
+
+/// Says what the screen `name` shows (none: unknown again), for the
+/// windows on it: the platform's probe when it knows, the person when it
+/// is wrong. Each window on it follows at its next pass.
+///
+/// # Errors
+/// The store refused the path or the value.
+pub fn tell_screen_colour(
+    app: &AppHandle,
+    name: &str,
+    colour: Option<ScreenColour>,
+) -> Result<(), String> {
+    use egui_pop::model::commands::Origin;
+    use egui_pop::model::ids::OwnerId;
+    use egui_pop::model::values::{Change, Set, Value};
+    let path = screen_key(name);
+    let store = app.store();
+    let mut store = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if store.get(&path).is_none() {
+        store
+            .declare(
+                &OwnerId::from_static("helios.display"),
+                &path,
+                Descriptor::choice(
+                    &format!("What the screen {name} shows"),
+                    &SCREEN_COLOURS,
+                    "unknown",
+                ),
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    let value = colour.map_or("unknown", ScreenColour::name);
+    store
+        .set(Set::new(&path, Change::To(Value::Choice(value.into())), Origin::User).untracked())
+        .map(|_| ())
+        .map_err(|e| format!("{e:?}"))
+}
+
+/// What the screen `name` shows, when Helios is told; none otherwise
+/// (the window's route then follows what the display offers).
+pub fn screen_colour(app: &AppHandle, name: &str) -> Option<ScreenColour> {
+    app.store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&screen_key(name))
+        .and_then(|e| e.value.as_choice().and_then(ScreenColour::parse))
+}
+
+/// What a window wants, with the Wide-gamut preview setting `wide_gamut`
+/// on a screen showing `colour`: sRGB on a screen said to show sRGB only
+/// (a wider image is mapped down there), [`wanted`] otherwise.
+pub fn wanted_on(wide_gamut: bool, colour: Option<ScreenColour>) -> DisplayTarget {
+    wanted(wide_gamut && colour != Some(ScreenColour::Srgb))
+}
+
+/// A window the image is drawn in is now on another screen: said on the
+/// bus by the window's own pass, from the place the system gave it
+/// (`display.window_screen`); the display's listener ([`ROUTE_LISTENER`])
+/// chooses the window's route from it.
+#[derive(Debug)]
+pub struct WindowScreen;
+
+impl Point for WindowScreen {
+    const KIND: PointKind = PointKind::Event;
+    const ID: &'static str = "display.window_screen";
+    type Input = OnScreen;
+    type Value = ();
+}
+
+/// A window and the screen it is on now (none when no screen told by
+/// name holds it), and the one it was on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OnScreen {
+    pub window: egui::ViewportId,
+    pub screen: Option<String>,
+    pub from: Option<String>,
+}
+
+/// The display's points, its contract with the application's bus.
+pub const POINTS: &[PointDecl] = &[PointDecl::of::<WindowScreen>(
+    "A window the image is drawn in is on another screen: its display route follows",
+)];
+
+/// The owner of the display's listeners.
+pub const BUS_OWNER: &str = "helios.display";
+/// The display's listener of `display.window_screen`, `screen.added` and
+/// `screen.removed`: each window's screen, which its route follows.
+pub const ROUTE_LISTENER: &str = "display.route";
+
+/// Where a window is, as the bus said it, and what its route was chosen
+/// from at its last pass.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Placed {
+    screen: Option<String>,
+    colour: Option<ScreenColour>,
+    wide_gamut: bool,
+}
+
+#[derive(Default)]
+struct WindowsState {
+    listening: bool,
+    /// The screen each window's own pass last found it on.
+    seen: HashMap<egui::ViewportId, Option<String>>,
+    /// Each window, as the bus said it.
+    placed: HashMap<egui::ViewportId, Placed>,
+}
+
+type Shared = Arc<Mutex<WindowsState>>;
+
+fn shared(ctx: &egui::Context) -> Shared {
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Shared>(egui::Id::unique("helios.display.windows"))
+            .clone()
+    })
+}
+
+fn lock(s: &Shared) -> std::sync::MutexGuard<'_, WindowsState> {
+    s.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Declares [`POINTS`] on `bus` (once).
+pub fn declare(bus: &dyn Bus) {
+    for refused in bus_contract::declare_all(bus, POINTS) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!(target: "helios", "display: {refused}");
+        }
+    }
+}
+
+/// Registers [`ROUTE_LISTENER`] on the screen points, once per context.
+fn listen(ctx: &egui::Context, bus: &dyn Bus, shared: &Shared) {
+    if std::mem::replace(&mut lock(shared).listening, true) {
+        return;
+    }
+    declare(bus);
+    let opts = || ListenOpts::new().owner(BUS_OWNER);
+    let (s, c) = (shared.clone(), ctx.clone());
+    let moved = bus.listen_local::<WindowScreen>(ROUTE_LISTENER, opts(), move |on, ()| {
+        log::info!(
+            target: "helios",
+            "display: a window moved from screen {:?} to {:?}, its route follows",
+            on.from,
+            on.screen
+        );
+        lock(&s)
+            .placed
+            .entry(on.window)
+            .or_default()
+            .screen
+            .clone_from(&on.screen);
+        c.request_repaint_of(on.window);
+        Ok::<(), HookError>(())
+    });
+    // A screen gone, or come: every window finds its screen again at its
+    // next pass (egui-pop moves those left off-screen first).
+    let again = |shared: Shared, ctx: egui::Context| {
+        move |_: &ScreenChange, (): &mut ()| {
+            let mut s = lock(&shared);
+            for w in s.seen.keys() {
+                ctx.request_repaint_of(*w);
+            }
+            s.seen.clear();
+            Ok::<(), HookError>(())
+        }
+    };
+    let removed = bus.listen_local::<ScreenRemoved>(
+        ROUTE_LISTENER,
+        opts(),
+        again(shared.clone(), ctx.clone()),
+    );
+    let added =
+        bus.listen_local::<ScreenAdded>(ROUTE_LISTENER, opts(), again(shared.clone(), ctx.clone()));
+    for l in [moved, removed, added] {
+        if let Err(e) = l {
+            log::error!(target: "helios", "display: {e}");
+        }
+    }
+}
+
+/// The image's window follows its screen: called from the pass of the
+/// window the image is drawn in. A window found on another screen than
+/// at its last pass is said on the bus (`display.window_screen`); returns
+/// what the window wants on the screen the bus placed it on, with the
+/// Wide-gamut preview setting ([`wanted_on`]).
+pub fn follow_window(ctx: &egui::Context, app: &AppHandle) -> DisplayTarget {
+    let shared = shared(ctx);
+    let bus = app.bus();
+    listen(ctx, &*bus, &shared);
+    let window = ctx.viewport_id();
+    let screen = ctx
+        .input(|i| i.viewport().outer_rect)
+        .and_then(egui_pop::api::window::screen_name_at);
+    let from = match lock(&shared).seen.insert(window, screen.clone()) {
+        Some(was) if was == screen => None,
+        was => Some(was.flatten()),
+    };
+    if let Some(from) = from {
+        let said = bus.alter::<WindowScreen>(
+            OnScreen {
+                window,
+                screen,
+                from,
+            },
+            (),
+        );
+        for f in &said.failures {
+            log::warn!(target: "helios", "{}: {f}", WindowScreen::ID);
+        }
+    }
+    let wide_gamut = wide_gamut(app);
+    let mut s = lock(&shared);
+    let placed = s.placed.entry(window).or_default();
+    placed.colour = placed
+        .screen
+        .as_deref()
+        .and_then(|name| screen_colour(app, name));
+    placed.wide_gamut = wide_gamut;
+    wanted_on(wide_gamut, placed.colour)
+}
+
+/// The windows the image was drawn in, and how each is placed; the main
+/// window first, always there.
+fn placed(ctx: &egui::Context) -> Vec<(egui::ViewportId, Placed)> {
+    let s = shared(ctx);
+    let s = lock(&s);
+    let mut all: Vec<_> = s.placed.iter().map(|(w, p)| (*w, p.clone())).collect();
+    if !s.placed.contains_key(&egui::ViewportId::ROOT) {
+        all.push((egui::ViewportId::ROOT, Placed::default()));
+    }
+    all.sort_by_key(|(w, _)| (*w != egui::ViewportId::ROOT, w.0.value()));
+    all
+}
+
+/// A window as the snapshot names it: `main`, or its id.
+fn window_name(window: egui::ViewportId) -> String {
+    if window == egui::ViewportId::ROOT {
+        "main".into()
+    } else {
+        window.0.short_debug_format()
+    }
 }
 
 fn collector(app: AppHandle) -> FnCollector {
@@ -265,6 +620,7 @@ impl Plugin for Display {
                 "Shows the image in Rec.2020 where the window can carry it (Wayland with colour management), so colours outside sRGB are not clipped. Elsewhere the image stays sRGB.",
             ),
         )?;
+        declare(&*ctx.app().bus());
         ctx.collector(collector(ctx.app()))?;
         ctx.collector(egui_pop::viewport::debug::collector())?;
         Ok(())
