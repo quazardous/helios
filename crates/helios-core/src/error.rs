@@ -31,6 +31,9 @@ pub enum Error {
     /// A decision node has no recorded answer yet. Transient: once it is
     /// answered, asking again renders.
     Pending { node: String },
+    /// A module gave up because every asker of its computation cancelled
+    /// (see [`crate::cancel`]). Transient: asking again computes again.
+    Cancelled { module: String },
     /// A render scale outside (0, 1], as written.
     Scale(String),
     /// A result was asked in an accelerator's memory of an engine that has
@@ -48,8 +51,16 @@ impl Error {
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
-            Error::Fault { .. } | Error::Pending { .. } | Error::Accelerator { .. }
+            Error::Fault { .. }
+                | Error::Pending { .. }
+                | Error::Accelerator { .. }
+                | Error::Cancelled { .. }
         )
+    }
+
+    /// Whether the render gave up because it was cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Error::Cancelled { .. })
     }
 }
 
@@ -74,6 +85,9 @@ impl fmt::Display for Error {
             }
             Error::Module { module, reason } => write!(f, "{module}: {reason}"),
             Error::Fault { node, what } => write!(f, "{node}: injected fault ({what})"),
+            Error::Cancelled { module } => {
+                write!(f, "{module}: {}", crate::cancel::CANCELLED)
+            }
             Error::Scale(scale) => write!(f, "render scale {scale} is not in (0, 1]"),
             Error::NoAccelerator => write!(f, "the engine has no accelerator"),
             Error::Accelerator { failure, reason } => {

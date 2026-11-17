@@ -56,6 +56,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::Serialize;
 
 use crate::bus::{Bus, Event};
+use crate::cancel;
 use crate::describe::Describe;
 use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
@@ -489,10 +490,23 @@ pub fn unions(mut regions: Vec<Region>) -> Vec<Region> {
     }
 }
 
+/// How many times an asker that did not cancel asks again for a step whose
+/// shared computation was cancelled by its other askers.
+const MAX_ATTEMPTS: u32 = 8;
+
+/// What one ask of a step gives.
+enum Attempt {
+    /// Ready content of the same lineage over a wider region.
+    Wider(Arc<Content>),
+    /// The step's own outputs.
+    Done(Outputs),
+}
+
 /// What a lookup in the cache finds for a step.
 enum Found {
-    /// The step's own entry, ready or not.
-    Cell(Arc<OnceLock<Outputs>>),
+    /// The step's own entry, ready or not, with the token its computation
+    /// runs under (every asker joins it).
+    Cell(Arc<OnceLock<Outputs>>, cancel::Token),
     /// Ready content of the same lineage over a wider region.
     Wider(Arc<Content>),
 }
@@ -532,6 +546,8 @@ impl Default for Cache {
 
 struct Entry {
     cell: Arc<OnceLock<Outputs>>,
+    /// The computation's token: cancelled only once every asker is.
+    askers: cancel::Token,
     lineage: ContentHash,
     region: Region,
     /// Bytes of its outputs, counted once they are ready.
@@ -548,7 +564,7 @@ impl Cache {
         if let Some(entry) = self.entries.get(&step.key) {
             self.order.touch(&step.key, tick);
             helios_cache::Counters::add(&self.stats.hits, 1);
-            return Found::Cell(entry.cell.clone());
+            return Found::Cell(entry.cell.clone(), entry.askers.clone());
         }
         if let Some((key, content)) = self.wider(step) {
             self.order.touch(&key, tick);
@@ -557,10 +573,12 @@ impl Cache {
         }
         helios_cache::Counters::add(&self.stats.misses, 1);
         let cell: Arc<OnceLock<Outputs>> = Arc::default();
+        let askers = cancel::Token::shared();
         self.entries.insert(
             step.key,
             Entry {
                 cell: cell.clone(),
+                askers: askers.clone(),
                 lineage: step.lineage,
                 region: step.region,
                 size: 0,
@@ -570,7 +588,7 @@ impl Cache {
             .entry(step.lineage)
             .or_default()
             .push(step.key);
-        Found::Cell(cell)
+        Found::Cell(cell, askers)
     }
 
     /// Ready content of `step`'s lineage over a region holding its own,
@@ -1914,15 +1932,39 @@ impl Engine {
             t.requests += 1;
             t.last_key = Some(step.key);
         });
-        let found = self.cache.lock().expect("engine cache lock").find(step);
-        let cell = match found {
-            Found::Cell(cell) => cell,
-            Found::Wider(content) => {
-                self.crops.fetch_add(1, Ordering::SeqCst);
+        // This asker's token: a computation it shares runs until every
+        // asker cancelled, and a cancelled one is asked again by those that
+        // did not.
+        let token = cancel::current();
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let outputs = match self.attempt(step, cause, pins, &token) {
+                Attempt::Wider(content) => {
+                    self.crops.fetch_add(1, Ordering::SeqCst);
+                    Ok(content)
+                }
+                Attempt::Done(outputs) => outputs,
+            };
+            let retry = outputs.as_ref().is_err_and(Error::is_cancelled)
+                && !token.is_cancelled()
+                && attempts < MAX_ATTEMPTS;
+            if !retry {
                 self.release(step, pins);
-                return Ok(content);
+                return outputs;
             }
+        }
+    }
+
+    /// One look in the cache for `step`: wider content, or its cell joined
+    /// (computed here when nobody computes it yet).
+    fn attempt(&self, step: &Step, cause: u64, pins: &Pins, token: &cancel::Token) -> Attempt {
+        let found = self.cache.lock().expect("engine cache lock").find(step);
+        let (cell, askers) = match found {
+            Found::Cell(cell, askers) => (cell, askers),
+            Found::Wider(content) => return Attempt::Wider(content),
         };
+        askers.join(token.clone());
         let mut computed_here = false;
         // Only one thread runs the initializer; others asking for the same key wait for it.
         let outputs = cell
@@ -1933,7 +1975,7 @@ impl Engine {
                     t.computed += 1;
                     t.running += 1;
                 });
-                let result = self.compute(step, cause, pins);
+                let result = cancel::scope(&askers, || self.compute(step, cause, pins));
                 self.track(step, |t| t.running -= 1);
                 let event = StepComputed {
                     node: step.node,
@@ -1952,7 +1994,6 @@ impl Engine {
                 .expect("engine cache lock")
                 .settle(Some(step.key), self.budget());
         }
-        self.release(step, pins);
         if outputs.as_ref().is_err_and(Error::is_transient) {
             // A transient failure is not an answer: forget it, so asking
             // again computes again.
@@ -1965,7 +2006,7 @@ impl Engine {
                 cache.remove(step.key);
             }
         }
-        outputs
+        Attempt::Done(outputs)
     }
 
     /// A step's GPU variant failed: it is computed on the CPU, and the bus
