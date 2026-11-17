@@ -6204,7 +6204,7 @@ impl Shell {
 
     /// The comparison follows the Compare place: its photos are the
     /// place's (none elsewhere: the Compare tab compares the selection);
-    /// entering it on photos selects the first, the active one. A
+    /// entering it on photos makes the first active, the marks' target. A
     /// workspace that opens in Compare goes there once its stack is read.
     fn follow_comparison(&mut self) {
         let app = self.core.app.handle().clone();
@@ -6247,12 +6247,10 @@ impl Shell {
             return;
         }
         cmp.set_photos(photos);
-        if let Some(first) = cmp.photos().first() {
-            self.focus
-                .library
-                .borrow_mut()
-                .select_ids(std::slice::from_ref(first));
-        }
+        // The first photo active: the marks go to it, the gallery's
+        // selection and cursor untouched.
+        let first = cmp.photos().first().cloned();
+        self.focus.library.borrow_mut().set_compare_active(first);
     }
 
     /// The shell's parts `library.changed`'s local listeners do their
@@ -6723,11 +6721,9 @@ impl Shell {
                     return Err("no photos are compared".into());
                 }
                 cmp.step(step, shown.len());
-                let active = cmp.active(&shown).cloned();
-                if !cmp.photos().is_empty()
-                    && let Some(active) = active
-                {
-                    self.focus.library.borrow_mut().select_ids(&[active]);
+                if !cmp.photos().is_empty() {
+                    let active = cmp.active(&shown).cloned();
+                    self.focus.library.borrow_mut().set_compare_active(active);
                 }
             }
             Action::CompareSync(on) => {

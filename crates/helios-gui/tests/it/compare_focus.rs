@@ -3,7 +3,7 @@
 //! button opens them side by side in the Compare place, zoom follows
 //! across the photos until the sync is turned off, the arrow keys move
 //! the active photo, and the active photo is rated from its marks and
-//! from the keys. File > New workspace lists "Compare", and a workspace
+//! from the keys, the gallery's selection and cursor left alone. File > New workspace lists "Compare", and a workspace
 //! made from it opens in Compare.
 //!
 //! The snapshots (`tests/snapshots/compare-*.png`, thresholds in the
@@ -104,8 +104,14 @@ fn compare_three_photos_sync_their_zoom_and_rate_the_active_one() {
     let photos = h.state().comparison().photos().to_vec();
     assert_eq!(photos, names(), "the three selected photos compared");
     assert_eq!(place(&h), "helios.comparison");
-    // The first photo is active and selected: the culling keys mark it.
-    assert_eq!(h.state().library().selection(), ["a"]);
+    // The first photo is active, the culling keys' target; the
+    // gallery's selection stays as it was.
+    let active = |h: &Harness<'_, Shell>| {
+        let c = h.state().comparison();
+        c.active(c.photos()).cloned()
+    };
+    assert_eq!(active(&h).as_deref(), Some("a"));
+    assert_eq!(h.state().library().selection(), names());
     // Synchronised by default: zooming one zooms every photo.
     assert!(h.state().comparison().synced);
     zoom_over(&mut h, "IMG_0001.jpg", 2.0);
@@ -128,22 +134,23 @@ fn compare_three_photos_sync_their_zoom_and_rate_the_active_one() {
         .click();
     h.run();
     assert!(h.state().comparison().synced);
-    // The arrow keys move the active photo, the selection with it.
+    // The arrow keys move the active photo, the selection left alone.
     run(&mut h, "helios.compare.focus", json!(null));
     h.run();
     h.key_press(Key::ArrowRight);
     h.run();
     h.run();
-    assert_eq!(h.state().library().selection(), ["b"]);
+    assert_eq!(active(&h).as_deref(), Some("b"));
     h.key_press(Key::ArrowLeft);
     h.key_press(Key::ArrowLeft);
     h.run();
     h.run();
-    assert_eq!(h.state().library().selection(), ["c"], "wraps around");
+    assert_eq!(active(&h).as_deref(), Some("c"), "wraps around");
     h.key_press(Key::ArrowLeft);
     h.run();
     h.run();
-    assert_eq!(h.state().library().selection(), ["b"]);
+    assert_eq!(active(&h).as_deref(), Some("b"));
+    assert_eq!(h.state().library().selection(), names());
     // Rated from its marks: the stars of the active photo.
     h.get_by_role_and_label(Role::Slider, "Active photo's rating")
         .click();
@@ -175,7 +182,7 @@ fn compare_needs_two_known_photos_and_leaves_with_its_place() {
     run(&mut h, "library.compare", json!({ "images": ["c", "a"] }));
     h.run();
     assert_eq!(h.state().comparison().photos(), ["c", "a"]);
-    assert_eq!(h.state().library().selection(), ["c"]);
+    assert_eq!(h.state().library().selection(), ["a"], "left alone");
     // Leaving the place leaves the photos: the Compare tab compares the
     // selection again.
     run(&mut h, "view.library", json!(null));
