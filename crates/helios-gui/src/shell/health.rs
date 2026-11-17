@@ -40,7 +40,7 @@
 //! a handle on the same runner to show its findings.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
@@ -259,21 +259,76 @@ pub fn owner_key(owner: &str) -> String {
     format!("healthOwner_{safe}")
 }
 
-/// The runner `card.safe`'s listener `health.cards` asks "Cards safe to
-/// format" of again, and whether it waits for a run under way to end.
+/// The runner the bus's listeners ask some checks of again
+/// (`card.safe`'s `health.cards`, the accounts' `health.accounts`), and
+/// the checks waiting for a run under way to end.
 #[derive(Clone, Default)]
-pub(crate) struct CardsRecheck(Arc<(Mutex<Option<Runner>>, AtomicBool)>);
+pub(crate) struct CardsRecheck(Arc<Rechecks>);
 
-/// `health.cards`: the cards check runs again now, from the one card
-/// list; when a run is under way, once it ends ([`Shell::health_tick`]).
-pub(super) fn recheck_cards(recheck: &CardsRecheck) {
-    let (runner, pending) = &*recheck.0;
+/// [`CardsRecheck`]'s runner, once set, and the checks waiting.
+#[derive(Default)]
+pub(crate) struct Rechecks {
+    runner: Mutex<Option<Runner>>,
+    pending: Mutex<Vec<String>>,
+}
+
+/// The checks `ids` run again now; when a run is under way, once it ends
+/// ([`Shell::health_tick`], [`recheck_pending`]).
+fn recheck(recheck: &CardsRecheck, ids: Vec<String>) {
+    let (runner, pending) = (&recheck.0.runner, &recheck.0.pending);
+    let mut pending = pending.lock().unwrap_or_else(PoisonError::into_inner);
+    for id in ids {
+        if !pending.contains(&id) {
+            pending.push(id);
+        }
+    }
+    if pending.is_empty() {
+        return;
+    }
     let ran = runner
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        .is_none_or(|r| r.run_only(&[helios_storage::health::backup::CARDS.to_owned()]));
-    pending.store(!ran, Ordering::SeqCst);
+        .is_none_or(|r| r.run_only(&pending));
+    if ran {
+        pending.clear();
+    }
+}
+
+/// The checks still waiting for a run under way to end, asked again.
+pub(super) fn recheck_pending(r: &CardsRecheck) {
+    recheck(r, Vec::new());
+}
+
+/// `health.cards`: the cards check runs again now, from the one card
+/// list; when a run is under way, once it ends ([`Shell::health_tick`]).
+pub(super) fn recheck_cards(r: &CardsRecheck) {
+    recheck(r, vec![helios_storage::health::backup::CARDS.to_owned()]);
+}
+
+/// `health.accounts`, an account signed out or removed: the checks
+/// handed the accounts run again, the plugins' (`plugins`: a source
+/// plugin is needed once its connector has an account) and each
+/// plugin's own (`<plugin>.<check>`, owned by its plugin).
+pub(super) fn recheck_accounts(r: &CardsRecheck) {
+    let ids: Vec<String> =
+        r.0.runner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|runner| {
+                runner
+                    .registry()
+                    .owned()
+                    .filter(|(owner, check)| {
+                        *owner == helios_plugin::health::installed::OWNER
+                            || check.id().starts_with(&format!("{owner}."))
+                    })
+                    .map(|(_, check)| check.id().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+    recheck(r, ids);
 }
 
 /// The fixes that change something not easily taken back: their button
@@ -438,7 +493,7 @@ impl Shell {
             .health
             .cards_runner
             .0
-            .0
+            .runner
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(runner.clone());
         self.core.health.runner = Some(runner);
@@ -739,9 +794,7 @@ impl Shell {
         if self.core.health.recheck && runner.run_now() {
             self.core.health.recheck = false;
         }
-        if self.core.health.cards_runner.0.1.load(Ordering::SeqCst) {
-            recheck_cards(&self.core.health.cards_runner);
-        }
+        recheck_pending(&self.core.health.cards_runner);
         runner.tick(Instant::now(), generation);
         let seen = (runner.runs(), runner.running());
         if seen != self.core.health.seen {
