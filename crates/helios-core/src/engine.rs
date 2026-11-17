@@ -283,6 +283,18 @@ struct Step {
 }
 
 impl Step {
+    /// What a trace span says of the step: `what`, its node, its region in
+    /// megapixels.
+    fn trace_detail(&self, what: &str) -> String {
+        format!(
+            "{what} node={} {}x{} {:.2} MP",
+            self.name,
+            self.region.width,
+            self.region.height,
+            self.region.area() as f64 / 1e6
+        )
+    }
+
     /// The steps it reads.
     fn inputs(&self) -> Vec<&Arc<Step>> {
         match &self.work {
@@ -1995,6 +2007,7 @@ impl Engine {
         match &step.work {
             Work::Source(image, scale) => {
                 self.source_reads.fetch_add(1, Ordering::SeqCst);
+                let _span = crate::trace::span("engine.source", || step.trace_detail(&step.name));
                 if self.take_fault(step, FaultKind::SourceRead) {
                     return Err(Error::Fault {
                         node: step.name.clone(),
@@ -2043,6 +2056,10 @@ impl Engine {
                         what: "computation".into(),
                     });
                 }
+                // The step's own work, its inputs computed before.
+                let _span = crate::trace::span("engine.step", || {
+                    step.trace_detail(&module.manifest().name)
+                });
                 if let (Some(a), true) = (self.active(), accelerated) {
                     let input = held
                         .first()
@@ -2087,6 +2104,7 @@ impl Engine {
             }
             Work::Reduce { input, scale } => {
                 let content = self.execute(input, cause, pins)?;
+                let _span = crate::trace::span("engine.reduce", || step.trace_detail(&step.name));
                 let ports = match content.as_ref() {
                     Content::Host(images) => images.len(),
                     Content::Device { .. } => 1,

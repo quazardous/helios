@@ -163,12 +163,16 @@ fn work(engine: &Engine, rx: &Receiver<(u64, Shown)>, state: &(Mutex<State>, Con
         }
         let (n, shown) = job;
         let (scale, region) = plan(shown.extent);
+        let span = helios_core::trace::span("preview.render", || {
+            format!("{}x{} at {scale:.4}", region.width, region.height)
+        });
         let image = engine
             .render_at(&shown.graph, shown.node, &shown.port, region, scale)
             .map_err(|e| {
                 log::warn!("preview: {e}");
                 e.to_string()
             });
+        drop(span);
         let (lock, cv) = state;
         let mut s = lock.lock().unwrap_or_else(PoisonError::into_inner);
         match image {
@@ -199,5 +203,46 @@ mod tests {
         let (scale, r) = plan(Region::sized(100, 40));
         assert!((scale - 1.0).abs() < f64::EPSILON);
         assert_eq!((r.width, r.height), (100, 40));
+    }
+
+    /// The open path's tail leaves its trace spans in order: the preview
+    /// rendered on its own thread (the engine's steps inside it), then the
+    /// histogram computed on it.
+    #[test]
+    fn the_preview_then_its_histogram_leave_trace_spans_in_order() {
+        let (listener, records) = helios_core::trace::collect();
+        let mut graph = helios_core::Graph::new();
+        let image = Image::from_fn(Region::sized(600, 400), 4, |x, y, _| {
+            ((x + y) % 7) as f32 / 7.0
+        });
+        let node = graph.add_source("source", image);
+        let shown = Shown::new(Arc::new(graph), node, helios_core::graph::SOURCE_PORT)
+            .unwrap()
+            .unwrap();
+        let preview = Preview::new(Arc::new(Engine::new(Arc::new(helios_core::Bus::new()))));
+        preview.follow(Some(shown), &egui::Context::default());
+        assert!(preview.wait(Duration::from_secs(30)), "the preview renders");
+        let (_, image) = preview.latest().unwrap();
+        crate::scopes::picture_sized(&image, crate::scopes::Mode::Histogram, false, [64, 32]);
+        drop(listener);
+        let records = records.lock().unwrap();
+        let thread = std::thread::current().name().map(String::from);
+        let mine: Vec<_> = records
+            .iter()
+            .filter(|r| {
+                r.thread.as_deref() == Some("helios-preview")
+                    || (r.thread == thread && r.name.starts_with("scopes."))
+            })
+            .collect();
+        let names: Vec<&str> = mine.iter().map(|r| r.name).collect();
+        assert_eq!(
+            names,
+            ["engine.source", "preview.render", "scopes.histogram"],
+            "{records:?}"
+        );
+        assert_eq!(mine[1].detail, "256x171 at 0.4267");
+        assert_eq!(mine[2].detail, "256x171");
+        assert!(mine[0].end() <= mine[1].end());
+        assert!(mine[1].end() <= mine[2].start);
     }
 }
