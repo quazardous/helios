@@ -215,7 +215,12 @@ pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -
     let tints = [[1.0, 0.25, 0.25], [0.25, 1.0, 0.25], [0.3, 0.45, 1.0]];
     match mode {
         Mode::Histogram => {
-            let h = histogram(image, width, s);
+            let h = {
+                let _span = helios_core::trace::span("scopes.histogram", || {
+                    format!("{}x{}", image.region().width, image.region().height)
+                });
+                histogram(image, width, s)
+            };
             for (c, counts) in h.channels.iter().enumerate() {
                 let peak = counts.peak();
                 for (x, &n) in counts.bins.iter().enumerate() {
@@ -233,7 +238,12 @@ pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -
         Mode::Waveform => {
             // No more bands than the image has columns; each drawn wide.
             let bands = bands(width, image);
-            let w = waveform(image, bands, levels, s);
+            let w = {
+                let _span = helios_core::trace::span("scopes.waveform", || {
+                    format!("{}x{}", image.region().width, image.region().height)
+                });
+                waveform(image, bands, levels, s)
+            };
             let peak = w.columns.iter().map(Counts::peak).max().unwrap_or(0);
             for (b, counts) in w.columns.iter().enumerate() {
                 for x in b * width / bands..(b + 1) * width / bands {
@@ -244,7 +254,12 @@ pub fn picture_sized(image: &Image, mode: Mode, stops: bool, size: [usize; 2]) -
         Mode::Parade => {
             let third = width / 3;
             let bands = bands(third, image);
-            let channels = parade(image, bands, levels, s);
+            let channels = {
+                let _span = helios_core::trace::span("scopes.parade", || {
+                    format!("{}x{}", image.region().width, image.region().height)
+                });
+                parade(image, bands, levels, s)
+            };
             for (c, w) in channels.iter().enumerate() {
                 let peak = w.columns.iter().map(Counts::peak).max().unwrap_or(0);
                 for (b, counts) in w.columns.iter().enumerate() {
@@ -384,6 +399,9 @@ impl Scopes {
             .as_ref()
             .is_none_or(|(g, _, _)| *g != self.generation)
         {
+            let _span = helios_core::trace::span("scopes.histogram", || {
+                format!("{}x{}", image.region().width, image.region().height)
+            });
             let h = histogram(image, BINS, scale(self.stops));
             let bins = h
                 .channels

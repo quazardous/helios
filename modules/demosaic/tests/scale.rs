@@ -94,3 +94,45 @@ fn a_half_scale_render_is_the_full_render_reduced() {
     assert!(regions[1].contains(&part.full_resolution(0.25)));
     assert!(regions.iter().all(|r| r.area() < 60 * 60), "{regions:?}");
 }
+
+/// Opening a small synthetic raw at half scale leaves a trace span per
+/// step, in the order the engine runs them: the mosaic read, the
+/// demosaic call (its algorithm and megapixels) inside its engine step,
+/// then the reduction to the asked scale.
+#[test]
+fn a_half_scale_render_traces_each_step_in_order() {
+    let (g, demosaic) = network([0.8, 0.5, 0.2], Region::sized(64, 48));
+    let e = Engine::new(Arc::new(Bus::new()));
+    let (listener, records) = helios_core::trace::collect();
+    e.render_at(&g, demosaic, "output", Region::sized(32, 24), 0.5)
+        .unwrap();
+    drop(listener);
+    // This test's own spans: a test alongside may trace its renders too.
+    let mine = |r: &&helios_core::trace::Record| {
+        r.thread == std::thread::current().name().map(String::from)
+    };
+    let records = records.lock().unwrap();
+    let names: Vec<&str> = records.iter().filter(mine).map(|r| r.name).collect();
+    assert_eq!(
+        names,
+        ["engine.source", "demosaic", "engine.step", "engine.reduce"],
+        "{records:?}"
+    );
+    let span = |name: &str| {
+        records
+            .iter()
+            .filter(mine)
+            .find(|r| r.name == name)
+            .unwrap()
+    };
+    assert_eq!(span("demosaic").detail, "Rcd 64x48 0.00 MP");
+    assert!(
+        span("engine.step")
+            .detail
+            .starts_with("demosaic node=demosaic 64x48")
+    );
+    assert!(span("engine.reduce").detail.contains("32x24"));
+    // The demosaic call lies inside its step.
+    assert!(span("demosaic").start >= span("engine.step").start);
+    assert!(span("demosaic").end() <= span("engine.step").end());
+}

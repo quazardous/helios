@@ -16,6 +16,7 @@
 //! - [`scheduler`]: named, cancellable background jobs; waiting until idle.
 //! - [`jobs`]: how background work goes, as `job.*` events people follow.
 //! - [`describe`]: every entity reports its state as structured data.
+//! - [`trace`]: timed spans of the engine's steps, for whoever listens.
 
 pub mod brick;
 pub mod bus;
@@ -35,6 +36,7 @@ pub mod params;
 pub mod scheduler;
 pub mod schema;
 pub mod status;
+pub mod trace;
 
 pub use brick::{
     BrickFamily, BrickPort, BrickSpec, Contract, Form, PortType, Shape, Space, Tolerance,

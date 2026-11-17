@@ -167,6 +167,15 @@ impl Module for Demosaic {
         output: Region,
     ) -> Result<Vec<Image>, String> {
         let input = inputs[0];
+        let _span = helios_core::trace::span("demosaic", || {
+            format!(
+                "{:?} {}x{} {:.2} MP",
+                plan.method,
+                output.width,
+                output.height,
+                output.area() as f64 / 1e6
+            )
+        });
         if plan.method == Method::Rcd {
             let r = input.region();
             let (stride, planes) = rcd::demosaic(
