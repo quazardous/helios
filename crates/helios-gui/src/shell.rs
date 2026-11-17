@@ -2023,7 +2023,7 @@ impl Shell {
         let listened = bus.listen_local::<AnswerDecision>(
             crate::decisions::ANSWERED_BY,
             egui_pop::api::bus::bus_contract::ListenOpts::new().owner(crate::decisions::BUS_OWNER),
-            move |r: &Request, _: &mut ()| {
+            move |r: &Request, (): &mut ()| {
                 answer_decision_on(&viewport, &decisions, r.clone(), "user")
                     .map(|_| ())
                     .inspect_err(|e| {

@@ -2331,7 +2331,7 @@ impl<S: Store + 'static> Persist<S> {
         let listened = bus.listen_local::<StacksAnswer>(
             STACKS,
             bus_contract::ListenOpts::new().owner(BUS_OWNER),
-            move |r: &Request, _: &mut ()| {
+            move |r: &Request, (): &mut ()| {
                 held(&writes).push_back(match r.clone() {
                     Request::Suggest { images } => Write::Suggest(images),
                     Request::Accept { decision, groups } => Write::Accept(decision, groups),
@@ -2350,7 +2350,7 @@ impl<S: Store + 'static> Persist<S> {
         let listened = bus.listen_local::<crate::library_write::LibraryWrite>(
             LIBRARY,
             bus_contract::ListenOpts::new().owner(BUS_OWNER),
-            move |w: &crate::library_write::WriteAsk, _: &mut ()| {
+            move |w: &crate::library_write::WriteAsk, (): &mut ()| {
                 write_asked(&writes, &asked, &node, &library, w.clone());
                 Ok(())
             },

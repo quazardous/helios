@@ -111,18 +111,14 @@ impl Review {
     /// (a panel made alone), dropped and logged.
     fn ask(&self, request: Request) {
         match &self.bus {
-            Some(bus) => match bus.defer() {
-                Some(defer) => {
+            Some(bus) => {
+                if let Some(defer) = bus.defer() {
                     defer.ask::<StacksAnswer>(request, ());
+                } else if let Some(r) = bus.alter::<StacksAnswer>(request, ()).refused {
+                    // A bus without `Defer`: heard at once.
+                    log::warn!(target: "helios", "{r}");
                 }
-                // A bus without `Defer`: heard at once.
-                None => {
-                    let out = bus.alter::<StacksAnswer>(request, ());
-                    if let Some(r) = out.refused {
-                        log::warn!(target: "helios", "{r}");
-                    }
-                }
-            },
+            }
             None => log::error!(target: "helios", "{ANSWER}: no bus, {request:?} dropped"),
         }
     }

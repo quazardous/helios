@@ -86,15 +86,9 @@ pub fn declare(bus: &dyn Bus) {
 /// that fails refuses the write, and egui-pop's drain logs it.
 pub fn ask(bus: &dyn Bus, write: WriteAsk) {
     declare(bus);
-    match bus.defer() {
-        Some(defer) => {
-            defer.ask::<LibraryWrite>(write, ());
-        }
-        None => {
-            let out = bus.alter::<LibraryWrite>(write, ());
-            if let Some(r) = out.refused {
-                log::warn!(target: "helios", "{r}");
-            }
-        }
+    if let Some(defer) = bus.defer() {
+        defer.ask::<LibraryWrite>(write, ());
+    } else if let Some(r) = bus.alter::<LibraryWrite>(write, ()).refused {
+        log::warn!(target: "helios", "{r}");
     }
 }
