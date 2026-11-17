@@ -20,7 +20,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 
-use egui_pop::api::toasts::{TOASTS, Toast};
+use egui_pop::api::toasts::Toast;
 use egui_pop::core::icon::Icon;
 use helios_core::Message;
 use helios_inspect::client::Client;
@@ -30,6 +30,7 @@ use helios_storage::{Role, Volume, VolumeId, VolumeKind, Volumes, registry};
 use serde_json::{Value, json};
 
 use super::Shell;
+use crate::backup_end::{self, CardList};
 use crate::import_end;
 
 /// Opens the Settings app at Storage › Volumes; `volume` (an id) marks
@@ -441,18 +442,16 @@ pub(crate) struct StoragePage {
     /// The accounts and sources behind remote volumes, read by
     /// `library.volumes` to show one row per account.
     pub(crate) owners: Owners,
-    /// The cards an import left short of their backups: told safe to
-    /// format once a backup job makes them so, while still inserted.
-    waiting: Rc<RefCell<Vec<Card>>>,
-    /// The same, for the health check's thread.
-    shared_waiting: Arc<Mutex<Vec<Card>>>,
+    /// The cards an import left short of their backups, while inserted:
+    /// the one list every reader reads ([`CardList`]).
+    pub(crate) cards: CardList,
     /// The link's [`StorageLink::seq`] last shown.
     seen: u64,
     /// The node facts the read kernel follows ([`super::reads`]).
     pub(super) reads: Option<crate::node_events::Listener>,
     /// The waiting cards checked again off the frame, once a backup
-    /// ended: each one's path and what it is now.
-    checking: Option<Receiver<Checked>>,
+    /// ended (`cards.safety`): each one's path and what it is now.
+    checking: Rc<RefCell<Option<Receiver<Checked>>>>,
 }
 
 impl Shell {
@@ -480,111 +479,134 @@ impl Shell {
     /// its badges and its `backup:` filters; what the link reads off the
     /// frame shows at a coming one.
     pub fn refresh_backups(&mut self) {
-        if let Some(link) = self.storage_link() {
-            link.refresh();
-        }
-        self.show_backups();
+        refresh_backups(&self.core.storage.read, &self.focus.library);
     }
 
     /// Each photo's backups as the link answers them now.
     fn show_backups(&mut self) {
-        let Some(link) = self.storage_link() else {
-            return;
-        };
-        match link.statuses() {
-            Ok(statuses) => {
-                let marks = statuses
-                    .iter()
-                    .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
-                    .collect();
-                let read = self.core.storage.read.borrow();
-                let badges = read.strategy.is_some();
-                let rule = strategy::rule(&read.list, read.strategy.as_ref());
-                drop(read);
-                let mut library = self.focus.library.borrow_mut();
-                library.set_backup_rule(rule);
-                library.set_backups(marks, badges);
-            }
-            Err(e) => log::warn!("backups: {e}"),
-        }
+        show_backups(&self.core.storage.read, &self.focus.library);
     }
 
     /// `storage.cards-waiting`, the shell's listener of `import.ended`:
     /// the cards an import read, from its report (`cards`), those short
     /// of their backups waiting for a backup job to end.
     pub(super) fn listen_cards_waiting(&self) -> Result<(), String> {
-        let (waiting, shared) = (
-            self.core.storage.waiting.clone(),
-            self.core.storage.shared_waiting.clone(),
-        );
+        let cards = self.core.storage.cards.clone();
         import_end::listen_local(
             &*self.core.app.handle().bus(),
             import_end::CARDS,
             move |end, _| {
                 if let Ok(report) = &end.outcome {
-                    wait_for_backups(&waiting, &shared, &report.cards);
+                    cards.wait_for_backups(&report.cards);
                 }
             },
         )
     }
 
-    /// The cards waiting for their backups, as the health check's thread
-    /// reads them (kept current by the shell).
-    pub fn waiting_cards(&self) -> Arc<Mutex<Vec<Card>>> {
-        self.core.storage.shared_waiting.clone()
-    }
-
-    fn share_waiting(&self) {
-        share_waiting(
-            &self.core.storage.waiting,
-            &self.core.storage.shared_waiting,
-        );
+    /// The one card list: the cards an import left short of their
+    /// backups, while inserted (the health check's thread reads it).
+    pub fn waiting_cards(&self) -> CardList {
+        self.core.storage.cards.clone()
     }
 
     /// The cards still waiting for their backups.
     pub fn cards_waiting_for_backups(&self) -> Vec<String> {
         self.core
             .storage
-            .waiting
-            .borrow()
-            .iter()
-            .map(|c| c.label.clone())
+            .cards
+            .waiting()
+            .into_iter()
+            .map(|c| c.label)
             .collect()
     }
 
-    /// A backup job ended: the badges read again, and each card still
-    /// inserted that waited for its backups checked again, off the frame
-    /// ([`Shell::storage_frame`] says the result). A card taken out is no
-    /// longer followed.
+    /// The shell's listeners of `backup.ended` and `card.safe`
+    /// ([`crate::backup_end`]), each in its declared place: the badges,
+    /// the cards checked again, then the toast, the Storage page's reads
+    /// and the health check's cards once some are safe.
+    pub(super) fn listen_backup_points(&mut self) {
+        self.import.get_mut().card_list = self.core.storage.cards.clone();
+        let bus = self.core.app.handle().bus();
+        let (read, library) = (self.core.storage.read.clone(), self.focus.library.clone());
+        let mut listened = vec![backup_end::listen_ended(
+            &*bus,
+            backup_end::BACKUPS,
+            move |_, _| refresh_backups(&read, &library),
+        )];
+        let (read, cards, checking) = (
+            self.core.storage.read.clone(),
+            self.core.storage.cards.clone(),
+            self.core.storage.checking.clone(),
+        );
+        let wake = self.core.health.ctx.clone();
+        listened.push(backup_end::listen_ended(
+            &*bus,
+            backup_end::SAFETY,
+            move |_, _| {
+                let link = read.borrow().link.clone();
+                if let Some(link) = link
+                    && let Some(r) = check_cards(link, cards.waiting(), wake.clone())
+                {
+                    *checking.borrow_mut() = Some(r);
+                }
+            },
+        ));
+        let (teller, log) = (self.teller(), self.core.log.clone());
+        listened.push(backup_end::listen_local(
+            &*bus,
+            backup_end::TOAST,
+            move |safe, _| {
+                for card in &safe.cards {
+                    let message = Message::new(
+                        "gui-backup-card-safe",
+                        "{ $card } is safe to format: every photo has its backups",
+                    )
+                    .with("card", card.label.clone());
+                    let text = teller.text(message.clone());
+                    teller.toast(Toast::success(&text));
+                    log.borrow_mut().push(crate::dialogs::Level::Info, message);
+                    teller.note(text);
+                }
+            },
+        ));
+        let app = self.core.app.handle().clone();
+        listened.push(backup_end::listen_local(
+            &*bus,
+            backup_end::STORAGE,
+            // The Storage page's card rows read again, from the list.
+            move |_, _| {
+                if let Some(k) = app
+                    .service(&egui_pop::api::admin::ADMIN)
+                    .and_then(|a| a.reads())
+                {
+                    k.event(super::reads::VOLUMES_CHANGED);
+                }
+            },
+        ));
+        let runner = self.core.health.cards_runner.clone();
+        listened.push(backup_end::listen_local(
+            &*bus,
+            backup_end::HEALTH,
+            move |_, _| super::health::recheck_cards(&runner),
+        ));
+        for e in listened.into_iter().filter_map(Result::err) {
+            self.notes.push(format!("{}: {e}", backup_end::ENDED));
+        }
+    }
+
+    /// A backup job ended: passed through `backup.ended` (the badges read
+    /// again, each card still inserted checked again off the frame:
+    /// [`Shell::storage_frame`] passes those found safe through
+    /// `card.safe`), then said on the journal.
     pub(super) fn backup_ended(&mut self) {
-        self.refresh_backups();
-        let Some(link) = self.storage_link() else {
-            return;
-        };
-        self.core
-            .storage
-            .waiting
-            .borrow_mut()
-            .retain(|c| c.path.is_dir());
-        self.share_waiting();
-        let cards = self.core.storage.waiting.borrow().clone();
-        if cards.is_empty() {
-            return;
-        }
-        let (send, checked) = std::sync::mpsc::channel();
-        let spawned = std::thread::Builder::new()
-            .name("card-safety".into())
-            .spawn(move || {
-                let now = cards
-                    .iter()
-                    .map(|c| (c.path.clone(), link.card_safety(c)))
-                    .collect();
-                let _ = send.send(now);
-            });
-        match spawned {
-            Ok(_) => self.core.storage.checking = Some(checked),
-            Err(e) => log::warn!("cards: no thread to check them: {e}"),
-        }
+        let bus = self.core.app.handle().bus();
+        let reactions = backup_end::pass_ended(&*bus, backup_end::BackupEnd::default());
+        self.core.app.handle().publish(
+            "helios",
+            None,
+            backup_end::ENDED,
+            backup_end::said(&reactions.ran, json!({})),
+        );
     }
 
     /// Each frame: what the link read since shows, and the cards checked
@@ -602,43 +624,47 @@ impl Shell {
                 self.read_fact(super::reads::VOLUMES_CHANGED);
             }
         }
-        let checked = match &self.core.storage.checking {
-            Some(r) => match r.try_recv() {
-                Ok(checked) => checked,
-                Err(std::sync::mpsc::TryRecvError::Empty) => return,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
-            },
-            None => return,
+        let checked = {
+            let mut checking = self.core.storage.checking.borrow_mut();
+            let checked = match &*checking {
+                Some(r) => match r.try_recv() {
+                    Ok(checked) => checked,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+                },
+                None => return,
+            };
+            *checking = None;
+            checked
         };
-        self.core.storage.checking = None;
+        // The list marked first: whoever reads it from now on (the
+        // listeners below, the import window, the Storage page, the
+        // health check) says the same.
+        let cards = &self.core.storage.cards;
+        let mut safe = Vec::new();
         for (path, now) in checked {
             match now {
-                Ok(now) if now.safe_to_format => {
-                    self.core
-                        .storage
-                        .waiting
-                        .borrow_mut()
-                        .retain(|c| c.path != path);
-                    let message = Message::new(
-                        "gui-backup-card-safe",
-                        "{ $card } is safe to format: every photo has its backups",
-                    )
-                    .with("card", now.label.clone());
-                    let text = self.text(message.clone());
-                    if let Some(toasts) = self.core.app.handle().service(&TOASTS) {
-                        toasts.notify(Toast::success(&text));
+                Ok(now) => {
+                    if cards.checked(&path, now.clone()) {
+                        safe.push(now);
                     }
-                    self.core
-                        .log
-                        .borrow_mut()
-                        .push(crate::dialogs::Level::Info, message);
-                    self.notes.push(text);
                 }
-                Ok(_) => {}
                 Err(e) => log::warn!("{}: {e}", path.display()),
             }
         }
-        self.share_waiting();
+        if safe.is_empty() {
+            return;
+        }
+        let labels: Vec<String> = safe.iter().map(|c| c.label.clone()).collect();
+        let bus = self.core.app.handle().bus();
+        let reactions = backup_end::pass_safe(&*bus, backup_end::SafeCards { cards: safe });
+        self.absorb_said();
+        self.core.app.handle().publish(
+            "helios",
+            None,
+            backup_end::SAFE,
+            backup_end::said(&reactions.ran, json!({ "cards": labels })),
+        );
     }
 
     /// The import window's strategy line, and whether it is the one
@@ -810,27 +836,69 @@ pub fn backup_line(
     (t(line.with("disks", disks)), false)
 }
 
-/// The cards an import read (`cards`): those short of their backups wait
-/// for a backup job to end, in `waiting` and its copy for the health
-/// check's thread.
-fn wait_for_backups(waiting: &RefCell<Vec<Card>>, shared: &Mutex<Vec<Card>>, cards: &[Card]) {
-    {
-        let mut waiting = waiting.borrow_mut();
-        for card in cards {
-            if card.safe_to_format || card.missing > 0 || card.short == 0 {
-                continue;
-            }
-            waiting.retain(|c| c.path != card.path);
-            waiting.push(card.clone());
-        }
+/// Each photo's backups read again (one read for the Library), for its
+/// badges and its `backup:` filters; what the link reads off the frame
+/// shows at a coming one.
+fn refresh_backups(read: &RefCell<StorageRead>, library: &RefCell<crate::library::Library>) {
+    let link = read.borrow().link.clone();
+    if let Some(link) = link {
+        link.refresh();
     }
-    share_waiting(waiting, shared);
+    show_backups(read, library);
 }
 
-/// The waiting cards copied for the health check's thread.
-fn share_waiting(waiting: &RefCell<Vec<Card>>, shared: &Mutex<Vec<Card>>) {
-    shared
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone_from(&waiting.borrow());
+/// Each photo's backups as the link answers them now.
+fn show_backups(read: &RefCell<StorageRead>, library: &RefCell<crate::library::Library>) {
+    let Some(link) = read.borrow().link.clone() else {
+        return;
+    };
+    match link.statuses() {
+        Ok(statuses) => {
+            let marks = statuses
+                .iter()
+                .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
+                .collect();
+            let read = read.borrow();
+            let badges = read.strategy.is_some();
+            let rule = strategy::rule(&read.list, read.strategy.as_ref());
+            drop(read);
+            let mut library = library.borrow_mut();
+            library.set_backup_rule(rule);
+            library.set_backups(marks, badges);
+        }
+        Err(e) => log::warn!("backups: {e}"),
+    }
+}
+
+/// `cards` checked again through `link` on a thread of their own (the
+/// check reads the vault), `wake`'s context asked a pass once it is done; where the
+/// result comes, or none when there is nothing to check.
+fn check_cards(
+    link: Arc<dyn StorageLink>,
+    cards: Vec<Card>,
+    wake: Arc<Mutex<Option<egui::Context>>>,
+) -> Option<Receiver<Checked>> {
+    if cards.is_empty() {
+        return None;
+    }
+    let (send, checked) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("card-safety".into())
+        .spawn(move || {
+            let now = cards
+                .iter()
+                .map(|c| (c.path.clone(), link.card_safety(c)))
+                .collect();
+            let _ = send.send(now);
+            if let Some(ctx) = wake.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+                ctx.request_repaint();
+            }
+        });
+    match spawned {
+        Ok(_) => Some(checked),
+        Err(e) => {
+            log::warn!("cards: no thread to check them: {e}");
+            None
+        }
+    }
 }

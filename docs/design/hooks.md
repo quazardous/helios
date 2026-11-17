@@ -445,6 +445,31 @@ a reviewed dump (`crates/helios-gui/tests/bus/volumes.txt`);
 `backups.on-connect` without a scan (it runs none): the missing target
 is reported and ignored.
 
+### Slice 2d: a backup's end and the cards safe to format
+
+A backup job's end was a flag the jobs' journal reader set
+(`take_backups`); the shell then read the badges again and checked the
+cards still inserted on a thread, polled each frame, and said the safe
+ones itself (toast, Log, notes). The cards were kept twice, `waiting`
+for the shell and `shared_waiting` for the health check's thread, copied
+by hand after each change; neither the import window nor the Storage
+page said whether a card could be formatted.
+
+Where it stands (2026-11-17): done. `helios_gui::backup_end` declares two
+points (`POINTS`) on the one bus. A backup's end passes once through
+`backup.ended`: `storage.backups` (the badges read again), then
+`cards.safety` (the cards still inserted checked again off the frame:
+the check reads the vault). The cards are one list, `CardList`: the
+import's `storage.cards-waiting` fills it, the check marks it, and the
+import window's card rows, the Storage page's card rows (`card`,
+`backupText`) and the health check's "Cards safe to format" all read it.
+Once the check lands, the shell marks the list, then passes the cards
+that became safe through `card.safe`: `cards.toast` (toast, Log),
+`storage.cards` (the Storage page's reads out of date), `health.cards`
+(the cards check run again, or once a run under way ends), in that
+pass. Both are said on the journal with the listeners that ran (`ran`).
+The order is a reviewed dump (`crates/helios-gui/tests/bus/backups.txt`).
+
 ### Slice 3: one module catalogue
 
 One crate lists the processing modules and what each ships (its

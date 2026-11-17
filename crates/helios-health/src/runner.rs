@@ -234,6 +234,19 @@ impl Runner {
         true
     }
 
+    /// The checks `ids` name, at once (none while a run is under way);
+    /// whether a run started.
+    pub fn run_only(&self, ids: &[String]) -> bool {
+        if !self.start(Some(ids)) {
+            return false;
+        }
+        self.schedule
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .ran(ids, Instant::now());
+        true
+    }
+
     /// No run starts from now on (the node stops); one under way ends.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);

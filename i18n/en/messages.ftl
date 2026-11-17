@@ -2691,6 +2691,10 @@ gui-storage-backup-on-connect = When a backup disk is plugged in
 
 gui-storage-backup-on-import = After each import
 
+gui-storage-card-safe = safe to format
+
+gui-storage-card-waiting = not safe to format yet
+
 gui-storage-dest-archive = Any archive disk
 
 gui-storage-dest-backup = Any backup disk

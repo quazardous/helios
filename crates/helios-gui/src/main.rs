@@ -155,7 +155,7 @@ fn health_runner(
     bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus>,
     library: Option<Library>,
     file: Option<PathBuf>,
-    cards: Arc<std::sync::Mutex<Vec<helios_library::import::Card>>>,
+    cards: helios_gui::backup_end::CardList,
     settings: egui_pop::core::binding::SharedStore,
     plugins: Arc<helios_plugin::Broker>,
     accounts: Option<&helios_plugin::health::AccountsFn>,
@@ -172,14 +172,13 @@ fn health_runner(
     let gpu = helios_health::Gather::new(|_| helios_gpu::health::gpu());
     let desktop = helios_gui::shell::HealthDesktop {
         destination_days: Box::new(move || helios_gui::platform::destination_days(&settings)),
+        // The one card list: the cards inserted still short.
         cards: Box::new(move || {
             cards
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .iter()
-                .filter(|c| c.path.is_dir())
+                .waiting()
+                .into_iter()
                 .map(|c| CardShort {
-                    label: c.label.clone(),
+                    label: c.label,
                     short: c.short,
                 })
                 .collect()

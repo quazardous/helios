@@ -2578,6 +2578,10 @@ gui-storage-backup-on-connect = Quand un disque de sauvegarde est branché
 
 gui-storage-backup-on-import = Après chaque import
 
+gui-storage-card-safe = peut être formatée
+
+gui-storage-card-waiting = pas encore à formater
+
 gui-storage-dest-archive = Tout disque d’archive
 
 gui-storage-dest-backup = Tout disque de sauvegarde

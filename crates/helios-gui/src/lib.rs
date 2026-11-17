@@ -4,6 +4,7 @@
 
 pub mod activity;
 pub mod agent_state;
+pub mod backup_end;
 pub mod caches;
 pub mod calibrate;
 pub mod caption;

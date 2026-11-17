@@ -1219,3 +1219,16 @@ fn a_refresh_never_blanks_the_page() {
         h.query_by_label_contains("Refreshing").is_none()
     });
 }
+
+/// The listeners of `backup.ended` and `card.safe` as the desktop
+/// registers them, in the order they run: a reviewed dump
+/// (`tests/bus/backups.txt`). The badges, then the cards checked; the
+/// toast, then the Storage page and the health check.
+#[test]
+fn the_backup_points_listeners_run_in_a_declared_order() {
+    let shell = Shell::new(helios_panels(), None);
+    assert_eq!(
+        helios_gui::backup_end::order(&*shell.app().handle().bus()),
+        include_str!("../bus/backups.txt")
+    );
+}
