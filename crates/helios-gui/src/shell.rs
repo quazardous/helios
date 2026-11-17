@@ -145,6 +145,9 @@ mod workshop_session;
 mod workspace_edit;
 mod workspace_live;
 
+/// The Compare panel, which the Compare place shows in the centre.
+const COMPARE_PANEL: &str = "helios.compare";
+
 /// The command the host registers to run the imports the shell hands
 /// over ([`Shell::take_imports`]); only with a library open.
 pub const IMPORT_COMMAND: &str = "library.import";
@@ -374,6 +377,8 @@ enum Action {
     ScanFolder(Value),
     /// Moves the comparison's active photo by a step.
     CompareStep(i64),
+    /// Leaves Compare, back to the place it was entered from.
+    CompareLeave,
     /// Zoom and pan synchronised across the compared photos, or not
     /// (toggled when `None`).
     CompareSync(Option<bool>),
@@ -3461,6 +3466,14 @@ impl Shell {
             ),
             Box::new(|a, _| Ok(Action::ScanFolder(a.clone()))),
         );
+        add(
+            CommandSpec::new(
+                crate::comparison::LEAVE_COMMAND,
+                "Leave Compare: back to the grid, or wherever it was entered from (Escape)",
+                "Library",
+            ),
+            Box::new(|_, _| Ok(Action::CompareLeave)),
+        );
         for (id, title, step) in [
             ("compare.next", "Compare: make the next photo active", 1),
             (
@@ -6107,8 +6120,13 @@ impl Shell {
 
     /// Compares photos side by side: the Compare place on `images` (ids),
     /// else on the selection; two to four photos, the first active.
+    /// Without `images` while comparing, Compare is left: the command
+    /// (its key C, the gallery bar's button) is a toggle.
     fn compare_photos(&mut self, args: &Value) -> Result<Value, String> {
         use egui_pop::views::library::compare::MAX_PANES;
+        if args.get("images").is_none() && crate::contexts::comparing(self.core.app.handle()) {
+            return self.leave_comparison();
+        }
         let mut ids: Vec<String> = match args.get("images").and_then(Value::as_array) {
             Some(list) => list
                 .iter()
@@ -6141,14 +6159,33 @@ impl Shell {
             );
         }
         let payload = helios_template::contexts::images_payload(&ids);
-        let done = crate::contexts::go(
-            self.core.app.handle(),
-            crate::contexts::COMPARISON,
+        let app = self.core.app.handle().clone();
+        let done = crate::contexts::enter_comparison(
+            &app,
             payload,
             &egui_pop::model::commands::Origin::User,
         )?;
+        // The Compare panel shown and focused, even when it was closed
+        // there before: its keys (the arrows, C, Escape) work at once.
+        let panel = egui_pop::model::ids::PanelId::from_static(COMPARE_PANEL);
+        if !app.panel_visible(&panel) {
+            app.set_panel_visible(&panel, true);
+        }
+        app.focus_panel(&panel);
         self.follow_comparison();
         Ok(json!({ "images": ids, "place": done }))
+    }
+
+    /// Leaves Compare (`compare.leave`): back to the place it was entered
+    /// from, the grid; the root for a workspace reopened on a comparison.
+    fn leave_comparison(&mut self) -> Result<Value, String> {
+        let left = crate::contexts::leave_comparison(
+            self.core.app.handle(),
+            &egui_pop::model::commands::Origin::User,
+        )?;
+        self.focus.compare_panel_shown = false;
+        self.follow_comparison();
+        Ok(json!({ "left": left }))
     }
 
     /// The comparison follows the Compare place: its photos are the
@@ -6167,6 +6204,21 @@ impl Shell {
             );
         } else if egui_pop::api::contexts::state(&app).is_some() {
             self.focus.open_in_compare = false;
+        }
+        // The Compare panel closed while in Compare leaves it: Compare
+        // without its panel would hold the window on nothing.
+        if crate::contexts::comparing(&app) {
+            let panel = egui_pop::model::ids::PanelId::from_static(COMPARE_PANEL);
+            if app.panel_visible(&panel) {
+                self.focus.compare_panel_shown = true;
+            } else if std::mem::take(&mut self.focus.compare_panel_shown) {
+                let _ = crate::contexts::leave_comparison(
+                    &app,
+                    &egui_pop::model::commands::Origin::User,
+                );
+            }
+        } else {
+            self.focus.compare_panel_shown = false;
         }
         let photos: Vec<String> = {
             let library = self.focus.library.borrow();
@@ -6629,6 +6681,7 @@ impl Shell {
                 );
             }
             Action::ComparePhotos(args) => return self.compare_photos(&args),
+            Action::CompareLeave => return self.leave_comparison(),
             Action::Sort(args, origin) => return self.sort_library(&args, &origin),
             Action::Folder(args, origin) => return self.folder_library(&args, &origin),
             Action::LibraryImports(id, args, origin) => {

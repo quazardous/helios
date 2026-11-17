@@ -1517,6 +1517,10 @@ gui-library-auto-advance = Avance automatique
 
 gui-library-compare-hint = Sélectionnez de deux à quatre images pour les comparer
 
+gui-library-compare-leave = Retour à la grille
+
+gui-library-compare-leave-tip = Quitter la comparaison, retour à la grille (C ou Échap)
+
 gui-library-count = { $shown } sur { $total }
 gui-library-facet-rating = Note
 gui-library-facet-label = Étiquette

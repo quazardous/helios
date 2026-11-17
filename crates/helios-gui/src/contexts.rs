@@ -250,6 +250,51 @@ pub fn compared(app: &AppHandle) -> Option<Vec<String>> {
         .map(|e| helios_template::contexts::images_of(&e.payload))
 }
 
+/// Whether the Compare place is the one shown (the top place).
+pub fn comparing(app: &AppHandle) -> bool {
+    state(app)
+        .places
+        .last()
+        .is_some_and(|e| e.frame == COMPARISON)
+}
+
+/// Enters the Compare place on these photos (`payload`), above the place
+/// the user is in (the library, the root), so leaving it comes back
+/// there; a comparison or a darkroom shown is replaced.
+pub fn enter_comparison(app: &AppHandle, payload: Json, origin: &Origin) -> Result<Json, String> {
+    let mut places: Vec<Entry> = state(app)
+        .places
+        .iter()
+        .take_while(|e| e.frame != COMPARISON && e.frame != DARKROOM)
+        .cloned()
+        .collect();
+    places.push(Entry {
+        frame: COMPARISON,
+        payload,
+    });
+    match contexts::request(app, Envelope::new(Request::Go { places }), origin) {
+        egui_pop::api::steps::Outcome::Done(r) => r,
+        egui_pop::api::steps::Outcome::Vetoed { by, reason } => {
+            Err(format!("vetoed by {by}: {reason}"))
+        }
+    }
+}
+
+/// Leaves the Compare place: back to the place it was entered from (the
+/// root for a workspace reopened on a comparison). `false` when the user
+/// is not in it.
+pub fn leave_comparison(app: &AppHandle, origin: &Origin) -> Result<bool, String> {
+    let Some(depth) = state(app).places.iter().position(|e| e.frame == COMPARISON) else {
+        return Ok(false);
+    };
+    match contexts::request(app, Envelope::new(Request::Jump { depth }), origin) {
+        egui_pop::api::steps::Outcome::Done(r) => r.map(|_| true),
+        egui_pop::api::steps::Outcome::Vetoed { by, reason } => {
+            Err(format!("vetoed by {by}: {reason}"))
+        }
+    }
+}
+
 /// Whether the stack was read and shows the workspace's root (no place).
 pub fn at_root(app: &AppHandle) -> bool {
     contexts::state(app).is_some_and(|s| s.places.is_empty())

@@ -213,6 +213,100 @@ fn new_workspace_offers_compare_and_a_compare_workspace_opens_in_it() {
     );
 }
 
+/// The Library's grid is back: out of the Compare place, the library's
+/// grid shown and the Compare panel no longer in the centre.
+fn assert_on_grid(h: &Harness<'_, Shell>, how: &str) {
+    use egui_pop::model::ids::PanelId;
+    use egui_pop::model::panels::Area;
+    assert_ne!(place(h), "helios.comparison", "{how} leaves Compare");
+    let layout = h.state().layout();
+    assert!(
+        layout
+            .area_of(&PanelId::new("helios.vault").unwrap())
+            .is_some(),
+        "{how}: the grid is shown"
+    );
+    assert_ne!(
+        layout.area_of(&PanelId::new("helios.compare").unwrap()),
+        Some(Area::Center),
+        "{how}: Compare no longer takes the centre"
+    );
+}
+
+/// Enters Compare from the gallery bar, two photos selected, as a user.
+fn enter_from_the_bar(h: &mut Harness<'_, Shell>) {
+    h.state().library_mut().select_ids(&names()[..2]);
+    run(h, "view.library", json!(null));
+    h.run();
+    assert_eq!(place(h), "helios.library");
+    h.get_by_role_and_label(Role::Button, "Compare").click();
+    h.run();
+    h.run();
+    assert_eq!(place(h), "helios.comparison");
+    assert_eq!(h.state().comparison().photos(), ["a", "b"]);
+}
+
+#[test]
+fn compare_is_left_every_way_a_user_tries() {
+    let mut h = library("way-out", 1.0);
+    // Escape, through the keymap.
+    enter_from_the_bar(&mut h);
+    h.key_press(Key::Escape);
+    h.run();
+    h.run();
+    assert_on_grid(&h, "Escape");
+    assert_eq!(place(&h), "helios.library", "back where it was entered");
+    // Compare again: a toggle (its command, as its key C runs it).
+    enter_from_the_bar(&mut h);
+    run(&mut h, "library.compare", json!(null));
+    h.run();
+    h.run();
+    assert_on_grid(&h, "Compare again");
+    // The Compare view's own way back.
+    enter_from_the_bar(&mut h);
+    h.get_by_role_and_label(Role::Button, "Back to grid")
+        .click();
+    h.run();
+    h.run();
+    assert_on_grid(&h, "Back to grid");
+    // Closing the Compare panel.
+    enter_from_the_bar(&mut h);
+    run(
+        &mut h,
+        "workbench.panel.close",
+        json!({ "panel": "helios.compare" }),
+    );
+    h.run();
+    h.run();
+    assert_on_grid(&h, "Closing the Compare panel");
+    // The context stack's back.
+    enter_from_the_bar(&mut h);
+    run(&mut h, "nav.back", json!(null));
+    h.run();
+    h.run();
+    assert_on_grid(&h, "Back");
+    // Choosing the grid.
+    enter_from_the_bar(&mut h);
+    run(&mut h, "view.library", json!(null));
+    h.run();
+    assert_on_grid(&h, "The grid chosen");
+}
+
+#[test]
+fn a_workspace_reopened_on_a_comparison_is_left_the_same_way() {
+    let mut h = library("reopened", 1.0);
+    let compare = helios_gui::templates::find("helios.compare").unwrap();
+    h.state_mut()
+        .apply_template_library(compare.template.library.as_ref());
+    h.run();
+    h.run();
+    assert_eq!(place(&h), "helios.comparison");
+    h.key_press(Key::Escape);
+    h.run();
+    h.run();
+    assert_on_grid(&h, "Escape in a reopened comparison");
+}
+
 /// Three photos of distinct colours, their large thumbnails cached.
 fn shown_in_colour(h: &mut Harness<'static, Shell>) -> helios_thumbs::Loader {
     let dir = std::env::temp_dir().join(format!("helios-gui-compare-{}", std::process::id()));

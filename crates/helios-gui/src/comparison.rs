@@ -16,8 +16,14 @@
 use egui_pop::views::library::compare::{CompareState, MAX_PANES, PaneView};
 
 /// Compares photos side by side, in the Compare place (`images`, else
-/// the selection): Lightroom's C.
+/// the selection): Lightroom's C. Without `images` while comparing, it
+/// leaves Compare (a toggle).
 pub const COMMAND: &str = "library.compare";
+
+/// Leaves Compare: back to the place it was entered from (the grid), as
+/// Escape, the Compare view's "Back to grid", the Compare command again
+/// (a toggle) and the Compare panel closed do.
+pub const LEAVE_COMMAND: &str = "compare.leave";
 
 /// The comparison of one focus.
 #[derive(Clone, Debug)]

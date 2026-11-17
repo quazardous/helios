@@ -995,6 +995,8 @@ gui-library-badge-versions e6e739b5295225ba
 gui-library-cannot-open 2702ccb4eb8511ba
 gui-library-compare 0b2cb0ac030421c2
 gui-library-compare-hint ef5d43662fafd120
+gui-library-compare-leave e4fe8ae6c13fec9d
+gui-library-compare-leave-tip 37d98832afe242e0
 gui-library-compare-tip e7cd98d9aa0035f5
 gui-library-count e72204ddb791f955
 gui-library-cull-clipped 1052a836d32a2f0e

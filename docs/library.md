@@ -463,7 +463,11 @@ The library panels are egui-pop's photo library widgets (its
   culling keys mark it. The comparison (its photos, the active one, the
   best, zoom and pan) belongs to the window's focus, not to the library
   view, so it can become a window of its own. File > New workspace
-  offers "Compare", a workspace that opens there.
+  offers "Compare", a workspace that opens there. It is left back to
+  the place it was entered from, the grid (2026-11-17): Escape
+  (`compare.leave`), `C` or the gallery's button again (a toggle,
+  "Back to grid" while comparing), the view's **Back to grid**, the
+  Compare panel closed, or the breadcrumb's back.
 
 **Sorting** (2026-11-11, see [design/library.md](design/library.md),
 L3): the grid shows the photos by capture time, oldest first, unless

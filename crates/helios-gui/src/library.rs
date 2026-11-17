@@ -3512,6 +3512,12 @@ impl Library {
             .and_then(|c| self.at(c))
     }
 
+    /// Whether the window shows the Compare place (the gallery bar's
+    /// Compare then leaves it).
+    pub fn comparing(&self) -> bool {
+        self.app.as_ref().is_some_and(crate::contexts::comparing)
+    }
+
     /// The images selected in the views, in order.
     pub fn selection(&self) -> Vec<String> {
         self.view.state.selection().keys().to_vec()
@@ -3984,15 +3990,32 @@ impl Library {
         let import = self
             .import_offered
             .then(|| crate::i18n::text(&ctx, Message::new("gui-library-import", "Import…")));
-        let compare = crate::i18n::text(&ctx, Message::new("gui-library-compare", "Compare"));
-        let compare_hint = crate::i18n::text(
-            &ctx,
-            Message::new(
-                "gui-library-compare-tip",
-                "The selected photos side by side (C)",
-            ),
-        );
-        let can_compare = self.view.state.selection().len() >= 2;
+        // A toggle: in Compare, it says the way back and takes it.
+        let comparing = self.comparing();
+        let (compare, compare_hint) = if comparing {
+            (
+                back_to_grid(&ctx),
+                crate::i18n::text(
+                    &ctx,
+                    Message::new(
+                        "gui-library-compare-leave-tip",
+                        "Leave Compare, back to the grid (C or Escape)",
+                    ),
+                ),
+            )
+        } else {
+            (
+                crate::i18n::text(&ctx, Message::new("gui-library-compare", "Compare")),
+                crate::i18n::text(
+                    &ctx,
+                    Message::new(
+                        "gui-library-compare-tip",
+                        "The selected photos side by side (C)",
+                    ),
+                ),
+            )
+        };
+        let can_compare = comparing || self.view.state.selection().len() >= 2;
         let mut asked = None;
         // Wrapped, the field no wider than what is left of the line: a
         // narrow panel takes the bar on several lines rather than widen
@@ -4889,6 +4912,7 @@ impl Library {
     /// makes it active, as in Lightroom's Survey view.
     pub fn compare_ui(&mut self, ui: &mut Ui, cmp: &mut Comparison) {
         self.receive(ui.ctx());
+        let comparing = self.comparing();
         let selection = self.selection();
         let keys: Vec<String> = cmp
             .shown(&selection)
@@ -4896,6 +4920,9 @@ impl Library {
             .filter(|k| self.index.contains_key(k))
             .collect();
         if keys.len() < 2 {
+            if comparing {
+                back_to_grid_action(ui);
+            }
             ui.muted(crate::i18n::text(
                 ui.ctx(),
                 Message::new(
@@ -4927,6 +4954,10 @@ impl Library {
         let best = cmp.best().map(String::from).filter(|b| keys.contains(b));
         let mut keep = false;
         ui.horizontal_wrapped(|ui| {
+            if comparing {
+                back_to_grid_action(ui);
+                ui.divider();
+            }
             widgets::checkbox(ui, &mut cmp.synced, sync.as_str());
             keep = ui
                 .add_enabled_ui(best.is_some(), |ui| {
@@ -5257,6 +5288,39 @@ impl Library {
             W::Version(a, b) => Some((a.clone(), b.clone())),
             _ => None,
         })
+    }
+}
+
+/// The way out of Compare, as its view and the gallery bar name it.
+fn back_to_grid(ctx: &egui::Context) -> String {
+    crate::i18n::text(
+        ctx,
+        Message::new("gui-library-compare-leave", "Back to grid"),
+    )
+}
+
+/// The Compare view's way back to the grid (Escape, C): leaves Compare.
+fn back_to_grid_action(ui: &mut Ui) {
+    let label = back_to_grid(ui.ctx());
+    let tip = crate::i18n::text(
+        ui.ctx(),
+        Message::new(
+            "gui-library-compare-leave-tip",
+            "Leave Compare, back to the grid (C or Escape)",
+        ),
+    );
+    if helios_ui::action(ui, Action::Secondary, &label)
+        .tip(tip)
+        .clicked()
+    {
+        crate::dialogs::request(
+            ui.ctx(),
+            crate::dialogs::Request::Run(
+                crate::comparison::LEAVE_COMMAND.into(),
+                Value::Null,
+                helios_shell::commands::Origin::User,
+            ),
+        );
     }
 }
 
