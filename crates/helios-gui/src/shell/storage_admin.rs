@@ -24,6 +24,7 @@
 //! The texts in the answers are in the interface's language.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
 use helios_connect::account::Account;
@@ -37,6 +38,7 @@ use serde_json::{Value, json};
 use super::Shell;
 use super::import_sources::SavedSource;
 use super::storage::{StorageLink, backup_line, day_of, destination_text, kind_of, role_text};
+use crate::backup_end::{CardList, CardState};
 
 /// Lists the volumes known (read-only).
 pub const VOLUMES: &str = "library.volumes";
@@ -197,6 +199,33 @@ pub fn volume_rows(
             "tone": if online > 0 { "success" } else { "info" },
         },
     })
+}
+
+/// The card rows the one card list follows ([`CardList`]): `card`
+/// (`safe` or `waiting`) and their words in `backupText` ("safe to
+/// format", "not safe to format yet").
+pub fn with_cards(t: &dyn Fn(Message) -> String, rows: &mut Value, cards: &CardList) {
+    let Some(rows) = rows["volumes"].as_array_mut() else {
+        return;
+    };
+    for row in rows {
+        let Some(state) = row["mount"]
+            .as_str()
+            .and_then(|m| cards.state_of(Path::new(m)))
+        else {
+            continue;
+        };
+        row["card"] = json!(state.name());
+        row["backupText"] = json!(t(card_words(state)));
+    }
+}
+
+/// What a card's state says, in the Storage page and the import window.
+pub(crate) fn card_words(state: CardState) -> Message {
+    match state {
+        CardState::Safe => Message::new("gui-storage-card-safe", "safe to format"),
+        CardState::Waiting => Message::new("gui-storage-card-waiting", "not safe to format yet"),
+    }
 }
 
 /// A remote volume's owner: the import account it is
@@ -580,6 +609,7 @@ impl Shell {
         }
         let (l, i18n) = (link.clone(), self.core.i18n.clone());
         let owned = self.core.storage.owners.clone();
+        let cards = self.core.storage.cards.clone();
         let volumes = self.register(
             CommandSpec::new(
                 VOLUMES,
@@ -601,6 +631,7 @@ impl Shell {
                 let mut rows =
                     volume_rows(&t, &grouped.volumes, &grouped.photos, strategy.as_ref());
                 with_sources(&mut rows, &grouped.sources);
+                with_cards(&t, &mut rows, &cards);
                 Ok(rows)
             },
         );

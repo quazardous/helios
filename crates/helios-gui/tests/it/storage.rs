@@ -717,6 +717,184 @@ fn a_card_short_of_its_backups_is_said_safe_once_a_backup_ends() {
     assert!(h.state().cards_waiting_for_backups().is_empty());
 }
 
+/// A card's volume mounted at `root`, known by its filesystem's UUID.
+fn card_volume(label: &str, root: &Path, uuid: &str) -> Volume {
+    let mut v = helios_storage::Card {
+        label: label.into(),
+        root: root.to_path_buf(),
+        capacity: Some(64_000_000_000),
+    }
+    .volume();
+    v.id = VolumeId(format!("uuid:{uuid}"));
+    v.identified_by = Identity::Uuid;
+    v
+}
+
+/// One card list: a backup ends with two cards an import left short of
+/// their backups still inserted. In the pass the toast says the first
+/// safe to format, the Storage page's card row says it too, the second
+/// (its backup copy not verified) is still waiting there and in the list
+/// the health check reads, and `card.safe` is on the journal after
+/// `backup.ended`, with its listeners in order; the import window's card
+/// row draws the same at its paint.
+#[test]
+fn a_backup_ended_says_a_card_safe_everywhere_from_one_list() {
+    use helios_gui::node_volumes::VolumeWatch;
+    use helios_gui::shell::VOLUMES_COMMAND;
+
+    let (mut world, mut shell) = World::new("one-card-list");
+    give_roles(&world.vault, "uuid:studio", &[Role::Library]);
+    give_roles(&world.vault, "uuid:backup", &[Role::Backup]);
+    let one = Strategy {
+        triggers: [Trigger::ByHand].into(),
+        ..Strategy::default()
+    };
+    strategy::save(&world.vault, &Scope::Library, Some(&one)).unwrap();
+    let (a, b) = (world.dir.join("EOS_DIGITAL"), world.dir.join("NIKON_D850"));
+    for (card, bytes) in [
+        (&a, b"a photo on the first card".as_slice()),
+        (&b, b"one on the second"),
+    ] {
+        let dcim = card.join("DCIM/100CARD");
+        std::fs::create_dir_all(&dcim).unwrap();
+        std::fs::write(dcim.join("IMG_0001.JPG"), bytes).unwrap();
+    }
+    let (card_a, card_b) = (
+        card_volume("EOS_DIGITAL", &a, "card-a"),
+        card_volume("NIKON_D850", &b, "card-b"),
+    );
+    shell.follow_volumes(VolumeWatch::start(
+        world.plugged.clone(),
+        Arc::new(Bus::new()),
+        shell.app().handle().bus(),
+        Duration::from_millis(30),
+    ));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let (studio, backup_disk) = (world.studio.clone(), world.backup.clone());
+    world.plug(
+        &mut h,
+        &[&studio, &backup_disk, &card_a, &card_b],
+        FIRST + 5,
+    );
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    until(&mut h, "the cards in the import window", |h| {
+        h.query_by_label("EOS_DIGITAL").is_some() && h.query_by_label("NIKON_D850").is_some()
+    });
+
+    let jobs = h.state().jobs();
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(world.dir.join("studio/Library")),
+        },
+        signals: false,
+        ..Options::default()
+    };
+    let report = import::import(
+        world.vault.as_ref(),
+        &jobs,
+        &[a.clone(), b.clone()],
+        &options,
+        FIRST + 10,
+        &mut |_: &serde_json::Value| {},
+    )
+    .unwrap();
+    assert_eq!(report.cards.len(), 2, "{report:?}");
+    assert!(report.cards.iter().all(|c| !c.safe_to_format), "{report:?}");
+    h.state()
+        .import_sink()
+        .send((json!({}), json!({ "ended": report })))
+        .unwrap();
+    until(&mut h, "both cards wait for their backups", |h| {
+        h.state().cards_waiting_for_backups() == ["EOS_DIGITAL", "NIKON_D850"]
+    });
+
+    let since = h.state().app().handle().last_event();
+    backup::run(
+        world.vault.as_ref(),
+        &jobs,
+        world.plugged.as_ref(),
+        Trigger::ByHand,
+        FIRST + 20,
+        None,
+    )
+    .unwrap();
+    // The second card's backup copy is not verified (its check failed or
+    // has not run): it is short still.
+    let second = report
+        .cards
+        .iter()
+        .find(|c| c.label == "NIKON_D850")
+        .and_then(|c| c.files[0].1)
+        .expect("the second card's photo imported");
+    world
+        .vault
+        .storage_transaction(|tx| tx.set_verified(&second.hex(), None))
+        .unwrap();
+    let said = "EOS_DIGITAL is safe to format: every photo has its backups";
+    until(&mut h, "the toast", |h| {
+        h.state().notes.iter().any(|n| n == said)
+    });
+
+    // In that same pass, from the one list: the Storage page's card rows,
+    // and the cards the health check reads.
+    assert_eq!(h.state().cards_waiting_for_backups(), ["NIKON_D850"]);
+    let answer = h
+        .state_mut()
+        .run(VOLUMES_COMMAND, json!(null), Origin::User)
+        .unwrap();
+    let row = |id: &str| {
+        answer["volumes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .unwrap_or_else(|| panic!("no row {id}: {answer}"))
+            .clone()
+    };
+    assert_eq!(row("uuid:card-a")["card"], "safe", "{answer}");
+    assert_eq!(row("uuid:card-a")["backupText"], "safe to format");
+    assert_eq!(row("uuid:card-b")["card"], "waiting", "{answer}");
+    assert_eq!(row("uuid:card-b")["backupText"], "not safe to format yet");
+    assert!(
+        !h.state()
+            .notes
+            .iter()
+            .any(|n| n.starts_with("NIKON_D850 is safe"))
+    );
+    // On the bus: the backup's end, then the card said safe, each with
+    // its listeners in their declared order.
+    let events = h.state().app().handle().events_since(since);
+    let ended = events
+        .iter()
+        .position(|e| e.name == "backup.ended")
+        .expect("backup.ended on the journal");
+    let safe = events
+        .iter()
+        .position(|e| e.name == "card.safe")
+        .expect("card.safe on the journal");
+    assert!(ended < safe);
+    assert_eq!(
+        events[ended].data["ran"],
+        json!(["storage.backups", "cards.safety"])
+    );
+    assert_eq!(events[safe].data["cards"], json!(["EOS_DIGITAL"]));
+    assert_eq!(
+        events[safe].data["ran"],
+        json!(["cards.toast", "storage.cards", "health.cards"])
+    );
+
+    // The import window's card rows, at their paint: the same.
+    h.step();
+    assert!(
+        h.query_by_label("safe to format").is_some(),
+        "the first card said safe in the import window"
+    );
+    assert!(h.query_by_label("not safe to format yet").is_some());
+}
+
 #[test]
 fn the_storage_scope_reads_the_volumes_and_the_strategy_from_commands() {
     use helios_gui::shell::{BACKUP_STRATEGY_COMMAND, VOLUME_ROLE_COMMAND, VOLUMES_COMMAND};
@@ -1040,4 +1218,17 @@ fn a_refresh_never_blanks_the_page() {
     until(&mut h, "the mark gone", |h| {
         h.query_by_label_contains("Refreshing").is_none()
     });
+}
+
+/// The listeners of `backup.ended` and `card.safe` as the desktop
+/// registers them, in the order they run: a reviewed dump
+/// (`tests/bus/backups.txt`). The badges, then the cards checked; the
+/// toast, then the Storage page and the health check.
+#[test]
+fn the_backup_points_listeners_run_in_a_declared_order() {
+    let shell = Shell::new(helios_panels(), None);
+    assert_eq!(
+        helios_gui::backup_end::order(&*shell.app().handle().bus()),
+        include_str!("../bus/backups.txt")
+    );
 }

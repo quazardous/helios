@@ -1217,6 +1217,8 @@ impl Shell {
         shell.restore_focus_windows();
         // What the desktop does once an import ends, in order.
         shell.listen_import_ended();
+        // What follows a backup's end, then the cards found safe.
+        shell.listen_backup_points();
         // What follows the Library read again, once shown.
         shell.listen_library_filled();
         // Files dropped on any window open the import window on them.

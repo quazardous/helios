@@ -40,7 +40,7 @@
 //! a handle on the same runner to show its findings.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
@@ -259,6 +259,23 @@ pub fn owner_key(owner: &str) -> String {
     format!("healthOwner_{safe}")
 }
 
+/// The runner `card.safe`'s listener `health.cards` asks "Cards safe to
+/// format" of again, and whether it waits for a run under way to end.
+#[derive(Clone, Default)]
+pub(crate) struct CardsRecheck(Arc<(Mutex<Option<Runner>>, AtomicBool)>);
+
+/// `health.cards`: the cards check runs again now, from the one card
+/// list; when a run is under way, once it ends ([`Shell::health_tick`]).
+pub(super) fn recheck_cards(recheck: &CardsRecheck) {
+    let (runner, pending) = &*recheck.0;
+    let ran = runner
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_none_or(|r| r.run_only(&[helios_storage::health::backup::CARDS.to_owned()]));
+    pending.store(!ran, Ordering::SeqCst);
+}
+
 /// The fixes that change something not easily taken back: their button
 /// asks first.
 const DESTRUCTIVE: &[&str] = &["plugin.disable"];
@@ -267,8 +284,10 @@ const DESTRUCTIVE: &[&str] = &["plugin.disable"];
 #[derive(Default)]
 pub(crate) struct HealthPage {
     runner: Option<Runner>,
+    /// The runner `health.cards` asks the cards check of, once set.
+    pub(super) cards_runner: CardsRecheck,
     /// The context the job's thread asks a frame of.
-    ctx: Arc<Mutex<Option<Egui>>>,
+    pub(super) ctx: Arc<Mutex<Option<Egui>>>,
     /// How many times a volume came or went, once listened to.
     volumes: Arc<AtomicU64>,
     listening: bool,
@@ -414,6 +433,14 @@ impl Shell {
                 ctx.request_repaint();
             }
         });
+        *self
+            .core
+            .health
+            .cards_runner
+            .0
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(runner.clone());
         self.core.health.runner = Some(runner);
         listen_checked(&*self.core.app.handle().bus());
         if !self.has_command(FINDINGS) {
@@ -711,6 +738,9 @@ impl Shell {
         };
         if self.core.health.recheck && runner.run_now() {
             self.core.health.recheck = false;
+        }
+        if self.core.health.cards_runner.0.1.load(Ordering::SeqCst) {
+            recheck_cards(&self.core.health.cards_runner);
         }
         runner.tick(Instant::now(), generation);
         let seen = (runner.runs(), runner.running());

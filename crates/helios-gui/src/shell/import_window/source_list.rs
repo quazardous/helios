@@ -29,6 +29,7 @@ use helios_connect::account::AccountState;
 use helios_core::Message;
 
 use super::{Event, ImportWindow, MenuAsked, Words, account_event, menu_items, name_of};
+use crate::backup_end::CardState;
 use crate::shell::import_auto::Trigger;
 use crate::shell::import_sources::SourceKey;
 
@@ -572,6 +573,13 @@ pub(super) fn sources_ui(
                     }
                     if !detail.is_empty() {
                         item.detail = vec![detail.join(" · ")];
+                    }
+                    // Whether it may be formatted, from the one card list.
+                    if let Some(state) = w.card_list.state_of(root) {
+                        item.detail.push(match state {
+                            CardState::Safe => words.card_safe.clone(),
+                            CardState::Waiting => words.card_waiting.clone(),
+                        });
                     }
                     item.icon = icon("sd-card", Icon::Disc);
                     Some(item)

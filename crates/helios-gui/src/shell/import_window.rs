@@ -256,6 +256,9 @@ struct ShellWords {
 #[derive(Default)]
 pub(crate) struct ImportWindow {
     pub(super) open: bool,
+    /// The one card list ([`crate::backup_end::CardList`]): whether a
+    /// card inserted is safe to format, said on its row.
+    pub(super) card_list: crate::backup_end::CardList,
     /// The imports running and ended during this run (the node's
     /// promises, [`crate::activity::Activity::imports`]), shown above the
     /// footer with their progress, outcome, Cancel and Retry.
@@ -848,6 +851,9 @@ struct Words {
     title: String,
     sources: String,
     cards: String,
+    /// A card's row: safe to format, or not yet (the one card list).
+    card_safe: String,
+    card_waiting: String,
     no_cards: String,
     folders: String,
     history: String,
@@ -1744,6 +1750,12 @@ impl ImportWindow {
             title: t(window_title()),
             sources: t(Message::new("gui-import-window-sources", "Sources")),
             cards: t(Message::new("gui-import-window-cards", "Cards and cameras")),
+            card_safe: t(super::storage_admin::card_words(
+                crate::backup_end::CardState::Safe,
+            )),
+            card_waiting: t(super::storage_admin::card_words(
+                crate::backup_end::CardState::Waiting,
+            )),
             no_cards: t(Message::new(
                 "gui-import-window-no-cards",
                 "No card inserted",
