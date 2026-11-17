@@ -6,7 +6,9 @@
 //! cancelling the batch cancels its exports; the "Batch export" template
 //! opens on the picks with the export ready.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,6 +21,7 @@ use helios_core::{Bus, Describe as _, Image, Region};
 use helios_export::Format;
 use helios_gui::dialogs::Level;
 use helios_gui::export::Exporter;
+use helios_gui::export_start;
 use helios_gui::persist::Persist;
 use helios_gui::queue::ItemState;
 use helios_gui::{Shell, headless, helios_panels, templates};
@@ -79,6 +82,8 @@ fn field_keys(form: &Value) -> Vec<String> {
 struct Desk {
     h: Harness<'static, Shell>,
     exporter: Exporter,
+    /// The exports asked, heard on `export.start`, for the test to run.
+    kept: Rc<RefCell<Vec<export_start::Asked>>>,
 }
 
 fn desk(dir: &Path, names: &[&str], workers: usize) -> Desk {
@@ -105,22 +110,18 @@ fn desk(dir: &Path, names: &[&str], workers: usize) -> Desk {
         workers,
         shell.viewport().engine().clone(),
     );
+    let kept = export_start::keep(&*shell.app().handle().bus()).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
-    Desk { h, exporter }
+    Desk { h, exporter, kept }
 }
 
 impl Desk {
     /// Runs the exports the shell asked for, as the window's host does.
     fn run_exports(&mut self) -> Vec<String> {
-        let bundle = self
-            .h
-            .state()
-            .workspace_bundle()
-            .unwrap_or_else(helios_template::workspace::blank);
-        let asks = self.h.state_mut().take_exports();
+        let asks = self.kept.take();
         asks.iter()
-            .map(|a| self.exporter.run(&bundle, a).unwrap())
+            .map(|a| self.exporter.run(&a.bundle, &a.ask).unwrap())
             .collect()
     }
 
@@ -131,6 +132,53 @@ impl Desk {
             self.h.run();
         }
     }
+}
+
+/// An export asked for is heard in the pass it is asked in: its
+/// listener runs in the pass the command runs in, and the journal says
+/// it (`export.started`, the listener that ran). With no listener (no
+/// library open) the command is refused with the reason, said as
+/// `export.refused`.
+#[test]
+fn an_export_asked_runs_in_its_pass_and_is_on_the_journal() {
+    let dir = temp("in-pass");
+    let mut d = desk(&dir, &["a.png", "b.png"], 1);
+    let bus = d.h.state().app().handle().bus();
+    bus.unlisten(export_start::START, export_start::RUN);
+    let args = json!({ "scope": "shown", "format": "png", "folder": dir.join("out") });
+    // The command is applied at the next pass: refused there, with why.
+    d.h.state_mut()
+        .run("library.export", args.clone(), Origin::User)
+        .unwrap();
+    d.h.step();
+    let kept = export_start::keep(&*bus).unwrap();
+    d.h.state_mut()
+        .run("library.export", args, Origin::User)
+        .unwrap();
+    d.h.step();
+    // Heard in the pass the command ran in: one frame.
+    let asks = kept.take();
+    assert_eq!(asks.len(), 1, "heard in the pass");
+    assert_eq!(asks[0].ask.images.len(), 2);
+    let said: Vec<(String, Value)> =
+        d.h.state()
+            .app()
+            .handle()
+            .events_since(0)
+            .into_iter()
+            .filter(|e| e.name.starts_with("export."))
+            .map(|e| (e.name.clone(), e.data.clone()))
+            .collect();
+    let names: Vec<&str> = said.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, [export_start::REFUSED, export_start::STARTED]);
+    assert_eq!(said[0].1["refused"]["by"], json!(export_start::START));
+    assert_eq!(
+        said[0].1["refused"]["reason"],
+        json!(export_start::NO_LIBRARY)
+    );
+    assert_eq!(said[1].1["ran"], json!([export_start::RUN]));
+    assert_eq!(said[1].1["images"], json!(2));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -183,9 +231,9 @@ fn file_export_is_in_the_file_menu_on_ctrl_shift_e_and_in_the_library_s_menu() {
             "space": "display-p3", "folder": out, "pattern": "{stem}-web", "clash": "number",
         } }),
     );
-    let asks = d.h.state_mut().take_exports();
+    let asks = d.kept.take();
     assert_eq!(asks.len(), 1);
-    let ask = &asks[0];
+    let ask = &asks[0].ask;
     assert_eq!(ask.images.len(), 2, "every image shown");
     assert_eq!(ask.settings.output.format, Format::Png { bits: 16 });
     assert_eq!(ask.settings.output.long_edge, Some(24));
@@ -360,6 +408,7 @@ fn the_batch_export_template_opens_on_the_picks_with_the_export_ready() {
     // which "Remember" offers to keep.
     let settings = h.state().export_settings();
     assert_eq!(settings.folder.as_deref(), Some("~/Pictures/Helios export"));
+    let heard = export_start::keep(&*h.state().app().handle().bus()).unwrap();
     run(
         &mut h,
         "library.export",
@@ -391,9 +440,9 @@ fn the_batch_export_template_opens_on_the_picks_with_the_export_ready() {
     let kept = h.state().export_settings();
     assert_eq!(kept.format, "png");
     assert_eq!(kept.folder.as_deref(), out.to_str());
-    let asks = h.state_mut().take_exports();
+    let asks = heard.take();
     assert_eq!(asks.len(), 1);
-    assert_eq!(asks[0].images, ["ab".repeat(32)]);
+    assert_eq!(asks[0].ask.images, ["ab".repeat(32)]);
     let _ = std::fs::remove_dir_all(&root);
 }
 

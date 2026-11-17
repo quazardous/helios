@@ -3099,6 +3099,7 @@ fn an_export_keeps_running_when_its_window_closes() {
     .adopted_by(&link);
     exporter.pause();
     let out = dir.join("out");
+    let kept = helios_gui::export_start::keep(&*h.state().app().handle().bus()).unwrap();
     h.state_mut()
         .run(
             "library.export",
@@ -3111,7 +3112,7 @@ fn an_export_keeps_running_when_its_window_closes() {
         .state()
         .workspace_bundle()
         .unwrap_or_else(helios_template::workspace::blank);
-    let asks = h.state_mut().take_exports();
+    let asks: Vec<_> = kept.take().into_iter().map(|a| a.ask).collect();
     assert_eq!(asks.len(), 1, "one export asked");
     let batch = exporter.run(&bundle, &asks[0]).unwrap();
     assert_eq!(

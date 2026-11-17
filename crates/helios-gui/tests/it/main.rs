@@ -47,6 +47,7 @@ mod gui;
 mod health;
 mod history_panel;
 mod history_preview;
+mod host;
 mod image_open;
 mod image_tools;
 mod import;

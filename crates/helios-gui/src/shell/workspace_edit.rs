@@ -105,9 +105,6 @@ pub(super) struct Edited {
     applied_seq: Option<u64>,
     /// The template it was made from, if it was.
     origin: Option<Bundle>,
-    /// Its network changed since it was last taken: the image shown goes
-    /// through it, in place.
-    network_changed: bool,
     /// The value paths the last step set for nodes it brought: the image
     /// keeps them when it goes through the new network.
     kept: BTreeSet<String>,
@@ -195,7 +192,6 @@ impl Shell {
             applied: text,
             applied_seq: None,
             origin,
-            network_changed: false,
             kept: BTreeSet::new(),
             disk,
             known,
@@ -338,13 +334,16 @@ impl Shell {
         self.workspace_state().map(|s| s.bundle)
     }
 
-    /// Whether the workspace's network changed since the last call: the
-    /// host opens the image shown again through it.
-    pub fn take_network_changed(&mut self) -> bool {
-        self.focus
-            .edit
-            .as_mut()
-            .is_some_and(|e| std::mem::take(&mut e.network_changed))
+    /// Registers the host's listener of the workspace's network changed
+    /// (`darkroom.network`, after the library's renders, on
+    /// `workspace.applied`): run once per change of what an image goes
+    /// through; the host passes the image shown through the new network
+    /// ([`Shell::keep_image_open`]), or opens it again.
+    ///
+    /// # Errors
+    /// The bus refused it.
+    pub fn listen_network(&self, run: impl Fn() + 'static) -> Result<(), String> {
+        workspace_applied::listen_network(&*self.core.app.handle().bus(), run)
     }
 
     /// After the workspace's network changed (an edit, an undo, a redo):
@@ -527,12 +526,9 @@ impl Shell {
         if outside.is_none() {
             self.write_workspace(&next);
         }
-        let network = before.bundle.template.network != next.bundle.template.network
-            || before.bundle.composites != next.bundle.composites;
         if let Some(edit) = &mut self.focus.edit {
             edit.applied = text;
             edit.applied_seq = Some(seq);
-            edit.network_changed |= network;
         }
         self.workspace_applied(Changed::between(&before, &next), &next);
         if let Some(theirs) = outside {
@@ -637,6 +633,18 @@ impl Shell {
                     "{}: the Workshops panel is busy",
                     workspace_applied::WORKSHOPS
                 )),
+            },
+        ));
+        // The Compare panel's renders went through the old network.
+        let library = self.focus.library.clone();
+        listened.push(workspace_applied::listen_local(
+            &*bus,
+            workspace_applied::HEADS,
+            move |_, reactions| match library.try_borrow_mut() {
+                Ok(mut l) => l.network_changed(),
+                Err(_) => reactions
+                    .failed
+                    .push(format!("{}: the library is busy", workspace_applied::HEADS)),
             },
         ));
         for e in listened.into_iter().filter_map(Result::err) {

@@ -227,6 +227,7 @@ fn quitting_during_an_export_asks_then_the_node_cancels_it() {
     exporter.pause();
     // Outside the desktop's folder, which its end removes.
     let out = std::env::temp_dir().join(format!("helios-quit-export-out-{}", std::process::id()));
+    let kept = helios_gui::export_start::keep(&*h.state().app().handle().bus()).unwrap();
     h.state_mut()
         .run(
             "library.export",
@@ -239,7 +240,7 @@ fn quitting_during_an_export_asks_then_the_node_cancels_it() {
         .state()
         .workspace_bundle()
         .unwrap_or_else(helios_template::workspace::blank);
-    let asks = h.state_mut().take_exports();
+    let asks: Vec<_> = kept.take().into_iter().map(|a| a.ask).collect();
     let batch = exporter.run(&bundle, &asks[0]).unwrap();
 
     h.state_mut()
