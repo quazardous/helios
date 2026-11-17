@@ -70,4 +70,6 @@ jobs:
           EOF
           make cli -j"$(nproc)"
           echo "VKDT_CLI=/tmp/vkdt/bin/vkdt-cli" >> "$GITHUB_ENV"
+      # VKDT_CLI is set: a vkdt-cli that does not run fails the tests
+      # instead of skipping them.
       - run: cargo test -p helios-parity --test vkdt -- --nocapture
