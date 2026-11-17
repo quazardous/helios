@@ -300,9 +300,11 @@ pub fn listen_both(
     let run = Arc::new(run);
     let mounted = run.clone();
     listen_mounted(bus, id, owner, move |m| {
-        mounted(&Change::Mounted(m.clone()))
+        mounted(&Change::Mounted(m.clone()));
     })?;
-    listen_unmounted(bus, id, owner, move |u| run(&Change::Unmounted(u.clone())))
+    listen_unmounted(bus, id, owner, move |u| {
+        run(&Change::Unmounted(u.clone()));
+    })
 }
 
 /// The scan of where each photo is, as [`SCAN`]: a volume plugged in or
