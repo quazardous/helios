@@ -8,7 +8,10 @@
 //! inserted. The pipe stays in 32-bit floats from `i-pfm` on.
 //!
 //! vkdt-cli is found as `VKDT_CLI`, else `vkdt-cli` on the PATH; it finds
-//! its modules next to itself (a vkdt checkout's `bin/`).
+//! its modules next to itself (a vkdt checkout's `bin/`). A test without
+//! vkdt-cli skips, saying so, unless `VKDT_CLI` is set: then vkdt is
+//! required and a vkdt-cli that does not run fails the test, so a parity
+//! job that provides vkdt cannot go green on skips ([`Vkdt::for_test`]).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -81,6 +84,12 @@ impl Vkdt {
             .output()
             .map_err(|e| format!("no vkdt-cli ({}): {e}", cli.display()))?;
         Ok(Vkdt { cli })
+    }
+
+    /// vkdt-cli for a parity test, or `None` to skip it: see the module
+    /// documentation for when a missing vkdt-cli fails instead.
+    pub fn for_test() -> Option<Vkdt> {
+        required_or_skip(Vkdt::find(), std::env::var_os("VKDT_CLI").is_some())
     }
 
     /// Renders `input` through one vkdt module with `params` (name, value
@@ -161,5 +170,42 @@ impl Vkdt {
             ));
         }
         read_pfm_top_first(&written)
+    }
+}
+
+/// [`Vkdt::for_test`]'s rule: skip without vkdt-cli, fail when it was
+/// required.
+fn required_or_skip(found: Result<Vkdt, String>, required: bool) -> Option<Vkdt> {
+    match found {
+        Ok(vkdt) => Some(vkdt),
+        Err(e) if required => panic!("VKDT_CLI is set, so vkdt is required: {e}"),
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_vkdt_cli_skips_when_not_required() {
+        assert!(required_or_skip(Err("no vkdt-cli".into()), false).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "vkdt is required")]
+    fn a_missing_vkdt_cli_fails_when_required() {
+        required_or_skip(Err("no vkdt-cli".into()), true);
+    }
+
+    #[test]
+    fn a_found_vkdt_cli_runs() {
+        let found = Ok(Vkdt {
+            cli: PathBuf::from("vkdt-cli"),
+        });
+        assert!(required_or_skip(found, true).is_some());
     }
 }

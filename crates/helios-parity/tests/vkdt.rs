@@ -1,5 +1,5 @@
 //! Parity of the modules ported from vkdt with vkdt itself, through
-//! vkdt-cli. Skipped without it.
+//! vkdt-cli. Skipped without it, failed without it when `VKDT_CLI` is set.
 
 use std::sync::Arc;
 
@@ -45,12 +45,8 @@ fn chart() -> Image {
 
 #[test]
 fn ported_vkdt_modules_match_vkdt() {
-    let vkdt = match Vkdt::find() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("skipped: {e}");
-            return;
-        }
+    let Some(vkdt) = Vkdt::for_test() else {
+        return;
     };
     let input = chart();
     let dir = std::env::temp_dir().join(format!("helios-parity-vkdt-{}", std::process::id()));
@@ -115,12 +111,8 @@ fn contrast_chart() -> Image {
 /// inwards: the border left out is the blurs' reach.
 #[test]
 fn ported_vkdt_contrast_matches_vkdt() {
-    let vkdt = match Vkdt::find() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("skipped: {e}");
-            return;
-        }
+    let Some(vkdt) = Vkdt::for_test() else {
+        return;
     };
     // vkdt's contrast reads half floats: both read the same rounded pixels.
     let input = helios_parity::vkdt::to_f16(&contrast_chart());
@@ -208,12 +200,8 @@ fn cfg_list(values: &[f64]) -> String {
 
 #[test]
 fn ported_vkdt_grade_matches_vkdt() {
-    let vkdt = match Vkdt::find() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("skipped: {e}");
-            return;
-        }
+    let Some(vkdt) = Vkdt::for_test() else {
+        return;
     };
     let input = chart();
     let dir = std::env::temp_dir().join(format!("helios-parity-vkdt-grade-{}", std::process::id()));
@@ -259,12 +247,8 @@ fn ported_vkdt_grade_matches_vkdt() {
 /// the half floats' rounding, well within the thresholds.
 #[test]
 fn ported_vkdt_filmcurv_matches_vkdt() {
-    let vkdt = match Vkdt::find() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("skipped: {e}");
-            return;
-        }
+    let Some(vkdt) = Vkdt::for_test() else {
+        return;
     };
     // Scene-referred: the chart's light spread up to about 2.
     let chart = chart();
@@ -318,12 +302,8 @@ fn ported_vkdt_filmcurv_matches_vkdt() {
 #[test]
 fn ported_vkdt_colour_matches_vkdt() {
     use helios_photo::camera::fields;
-    let vkdt = match Vkdt::find() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("skipped: {e}");
-            return;
-        }
+    let Some(vkdt) = Vkdt::for_test() else {
+        return;
     };
     let input = helios_parity::vkdt::to_f16(&chart());
     let dir =
