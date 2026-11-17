@@ -11,6 +11,7 @@ pub mod calibrate;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;
+pub mod command_policy;
 pub mod comparison;
 pub mod config;
 pub mod contexts;

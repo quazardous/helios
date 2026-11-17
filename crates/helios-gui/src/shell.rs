@@ -1479,6 +1479,10 @@ impl Shell {
             .borrow_mut()
             .set_app(shell.core.app.handle().clone());
         shell.listen_decisions();
+        // Every command run passes Helios's policy first (`command.run`).
+        if let Err(e) = crate::command_policy::listen(&*shell.core.app.handle().bus()) {
+            log::error!(target: "helios", "{}: {e}", crate::command_policy::POLICY);
+        }
         if has(&shell, crate::log_panel::PANEL) {
             let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
