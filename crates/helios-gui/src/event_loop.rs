@@ -13,7 +13,10 @@
 //!   (`shell::place_main_window`); read again when a window's scale factor
 //!   changes or a window moves (onto another monitor, maybe), so a window
 //!   opened later (a detached panel, the import window) is repaired against
-//!   the screens of the moment.
+//!   the screens of the moment. egui-pop says a change on its bus
+//!   (`screen.removed`, `screen.added`, by name) and moves the windows on
+//!   a screen gone onto one left, a detached panel docking back. This loop
+//!   is the one place in Helios that reads the monitors.
 //!
 //! Everything else goes to eframe as it comes.
 
