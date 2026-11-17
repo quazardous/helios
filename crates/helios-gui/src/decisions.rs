@@ -507,11 +507,9 @@ impl Decisions {
                     Message::new("gui-decisions-confidence", "Confidence: { $percent } %")
                         .with("percent", percent(c)),
                 );
-                ui.horizontal(|ui| {
-                    ui.text_role(TextRole::Body, &sure);
-                    #[allow(clippy::cast_possible_truncation)]
-                    helios_ui::progress(ui, Progress::Row, &sure, Some(c as f32));
-                });
+                ui.text_role(TextRole::Body, &sure);
+                #[allow(clippy::cast_possible_truncation)]
+                helios_ui::progress(ui, Progress::Row, &sure, Some(c as f32));
             }
             if !p.rationale.is_empty() {
                 ui.text_role(
