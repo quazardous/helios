@@ -73,6 +73,21 @@ fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
     let open = shell.layout();
     for (a, node) in &layout.areas {
         let now = open.areas.iter().find(|(x, _)| x == a).unwrap();
+        if *a == Area::StartSide {
+            // A panel declared since (the Library's Filters) docks in its
+            // area beside what was saved, which stays as it was.
+            assert_eq!(
+                now.1,
+                Node::Split {
+                    vertical: false,
+                    ratio: 0.7,
+                    a: Box::new(node.clone()),
+                    b: Box::new(tabs(&["helios.filters"], 0)),
+                },
+                "{a:?}"
+            );
+            continue;
+        }
         assert_eq!(&now.1, node, "{a:?}");
     }
     assert_eq!(open.auxiliary, layout.auxiliary);
