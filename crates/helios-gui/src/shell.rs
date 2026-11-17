@@ -2012,18 +2012,54 @@ impl Shell {
         answered
     }
 
-    /// Answers what the Decisions panel asked during the last frame, and
-    /// makes its cards again from the book (an agent's answer removes
-    /// its card here).
+    /// Makes the Decisions panel's cards again from the book before it
+    /// is drawn (an agent's answer removes its card here).
     fn follow_decisions(&mut self) {
-        let requests = self.focus.decisions.borrow_mut().take_requests();
-        for r in requests {
-            if let Err(e) = self.answer_decision(r, &Origin::User) {
-                self.warn(e);
-            }
-        }
         let viewport = self.focus.viewport.borrow();
         self.focus.decisions.borrow_mut().refresh(viewport.graph());
+    }
+
+    /// Answers what was asked while the panels and windows were drawn, in
+    /// the same pass, once they are: the dialogs channel's asks (a
+    /// dialog, a menu, a notice, a command), the Decisions panel's
+    /// answers, and a toast for each snapshot restored. What an answer
+    /// asks in turn is answered too (a command that opens a dialog). A
+    /// dialog or a menu opened here is drawn at the next frame, asked
+    /// for at once.
+    fn answer_asks(&mut self, ctx: &Egui) {
+        let mut answered = false;
+        // A few rounds: an answer may ask again; more waits a frame.
+        for _ in 0..4 {
+            let requests = crate::dialogs::take_requests(ctx);
+            let decisions = self.focus.decisions.borrow_mut().take_requests();
+            let restored = !crate::edit_snapshots::lock(&self.core.snapshots).restored_none();
+            if requests.is_empty() && decisions.is_empty() && !restored {
+                break;
+            }
+            answered = true;
+            for r in requests {
+                use crate::dialogs::Request;
+                match r {
+                    Request::Confirm(c) => self.confirm(c),
+                    Request::Form(f) => self.form(f),
+                    Request::Picker(p) => self.pick(p),
+                    Request::Menu { at, items } => self.open_menu(at, items),
+                    Request::Notify(level, text) => self.notify(level, text),
+                    Request::Run(id, args, origin) => {
+                        let _ = self.run(&id, args, origin);
+                    }
+                }
+            }
+            for r in decisions {
+                if let Err(e) = self.answer_decision(r, &Origin::User) {
+                    self.warn(e);
+                }
+            }
+            self.follow_snapshots();
+        }
+        if answered {
+            ctx.request_repaint();
+        }
     }
 
     /// Gives the viewport the GPU path it draws with, on the render state
@@ -7116,20 +7152,6 @@ impl Shell {
         for image in screenshots {
             self.on_screenshot(&image);
         }
-        // What panels asked for during the last frame.
-        for r in crate::dialogs::take_requests(&ctx) {
-            use crate::dialogs::Request;
-            match r {
-                Request::Confirm(c) => self.confirm(c),
-                Request::Form(f) => self.form(f),
-                Request::Picker(p) => self.pick(p),
-                Request::Menu { at, items } => self.open_menu(at, items),
-                Request::Notify(level, text) => self.notify(level, text),
-                Request::Run(id, args, origin) => {
-                    let _ = self.run(&id, args, origin);
-                }
-            }
-        }
         self.set_context(&ctx);
         self.core.app.logic(&ctx);
         // New undo steps are made in the place the stack shows now, and
@@ -7139,8 +7161,6 @@ impl Shell {
             &mut lock(&self.core.values),
             &self.focus.subworkspaces,
         );
-        // The History panel's snapshots: a toast for each restore.
-        self.follow_snapshots();
         // The node's endpoint lists and runs the windows' commands.
         if let Some(mut asks) = self.window_asks.take() {
             crate::window_commands::answer(self, &mut asks, &ctx);
@@ -7239,6 +7259,9 @@ impl Shell {
         self.menus_ui(&ctx);
         self.rule_editor_ui(&ctx);
         self.pointer_choice_ui(&ctx);
+        // What the panels and windows asked while drawn, answered in the
+        // pass they asked in.
+        self.answer_asks(&ctx);
 
         let named = ctx.data(|d| {
             d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique("helios.named"))

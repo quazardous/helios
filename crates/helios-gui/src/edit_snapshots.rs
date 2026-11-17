@@ -202,6 +202,11 @@ impl Book {
         self.restored.push(name.to_string());
     }
 
+    /// Whether no snapshot was restored since last asked.
+    pub fn restored_none(&self) -> bool {
+        self.restored.is_empty()
+    }
+
     /// The snapshots restored since last asked, by name.
     pub fn take_restored(&mut self) -> Vec<String> {
         std::mem::take(&mut self.restored)

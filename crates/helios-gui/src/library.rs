@@ -25,7 +25,7 @@
 //!
 //! The search field's filter becomes a vault query (rating, labels, flags,
 //! tags, and dates as capture days; [`query_of`]), run by the host
-//! ([`Library::take_query`], [`Library::set_matches`]); its words are
+//! ([`Library::take_queries`], [`Library::set_matches`]); its words are
 //! matched here, on the names and tags the library holds.
 //!
 //! Each photo's backups (`helios_storage::strategy::statuses`, read once
@@ -3012,7 +3012,7 @@ impl Library {
     }
 
     /// Filters the library: its vault query waits for the host
-    /// ([`Library::take_query`]).
+    /// ([`Library::take_queries`]).
     pub fn set_filter(&mut self, filter: Filter) {
         self.view.search.set_filter(filter.clone());
         self.filtered(filter);
@@ -3115,11 +3115,6 @@ impl Library {
         (std::mem::replace(&mut self.filter_history_write, Wanted::No) == Wanted::Yes)
             .then(|| self.filter_history.clone())
             .flatten()
-    }
-
-    /// The vault query the filter needs run, once.
-    pub fn take_query(&mut self) -> Option<Query> {
-        self.view.query.take()
     }
 
     /// The vault queries the galleries need run, once each, with the
