@@ -249,7 +249,12 @@ impl Demosaic {
                     return Err(helios_core::cancel::CANCELLED.to_string());
                 }
                 let width = tile_w.min(output.width - x);
-                let piece = Region::new(output.x + x as i64, output.y + y as i64, width, rows);
+                let piece = Region::new(
+                    output.x + i64::from(x),
+                    output.y + i64::from(y),
+                    width,
+                    rows,
+                );
                 self.tile(plan, input, piece, &mut chunk[x as usize * 4..], row);
                 x += width;
             }
