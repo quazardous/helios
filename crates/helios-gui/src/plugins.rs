@@ -64,6 +64,7 @@ pub struct Declarations {
 pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("activity.show", "phosphor:pulse"),
     ("calibrate.open", "phosphor:eyedropper"),
+    ("compare.leave", "phosphor:squares-four"),
     ("compare.next", "chevron-right"),
     ("compare.previous", "chevron-left"),
     ("compare.sync", "phosphor:link"),
