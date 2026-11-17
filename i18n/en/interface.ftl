@@ -138,6 +138,9 @@ plugin-helios-lists =
 plugin-helios-platform =
     .title = Helios platform
 
+plugin-helios-quit =
+    .title = Helios quit
+
 plugin-helios-theme-editor =
     .title = Theme editor
 

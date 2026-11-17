@@ -681,13 +681,23 @@ impl Shell {
         if !self.core.health.listening
             && let Some(watch) = self.volume_watch()
         {
+            // A volume came or went: the checks that follow the volumes
+            // run again, once the scan said where the copies are.
             let (volumes, ctx) = (self.core.health.volumes.clone(), ctx.clone());
-            watch.on_change(move |change| {
-                if !change.at_start() {
-                    volumes.fetch_add(1, Ordering::SeqCst);
-                    ctx.request_repaint();
-                }
-            });
+            let listened = crate::node_volumes::listen_both(
+                &**watch.hooks(),
+                crate::node_volumes::HEALTH,
+                "helios.health",
+                move |change| {
+                    if !change.at_start() {
+                        volumes.fetch_add(1, Ordering::SeqCst);
+                        ctx.request_repaint();
+                    }
+                },
+            );
+            if let Err(e) = listened {
+                log::error!(target: "helios", "{}: {e}", crate::node_volumes::HEALTH);
+            }
             self.core.health.listening = true;
         }
         self.receive_library_folder();
