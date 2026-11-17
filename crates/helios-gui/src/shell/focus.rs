@@ -124,11 +124,14 @@ pub(super) struct Focus {
     pub(super) queue_panel: Rc<RefCell<crate::queue::QueuePanel>>,
     /// The image's compare and mask tool, kept with their modes.
     pub(super) follow: crate::contexts::Follow,
-    /// The workspace's sub-workspaces, for their place; whether they
-    /// were read, and at which of the state's sequence numbers (none: no
-    /// state).
+    /// The workspace's sub-workspaces, for their place: read again by
+    /// `workspace.applied`'s `contexts.subworkspaces` listener.
     pub(super) subworkspaces: crate::contexts::Subworkspaces,
-    pub(super) subworkspaces_seen: (bool, Option<u64>),
+    /// egui-pop's workspace keymap layer as the workspace's keys last
+    /// loaded it (keys, command, clause): a difference is a change made
+    /// in the shortcuts editor. Kept by `workspace.applied`'s
+    /// `workspace.keys` listener.
+    pub(super) keys_loaded: Rc<RefCell<Vec<(String, String, String)>>>,
     /// Helios's status bar items, published when what they say changes.
     pub(super) status_items: crate::status_items::Items,
     /// What the open photo's edit changed from its defaults, as last
@@ -209,7 +212,7 @@ impl Focus {
             queue_panel: Rc::default(),
             follow: crate::contexts::Follow::default(),
             subworkspaces: seed.subworkspaces,
-            subworkspaces_seen: (false, None),
+            keys_loaded: Rc::default(),
             status_items: crate::status_items::Items::default(),
             edit_marks: Rc::default(),
             edit_rev: None,

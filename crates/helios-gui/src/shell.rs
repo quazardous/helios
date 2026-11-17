@@ -1228,6 +1228,8 @@ impl Shell {
         // Each focus window and the import window close their state with
         // their window's `window.close`, in the same pass.
         shell.listen_window_closes();
+        // Who follows a workspace's state applied, in order.
+        shell.listen_workspace_applied();
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
@@ -2458,33 +2460,10 @@ impl Shell {
         }
     }
 
-    /// Reads the workspace's sub-workspaces again when its state changed
-    /// (an edit, an undo, an agent, another workspace opened), then
-    /// leaves a sub-workspace shown that is gone, with a toast.
+    /// Leaves a sub-workspace shown that is gone, with a toast. The list
+    /// is read again by `workspace.applied`'s `contexts.subworkspaces`
+    /// listener; the place shown changes on the stack.
     fn follow_subworkspaces(&mut self) {
-        let (seq, list) = {
-            let store = lock(&self.core.values);
-            let entry = store.get(WORKSPACE_STATE);
-            let seq = entry.map(|e| e.seq);
-            if self.focus.subworkspaces_seen == (true, seq) {
-                (seq, None)
-            } else {
-                let list = entry.and_then(|e| match &e.value {
-                    helios_core::Value::Text(t) => serde_json::from_str::<Value>(t)
-                        .ok()
-                        .and_then(|j| {
-                            serde_json::from_value(j["template"]["subworkspaces"].clone()).ok()
-                        })
-                        .or(Some(Vec::new())),
-                    _ => None,
-                });
-                (seq, Some(list))
-            }
-        };
-        if let Some(list) = list {
-            self.focus.subworkspaces_seen = (true, seq);
-            self.focus.subworkspaces.set(list);
-        }
         if let Some(id) =
             crate::contexts::leave_gone(self.core.app.handle(), &self.focus.subworkspaces)
         {
@@ -2511,10 +2490,10 @@ impl Shell {
         step_result(self.core.app.save_layout())?;
         self.focus.workspace.set(Some(workspace_key(dir)));
         self.load_layout()?;
-        // Its sub-workspaces are read once its state is: until then a
-        // restored one is kept, and left then if it is gone.
+        // Its sub-workspaces are read once its state is applied
+        // (`workspace.applied`): until then a restored one is kept, and
+        // left then if it is gone.
         self.focus.subworkspaces.set(None);
-        self.focus.subworkspaces_seen = (false, None);
         // Its places and modes, kept beside its layout.
         egui_pop::api::contexts::reload(self.core.app.handle());
         Ok(())

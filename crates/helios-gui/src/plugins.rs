@@ -99,6 +99,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("import.history.again", "phosphor:arrow-clockwise"),
     ("import.history.list", "phosphor:clock-counter-clockwise"),
     ("import.reconnect", "phosphor:plugs-connected"),
+    ("import.signOut", "phosphor:sign-out"),
     ("import.sources.add", "phosphor:plus-circle"),
     ("init.apply", "phosphor:check-circle"),
     ("init.chooseFolder", "folder"),

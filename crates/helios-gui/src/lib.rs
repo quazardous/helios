@@ -97,6 +97,7 @@ mod windows;
 mod workbench;
 pub mod workshop_run;
 pub mod workshops;
+pub mod workspace_applied;
 
 pub use shell::{Shell, headless, name_rect};
 pub use workbench::{IMAGE_FIRST, area_named, beside_the_end_side, gather_palettes, image_first};
