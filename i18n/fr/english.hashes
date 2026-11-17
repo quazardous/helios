@@ -1909,8 +1909,13 @@ node-command-origin 0ec35222dda3dfce
 node-command-params c982161f016803d8
 node-command-unknown 173dc16b73b51bb0
 node-edit-not-saved 6371e83fc812ed88
+node-end-backups 6a996de012afb6dd
+node-end-exports bf0f709f7f11a029
+node-end-health 007ba9dfe278be6e
 node-end-jobs d0e441db3a0c02dd
 node-end-jobs-waiting 4d8e763910f656bf
+node-end-map a089ad4a5585de11
+node-end-mirror b6419309ed0237a5
 node-end-vault 5a5158cf56c6d779
 node-job-unknown 39f3e78315b7e6c2
 node-load-refused 3c406345cb7a783e
