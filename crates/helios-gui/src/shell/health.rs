@@ -263,12 +263,19 @@ pub fn owner_key(owner: &str) -> String {
 /// (`card.safe`'s `health.cards`, the accounts' `health.accounts`), and
 /// the checks waiting for a run under way to end.
 #[derive(Clone, Default)]
-pub(crate) struct CardsRecheck(Arc<(Mutex<Option<Runner>>, Mutex<Vec<String>>)>);
+pub(crate) struct CardsRecheck(Arc<Rechecks>);
+
+/// [`CardsRecheck`]'s runner, once set, and the checks waiting.
+#[derive(Default)]
+pub(crate) struct Rechecks {
+    runner: Mutex<Option<Runner>>,
+    pending: Mutex<Vec<String>>,
+}
 
 /// The checks `ids` run again now; when a run is under way, once it ends
 /// ([`Shell::health_tick`], [`recheck_pending`]).
 fn recheck(recheck: &CardsRecheck, ids: Vec<String>) {
-    let (runner, pending) = &*recheck.0;
+    let (runner, pending) = (&recheck.0.runner, &recheck.0.pending);
     let mut pending = pending.lock().unwrap_or_else(PoisonError::into_inner);
     for id in ids {
         if !pending.contains(&id) {
@@ -305,7 +312,7 @@ pub(super) fn recheck_cards(r: &CardsRecheck) {
 /// plugin's own (`<plugin>.<check>`, owned by its plugin).
 pub(super) fn recheck_accounts(r: &CardsRecheck) {
     let ids: Vec<String> =
-        r.0.0
+        r.0.runner
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
@@ -486,7 +493,7 @@ impl Shell {
             .health
             .cards_runner
             .0
-            .0
+            .runner
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(runner.clone());
         self.core.health.runner = Some(runner);
