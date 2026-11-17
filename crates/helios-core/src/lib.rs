@@ -20,6 +20,7 @@
 
 pub mod brick;
 pub mod bus;
+pub mod cancel;
 pub mod config;
 pub mod curve;
 pub mod describe;
