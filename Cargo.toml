@@ -66,13 +66,13 @@ helios-ui = { path = "crates/helios-ui" }
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.11", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.12", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
-egui-pop-agent = "0.5"
+egui-pop-agent = "0.6"
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
-egui-pop-i18n = "0.10"
+egui-pop-i18n = "0.11"
 # MIT OR Apache-2.0: the bus contract (points, ordered listeners, the
 # order dump), std only: Helios's library crates declare their points and
 # listen on the bus the application hands them, never building one.
@@ -82,9 +82,9 @@ bus-contract = "0.2.0"
 egui-pop-hooks = "0.1"
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
-egui-pop-model = "0.8"
+egui-pop-model = "0.9"
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = "0.11"
+egui-pop-test = "0.12"
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
 egui-pop-wayland = "0.2"
@@ -93,7 +93,7 @@ egui-pop-wayland = "0.2"
 egui_fit = { version = "0.1", features = ["serde"] }
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-egui_hud = "0.4"
+egui_hud = "0.5"
 blake3 = "1"
 # MIT OR Apache-2.0: the hashes connectors claim for their items (MD5,
 # SHA-1, SHA-256), checked while fetched bytes land.
@@ -144,36 +144,10 @@ too_many_lines = "allow"
 # moved into threads or stored); changing them is an API decision.
 needless_pass_by_value = "allow"
 
-
-# Helios `next` builds on egui-pop's and egui_hud's `next`, each by one git
-# revision: every crate of a repository from the same commit, so the graph
-# holds one egui-pop. `cargo xtask pin-bump` moves these lines; a release
-# takes the published versions instead (`cargo xtask pins --release`;
-# docs/releases.md, "egui-pop and egui_hud: next follows next").
-[patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "6639948b" }
-
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
 # Dependencies build without debug info: the GPU and GUI stacks are large,
 # and Helios's own crates keep theirs.
-egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "b8d74871" }
 [profile.dev.package."*"]
 debug = false
 
