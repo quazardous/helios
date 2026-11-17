@@ -891,7 +891,13 @@ fn prepare_library(
     let spawned = std::thread::Builder::new()
         .name("helios-image-open".into())
         .spawn(move || {
-            if let Some((graph, node)) = first_paint(&file) {
+            let _span = helios_core::trace::span("photo.open", || file.display().to_string());
+            let first = {
+                let _span =
+                    helios_core::trace::span("photo.first_paint", || file.display().to_string());
+                first_paint(&file)
+            };
+            if let Some((graph, node)) = first {
                 let _ = sender.send(Ready::First(graph, node));
             }
             let prepared = image_graph(&file, &bundle).map(|(graph, node)| Prepared {
@@ -923,6 +929,7 @@ fn prepare(path: PathBuf, bundle: helios_template::Bundle, library: Option<Libra
     let spawned = std::thread::Builder::new()
         .name("helios-image-open".into())
         .spawn(move || {
+            let _span = helios_core::trace::span("photo.open", || file.display().to_string());
             let prepared = image_graph(&file, &bundle).and_then(|(graph, node)| {
                 let image = library
                     .map(|l| l.import_file(&file, seconds()))
@@ -1731,6 +1738,7 @@ fn main() -> Result<(), String> {
         return Ok(());
     }
     start::begin();
+    let _open_trace = start::open_trace();
     if let [flag, target, out] = args.as_slice()
         && flag == "--snapshot"
     {

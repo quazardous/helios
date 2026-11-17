@@ -23,9 +23,14 @@
 
 use std::path::{Path, PathBuf};
 
+use egui_pop::core::input::Input;
 use egui_pop::core::overlay::DialogLayout;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, TextRole, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::Message;
 use helios_library::import::Duplicates;
+use helios_ui::{Action, Scroll};
 
 use super::Shell;
 use super::import_choices::{self, ChoiceWords, Choices, Sample};
@@ -204,33 +209,28 @@ impl ImportWindow {
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
         body.set_clip_rect(rect.intersect(body.clip_rect()));
-        body.heading(t(Message::new(
-            "gui-import-profiles-title",
-            "Import profiles",
-        )));
+        body.text_role(
+            TextRole::Title,
+            t(Message::new("gui-import-profiles-title", "Import profiles")),
+        );
         let list_width = (rect.width() * 0.3).clamp(160.0, 260.0);
         body.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.set_width(list_width);
                 self.list_ui(ui, &t);
             });
-            ui.separator();
+            ui.divider();
             ui.vertical(|ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("helios.import.profiles.editor")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        into = self.editor_ui(ui, words, &t);
-                    });
+                helios_ui::scroll(ui, "helios.import.profiles.editor", Scroll::Region, |ui| {
+                    into = self.editor_ui(ui, words, &t);
+                });
             });
         });
         layout.footer(ui, |ui| {
-            ui.separator();
+            ui.divider();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(t(Message::new("gui-import-profiles-done", "Done")))
-                    .clicked()
-                {
+                let done_word = t(Message::new("gui-import-profiles-done", "Done"));
+                if helios_ui::action(ui, Action::Primary, &done_word).clicked() {
                     done = true;
                 }
             });
@@ -248,31 +248,24 @@ impl ImportWindow {
         };
         let mut pick = None;
         for p in self.profiles.list() {
-            if ui.selectable_label(p.id == selected, &p.name).clicked() {
+            if widgets::selectable_label(ui, p.id == selected, &p.name).clicked() {
                 pick = Some(p.id.clone());
             }
         }
-        ui.separator();
+        ui.divider();
         let built_in = self
             .profiles
             .get(&selected)
             .is_some_and(ImportProfile::built_in);
         ui.horizontal_wrapped(|ui| {
-            if ui
-                .button(t(Message::new("gui-import-profiles-new", "New")))
-                .clicked()
-            {
+            let new = t(Message::new("gui-import-profiles-new", "New"));
+            if helios_ui::action(ui, Action::Secondary, &new).clicked() {
                 let name = t(Message::new("gui-import-profiles-new-name", "New profile"));
                 pick = Some(self.profiles.add(&name, Choices::default()));
                 self.profiles.save();
             }
-            if ui
-                .button(t(Message::new(
-                    "gui-import-profiles-duplicate",
-                    "Duplicate",
-                )))
-                .clicked()
-            {
+            let duplicate = t(Message::new("gui-import-profiles-duplicate", "Duplicate"));
+            if helios_ui::action(ui, Action::Secondary, &duplicate).clicked() {
                 self.keep_profile_edits();
                 let name = self
                     .profiles
@@ -285,21 +278,23 @@ impl ImportWindow {
                 pick = Some(self.profiles.add(&name, self.choices.clone()));
                 self.profiles.save();
             }
+            let rename = t(Message::new("gui-import-profiles-rename", "Rename"));
             if ui
-                .add_enabled(
-                    !built_in,
-                    egui::Button::new(t(Message::new("gui-import-profiles-rename", "Rename"))),
-                )
+                .add_enabled_ui(!built_in, |ui| {
+                    helios_ui::action(ui, Action::Secondary, &rename)
+                })
+                .inner
                 .clicked()
                 && let Some(m) = &mut self.manager
             {
                 m.renaming = self.profiles.get(&selected).map(|p| p.name.clone());
             }
+            let delete = t(Message::new("gui-import-profiles-delete", "Delete"));
             if ui
-                .add_enabled(
-                    !built_in,
-                    egui::Button::new(t(Message::new("gui-import-profiles-delete", "Delete"))),
-                )
+                .add_enabled_ui(!built_in, |ui| {
+                    helios_ui::action(ui, Action::Danger, &delete)
+                })
+                .inner
                 .clicked()
                 && self.profiles.remove(&selected)
             {
@@ -317,13 +312,13 @@ impl ImportWindow {
             }
         });
         if let Some(name) = self.manager.as_mut().and_then(|m| m.renaming.as_mut()) {
-            let edit = ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
-            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            // Named by the action it is typed for.
+            let label = t(Message::new("gui-import-profiles-rename", "Rename"));
+            let width = ui.available_width();
+            let enter = Input::text(name, &label).width(width).show(ui).submitted;
             let name = name.clone();
-            if (enter
-                || ui
-                    .button(t(Message::new("gui-import-profiles-save-name", "Save")))
-                    .clicked())
+            let save = t(Message::new("gui-import-profiles-save-name", "Save"));
+            if (enter || helios_ui::action(ui, Action::Secondary, &save).clicked())
                 && !name.trim().is_empty()
             {
                 if self.profiles.rename(&selected, &name) {
@@ -334,11 +329,14 @@ impl ImportWindow {
                 }
             }
         }
-        ui.separator();
-        ui.label(t(Message::new(
-            "gui-import-profiles-default-for",
-            "Default for",
-        )));
+        ui.divider();
+        ui.text_role(
+            TextRole::Body,
+            t(Message::new(
+                "gui-import-profiles-default-for",
+                "Default for",
+            )),
+        );
         // Each connector, by its label: none is special here.
         let texts = self.texts.clone();
         let connectors: Vec<(String, String)> = self
@@ -352,7 +350,7 @@ impl ImportWindow {
             .collect();
         for (connector, label) in connectors {
             let mut on = self.profiles.defaults.get(&connector) == Some(&selected);
-            if ui.checkbox(&mut on, label).changed() {
+            if widgets::checkbox(ui, &mut on, label).changed() {
                 if on {
                     self.profiles.defaults.insert(connector, selected.clone());
                 } else {
@@ -401,12 +399,17 @@ impl ImportWindow {
             Err(e) => e,
         };
         ui.horizontal_wrapped(|ui| {
-            ui.strong(t(Message::new("gui-import-profiles-example", "Example")));
-            ui.monospace(example);
+            ui.text_role(
+                TextRole::Section,
+                t(Message::new("gui-import-profiles-example", "Example")),
+            );
+            ui.code_text(example);
         });
-        ui.separator();
-        ui.strong(t(Message::new("gui-import-profiles-copy", "Copy")));
-        ui.weak(t(Message::new(
+        // Each group under its section title, a group's space apart (where
+        // a separator was), so the editor still fits the window's body.
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new("gui-import-profiles-copy", "Copy")));
+        ui.muted(t(Message::new(
             "gui-import-profiles-copy-help",
             "A source that cannot be added where it is, or that is wiped after import, is always copied",
         )));
@@ -414,35 +417,35 @@ impl ImportWindow {
         // cannot add in place is not asked.
         if self.sources.setup.placement.asks() {
             ui.horizontal_wrapped(|ui| {
-                ui.radio_value(&mut self.choices.copy_folders, true, &words.copy);
-                ui.radio_value(&mut self.choices.copy_folders, false, &words.add);
+                widgets::radio_value(ui, &mut self.choices.copy_folders, true, &words.copy);
+                widgets::radio_value(ui, &mut self.choices.copy_folders, false, &words.add);
             });
         }
-        ui.separator();
-        ui.strong(t(Message::new("gui-import-profiles-naming", "Naming")));
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new("gui-import-profiles-naming", "Naming")));
         import_choices::copy_choices_ui(ui, self, words, &mut asked);
-        ui.separator();
-        ui.strong(t(Message::new("gui-import-profiles-filter", "Filter")));
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new("gui-import-profiles-filter", "Filter")));
         super::import_profiles::include_ui(ui, self, &words.profile);
-        ui.separator();
-        ui.strong(t(Message::new("gui-import-profiles-apply", "Apply")));
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new("gui-import-profiles-apply", "Apply")));
         super::import_profiles::apply_ui(ui, self, &words.profile);
-        ui.separator();
-        ui.strong(t(Message::new("gui-import-profiles-advanced", "Advanced")));
+        ui.space_role(Space::Group);
+        ui.section_title(t(Message::new("gui-import-profiles-advanced", "Advanced")));
         ui.horizontal_wrapped(|ui| {
-            ui.label(&words.duplicates);
+            ui.text_role(TextRole::Body, &words.duplicates);
             let d = &mut self.choices.duplicates;
-            ui.radio_value(d, Duplicates::Skip, &words.skip);
-            ui.radio_value(d, Duplicates::Keep, &words.keep);
-            ui.radio_value(d, Duplicates::Ask, &words.ask);
+            widgets::radio_value(ui, d, Duplicates::Skip, &words.skip);
+            widgets::radio_value(ui, d, Duplicates::Keep, &words.keep);
+            widgets::radio_value(ui, d, Duplicates::Ask, &words.ask);
         });
         if self.sources.honours.darktable {
-            ui.checkbox(&mut self.choices.darktable, &words.darktable)
-                .on_hover_text(&words.darktable_help);
+            widgets::checkbox(ui, &mut self.choices.darktable, &words.darktable)
+                .tip(&words.darktable_help);
         }
         if self.camera_looks {
-            ui.checkbox(&mut self.choices.camera_look, &words.camera_look)
-                .on_hover_text(&words.camera_look_help);
+            widgets::checkbox(ui, &mut self.choices.camera_look, &words.camera_look)
+                .tip(&words.camera_look_help);
         }
         asked.is_some()
     }

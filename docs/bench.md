@@ -56,6 +56,7 @@ Jobs of the Benchfile:
 | `gpu` | the GPU backend's tests on the box's NVIDIA GPU; the adapter used in `out/adapter.txt` | 4 cores, 4 GB, the GPU alone |
 | `bench-masks` | `cargo xtask bench masks`, `masks.jsonl` in `out/` | 8 cores, 6 GB, the machine alone |
 | `thumb-bench` | a timing job (the box's cap and cool-down apply), run after `thumb-bench-build`, which builds it: the thumbnail benchmark (`helios-gui`'s `thumb_bench` example, see [performance.md](performance.md)): per raw of the `raw-corpus` volume its embedded previews' cost, a 256 px cache entry's size and a 256 px render of its edit, then the library grid with the corpus repeated to each of `sizes=` images (1,000, 10,000 and 50,000 by default): first screen, scroll frame times, peak RSS, textures; `out/thumb-bench.jsonl` | 8 cores, 8 GB, timing (the machine alone) |
+| `open-timing` | a timing job, run after `open-timing-build`, which builds it (`helios-gui`'s `open_timing` example): each raw of the `raw-corpus` volume opened `runs=` times (3) as the desktop opens it, the engine's trace spans (`helios_core::trace`) giving decode, graph build, proxy, preview, histogram, fit, each demosaic call and one slider; medians per raw and a stability flag in `out/open-timing.md`, each run in `out/open-timing.jsonl` | 8 cores, 8 GB, timing (the machine alone) |
 | `test-times` | `cargo xtask test-times --profile ci`, its history kept per branch | 8 cores, 6 GB, the machine alone |
 | `mask-parity` | darktable's drawn masks against darktable-cli, built from a pinned upstream commit (see [masks.md](masks.md), "Parity with darktable"); JUnit, a summary and the masks in `out/` | 8 cores, 8 GB |
 | `raw-corpus` | the raw corpus checks (`helios-corpus`) on the `raw-corpus` volume; JUnit, a summary, the observed values and thumbnails in `out/`; `bless=yes` accepts new thumbnails | 4 cores, 4 GB |
@@ -635,7 +636,7 @@ Every agent follows them.
   to commit (`egui-pop-snapshots`). `egui-pop-gate` stays for a release or a
   by-hand check, not for each branch.
 - The GPU and timing jobs (`gpu`, `gpu-intel`, `egui-pop-gpu-tiles`,
-  `egui-pop-threading`, `egui-pop-perf`, `start-timing`, `quit-timing`, `test-times`, `thumb-bench`, the
+  `egui-pop-threading`, `egui-pop-perf`, `start-timing`, `quit-timing`, `test-times`, `thumb-bench`, `open-timing`, the
   parity and bench jobs) run before a release only, queued by one agent
   given that job, never by the agents writing code. Helios's whole suite
   runs in `next`'s CI (nextest on the workspace, survival, Windows).

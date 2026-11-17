@@ -499,6 +499,15 @@ fn render(
                 continue;
             }
             stats.render_of(s.graph.id(), union, scale.get());
+            let _span = helios_core::trace::span("viewport.tiles", || {
+                format!(
+                    "{}x{} at {:.4} ({} tiles)",
+                    union.width,
+                    union.height,
+                    scale.get(),
+                    live.len()
+                )
+            });
             if let Some(d) = device
                 && deliver_on_device(engine, d, s, (union, scale.get()), &live, sink, stats)
             {

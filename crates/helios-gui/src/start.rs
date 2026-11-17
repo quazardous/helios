@@ -104,6 +104,36 @@ pub fn trace_frame(what: impl std::fmt::Display) {
     eprintln!("helios-frame {wall} {what}");
 }
 
+/// The environment variable that sends every engine span
+/// (`helios_core::trace`: each step, the demosaic, the photo open, the
+/// preview, the scopes) to standard error:
+///
+/// ```text
+/// helios-span <epoch µs at its start> <ms it took> <name> <detail>
+/// ```
+pub const OPEN_TRACE_ENV: &str = "HELIOS_OPEN_TRACE";
+
+/// Listens to the engine's spans when [`OPEN_TRACE_ENV`] is set: the
+/// lines go to standard error while the listener is kept.
+pub fn open_trace() -> Option<helios_core::trace::Listener> {
+    std::env::var_os(OPEN_TRACE_ENV)?;
+    let (anchor, wall) = (
+        std::time::Instant::now(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_micros()),
+    );
+    Some(helios_core::trace::listen(move |r| {
+        // The span's start on the wall clock, from one anchor read once.
+        let at = if r.start >= anchor {
+            wall + (r.start - anchor).as_micros()
+        } else {
+            wall.saturating_sub((anchor - r.start).as_micros())
+        };
+        eprintln!("helios-span {at} {:.1} {} {}", r.ms(), r.name, r.detail);
+    }))
+}
+
 /// Marks a step of the first frame (nothing in the frames after it).
 pub fn mark_in_first_frame(step: &str) {
     if !FIRST_BUILT.load(Ordering::Relaxed) {

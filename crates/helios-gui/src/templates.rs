@@ -135,7 +135,12 @@ fn through(path: &Path, bundle: &Bundle, preview: bool) -> Result<(Graph, NodeId
         ));
     }
     let built = if raw && network.takes_raw() {
-        let developed = helios_load::load(path).and_then(|loaded| {
+        let decoded = {
+            let _span = helios_core::trace::span("photo.decode", || path.display().to_string());
+            helios_load::load(path)
+        };
+        let developed = decoded.and_then(|loaded| {
+            let _span = helios_core::trace::span("photo.graph", || path.display().to_string());
             let camera = loaded
                 .camera
                 .ok_or_else(|| format!("{}: no camera to develop it with", path.display()))?
