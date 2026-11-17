@@ -122,10 +122,7 @@ fn the_darkroom_docks_the_history_beside_the_modules_and_its_rows_walk_the_edit(
     let dir = temp("darkroom");
     let mut h = darkroom(&dir);
     let app = h.state().app().handle().clone();
-    assert_eq!(
-        app.context().get("place").to_string(),
-        "helios.darkroom"
-    );
+    assert_eq!(app.context().get("place").to_string(), "helios.darkroom");
     // The darkroom's layout: History is a tab of the start side, beside
     // the Modules.
     let layout = h.state().layout();

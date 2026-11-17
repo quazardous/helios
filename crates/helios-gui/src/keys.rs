@@ -261,6 +261,12 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // The Activity focus: the background jobs, as Ctrl+J opens a
     // browser's downloads.
     bind("Ctrl+Shift+J", crate::activity::COMMAND, "");
+    // The History panel (Window > History): the edit's undo steps.
+    bind(
+        "Ctrl+Shift+H",
+        &format!("{}.toggle", egui_pop::api::history_view::PANEL_HISTORY),
+        "",
+    );
     // The Library in its own window (Lightroom's key for the Library).
     bind("Ctrl+Alt+1", crate::shell::LIBRARY_WINDOW_COMMAND, "");
     // Close the window in front, as its close button does (egui-pop's

@@ -946,8 +946,10 @@ impl Shell {
                 values: values.clone(),
                 i18n: i18n.clone(),
             })
-            // egui-pop's History panel (the end side bar, closed until
-            // asked for) and the agents' `history.*` commands, over
+            // egui-pop's History panel (a tab beside the Modules in the
+            // darkroom, `workbench::darkroom`; elsewhere closed until
+            // Window > History or Ctrl+Shift+H) and the agents'
+            // `history.*` commands, over
             // Helios's history owner (`crate::history::HeliosHistory`).
             .plugin(egui_pop::api::history_view::HistoryPlugin::default())
             // The Window menu and Close window: every window has them
@@ -4368,6 +4370,14 @@ impl Shell {
                 "1_open",
                 3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
+            ),
+            // Window > History (Ctrl+Shift+H): the undo steps, egui-pop's
+            // panel, shown or closed.
+            command(
+                MENU_WINDOW,
+                "2_panels",
+                0,
+                &format!("{}.toggle", egui_pop::api::history_view::PANEL_HISTORY),
             ),
             // View > Activity… (Ctrl+Shift+J): the background jobs, open
             // whether one runs or not.

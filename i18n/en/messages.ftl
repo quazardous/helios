@@ -753,6 +753,8 @@ gui-history-camera-look-default = Change the default camera look of { $name }
 
 gui-history-camera-look-fit = Fit the camera look to the camera's JPEG
 
+gui-history-edit = { $what } { $value }
+
 gui-history-import = Import { $count } photos
 
 gui-history-keyword-merge = Merge keyword { $from } into { $to }

@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use egui::Ui;
+use egui_pop::api::history_view::PANEL_HISTORY;
 use egui_pop::api::{Ctx, Plugin, PluginError};
 use egui_pop::model::ids::{PanelId, PluginId};
 use egui_pop::model::layout::{Anchor, AnchorEdge, Arrangement, FloatingGroup, Layout, Node};
@@ -173,17 +174,25 @@ fn only(specs: &[PanelSpec], shown: &[(Area, &str)]) -> Layout {
 
 /// The darkroom layout of these panels (see [`DARKROOM`]): each panel
 /// open by default in its own area, as tabs in declaration order, the
-/// image shown in the centre; the others closed.
+/// image shown in the centre; the others closed. egui-pop's History
+/// panel (the edit's undo steps) is a tab beside the Modules, on the
+/// start side, where darktable and Lightroom keep their history. A
+/// darkroom layout the user saved keeps its own tabs: History, closed
+/// there, opens from Window > History.
 pub fn darkroom(specs: &[PanelSpec]) -> Layout {
     let image = "helios.viewport";
+    let modules = "helios.modules";
     let areas = [Area::Center, Area::StartSide, Area::EndSide, Area::Bottom]
         .into_iter()
         .filter_map(|area| {
-            let panels: Vec<PanelId> = specs
+            let mut panels: Vec<PanelId> = specs
                 .iter()
                 .filter(|s| s.open && s.area == area)
                 .map(|s| s.id.clone())
                 .collect();
+            if let Some(at) = panels.iter().position(|p| p.as_str() == modules) {
+                panels.insert(at + 1, PANEL_HISTORY);
+            }
             let active = panels.iter().position(|p| p.as_str() == image).unwrap_or(0);
             (!panels.is_empty()).then_some((area, Node::Tabs { panels, active }))
         })

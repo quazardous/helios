@@ -246,11 +246,18 @@ is going (`plugins::History` vetoes the `edit.undo`, `edit.redo` and
 `edit.jump` steps with the reason).
 
 **The History panel.** egui-pop's `HistoryPlugin` brings the History
-panel (`egui_pop.history`), in the end side bar, closed until asked for
-(`egui_pop.history.toggle`, in the command palette). It lists the
+panel (`egui_pop.history`). The darkroom's layout docks it as a tab
+beside the Modules, on the start side, where darktable and Lightroom
+keep their history (2026-11-17); elsewhere, and in a darkroom layout
+the user saved before, it is closed until asked for: Window > History,
+Ctrl+Shift+H or the palette (`egui_pop.history.toggle`). It lists the
 history's steps under a Start row, oldest first: the head selected, the
 steps a redo would make again muted under it, a step made by an agent
-or a script named with its origin ("Exposure (agent:mcp)"). A click on
+or a script named with its origin ("Exposure (agent:mcp)"). A step that
+changed one value reads as the edit it made, the value's label and
+where it left it, in the interface's language ("Exposure +0.30 EV",
+"Exposure bypassed"), in the panel and in Edit > Undo and Redo; a step
+changing several values keeps its own label. A click on
 a row brings the edit there, by undos or redos, all or nothing, through
 `edit.jump`.
 
