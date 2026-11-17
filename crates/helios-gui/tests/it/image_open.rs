@@ -185,6 +185,56 @@ fn a_failing_save_keeps_the_current_photo_open_and_says_why() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The save of image 1's edit fails slowly: the vault is held by another
+/// writer and the store waits 1.5 s for it before giving up, past the
+/// bus's default listener deadline (1 s). The switch is still refused:
+/// image 1 stays open, its edit shown and marked unsaved, and its undo
+/// history is kept (`history.scope` did not run). Before the fix the bus
+/// dropped the late listener's refusal and the photo switched.
+#[test]
+fn a_slow_failing_save_still_refuses_the_switch() {
+    let dir = scratch("save-fails-slowly");
+    let path = vault_file(&dir);
+    let options = Options {
+        busy_timeout: Duration::from_millis(1500),
+        ..Options::default()
+    };
+    let (mut shell, mut persist) = open(&path, &options);
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    set(&shell, 1.5);
+
+    let mut blocker = SqliteStore::open(&path).unwrap();
+    blocker.begin().unwrap();
+    let (graph, exp) = network();
+    let refused = persist.open_image(&mut shell, id(2), graph, exp, "output");
+    blocker.rollback().unwrap();
+    drop(blocker);
+    let refused = refused.expect_err("the slow failed save refuses the switch");
+    assert!(
+        refused.contains("not saved"),
+        "the refusal says why: {refused}"
+    );
+    assert_eq!(
+        persist.session().map(helios_vault::EditSession::image),
+        Some(id(1)),
+        "image 1 stays open"
+    );
+    assert!(persist.unsaved(), "its edit is marked unsaved");
+    assert!((shown(&shell) - 1.5).abs() < 1e-9, "its edit still shown");
+    let undone = shell
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&helios_shell::commands::Origin::User)
+        .unwrap();
+    assert!(undone.is_some(), "its undo history is kept");
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The listeners of `image.open` and `image.close` as the desktop
 /// registers them, in the order they run: a reviewed dump
 /// (`tests/bus/darkroom.txt`). The edit saved first, then its history
