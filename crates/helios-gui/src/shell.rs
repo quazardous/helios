@@ -946,8 +946,10 @@ impl Shell {
                 values: values.clone(),
                 i18n: i18n.clone(),
             })
-            // egui-pop's History panel (the end side bar, closed until
-            // asked for) and the agents' `history.*` commands, over
+            // egui-pop's History panel (a tab beside the Modules in the
+            // darkroom, `workbench::darkroom`; elsewhere closed until
+            // Window > History or Ctrl+Shift+H) and the agents'
+            // `history.*` commands, over
             // Helios's history owner (`crate::history::HeliosHistory`).
             .plugin(egui_pop::api::history_view::HistoryPlugin::default())
             // The Window menu and Close window: every window has them
@@ -1332,7 +1334,11 @@ impl Shell {
             shell.set_content("helios.viewport", move |ui| {
                 let area = ui.max_rect();
                 let leave = {
+                    // What the image wants in the window it is drawn
+                    // in, from the screen that window is on.
+                    let wanted = crate::display::follow_window(ui.ctx(), &app);
                     let mut viewport = viewport.borrow_mut();
+                    viewport.set_wanted(wanted);
                     viewport.ui(ui, &values);
                     viewport.take_leave()
                 };
@@ -4371,6 +4377,14 @@ impl Shell {
                 3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
             ),
+            // Window > History (Ctrl+Shift+H): the undo steps, egui-pop's
+            // panel, shown or closed.
+            command(
+                MENU_WINDOW,
+                "2_panels",
+                0,
+                &format!("{}.toggle", egui_pop::api::history_view::PANEL_HISTORY),
+            ),
             // View > Activity… (Ctrl+Shift+J): the background jobs, open
             // whether one runs or not.
             command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),
@@ -7110,8 +7124,6 @@ impl Shell {
             }
         }
         self.set_context(&ctx);
-        let wanted = crate::display::wanted(crate::display::wide_gamut(self.core.app.handle()));
-        self.focus.viewport.borrow_mut().set_wanted(wanted);
         self.core.app.logic(&ctx);
         // The workspace's sub-workspaces; one shown that is gone is left.
         self.follow_subworkspaces();

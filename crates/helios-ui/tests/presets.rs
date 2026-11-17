@@ -316,7 +316,7 @@ fn progress_is_a_bar_when_the_work_counts_and_a_spinner_when_it_does_not() {
 }
 
 #[test]
-fn a_scroll_shows_its_content_and_a_tail_stays_a_few_lines_high() {
+fn a_scroll_shows_its_content_and_a_tail_or_section_stays_bounded() {
     for kind in Scroll::ALL {
         let h = harness(kind, |ui, kind| {
             let rect = helios_ui::scroll(ui, "test.scroll", *kind, |ui| {
@@ -326,8 +326,8 @@ fn a_scroll_shows_its_content_and_a_tail_stays_a_few_lines_high() {
                 ui.min_rect()
             });
             assert!(rect.height() > 360.0, "the content keeps its height");
-            if *kind == Scroll::Tail {
-                assert!(ui.min_rect().height() < 300.0, "a tail is bounded");
+            if matches!(*kind, Scroll::Tail | Scroll::Section) {
+                assert!(ui.min_rect().height() < 300.0, "{kind:?} is bounded");
             }
         });
         let shown = if kind == Scroll::Tail {

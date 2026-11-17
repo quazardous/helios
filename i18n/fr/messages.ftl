@@ -488,6 +488,8 @@ gui-graph-wires-orthogonal = Orthogonales
 gui-graph-wires-straight = Droites
 
 gui-history-batch = { $label } ({ $count } valeurs)
+
+gui-history-edit = { $what } { $value }
 gui-history-calibration-apply = Appliquer le profil de calibration « { $name } »
 gui-history-calibration-default = Définir le défaut de calibration de { $name }
 gui-history-calibration-delete = Supprimer le profil de calibration « { $name } »
