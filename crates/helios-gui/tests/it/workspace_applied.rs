@@ -220,3 +220,96 @@ fn the_workspace_points_listeners_run_in_a_declared_order() {
     drop(h);
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// The listeners of egui-pop's `layout.changed` as the desktop registers
+/// them: egui-pop's save of the layout's document, then the workspace's
+/// copy of it (`tests/bus/layout.txt`).
+#[test]
+fn the_layout_point_saves_then_copies() {
+    let root = temp("layout-order");
+    let h = window(&root);
+    assert_eq!(
+        helios_gui::workspace_applied::layout_order(&*h.state().app().handle().bus()),
+        include_str!("../bus/layout.txt")
+    );
+    drop(h);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A change of the layout is saved once and copied once, after its
+/// command, and nothing more while nothing changes.
+#[test]
+fn a_layout_change_is_saved_once_and_its_copy_follows() {
+    let root = temp("layout-once");
+    let config = root.join("config");
+    let shell = Shell::new(helios_panels(), None);
+    let catalogue = templates::catalogue(shell.panels(), shell.specs());
+    let created = templates::create_workspace(
+        &templates::find("helios.portrait-retouch").unwrap(),
+        &catalogue,
+        &root.join("work"),
+        &config,
+    )
+    .unwrap();
+    let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
+        .workspace(&created.workspace)
+        .build();
+    shell.load_layout().unwrap();
+    shell.open_workspace(&config, &created.workspace).unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let saves = |h: &Harness<'static, Shell>| {
+        h.state()
+            .app()
+            .handle()
+            .step_traces()
+            .iter()
+            .filter(|t| t.step == egui_pop::api::app::STEP_LAYOUT_SAVE)
+            .count()
+    };
+    // An edited workspace keeps its state, the copy of the layout with it.
+    h.state_mut()
+        .edit_workspace(&json!({ "name": "Mine" }), &Origin::User)
+        .unwrap();
+    h.run();
+    let before = saves(&h);
+    let shown = h.state().layout();
+    let panel = shown
+        .placed()
+        .into_iter()
+        .find(|p| {
+            // One of Helios's panels: the workspace's copy keeps only
+            // those (egui-pop's own belong to the application).
+            p.as_str().starts_with("helios.")
+                && p.as_str() != "helios.viewport"
+                && shown.area_of(p).is_some()
+        })
+        .cloned()
+        .expect("a docked panel");
+    // Moved to the other side (a dock: `workbench.move`).
+    let to = match shown.area_of(&panel) {
+        Some(egui_pop::model::panels::Area::StartSide) => egui_pop::model::panels::Area::EndSide,
+        _ => egui_pop::model::panels::Area::StartSide,
+    };
+    let out = h.state().app().handle().move_panel(&panel, to).unwrap();
+    assert!(out.ok(), "{out:?}");
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(h.state().layout().area_of(&panel), Some(to), "moved");
+    assert_eq!(saves(&h) - before, 1, "saved once");
+    let files = helios_template::workspace::Files::new(&config, &created.workspace);
+    let copy = files.load_on_disk().unwrap().bundle.layout;
+    assert_eq!(
+        copy.area_of(&panel),
+        Some(to),
+        "the copy follows: {panel} in {copy:?}"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(saves(&h) - before, 1, "nothing changed since");
+    drop(h);
+    std::fs::remove_dir_all(&root).unwrap();
+}

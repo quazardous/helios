@@ -24,7 +24,6 @@ use std::sync::{Arc, Mutex};
 
 use egui::Rect;
 use egui_pop::model::ids::PanelId;
-use egui_pop::model::layout::Layout;
 use helios_core::Engine;
 
 use super::{Shot, workshop_edit, workspace_edit};
@@ -118,9 +117,10 @@ pub(super) struct Focus {
     pub(super) graph: Rc<RefCell<crate::graph::GraphPanel>>,
     /// The workspace open, whose layout egui-pop keeps.
     pub(super) workspace: Workspace,
-    /// The layout as last saved to the workspace's document: saved again
-    /// once it changes, so a kill keeps it.
-    pub(super) layout_saved: Option<Layout>,
+    /// egui-pop saved the layout it changed (`layout.changed`): the copy
+    /// kept with the workspace's state follows at the shell's next turn
+    /// (`helios.layout-copy`).
+    pub(super) layout_copy_due: Rc<std::cell::Cell<bool>>,
     /// The workspace's state, as edited (`workspace_edit`).
     pub(super) edit: Option<workspace_edit::Edited>,
     /// The Queue panel: the selected node's queue.
@@ -211,7 +211,7 @@ impl Focus {
             mask_tree: Rc::default(),
             graph: Rc::default(),
             workspace: seed.workspace,
-            layout_saved: None,
+            layout_copy_due: Rc::default(),
             edit: None,
             queue_panel: Rc::default(),
             follow: crate::contexts::Follow::default(),

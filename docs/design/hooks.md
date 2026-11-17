@@ -636,6 +636,28 @@ is passed through the new network after the shell's pass, by the host,
 which holds the image (2026-11-17). The workshop session (`follow_session`) follows the value
 store's history, not the workspace's state.
 
+### Slice 2h: the layout changed
+
+Two savers followed one document, each pass: egui-pop's autosave
+compared a print of the layout and saved it a second after it changed;
+the shell compared the whole layout each pass, saved it through
+egui-pop's `layout.save` step when no button was held, then wrote the
+copy of the layout kept with the workspace's state.
+
+Where it stands (2026-11-17): done. egui-pop says every real change
+of the layout once, as `layout.changed` (a panel docked, detached,
+floated, moved, opened or closed, a split or a palette resized, a
+layout put in), once the gesture that made it ended: a drag in
+progress says nothing until it is let go. egui-pop owns the save: its
+listener `layout.save` writes the document the host names (the
+workspace's), since egui-pop holds the persistence, the document and
+the step, and every egui-pop application gets it. Helios's listener
+`helios.layout-copy` (`workspace_applied::LAYOUT_COPY`) runs after it
+and keeps the copy beside the workspace's files, at the shell's next
+turn of the pass (the copy needs the shell). The order is a reviewed
+dump (`crates/helios-gui/tests/bus/layout.txt`). Neither side compares
+the layout each pass any more.
+
 ### Slice 3: one module catalogue
 
 One crate lists the processing modules and what each ships (its
