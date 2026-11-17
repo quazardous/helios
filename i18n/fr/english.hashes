@@ -2199,6 +2199,14 @@ param-vkdt-grade-offset.description 4b22471e03130a5f
 param-vkdt-grade-offset.label ec0a877c29a156c8
 param-vkdt-grade-sh-pivot.description 28d460d164e95f50
 param-vkdt-grade-sh-pivot.label 6c6084c8b354b6b1
+param-vkdt-llap-clarity.description aede889282c971a2
+param-vkdt-llap-clarity.label 3a4b436819e26d27
+param-vkdt-llap-highlights.description dbf461c0cf92b1a8
+param-vkdt-llap-highlights.label 868cc54318b6839a
+param-vkdt-llap-shadows.description c484068738987c66
+param-vkdt-llap-shadows.label 87d895ca7dc24b7c
+param-vkdt-llap-sigma.description aff5eef676f18789
+param-vkdt-llap-sigma.label 678c415fff647422
 param-vkdt-usm-amount.description 64bb85d55333be94
 param-vkdt-usm-amount.label 6b2fee649d064481
 param-vkdt-usm-thrs.description 2269323ad1852b2e

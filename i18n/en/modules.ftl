@@ -613,6 +613,22 @@ param-vkdt-grade-sh-pivot =
     .description = where shadows turn into midtones (zoned log)
     .label = sh_pivot
 
+param-vkdt-llap-clarity =
+    .description = the local contrast in the midtones
+    .label = clarity
+
+param-vkdt-llap-highlights =
+    .description = the slope below each grey level: above 1 darkens the highlights' detail
+    .label = highlights
+
+param-vkdt-llap-shadows =
+    .description = the slope above each grey level: above 1 brightens the shadows' detail
+    .label = shadows
+
+param-vkdt-llap-sigma =
+    .description = the width of the tone curves around each grey level
+    .label = sigma
+
 param-vkdt-usm-amount =
     .description = how much to increase sharpness
     .label = amount

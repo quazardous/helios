@@ -356,3 +356,61 @@ fn ported_vkdt_colour_matches_vkdt() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// vkdt's `llap`, a composite of a pyramid as deep as the image allows:
+/// Helios builds the same levels from the image's size (odd sides round
+/// up, as in vkdt) and mirrors at each level's edges as vkdt's sampler
+/// does, so the whole image is compared, on an even chart and on one whose
+/// sides are odd. vkdt keeps its eleven-layer levels in half floats,
+/// Helios in floats: the inside is held to darktable's thresholds, the
+/// whole image is printed.
+#[test]
+fn ported_vkdt_llap_matches_vkdt() {
+    let Some(vkdt) = Vkdt::for_test() else {
+        return;
+    };
+    let even = helios_parity::vkdt::to_f16(&contrast_chart());
+    let odd = helios_parity::vkdt::to_f16(&contrast_chart().sample(Region::new(3, 5, 201, 133)));
+    let odd = Image::new(Region::sized(201, 133), 4, odd.data().to_vec());
+    let dir = std::env::temp_dir().join(format!("helios-parity-vkdt-llap-{}", std::process::id()));
+    // (sigma, shadows, highlights, clarity): vkdt's defaults give the input
+    // back; then each control on its own and together.
+    let cases = [
+        (0.12, 1.0, 1.0, 0.0),
+        (0.12, 1.0, 1.0, 1.0),
+        (0.12, 2.0, 0.6, 0.0),
+        (0.2, 1.5, 1.3, 0.5),
+    ];
+    let mut i = 0;
+    for input in [&even, &odd] {
+        for (sigma, shadows, highlights, clarity) in cases {
+            let params = Params::new()
+                .with("sigma", Value::Float(sigma))
+                .with("shadows", Value::Float(shadows))
+                .with("highlights", Value::Float(highlights))
+                .with("clarity", Value::Float(clarity));
+            let ours = helios(
+                ModuleRef::composite(helios_module_vkdt::VkdtLlap),
+                params,
+                input,
+            );
+            // vkdt names highlights `hilights`.
+            let cfg = [
+                ("sigma", sigma.to_string()),
+                ("shadows", shadows.to_string()),
+                ("hilights", highlights.to_string()),
+                ("clarity", clarity.to_string()),
+            ];
+            let theirs = vkdt
+                .render_f16(input, "llap", &cfg, &dir.join(i.to_string()))
+                .unwrap();
+            i += 1;
+            let whole = compare(&ours, &theirs).unwrap();
+            let d = compare(&inset(&ours, 4), &inset(&theirs, 4)).unwrap();
+            let size = input.region();
+            eprintln!("vkdt llap {size} {cfg:?}: inside {d:?}, whole image {whole:?}");
+            assert!(d.within(&DARKTABLE), "llap {size} {cfg:?}: {d:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

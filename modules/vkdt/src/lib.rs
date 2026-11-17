@@ -30,6 +30,10 @@
 //!   saturation in darktable UCS and highlight clip ([`colour`]). It takes
 //!   the camera's matrix and coefficients as context inputs: a chain
 //!   feeding it leaves Helios's `whitebalance` out (vkdt balances here).
+//! - `vkdt_llap`: local contrast, shadows and highlights by a local
+//!   Laplacian pyramid ([`llap`]), a composite whose levels follow the
+//!   image's size; its samplers mirror at the edges as vkdt's do
+//!   ([`sample`]).
 //!
 //! [`ucs`] holds the colour spaces they share, darktable's uniform colour
 //! space among them (MIT licence, by Aurélien Pierre, as vkdt carries it).
@@ -43,12 +47,15 @@ pub mod contrast;
 pub mod filmcurv;
 pub mod grade;
 pub mod guided;
+pub mod llap;
+pub mod sample;
 pub mod ucs;
 
 pub use colour::VkdtColour;
 pub use contrast::VkdtContrast;
 pub use filmcurv::VkdtFilmcurv;
 pub use grade::VkdtGrade;
+pub use llap::VkdtLlap;
 
 use helios_core::{
     Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params,
