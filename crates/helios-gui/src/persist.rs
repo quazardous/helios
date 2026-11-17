@@ -2602,6 +2602,12 @@ impl<S: Store + 'static> Persist<S> {
         self.editing.as_ref().map(|e| &e.session)
     }
 
+    /// Whether the edit open is marked unsaved: its last save failed, and
+    /// it is saved again at the next frame or switch.
+    pub fn unsaved(&self) -> bool {
+        self.editing.as_ref().is_some_and(|e| e.unsaved)
+    }
+
     /// Reads the metadata templates once, writes them back each time they
     /// change (a library document through the node, outside the
     /// library's history), and reads the capture details the Metadata
