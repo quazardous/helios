@@ -155,6 +155,45 @@ fn a_network_change_runs_the_graph_then_the_workshops() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// A node added changes what an image goes through: the library's
+/// renders, then the host's image (`darkroom.network`), each once per
+/// change, the undo included; a node moved (above) runs neither.
+#[test]
+fn a_nodes_change_reaches_the_renders_then_the_host_once() {
+    let root = temp("nodes");
+    let mut h = window(&root);
+    crate::host::listen_network(h.state());
+    let since = h.state().app().handle().last_event();
+    h.state_mut()
+        .run(
+            "network.add",
+            json!({ "nodes": [{ "module": "sigmoid" }] }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let said = applied_since(&h, since);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(strings(&said[0]["changed"]).contains(&"nodes"), "{said:?}");
+    let ran = strings(&said[0]["ran"]);
+    assert_eq!(
+        ran[ran.len() - 2..],
+        ["library.heads", "darkroom.network"],
+        "{said:?}"
+    );
+    assert_eq!(crate::host::network_changed(), 1, "once");
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    h.run();
+    assert_eq!(crate::host::network_changed(), 1, "the undo's, once");
+    drop(h);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 fn assert_network(said: &Value) {
     assert!(strings(&said["changed"]).contains(&"network"), "{said}");
     assert_eq!(
@@ -167,7 +206,9 @@ fn assert_network(said: &Value) {
 /// The listeners of `workspace.applied` as the desktop registers them,
 /// in the order they run: a reviewed dump (`tests/bus/workspace.txt`).
 /// The keys first, then the places (the list before the scope that
-/// reads it), then the graph and the Workshops panel.
+/// reads it), then the graph and the Workshops panel, then the library's
+/// renders (the host's `darkroom.network` comes after them, registered
+/// by the host).
 #[test]
 fn the_workspace_points_listeners_run_in_a_declared_order() {
     let root = temp("order");

@@ -20,6 +20,10 @@
 //!    editor's network, positions, groups and Add menu.
 //! 5. `workshops.composites` (network, composites): the Workshops
 //!    panel's workshops and the nodes that run them.
+//! 6. `library.heads` (nodes): the Compare panel's renders, made through
+//!    the old network, made again.
+//! 7. `darkroom.network` (nodes): the host's; the image shown goes
+//!    through the new network in place, or is opened again.
 //!
 //! The pass is then said on the journal under the point's name with
 //! what changed (`changed`) and the listeners that ran (`ran`). The
@@ -50,6 +54,11 @@ pub const SCOPE: &str = "contexts.scope";
 pub const GRAPH: &str = "graph.template";
 /// The Workshops panel's workshops and their nodes.
 pub const WORKSHOPS: &str = "workshops.composites";
+/// The library's head renders (the Compare panel's), made again.
+pub const HEADS: &str = "library.heads";
+/// The image shown, through the new network: the host's listener
+/// ([`listen_network`]).
+pub const NETWORK: &str = "darkroom.network";
 
 /// Whether a listener reads a part that changed.
 type Wants = fn(&Changed) -> bool;
@@ -70,6 +79,8 @@ pub const ORDER: &[(&str, &str, Option<&str>, Wants)] = &[
     (WORKSHOPS, "helios.workshops", Some(GRAPH), |c| {
         c.network || c.composites
     }),
+    (HEADS, "helios.library", Some(WORKSHOPS), |c| c.nodes),
+    (NETWORK, "helios.darkroom", Some(HEADS), |c| c.nodes),
 ];
 
 /// What changed in the state applied: everything when it opened.
@@ -82,6 +93,9 @@ pub struct Changed {
     pub library: bool,
     /// Its network, the nodes' positions, its parameters.
     pub network: bool,
+    /// What an image goes through: its network's nodes and links, or its
+    /// composites (not the nodes' positions nor its parameters).
+    pub nodes: bool,
     /// Its sub-workspaces.
     pub subworkspaces: bool,
     /// Its own composites (its macros and workshops).
@@ -98,6 +112,7 @@ impl Changed {
         tools: true,
         library: true,
         network: true,
+        nodes: true,
         subworkspaces: true,
         composites: true,
         layout: true,
@@ -113,6 +128,7 @@ impl Changed {
             network: b.network != n.network
                 || b.positions != n.positions
                 || b.parameters != n.parameters,
+            nodes: b.network != n.network || before.bundle.composites != next.bundle.composites,
             subworkspaces: b.subworkspaces != n.subworkspaces
                 || b.retired_subworkspaces != n.retired_subworkspaces,
             composites: before.bundle.composites != next.bundle.composites,
@@ -127,6 +143,7 @@ impl Changed {
             (self.tools, "tools"),
             (self.library, "library"),
             (self.network, "network"),
+            (self.nodes, "nodes"),
             (self.subworkspaces, "subworkspaces"),
             (self.composites, "composites"),
             (self.layout, "layout"),
@@ -216,6 +233,16 @@ pub fn listen_local(
     .map_err(|e| e.to_string())
 }
 
+/// Registers `run` as the host's listener of a network changed
+/// ([`NETWORK`]): run once per pass whose nodes changed, after the
+/// library's renders. One there already is replaced.
+///
+/// # Errors
+/// The bus refused it.
+pub fn listen_network(bus: &dyn Bus, run: impl Fn() + 'static) -> Result<(), String> {
+    listen_local(bus, NETWORK, move |_, _| run())
+}
+
 /// Passes `workspace` through the point on `bus`: what the listeners
 /// did, in order.
 pub fn pass(bus: &dyn Bus, workspace: Workspace) -> Reactions {
@@ -294,11 +321,18 @@ mod tests {
         );
         assert_eq!(
             only(Changed {
+                nodes: true,
+                ..Changed::default()
+            }),
+            [HEADS, NETWORK]
+        );
+        assert_eq!(
+            only(Changed {
                 subworkspaces: true,
                 ..Changed::default()
             }),
             [SUBWORKSPACES, SCOPE, GRAPH]
         );
-        assert_eq!(Changed::ALL.names().len(), 7);
+        assert_eq!(Changed::ALL.names().len(), 8);
     }
 }

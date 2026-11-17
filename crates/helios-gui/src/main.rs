@@ -1017,8 +1017,12 @@ struct App {
     library_reading: Option<LibraryReading>,
     /// Images being made ready, opened in the viewport as each is.
     preparing: Vec<Preparing>,
-    /// Starts the exports the shell asks for; the node runs them.
-    exporter: Option<Arc<helios_gui::export::Exporter>>,
+    /// Starts the exports the shell asks for (`export.run`, on
+    /// `export.start`, holds it weakly); the node runs them. Held here: it
+    /// ends with the application.
+    _exporter: Option<Arc<helios_gui::export::Exporter>>,
+    /// The workspace's network changed, heard by `darkroom.network`.
+    network_changed: std::rc::Rc<std::cell::Cell<bool>>,
     /// Why an export asked for did not start, heard from its thread.
     export_refused: (
         std::sync::mpsc::Sender<String>,
@@ -1504,11 +1508,10 @@ impl eframe::App for App {
             }
         }
         // The workspace's network changed (an edit, a reset, an import,
-        // an undo): the image goes through it in place, its values and
-        // history kept; opened again when the new network cannot take it.
-        if self.shell.take_network_changed() {
-            // The Compare panel's renders went through the old network.
-            self.shell.library_mut().network_changed();
+        // an undo), heard by `darkroom.network` on `workspace.applied`:
+        // the image goes through it in place, its values and history
+        // kept; opened again when the new network cannot take it.
+        if self.network_changed.take() {
             match self.shell.keep_image_open() {
                 Ok(true) => {
                     if let Some(persist) = &mut self.persist {
@@ -1540,22 +1543,8 @@ impl eframe::App for App {
                 helios_shell::commands::Origin::User,
             );
         }
-        // Exports asked for: planned over the library through the node on
-        // a thread of their own and run as jobs; a refusal comes back at a
-        // coming frame.
-        for ask in self.shell.take_exports() {
-            match &self.exporter {
-                Some(exporter) => {
-                    let refused = self.export_refused.0.clone();
-                    exporter.start(self.bundle(), ask, move |e| drop(refused.send(e)));
-                }
-                None => drop(
-                    self.export_refused
-                        .0
-                        .send("no library open: exports take their images from one".into()),
-                ),
-            }
-        }
+        // Exports are started by `export.run` in the pass they are asked
+        // in; a plan that fails on its thread comes back here.
         while let Ok(e) = self.export_refused.1.try_recv() {
             self.shell.notify(
                 helios_gui::dialogs::Level::Error,
@@ -2462,10 +2451,44 @@ fn main() -> Result<(), String> {
             if let (Some(mirror), Some(link)) = (job_promises, node_link.as_ref()) {
                 link.adopt(mirror);
             }
+            let export_refused = std::sync::mpsc::channel();
+            // The exports asked for, heard in the pass they are asked in:
+            // planned over the library through the node on a thread of
+            // their own and run as jobs. The listener does not keep the
+            // exporter alive: it ends with the application.
+            if let Some(exporter) = &exporter {
+                let (exporter, refused) = (Arc::downgrade(exporter), export_refused.0.clone());
+                let listened = helios_gui::export_start::listen_local(
+                    &*shell.app().handle().bus(),
+                    move |asked| {
+                        let exporter = exporter
+                            .upgrade()
+                            .ok_or(helios_gui::export_start::NO_LIBRARY)?;
+                        let refused = refused.clone();
+                        exporter.start(asked.bundle.clone(), asked.ask.clone(), move |e| {
+                            drop(refused.send(e));
+                        });
+                        Ok(())
+                    },
+                );
+                if let Err(e) = listened {
+                    log::error!("{}: {e}", helios_gui::export_start::START);
+                }
+            }
+            // The workspace's network changed: the image shown follows
+            // it after the shell's pass (the host holds the image).
+            let network_changed = std::rc::Rc::new(std::cell::Cell::new(false));
+            {
+                let changed = network_changed.clone();
+                if let Err(e) = shell.listen_network(move || changed.set(true)) {
+                    log::error!("{}: {e}", helios_gui::workspace_applied::NETWORK);
+                }
+            }
             let mut app = App {
                 node: node_client,
-                exporter,
-                export_refused: std::sync::mpsc::channel(),
+                _exporter: exporter,
+                network_changed,
+                export_refused,
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,

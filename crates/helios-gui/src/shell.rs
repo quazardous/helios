@@ -1189,7 +1189,6 @@ impl Shell {
                 let (to, from) = std::sync::mpsc::channel();
                 (crate::import_end::Publisher::new(to), from)
             },
-            exports: Vec::new(),
             workshop_runner: None,
             workshop_reviewer: None,
             workshop_waiting: Vec::new(),

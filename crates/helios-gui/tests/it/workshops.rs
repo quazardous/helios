@@ -96,6 +96,7 @@ fn window(root: &Path, on: bool) -> Harness<'static, Shell> {
     shell
         .set_view_source(built.graph, built.view.0, &built.view.1)
         .unwrap();
+    crate::host::listen_network(&shell);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     h
@@ -106,7 +107,7 @@ fn follow(h: &mut Harness<'static, Shell>) {
     for _ in 0..3 {
         h.run();
     }
-    if h.state_mut().take_network_changed() {
+    if crate::host::network_changed() > 0 {
         assert!(h.state_mut().keep_image_open().unwrap(), "kept in place");
     }
     for _ in 0..2 {
