@@ -180,6 +180,70 @@ fn a_snapshot_never_saved_is_lost_when_the_desktop_quits() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A second photo next to the first, in the vault of `dir`.
+fn other_photo(persist: &Persist<SqliteStore>, dir: &Path) -> ImageId {
+    image::RgbImage::from_fn(12, 8, |x, y| {
+        image::Rgb([90, (x * 20) as u8, (y * 30) as u8])
+    })
+    .save(dir.join("other.png"))
+    .unwrap();
+    persist
+        .vault()
+        .import_file(&dir.join("other.png"), 1)
+        .unwrap()
+}
+
+#[test]
+fn a_snapshot_taken_right_before_a_photo_switch_is_kept() {
+    let dir = scratch("switch");
+    let (mut shell, mut persist, image) = open(&dir);
+    let other = other_photo(&persist, &dir);
+    set(&shell, 1.0);
+    // Taken before the step is saved, then the photo switched at once:
+    // the switch saves the step, and the snapshot with it.
+    take(&shell, "Bright");
+    assert_eq!(listed(&shell), ["Bright*"]);
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, other, graph, exp, "output")
+        .unwrap();
+    persist.settle(&mut shell);
+    let names: Vec<String> = kept(&dir, image).into_iter().map(|s| s.name).collect();
+    assert_eq!(names, ["Bright"], "kept in the vault by the switch");
+    drop((shell, persist));
+    let (shell, _persist, _) = open(&dir);
+    assert_eq!(listed(&shell), ["Bright"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_snapshot_taken_right_before_a_close_or_a_quit_is_kept() {
+    // Closed: the image's close saves the step, and the snapshot.
+    let dir = scratch("close");
+    let (mut shell, mut persist, image) = open(&dir);
+    set(&shell, 1.0);
+    take(&shell, "Closed");
+    persist.close_image(&mut shell, 1.0).unwrap();
+    persist.settle(&mut shell);
+    let names: Vec<String> = kept(&dir, image).into_iter().map(|s| s.name).collect();
+    assert_eq!(names, ["Closed"], "kept in the vault by the close");
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+    // Quit: the closing frame (the end splash's "Saving your changes")
+    // saves the step, and the snapshot.
+    let dir = scratch("quit");
+    let (mut shell, mut persist, image) = open(&dir);
+    set(&shell, 1.0);
+    take(&shell, "Quit");
+    persist.frame_settled(&mut shell, 1.0);
+    drop((shell, persist));
+    let names: Vec<String> = kept(&dir, image).into_iter().map(|s| s.name).collect();
+    assert_eq!(names, ["Quit"], "kept in the vault by the quit");
+    let (shell, _persist, _) = open(&dir);
+    assert_eq!(listed(&shell), ["Quit"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_restore_is_one_step_an_undo_takes_back_after_reopening() {
     let dir = scratch("restore");

@@ -130,6 +130,7 @@ mod workshop_run;
 mod workshops;
 mod workspace_applied;
 mod workspace_edit;
+mod workspace_history;
 mod workspace_keys;
 mod workspace_live;
 mod workspaces;
