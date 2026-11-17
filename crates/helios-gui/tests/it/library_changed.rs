@@ -204,6 +204,7 @@ fn the_library_points_listeners_run_in_a_declared_order() {
          \x20 2. library.fill (owner helios.library): local; after library.volumes\n\
          \x20 3. library.albums (owner helios.library): local; after library.fill\n\
          \x20 4. library.stacks (owner helios.library): local; after library.albums\n\
+         \x20 5. library.imports (owner helios.library): local; after library.stacks\n\
          library.filled\n\
          \x20 1. library.select-imported (owner helios.library): local\n"
     );

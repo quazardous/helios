@@ -12,7 +12,8 @@
 //!    remembered as the workspace's keys loaded it, so the shortcuts
 //!    editor's follower takes no step for keys an undo put back.
 //! 2. `contexts.subworkspaces` (sub-workspaces): the list of places the
-//!    workspace offers, read again.
+//!    workspace offers, read again; a sub-workspace shown that is gone
+//!    is left, with a toast.
 //! 3. `contexts.scope` (sub-workspaces): the value store's scope follows
 //!    the sub-workspace shown as the list now has it. After the list.
 //! 4. `graph.template` (network, sub-workspaces, composites): the graph
