@@ -238,3 +238,57 @@ fn a_switch_is_said_on_the_journal_with_the_listeners_that_ran() {
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A switch runs each follower of the image open once, in its declared
+/// order, inside the pass: `image.closed` follows nothing (an image is
+/// asked), `image.opened` runs `snapshots.book`, `mask.marks`, then
+/// `workshop.photo`, which names the image to the workshop session before
+/// any frame ran (no compare at a later pass). A close with none after it
+/// passes `image.closed` once.
+#[test]
+fn a_switch_runs_each_follower_once_in_order() {
+    let dir = scratch("followers");
+    let path = vault_file(&dir);
+    let (mut shell, mut persist) = open(&path, &Options::default());
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    assert_eq!(shell.edited_image(), Some(id(1).hex()));
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(2), graph, exp, "output")
+        .unwrap();
+    assert_eq!(
+        shell.edited_image(),
+        Some(id(2).hex()),
+        "the workshop follows the switch inside its pass"
+    );
+    persist.close_image(&mut shell, 0.0).unwrap();
+    assert_eq!(shell.edited_image(), None, "and the close");
+    let said: Vec<(String, serde_json::Value)> = shell
+        .app()
+        .handle()
+        .events_since(0)
+        .into_iter()
+        .filter(|e| e.name.starts_with("image."))
+        .map(|e| (e.name.clone(), e.data.clone()))
+        .collect();
+    let kinds: Vec<&str> = said.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(
+        kinds,
+        [
+            "image.opened",
+            "image.closed",
+            "image.opened",
+            "image.closed"
+        ]
+    );
+    let followers = serde_json::json!(["snapshots.book", "mask.marks", "workshop.photo"]);
+    assert_eq!(said[0].1["followed"], followers);
+    assert_eq!(said[1].1["followed"], serde_json::Value::Null);
+    assert_eq!(said[2].1["followed"], followers);
+    assert_eq!(said[3].1["followed"], followers);
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

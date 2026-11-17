@@ -2243,12 +2243,31 @@ impl<S: Store + 'static> Persist<S> {
         &mut self,
         shell: &mut Shell,
         image: ImageId,
-        mut graph: Graph,
+        graph: Graph,
         node: NodeId,
         port: &str,
     ) -> Result<Option<Version>, String> {
         // `image.open`: the edit open saved first; refused, it stays open.
         self.switch(shell, Some(image), seconds_now())?;
+        let loaded = self.load_image(shell, image, graph, node, port);
+        if loaded.is_err() {
+            // Not loaded: no image open, as its followers know it.
+            let bus = self.listen_darkroom(shell);
+            crate::image_open::follow(&*bus, crate::image_open::Shown::default());
+        }
+        loaded
+    }
+
+    /// Loads `image` once `image.open` went through: its saved edit on
+    /// the network, shown in the viewport, then `image.opened` passed.
+    fn load_image(
+        &mut self,
+        shell: &mut Shell,
+        image: ImageId,
+        mut graph: Graph,
+        node: NodeId,
+        port: &str,
+    ) -> Result<Option<Version>, String> {
         // Opened for the first time, a raw gets its camera's default
         // calibration profile and default camera look (as its first
         // edit, read just below).
@@ -2284,18 +2303,18 @@ impl<S: Store + 'static> Persist<S> {
         let modules = modules_of(&graph);
         shell.set_view_source(graph, node, port)?;
         let snapshots = self.read_snapshots(shell, image, &unedited);
-        {
-            let mut book = crate::edit_snapshots::lock(shell.snapshots());
-            book.load(image, snapshots);
-            book.set_saved(saved_params(&modules));
-        }
-        let committed = {
-            let mut store = shell.values().lock().expect("value store lock");
-            // The labels and locks it was saved with; another image's go.
-            let marks = head.as_ref().map_or(&Value::Null, |h| &h.edit["marks"]);
-            crate::mask_tree::restore_marks(&mut store, marks);
-            store.committed()
+        // `image.opened`: what follows the image open, once, in order.
+        let bus = self.listen_darkroom(shell);
+        let shown = crate::image_open::Shown {
+            image: Some(image.hex()),
+            snapshots,
+            saved: saved_params(&modules),
+            marks: head
+                .as_ref()
+                .map_or(Value::Null, |h| h.edit["marks"].clone()),
         };
+        let followed = crate::image_open::follow(&*bus, shown);
+        let committed = held(shell.values()).committed();
         self.editing = Some(Editing {
             confirmed: session.clone(),
             session,
@@ -2309,7 +2328,7 @@ impl<S: Store + 'static> Persist<S> {
             "helios",
             None,
             crate::image_open::OPENED,
-            json!({ "image": image.hex() }),
+            json!({ "image": image.hex(), "followed": followed.ran }),
         );
         Ok(head)
     }
@@ -2499,7 +2518,14 @@ impl<S: Store + 'static> Persist<S> {
         }
         self.editing = None;
         if switch.from.is_some() {
-            handle.publish("helios", None, io::CLOSED, io::said(&switch, &switched));
+            let mut said = io::said(&switch, &switched);
+            // Closed with none after it: what follows the image open
+            // follows that, once. An image asked passes `image.opened`
+            // once loaded.
+            if to.is_none() {
+                said["followed"] = json!(io::follow(&*bus, io::Shown::default()).ran);
+            }
+            handle.publish("helios", None, io::CLOSED, said);
         }
         Ok(())
     }
@@ -2539,7 +2565,32 @@ impl<S: Store + 'static> Persist<S> {
             crate::edit_snapshots::lock(&snapshots).clear();
             Ok(())
         });
-        for e in [saved, scoped].into_iter().filter_map(Result::err) {
+        // The followers of `image.opened` / `image.closed`, each on its
+        // own state.
+        let snapshots = shell.snapshots().clone();
+        let book = io::listen_follower_local(&*bus, io::SNAPSHOTS, move |shown| {
+            let Some(image) = shown
+                .image
+                .as_deref()
+                .and_then(|i| ImageId::from_hex(i).ok())
+            else {
+                return;
+            };
+            let mut book = crate::edit_snapshots::lock(&snapshots);
+            book.load(image, shown.snapshots.clone());
+            book.set_saved(shown.saved.clone());
+        });
+        let values = shell.values().clone();
+        let marks = io::listen_follower_local(&*bus, io::MARKS, move |shown| {
+            if shown.image.is_some() {
+                crate::mask_tree::restore_marks(&mut held(&values), &shown.marks);
+            }
+        });
+        let workshop = shell.listen_workshop_photo(&*bus);
+        for e in [saved, scoped, book, marks, workshop]
+            .into_iter()
+            .filter_map(Result::err)
+        {
             log::error!(target: "helios", "{}: {e}", io::OPEN);
         }
         self.darkroom = Some(bus.clone());
@@ -2640,7 +2691,6 @@ impl<S: Store + 'static> Persist<S> {
         if !changes.is_empty() {
             self.writes.push_back(Write::Fields(changes));
         }
-        shell.set_edited_image(self.editing.as_ref().map(|e| e.session.image().hex()));
         if let Some(e) = &mut self.editing {
             e.session.set_meta(shell.session_meta());
         }

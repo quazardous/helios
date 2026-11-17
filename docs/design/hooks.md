@@ -521,12 +521,74 @@ one's steps). A refusal stops the listeners after it. The journal says
 `image.refused` (with who refused and why). The order is a reviewed
 dump (`crates/helios-gui/tests/bus/darkroom.txt`).
 
-Still followed by comparing each pass, to move as listeners of
-`image.opened` in a next slice: the viewport's source and the preview
-(pixels: the listed exception for the render itself), the panels that
-follow the photo (`panel.state`), scopes, decisions, the mask tree, the
-stand-in and the workshop session (`set_edited_image` in each
-`Persist::frame`).
+#### What follows the image open (2026-11-17)
+
+**Decision (2026-11-17): followers hold their own state behind a handle
+and are local listeners of `image.opened` / `image.closed`; no per-pass
+inbox.** The other way was an inbox: `image.opened`'s listeners only
+record that they were reached, and the shell drains the inbox at a
+declared point of its pass with `&mut Shell` in hand. Reasons for the
+handle:
+
+- **One framework, already used.** `image.open`'s own listeners and
+  `library.changed`'s four (c80172a5) are local listeners holding the
+  part of the shell they change (`Rc` / `Arc`); an inbox is the shape
+  `library.changed` left ("listeners that only marked their place, then
+  the persistence layer did each part"), because the order dump then
+  showed names while the work ran elsewhere, in a hand-written order.
+- **"Not on the bus = does not exist".** With handles, the listener *is*
+  the work: the dump (`crates/helios-gui/tests/bus/darkroom.txt`) lists
+  every follower, its owner and its `after`, and the journal's
+  `followed` says which ran. With an inbox, the drain is one more
+  hand-written list in the shell, and a follower missing from it would
+  be listed yet never run.
+- **No special case.** Each follower is registered the same way
+  (`image_open::listen_follower_local(bus, id, run)`), in its place in
+  `image_open::FOLLOWERS`; a new follower needs a handle on its own
+  state, which is what the bus asks of every listener anyway.
+- **Inside the pass.** The followers run before `open_image` returns, so
+  nothing of the next frame sees a half-switched darkroom (before, the
+  workshop learned the image at the next `Persist::frame`, a frame late).
+
+The cost: what a follower changes must be reachable without `&mut
+Shell`. Each follower's state that is not yet is moved behind a handle
+the shell and the listener share (as `Shell::library_parts` did), never
+reached through the shell from the listener.
+
+Where it stands: `image.opened` (an image loaded) and `image.closed`
+(closed with none after it, or an opening that failed to load) pass
+once per switch, their followers in this order:
+`snapshots.book` (the image's pinned snapshots and the parameters its
+edit saves, into the snapshot book), `mask.marks` (the labels and locks
+its edit was saved with, into the value store) and `workshop.photo` (the
+workshop session's photo: it was compared at every `Persist::frame`,
+`set_edited_image`, and no longer is). A switch to another image passes
+`image.closed` with no followers (the next image's `image.opened`
+follows), so each follower runs exactly once.
+
+What the slice's list named and is **not** a follower of the image open,
+so it stays where it is (read 2026-11-17):
+
+- **The viewport's source** is the load itself, part of the request's
+  act (`Shell::set_view_source`, also used for a file outside the
+  library and for a raw's first paint); the **preview** follows the
+  network shown each pass: pixels, the listed exception.
+- **The panels that follow the photo** (`panel.state`): made stale when
+  an opening is *asked* (`Shell::open_from_library`, before anything is
+  loaded), then derived each pass from the preview's render status,
+  which changes without any switch. Not an image compare.
+- **The stand-in** (the large thumbnail drawn while a raw is made
+  ready): asked with the opening, dropped once the render is complete:
+  the same.
+- **The display route** (W8, `display::follow_window`) follows the
+  window's screen, not the image.
+- **The title** is the workspace's name, not the image's.
+- **Decisions and the mask tree** are derived from the network shown
+  (`Decisions::refresh`, `MaskTree::follow`), which changes in place with
+  every edit; a switch only resets the decisions' book, inside
+  `set_view_source`. Following the network's changes (an event when the
+  shown network changes) would be a slice of its own, not
+  `image.opened`.
 
 ### Slice 2g: a workspace's state applied
 
