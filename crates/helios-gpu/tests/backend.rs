@@ -446,6 +446,53 @@ fn vkdt_filmcurv_on_the_gpu_matches_its_cpu_reference() {
 }
 
 #[test]
+fn vkdt_llap_kernels_on_the_gpu_match_their_cpu_reference() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(70, 50), 4, 19);
+    let curve = ModuleRef::new(helios_module_vkdt::llap::Curve);
+    for (sigma, shadows, highlights, clarity) in [
+        (0.12, 1.0, 1.0, 0.0),
+        (0.2, 2.5, 0.5, 1.0),
+        (0.05, 0.3, 4.0, -0.8),
+    ] {
+        let params = Params::new()
+            .with("sigma", Value::Float(sigma))
+            .with("shadows", Value::Float(shadows))
+            .with("highlights", Value::Float(highlights))
+            .with("clarity", Value::Float(clarity));
+        let c = check(
+            &gpu,
+            &curve,
+            &params,
+            &Context::new(),
+            &input,
+            input.region(),
+        )
+        .unwrap();
+        assert!(
+            c.max_abs < 1e-4,
+            "llap curve {sigma} {shadows} {highlights} {clarity}: {c:?}"
+        );
+    }
+    // Eleven layers; the domain is the finer level's, its lookups mirrored.
+    let layers = helios_testkit::noise(Region::new(-6, 3, 70, 50), 11, 23);
+    let reduce = ModuleRef::new(helios_module_vkdt::llap::Reduce);
+    for (domain, region) in [
+        ((-6, 3, 70, 50), Region::sized(35, 25)),
+        ((-6, 3, 69, 49), Region::new(5, 4, 20, 17)),
+    ] {
+        let params = Params::new()
+            .with("x", Value::Int(domain.0))
+            .with("y", Value::Int(domain.1))
+            .with("width", Value::Int(domain.2))
+            .with("height", Value::Int(domain.3));
+        let c = check(&gpu, &reduce, &params, &Context::new(), &layers, region).unwrap();
+        assert!(c.max_abs < 1e-5, "llap reduce {domain:?} {region}: {c:?}");
+    }
+}
+
+#[test]
 fn vkdt_colour_on_the_gpu_matches_its_cpu_reference() {
     let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };

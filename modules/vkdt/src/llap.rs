@@ -25,11 +25,13 @@
 //! image's extent at the render's scale, as vkdt builds them from its
 //! size: lookups mirror at each level's edges as vkdt's sampler does.
 //!
-//! The kernels run on the CPU.
+//! `curve` and `reduce` have a GPU variant; `expand`, `assemble` and
+//! `colour` read two images and run on the CPU, since an accelerator runs
+//! one input today.
 
 use helios_core::{
-    Composite, Context, Error, Expansion, Family, Image, Manifest, Module, ModuleKind, ModuleRef,
-    Needs, Network, ParamKind, ParamSpec, Params, PortSpec, Region, Role, Value, Wire,
+    Composite, Context, Error, Expansion, Family, GpuKernel, Image, Manifest, Module, ModuleKind,
+    ModuleRef, Needs, Network, ParamKind, ParamSpec, Params, PortSpec, Region, Role, Value, Wire,
 };
 
 use crate::guided::luminance;
@@ -228,6 +230,17 @@ impl Module for Curve {
         }
         Ok(vec![Image::new(output, LAYERS, data)])
     }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        Some(GpuKernel {
+            wgsl: include_str!("wgsl/llap_curve.wgsl"),
+            entry: "main",
+        })
+    }
+
+    fn gpu_uniforms(&self, p: &CurvePlan) -> Vec<f32> {
+        vec![p.sigma, p.shadows, p.highlights, p.clarity]
+    }
 }
 
 /// `reduce`: a pyramid level at half the resolution, each of its eleven
@@ -277,6 +290,17 @@ impl Module for Reduce {
             }
         }
         Ok(vec![Image::new(output, LAYERS, data)])
+    }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        Some(GpuKernel {
+            wgsl: include_str!("wgsl/llap_reduce.wgsl"),
+            entry: "main",
+        })
+    }
+
+    fn gpu_uniforms(&self, d: &Domain) -> Vec<f32> {
+        vec![d.x as f32, d.y as f32, d.width as f32, d.height as f32]
     }
 }
 
