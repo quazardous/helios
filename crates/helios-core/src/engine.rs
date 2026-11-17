@@ -56,6 +56,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::Serialize;
 
 use crate::bus::{Bus, Event};
+use crate::cancel;
 use crate::describe::Describe;
 use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
@@ -489,10 +490,23 @@ pub fn unions(mut regions: Vec<Region>) -> Vec<Region> {
     }
 }
 
+/// How many times an asker that did not cancel asks again for a step whose
+/// shared computation was cancelled by its other askers.
+const MAX_ATTEMPTS: u32 = 8;
+
+/// What one ask of a step gives.
+enum Attempt {
+    /// Ready content of the same lineage over a wider region.
+    Wider(Arc<Content>),
+    /// The step's own outputs.
+    Done(Outputs),
+}
+
 /// What a lookup in the cache finds for a step.
 enum Found {
-    /// The step's own entry, ready or not.
-    Cell(Arc<OnceLock<Outputs>>),
+    /// The step's own entry, ready or not, with the token its computation
+    /// runs under (every asker joins it).
+    Cell(Arc<OnceLock<Outputs>>, cancel::Token),
     /// Ready content of the same lineage over a wider region.
     Wider(Arc<Content>),
 }
@@ -532,6 +546,8 @@ impl Default for Cache {
 
 struct Entry {
     cell: Arc<OnceLock<Outputs>>,
+    /// The computation's token: cancelled only once every asker is.
+    askers: cancel::Token,
     lineage: ContentHash,
     region: Region,
     /// Bytes of its outputs, counted once they are ready.
@@ -548,7 +564,7 @@ impl Cache {
         if let Some(entry) = self.entries.get(&step.key) {
             self.order.touch(&step.key, tick);
             helios_cache::Counters::add(&self.stats.hits, 1);
-            return Found::Cell(entry.cell.clone());
+            return Found::Cell(entry.cell.clone(), entry.askers.clone());
         }
         if let Some((key, content)) = self.wider(step) {
             self.order.touch(&key, tick);
@@ -557,10 +573,12 @@ impl Cache {
         }
         helios_cache::Counters::add(&self.stats.misses, 1);
         let cell: Arc<OnceLock<Outputs>> = Arc::default();
+        let askers = cancel::Token::shared();
         self.entries.insert(
             step.key,
             Entry {
                 cell: cell.clone(),
+                askers: askers.clone(),
                 lineage: step.lineage,
                 region: step.region,
                 size: 0,
@@ -570,7 +588,7 @@ impl Cache {
             .entry(step.lineage)
             .or_default()
             .push(step.key);
-        Found::Cell(cell)
+        Found::Cell(cell, askers)
     }
 
     /// Ready content of `step`'s lineage over a region holding its own,
@@ -1394,10 +1412,12 @@ impl Engine {
                     | ShapeKind::Composite { .. }
                     | ShapeKind::Bypass { .. } => {}
                     ShapeKind::Reduce { input, scale } => {
+                        let full = r.full_resolution(*scale);
+                        let extent = graph.extent(input.node).ok().flatten();
                         asked
                             .entry(*input)
                             .or_default()
-                            .push(r.full_resolution(*scale));
+                            .push(whole_image_ask(full, extent));
                     }
                     ShapeKind::Pending { inputs } => {
                         for (src, _) in inputs {
@@ -1912,15 +1932,39 @@ impl Engine {
             t.requests += 1;
             t.last_key = Some(step.key);
         });
-        let found = self.cache.lock().expect("engine cache lock").find(step);
-        let cell = match found {
-            Found::Cell(cell) => cell,
-            Found::Wider(content) => {
-                self.crops.fetch_add(1, Ordering::SeqCst);
+        // This asker's token: a computation it shares runs until every
+        // asker cancelled, and a cancelled one is asked again by those that
+        // did not.
+        let token = cancel::current();
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let outputs = match self.attempt(step, cause, pins, &token) {
+                Attempt::Wider(content) => {
+                    self.crops.fetch_add(1, Ordering::SeqCst);
+                    Ok(content)
+                }
+                Attempt::Done(outputs) => outputs,
+            };
+            let retry = outputs.as_ref().is_err_and(Error::is_cancelled)
+                && !token.is_cancelled()
+                && attempts < MAX_ATTEMPTS;
+            if !retry {
                 self.release(step, pins);
-                return Ok(content);
+                return outputs;
             }
+        }
+    }
+
+    /// One look in the cache for `step`: wider content, or its cell joined
+    /// (computed here when nobody computes it yet).
+    fn attempt(&self, step: &Step, cause: u64, pins: &Pins, token: &cancel::Token) -> Attempt {
+        let found = self.cache.lock().expect("engine cache lock").find(step);
+        let (cell, askers) = match found {
+            Found::Cell(cell, askers) => (cell, askers),
+            Found::Wider(content) => return Attempt::Wider(content),
         };
+        askers.join(token.clone());
         let mut computed_here = false;
         // Only one thread runs the initializer; others asking for the same key wait for it.
         let outputs = cell
@@ -1931,7 +1975,7 @@ impl Engine {
                     t.computed += 1;
                     t.running += 1;
                 });
-                let result = self.compute(step, cause, pins);
+                let result = cancel::scope(&askers, || self.compute(step, cause, pins));
                 self.track(step, |t| t.running -= 1);
                 let event = StepComputed {
                     node: step.node,
@@ -1950,7 +1994,6 @@ impl Engine {
                 .expect("engine cache lock")
                 .settle(Some(step.key), self.budget());
         }
-        self.release(step, pins);
         if outputs.as_ref().is_err_and(Error::is_transient) {
             // A transient failure is not an answer: forget it, so asking
             // again computes again.
@@ -1963,7 +2006,7 @@ impl Engine {
                 cache.remove(step.key);
             }
         }
-        outputs
+        Attempt::Done(outputs)
     }
 
     /// A step's GPU variant failed: it is computed on the CPU, and the bus
@@ -2121,6 +2164,44 @@ impl Engine {
             Work::Pending { .. } => unreachable!("execute answers pending steps itself"),
         }
     }
+}
+
+/// The step a reduce over the whole image reads at full resolution is
+/// grown to a canonical region, so asks at different scales share one
+/// key, and so one computation: their regions run a few pixels past the
+/// image (or stop just short of it), each by a different amount, from
+/// rounding at each scale. Each side is rounded out to this many pixels.
+const WHOLE_IMAGE_MARGIN: i64 = 64;
+
+/// The full-resolution region a reduce asks for (`full`): grown to the
+/// canonical whole-image region when it holds the whole `extent` but for
+/// less than a margin on each side, as is for a part of the image (a
+/// zoomed tile). Growing changes no pixel a reduce reads: a step's pixels
+/// do not depend on its region (what tiling relies on), and the reduce
+/// reads only `full`, held inside.
+///
+/// The canonical region is the extent grown on each side by its overshoot
+/// rounded up to the margin; the right and bottom always by one margin at
+/// least, since rounding a size up at a scale nearly always runs past
+/// them, while the left and top start on the image's own grid.
+fn whole_image_ask(full: Region, extent: Option<Region>) -> Region {
+    const M: i64 = WHOLE_IMAGE_MARGIN;
+    let Some(e) = extent.filter(|e| {
+        !e.is_empty()
+            && full.x <= e.x + M
+            && full.y <= e.y + M
+            && full.right() >= e.right() - M
+            && full.bottom() >= e.bottom() - M
+    }) else {
+        return full;
+    };
+    let round = |over: i64| (over.max(0) + M - 1) / M * M;
+    let (x, y) = (e.x - round(e.x - full.x), e.y - round(e.y - full.y));
+    let (right, bottom) = (
+        e.right() + round(full.right() - e.right()).max(M),
+        e.bottom() + round(full.bottom() - e.bottom()).max(M),
+    );
+    Region::new(x, y, (right - x) as u32, (bottom - y) as u32)
 }
 
 /// A copy to or from the accelerator failed, for `step`: a lost or hung

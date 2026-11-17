@@ -26,6 +26,7 @@
 //! `library.images.trash` as a journaled job. Not a step of the library's
 //! history: the system trash is their undo.
 
+use crate::library_write::WriteAsk;
 use egui_pop::views::library::{Change as Mark, ColorLabel};
 use serde_json::{Value, json};
 
@@ -365,7 +366,7 @@ impl Library {
     }
 
     /// Queues `images` (those shown), else the selection, to be taken out
-    /// of the Library by the host ([`Library::take_removals`]); how many.
+    /// of the Library by the host (`library.write`); how many.
     ///
     /// # Errors
     /// No photo to take out.
@@ -381,19 +382,15 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.removals
-            .push((keys, crate::library_history::current_batch()));
+        self.ask_write(WriteAsk::Remove(
+            keys,
+            crate::library_history::current_batch(),
+        ));
         Ok(count)
     }
 
-    /// The photos asked taken out of the Library since, one list per
-    /// command, with its batch.
-    pub fn take_removals(&mut self) -> Vec<(Vec<String>, super::Batch)> {
-        std::mem::take(&mut self.removals)
-    }
-
     /// Queues `images` (those shown), else the selection, to be turned by
-    /// the host ([`Library::take_rotations`]); how many.
+    /// the host (`library.write`); how many.
     ///
     /// # Errors
     /// No photo to turn.
@@ -409,19 +406,16 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.rotations
-            .push((keys, turn, crate::library_history::current_batch()));
+        self.ask_write(WriteAsk::Rotate(
+            keys,
+            turn,
+            crate::library_history::current_batch(),
+        ));
         Ok(count)
     }
 
-    /// The photos asked turned since, one list per command, with the
-    /// turn and its batch.
-    pub fn take_rotations(&mut self) -> Vec<(Vec<String>, Turn, super::Batch)> {
-        std::mem::take(&mut self.rotations)
-    }
-
     /// Queues `images` (those shown), else the selection, to be
-    /// duplicated by the host ([`Library::take_duplicates`]); how many.
+    /// duplicated by the host (`library.write`); how many.
     ///
     /// # Errors
     /// No photo to duplicate.
@@ -441,18 +435,12 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.duplicates.push((keys, from));
+        self.ask_write(WriteAsk::Duplicate(keys, from));
         Ok(count)
     }
 
-    /// The photos asked duplicated since, one list per command, with
-    /// where each copy's edit comes from.
-    pub fn take_duplicates(&mut self) -> Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)> {
-        std::mem::take(&mut self.duplicates)
-    }
-
     /// Queues `images` (those shown), else the selection, for their files
-    /// to go to the trash ([`Library::take_trash_asks`]); how many.
+    /// to go to the trash (`library.write`); how many.
     ///
     /// # Errors
     /// No photo.
@@ -472,11 +460,11 @@ impl Library {
             None => self.targets()?,
         };
         let count = keys.len();
-        self.trash_asks.push(TrashAsk {
+        self.ask_write(WriteAsk::Trash(TrashAsk {
             images: keys,
             confirmed,
             rejected: false,
-        });
+        }));
         Ok(count)
     }
 
@@ -499,17 +487,12 @@ impl Library {
             return Err("no rejected photo shown".into());
         }
         let count = keys.len();
-        self.trash_asks.push(TrashAsk {
+        self.ask_write(WriteAsk::Trash(TrashAsk {
             images: keys,
             confirmed,
             rejected: true,
-        });
+        }));
         Ok(count)
-    }
-
-    /// The trash asks since, in order.
-    pub fn take_trash_asks(&mut self) -> Vec<TrashAsk> {
-        std::mem::take(&mut self.trash_asks)
     }
 }
 
@@ -576,7 +559,7 @@ mod tests {
             Ok(1)
         );
         assert_eq!(
-            lib.take_duplicates(),
+            lib.asked_duplicates(),
             [
                 (vec!["b".to_string()], DuplicateFrom::Current),
                 (vec!["c".to_string()], DuplicateFrom::Original)
@@ -600,13 +583,13 @@ mod tests {
             Ok(1)
         );
         assert_eq!(
-            lib.take_rotations(),
+            lib.asked_rotations(),
             [
                 (vec!["a".to_string(), "c".into()], Turn::Left, None),
                 (vec!["d".to_string()], Turn::Reset, None)
             ]
         );
-        assert!(lib.take_rotations().is_empty());
+        assert!(lib.asked_rotations().is_empty());
     }
 
     #[test]
@@ -623,13 +606,13 @@ mod tests {
         );
         assert!(lib.remove_from_library(Some(vec!["zz".into()])).is_err());
         assert_eq!(
-            lib.take_removals(),
+            lib.asked_removals(),
             [
                 (vec!["a".to_string(), "c".into()], None),
                 (vec!["d".to_string()], None)
             ]
         );
-        assert!(lib.take_removals().is_empty());
+        assert!(lib.asked_removals().is_empty());
     }
 
     #[test]
@@ -657,7 +640,7 @@ mod tests {
             "a photo not rejected is left out"
         );
         assert_eq!(lib.ask_trash(None, false), Ok(1), "the selection");
-        let asks = lib.take_trash_asks();
+        let asks = lib.asked_trash_asks();
         assert_eq!(asks[0].images, ["b", "d"]);
         assert!(asks[0].rejected && !asks[0].confirmed);
         assert_eq!(asks[1].images, ["d"]);

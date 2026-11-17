@@ -25,6 +25,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::library_write::WriteAsk;
 use egui::Ui;
 use egui_pop::core::input::Input;
 use egui_pop::core::tooltip::TooltipExt as _;
@@ -39,7 +40,7 @@ use helios_ui::{Action, Scroll};
 use helios_vault::meta::{COPYRIGHT, CREATOR, DESCRIPTION, TEXT_FIELDS, TITLE};
 use serde_json::{Map, Value, json};
 
-use super::{Batch, Entry, Library};
+use super::{Entry, Library};
 
 /// Sets metadata on photos as one undoable step (`fields`, `keywords`
 /// with `add` and `remove`, `labels` with `add` and `remove`; `images`:
@@ -215,7 +216,7 @@ pub(super) struct MetaDrafts {
 }
 
 impl Library {
-    /// Queues a group edit for the host ([`Library::take_meta_edits`]);
+    /// Queues a group edit for the host (`library.write`);
     /// how many photos it names. `images`: those shown, else the
     /// selection.
     ///
@@ -240,14 +241,11 @@ impl Library {
             return Err("nothing to set: no field, label or keyword".into());
         }
         let count = edit.images.len();
-        self.meta_edits
-            .push((edit, crate::library_history::current_batch()));
+        self.ask_write(WriteAsk::Meta(
+            edit,
+            crate::library_history::current_batch(),
+        ));
         Ok(count)
-    }
-
-    /// The group edits asked since, each with its batch.
-    pub fn take_meta_edits(&mut self) -> Vec<(MetaEdit, Batch)> {
-        std::mem::take(&mut self.meta_edits)
     }
 
     /// What the selection (else the cursor's photo) shares, as
@@ -299,11 +297,6 @@ impl Library {
         std::mem::replace(&mut self.templates_wanted, super::Wanted::No) == super::Wanted::Yes
     }
 
-    /// The templates to write back, once changed.
-    pub fn take_templates_write(&mut self) -> Option<Vec<Template>> {
-        self.templates_write.take()
-    }
-
     fn templates_mut(&mut self) -> Result<&mut Vec<Template>, String> {
         self.templates
             .as_mut()
@@ -352,7 +345,9 @@ impl Library {
         });
         list.sort_by(|a, b| a.name.cmp(&b.name));
         let count = list.len();
-        self.templates_write = self.templates.clone();
+        if let Some(list) = self.templates.clone() {
+            self.ask_write(WriteAsk::Templates(list));
+        }
         self.meta_panel.template = Some(name.to_string());
         Ok(count)
     }
@@ -395,7 +390,9 @@ impl Library {
             return Err(format!("no template “{name}”"));
         }
         let count = list.len();
-        self.templates_write = self.templates.clone();
+        if let Some(list) = self.templates.clone() {
+            self.ask_write(WriteAsk::Templates(list));
+        }
         if self.meta_panel.template.as_deref() == Some(name) {
             self.meta_panel.template = None;
         }

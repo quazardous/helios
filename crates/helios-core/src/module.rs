@@ -712,6 +712,11 @@ impl ModuleRef {
     }
 
     fn module_error(&self, reason: String) -> Error {
+        if reason == crate::cancel::CANCELLED {
+            return Error::Cancelled {
+                module: self.manifest().name.clone(),
+            };
+        }
         Error::Module {
             module: self.manifest().name.clone(),
             reason,

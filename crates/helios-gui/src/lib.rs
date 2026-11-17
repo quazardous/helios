@@ -44,6 +44,7 @@ pub mod keys;
 pub mod library;
 pub mod library_changed;
 pub mod library_history;
+pub mod library_write;
 pub mod log_panel;
 #[cfg(target_os = "macos")]
 pub mod macos;
