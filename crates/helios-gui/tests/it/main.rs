@@ -89,6 +89,7 @@ mod persist;
 mod photo_panels;
 mod picture_orientation;
 mod platform;
+mod plugin_commands;
 mod plugin_consent;
 mod queue;
 mod quick_open;

@@ -14,6 +14,8 @@ use serde_json::{Value as Json, json};
 
 const TESTEE: &str = "org.example.testee";
 const READ: &str = "onService:metadata.read";
+/// A copy of the test plugin slow to start.
+const SLOW: &str = "org.example.slow";
 
 /// A directory of the test's own.
 fn scratch(name: &str) -> PathBuf {
@@ -295,6 +297,58 @@ fn a_call_times_out_and_the_plugin_lives_on() {
     let again = b.call(TESTEE, READ, "echo", json!({"n": 1})).unwrap();
     assert_eq!(again["params"]["n"], 1);
     assert_eq!(again["pid"], pid);
+}
+
+/// One plugin's slow start holds no other plugin: a call to another, the
+/// list (the Settings page) and `running` answer at once; a second call
+/// to the one starting waits for that start and shares its process.
+#[test]
+fn a_slow_start_blocks_no_other_plugin() {
+    if !python() {
+        return;
+    }
+    let slow = testee_copy("slow", |t| {
+        t.replace(TESTEE, SLOW).replace(
+            r#"["python3", "testee.py"]"#,
+            r#"["python3", "-c", "import time, runpy; time.sleep(4); runpy.run_path('testee.py', run_name='__main__')"]"#,
+        )
+    });
+    let mut b = testee(quick());
+    b.add(&slow, Scope::User).unwrap();
+    let b = Arc::new(b);
+    // the other plugin runs already
+    b.call(TESTEE, READ, "echo", json!({})).unwrap();
+
+    let starting = |b: &Arc<Broker>| {
+        let b = b.clone();
+        std::thread::spawn(move || b.call(SLOW, READ, "echo", json!({})))
+    };
+    let first = starting(&b);
+    std::thread::sleep(Duration::from_millis(500));
+    let second = starting(&b);
+    std::thread::sleep(Duration::from_millis(200));
+
+    let t = std::time::Instant::now();
+    b.call(TESTEE, READ, "echo", json!({"n": 1})).unwrap();
+    assert!(
+        t.elapsed() < Duration::from_secs(2),
+        "a call to another plugin waited {:?} on the slow start",
+        t.elapsed()
+    );
+    let t = std::time::Instant::now();
+    let list = b.list();
+    assert!(!b.running(SLOW), "not running until it answered");
+    assert!(
+        t.elapsed() < Duration::from_secs(1),
+        "the list waited {:?} on the slow start",
+        t.elapsed()
+    );
+    assert_eq!(list["plugins"].as_array().unwrap().len(), 2);
+
+    let first = first.join().unwrap().unwrap();
+    let second = second.join().unwrap().unwrap();
+    assert_eq!(first["pid"], second["pid"], "started once");
+    assert!(b.running(SLOW));
 }
 
 #[test]

@@ -43,6 +43,8 @@ for line in sys.stdin:
                 {"name": "granted", "value": granted, "source": "testee"},
             ]
         }
+    elif method == "command/execute":
+        reply["result"] = {"command": params["command"], "args": params["args"], "pid": os.getpid()}
     elif method == "echo":
         reply["result"] = {"params": params, "pid": os.getpid()}
     elif method == "told":
