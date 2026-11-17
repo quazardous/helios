@@ -6,7 +6,12 @@
 //! (a fix) and a junction left to its fallback decided; Re-run for the
 //! held and decided photos.
 
+use egui_pop::core::number::NumberInput;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::Message;
+use helios_ui::{Action, Scroll};
 use serde_json::{Value, json};
 
 use super::Panel;
@@ -50,6 +55,9 @@ fn source_words(kind: &str) -> Message {
     }
 }
 
+/// How wide a value set by hand is typed, in points: a few digits.
+const VALUE_WIDTH: f32 = 64.0;
+
 fn number(v: &Value) -> String {
     v.as_f64().map_or_else(
         || "-".to_string(),
@@ -69,13 +77,16 @@ impl Panel {
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let Some(review) = self.review.clone() else {
             if let Some(last) = &self.last_run {
-                ui.separator();
-                if ui
-                    .button(text(Message::new(
+                ui.divider();
+                if helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new(
                         "gui-workshops-review-last",
                         "Review the last run",
-                    )))
-                    .clicked()
+                    )),
+                )
+                .clicked()
                 {
                     *run = Some(("workshop.review", json!({ "run": last })));
                 }
@@ -84,17 +95,20 @@ impl Panel {
         };
         let id = review["run"].clone();
         let node = review["node"].clone();
-        ui.separator();
-        ui.strong(text(
-            Message::new(
-                "gui-workshops-review-title",
-                "Review: { $name }, run { $n }",
-            )
-            .with("name", review["name"].as_str().unwrap_or_default())
-            .with("n", review["n"].to_string()),
-        ));
+        ui.divider();
+        ui.text_role(
+            TextRole::Section,
+            text(
+                Message::new(
+                    "gui-workshops-review-title",
+                    "Review: { $name }, run { $n }",
+                )
+                .with("name", review["name"].as_str().unwrap_or_default())
+                .with("n", review["n"].to_string()),
+            ),
+        );
         let c = &review["counts"];
-        ui.weak(text(
+        ui.muted(text(
             Message::new(
                 "gui-workshops-review-counts",
                 "{ $photos } photos, { $flagged } to review, { $held } held; AI calls: { $calls }",
@@ -110,154 +124,194 @@ impl Panel {
         let rerun = review["rerun"].as_array().map_or(0, Vec::len);
         let mut close = false;
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(
+            widgets::checkbox(
+                ui,
                 &mut self.review_flagged_only,
                 text(Message::new("gui-workshops-review-flagged-only", "Only photos to review")),
             );
             if rerun > 0
-                && ui
-                    .button(text(
+                && helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &text(
                         Message::new("gui-workshops-review-rerun", "Re-run held and decided ({ $count })")
                             .with("count", rerun.to_string()),
-                    ))
-                    .on_hover_text(text(Message::new(
-                        "gui-workshops-review-rerun-hint",
-                        "Run the workshop again on the held photos and those with a junction decided: a new run, one undo step",
-                    )))
-                    .clicked()
+                    ),
+                )
+                .tip(text(Message::new(
+                    "gui-workshops-review-rerun-hint",
+                    "Run the workshop again on the held photos and those with a junction decided: a new run, one undo step",
+                )))
+                .clicked()
             {
                 *run = Some(("workshop.review", json!({ "run": id, "node": node, "action": "rerun" })));
             }
-            if ui
-                .small_button(text(Message::new("gui-workshops-review-refresh", "Refresh")))
-                .clicked()
+            if helios_ui::row_action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-workshops-review-refresh", "Refresh")),
+            )
+            .clicked()
             {
                 *run = Some(("workshop.review", json!({ "run": id })));
             }
-            close = ui
-                .small_button(text(Message::new("gui-workshops-review-close", "Close")))
-                .clicked();
+            close = helios_ui::row_action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-workshops-review-close", "Close")),
+            )
+            .clicked();
         });
         if close {
             self.review = None;
             return;
         }
         let pending = review["pending"].as_array().cloned().unwrap_or_default();
-        let scroll = egui::ScrollArea::vertical()
-            .id_salt("workshop-review")
-            .max_height(480.0)
-            .auto_shrink([false, true]);
-        scroll.show(ui, |ui| {
-        for p in review["photos"].as_array().into_iter().flatten() {
-            let state = p["state"].as_str().unwrap_or_default();
-            let flags = p["flags"].as_array().cloned().unwrap_or_default();
-            let to_review = !flags.is_empty() || matches!(state, "held" | "stopped" | "failed");
-            if self.review_flagged_only && !to_review {
-                continue;
-            }
-            let image = p["image"].as_str().unwrap_or_default().to_string();
-            let name = p["name"]
-                .as_str()
-                .map_or_else(|| image.chars().take(8).collect(), String::from);
-            ui.group(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.strong(&name);
-                    ui.label(text(state_words(state)));
-                    for f in &flags {
-                        ui.label(
-                            egui::RichText::new(text(flag_words(f["flag"].as_str().unwrap_or_default())))
-                                .color(ui.visuals().warn_fg_color),
-                        )
-                        .on_hover_text(f["note"].as_str().unwrap_or_default());
-                    }
-                });
-                for (slider, after) in p["after"].as_object().into_iter().flatten() {
-                    let source = p["provenance"][slider]["kind"].as_str().unwrap_or("fixed");
-                    let junction = pending
-                        .iter()
-                        .any(|j| j["image"] == image.as_str() && j["junction"] == slider.as_str());
+        helios_ui::scroll(ui, "workshop-review", Scroll::Form, |ui| {
+            for p in review["photos"].as_array().into_iter().flatten() {
+                let state = p["state"].as_str().unwrap_or_default();
+                let flags = p["flags"].as_array().cloned().unwrap_or_default();
+                let to_review = !flags.is_empty() || matches!(state, "held" | "stopped" | "failed");
+                if self.review_flagged_only && !to_review {
+                    continue;
+                }
+                let image = p["image"].as_str().unwrap_or_default().to_string();
+                let name = p["name"]
+                    .as_str()
+                    .map_or_else(|| image.chars().take(8).collect(), String::from);
+                ui.space_role(Space::Group);
+                ui.card(Tone::Neutral, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let l = ui.label(text(
-                            Message::new(
-                                "gui-workshops-review-value",
-                                "{ $slider }: { $before } before, { $after } after ({ $source })",
-                            )
-                            .with("slider", slider.as_str())
-                            .with("before", number(&p["before"][slider]))
-                            .with("after", number(after))
-                            .with("source", text(source_words(source))),
-                        ));
-                        if matches!(state, "failed" | "reverted") {
-                            return;
+                        ui.text_role(TextRole::Section, &name);
+                        ui.text_role(TextRole::Body, text(state_words(state)));
+                        for f in &flags {
+                            let r = ui.text_tone(
+                                Tone::Warning,
+                                text(flag_words(f["flag"].as_str().unwrap_or_default())),
+                            );
+                            if let Some(note) = f["note"].as_str().filter(|n| !n.is_empty()) {
+                                let _ = r.tip(note);
+                            }
                         }
-                        let key = (image.clone(), slider.clone());
-                        let v = self
-                            .review_edits
-                            .entry(key)
-                            .or_insert_with(|| after.as_f64().unwrap_or(0.0));
-                        ui.add(egui::DragValue::new(v).speed(0.01)).labelled_by(l.id);
-                        let v = *v;
-                        if junction {
-                            if ui
-                                .small_button(text(Message::new("gui-workshops-review-decide", "Decide")))
-                                .on_hover_text(text(Message::new(
+                    });
+                    for (slider, after) in p["after"].as_object().into_iter().flatten() {
+                        let source = p["provenance"][slider]["kind"].as_str().unwrap_or("fixed");
+                        let junction = pending
+                            .iter()
+                            .any(|j| j["image"] == image.as_str() && j["junction"] == slider.as_str());
+                        let l = ui.text_role(
+                            TextRole::Body,
+                            text(
+                                Message::new(
+                                    "gui-workshops-review-value",
+                                    "{ $slider }: { $before } before, { $after } after ({ $source })",
+                                )
+                                .with("slider", slider.as_str())
+                                .with("before", number(&p["before"][slider]))
+                                .with("after", number(after))
+                                .with("source", text(source_words(source))),
+                            ),
+                        );
+                        if matches!(state, "failed" | "reverted") {
+                            continue;
+                        }
+                        // The value under its line, and its button.
+                        ui.horizontal(|ui| {
+                            let key = (image.clone(), slider.clone());
+                            let v = self
+                                .review_edits
+                                .entry(key)
+                                .or_insert_with(|| after.as_f64().unwrap_or(0.0));
+                            // The value typed; the node refuses one outside
+                            // the slider's range. The kit's number field is
+                            // as wide as its range's end, so an unbounded one
+                            // is held to a few digits here.
+                            let field = ui
+                                .push_id((&image, slider), |ui| {
+                                    ui.allocate_ui(egui::vec2(VALUE_WIDTH, ui.spacing().interact_size.y), |ui| {
+                                        NumberInput::new(v, slider, f64::MIN..=f64::MAX)
+                                            .step(0.01)
+                                            .decimals(2)
+                                            .show(ui)
+                                    })
+                                    .inner
+                                })
+                                .inner;
+                            let _ = field.labelled_by(l.id);
+                            let v = *v;
+                            if junction {
+                                if helios_ui::row_action(
+                                    ui,
+                                    Action::Secondary,
+                                    &text(Message::new("gui-workshops-review-decide", "Decide")),
+                                )
+                                .tip(text(Message::new(
                                     "gui-workshops-review-decide-hint",
                                     "Answer this junction for this photo: recorded in the workshop's decision book, a re-run takes it",
                                 )))
                                 .clicked()
+                                {
+                                    *run = Some((
+                                        "workshop.review",
+                                        json!({ "run": id, "node": node, "action": "decide", "image": image, "junction": slider, "value": v }),
+                                    ));
+                                }
+                            } else if helios_ui::row_action(
+                                ui,
+                                Action::Secondary,
+                                &text(Message::new("gui-workshops-review-set", "Set")),
+                            )
+                            .tip(text(Message::new(
+                                "gui-workshops-review-set-hint",
+                                "Fix this value on this photo by hand: a new version, its flag cleared",
+                            )))
+                            .clicked()
                             {
                                 *run = Some((
                                     "workshop.review",
-                                    json!({ "run": id, "node": node, "action": "decide", "image": image, "junction": slider, "value": v }),
+                                    json!({ "run": id, "node": node, "action": "fix", "image": image, "values": { slider.as_str(): v } }),
                                 ));
                             }
-                        } else if ui
-                            .small_button(text(Message::new("gui-workshops-review-set", "Set")))
-                            .on_hover_text(text(Message::new(
-                                "gui-workshops-review-set-hint",
-                                "Fix this value on this photo by hand: a new version, its flag cleared",
+                        });
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if matches!(state, "held" | "stopped")
+                            && helios_ui::row_action(
+                                ui,
+                                Action::Secondary,
+                                &text(Message::new("gui-workshops-review-accept", "Accept")),
+                            )
+                            .tip(text(Message::new(
+                                "gui-workshops-review-accept-hint",
+                                "Write this photo with the values the run found, flags and all",
                             )))
                             .clicked()
                         {
                             *run = Some((
                                 "workshop.review",
-                                json!({ "run": id, "node": node, "action": "fix", "image": image, "values": { slider.as_str(): v } }),
+                                json!({ "run": id, "node": node, "action": "accept", "image": image }),
                             ));
                         }
-                    });
-                }
-                ui.horizontal_wrapped(|ui| {
-                    if matches!(state, "held" | "stopped")
-                        && ui
-                            .small_button(text(Message::new("gui-workshops-review-accept", "Accept")))
-                            .on_hover_text(text(Message::new(
-                                "gui-workshops-review-accept-hint",
-                                "Write this photo with the values the run found, flags and all",
-                            )))
-                            .clicked()
-                    {
-                        *run = Some((
-                            "workshop.review",
-                            json!({ "run": id, "node": node, "action": "accept", "image": image }),
-                        ));
-                    }
-                    if matches!(state, "applied" | "accepted" | "fixed")
-                        && ui
-                            .small_button(text(Message::new("gui-workshops-review-revert", "Revert")))
-                            .on_hover_text(text(Message::new(
+                        if matches!(state, "applied" | "accepted" | "fixed")
+                            && helios_ui::row_action(
+                                ui,
+                                Action::Secondary,
+                                &text(Message::new("gui-workshops-review-revert", "Revert")),
+                            )
+                            .tip(text(Message::new(
                                 "gui-workshops-review-revert-hint",
                                 "Take the run's version of this photo out: its edit before the run is current again",
                             )))
                             .clicked()
-                    {
-                        *run = Some((
-                            "workshop.review",
-                            json!({ "run": id, "action": "revert", "image": image }),
-                        ));
-                    }
+                        {
+                            *run = Some((
+                                "workshop.review",
+                                json!({ "run": id, "action": "revert", "image": image }),
+                            ));
+                        }
+                    });
                 });
-            });
-        }
+            }
         });
     }
 }
