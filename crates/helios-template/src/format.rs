@@ -266,6 +266,7 @@ impl ResultsMode {
         Self::ALL.into_iter().find(|m| m.name() == name)
     }
 
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if takes a reference
     fn is_thumbnails(&self) -> bool {
         *self == ResultsMode::Thumbnails
     }

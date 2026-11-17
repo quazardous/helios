@@ -132,12 +132,11 @@ pub fn auto_advance_of(library: Option<&LibraryDesc>, id: &str) -> bool {
 /// changes the main view only.
 pub fn set_auto_advance(library: &mut LibraryDesc, id: &str, on: bool) {
     if id == MAIN_GALLERY {
-        for other in [WINDOW_GALLERY] {
-            let mut view = view_of(Some(library), other);
-            if view.auto_advance.is_none() && library.auto_advance != on {
-                view.auto_advance = Some(library.auto_advance);
-                set_view(library, other, view);
-            }
+        // The other views known today (more with gallery instances).
+        let mut view = view_of(Some(library), WINDOW_GALLERY);
+        if view.auto_advance.is_none() && library.auto_advance != on {
+            view.auto_advance = Some(library.auto_advance);
+            set_view(library, WINDOW_GALLERY, view);
         }
         library.auto_advance = on;
     } else {
@@ -437,5 +436,4 @@ mod tests {
         assert!(!auto_advance_of(Some(&l), WINDOW_GALLERY));
         assert_eq!(l, LibraryDesc::default());
     }
-
 }

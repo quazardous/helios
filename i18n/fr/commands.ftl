@@ -404,7 +404,7 @@ command-theme-select =
     .title = Utiliser un thème, par son nom
 
 command-vault-autoAdvance =
-    .title = Tri : passer à l’image suivante après chaque marque (`on` ; basculé en son absence)
+    .title = Tri : passer à l’image suivante après chaque marque, dans la vue de la Bibliothèque utilisée (`on` ; basculé en son absence)
 
 command-vault-flag-none =
     .title = Retirer le choix ou le rejet des images sélectionnées

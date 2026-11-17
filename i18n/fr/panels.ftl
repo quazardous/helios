@@ -47,3 +47,6 @@ panel-helios-viewport =
 
 panel-helios-workshops =
     .title = Ateliers
+
+panel-helios-filters =
+    .title = Filtres
