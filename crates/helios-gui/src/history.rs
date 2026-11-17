@@ -581,7 +581,7 @@ fn edit_label(store: &Store, i18n: Option<&I18n>, step: &Step) -> Option<Label> 
     let m = Message::new("gui-history-edit", "{ $what } { $value }")
         .with("what", what)
         .with("value", value);
-    Some(Label::text(&say(i18n, &m)))
+    Some(Label::text(say(i18n, &m)))
 }
 
 impl HeliosHistory {
