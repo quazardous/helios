@@ -1770,6 +1770,18 @@ impl Shell {
         if let Some(id) = id {
             self.focus.library.borrow_mut().ask_large(id);
         }
+        // The panels following the photo are stale at once.
+        self.follow_photo_panels();
+    }
+
+    /// Asks `panel.state` of the panels following the photo when their
+    /// state changed ([`crate::photo_panels`]).
+    fn follow_photo_panels(&mut self) {
+        let opening = self.focus.viewport.borrow().opening();
+        let status = self.focus.preview.status();
+        self.focus
+            .photo_panels
+            .follow(self.core.app.handle(), &status, opening);
     }
 
     /// Hands the viewport the large thumbnail of the image being opened,
@@ -7206,6 +7218,7 @@ impl Shell {
         self.focus
             .preview
             .follow(self.focus.viewport.borrow().shown(), &ctx);
+        self.follow_photo_panels();
         self.core.app.show(ui);
         crate::start::mark_in_first_frame("panels drawn");
         crate::workbench::keep_focus_taken(&ctx);

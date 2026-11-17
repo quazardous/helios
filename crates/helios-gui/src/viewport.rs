@@ -942,6 +942,12 @@ impl Viewport {
         });
     }
 
+    /// Whether an image being opened is not shown yet: selected, its
+    /// network not given ([`Viewport::set_source`]).
+    pub fn opening(&self) -> bool {
+        self.stand_in.as_ref().is_some_and(|s| !s.sourced)
+    }
+
     /// Whether an image being opened still waits for its large thumbnail.
     pub fn wants_stand_in(&self) -> bool {
         self.stand_in.as_ref().is_some_and(|s| s.texture.is_none())

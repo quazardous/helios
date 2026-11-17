@@ -102,6 +102,9 @@ pub(super) struct Focus {
     /// A small render of what the viewport shows, for the scopes and the
     /// navigator.
     pub(super) preview: Rc<crate::preview::Preview>,
+    /// The state last asked of the panels following the photo
+    /// (`panel.state`).
+    pub(super) photo_panels: crate::photo_panels::PhotoPanels,
     /// The image's own surface (Wayland), following the Wide-gamut
     /// preview setting.
     pub(super) image_surface: crate::display::ImageSurfaceSwitch,
@@ -195,6 +198,7 @@ impl Focus {
             viewport: seed.viewport,
             opening: None,
             preview,
+            photo_panels: crate::photo_panels::PhotoPanels::default(),
             image_surface: crate::display::ImageSurfaceSwitch::default(),
             params: Rc::new(RefCell::new(crate::params::Params::new(seed.controls))),
             mask_tree: Rc::default(),
