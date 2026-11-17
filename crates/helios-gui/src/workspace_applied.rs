@@ -243,6 +243,40 @@ pub fn listen_network(bus: &dyn Bus, run: impl Fn() + 'static) -> Result<(), Str
     listen_local(bus, NETWORK, move |_, _| run())
 }
 
+/// The listener of egui-pop's `layout.changed` keeping the copy of the
+/// layout with the workspace's state, after egui-pop's own save
+/// (`layout.save`): egui-pop owns the layout's document and saves it,
+/// Helios only keeps its copy beside the workspace's files.
+pub const LAYOUT_COPY: &str = "helios.layout-copy";
+
+/// Registers `run` as [`LAYOUT_COPY`] on `bus`, after egui-pop's save:
+/// a local listener bound to the calling thread (the interface's). One
+/// there already is replaced.
+///
+/// # Errors
+/// The bus refused it.
+pub fn listen_layout_copy(bus: &dyn Bus, run: impl Fn() + 'static) -> Result<(), String> {
+    use egui_pop::api::bus::{LAYOUT_SAVE, LayoutChanged};
+    bus.unlisten(LayoutChanged::ID, LAYOUT_COPY);
+    bus.listen_local::<LayoutChanged>(
+        LAYOUT_COPY,
+        ListenOpts::new()
+            .owner("helios.workspace")
+            .after(LAYOUT_SAVE),
+        move |_, ()| {
+            run();
+            Ok::<(), HookError>(())
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The order `layout.changed`'s listeners run in on `bus`: egui-pop's
+/// save, then the workspace's copy.
+pub fn layout_order(bus: &dyn Bus) -> String {
+    bus_contract::order_dump(bus, &[egui_pop::api::bus::LayoutChanged::ID])
+}
+
 /// Passes `workspace` through the point on `bus`: what the listeners
 /// did, in order.
 pub fn pass(bus: &dyn Bus, workspace: Workspace) -> Reactions {
