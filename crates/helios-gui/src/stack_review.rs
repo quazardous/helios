@@ -10,20 +10,55 @@
 //! image.
 //!
 //! The panel holds no vault: the host gives it the proposals
-//! ([`Review::set_decisions`]) and runs what the user asked
-//! ([`Review::take_requests`]), as the library's marks are.
+//! ([`Review::set_decisions`]); what the user asks is a request on the
+//! bus ([`StacksAnswer`], `stacks.answer`), asked while the panel draws
+//! and heard after it in the same pass (`Defer`): the host's listener
+//! sends it to the node with the library's other writes.
 
 use egui_pop::core::ui::UiPop as _;
 use std::collections::{BTreeMap, BTreeSet};
 
+use std::sync::Arc;
+
 use egui::Ui;
+use egui_pop::api::bus::bus_contract::{self, Bus, Point, PointDecl, PointKind, Refused};
 use helios_core::Message;
 use helios_library::stacks::{Decision, Status};
 
 use crate::library::Library;
+use crate::request::Heard;
 
 /// The panel's id.
 pub const PANEL: &str = "helios.stacks";
+
+/// The request a proposal's answer (or a new proposal) is asked on.
+pub const ANSWER: &str = "stacks.answer";
+
+/// What the user asked of the proposals: a request, asked while the
+/// panel draws, heard after it.
+pub struct StacksAnswer;
+
+impl Point for StacksAnswer {
+    const ID: &'static str = ANSWER;
+    type Input = Request;
+    type Value = Heard;
+    const KIND: PointKind = PointKind::Request;
+}
+
+/// The Stacks panel's point, its contract with the application's bus:
+/// declared by [`declare`].
+pub const POINTS: &[PointDecl] = &[PointDecl::of::<StacksAnswer>(
+    "A stack proposal asked, accepted (all or the checked groups) or declined in the Stacks panel: heard after the drawing, sent to the node",
+)];
+
+/// Declares [`POINTS`] on `bus` (once).
+pub fn declare(bus: &dyn Bus) {
+    for refused in bus_contract::declare_all(bus, POINTS) {
+        if !matches!(refused, Refused::AlreadyDeclared { .. }) {
+            log::error!(target: "helios", "stacks: {refused}");
+        }
+    }
+}
 
 /// What the user asked of the proposals, for the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,16 +78,46 @@ pub enum Request {
 }
 
 /// The proposals waiting, and which of their groups are checked.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Review {
     decisions: Vec<Decision>,
     /// Per proposal, the groups left unchecked (every group is checked
     /// at first).
     unchecked: BTreeMap<String, BTreeSet<usize>>,
-    requests: Vec<Request>,
+    /// The application's bus, where what the user asks is asked.
+    bus: Option<Arc<dyn Bus>>,
+}
+
+impl std::fmt::Debug for Review {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Review")
+            .field("decisions", &self.decisions)
+            .field("unchecked", &self.unchecked)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Review {
+    /// A panel asking on `bus` ([`StacksAnswer`]).
+    pub fn on(bus: Arc<dyn Bus>) -> Self {
+        declare(&*bus);
+        Self {
+            bus: Some(bus),
+            ..Self::default()
+        }
+    }
+
+    /// Asks `request` on the bus, heard after the drawing; with no bus
+    /// (a panel made alone), dropped and logged.
+    fn ask(&self, request: Request) {
+        match &self.bus {
+            Some(bus) => {
+                crate::request::ask::<StacksAnswer>(&**bus, request, Heard::default());
+            }
+            None => log::error!(target: "helios", "{ANSWER}: no bus, {request:?} dropped"),
+        }
+    }
+
     /// The proposals as the vault keeps them; the answered ones are left
     /// out.
     pub fn set_decisions(&mut self, decisions: Vec<Decision>) {
@@ -96,12 +161,12 @@ impl Review {
 
     /// Asks for a new proposal.
     pub fn suggest(&mut self, images: Vec<String>) {
-        self.requests.push(Request::Suggest { images });
+        self.ask(Request::Suggest { images });
     }
 
     /// Accepts every group of a proposal.
     pub fn accept_all(&mut self, decision: &str) {
-        self.requests.push(Request::Accept {
+        self.ask(Request::Accept {
             decision: decision.into(),
             groups: None,
         });
@@ -120,7 +185,7 @@ impl Review {
             return Err("no group checked: decline the proposal instead".into());
         }
         let groups = (taken.len() < d.proposal.groups.len()).then_some(taken);
-        self.requests.push(Request::Accept {
+        self.ask(Request::Accept {
             decision: decision.into(),
             groups,
         });
@@ -129,14 +194,9 @@ impl Review {
 
     /// Declines a proposal.
     pub fn decline(&mut self, decision: &str) {
-        self.requests.push(Request::Decline {
+        self.ask(Request::Decline {
             decision: decision.into(),
         });
-    }
-
-    /// What the user asked since the last call.
-    pub fn take_requests(&mut self) -> Vec<Request> {
-        std::mem::take(&mut self.requests)
     }
 
     /// The panel. Clicking a group's images selects them in the library

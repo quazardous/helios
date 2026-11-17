@@ -2002,6 +2002,32 @@ fn move_to_trash_asks_then_trashes_through_a_journaled_job_a_backup_refused() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A write the Library asks (a turn) is a deferred request
+/// (`library.write`): asked while the Library is borrowed, heard after
+/// the drawing in the same pass, its write waiting for the node by the
+/// host's turn; then written.
+#[test]
+fn a_turn_asked_in_the_library_is_heard_in_the_pass_it_is_made() {
+    use helios_vault::rotation::{ROTATION, quarter_turns};
+    let root = temp("turn-pass");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    settle(&mut h, &mut persist, 1.0);
+    assert!(!persist.busy(), "nothing waits before the ask");
+    h.state_mut().library_mut().select_ids(&[id(1).hex()]);
+    run(&mut h, "library.rotateRight", json!(null));
+    assert_eq!(h.state().app().handle().asks_waiting(), 1, "asked");
+    // One pass: the ask heard after the drawing.
+    h.step();
+    assert_eq!(h.state().app().handle().asks_waiting(), 0, "heard");
+    assert!(persist.busy(), "its write waits for the node");
+    settle(&mut h, &mut persist, 2.0);
+    let rows = persist.vault().fields_of(&[id(1)], &[ROTATION]).unwrap();
+    assert_eq!(quarter_turns(rows[0].get(ROTATION)), 1);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn ctrl_brackets_rotate_the_selection_and_undo_turns_it_back() {
     use egui_pop::api::history::{Answer, Request};

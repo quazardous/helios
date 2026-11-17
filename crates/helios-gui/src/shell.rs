@@ -1157,6 +1157,9 @@ impl Shell {
             controls,
         });
         let shell_bus = jobs.bus().clone();
+        let stack_review = Rc::new(RefCell::new(crate::stack_review::Review::on(
+            app.handle().bus(),
+        )));
         let core = core::Core {
             app,
             registry,
@@ -1176,7 +1179,7 @@ impl Shell {
             machine: helios_profile::Machine::here(&config_dir().join("machine.toml")),
             loaded: None,
             resolved_view,
-            stack_review: Rc::default(),
+            stack_review,
             duplicates: Rc::default(),
             imports: Vec::new(),
             activity,

@@ -5,7 +5,8 @@
 //! `library.stacks.top`) and records the step it answers in the
 //! library's history: Ctrl+Z takes it back.
 
-use super::{Batch, Library};
+use super::Library;
+use crate::library_write::WriteAsk;
 
 /// Groups photos into one stack (`images`, else the selection; `top`,
 /// else the photo under the cursor when it is one of them), the stacks
@@ -93,7 +94,7 @@ impl Library {
             None => self.cursor_id().filter(|c| keys.contains(c)),
         };
         let count = keys.len();
-        self.stack_asks.push((
+        self.ask_write(WriteAsk::Stack(
             StackAsk::Group { images: keys, top },
             crate::library_history::current_batch(),
         ));
@@ -119,7 +120,7 @@ impl Library {
             return Err("none of the photos is in a stack".into());
         }
         let count = stacks.len();
-        self.stack_asks.push((
+        self.ask_write(WriteAsk::Stack(
             StackAsk::Ungroup { images: keys },
             crate::library_history::current_batch(),
         ));
@@ -142,7 +143,7 @@ impl Library {
             .and_then(|i| self.entries[i].stack.as_ref())
             .map(|s| s.id.clone())
             .ok_or("the photo is in no stack")?;
-        self.stack_asks.push((
+        self.ask_write(WriteAsk::Stack(
             StackAsk::Top {
                 stack: stack.clone(),
                 image,
@@ -150,11 +151,6 @@ impl Library {
             crate::library_history::current_batch(),
         ));
         Ok(stack)
-    }
-
-    /// What was asked of the stacks since, each with its batch.
-    pub fn take_stack_asks(&mut self) -> Vec<(StackAsk, Batch)> {
-        std::mem::take(&mut self.stack_asks)
     }
 }
 
@@ -181,7 +177,7 @@ mod tests {
         lib.select_ids(&["a".into(), "b".into()]);
         assert_eq!(lib.group_stack(None, None), Ok(2));
         assert_eq!(
-            lib.take_stack_asks(),
+            lib.asked_stack_asks(),
             [(
                 StackAsk::Group {
                     images: vec!["a".into(), "b".into()],
@@ -208,7 +204,7 @@ mod tests {
         );
         assert_eq!(lib.top_of_stack(Some("b")), Ok("s".into()));
         assert_eq!(lib.ungroup_stack(Some(vec!["b".into(), "c".into()])), Ok(1));
-        let asks: Vec<StackAsk> = lib.take_stack_asks().into_iter().map(|(a, _)| a).collect();
+        let asks: Vec<StackAsk> = lib.asked_stack_asks().into_iter().map(|(a, _)| a).collect();
         assert_eq!(
             asks[1],
             StackAsk::Top {

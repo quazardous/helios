@@ -6,7 +6,8 @@
 //! node (`library.pairs.pair`, `library.pairs.unpair`) and records the
 //! step it answers in the library's history: Ctrl+Z takes it back.
 
-use super::{Batch, Library};
+use super::Library;
+use crate::library_write::WriteAsk;
 
 /// Pairs RAW+JPEG files: the pairs among photos (`images`, else the
 /// selection; `all`: the whole Library), or two photos as they are
@@ -73,7 +74,7 @@ impl Library {
             Some(keys)
         };
         let count = images.as_ref().map(Vec::len);
-        self.pair_asks.push((
+        self.ask_write(WriteAsk::Pair(
             PairAsk::Pair { images, exact },
             crate::library_history::current_batch(),
         ));
@@ -87,16 +88,11 @@ impl Library {
     pub fn ask_unpair(&mut self, images: Option<Vec<String>>) -> Result<usize, String> {
         let keys = self.named_or_selected(images)?;
         let count = keys.len();
-        self.pair_asks.push((
+        self.ask_write(WriteAsk::Pair(
             PairAsk::Unpair { images: keys },
             crate::library_history::current_batch(),
         ));
         Ok(count)
-    }
-
-    /// What was asked of pairs since, each with its batch.
-    pub fn take_pair_asks(&mut self) -> Vec<(PairAsk, Batch)> {
-        std::mem::take(&mut self.pair_asks)
     }
 }
 
@@ -126,7 +122,7 @@ mod tests {
         assert_eq!(lib.ask_pair(None, true, false), Ok(None), "the Library");
         assert_eq!(lib.ask_unpair(Some(vec!["b".into(), "z".into()])), Ok(1));
         assert!(lib.ask_unpair(Some(vec!["z".into()])).is_err());
-        let asks: Vec<PairAsk> = lib.take_pair_asks().into_iter().map(|(a, _)| a).collect();
+        let asks: Vec<PairAsk> = lib.asked_pair_asks().into_iter().map(|(a, _)| a).collect();
         assert_eq!(
             asks,
             vec![
@@ -143,6 +139,6 @@ mod tests {
                 },
             ]
         );
-        assert!(lib.take_pair_asks().is_empty());
+        assert!(lib.asked_pair_asks().is_empty());
     }
 }

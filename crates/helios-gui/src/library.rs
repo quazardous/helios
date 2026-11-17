@@ -1758,9 +1758,6 @@ pub struct Library {
     /// The import session whose photos are all selected once its query
     /// answers ([`Library::show_import`]).
     select_session: Option<String>,
-    /// Album changes asked, for the host to make in the vault, each with
-    /// the batch it was asked in.
-    album_edits: Vec<(AlbumEdit, Batch)>,
     /// The quick collection's photos, as last read with the albums.
     quick: Vec<String>,
     /// The same, for the grid's badge.
@@ -1776,33 +1773,16 @@ pub struct Library {
     versions_wanted: Vec<String>,
     /// The photos whose heads were asked, until they come.
     versions_asked: Vec<String>,
-    /// What the strip and the commands asked of photos' versions, for
-    /// the host, each with its batch.
-    version_asks: Vec<(VersionAsk, Batch)>,
-    /// What the commands asked of the stacks (group, ungroup, top), for
-    /// the host, each with its batch.
-    stack_asks: Vec<(StackAsk, Batch)>,
     /// How many photos carry a keyword of each branch (the Keywords
     /// section), built from the photos' tags; none until built again
     /// after they change.
     keyword_counts: Option<std::collections::BTreeMap<String, u64>>,
-    /// What the commands asked of the keyword branches (rename, merge),
-    /// for the host, each with its batch.
-    keyword_asks: Vec<(KeywordAsk, Batch)>,
-    /// The group edits of metadata asked (`library.meta.set`), for the
-    /// host, each with its batch.
-    meta_edits: Vec<(MetaEdit, Batch)>,
     /// The metadata templates, once read from the library.
     templates: Option<Vec<Template>>,
     /// Whether the host is to read the templates.
     templates_wanted: Wanted,
-    /// The templates to write back, once changed.
-    templates_write: Option<Vec<Template>>,
     /// The Metadata section's state.
     meta_panel: metadata::MetaPanel,
-    /// What the commands asked of RAW+JPEG pairs (pair, unpair), for the
-    /// host, each with its batch.
-    pair_asks: Vec<(PairAsk, Batch)>,
     /// The pinned and recent filters (`crate::recent_filters`), as last
     /// read from the vault; none until the host reads them.
     filter_history: Option<crate::recent_filters::FilterHistory>,
@@ -1817,8 +1797,6 @@ pub struct Library {
     known_tags: Vec<String>,
     app: Option<AppHandle>,
     changes: Vec<Change>,
-    /// Stacks expanded or collapsed, for the vault: (stack, expanded).
-    expansions: Vec<(String, bool)>,
     /// An image opened (Enter, a double click), for the host.
     activated: Option<String>,
     sink: ThumbnailSink,
@@ -1863,18 +1841,10 @@ pub struct Library {
     fed: (Vec<String>, Vec<String>),
     /// The marks copied last ([`MARKS_COPY_COMMAND`]), to paste.
     copied: Option<CopiedMarks>,
-    /// The photos asked taken out of the Library ([`REMOVE_COMMAND`]),
-    /// for the host.
-    removals: Vec<(Vec<String>, Batch)>,
-    /// The photos asked turned ([`ROTATE_LEFT_COMMAND`] and the others),
-    /// for the host.
-    rotations: Vec<(Vec<String>, Turn, Batch)>,
-    /// The photos asked duplicated ([`DUPLICATE_COMMAND`],
-    /// [`DUPLICATE_ORIGINAL_COMMAND`]), for the host.
-    duplicates: Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)>,
-    /// The photos whose files were asked moved to the trash
-    /// ([`TRASH_COMMAND`], [`DELETE_REJECTED_COMMAND`]), for the host.
-    trash_asks: Vec<TrashAsk>,
+    /// The writes asked with no application to ask them on (a Library
+    /// made alone, in a unit test), for the test to read.
+    #[cfg(test)]
+    unheard: Vec<crate::library_write::WriteAsk>,
 }
 
 /// What can limit the photos the Library shows
@@ -1966,23 +1936,16 @@ impl Default for Library {
             albums_wanted: Wanted::Yes,
             imports: Vec::new(),
             select_session: None,
-            album_edits: Vec::new(),
             quick: Vec::new(),
             quick_set: HashSet::new(),
             head_counts: HashMap::new(),
             versions: Vec::new(),
             versions_wanted: Vec::new(),
             versions_asked: Vec::new(),
-            version_asks: Vec::new(),
-            stack_asks: Vec::new(),
             keyword_counts: None,
-            keyword_asks: Vec::new(),
-            meta_edits: Vec::new(),
             templates: None,
             templates_wanted: Wanted::Yes,
-            templates_write: None,
             meta_panel: metadata::MetaPanel::default(),
-            pair_asks: Vec::new(),
             filter_history: None,
             filter_history_wanted: Wanted::Yes,
             used_early: Vec::new(),
@@ -1990,8 +1953,9 @@ impl Default for Library {
             tags: TagInputState::default(),
             known_tags: Vec::new(),
             app: None,
+            #[cfg(test)]
+            unheard: Vec::new(),
             changes: Vec::new(),
-            expansions: Vec::new(),
             activated: None,
             sink: ThumbnailSink {
                 sender,
@@ -2016,10 +1980,6 @@ impl Default for Library {
             map_feed: None,
             fed: (Vec::new(), Vec::new()),
             copied: None,
-            removals: Vec::new(),
-            rotations: Vec::new(),
-            duplicates: Vec::new(),
-            trash_asks: Vec::new(),
         }
     }
 }
@@ -2705,15 +2665,29 @@ impl Library {
         self.albums_wanted = Wanted::Yes;
     }
 
-    /// Queues an album change for the host ([`Library::take_album_edits`]).
+    /// Asks an album change of the vault (`library.write`).
     pub fn edit_album(&mut self, edit: AlbumEdit) {
-        self.album_edits
-            .push((edit, crate::library_history::current_batch()));
+        self.ask_write(crate::library_write::WriteAsk::Album(
+            edit,
+            crate::library_history::current_batch(),
+        ));
     }
 
-    /// The album changes asked since, in order, each with its batch.
-    pub fn take_album_edits(&mut self) -> Vec<(AlbumEdit, Batch)> {
-        std::mem::take(&mut self.album_edits)
+    /// Asks `write` of the vault on the application's bus
+    /// (`library.write`), heard after the drawing: the host's listener
+    /// sends it to the node with the other writes, in ask order. With no
+    /// application (a Library made alone), it is kept for a unit test to
+    /// read, and dropped outside the tests.
+    pub(crate) fn ask_write(&mut self, write: crate::library_write::WriteAsk) {
+        match &self.app {
+            Some(app) => crate::library_write::ask(&*app.bus(), write),
+            None => {
+                #[cfg(test)]
+                self.unheard.push(write);
+                #[cfg(not(test))]
+                log::error!(target: "helios", "{}: no application, {write:?} dropped", crate::library_write::WRITE);
+            }
+        }
     }
 
     /// The vault query of the filter in force, its backup rule set.
@@ -3516,12 +3490,6 @@ impl Library {
         std::mem::take(&mut self.changes)
     }
 
-    /// Stacks the user expanded or collapsed since the last call:
-    /// (stack id, expanded).
-    pub fn take_expansions(&mut self) -> Vec<(String, bool)> {
-        std::mem::take(&mut self.expansions)
-    }
-
     /// Whether the user asked to import from the workspace's source,
     /// once.
     pub fn take_import_asked(&mut self) -> bool {
@@ -3730,7 +3698,7 @@ impl Library {
                 }
                 Signal::Stack { top, expanded } => {
                     if let Some(s) = self.at(&top).and_then(|i| self.entries[i].stack.clone()) {
-                        self.expansions.push((s.id, expanded));
+                        self.ask_write(crate::library_write::WriteAsk::Expand(s.id, expanded));
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
@@ -3878,7 +3846,7 @@ impl Library {
             .ok_or("the image is in no stack")?;
         let expanded = !self.view.state.is_expanded(&s.top);
         self.view.state.set_expanded(s.top.clone(), expanded);
-        self.expansions.push((s.id, expanded));
+        self.ask_write(crate::library_write::WriteAsk::Expand(s.id, expanded));
         Ok(())
     }
 
@@ -5206,6 +5174,90 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
             )
         })
         .collect()
+}
+
+/// What a unit test reads of the writes a Library made alone asked.
+#[cfg(test)]
+impl Library {
+    /// The asks `pick` takes out of those not heard, in order; the
+    /// others stay.
+    fn asked<T>(&mut self, pick: impl Fn(&crate::library_write::WriteAsk) -> Option<T>) -> Vec<T> {
+        let mut taken = Vec::new();
+        self.unheard.retain(|w| match pick(w) {
+            Some(t) => {
+                taken.push(t);
+                false
+            }
+            None => true,
+        });
+        taken
+    }
+
+    pub(crate) fn asked_removals(&mut self) -> Vec<(Vec<String>, Batch)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Remove(i, b) => Some((i.clone(), b.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_rotations(&mut self) -> Vec<(Vec<String>, Turn, Batch)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Rotate(i, t, b) => Some((i.clone(), t.clone(), b.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_duplicates(
+        &mut self,
+    ) -> Vec<(Vec<String>, helios_vault::versions::DuplicateFrom)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Duplicate(i, f) => Some((i.clone(), f.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_trash_asks(&mut self) -> Vec<TrashAsk> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Trash(t) => Some(t.clone()),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_stack_asks(&mut self) -> Vec<(StackAsk, Batch)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Stack(a, b) => Some((a.clone(), b.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_keyword_asks(&mut self) -> Vec<(KeywordAsk, Batch)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Keyword(a, b) => Some((a.clone(), b.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_pair_asks(&mut self) -> Vec<(PairAsk, Batch)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Pair(a, b) => Some((a.clone(), b.clone())),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn asked_version_asks(&mut self) -> Vec<(VersionAsk, Batch)> {
+        use crate::library_write::WriteAsk as W;
+        self.asked(|w| match w {
+            W::Version(a, b) => Some((a.clone(), b.clone())),
+            _ => None,
+        })
+    }
 }
 
 #[cfg(test)]
