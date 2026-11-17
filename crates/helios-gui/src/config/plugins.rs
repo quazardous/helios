@@ -35,10 +35,10 @@
 //!
 //! **To the plugin.** [`PluginSettingsStore::values`] gives a plugin's
 //! values as it is handed them (the library's over the app's, secrets
-//! read from the keyring), and each save, or a library change from
-//! another client, tells [`PluginSettingsStore::on_changed`] which
-//! plugins moved: the desktop hands both to the broker
-//! ([`connect`]), which tells the running plugin or restarts it.
+//! read from the keyring). Each save, or a library change from another
+//! client, is a `settings.changed` event on the bus: the `plugins.values`
+//! listener keeps the new value and tells the broker ([`connect`]) which
+//! plugins moved, and the broker tells the running plugin or restarts it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
