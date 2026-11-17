@@ -55,6 +55,9 @@ fn source_words(kind: &str) -> Message {
     }
 }
 
+/// How wide a value set by hand is typed, in points: a few digits.
+const VALUE_WIDTH: f32 = 64.0;
+
 fn number(v: &Value) -> String {
     v.as_f64().map_or_else(
         || "-".to_string(),
@@ -219,13 +222,18 @@ impl Panel {
                                 .entry(key)
                                 .or_insert_with(|| after.as_f64().unwrap_or(0.0));
                             // The value typed; the node refuses one outside
-                            // the slider's range.
+                            // the slider's range. The kit's number field is
+                            // as wide as its range's end, so an unbounded one
+                            // is held to a few digits here.
                             let field = ui
                                 .push_id((&image, slider), |ui| {
-                                    NumberInput::new(v, slider, f64::MIN..=f64::MAX)
-                                        .step(0.01)
-                                        .decimals(3)
-                                        .show(ui)
+                                    ui.allocate_ui(egui::vec2(VALUE_WIDTH, ui.spacing().interact_size.y), |ui| {
+                                        NumberInput::new(v, slider, f64::MIN..=f64::MAX)
+                                            .step(0.01)
+                                            .decimals(2)
+                                            .show(ui)
+                                    })
+                                    .inner
                                 })
                                 .inner;
                             let _ = field.labelled_by(l.id);
