@@ -112,9 +112,9 @@ fn ev(h: &Harness<'_, Shell>) -> f64 {
 }
 
 /// Whether the panel's row saying `label` is the selected one (the
-/// history's mark).
+/// history's mark): a selectable row says so as toggled.
 fn marked(h: &Harness<'_, Shell>, label: &str) -> bool {
-    h.get_by_label(label).accesskit_node().is_selected() == Some(true)
+    h.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
 }
 
 #[test]
