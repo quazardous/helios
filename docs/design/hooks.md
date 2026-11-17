@@ -496,7 +496,39 @@ then pass the point once on the interface's thread; the pass is said on
 the journal with the listeners that ran (`ran`). The order is a reviewed
 dump (`crates/helios-gui/tests/bus/accounts.txt`).
 
-### Slice 2f: a workspace's state applied
+### Slice 2f: an image opened or closed in the darkroom
+
+Switching images saved the edit open only on one path: the desktop's
+opening of a raw called `persist.close_image` first, an order that lived
+in a comment ("what is drawn now is not saved into its edit"). Any other
+opening (`Persist::open_image` called directly) replaced the edit with
+the next image's, its last step lost; and the save's answer came at a
+later frame, after the next image was already shown, so a failed save
+could not keep the image open.
+
+Where it stands (2026-11-17): done for the switch itself.
+`helios_gui::image_open` declares two requests (`POINTS`):
+`image.open` and `image.close`, which `Persist::open_image` and
+`Persist::close_image` pass on the shell's bus before anything of the
+next image loads. Their listeners are named and placed (`ORDER`):
+`edit.save` first (the step not saved yet written through the node and
+its answer waited for inside the pass: a refused write refuses the
+request with its reason, and the image stays open, its edit marked
+unsaved), then `history.scope` (the value store's steps and the
+snapshot book cleared, so the next image's undo never walks into this
+one's steps). A refusal stops the listeners after it. The journal says
+`image.closed` (with `from`, `to` and `ran`), `image.opened`, or
+`image.refused` (with who refused and why). The order is a reviewed
+dump (`crates/helios-gui/tests/bus/darkroom.txt`).
+
+Still followed by comparing each pass, to move as listeners of
+`image.opened` in a next slice: the viewport's source and the preview
+(pixels: the listed exception for the render itself), the panels that
+follow the photo (`panel.state`), scopes, decisions, the mask tree, the
+stand-in and the workshop session (`set_edited_image` in each
+`Persist::frame`).
+
+### Slice 2g: a workspace's state applied
 
 Applying a workspace's state (it opened; an edit, a reset, an agent's
 step; an undo or a redo of one; its files changed outside and taken in)
@@ -527,7 +559,7 @@ by the store's sequence number of its path, once per pass (a number,
 no longer the text): the value store has no path listener yet (ADR
 0016 names it). The image going through a changed network
 (`take_network_changed`) is the darkroom's, with the image's opening
-(slice B8). The workshop session (`follow_session`) follows the value
+(slice 2f). The workshop session (`follow_session`) follows the value
 store's history, not the workspace's state.
 
 ### Slice 3: one module catalogue
