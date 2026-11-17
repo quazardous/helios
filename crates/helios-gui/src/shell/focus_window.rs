@@ -109,7 +109,7 @@ impl FocusWindow {
         listen_window_close(app, &owner, self.window, move |did| {
             let mut s = state
                 .try_borrow_mut()
-                .map_err(|_| HookError("the focus is being drawn".into()))?;
+                .map_err(|_| HookError::failed("the focus is being drawn"))?;
             s.set_open(false);
             *s.shown() = None;
             did.push(format!("{}: closed", self.window));

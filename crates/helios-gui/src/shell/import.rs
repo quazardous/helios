@@ -854,10 +854,10 @@ impl Shell {
                     return Ok(());
                 }
                 let Some(app) = egui_pop::api::bus::asking() else {
-                    return Err(HookError("no application asking".into()));
+                    return Err(HookError::failed("no application asking"));
                 };
                 let command = CommandId::new(super::import_window::COMMAND)
-                    .map_err(|e| HookError(e.to_string()))?;
+                    .map_err(|e| HookError::failed(e.to_string()))?;
                 app.run(command, json!({ "paths": drop.paths }));
                 did.push(format!("{DROP_LISTENER}: {} files", drop.paths.len()));
                 Ok(())

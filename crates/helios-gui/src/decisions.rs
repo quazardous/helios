@@ -423,14 +423,16 @@ impl Decisions {
                     "How sure the model must be for its proposal to be taken",
                 ));
                 let mut t = self.threshold;
-                let r = Slider::new(&mut t, "", 0.0..=1.0)
+                // Named by its hint: egui-pop 0.13's sliders name
+                // themselves by their label, and a blank one stops a
+                // debug build.
+                let r = Slider::new(&mut t, &hint, 0.0..=1.0)
                     .step(0.05)
                     .display_scale(100.0)
                     .precision(0)
                     .unit("%")
                     .show(ui)
                     .response;
-                egui_pop::core::a11y::name(&r, egui::Role::Slider, &hint);
                 let _ = r.tip(&hint);
                 if t != self.threshold {
                     self.set_threshold(t);
