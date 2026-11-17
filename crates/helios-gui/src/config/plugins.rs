@@ -548,29 +548,6 @@ impl PluginSettingsStore {
         }
     }
 
-    /// Follows the node's bus (`heard`, from `Bus::subscribe`): the open
-    /// library's layer said changed is read again, and what moved told to
-    /// the Settings app, whose `settings.changed` hands it to the plugin.
-    /// Ends with the bus.
-    pub fn follow(&self, heard: std::sync::mpsc::Receiver<helios_core::Envelope>) {
-        let me = self.clone();
-        let picked = std::thread::Builder::new()
-            .name("helios-plugin-settings-follow".into())
-            .spawn(move || {
-                let kind = <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND;
-                while let Ok(e) = heard.recv() {
-                    if e.kind == kind
-                        && let Some(name) = e.payload["layer"].as_str()
-                    {
-                        me.layer_changed(name);
-                    }
-                }
-            });
-        if let Err(e) = picked {
-            log::warn!("plugin settings: the node's layers are not followed: {e}");
-        }
-    }
-
     fn key(&self, id: &str) -> Option<(&PluginSettings, &str, &ConfigKey)> {
         let (i, name) = self.inner.keys.get(id)?;
         let p = &self.inner.plugins[*i];
@@ -810,7 +787,7 @@ impl PluginSettingsStore {
 
     /// A layer of the node changed: the library's is read again and what
     /// moved told to the watcher.
-    fn layer_changed(&self, name: &str) {
+    pub(super) fn layer_changed(&self, name: &str) {
         if self.inner.project.as_deref() != Some(name) {
             return;
         }

@@ -2030,7 +2030,7 @@ fn main() -> Result<(), String> {
             helios_gui::caches::apply_settings(&shell, &settings);
             // Helios's settings kept through the node, followed live: a
             // layer another client changes reaches the Settings window.
-            let kept = helios_gui::config::install(
+            helios_gui::config::install(
                 shell.app().handle(),
                 settings.clone(),
                 node_settings
@@ -2038,16 +2038,14 @@ fn main() -> Result<(), String> {
                     .map(|n| Arc::new(n) as Arc<dyn helios_gui::config::NodeLayers>),
                 &settings_dir,
             );
-            let plugin_layers = layer_events.map(|(heard, plugins_heard)| {
-                kept.follow(heard);
-                plugins_heard
-            });
+            // The node's layers, followed for Helios's settings and the
+            // plugins' alike.
+            if let Some(heard) = layer_events {
+                helios_gui::config::follow(shell.app().handle(), heard);
+            }
             // The plugins' own settings, handed to each as it starts and
             // again when they change (`plugins.values`).
             helios_gui::config::connect_plugins(shell.app().handle(), &plugins);
-            if let Some(heard) = plugin_layers {
-                helios_gui::config::follow_plugins(shell.app().handle(), heard);
-            }
             if let Some(rs) = render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
@@ -2511,12 +2509,9 @@ struct Booted {
     library_reading: Option<LibraryReading>,
     node_settings:
         Option<helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>>,
-    /// The node's events heard for Helios's settings, then for the
-    /// plugins' (each store follows its own).
-    layer_events: Option<(
-        std::sync::mpsc::Receiver<helios_core::Envelope>,
-        std::sync::mpsc::Receiver<helios_core::Envelope>,
-    )>,
+    /// The node's events heard for the settings kept in its layers
+    /// (`config::follow`).
+    layer_events: Option<std::sync::mpsc::Receiver<helios_core::Envelope>>,
     settings: helios_gui::config::Settings,
     preparing: Option<Preparing>,
     plugins: Arc<helios_plugin::Broker>,
@@ -2632,10 +2627,8 @@ fn boot(from: BootFrom) -> Booted {
     // The library is read while the shell is built.
     let library_reading = persist.as_ref().map(|p| read_library(p.reader()));
     // Heard from before they are read: a layer another client of the
-    // node changes from now on is read again (`NodeSettingsStore::follow`).
-    let layer_events = persist
-        .as_ref()
-        .map(|p| (p.bus().subscribe(), p.bus().subscribe()));
+    // node changes from now on is read again (`config::follow`).
+    let layer_events = persist.as_ref().map(|p| p.bus().subscribe());
     // Helios's settings, resolved once from their layers: the machine's
     // file, the library's and the person's layers the node keeps (as
     // `helios-node --vault` does), `--set`. Every part reads them from
