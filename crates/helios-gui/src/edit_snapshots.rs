@@ -11,9 +11,12 @@
 //!   pinned at once, kept in the vault at the next frame. A pinned
 //!   snapshot kept there survives a quit and a `kill -9`.
 //! - **Pending until then.** A snapshot not pinned yet is shown "not
-//!   saved yet"; if the app quits (or another image opens) first, it is
-//!   lost. One whose step the history left before a save stays pending
-//!   for the session.
+//!   saved yet". Leaving the image (another image opened, the image
+//!   closed) saves its edit first (`edit.save`), which pins and keeps the
+//!   snapshots taken at the step it saves before the book is cleared;
+//!   quitting saves the edit and the snapshots in the closing frame. Only
+//!   a crash loses one. One whose step the history left before a save
+//!   stays pending for the session.
 //! - **Restoring** writes its values back as one new step of the value
 //!   store, which an undo takes back; a toast says so.
 //!
@@ -195,6 +198,12 @@ impl Book {
     /// Whether the vault must keep the pinned snapshots again; cleared.
     pub fn take_dirty(&mut self) -> bool {
         std::mem::take(&mut self.dirty)
+    }
+
+    /// The vault did not keep the pinned snapshots: kept again at the
+    /// next chance.
+    pub fn keep_again(&mut self) {
+        self.dirty = true;
     }
 
     /// A restore was made: the toast's to say.

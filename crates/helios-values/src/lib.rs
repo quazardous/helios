@@ -29,6 +29,10 @@
 //!   that follow each other are one step. A group can be undone alone,
 //!   out of order, when no later step touched its values
 //!   ([`Store::undo_group`]); so can one step ([`Store::undo_step`]).
+//! - History scopes ([`HistoryScope`]): a step is the workspace's when
+//!   it changed a `workspace/…` path (a graph edit), else the open
+//!   image's. Another image opening leaves the image's steps
+//!   ([`Store::leave_image`]); the workspace's stay undoable.
 //! - Replaced steps: the redo list a new step drops is kept as a line
 //!   leaving from the step it came after ([`Store::replaced_steps`]), and
 //!   a jump reaches it ([`Store::jump_replaced`]).
@@ -42,11 +46,13 @@
 
 mod commands;
 mod graph;
+mod history_scope;
 mod points;
 mod preview;
 
 pub use commands::{register, value_from_json, value_to_json};
 pub use graph::{BYPASS, Keep, Rebound, bind_node, bypass_path, node_path, rebind, sync};
+pub use history_scope::{HistoryScope, WORKSPACE_PATHS};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -1070,9 +1076,9 @@ impl Store {
         self.last_origin.as_ref()
     }
 
-    /// Forgets the undo and redo steps (another image opened: its values
-    /// share the paths of the one before, which an undo must not reach).
-    /// Values, gestures and the committed count stay.
+    /// Forgets every undo and redo step, the workspace's too (another
+    /// image opening keeps those: [`Store::leave_image`]). Values,
+    /// gestures and the committed count stay.
     pub fn clear_history(&mut self) {
         self.undo.clear();
         self.redo.clear();
