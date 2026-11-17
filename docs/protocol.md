@@ -28,6 +28,8 @@ direction. Why JSON-RPC, and what other projects do, is in
   runs. `_meta.origin` names who runs a command (`user`, `cli`,
   `control`, `midi`, `agent:NAME`, `script:NAME`, `remote:NAME`;
   `control` when not given): a change to the edit is saved under it.
+  `user`, the person at the desktop, is the desktop's own in-process
+  calls alone: a call over a connection naming it is refused (-32004).
   `_meta.request_id` is the call's key: sent again with it, the call is
   applied once ([Request ids](#request-ids)).
 - **Id**: a number or a string. Each call runs on a thread of its own, so
@@ -893,8 +895,12 @@ greyed, `disabledReason`, the reason its menu entry gives ("Only in the
 Helios window", "Does not apply here (…)"). `command.run` (`id`,
 `params`, `origin`, `window`, `scope` to pick one where both have the
 id) runs a window command on the interface's thread in that open window,
-announced on the bus as `control.command` with its origin, and refuses
-it with that reason where it does not apply.
+announced on the bus once run as `control.command` with its origin, and
+refuses it with that reason where it does not apply, announced as
+`control.command.refused` (`id`, `origin`, `reason`). A `dry_run` (or
+`dryRun`) that is not `false` is refused unless the command takes one
+(its declared arguments name it) or only reads: a command that ignores
+it would run for real.
 
 The `helios commands` and `helios run` CLI verbs and `helios-mcp`'s
 generic pair (`helios_commands_list`, `helios_command_run`) are these two

@@ -929,7 +929,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-command-origin",
-                    "`{ $origin }` is not an origin: user, cli, control, agent:NAME or script:NAME",
+                    "`{ $origin }` is not an origin: user, cli, control, midi, agent:NAME, script:NAME or remote:NAME",
                 )
                 .with("origin", origin),
             );

@@ -35,6 +35,11 @@ pub struct CommandSpec {
     /// only read.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub read_only: bool,
+    /// It takes `dry_run`: says what it would do and changes nothing. A
+    /// dry run of a command that does not is refused before it runs
+    /// ([`crate::policy::dry_run`]).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
 }
 
 impl CommandSpec {
@@ -45,6 +50,7 @@ impl CommandSpec {
             category: category.into(),
             when: String::new(),
             read_only: false,
+            dry_run: false,
         }
     }
 
@@ -56,6 +62,13 @@ impl CommandSpec {
     /// Declares it read-only: it changes nothing.
     pub fn read_only(mut self) -> Self {
         self.read_only = true;
+        self
+    }
+
+    /// Declares that it takes `dry_run`: with it, it says what it would
+    /// do and changes nothing.
+    pub fn dry_run(mut self) -> Self {
+        self.dry_run = true;
         self
     }
 }

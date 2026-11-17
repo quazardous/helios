@@ -20,6 +20,16 @@ use crate::workshops::SETTING;
 
 /// The workshops' commands, with their titles (category
 /// [`crate::workshops::CATEGORY`]).
+/// The commands of [`COMMANDS`] that take `dry_run`.
+pub(super) const DRY_RUN: &[&str] = &[
+    "workshop.apply",
+    "workshop.aim",
+    "workshop.save",
+    "workshop.design",
+    "workshop.generalise",
+    "workshop.run",
+];
+
 pub(super) const COMMANDS: &[(&str, &str)] = &[
     (
         "workshop.apply",

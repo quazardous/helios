@@ -108,21 +108,12 @@ impl Registry {
     }
 }
 
-/// Who asked for a command run: `user`, `cli`, `control`, `agent:NAME` or
-/// `script:NAME`. Refused with the forms it takes otherwise.
+/// Who asked for a command run: one of the origins of
+/// `helios_shell::policy` (`user`, `cli`, `control`, `midi`, `agent:NAME`,
+/// `script:NAME`, `remote:NAME`). Refused with the forms it takes
+/// otherwise.
 pub fn check_origin(origin: &str) -> Result<(), String> {
-    let named = |prefix: &str| {
-        origin
-            .strip_prefix(prefix)
-            .is_some_and(|name| !name.is_empty() && !name.contains(char::is_whitespace))
-    };
-    if matches!(origin, "user" | "cli" | "control") || named("agent:") || named("script:") {
-        Ok(())
-    } else {
-        Err(format!(
-            "`{origin}` is not an origin: user, cli, control, agent:NAME or script:NAME"
-        ))
-    }
+    helios_shell::policy::origin(origin).map(|_| ())
 }
 
 /// An object schema: its properties, each `(name, schema, required)`; no
@@ -238,7 +229,15 @@ mod tests {
 
     #[test]
     fn an_origin_is_one_of_its_forms() {
-        for good in ["user", "cli", "control", "agent:mcp", "script:batch"] {
+        for good in [
+            "user",
+            "cli",
+            "control",
+            "midi",
+            "agent:mcp",
+            "script:batch",
+            "remote:phone",
+        ] {
             assert_eq!(check_origin(good), Ok(()), "{good}");
         }
         for bad in ["", "agent:", "robot", "agent:two words"] {

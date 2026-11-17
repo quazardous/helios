@@ -158,3 +158,49 @@ fn a_greyed_command_is_refused_with_its_reason_and_an_enabled_one_runs_as_the_ag
         .unwrap_err();
     assert!(closed.message.contains("no `import` window"), "{closed:?}");
 }
+
+/// A dry run never acts: a command that does not take `dry_run` is
+/// refused before it runs, and nothing changes; one that takes it is let
+/// through to say what it would do.
+#[test]
+fn a_dry_run_of_a_command_that_takes_none_is_refused_and_changes_nothing() {
+    let mut d = desktop();
+    let before = d.h.state().theme_name().to_string();
+    let other = if before == "helios-light" {
+        "helios-dark"
+    } else {
+        "helios-light"
+    };
+    let asked = d.call(
+        "command.run",
+        json!({ "id": "theme.select", "params": { "name": other, "dry_run": true } }),
+    );
+    d.h.run();
+    assert_eq!(
+        d.h.state().theme_name(),
+        before,
+        "a dry run changed the theme: {asked:?}"
+    );
+    let refused = asked.unwrap_err();
+    assert_eq!(refused.code, rpc::code::REFUSED);
+    assert!(
+        refused.message.contains("takes no `dry_run`"),
+        "{refused:?}"
+    );
+    // `dry_run: false` asks for the real run.
+    d.call(
+        "command.run",
+        json!({ "id": "theme.select", "params": { "name": other, "dry_run": false } }),
+    )
+    .unwrap();
+    d.h.run();
+    assert_eq!(d.h.state().theme_name(), other);
+    // A command that takes one is not refused for it.
+    let macro_open = d.call(
+        "command.run",
+        json!({ "id": "macro.open", "params": { "node": "nothing", "dry_run": true } }),
+    );
+    if let Err(e) = macro_open {
+        assert!(!e.message.contains("takes no `dry_run`"), "{e:?}");
+    }
+}

@@ -338,6 +338,11 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
     if spec.read_only {
         s = s.read_only();
     }
+    if spec.dry_run {
+        // Declared in its arguments, as egui-pop's commands declare it:
+        // the window commands let a dry run through to it alone.
+        s = s.args(serde_json::json!({ "dry_run": false }));
+    }
     Ok(s)
 }
 

@@ -321,18 +321,11 @@ fn check_window(window: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Helios's origin for an endpoint's (`user`, `cli`, `control`,
-/// `agent:NAME`, `script:NAME`).
+/// Helios's origin for an endpoint's, by the one table of
+/// [`helios_shell::policy::origin`] (the endpoint has checked it; a name
+/// it does not know is a remote's).
 fn origin_of(origin: &str) -> Origin {
-    if let Some(name) = origin.strip_prefix("agent:") {
-        Origin::Agent(name.into())
-    } else if let Some(name) = origin.strip_prefix("script:") {
-        Origin::Script(name.into())
-    } else if origin == "user" {
-        Origin::User
-    } else {
-        Origin::Remote(origin.into())
-    }
+    helios_shell::policy::origin(origin).unwrap_or_else(|_| Origin::Remote(origin.into()))
 }
 
 /// Runs command `id` in open window `window`, refused with its reason
@@ -348,7 +341,7 @@ fn run(
     window: &str,
     batch: Option<Group>,
 ) -> Reply {
-    let cx = match runnable(shell, ctx, id, window) {
+    let cx = match runnable(shell, ctx, id, &params, window) {
         Ok(cx) => cx,
         Err(e) => return Reply::Done(Err(e)),
     };
@@ -358,11 +351,14 @@ fn run(
 }
 
 /// The context command `id` runs in, in open window `window`; refused
-/// with its reason where it does not apply there.
+/// with its reason where it does not apply there, and a dry run of a
+/// command that takes none ([`helios_shell::policy::dry_run`]: it would
+/// run for real).
 fn runnable(
     shell: &Shell,
     ctx: &egui::Context,
     id: &str,
+    params: &Value,
     window: &str,
 ) -> Result<WhenContext, String> {
     check_window(window)?;
@@ -375,6 +371,12 @@ fn runnable(
         .command(&command)
         .filter(|s| s.agent)
         .ok_or_else(|| format!("no command `{id}` in the window"))?;
+    helios_shell::policy::dry_run(
+        id,
+        helios_shell::policy::declares_dry_run(&spec.args),
+        spec.read_only,
+        params,
+    )?;
     let cx = window_context(&app, ctx, window);
     if let Some(reason) = disabled_reason(&app, ctx, &spec, &cx) {
         return Err(reason);
@@ -392,6 +394,10 @@ mod tests {
         assert_eq!(origin_of("script:batch"), Origin::Script("batch".into()));
         assert_eq!(origin_of("user"), Origin::User);
         assert_eq!(origin_of("cli"), Origin::Remote("cli".into()));
+        // The node's names, one table: a MIDI device is `midi`, a remote
+        // is named after its prefix.
+        assert_eq!(origin_of("midi"), Origin::Midi);
+        assert_eq!(origin_of("remote:phone"), Origin::Remote("phone".into()));
         assert!(check_window("import").is_ok());
         assert!(check_window("").is_err());
         assert_eq!(params_schema(&Value::Null), json!({ "type": "object" }));

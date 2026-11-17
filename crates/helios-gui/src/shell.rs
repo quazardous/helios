@@ -2874,8 +2874,12 @@ impl Shell {
             .chain(macro_edit::COMMANDS)
         {
             let id = *id;
+            let mut spec = CommandSpec::new(id, title, "Workspace");
+            if workspace_edit::takes_dry_run(id) {
+                spec = spec.dry_run();
+            }
             add(
-                CommandSpec::new(id, title, "Workspace"),
+                spec,
                 Box::new(move |a, origin| {
                     Ok(Action::WorkspaceEdit(id.into(), a.clone(), origin.clone()))
                 }),
@@ -2888,8 +2892,12 @@ impl Shell {
         {
             for (id, title) in workshop_edit::COMMANDS {
                 let id = *id;
+                let mut spec = CommandSpec::new(id, title, crate::workshops::CATEGORY);
+                if workshop_edit::DRY_RUN.contains(&id) {
+                    spec = spec.dry_run();
+                }
                 add(
-                    CommandSpec::new(id, title, crate::workshops::CATEGORY),
+                    spec,
                     Box::new(move |a, origin| {
                         Ok(Action::WorkspaceEdit(id.into(), a.clone(), origin.clone()))
                     }),
@@ -3750,7 +3758,8 @@ impl Shell {
                 "Fit a camera look from the selection: one look from photos of one camera, fitted to their embedded JPEGs and written into each (`images`: ids, else the selection; `default`: keep it as the camera's default too)",
                 "Library",
             )
-            .when(IN_LIBRARY),
+            .when(IN_LIBRARY)
+            .dry_run(),
             Box::new(|a, origin| Ok(Action::FitCameraLook(a.clone(), origin.clone()))),
         );
         add(
@@ -3762,7 +3771,8 @@ impl Shell {
                 "library.pasteFiles",
                 "Paste Files or Image (`dry_run`: only say what would be imported)",
                 "Library",
-            ),
+            )
+            .dry_run(),
             Box::new(|a, origin| {
                 let dry_run = a.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
                 Ok(Action::PasteFiles(dry_run, origin.clone()))
@@ -3805,7 +3815,8 @@ impl Shell {
                 "param.paste",
                 "Paste onto a value (`path`; `dry_run` says what it would set)",
                 "Values",
-            ),
+            )
+            .dry_run(),
             Box::new(move |a, origin| {
                 let dry_run = a.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
                 Ok(Action::PasteParam(

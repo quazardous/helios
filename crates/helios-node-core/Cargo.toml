@@ -16,6 +16,7 @@ helios-inspect.workspace = true
 helios-library.workspace = true
 helios-load.workspace = true
 helios-photo.workspace = true
+helios-shell.workspace = true
 blake3.workspace = true
 bus-contract.workspace = true
 helios-storage.workspace = true

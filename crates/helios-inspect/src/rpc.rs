@@ -314,6 +314,8 @@ pub(crate) type Closers = Arc<Mutex<Vec<Box<dyn FnOnce() + Send>>>>;
 /// What a method sees of its call.
 pub struct Call {
     id: Option<Id>,
+    /// It came over a connection (another process), not in process.
+    connected: bool,
     cancelled: Arc<AtomicBool>,
     sink: Sink,
     closers: Closers,
@@ -332,6 +334,7 @@ impl Call {
     ) -> Self {
         Self {
             id,
+            connected: false,
             cancelled,
             sink,
             closers,
@@ -351,6 +354,15 @@ impl Call {
     /// import stops before its next file).
     pub fn cancel_flag(&self) -> Arc<AtomicBool> {
         self.cancelled.clone()
+    }
+
+    /// Whether the call came over a connection to the endpoint (a socket:
+    /// another process, whoever it says it is) rather than in process
+    /// (the application's own client). Who connected, not what the call
+    /// says, decides what it may claim to be
+    /// (`helios_shell::policy::over_connection`).
+    pub fn over_connection(&self) -> bool {
+        self.connected
     }
 
     /// The call's id; `None` for a notification.
@@ -474,6 +486,7 @@ pub(crate) fn dispatch(
     }
     let call = Call {
         id: request.id,
+        connected: true,
         cancelled,
         sink: sink.clone(),
         closers: closers.clone(),

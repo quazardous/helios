@@ -37,6 +37,23 @@ use crate::workspace_applied::{self, Changed};
 pub const STATE: &str = "workspace/state";
 
 /// The workspace's commands, with their titles.
+/// The commands of [`COMMANDS`] that take `dry_run`.
+const DRY_RUN: &[&str] = &[
+    "workspace.reset",
+    "workspace.saveAsTemplate",
+    "workspace.importParts",
+    "network.delegate",
+    "subworkspace.delete",
+];
+
+/// Whether workspace command `id` (of [`COMMANDS`], the network's or the
+/// macros') takes `dry_run`: every network edit and macro command does.
+pub(super) fn takes_dry_run(id: &str) -> bool {
+    DRY_RUN.contains(&id)
+        || super::network_edit::COMMANDS.iter().any(|(c, _)| *c == id)
+        || super::macro_edit::COMMANDS.iter().any(|(c, _)| *c == id)
+}
+
 pub(super) const COMMANDS: &[(&str, &str)] = &[
     (
         "workspace.edit",
