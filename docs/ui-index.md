@@ -17,7 +17,7 @@ To add an entry, give the public item a doc line
 `/// Need (group): a search field.`, a preset using the same words as
 the widget it wraps; the group is one of: `text`, `layout`, `action`, `input`, `state`, `status`, `icon`, `help`, `dialog`, `data`, `image`.
 
-egui-pop in the lock: 0.12.0.
+egui-pop in the lock: 0.12.1.
 
 ## Text and titles
 
