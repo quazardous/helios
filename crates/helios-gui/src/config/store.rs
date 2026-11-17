@@ -12,7 +12,7 @@
 //! | any | `workspace` | the workspace's `WORKSPACE_FILE` |
 //!
 //! A layer another client of the node changes is heard on the node's bus
-//! ([`NodeSettingsStore::follow`]) and told to egui-pop's watch: the
+//! ([`super::follow`]) and told to egui-pop's watch: the
 //! Settings window shows the new values, and nothing is written back.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -117,30 +117,6 @@ impl NodeSettingsStore {
     /// The settings as kept now.
     pub fn settings(&self) -> Settings {
         lock(&self.inner.settings).clone()
-    }
-
-    /// Follows the node's bus (`heard`, from `Bus::subscribe`): a layer
-    /// it says changed is read again and what moved is told to the
-    /// watchers. A change this store wrote itself reads as no change.
-    /// Ends with the bus.
-    pub fn follow(&self, heard: Receiver<helios_core::Envelope>) {
-        let me = self.clone();
-        let picked = std::thread::Builder::new()
-            .name("helios-settings-follow".into())
-            .spawn(move || {
-                let kind = <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND;
-                while let Ok(e) = heard.recv() {
-                    if e.kind != kind {
-                        continue;
-                    }
-                    if let Some(name) = e.payload["layer"].as_str() {
-                        me.layer_changed(name);
-                    }
-                }
-            });
-        if let Err(e) = picked {
-            log::warn!("settings: the node's layers are not followed: {e}");
-        }
     }
 
     /// Reads a layer the node said changed again, and tells the watchers
@@ -303,6 +279,31 @@ pub fn composite(
     }
 }
 
+/// Calls `changed` with each node layer the node's bus (`heard`, from
+/// `Bus::subscribe`) says changed, on a thread of its own; ends with the
+/// bus. Used by [`super::follow`], which hands every store keeping values
+/// in the node's layers the one subscription.
+pub(super) fn on_layers_changed(
+    heard: Receiver<helios_core::Envelope>,
+    changed: impl Fn(&str) + Send + 'static,
+) {
+    let picked = std::thread::Builder::new()
+        .name("helios-settings-follow".into())
+        .spawn(move || {
+            let kind = <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND;
+            while let Ok(e) = heard.recv() {
+                if e.kind == kind
+                    && let Some(name) = e.payload["layer"].as_str()
+                {
+                    changed(name);
+                }
+            }
+        });
+    if let Err(e) = picked {
+        log::warn!("settings: the node's layers are not followed: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,7 +440,10 @@ mod tests {
 
         // Watched: another client's change comes in, this store's own
         // write does not.
-        mine.follow(bus.subscribe());
+        {
+            let mine = mine.clone();
+            on_layers_changed(bus.subscribe(), move |name| mine.layer_changed(name));
+        }
         let (tell, heard) = std::sync::mpsc::channel();
         let tell = Mutex::new(tell);
         mine.watch(

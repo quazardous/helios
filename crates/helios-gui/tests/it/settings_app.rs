@@ -358,13 +358,13 @@ fn a_layer_another_client_of_the_node_changes_is_read_again() {
     let mine = node.settings();
     let (sources, problems) = config::read(&dir, &|n| mine.read(n), Some(project.into()), &[]);
     assert!(problems.is_empty(), "{problems:?}");
-    let kept = config::install(
+    config::install(
         &app,
         Settings::resolve(&sources),
         Some(Arc::new(node.settings())),
         &dir,
     );
-    kept.follow(heard);
+    config::follow(&app, heard);
     saved(&mut h);
     let user_before = mine.read("user").unwrap();
     let id = |k: &str| SettingId::new(k).unwrap();

@@ -32,7 +32,7 @@
 //!
 //! **Followed live.** A layer the node keeps that another of its clients
 //! changed (`settings.layerChanged` on its bus) is read again
-//! ([`store::NodeSettingsStore::follow`]): the Settings app shows its new
+//! ([`follow`]): the Settings app shows its new
 //! values, and nothing is written back.
 
 use std::collections::BTreeMap;
@@ -1637,7 +1637,7 @@ fn setting_id(key: &str) -> Result<SettingId, PluginError> {
 /// machine's file in `config_dir`, the interface's own in a file there,
 /// the open workspace's in its file. The library's value scope is
 /// offered when a library is open, and `--set` shown as the command
-/// line's. The store is returned for [`NodeSettingsStore::follow`].
+/// line's. The node's layers are followed live by [`follow`].
 pub fn install(
     app: &AppHandle,
     settings: Settings,
@@ -1698,17 +1698,33 @@ pub fn connect_plugins(app: &AppHandle, broker: &Arc<helios_plugin::Broker>) {
     }
 }
 
-/// Follows the node's bus for the plugins' library values (`heard`,
-/// from `Bus::subscribe`): another client's change reaches the Settings
-/// app, and the plugin through `settings.changed`.
-pub fn follow_plugins(app: &AppHandle, heard: std::sync::mpsc::Receiver<helios_core::Envelope>) {
+/// Follows the node's bus (`heard`, from `Bus::subscribe`) for every
+/// store [`install`] made that keeps values in the node's layers:
+/// Helios's settings and the plugins'. A layer another client changes is
+/// read again by each, and what moved reaches the Settings app, so every
+/// `settings.changed` listener hears it. One subscription for all of
+/// them, so none is left out. After [`install`]; ends with the bus.
+pub fn follow(app: &AppHandle, heard: std::sync::mpsc::Receiver<helios_core::Envelope>) {
     let Some(bridge) = app.service(&BRIDGE) else {
         return;
     };
-    let store = lock(&bridge.state).plugins.clone();
-    if let Some(store) = store {
-        store.follow(heard);
+    let (helios, plugins) = {
+        let st = lock(&bridge.state);
+        let helios = st.installed.as_ref().map(|(s, _)| s.clone());
+        (helios, st.plugins.clone())
+    };
+    if helios.is_none() && plugins.is_none() {
+        log::warn!("settings: the node's layers are followed before they are installed");
+        return;
     }
+    store::on_layers_changed(heard, move |name| {
+        if let Some(s) = &helios {
+            s.layer_changed(name);
+        }
+        if let Some(s) = &plugins {
+            s.layer_changed(name);
+        }
+    });
 }
 
 /// Gives the Settings app the store for what is open now. A value the

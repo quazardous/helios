@@ -13,6 +13,8 @@ use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use egui_pop::api::admin::ADMIN;
+use egui_pop::api::bus::SettingsChanged;
+use egui_pop::api::bus::bus_contract::ListenOpts;
 use egui_pop::model::ids::SettingId;
 use helios_connect::account::{MemorySecrets, Secrets as _};
 use helios_gui::config::{self, LIBRARY, Settings};
@@ -138,13 +140,13 @@ fn world(name: &str) -> World {
     let mine = node.settings();
     let (sources, problems) = config::read(&dir, &|n| mine.read(n), Some(PROJECT.into()), &[]);
     assert!(problems.is_empty(), "{problems:?}");
-    let kept = config::install(
+    config::install(
         &app,
         Settings::resolve(&sources),
         Some(Arc::new(node.settings())),
         &dir,
     );
-    kept.follow(heard);
+    config::follow(&app, heard);
     let mut w = World {
         h,
         node,
@@ -270,22 +272,50 @@ fn a_plugin_s_page_renders_its_contract_and_saves_through_the_store() {
 }
 
 #[test]
-fn a_library_value_another_client_changes_appears() {
+fn a_library_value_another_client_changes_appears_and_every_listener_hears_it() {
     let mut w = world("live");
     let app = w.h.state().app().handle().clone();
+    // Every `settings.changed` listener hears what another client changed
+    // in the library's layer, Helios's settings and the plugins' alike.
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    {
+        let heard = heard.clone();
+        app.bus()
+            .listen::<SettingsChanged>(
+                "test.heard",
+                ListenOpts::new().owner("test"),
+                move |change, ()| {
+                    heard.lock().unwrap().push(change.id().to_string());
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
     let other = w.node.settings();
     other
         .write(
             PROJECT,
-            &format!("[plugin-settings.\"{PLUGIN}\"]\nquality = 33\n"),
+            &format!(
+                "[project.decisions]\nmode = \"human\"\n\n\
+                 [plugin-settings.\"{PLUGIN}\"]\nquality = 33\n"
+            ),
         )
         .unwrap();
+    let quality = format!("{PLUGIN}.quality");
     let end = Instant::now() + Duration::from_secs(30);
-    while app.setting::<i64>(&id("quality")) != Some(33) {
+    loop {
+        let all = {
+            let h = heard.lock().unwrap();
+            h.contains(&quality) && h.iter().any(|i| i == "project.decisions.mode")
+        };
+        if all && app.setting::<i64>(&id("quality")) == Some(33) {
+            break;
+        }
         assert!(
             Instant::now() < end,
-            "not read again in 30 s: {:?}",
-            app.setting::<i64>(&id("quality"))
+            "not read again in 30 s: {:?}, heard {:?}",
+            app.setting::<i64>(&id("quality")),
+            heard.lock().unwrap()
         );
         std::thread::sleep(Duration::from_millis(10));
         w.h.run();
