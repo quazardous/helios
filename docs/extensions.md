@@ -271,14 +271,25 @@ A crash costs that plugin alone: the call in flight fails at once with the
 plugin's last line of standard error, a `Crashed` notice goes out, and the
 next call restarts it, after a wait that doubles with each crash in a row.
 
-Three services: `importer` (see "Importers" below), `metadata.read` (an image path in, fields out, each with the
-tag it came from: camera, lens, exposure, GPS, keywords…) and `device`
-(`device.list`, `device.info`, `device.capture`, `device.download`, with
-progress). The shell commands are `plugin.list`, `plugin.capabilities`,
-`plugin.enable`, `plugin.disable`, `plugin.grant` (`granted: false` takes
-the capability back), `plugin.revoke`, `metadata.read`,
-`device.list`, `device.info`, `device.capture`, `device.download`, and the
-commands plugins contribute, each run in its plugin.
+Four services: `importer` (see "Importers" below), `import.source` (a
+source of the import window, such as `google-photos`: see
+docs/google-photos.md), `metadata.read` (an image path in, fields out,
+each with the tag it came from: camera, lens, exposure, GPS, keywords…)
+and `device` (`device.list`, `device.info`, `device.capture`,
+`device.download`, with progress). The desktop declares these commands
+on its registry, so its menus, palette and agents run them like any
+other: `plugin.list`, `plugin.capabilities`, `plugin.enable`,
+`plugin.disable`, `plugin.grant` (`granted: false` takes the capability
+back), `plugin.revoke`, `metadata.read`, `device.list`, `device.info`,
+`device.capture`, `device.download`, and the commands plugins contribute
+(`[[commands]]`), each run in its plugin, which starts on
+`onCommand:<id>` and holds to its grants as on any call. A contributed
+command whose id is taken already is left out, said in the log.
+
+One plugin's start holds no other: a plugin is started outside the lock
+of its state, marked as starting meanwhile, so a call to another plugin,
+`plugin.list` and the idle sweep go on; a second call to the plugin that
+is starting waits for that start and shares its process.
 
 **What is enforced: crash isolation plus brokered data.** Each capability
 is either *brokered*, where the broker controls the access and checks it

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -151,6 +151,13 @@ struct State {
     /// The values of its own settings the running process was handed
     /// (at `initialize`, then by `settings/changed`).
     values: Option<Map<String, Json>>,
+    /// Its process is being started, outside this state's lock: the
+    /// other calls to it wait for that start ([`Slot::started`]), the
+    /// other plugins go on.
+    starting: bool,
+    /// Moves each time its process is stopped: a start that ends after
+    /// a stop (its grants or settings changed meanwhile) is not kept.
+    stops: u64,
 }
 
 struct Slot {
@@ -158,6 +165,8 @@ struct Slot {
     dir: PathBuf,
     scope: Scope,
     state: Mutex<State>,
+    /// Told when a start of its process ends.
+    started: Condvar,
 }
 
 type Listeners = Arc<Mutex<Vec<Sender<Notice>>>>;
@@ -284,7 +293,10 @@ impl Broker {
                     in_flight: 0,
                     last_error: None,
                     values: None,
+                    starting: false,
+                    stops: 0,
                 }),
+                started: Condvar::new(),
             },
         );
         Ok(id)
@@ -499,6 +511,11 @@ impl Broker {
         let mut st = slot.state.lock().expect("plugin lock");
         let Some(process) = st.process.clone().filter(|p| p.alive()) else {
             st.values = None;
+            // one starting may have read the values before they moved:
+            // that start is not kept, it starts again with these
+            if st.starting {
+                st.stops += 1;
+            }
             return Ok(Told::Nothing);
         };
         let before = st.values.clone().unwrap_or_default();
@@ -573,6 +590,7 @@ impl Broker {
     }
 
     fn stop_locked(&self, id: &str, st: &mut State, why: &str) {
+        st.stops += 1;
         if let Some(p) = st.process.take() {
             let was_alive = p.alive();
             p.stop(self.policy.grace);
@@ -588,11 +606,13 @@ impl Broker {
         }
     }
 
-    /// Stops the plugins left unused longer than the policy's `idle`.
+    /// Stops the plugins left unused longer than the policy's `idle`; one
+    /// starting is left alone.
     pub fn stop_idle(&self) {
         for (id, slot) in &self.plugins {
             let mut st = slot.state.lock().expect("plugin lock");
             if st.process.is_some()
+                && !st.starting
                 && st.in_flight == 0
                 && st.last_used.elapsed() >= self.policy.idle
             {
@@ -610,6 +630,9 @@ impl Broker {
     pub fn probe(&self, id: &str) -> Result<(Probed, Vec<String>), String> {
         let slot = self.slot(id)?;
         let mut st = slot.state.lock().expect("plugin lock");
+        while st.starting {
+            st = slot.started.wait(st).expect("plugin lock");
+        }
         let mut log: Vec<String> = Vec::new();
         if let Some(p) = &st.process {
             if p.alive() {
@@ -630,13 +653,17 @@ impl Broker {
                 return Ok((Probed::NotGranted(c.name.clone()), log));
             }
         }
-        match self.start(id, slot, &st) {
+        // started outside the lock, as any start: its handshake may take
+        // the whole `initialize` timeout
+        let granted = st.granted.clone();
+        drop(st);
+        match self.start(id, slot, &granted) {
             Ok((p, _)) => {
                 p.stop(self.policy.grace);
                 Ok((Probed::Answers, log))
             }
             Err(e) => {
-                st.last_error = Some(e.clone());
+                slot.state.lock().expect("plugin lock").last_error = Some(e.clone());
                 log.push(e.clone());
                 Ok((Probed::Failed(e), log))
             }
@@ -681,9 +708,9 @@ impl Broker {
         let mut errors = Vec::new();
         for (id, slot) in &self.plugins {
             if slot.manifest.activation.iter().any(|e| e == "onStartup") {
-                let mut st = slot.state.lock().expect("plugin lock");
+                let st = slot.state.lock().expect("plugin lock");
                 if st.enabled
-                    && let Err(e) = self.ensure(id, slot, &mut st, "onStartup")
+                    && let (_, Err(e)) = self.ensure(id, slot, st, "onStartup")
                 {
                     errors.push(e);
                 }
@@ -692,66 +719,94 @@ impl Broker {
         errors
     }
 
-    /// The running process of a plugin, started for `event` if need be.
-    fn ensure(
+    /// The running process of a plugin, started for `event` if need be,
+    /// and its state's lock again. The start runs outside the lock, the
+    /// state marked as starting: a call to another plugin, the list and
+    /// the idle sweep go on meanwhile; another call to this one waits for
+    /// that start and shares its process.
+    fn ensure<'a>(
         &self,
         id: &str,
-        slot: &Slot,
-        st: &mut State,
+        slot: &'a Slot,
+        mut st: MutexGuard<'a, State>,
         event: &str,
-    ) -> Result<Arc<Process>, String> {
-        if !st.enabled {
-            return Err(format!("plugin `{id}` is disabled"));
-        }
-        if !slot.manifest.activation.iter().any(|e| e == event) {
-            return Err(format!("plugin `{id}` does not start on `{event}`"));
-        }
-        // What the broker cannot hold a process to, the user must grant
-        // before the process runs at all.
-        for c in &slot.manifest.capabilities {
-            if capability(&c.name).map(|(e, _)| e) == Some(Enforcement::Ambient)
-                && !st.granted.contains(&c.name)
-            {
-                return Err(format!(
-                    "plugin `{id}` needs the capability `{}` ({}), not granted: \
-                     allow it in Settings > Plugins",
-                    c.name, c.reason
-                ));
+    ) -> (MutexGuard<'a, State>, Result<Arc<Process>, String>) {
+        loop {
+            while st.starting {
+                st = slot.started.wait(st).expect("plugin lock");
             }
-        }
-        if let Some(p) = &st.process {
-            if p.alive() {
-                return Ok(p.clone());
+            if !st.enabled {
+                return (st, Err(format!("plugin `{id}` is disabled")));
             }
-            // It ended on its own: count the crash, wait before the next
-            // start, longer after each crash in a row.
-            let tail = p.stderr_tail();
-            st.process = None;
-            self.back_off(st);
-            st.last_error = Some(format!("crashed{}", tail_note(&tail)));
-        }
-        if let Some(at) = st.retry_at {
-            let now = Instant::now();
-            if at > now {
-                return Err(format!(
-                    "plugin `{id}` crashed {} time(s) in a row; it restarts in {} ms",
-                    st.crashes,
-                    (at - now).as_millis()
-                ));
+            if !slot.manifest.activation.iter().any(|e| e == event) {
+                return (
+                    st,
+                    Err(format!("plugin `{id}` does not start on `{event}`")),
+                );
             }
-        }
-        match self.start(id, slot, st) {
-            Ok((p, values)) => {
-                st.process = Some(p.clone());
-                st.values = Some(values);
-                st.retry_at = None;
-                announce(&self.listeners, Notice::Started { plugin: id.into() });
-                Ok(p)
+            // What the broker cannot hold a process to, the user must grant
+            // before the process runs at all.
+            for c in &slot.manifest.capabilities {
+                if capability(&c.name).map(|(e, _)| e) == Some(Enforcement::Ambient)
+                    && !st.granted.contains(&c.name)
+                {
+                    let e = format!(
+                        "plugin `{id}` needs the capability `{}` ({}), not granted: \
+                         allow it in Settings > Plugins",
+                        c.name, c.reason
+                    );
+                    return (st, Err(e));
+                }
             }
-            Err(e) => {
-                self.back_off(st);
-                st.last_error = Some(e.clone());
-                Err(e)
+            if let Some(p) = &st.process {
+                if p.alive() {
+                    let p = p.clone();
+                    return (st, Ok(p));
+                }
+                // It ended on its own: count the crash, wait before the next
+                // start, longer after each crash in a row.
+                let tail = p.stderr_tail();
+                st.process = None;
+                self.back_off(&mut st);
+                st.last_error = Some(format!("crashed{}", tail_note(&tail)));
+            }
+            if let Some(at) = st.retry_at {
+                let now = Instant::now();
+                if at > now {
+                    let e = format!(
+                        "plugin `{id}` crashed {} time(s) in a row; it restarts in {} ms",
+                        st.crashes,
+                        (at - now).as_millis()
+                    );
+                    return (st, Err(e));
+                }
+            }
+            st.starting = true;
+            let stops = st.stops;
+            let granted = st.granted.clone();
+            drop(st);
+            let started = self.start(id, slot, &granted);
+            st = slot.state.lock().expect("plugin lock");
+            st.starting = false;
+            slot.started.notify_all();
+            match started {
+                // Stopped while it started (disabled, its grants or
+                // settings changed): not kept, started again as it is now.
+                Ok((p, _)) if st.stops != stops => {
+                    p.stop(self.policy.grace);
+                }
+                Ok((p, values)) => {
+                    st.process = Some(p.clone());
+                    st.values = Some(values);
+                    st.retry_at = None;
+                    announce(&self.listeners, Notice::Started { plugin: id.into() });
+                    return (st, Ok(p));
+                }
+                Err(e) => {
+                    self.back_off(&mut st);
+                    st.last_error = Some(e.clone());
+                    return (st, Err(e));
+                }
             }
         }
     }
@@ -773,7 +828,7 @@ impl Broker {
         &self,
         id: &str,
         slot: &Slot,
-        st: &State,
+        granted: &BTreeSet<String>,
     ) -> Result<(Arc<Process>, Map<String, Json>), String> {
         let m = &slot.manifest;
         let first = &m.command[0];
@@ -853,7 +908,7 @@ impl Broker {
             "helios": {"version": self.version.to_string()},
             "interfaces": interfaces,
             "plugin": {"id": id, "dir": slot.dir},
-            "capabilities": {"granted": st.granted},
+            "capabilities": {"granted": granted},
             "settings": prefixed(id, &values),
             "config": {"plugin": values},
         });
@@ -908,10 +963,9 @@ impl Broker {
         self.stop_idle();
         let slot = self.slot(id).map_err(CallError::Stopped)?;
         let (process, values) = {
-            let mut st = slot.state.lock().expect("plugin lock");
-            let p = self
-                .ensure(id, slot, &mut st, event)
-                .map_err(CallError::Stopped)?;
+            let st = slot.state.lock().expect("plugin lock");
+            let (mut st, p) = self.ensure(id, slot, st, event);
+            let p = p.map_err(CallError::Stopped)?;
             st.in_flight += 1;
             st.last_used = Instant::now();
             (p, st.values.clone().unwrap_or_default())
