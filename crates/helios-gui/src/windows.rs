@@ -36,6 +36,7 @@ pub struct Drawn {
 #[derive(Default)]
 struct State {
     scales: HashMap<ViewportId, f32>,
+    positions: HashMap<ViewportId, Pos2>,
     drawn: HashMap<ViewportId, Drawn>,
 }
 
@@ -62,8 +63,12 @@ pub fn harness_with_windows<'a>(
             .builder
             .inner_size
             .unwrap_or(Vec2::new(480.0, 360.0));
-        let at = viewport.builder.position.unwrap_or(Pos2::ZERO);
-        let scale = st.borrow().scales.get(&id).copied().unwrap_or(1.0);
+        let (at, scale) = {
+            let st = st.borrow();
+            let at = st.positions.get(&id).copied();
+            let at = at.or(viewport.builder.position).unwrap_or(Pos2::ZERO);
+            (at, st.scales.get(&id).copied().unwrap_or(1.0))
+        };
         let mut input = egui::RawInput {
             viewport_id: id,
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
@@ -117,6 +122,15 @@ impl Windows {
             .borrow_mut()
             .scales
             .insert(window_id(panel), scale);
+    }
+
+    /// Moves a detached panel's window to `at` (its outer position, in
+    /// points, on the screens told), from its next pass.
+    pub fn set_position(&self, panel: &str, at: Pos2) {
+        self.state
+            .borrow_mut()
+            .positions
+            .insert(window_id(panel), at);
     }
 
     /// What a detached panel's window drew at its last pass.

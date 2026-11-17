@@ -31,6 +31,7 @@ mod decisions;
 mod develop_raw;
 mod dialog_details;
 mod dialogs;
+mod display_route;
 mod duplicates;
 mod edit_marks;
 mod edit_snapshots;
