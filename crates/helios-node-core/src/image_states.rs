@@ -245,6 +245,9 @@ impl fmt::Debug for ImageStates {
     }
 }
 
+/// Routers made so far, to name their threads apart.
+static ROUTERS: AtomicU64 = AtomicU64::new(0);
+
 /// How many computations the desktop's router runs at once: the
 /// interactive state and one more (the heavy steps inside, the demosaic,
 /// spread over every core already).
@@ -268,7 +271,6 @@ impl ImageStates {
             computed: AtomicU64::new(0),
             cancelled: AtomicU64::new(0),
         });
-        static ROUTERS: AtomicU64 = AtomicU64::new(0);
         let prefix: Arc<str> =
             format!("helios-states-{}.", ROUTERS.fetch_add(1, Ordering::Relaxed)).into();
         for i in 0..threads.max(1) {
@@ -542,13 +544,11 @@ impl Handle {
             Found::Ready(value) => return Some(Ok(value.clone())),
             Found::Flying(waiter) => waiter.try_get()?,
         };
-        match self.settle(outcome) {
-            Some(answer) => Some(answer),
-            None => {
-                self.again();
-                None
-            }
+        let answer = self.settle(outcome);
+        if answer.is_none() {
+            self.again();
         }
+        answer
     }
 
     /// The answer of a flight's outcome, or `None` when the others
