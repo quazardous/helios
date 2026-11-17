@@ -208,7 +208,7 @@ impl Life {
         let jobs = self.jobs();
         let waiting = self.read(|s| s.quit == Some(AtQuit::Wait) && !s.force);
         if waiting {
-            self.wait_for_jobs(&jobs);
+            wait_for_jobs(&jobs);
         }
         // Leaving them is safe: what they wrote is in the vault, the rest
         // is done again (an export asked again, a backup run again).
@@ -217,42 +217,42 @@ impl Life {
             stop_one(j, until);
         }
     }
+}
 
-    /// A quit that leaves the running jobs to finish: waited for, all
-    /// together at most [`WAIT_FOR_JOBS`].
-    fn wait_for_jobs(&self, jobs: &[Arc<dyn NodeJobs>]) {
-        let until = std::time::Instant::now() + WAIT_FOR_JOBS;
-        let step = crate::phases::end()
-            .begin(Message::new("node-end-jobs", "Stopping background jobs"))
-            .can_skip();
-        for j in jobs {
-            let running = j.running().len();
-            if running == 0 {
-                continue;
+/// A quit that leaves the running jobs to finish: waited for, all
+/// together at most [`WAIT_FOR_JOBS`].
+fn wait_for_jobs(jobs: &[Arc<dyn NodeJobs>]) {
+    let until = std::time::Instant::now() + WAIT_FOR_JOBS;
+    let step = crate::phases::end()
+        .begin(Message::new("node-end-jobs", "Stopping background jobs"))
+        .can_skip();
+    for j in jobs {
+        let running = j.running().len();
+        if running == 0 {
+            continue;
+        }
+        crate::quit::mark("the node waits for its running jobs");
+        step.why(
+            Message::new(
+                "node-end-jobs-waiting",
+                "Waiting for { $count } running jobs to finish",
+            )
+            .with("count", running as f64),
+        );
+        loop {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                log::warn!(
+                    target: "helios::node",
+                    "the running jobs did not finish in {} min: they are cancelled",
+                    WAIT_FOR_JOBS.as_secs() / 60
+                );
+                return;
             }
-            crate::quit::mark("the node waits for its running jobs");
-            step.why(
-                Message::new(
-                    "node-end-jobs-waiting",
-                    "Waiting for { $count } running jobs to finish",
-                )
-                .with("count", running as f64),
-            );
-            loop {
-                let left = until.saturating_duration_since(std::time::Instant::now());
-                if left.is_zero() {
-                    log::warn!(
-                        target: "helios::node",
-                        "the running jobs did not finish in {} min: they are cancelled",
-                        WAIT_FOR_JOBS.as_secs() / 60
-                    );
-                    return;
-                }
-                if j.wait(left.min(Duration::from_mins(1))) {
-                    break;
-                }
-                log::info!(target: "helios::node", "still waiting for running jobs");
+            if j.wait(left.min(Duration::from_mins(1))) {
+                break;
             }
+            log::info!(target: "helios::node", "still waiting for running jobs");
         }
     }
 }
