@@ -351,6 +351,7 @@ fn an_agents_answer_removes_the_card() {
 /// decision in human mode with its answer form open.
 #[test]
 fn decisions_snapshots() {
+    use crate::shot::Shots as _;
     let mut h = harness(shell(&[
         ("sure", Some(0.9)),
         ("unsure", Some(0.5)),
@@ -360,10 +361,5 @@ fn decisions_snapshots() {
     frames(&mut h);
     let mut results = egui_kittest::SnapshotResults::new();
     let rect = h.state().target_rect(PANEL).unwrap();
-    // The old drawing leaves its sliders unnamed: its picture is taken
-    // without the accessibility check, for the record only.
-    let image = h.render().unwrap();
-    let rect = rect.intersect(h.ctx.content_rect());
-    let cut = helios_gui::snapshot::crop(&image, rect, h.ctx.pixels_per_point());
-    results.add(egui_kittest::try_image_snapshot(&cut, "decisions-pop-dark-1x"));
+    results.add(h.try_shot_of("decisions-pop-dark-1x", rect));
 }

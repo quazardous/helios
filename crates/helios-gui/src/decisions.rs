@@ -22,12 +22,17 @@
 //! [`Decisions::card_ui`] draws one card on its own, for the graph view
 //! to show next to its node once it exists.
 
-use egui_pop::core::ui::UiPop as _;
 use std::collections::BTreeMap;
 
 use egui::Ui;
+use egui_pop::core::input::Input;
+use egui_pop::core::slider::Slider;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::{Graph, Message, ModuleKind, ParamKind, ParamSpec, Params, Value};
 use helios_decision::{Book, Mode, Proposal, Status};
+use helios_ui::{Action, Progress, Scroll};
 use helios_values::Descriptor;
 
 /// The panel's id.
@@ -378,13 +383,13 @@ impl Decisions {
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
         if self.cards.is_empty() {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-decisions-none",
                 "No decision waiting for an answer",
             )));
             return;
         }
-        ui.strong(text(
+        ui.section_title(text(
             Message::new("gui-decisions-count", "{ $count } decisions waiting")
                 .with("count", self.cards.len()),
         ));
@@ -396,46 +401,49 @@ impl Decisions {
         if proposed >= 2 {
             ui.horizontal(|ui| {
                 let above = self.above(self.threshold).len();
-                let r = ui.add_enabled(
-                    above > 0,
-                    egui::Button::new(text(
-                        Message::new(
-                            "gui-decisions-accept-above",
-                            "Accept the { $count } above { $percent } %",
-                        )
-                        .with("count", above)
-                        .with("percent", percent(self.threshold)),
-                    )),
+                let label = text(
+                    Message::new(
+                        "gui-decisions-accept-above",
+                        "Accept the { $count } above { $percent } %",
+                    )
+                    .with("count", above)
+                    .with("percent", percent(self.threshold)),
                 );
+                let r = ui
+                    .add_enabled_ui(above > 0, |ui| {
+                        helios_ui::action(ui, Action::Secondary, &label)
+                    })
+                    .inner;
                 crate::name_rect(&ctx, "helios.decisions.accept_above", r.rect);
                 if r.clicked() {
                     self.accept_above(self.threshold);
                 }
-                let mut t = self.threshold;
-                ui.add(
-                    egui::Slider::new(&mut t, 0.0..=1.0)
-                        .show_value(false)
-                        .step_by(0.05),
-                )
-                .on_hover_text(text(Message::new(
+                let hint = text(Message::new(
                     "gui-decisions-threshold-hint",
                     "How sure the model must be for its proposal to be taken",
-                )));
+                ));
+                let mut t = self.threshold;
+                let r = Slider::new(&mut t, "", 0.0..=1.0)
+                    .step(0.05)
+                    .display_scale(100.0)
+                    .precision(0)
+                    .unit("%")
+                    .show(ui)
+                    .response;
+                egui_pop::core::a11y::name(&r, egui::Role::Slider, &hint);
+                let _ = r.tip(&hint);
                 if t != self.threshold {
                     self.set_threshold(t);
                 }
             });
         }
         let cards = self.cards.clone();
-        ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.decisions.scroll"),
-            |ui| {
-                for card in &cards {
-                    ui.separator();
-                    self.card_ui(ui, card);
-                }
-            },
-        );
+        helios_ui::scroll(ui, "helios.decisions.scroll", Scroll::Region, |ui| {
+            for card in &cards {
+                ui.space_role(Space::Group);
+                ui.card(Tone::Neutral, |ui| self.card_ui(ui, card));
+            }
+        });
     }
 
     /// One card: what the decision asks, the proposal, Accept and
@@ -445,11 +453,14 @@ impl Decisions {
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let node = card.node.as_str();
-        let r = ui.strong(if card.description.is_empty() {
-            card.module.clone()
-        } else {
-            card.description.clone()
-        });
+        let r = ui.text_role(
+            TextRole::Section,
+            if card.description.is_empty() {
+                card.module.clone()
+            } else {
+                card.description.clone()
+            },
+        );
         crate::name_rect(&ctx, &format!("helios.decisions.{node}"), r.rect);
         let mode = match card.mode {
             Mode::Human => Message::new("gui-decisions-mode-human", "{ $node }: answered by you")
@@ -465,45 +476,54 @@ impl Decisions {
             )
             .with("node", node),
         };
-        ui.weak(text(mode));
+        ui.muted(text(mode));
         for (name, value) in card.question.iter() {
-            ui.label(format!("{name}: {}", plain(value)));
+            ui.text_role(TextRole::Body, format!("{name}: {}", plain(value)));
         }
         if let Some(p) = &card.proposal {
-            ui.label(text(
-                Message::new("gui-decisions-proposal", "{ $model } proposes:")
-                    .with("model", p.model.name.as_str()),
-            ));
+            ui.text_role(
+                TextRole::Body,
+                text(
+                    Message::new("gui-decisions-proposal", "{ $model } proposes:")
+                        .with("model", p.model.name.as_str()),
+                ),
+            );
             if let Some(best) = p.options.first() {
                 for spec in &card.answer {
                     if let Some(v) = best.get(&spec.name) {
                         let (label, shown) = field_text(&ctx, card, spec, v);
-                        ui.label(format!("  {label}: {shown}"));
+                        ui.text_role(TextRole::Body, format!("  {label}: {shown}"));
                     }
                 }
             }
             if p.options.len() > 1 {
-                ui.weak(text(
+                ui.muted(text(
                     Message::new("gui-decisions-other-options", "{ $count } other options")
                         .with("count", p.options.len() - 1),
                 ));
             }
             if let Some(c) = p.confidence {
-                ui.add(
-                    egui::ProgressBar::new(c as f32).text(text(
-                        Message::new("gui-decisions-confidence", "Confidence: { $percent } %")
-                            .with("percent", percent(c)),
-                    )),
+                let sure = text(
+                    Message::new("gui-decisions-confidence", "Confidence: { $percent } %")
+                        .with("percent", percent(c)),
                 );
+                ui.horizontal(|ui| {
+                    ui.text_role(TextRole::Body, &sure);
+                    #[allow(clippy::cast_possible_truncation)]
+                    helios_ui::progress(ui, Progress::Row, &sure, Some(c as f32));
+                });
             }
             if !p.rationale.is_empty() {
-                ui.label(text(
-                    Message::new("gui-decisions-why", "Why: { $why }")
-                        .with("why", p.rationale.as_str()),
-                ));
+                ui.text_role(
+                    TextRole::Body,
+                    text(
+                        Message::new("gui-decisions-why", "Why: { $why }")
+                            .with("why", p.rationale.as_str()),
+                    ),
+                );
             }
         } else if card.mode != Mode::Human {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-decisions-waiting-model",
                 "Waiting for the model",
             )));
@@ -514,23 +534,34 @@ impl Decisions {
         }
         ui.horizontal(|ui| {
             if card.proposal.is_some() {
-                let r = ui.button(text(Message::new("gui-decisions-accept", "Accept")));
+                let r = helios_ui::action(
+                    ui,
+                    Action::Primary,
+                    &text(Message::new("gui-decisions-accept", "Accept")),
+                );
                 crate::name_rect(&ctx, &format!("helios.decisions.{node}.accept"), r.rect);
                 if r.clicked() {
                     self.accept(node, 0);
                 }
-                let r = ui
-                    .button(text(Message::new("gui-decisions-correct", "Correct…")))
-                    .on_hover_text(text(Message::new(
-                        "gui-decisions-correct-hint",
-                        "Change the proposal before it is recorded",
-                    )));
+                let r = helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-decisions-correct", "Correct…")),
+                )
+                .tip(text(Message::new(
+                    "gui-decisions-correct-hint",
+                    "Change the proposal before it is recorded",
+                )));
                 crate::name_rect(&ctx, &format!("helios.decisions.{node}.correct"), r.rect);
                 if r.clicked() {
                     let _ = self.correct(node);
                 }
             } else {
-                let r = ui.button(text(Message::new("gui-decisions-answer", "Answer…")));
+                let r = helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-decisions-answer", "Answer…")),
+                );
                 crate::name_rect(&ctx, &format!("helios.decisions.{node}.correct"), r.rect);
                 if r.clicked() {
                     let _ = self.correct(node);
@@ -553,9 +584,8 @@ impl Decisions {
             };
             let (label, shown) = field_text(&ctx, card, spec, &value);
             let edited = ui
-                .horizontal(|ui| {
-                    ui.label(&label);
-                    field(ui, card, spec, value, &shown)
+                .push_id(&spec.name, |ui| {
+                    field(ui, card, spec, value, &label, &shown)
                 })
                 .inner;
             if let Some(v) = edited {
@@ -564,14 +594,21 @@ impl Decisions {
         }
         self.forms.insert(node.to_string(), values);
         ui.horizontal(|ui| {
-            let r = ui.button(text(Message::new("gui-decisions-record", "Record")));
+            let r = helios_ui::action(
+                ui,
+                Action::Primary,
+                &text(Message::new("gui-decisions-record", "Record")),
+            );
             crate::name_rect(&ctx, &format!("helios.decisions.{node}.record"), r.rect);
             if r.clicked() {
                 let _ = self.submit(node);
             }
-            if ui
-                .button(text(Message::new("gui-decisions-cancel", "Cancel")))
-                .clicked()
+            if helios_ui::action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-decisions-cancel", "Cancel")),
+            )
+            .clicked()
             {
                 self.close_form(node);
             }
@@ -647,23 +684,38 @@ fn field_text(ctx: &egui::Context, card: &Card, spec: &ParamSpec, v: &Value) -> 
     (label, shown)
 }
 
-/// One field of the answer form; the value when it was changed. A list
-/// or a long text (a mask) is shown, not edited here.
-fn field(ui: &mut Ui, card: &Card, spec: &ParamSpec, value: Value, shown: &str) -> Option<Value> {
+/// One field of the answer form, labelled `label`; the value when it was
+/// changed. A number is egui-pop's slider (its label inside the bar); a
+/// list or a long text (a mask) is shown, not edited here.
+fn field(
+    ui: &mut Ui,
+    card: &Card,
+    spec: &ParamSpec,
+    value: Value,
+    label: &str,
+    shown: &str,
+) -> Option<Value> {
     let id = format!("helios.decisions.{}.{}", card.node, spec.name);
     let (r, changed) = match (&spec.kind, value) {
         (ParamKind::Float { min, max, .. }, Value::Float(mut x)) => {
-            let r = ui.add(egui::Slider::new(&mut x, *min..=*max));
-            let changed = r.changed().then_some(Value::Float(x));
-            (r, changed)
+            let out = Slider::new(&mut x, label, *min..=*max).show(ui);
+            let changed = out.response.changed().then_some(Value::Float(x));
+            (out.response, changed)
         }
-        (ParamKind::Int { min, max, .. }, Value::Int(mut x)) => {
-            let r = ui.add(egui::Slider::new(&mut x, *min..=*max));
-            let changed = r.changed().then_some(Value::Int(x));
-            (r, changed)
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+        (ParamKind::Int { min, max, .. }, Value::Int(n)) => {
+            let mut x = n as f64;
+            let out = Slider::new(&mut x, label, *min as f64..=*max as f64)
+                .integer()
+                .show(ui);
+            let changed = out
+                .response
+                .changed()
+                .then_some(Value::Int(x.round() as i64));
+            (out.response, changed)
         }
         (ParamKind::Bool { .. }, Value::Bool(mut x)) => {
-            let r = ui.checkbox(&mut x, "");
+            let r = widgets::checkbox(ui, &mut x, label);
             let changed = r.changed().then_some(Value::Bool(x));
             (r, changed)
         }
@@ -673,27 +725,41 @@ fn field(ui: &mut Ui, card: &Card, spec: &ParamSpec, value: Value, shown: &str) 
             d.module = Some(card.module.clone());
             let path = helios_values::node_path(&card.node, &spec.name);
             let mut picked = None;
-            let r = egui::ComboBox::from_id_salt(&id)
-                .selected_text(shown)
-                .show_ui(ui, |ui| {
-                    for o in options {
-                        let label = crate::params::choice(&ctx, &path, &d, o);
-                        if ui.selectable_label(*o == c, label).clicked() && *o != c {
-                            picked = Some(Value::Choice(o.clone()));
+            let r = ui
+                .horizontal(|ui| {
+                    ui.text_role(TextRole::Body, label);
+                    ui.combo_box(widgets::combo_box(&id).selected_text(shown), |ui| {
+                        for o in options {
+                            let word = crate::params::choice(&ctx, &path, &d, o);
+                            if widgets::selectable_label(ui, *o == c, word).clicked() && *o != c {
+                                picked = Some(Value::Choice(o.clone()));
+                            }
                         }
-                    }
+                    })
+                    .response
                 })
-                .response;
-            let name = crate::params::label(&ctx, &path, &d);
-            egui_pop::core::a11y::name(&r, egui::Role::ComboBox, &name);
+                .inner;
+            egui_pop::core::a11y::name(&r, egui::Role::ComboBox, label);
             (r, picked)
         }
         (ParamKind::Text { .. }, Value::Text(mut t)) if t.len() <= 64 => {
-            let r = ui.text_edit_singleline(&mut t);
-            let changed = r.changed().then_some(Value::Text(t));
-            (r, changed)
+            let out = ui
+                .horizontal(|ui| {
+                    ui.text_role(TextRole::Body, label);
+                    Input::text(&mut t, label).id_salt(&id).show(ui)
+                })
+                .inner;
+            let changed = out.changed.then_some(Value::Text(t));
+            (out.response, changed)
         }
-        _ => (ui.weak(shown), None),
+        _ => (
+            ui.horizontal(|ui| {
+                ui.text_role(TextRole::Body, label);
+                ui.muted(shown)
+            })
+            .inner,
+            None,
+        ),
     };
     crate::name_rect(ui.ctx(), &id, r.rect);
     changed
