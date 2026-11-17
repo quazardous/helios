@@ -4,3 +4,11 @@ image.open
 image.close
   1. edit.save (owner helios.darkroom): local
   2. history.scope (owner helios.darkroom): local; after edit.save
+image.opened
+  1. snapshots.book (owner helios.darkroom): local
+  2. mask.marks (owner helios.darkroom): local; after snapshots.book
+  3. workshop.photo (owner helios.darkroom): local; after mask.marks
+image.closed
+  1. snapshots.book (owner helios.darkroom): local
+  2. mask.marks (owner helios.darkroom): local; after snapshots.book
+  3. workshop.photo (owner helios.darkroom): local; after mask.marks
