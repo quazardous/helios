@@ -55,3 +55,62 @@ fn where_no_position_was_kept_nothing_moves() {
     assert_eq!(vb.position, None, "the system places it");
     assert_eq!(vb.inner_size, Some(vec2(1000.0, 700.0)));
 }
+
+/// A monitor unplugged while Helios runs is said on egui-pop's bus, by
+/// the name winit gives it (`screen.removed`), once the event loop tells
+/// the screens left; plugged in again, `screen.added`. Helios's loop is
+/// the one place that reads the monitors (`event_loop::tell_screens`).
+#[test]
+fn a_monitor_unplugged_is_said_on_the_bus_by_its_name() {
+    use std::sync::{Arc, Mutex};
+
+    use egui_pop::api::bus::bus_contract::{ListenOpts, Point as _};
+    use egui_pop::api::bus::{ScreenAdded, ScreenRemoved};
+    use helios_gui::{Shell, headless, helios_panels};
+
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let bus = h.state().app().handle().bus();
+    let said = heard.clone();
+    bus.listen_local::<ScreenRemoved>(
+        "test.removed",
+        ListenOpts::new().owner("test").last(),
+        move |c, ()| {
+            said.lock()
+                .unwrap()
+                .push(format!("{} {:?}", ScreenRemoved::ID, c.name));
+            Ok(())
+        },
+    )
+    .unwrap();
+    let said = heard.clone();
+    bus.listen_local::<ScreenAdded>(
+        "test.added",
+        ListenOpts::new().owner("test").last(),
+        move |c, ()| {
+            said.lock()
+                .unwrap()
+                .push(format!("{} {:?}", ScreenAdded::ID, c.name));
+            Ok(())
+        },
+    )
+    .unwrap();
+    window::set_screens(vec![panel(), monitor()]);
+    h.run();
+    assert!(
+        heard.lock().unwrap().is_empty(),
+        "the screens first told are not said"
+    );
+    window::set_screens(vec![panel()]);
+    h.run();
+    window::set_screens(vec![panel(), monitor()]);
+    h.run();
+    window::set_screens(Vec::new());
+    assert_eq!(
+        *heard.lock().unwrap(),
+        vec![
+            "screen.removed Some(\"DP-1\")".to_string(),
+            "screen.added Some(\"DP-1\")".to_string(),
+        ]
+    );
+}
