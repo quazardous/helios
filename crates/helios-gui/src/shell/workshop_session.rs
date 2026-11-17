@@ -556,7 +556,7 @@ impl Shell {
     ) -> Result<(), String> {
         let panel = self.focus.workshops.clone();
         crate::image_open::listen_follower_local(bus, crate::image_open::WORKSHOP, move |shown| {
-            panel.borrow_mut().image = shown.image.clone();
+            panel.borrow_mut().image.clone_from(&shown.image);
         })
     }
 }
