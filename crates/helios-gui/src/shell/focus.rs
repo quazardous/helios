@@ -75,6 +75,9 @@ pub(super) struct Focus {
     /// The workspace opens in Compare (its template says so): the place
     /// is entered once the stack is read, when it shows the root.
     pub(super) open_in_compare: bool,
+    /// The Compare panel was seen shown in the Compare place: closed
+    /// there, Compare is left.
+    pub(super) compare_panel_shown: bool,
     /// The album a rename form was opened for (`library.collection.rename`
     /// without `id` renames it).
     pub(super) album_renamed: Option<String>,
@@ -191,6 +194,7 @@ impl Focus {
             library: seed.library,
             comparison: Rc::default(),
             open_in_compare: false,
+            compare_panel_shown: false,
             album_renamed: None,
             album_ruled: None,
             rule_editor: None,
