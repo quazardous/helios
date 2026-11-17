@@ -168,11 +168,6 @@ impl Shell {
         self.core.export_lines.0.clone()
     }
 
-    /// The exports asked for since the last call, for the host to run.
-    pub fn take_exports(&mut self) -> Vec<ExportAsk> {
-        std::mem::take(&mut self.core.exports)
-    }
-
     /// The workspace's export settings, or the defaults.
     pub fn export_settings(&self) -> ExportDesc {
         self.workspace_state()
@@ -239,12 +234,34 @@ impl Shell {
             .network
             .view
             .node;
+        // Passed through `export.start` in this pass: the host's exporter
+        // plans and runs it, or the reason it does not is the command's.
+        let asked = crate::export_start::Asked {
+            ask: ExportAsk {
+                images,
+                settings,
+                open_label: self.text(Message::new("gui-export-open-folder", "Open folder")),
+            },
+            bundle: self
+                .workspace_bundle()
+                .unwrap_or_else(helios_template::workspace::blank),
+        };
+        let started = crate::export_start::pass(&*self.core.app.handle().bus(), asked.clone());
+        let event = if started.refused.is_some() {
+            crate::export_start::REFUSED
+        } else {
+            crate::export_start::STARTED
+        };
+        self.core.app.handle().publish(
+            "helios",
+            None,
+            event,
+            crate::export_start::said(&asked, &started),
+        );
+        if let Some(r) = started.refused {
+            return Err(format!("the export did not start: {}", r.reason));
+        }
         self.select_exported_node(&node);
-        self.core.exports.push(ExportAsk {
-            images,
-            settings,
-            open_label: self.text(Message::new("gui-export-open-folder", "Open folder")),
-        });
         self.note(
             Message::new(
                 "gui-export-queued",

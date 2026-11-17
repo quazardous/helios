@@ -4,3 +4,4 @@ workspace.applied
   3. contexts.scope (owner helios.contexts): local; after contexts.subworkspaces
   4. graph.template (owner helios.graph): local; after contexts.scope
   5. workshops.composites (owner helios.workshops): local; after graph.template
+  6. library.heads (owner helios.library): local; after workshops.composites

@@ -29,7 +29,7 @@ use helios_core::{Engine, Message};
 use helios_shell::commands::Registry;
 use serde_json::Value;
 
-use super::{ExportAsk, ImportLines, Queue, health, storage};
+use super::{ImportLines, Queue, health, storage};
 use crate::dialogs::Notice;
 use crate::plugins::{Declarations, ListSource};
 
@@ -94,8 +94,6 @@ pub(super) struct Core {
         crate::import_end::Publisher,
         std::sync::mpsc::Receiver<crate::import_end::ImportEnd>,
     ),
-    /// Exports asked for, for the host.
-    pub(super) exports: Vec<ExportAsk>,
     /// Where `workshop.run` hands a run: the host's runner, which holds
     /// the library (none without one).
     pub(super) workshop_runner: Option<super::workshop_run::RunFn>,

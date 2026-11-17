@@ -93,7 +93,12 @@ use egui_pop::api::files::browser::{
     DropOrigin, EntryKind, EntryMarks, FileBrowser, MarkChip, SourceEntry, ViewModes,
 };
 use egui_pop::core::kit::Tone;
+use egui_pop::core::progress::Spinner;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _, role_text};
+use egui_pop::core::widgets;
 use helios_storage::{Card, Volumes};
+use helios_ui::{Action, Scroll};
 
 use crate::node_volumes::{self, Change, VolumeWatch};
 
@@ -2172,7 +2177,7 @@ impl ImportWindow {
             source_list::sources_ui(ui, w, words, &mut event);
         });
         column(ui, "helios.import.contents", middle, &mut |ui| {
-            ui.heading(&words.contents);
+            ui.text_role(TextRole::Title, &words.contents);
             let browse = &words.grid.browse;
             match super::import_browsers::switch_ui(ui, w, browse) {
                 Shown::Grid => {
@@ -2188,8 +2193,8 @@ impl ImportWindow {
                     }
                 }
                 Shown::Picker(_) => {
-                    ui.separator();
-                    ui.weak(&words.grid.choose_on_the_right);
+                    ui.divider();
+                    ui.muted(&words.grid.choose_on_the_right);
                 }
                 // The album selected under the account, in the grid once
                 // its photos are listed.
@@ -2199,22 +2204,22 @@ impl ImportWindow {
                     }
                 }
                 Shown::Albums => {
-                    ui.separator();
+                    ui.divider();
                     match w.album_shown().map(|(_, _, p)| p) {
                         Some(super::import_albums::Photos::Failed(why)) => {
-                            ui.weak(format!("{} {why}", browse.album_failed));
+                            ui.muted(format!("{} {why}", browse.album_failed));
                         }
                         Some(_) => {
-                            ui.weak(&browse.album_reading);
+                            ui.muted(&browse.album_reading);
                         }
                         None => {
-                            ui.weak(&browse.album_choose);
+                            ui.muted(&browse.album_choose);
                         }
                     }
                 }
                 Shown::NotListed => {
-                    ui.separator();
-                    ui.weak(&browse.not_listed);
+                    ui.divider();
+                    ui.muted(&browse.not_listed);
                 }
             }
         });
@@ -2227,34 +2232,31 @@ impl ImportWindow {
             if let Some(e) = profile_ui(ui, w, words) {
                 event = Some(e);
             }
-            egui::ScrollArea::vertical()
-                .id_salt("helios.import.choices")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.separator();
-                    ui.heading(&detail.label);
-                    for part in &detail.parts {
-                        match part {
-                            Part::Account { id, picker: true } => {
-                                if let Some(e) = choose_contents_ui(ui, w, id) {
-                                    event = Some(e);
-                                }
-                                ui.separator();
+            helios_ui::scroll(ui, "helios.import.choices", Scroll::Region, |ui| {
+                ui.divider();
+                ui.text_role(TextRole::Title, &detail.label);
+                for part in &detail.parts {
+                    match part {
+                        Part::Account { id, picker: true } => {
+                            if let Some(e) = choose_contents_ui(ui, w, id) {
+                                event = Some(e);
                             }
-                            Part::Account { id, picker: false } => {
-                                ui.label(account_header(w, id));
-                            }
-                            // The profile's: in the profile editor.
-                            Part::Copy => {}
-                            Part::Params => {
-                                ui.separator();
-                                w.detail_params_ui(ui, &detail);
-                            }
+                            ui.divider();
+                        }
+                        Part::Account { id, picker: false } => {
+                            ui.text_role(TextRole::Body, account_header(w, id));
+                        }
+                        // The profile's: in the profile editor.
+                        Part::Copy => {}
+                        Part::Params => {
+                            ui.divider();
+                            w.detail_params_ui(ui, &detail);
                         }
                     }
-                    ui.separator();
-                    storage = backup_line_ui(ui, words);
-                });
+                }
+                ui.divider();
+                storage = backup_line_ui(ui, words);
+            });
             if storage {
                 event = Some(Event::Storage);
             }
@@ -2263,14 +2265,14 @@ impl ImportWindow {
             // The imports running, and those ended during this run: they
             // go on when the window closes.
             if !w.promises.is_empty() {
-                ui.separator();
+                ui.divider();
             }
             for p in &w.promises {
                 if let Some(action) = crate::promise_line::show(ui, p) {
                     event = Some(Event::Promise(p.id.clone(), action));
                 }
             }
-            ui.separator();
+            ui.divider();
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let count = w.contents.counts().selected;
@@ -2287,25 +2289,24 @@ impl ImportWindow {
                     } else {
                         &words.none_ticked
                     };
+                    let enabled =
+                        count > 0 && !running && bad_name.is_none() && words.no_library.is_none();
                     let import = ui
-                        .add_enabled(
-                            count > 0
-                                && !running
-                                && bad_name.is_none()
-                                && words.no_library.is_none(),
-                            egui::Button::new(&words.import_count),
-                        )
-                        .on_disabled_hover_text(why);
+                        .add_enabled_ui(enabled, |ui| {
+                            helios_ui::action(ui, Action::Primary, &words.import_count)
+                        })
+                        .inner
+                        .disabled_tip(why);
                     if import.clicked() {
                         event = Some(Event::Import);
                     }
-                    if ui.button(&words.cancel).clicked() {
+                    if helios_ui::action(ui, Action::Secondary, &words.cancel).clicked() {
                         event = Some(Event::Cancel);
                     }
                     if let Some(e) = &words.no_library {
-                        ui.colored_label(ui.visuals().warn_fg_color, e);
+                        ui.text_tone(Tone::Warning, e);
                     } else if count > 0 {
-                        ui.label(&words.totals);
+                        ui.text_role(TextRole::Body, &words.totals);
                     }
                 });
             });
@@ -2326,23 +2327,26 @@ fn status_bar_ui(ui: &mut egui::Ui, words: &GridWords, reading: bool) {
                 let Some((before, after, path)) = words.reading.as_ref().filter(|_| reading) else {
                     return;
                 };
-                ui.spinner();
+                ui.add(Spinner::new());
                 let width = ui.available_width();
-                let font = egui::TextStyle::Body.resolve(ui.style());
-                let color = ui.visuals().weak_text_color();
+                // Measured in the muted role it is drawn in.
                 let fits = |p: &str| {
-                    let text = format!("{before}{p}{after}");
-                    ui.painter()
-                        .layout_no_wrap(text, font.clone(), color)
+                    let text = role_text(ui, TextRole::Muted, format!("{before}{p}{after}"));
+                    egui::WidgetText::from(text)
+                        .into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Extend),
+                            f32::INFINITY,
+                            egui::TextStyle::Body,
+                        )
                         .size()
                         .x
                         <= width
                 };
                 let path = shorten_middle(path, fits);
-                ui.add(
-                    egui::Label::new(egui::RichText::new(format!("{before}{path}{after}")).weak())
-                        .truncate(),
-                );
+                // Cut at the bar's end, should it still not fit.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                ui.muted(format!("{before}{path}{after}"));
             });
         });
 }
@@ -2353,10 +2357,10 @@ fn status_bar_ui(ui: &mut egui::Ui, words: &GridWords, reading: bool) {
 fn backup_line_ui(ui: &mut egui::Ui, words: &Words) -> bool {
     ui.horizontal_wrapped(|ui| {
         if words.no_backup {
-            ui.colored_label(ui.visuals().warn_fg_color, &words.backup);
-            ui.button(&words.storage).clicked()
+            ui.text_tone(Tone::Warning, &words.backup);
+            helios_ui::action(ui, Action::Secondary, &words.storage).clicked()
         } else {
-            ui.add(egui::Label::new(&words.backup).wrap());
+            ui.text_role(TextRole::Body, &words.backup);
             false
         }
     })
@@ -2379,13 +2383,17 @@ fn menu_items(
     auto: Option<(Trigger, Option<Trigger>)>,
 ) -> Option<MenuAsked> {
     let mut asked = None;
-    if ui.button(&words.edit_source).clicked() {
+    // Each item is the action's button, which egui's menu style draws as
+    // a menu's item.
+    if helios_ui::action(ui, Action::Secondary, &words.edit_source).clicked() {
         asked = Some(MenuAsked::Edit);
         ui.close();
     }
     if let Some((offered, set)) = auto {
+        // egui's submenu: egui-pop has no submenu item to draw in a
+        // menu shown by hand yet.
         ui.menu_button(&words.auto, |ui| {
-            if ui.radio(set.is_none(), &words.auto_off).clicked() {
+            if widgets::radio(ui, set.is_none(), &words.auto_off).clicked() {
                 asked = Some(MenuAsked::Auto(None));
                 ui.close();
             }
@@ -2393,15 +2401,14 @@ fn menu_items(
                 Trigger::Plugged => &words.auto_plugged,
                 Trigger::NewFiles => &words.auto_new_files,
             };
-            if ui.radio(set == Some(offered), label).clicked() {
+            if widgets::radio(ui, set == Some(offered), label).clicked() {
                 asked = Some(MenuAsked::Auto(Some(offered)));
                 ui.close();
             }
         });
     }
-    if ui
-        .button(&words.forget_source)
-        .on_hover_text(&words.forget_source_hint)
+    if helios_ui::action(ui, Action::Secondary, &words.forget_source)
+        .tip(&words.forget_source_hint)
         .clicked()
     {
         asked = Some(MenuAsked::Forget);
@@ -2463,29 +2470,29 @@ fn columns(rect: egui::Rect, gap: f32) -> [egui::Rect; 3] {
 /// what it does in one line.
 fn profile_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<Event> {
     let mut event = None;
-    ui.heading(&words.choices.heading);
+    ui.text_role(TextRole::Title, &words.choices.heading);
     let in_use = w.profile_in_use();
     let shown = w
         .profiles
         .get(&in_use)
         .map_or_else(|| in_use.clone(), |p| p.name.clone());
-    egui::ComboBox::new("helios.import.profile", &words.profile)
-        .selected_text(shown)
-        .show_ui(ui, |ui| {
-            for p in w.profiles.list() {
-                if ui.selectable_label(p.id == in_use, &p.name).clicked() {
-                    event = Some(Event::Profile(p.id.clone()));
-                }
+    let combo =
+        widgets::combo_box_labelled("helios.import.profile", &words.profile).selected_text(shown);
+    ui.combo_box(combo, |ui| {
+        for p in w.profiles.list() {
+            if widgets::selectable_label(ui, p.id == in_use, &p.name).clicked() {
+                event = Some(Event::Profile(p.id.clone()));
             }
-            ui.separator();
-            if ui.selectable_label(false, &words.manage_profiles).clicked() {
-                event = Some(Event::ManageProfiles);
-            }
-        });
+        }
+        ui.divider();
+        if widgets::selectable_label(ui, false, &words.manage_profiles).clicked() {
+            event = Some(Event::ManageProfiles);
+        }
+    });
     if let Some(shown_for) = &words.choices.shown_for {
-        ui.weak(shown_for);
+        ui.muted(shown_for);
     }
-    ui.add(egui::Label::new(egui::RichText::new(&words.profile_summary).weak()).wrap());
+    ui.muted(&words.profile_summary);
     event
 }
 
@@ -2500,29 +2507,29 @@ fn contents_ui(
 ) -> Option<Vec<PathBuf>> {
     let c = &mut w.contents;
     // What is read now is said in the window's status bar.
-    ui.label(&words.counts);
+    ui.text_role(TextRole::Body, &words.counts);
     ui.horizontal_wrapped(|ui| {
-        ui.checkbox(&mut c.new_only, &words.new_only);
+        widgets::checkbox(ui, &mut c.new_only, &words.new_only);
         let mut types = c.types;
         let name = |t: Types| match t {
             Types::All => &words.all_types,
             Types::Raw => &words.raw_only,
             Types::Jpeg => &words.jpeg_only,
         };
-        egui::ComboBox::new("helios.import.types", &words.types)
-            .selected_text(name(types))
-            .show_ui(ui, |ui| {
-                for t in [Types::All, Types::Raw, Types::Jpeg] {
-                    ui.selectable_value(&mut types, t, name(t));
-                }
-            });
+        let combo = widgets::combo_box_labelled("helios.import.types", &words.types)
+            .selected_text(name(types));
+        ui.combo_box(combo, |ui| {
+            for t in [Types::All, Types::Raw, Types::Jpeg] {
+                widgets::selectable_value(ui, &mut types, t, name(t));
+            }
+        });
         c.set_types(types);
-        ui.label(&words.select);
-        if ui.small_button(&words.all).clicked() {
+        ui.text_role(TextRole::Body, &words.select);
+        if helios_ui::row_action(ui, Action::Secondary, &words.all).clicked() {
             c.tick_all(true);
             w.tick_revision += 1;
         }
-        if ui.small_button(&words.none).clicked() {
+        if helios_ui::row_action(ui, Action::Secondary, &words.none).clicked() {
             c.tick_all(false);
             w.tick_revision += 1;
         }
@@ -2534,7 +2541,10 @@ fn contents_ui(
             .and_then(|f| c.cell_of(f))
             .map(|i| c.cells[i].day());
         if ui
-            .add_enabled(day.is_some(), egui::Button::new(&words.day).small())
+            .add_enabled_ui(day.is_some(), |ui| {
+                helios_ui::row_action(ui, Action::Secondary, &words.day)
+            })
+            .inner
             .clicked()
             && let Some(day) = day
         {
@@ -2545,9 +2555,9 @@ fn contents_ui(
             w.tick_revision += 1;
         }
     });
-    ui.separator();
+    ui.divider();
     if w.contents.cells.is_empty() && !reading {
-        ui.weak(&words.empty);
+        ui.muted(&words.empty);
     }
     w.sync_browser(words);
     // The folder tree, when shown, takes a strip on the grid's left.
