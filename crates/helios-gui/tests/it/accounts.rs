@@ -1714,6 +1714,50 @@ fn removing_an_account_during_a_pick_cancels_it_first() {
     until_pick_cancelled(&mut w);
 }
 
+/// The listeners of `account.signedOut` and `account.removed` as the
+/// desktop registers them, in the order they run: a reviewed dump
+/// (`tests/bus/accounts.txt`). The picking cancelled first, then the
+/// secrets, then whoever shows the account.
+#[test]
+fn the_account_points_listeners_run_in_a_declared_order() {
+    let (_world, h) = world();
+    assert_eq!(
+        helios_gui::account_gone::order(&*h.state().app().handle().bus()),
+        include_str!("../bus/accounts.txt")
+    );
+}
+
+/// Signing out is said once on the journal, with the listeners that ran
+/// in their order.
+#[test]
+fn signing_out_is_said_once_with_the_listeners_that_ran() {
+    let mut w = picking_under_way();
+    let id = w.account.clone();
+    let since = w.h.state().app().handle().last_event();
+    run(
+        &mut w.h,
+        "import.signOut",
+        json!({ "account": id }),
+        Origin::User,
+    )
+    .unwrap();
+    let said: Vec<_> =
+        w.h.state()
+            .app()
+            .handle()
+            .events_since(since)
+            .into_iter()
+            .filter(|e| e.name == "account.signedOut")
+            .collect();
+    assert_eq!(said.len(), 1, "said once");
+    let ran: Vec<&str> = helios_gui::account_gone::ORDER
+        .iter()
+        .map(|(id, _, _)| *id)
+        .collect();
+    assert_eq!(said[0].data["ran"], json!(ran));
+    assert_eq!(said[0].data["account"], json!(id));
+}
+
 /// Left without Done: said plainly, and the primary action again.
 #[test]
 fn nothing_chosen_says_so_and_offers_to_choose_again() {

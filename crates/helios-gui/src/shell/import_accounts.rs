@@ -593,14 +593,40 @@ impl Accounts {
         Ok(())
     }
 
-    /// Signs an account out: its secrets forgotten, "not connected".
-    pub(crate) fn sign_out(&mut self, id: &str) -> Result<(), String> {
-        let book = self.book.clone().ok_or("accounts need a library open")?;
-        match &self.web {
-            Some(web) => web.sign_out(book.as_ref(), self.secrets.as_ref(), id)?,
-            None => helios_connect::account::sign_out(book.as_ref(), self.secrets.as_ref(), id)?,
-        };
-        Ok(())
+    /// `import.cancel-picking`, the account `id` signed out or removed
+    /// (`crate::account_gone`): its choice of photos under way cancelled
+    /// (its thread sees the cancel and ends), its sign-in running given
+    /// up, its photos chosen and not imported given up, their pickings
+    /// ended.
+    pub(crate) fn cancel_for(&mut self, id: &str) {
+        if self.picking.as_ref().is_some_and(|p| p.account == id)
+            && let Some(p) = self.picking.take()
+        {
+            p.cancel.cancel();
+        }
+        if let Some(c) = &self.connecting
+            && c.session.account == id
+        {
+            c.session.cancel();
+            self.close();
+        }
+        let chosen = self
+            .chosen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        end_picks(chosen.unwrap_or_default());
+    }
+
+    /// `import.sources`, the account `id` signed out or removed: the
+    /// accounts as last read follow at once (not connected, or gone), so
+    /// the window's next pass shows it before the read answers.
+    pub(crate) fn follow_gone(&mut self, id: &str, removed: bool) {
+        if removed {
+            self.listed.retain(|a| a.id != id);
+        } else if let Some(a) = self.listed.iter_mut().find(|a| a.id == id) {
+            a.state = AccountState::NotConnected;
+        }
     }
 
     /// Starts choosing photos under the account `id` ("Choose photos in
