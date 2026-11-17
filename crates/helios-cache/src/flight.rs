@@ -56,20 +56,107 @@ struct Leader<'a, K: Clone + Eq + Hash, V: Clone> {
 
 impl<K: Clone + Eq + Hash, V: Clone> Drop for Leader<'_, K, V> {
     fn drop(&mut self) {
-        self.flight
-            .cells
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&self.key);
-        *self
+        self.flight.end(&self.key, &self.cell, self.value.take());
+    }
+}
+
+/// What [`Flight::begin`] gives: the computation to run, or one to wait
+/// for.
+pub enum Begin<K: Clone + Eq + Hash, V: Clone> {
+    /// No computation for the key runs: this one leads it.
+    Lead(Lead<K, V>),
+    /// One runs: wait for its value.
+    Join(Waiter<V>),
+}
+
+/// The computation of a key, led by whoever holds it, on any thread: its
+/// value is handed to the waiters by [`Lead::finish`]. Dropped without a
+/// value (a failure, a panic), it ends abandoned.
+pub struct Lead<K: Clone + Eq + Hash, V: Clone> {
+    flight: Arc<Flight<K, V>>,
+    key: K,
+    cell: Arc<Cell<V>>,
+    value: Option<V>,
+}
+
+impl<K: Clone + Eq + Hash, V: Clone> Lead<K, V> {
+    /// A waiter for this computation's value.
+    pub fn waiter(&self) -> Waiter<V> {
+        Waiter {
+            cell: self.cell.clone(),
+        }
+    }
+
+    /// Ends the computation: its waiters get `value`, or abandoned with
+    /// `None`; the next request for the key computes again.
+    pub fn finish(mut self, value: Option<V>) {
+        self.value = value;
+    }
+}
+
+impl<K: Clone + Eq + Hash, V: Clone> Drop for Lead<K, V> {
+    fn drop(&mut self) {
+        self.flight.end(&self.key, &self.cell, self.value.take());
+    }
+}
+
+/// Waits for a computation in flight, as often as asked.
+pub struct Waiter<V> {
+    cell: Arc<Cell<V>>,
+}
+
+impl<V> Clone for Waiter<V> {
+    fn clone(&self) -> Self {
+        Waiter {
+            cell: self.cell.clone(),
+        }
+    }
+}
+
+impl<V: Clone> Waiter<V> {
+    /// The value, once the computation ended; `None` while it runs.
+    pub fn try_get(&self) -> Option<Result<V, FlightError>> {
+        match &*self
             .cell
             .state
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = match self.value.take() {
-            Some(v) => State::Done(v),
-            None => State::Abandoned,
-        };
-        self.cell.done.notify_all();
+            .unwrap_or_else(PoisonError::into_inner)
+        {
+            State::Done(v) => Some(Ok(v.clone())),
+            State::Abandoned => Some(Err(FlightError::Abandoned)),
+            State::Running => None,
+        }
+    }
+
+    /// The value, waited for at most `deadline`.
+    ///
+    /// # Errors
+    /// [`FlightError::Timeout`] past the deadline;
+    /// [`FlightError::Abandoned`] when the computation gave no value.
+    pub fn wait(&self, deadline: Duration) -> Result<V, FlightError> {
+        let until = Instant::now() + deadline;
+        let mut state = self
+            .cell
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        loop {
+            match &*state {
+                State::Done(v) => return Ok(v.clone()),
+                State::Abandoned => return Err(FlightError::Abandoned),
+                State::Running => {}
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(FlightError::Timeout);
+            }
+            state = self
+                .cell
+                .done
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
     }
 }
 
@@ -81,6 +168,44 @@ impl<K: Clone + Eq + Hash, V: Clone> Flight<K, V> {
     /// How many requests were merged into another's computation.
     pub fn merged(&self) -> u64 {
         self.merged.load(Ordering::Relaxed)
+    }
+
+    /// Ends `key`'s computation: out of the flight, its waiters woken
+    /// with `value` (abandoned without one).
+    fn end(&self, key: &K, cell: &Arc<Cell<V>>, value: Option<V>) {
+        {
+            let mut cells = self.cells.lock().unwrap_or_else(PoisonError::into_inner);
+            if cells.get(key).is_some_and(|c| Arc::ptr_eq(c, cell)) {
+                cells.remove(key);
+            }
+        }
+        *cell.state.lock().unwrap_or_else(PoisonError::into_inner) = match value {
+            Some(v) => State::Done(v),
+            None => State::Abandoned,
+        };
+        cell.done.notify_all();
+    }
+
+    /// Starts a request for `key` without blocking: it leads the
+    /// computation when none runs (computed anywhere, ended by
+    /// [`Lead::finish`]), else it joins the running one (counted merged).
+    pub fn begin(self: &Arc<Self>, key: &K) -> Begin<K, V> {
+        let mut cells = self.cells.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(cell) = cells.get(key) {
+            self.merged.fetch_add(1, Ordering::Relaxed);
+            return Begin::Join(Waiter { cell: cell.clone() });
+        }
+        let cell = Arc::new(Cell {
+            state: Mutex::new(State::Running),
+            done: Condvar::new(),
+        });
+        cells.insert(key.clone(), cell.clone());
+        Begin::Lead(Lead {
+            flight: self.clone(),
+            key: key.clone(),
+            cell,
+            value: None,
+        })
     }
 
     /// How many computations are running.
@@ -133,23 +258,6 @@ impl<K: Clone + Eq + Hash, V: Clone> Flight<K, V> {
                 .ok_or(FlightError::Abandoned);
         }
         self.merged.fetch_add(1, Ordering::Relaxed);
-        let until = Instant::now() + deadline;
-        let mut state = cell.state.lock().unwrap_or_else(PoisonError::into_inner);
-        loop {
-            match &*state {
-                State::Done(v) => return Ok((v.clone(), true)),
-                State::Abandoned => return Err(FlightError::Abandoned),
-                State::Running => {}
-            }
-            let left = until.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(FlightError::Timeout);
-            }
-            state = cell
-                .done
-                .wait_timeout(state, left)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
+        Waiter { cell }.wait(deadline).map(|v| (v, true))
     }
 }

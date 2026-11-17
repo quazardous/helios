@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+helios-cache.workspace = true
 helios-calibrate.workspace = true
 helios-connect.workspace = true
 helios-core.workspace = true

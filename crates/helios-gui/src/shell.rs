@@ -1137,6 +1137,11 @@ impl Shell {
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
         let (engine_notices, engine_wake) = subscribe_engine_notices(&engine);
+        // The image-state router on it: the preview is one of its states.
+        let states = helios_node_core::image_states::ImageStates::new(
+            engine.bus().clone(),
+            helios_node_core::image_states::THREADS,
+        );
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
         let activity = crate::activity::Activity::default();
@@ -1160,6 +1165,7 @@ impl Shell {
             library,
             viewport,
             controls,
+            states,
         });
         let shell_bus = jobs.bus().clone();
         let stack_review = Rc::new(RefCell::new(crate::stack_review::Review::on(
