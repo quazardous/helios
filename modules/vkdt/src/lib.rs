@@ -43,6 +43,7 @@ pub mod contrast;
 pub mod filmcurv;
 pub mod grade;
 pub mod guided;
+pub mod sample;
 pub mod ucs;
 
 pub use colour::VkdtColour;
