@@ -989,14 +989,20 @@ fn show_prepared(
     let Prepared {
         image, graph, node, ..
     } = prepared;
-    if let (Some(persist), Some(image)) = (persist, image) {
-        persist
+    match (persist, image) {
+        (Some(persist), Some(image)) => persist
             .open_image(shell, image, graph, node, "output")
-            .map(|_| ())
-    } else {
-        // Not in the library: no profile to offer.
-        helios_gui::calibrate::set_offer(shell.values(), None);
-        shell.set_view_source(graph, node, "output")
+            .map(|_| ()),
+        (persist, _) => {
+            // `image.close`: the image of the library open before is
+            // closed, its edit saved, before this file is shown.
+            if let Some(persist) = persist {
+                persist.close_image(shell, seconds_f64())?;
+            }
+            // Not in the library: no profile to offer.
+            helios_gui::calibrate::set_offer(shell.values(), None);
+            shell.set_view_source(graph, node, "output")
+        }
     }
 }
 
