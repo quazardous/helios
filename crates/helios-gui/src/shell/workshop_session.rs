@@ -537,6 +537,28 @@ impl Shell {
     pub fn set_edited_image(&mut self, image: Option<String>) {
         self.focus.workshops.borrow_mut().image = image;
     }
+
+    /// The vault image the workshop session knows as open (none: an image
+    /// not in the vault, or none open).
+    pub fn edited_image(&self) -> Option<String> {
+        self.focus.workshops.borrow().image.clone()
+    }
+
+    /// Registers `workshop.photo`, the follower of `image.opened` and
+    /// `image.closed` ([`crate::image_open`]) that names the image open to
+    /// the workshop session, on the panel it holds.
+    ///
+    /// # Errors
+    /// The bus refused it.
+    pub fn listen_workshop_photo(
+        &self,
+        bus: &dyn egui_pop::api::bus::bus_contract::Bus,
+    ) -> Result<(), String> {
+        let panel = self.focus.workshops.clone();
+        crate::image_open::listen_follower_local(bus, crate::image_open::WORKSHOP, move |shown| {
+            panel.borrow_mut().image.clone_from(&shown.image);
+        })
+    }
 }
 
 impl Shell {

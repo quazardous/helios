@@ -18,6 +18,16 @@
 //! The listeners hold the edit's state and the interface's (`Rc`): they
 //! are local listeners ([`listen_local`]), bound to the interface's
 //! thread, where the request is passed.
+//!
+//! Once the next image is loaded, what follows the image open passes once
+//! through `image.opened` ([`ImageOpened`]; `image.closed`,
+//! [`ImageClosed`], when no image follows), its followers in the order
+//! [`FOLLOWERS`] declares: the image's pinned snapshots loaded
+//! (`snapshots.book`), the labels and locks its edit was saved with
+//! (`mask.marks`), the workshop session's photo (`workshop.photo`). Each
+//! follower holds its own state behind a handle (`Rc` or `Arc`) and does
+//! its part inside the pass ([`listen_follower_local`]); none compares
+//! the image open at each pass.
 
 use std::rc::Rc;
 
@@ -49,6 +59,24 @@ pub const SCOPE: &str = "history.scope";
 /// The listeners of both points, each with the one it runs after: the
 /// order they run in.
 pub const ORDER: &[(&str, Option<&str>)] = &[(SAVE, None), (SCOPE, Some(SAVE))];
+
+/// The image's pinned snapshots loaded into the snapshot book, with the
+/// parameters its edit saves.
+pub const SNAPSHOTS: &str = "snapshots.book";
+/// The labels and locks the image's edit was saved with, put back in the
+/// value store (another image's gone).
+pub const MARKS: &str = "mask.marks";
+/// The workshop session's photo: the vault image its steps are recorded
+/// on.
+pub const WORKSHOP: &str = "workshop.photo";
+
+/// The followers of [`ImageOpened`] and [`ImageClosed`], each with the
+/// one it runs after: the order they run in.
+pub const FOLLOWERS: &[(&str, Option<&str>)] = &[
+    (SNAPSHOTS, None),
+    (MARKS, Some(SNAPSHOTS)),
+    (WORKSHOP, Some(MARKS)),
+];
 
 /// What a switch is: the image open (none when nothing is edited) and the
 /// one asked (none for a close), as the listeners read it.
@@ -102,6 +130,44 @@ impl Point for ImageClose {
     const KIND: PointKind = PointKind::Request;
 }
 
+/// What the followers read once an image is open, or closed with none
+/// after it.
+#[derive(Clone, Debug, Default)]
+pub struct Shown {
+    /// The image open now, by its id's hex; none once closed.
+    pub image: Option<String>,
+    /// Its pinned snapshots, each with the values of its version.
+    pub snapshots: Vec<crate::edit_snapshots::Taken>,
+    /// The parameters its edit saves, by node.
+    pub saved: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// The labels and locks its edit was saved with (null: none).
+    pub marks: Value,
+}
+
+/// The followers that ran, in order.
+#[derive(Clone, Debug, Default)]
+pub struct Followed {
+    pub ran: Vec<String>,
+}
+
+/// An image is open in the darkroom: what follows it, in order.
+pub struct ImageOpened;
+
+impl Point for ImageOpened {
+    const ID: &'static str = OPENED;
+    type Input = Shown;
+    type Value = Followed;
+}
+
+/// The image open is closed, none after it: what follows it, in order.
+pub struct ImageClosed;
+
+impl Point for ImageClosed {
+    const ID: &'static str = CLOSED;
+    type Input = Shown;
+    type Value = Followed;
+}
+
 /// The darkroom's points, this crate's contract with the application's
 /// bus: declared by [`declare`].
 pub const POINTS: &[PointDecl] = &[
@@ -110,6 +176,12 @@ pub const POINTS: &[PointDecl] = &[
     ),
     PointDecl::of::<ImageClose>(
         "Close the image open in the darkroom: its edit saved first; a failed save refuses",
+    ),
+    PointDecl::of::<ImageOpened>(
+        "An image is open in the darkroom: what follows the image open, once, in order",
+    ),
+    PointDecl::of::<ImageClosed>(
+        "The image open is closed, none after it: what follows the image open, once, in order",
     ),
 ];
 
@@ -184,9 +256,60 @@ pub fn pass(bus: &dyn Bus, switch: Switch) -> Switched {
     altered.value
 }
 
-/// The order both points' listeners run in on `bus`.
+/// Registers `run` as the follower `id` (one of [`FOLLOWERS`]) of both
+/// [`ImageOpened`] and [`ImageClosed`] on `bus`, in its declared place: a
+/// local listener bound to the calling thread (the interface's). One
+/// there already under `id` is replaced.
+///
+/// # Errors
+/// `id` is not in [`FOLLOWERS`], or the bus refused it.
+pub fn listen_follower_local(
+    bus: &dyn Bus,
+    id: &'static str,
+    run: impl Fn(&Shown) + 'static,
+) -> Result<(), String> {
+    let Some(&(_, after)) = FOLLOWERS.iter().find(|(listener, _)| *listener == id) else {
+        return Err(format!("`{id}` is not a follower of {OPENED}"));
+    };
+    declare(bus);
+    let opts = || {
+        let opts = ListenOpts::new().owner(BUS_OWNER);
+        match after {
+            Some(after) => opts.after(after),
+            None => opts,
+        }
+    };
+    let run = Rc::new(move |shown: &Shown, followed: &mut Followed| {
+        followed.ran.push(id.to_owned());
+        run(shown);
+        Ok::<(), HookError>(())
+    });
+    bus.unlisten(OPENED, id);
+    bus.unlisten(CLOSED, id);
+    let opened = run.clone();
+    bus.listen_local::<ImageOpened>(id, opts(), move |s, v| opened(s, v))
+        .map_err(|e| e.to_string())?;
+    bus.listen_local::<ImageClosed>(id, opts(), move |s, v| run(s, v))
+        .map_err(|e| e.to_string())
+}
+
+/// Passes `shown` through `image.opened` (an image open) or
+/// `image.closed` (none) on `bus`: the followers that ran, in order.
+pub fn follow(bus: &dyn Bus, shown: Shown) -> Followed {
+    let (point, altered) = if shown.image.is_some() {
+        (OPENED, bus.alter::<ImageOpened>(shown, Followed::default()))
+    } else {
+        (CLOSED, bus.alter::<ImageClosed>(shown, Followed::default()))
+    };
+    for failure in &altered.failures {
+        log::warn!(target: "helios", "{point}: {failure}");
+    }
+    altered.value
+}
+
+/// The order the darkroom's points' listeners run in on `bus`.
 pub fn order(bus: &dyn Bus) -> String {
-    bus_contract::order_dump(bus, &[OPEN, CLOSE])
+    bus_contract::order_dump(bus, &[OPEN, CLOSE, OPENED, CLOSED])
 }
 
 /// The journal's words for a pass: the images, the listeners that ran,
@@ -253,5 +376,42 @@ mod tests {
         );
         assert_eq!(*scoped.borrow(), 2);
         assert!(listen_local(&bus, "nobody", |_, _| Ok(())).is_err());
+    }
+
+    #[test]
+    fn each_follower_runs_once_per_pass_in_its_declared_order() {
+        let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
+        let runs = Rc::new(RefCell::new(Vec::new()));
+        // Registered against their order: the bus places them.
+        for id in [WORKSHOP, MARKS, SNAPSHOTS] {
+            let r = runs.clone();
+            listen_follower_local(&bus, id, move |shown| {
+                r.borrow_mut().push((id, shown.image.clone()));
+            })
+            .unwrap();
+        }
+        let opened = follow(
+            &bus,
+            Shown {
+                image: Some("b".into()),
+                ..Shown::default()
+            },
+        );
+        assert_eq!(opened.ran, [SNAPSHOTS, MARKS, WORKSHOP]);
+        let closed = follow(&bus, Shown::default());
+        assert_eq!(closed.ran, [SNAPSHOTS, MARKS, WORKSHOP]);
+        let b = Some("b".to_string());
+        assert_eq!(
+            *runs.borrow(),
+            [
+                (SNAPSHOTS, b.clone()),
+                (MARKS, b.clone()),
+                (WORKSHOP, b),
+                (SNAPSHOTS, None),
+                (MARKS, None),
+                (WORKSHOP, None),
+            ]
+        );
+        assert!(listen_follower_local(&bus, SAVE, |_| ()).is_err());
     }
 }
