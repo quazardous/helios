@@ -543,4 +543,96 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// A job whose stop does not end in time: a backup stuck copying to
+    /// a slow disk, which neither its cancel nor its wait gets out of
+    /// before the test lets it go.
+    struct Stuck {
+        released: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl Stuck {
+        fn hold(&self, limit: Duration) -> bool {
+            let (released, woken) = &*self.released;
+            let held = released.lock().unwrap_or_else(PoisonError::into_inner);
+            let (held, _) = woken
+                .wait_timeout_while(held, limit, |r| !*r)
+                .unwrap_or_else(PoisonError::into_inner);
+            *held
+        }
+
+        fn release(released: &Arc<(Mutex<bool>, Condvar)>) {
+            *released.0.lock().unwrap() = true;
+            released.1.notify_all();
+        }
+    }
+
+    impl NodeJobs for Stuck {
+        fn running(&self) -> Vec<String> {
+            vec!["backup-1".into()]
+        }
+
+        fn cancel_all(&self) {
+            self.hold(Duration::from_mins(1));
+        }
+
+        fn wait(&self, deadline: Duration) -> bool {
+            self.hold(deadline)
+        }
+    }
+
+    /// How long the process gives a quit a signal asked for before it
+    /// ends anyway (helios-gui's `ending::DEADLINE`, 8 s), less the
+    /// window's own steps.
+    const PROCESS_DEADLINE: Duration = Duration::from_secs(6);
+
+    /// A quit confirmed while a job's stop hangs: the node stops the job
+    /// within its deadline and still closes the library cleanly, before
+    /// the process would be ended.
+    #[test]
+    fn a_job_stuck_stopping_does_not_keep_the_library_open_past_the_process_deadline() {
+        let dir = scratch("stuck-cancel");
+        let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+        let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        let link = node.link();
+        let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
+        link.adopt(Arc::new(Stuck {
+            released: released.clone(),
+        }));
+        let client = node.connect();
+        link.quit_cancelling_jobs();
+        drop(client);
+        let stopped = link.wait_stopped(PROCESS_DEADLINE);
+        Stuck::release(&released);
+        assert!(stopped, "the library closed before the process deadline");
+        node.stop();
+        let again = SqliteStore::open(&dir.join("vault.db")).unwrap();
+        assert!(!again.report().unclean_shutdown, "closed cleanly");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The host's last word (`stop`, no quit asked: eframe ending on an
+    /// error) with a job that does not end: the stop does not wait for
+    /// it without a limit.
+    #[test]
+    fn the_hosts_stop_does_not_wait_for_a_stuck_job_without_a_limit() {
+        let dir = scratch("stuck-stop");
+        let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
+        let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        let link = node.link();
+        let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
+        link.adopt(Arc::new(Stuck {
+            released: released.clone(),
+        }));
+        let (done, stopped) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            node.stop();
+            let _ = done.send(());
+        });
+        let in_time = stopped.recv_timeout(PROCESS_DEADLINE).is_ok();
+        Stuck::release(&released);
+        assert!(in_time, "the stop ended within the process deadline");
+        assert!(link.stopped());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
