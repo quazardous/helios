@@ -7,6 +7,7 @@ use egui_kittest::Harness;
 use egui_pop::api::window::{Screen, set_screens};
 
 use egui_pop::model::values::{Change, Set, Value as PopValue};
+use helios_gui::display::ScreenColour;
 use helios_gui::{Shell, display, headless, helios_panels};
 use serde_json::{Value as Json, json};
 
@@ -66,16 +67,9 @@ fn a_detached_viewer_takes_the_route_of_the_screen_it_is_on() {
         headless::harness_with_windows(Shell::new(helios_panels(), None), vec2(1024.0, 700.0), 1.0);
     h.step();
     // What each screen shows, and the Wide-gamut preview on.
-    set(
-        &mut h,
-        &format!("display/screens/{PLAIN}"),
-        PopValue::Text("srgb".into()),
-    );
-    set(
-        &mut h,
-        &format!("display/screens/{WIDE}"),
-        PopValue::Text("wide-gamut".into()),
-    );
+    let app = h.state().app().handle().clone();
+    display::tell_screen_colour(&app, PLAIN, Some(ScreenColour::Srgb)).unwrap();
+    display::tell_screen_colour(&app, WIDE, Some(ScreenColour::WideGamut)).unwrap();
     set(
         &mut h,
         &format!("settings/{}", display::SETTING_WIDE_GAMUT),
