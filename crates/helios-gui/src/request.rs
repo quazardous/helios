@@ -11,7 +11,7 @@
 //! This module closes that, at the emit site and in the listeners:
 //! - [`pass`] emits a request and turns any failure that dropped a
 //!   contribution (error, panic, late) into a refusal by that listener,
-//!   "refused by <listener>: <failure>", unless an earlier one refused;
+//!   `"refused by <listener>: <failure>"`, unless an earlier one refused;
 //! - [`listener`] wraps a listener: it is not run once the request is
 //!   refused, and it refuses itself when a listener before it in the same
 //!   pass ran but its contribution is gone (it failed): what follows a
@@ -101,7 +101,7 @@ pub fn listener<I, V: Refusable>(
 /// Passes `input` through the request `P` on `bus`, from `value`: the
 /// value its listeners left, fail-closed. A listener whose contribution
 /// the bus dropped (an error, a panic, past its deadline) refuses the
-/// request, "refused by <listener>: <failure>", unless one before it
+/// request, `"refused by <listener>: <failure>"`, unless one before it
 /// refused already. Each failure is logged.
 pub fn pass<P: Point>(bus: &dyn Bus, input: P::Input, value: P::Value) -> P::Value
 where
