@@ -123,6 +123,7 @@ mod window_commands;
 mod workshop_design;
 mod workshop_run;
 mod workshops;
+mod workspace_applied;
 mod workspace_edit;
 mod workspace_keys;
 mod workspace_live;
