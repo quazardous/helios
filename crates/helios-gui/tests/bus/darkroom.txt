@@ -1,0 +1,6 @@
+image.open
+  1. edit.save (owner helios.darkroom): local
+  2. history.scope (owner helios.darkroom): local; after edit.save
+image.close
+  1. edit.save (owner helios.darkroom): local
+  2. history.scope (owner helios.darkroom): local; after edit.save

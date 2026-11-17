@@ -184,3 +184,57 @@ fn a_failing_save_keeps_the_current_photo_open_and_says_why() {
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The listeners of `image.open` and `image.close` as the desktop
+/// registers them, in the order they run: a reviewed dump
+/// (`tests/bus/darkroom.txt`). The edit saved first, then its history
+/// left.
+#[test]
+fn the_darkroom_points_listeners_run_in_a_declared_order() {
+    let dir = scratch("order");
+    let path = vault_file(&dir);
+    let (shell, mut persist) = open(&path, &Options::default());
+    assert_eq!(
+        persist.darkroom_order(&shell),
+        include_str!("../bus/darkroom.txt")
+    );
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A switch is said on the journal: `image.closed` with the listeners
+/// that ran in their order, then `image.opened`; a refused one,
+/// `image.refused` with who refused.
+#[test]
+fn a_switch_is_said_on_the_journal_with_the_listeners_that_ran() {
+    let dir = scratch("journal");
+    let path = vault_file(&dir);
+    let (mut shell, mut persist) = open(&path, &Options::default());
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    set(&shell, 1.5);
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(2), graph, exp, "output")
+        .unwrap();
+    let said: Vec<(String, serde_json::Value)> = shell
+        .app()
+        .handle()
+        .events_since(0)
+        .into_iter()
+        .filter(|e| e.name.starts_with("image."))
+        .map(|e| (e.name.clone(), e.data.clone()))
+        .collect();
+    let kinds: Vec<&str> = said.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(kinds, ["image.opened", "image.closed", "image.opened"]);
+    assert_eq!(
+        said[1].1["ran"],
+        serde_json::json!(["edit.save", "history.scope"])
+    );
+    assert_eq!(said[1].1["from"], serde_json::json!(id(1).hex()));
+    assert_eq!(said[1].1["to"], serde_json::json!(id(2).hex()));
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
