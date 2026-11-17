@@ -341,10 +341,15 @@ impl<S: Store + 'static> LocalNode<S> {
 
     /// Watches `volumes` (the machine's: `helios_storage::system()`) on a
     /// thread of the node's, with or without a window: their comings and
-    /// goings are published on the node's bus
-    /// ([`crate::volumes`]). The watch stops as the node stops.
-    pub fn watch_volumes(&self, volumes: Arc<dyn Volumes>) -> VolumeWatch {
-        let watch = VolumeWatch::start(volumes, self.bus.clone(), crate::volumes::POLL);
+    /// goings are published on the node's bus, then passed through their
+    /// points on `hooks`, the application's bus ([`crate::volumes`]). The
+    /// watch stops as the node stops.
+    pub fn watch_volumes(
+        &self,
+        volumes: Arc<dyn Volumes>,
+        hooks: Arc<dyn bus_contract::Bus>,
+    ) -> VolumeWatch {
+        let watch = VolumeWatch::start(volumes, self.bus.clone(), hooks, crate::volumes::POLL);
         self.link
             .0
             .watches

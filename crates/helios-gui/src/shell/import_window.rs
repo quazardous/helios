@@ -936,15 +936,24 @@ impl Shell {
             w.save();
         }
         w.sources.see_cards(mounted);
-        watch.on_change(move |_| {
-            if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                // The main window's toasts, and the import window's list.
-                ctx.request_repaint_of(ViewportId::ROOT);
-                if let Some(at) = *drawn_in.lock().unwrap_or_else(PoisonError::into_inner) {
-                    ctx.request_repaint_of(at);
+        // A volume came or went: the main window's toasts and the import
+        // window's list, woken at once (before the scan).
+        let listened = node_volumes::listen_both(
+            &**watch.hooks(),
+            node_volumes::CARDS,
+            "helios.import",
+            move |_| {
+                if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+                    ctx.request_repaint_of(ViewportId::ROOT);
+                    if let Some(at) = *drawn_in.lock().unwrap_or_else(PoisonError::into_inner) {
+                        ctx.request_repaint_of(at);
+                    }
                 }
-            }
-        });
+            },
+        );
+        if let Err(e) = listened {
+            log::error!(target: "helios", "{}: {e}", node_volumes::CARDS);
+        }
         w.volumes = Some(watch);
     }
 
@@ -952,9 +961,11 @@ impl Shell {
     /// no node (tests, a desktop without a library): [`Shell::follow_volumes`]
     /// on a watch publishing on a bus of its own.
     pub fn watch_cards(&mut self, volumes: Arc<dyn Volumes>) {
+        let hooks = self.core.app.handle().bus();
         self.follow_volumes(VolumeWatch::start(
             volumes,
             Arc::new(helios_core::Bus::new()),
+            hooks,
             node_volumes::POLL,
         ));
     }

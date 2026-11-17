@@ -220,7 +220,7 @@ impl VaultNode {
         let mirrored = bus.subscribe();
         let node = LocalNode::own(vault, bus.clone(), FLUSH_EVERY);
         let link = node.link();
-        let watch = node.watch_volumes(options.volumes.clone());
+        let watch = node.watch_volumes(options.volumes.clone(), options.hooks.clone());
         let backups = Backups::new(
             node.vault().clone(),
             jobs.clone(),
@@ -228,7 +228,7 @@ impl VaultNode {
             |e| eprintln!("helios-node: {e}"),
         )
         .adopted_by(&link);
-        backups.follow(&watch);
+        backups.follow(&*options.hooks);
         let after_imports = AfterImports::start(heard, &backups);
         let importer = Importer {
             vault: node.vault().clone(),

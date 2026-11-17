@@ -421,6 +421,30 @@ the reads through the node): they mark their place, and `Persist` (for
 `library.changed`) or the shell (for `library.filled`) does their part
 right after, in the order they ran.
 
+### Slice 2c: volumes coming and going
+
+The node's volume watch published `volume.mounted` / `volume.unmounted`
+on the journal and also called callbacks in the order the desktop's
+start registered them: the scan of where each photo is (which only
+woke the scan's own thread), the image map's feed, the backups on
+connect and the health check's counter. A backup on connect could read
+the locations before the scan set them: plugging the library disk back
+in skipped its photos as offline.
+
+Where it stands (2026-11-17): done. `helios_node_core::volumes` declares
+two points (`POINTS`), passed on the application's bus the watch is
+handed at its start, after the journal's event and on the watch's
+thread. Their listeners are named and placed (`MOUNTED_ORDER`,
+`UNMOUNTED_ORDER`): `import.cards` before `library.scan`;
+`library.scan` scans inside the pass (`Scanner::scan_now`, one scan at
+a time with the scanner's thread); `backups.on-connect`,
+`health.recheck` and `map.plugged` after it. The Storage page and the
+Library's badges follow the scan through `library.changed`. The order is
+a reviewed dump (`crates/helios-gui/tests/bus/volumes.txt`);
+`VolumeWatch::on_change` is gone. The headless node registers
+`backups.on-connect` without a scan (it runs none): the missing target
+is reported and ignored.
+
 ### Slice 3: one module catalogue
 
 One crate lists the processing modules and what each ships (its

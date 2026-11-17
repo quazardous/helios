@@ -33,7 +33,7 @@ use helios_storage::strategy::{self, Scope, Trigger};
 use helios_vault::{Store, Vault};
 
 use crate::node::{Link, NodeJobs};
-use crate::volumes::{Change, VolumeWatch};
+use crate::volumes;
 
 /// How long the node's stop waits for a cancelled backup to stop: it
 /// stops before its next photo, so one copy at most.
@@ -155,19 +155,24 @@ where
         true
     }
 
-    /// The strategy's "when a backup disk is plugged in": each volume
-    /// `watch` sees mounted after its first look starts a run on
+    /// The strategy's "when a backup disk is plugged in", as the
+    /// listener [`crate::volumes::BACKUPS`] of `volume.mounted` on `bus`
+    /// (after the scan, so the run reads the locations it just set): each
+    /// volume mounted after the watch's first look starts a run on
     /// [`Trigger::OnConnect`] (what is short goes to it; a strategy that
     /// does not run on it copies nothing).
-    pub fn follow(self: &Arc<Self>, watch: &VolumeWatch) {
+    pub fn follow(self: &Arc<Self>, bus: &dyn bus_contract::Bus) {
         let me = Arc::downgrade(self);
-        watch.on_change(move |change| {
-            if matches!(change, Change::Mounted(m) if !m.at_start)
+        let listened = volumes::listen_mounted(bus, volumes::BACKUPS, "helios.backups", move |m| {
+            if !m.at_start
                 && let Some(me) = me.upgrade()
             {
                 me.start(Trigger::OnConnect, None);
             }
         });
+        if let Err(e) = listened {
+            (self.warn)(format!("{}: {e}", volumes::BACKUPS));
+        }
     }
 
     /// "Back up now" (`library.backupNow`): the errors a person must see

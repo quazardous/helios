@@ -13,7 +13,7 @@ use helios_core::Bus;
 use helios_core::jobs::Jobs;
 use helios_gui::node::LocalNode;
 use helios_gui::node_jobs::Backups;
-use helios_gui::node_volumes::{Change, VolumeWatch};
+use helios_gui::node_volumes::{self, Change, VolumeWatch};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_library::import::{self, Options, Placement};
 use helios_shell::commands::Origin;
@@ -53,6 +53,11 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// Helios's one bus, as `main` builds it.
+fn hooks() -> Arc<dyn egui_pop::api::bus::bus_contract::Bus> {
+    Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new())
+}
+
 fn node(dir: &Path) -> LocalNode<SqliteStore> {
     LocalNode::open(
         SqliteStore::open(&dir.join("vault.db")).unwrap(),
@@ -79,8 +84,8 @@ fn a_card_plugged_in_with_the_import_window_closed_is_seen_by_the_node() {
     let dir = scratch("card");
     let node = node(&dir);
     let plugged = Arc::new(Plugged::default());
-    let watch = node.watch_volumes(plugged.clone());
     let mut shell = Shell::new(helios_panels(), None);
+    let watch = node.watch_volumes(plugged.clone(), shell.app().handle().bus());
     shell.follow_volumes(watch.clone());
     let mut h = headless::harness(shell, egui::vec2(1280.0, 800.0));
     h.run();
@@ -142,6 +147,13 @@ fn a_card_plugged_in_with_the_import_window_closed_is_seen_by_the_node() {
             .iter()
             .any(|c| matches!(c, Change::Unmounted(u) if u.id == volume.id && u.mount == root))
     );
+    // Heard on Helios's bus by the cards and the health check.
+    let heard = watch.heard();
+    let gone = heard
+        .iter()
+        .find(|h| h.point == "volume.unmounted" && h.id == volume.id)
+        .expect("volume.unmounted passed");
+    assert_eq!(gone.ran, [node_volumes::CARDS, node_volumes::HEALTH]);
     drop(h);
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
@@ -229,8 +241,9 @@ fn a_backup_disk_plugged_in_with_no_window_is_backed_up_by_the_node() {
         said.lock().unwrap().push(e);
     })
     .adopted_by(&node.link());
-    let watch = node.watch_volumes(plugged.clone());
-    backups.follow(&watch);
+    let hooks = hooks();
+    let watch = node.watch_volumes(plugged.clone(), hooks.clone());
+    backups.follow(&*hooks);
     until("the watch's first look", || watch.listed());
     assert_eq!(backed_up(vault, "uuid:backup"), 0, "nothing at start");
 
@@ -249,6 +262,202 @@ fn a_backup_disk_plugged_in_with_no_window_is_backed_up_by_the_node() {
             .any(|c| matches!(c, Change::Mounted(m) if m.id.as_str() == "uuid:backup")),
         "on the node's bus"
     );
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Volumes plugged in, as a test plugs them, read slowly by the volume
+/// scan's own thread: a scan that takes its time, as on a large library.
+/// Whoever acts on a disk plugged in must not depend on the scan being
+/// quick.
+struct SlowScan {
+    plugged: Arc<Plugged>,
+    scan_delay: Mutex<Duration>,
+}
+
+impl Volumes for SlowScan {
+    fn volumes(&self) -> Vec<Volume> {
+        if std::thread::current().name() == Some("helios-volume-scan") {
+            let delay = *self.scan_delay.lock().unwrap();
+            std::thread::sleep(delay);
+        }
+        self.plugged.volumes()
+    }
+}
+
+/// Where the photos' copies on `disk` are, as the vault says.
+fn presence_on(vault: &Vault<SqliteStore>, disk: &str) -> Vec<helios_vault::Presence> {
+    vault
+        .all_locations()
+        .unwrap()
+        .into_iter()
+        .filter(|(_, l)| l.volume.as_ref().is_some_and(|v| v.as_str() == disk))
+        .map(|(_, l)| l.presence)
+        .collect()
+}
+
+/// The library disk plugged in again while the backup disk is there: the
+/// scan says its copies are present before the backup on connect looks
+/// for them, so the backup copies both photos at once, however slow the
+/// scan's own thread is.
+#[test]
+fn a_disk_plugged_in_is_scanned_before_its_backup_starts() {
+    let dir = scratch("scan-first");
+    let node = node(&dir);
+    let vault = node.vault();
+    let jobs = Jobs::new(Arc::new(Bus::new()));
+    let lib = disk("uuid:lib", &dir.join("libdisk"), &[Role::Library]);
+    let backup = disk("uuid:backup", &dir.join("backup"), &[Role::Backup]);
+    registry::record(vault, &[lib.clone(), backup.clone()], "studio", 10, None).unwrap();
+    for v in [&lib, &backup] {
+        registry::save(vault, v).unwrap();
+    }
+    let roll = dir.join("roll");
+    std::fs::create_dir_all(&roll).unwrap();
+    for k in 0..2u8 {
+        let bytes: Vec<u8> = (0..20_000u32)
+            .map(|i| (i as u8).wrapping_mul(k + 3))
+            .collect();
+        std::fs::write(roll.join(format!("p{k}.raf")), bytes).unwrap();
+    }
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(dir.join("libdisk/Library")),
+        },
+        signals: false,
+        ..Options::default()
+    };
+    import::import(
+        vault,
+        &jobs,
+        &[roll],
+        &options,
+        100,
+        &mut |_: &serde_json::Value| {},
+    )
+    .unwrap();
+    let on_connect = Strategy {
+        triggers: [Trigger::OnConnect].into(),
+        ..Strategy::default()
+    };
+    strategy::save(vault, &Scope::Library, Some(&on_connect)).unwrap();
+
+    // Both disks plugged in; the first scan links the copies to the
+    // library disk.
+    let plugged = Arc::new(Plugged::default());
+    plugged.plug(lib.clone());
+    plugged.plug(backup);
+    let volumes = Arc::new(SlowScan {
+        plugged: plugged.clone(),
+        scan_delay: Mutex::new(Duration::ZERO),
+    });
+    let scans = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = scans.clone();
+    let scanner = node.library().scan_volumes(
+        volumes.clone(),
+        "studio".into(),
+        Duration::from_hours(1),
+        move |outcome| {
+            outcome.unwrap();
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
+    let scanned = || scans.load(std::sync::atomic::Ordering::SeqCst);
+    until("the first scan", || scanned() >= 1);
+    assert_eq!(
+        presence_on(vault, "uuid:lib"),
+        [helios_vault::Presence::Present; 2],
+        "linked to the library disk"
+    );
+    let errors: Arc<Mutex<Vec<String>>> = Arc::default();
+    let said = errors.clone();
+    let backups = Backups::new(vault.clone(), jobs, plugged.clone(), move |e| {
+        said.lock().unwrap().push(e);
+    })
+    .adopted_by(&node.link());
+    // Wired as the desktop wires them: listeners of the volume points on
+    // Helios's one bus.
+    let hooks = hooks();
+    node_volumes::listen_scan(&*hooks, scanner).unwrap();
+    backups.follow(&*hooks);
+    let watch = node.watch_volumes(plugged.clone(), hooks.clone());
+    until("the watch's first look", || watch.listed());
+
+    // The library disk unplugged: its copies offline once scanned.
+    plugged.unplug(&lib.id);
+    until("the unplugged disk scanned", || {
+        presence_on(vault, "uuid:lib") == [helios_vault::Presence::Offline; 2]
+    });
+    let before = scanned();
+    assert_eq!(backed_up(vault, "uuid:backup"), 0, "nothing backed up yet");
+
+    // From now on the scan's own thread is slow; the library disk is
+    // plugged in again.
+    *volumes.scan_delay.lock().unwrap() = Duration::from_millis(500);
+    plugged.plug(lib);
+    until("the plugged disk scanned", || scanned() > before);
+    until("the plugged disk's listeners ran", || {
+        watch
+            .heard()
+            .iter()
+            .any(|h| h.point == "volume.mounted" && h.id.as_str() == "uuid:lib")
+    });
+    let heard = watch.heard();
+    let plugged_in = heard
+        .iter()
+        .find(|h| h.point == "volume.mounted" && h.id.as_str() == "uuid:lib")
+        .unwrap();
+    assert_eq!(
+        plugged_in.ran,
+        [node_volumes::SCAN, node_volumes::BACKUPS],
+        "scanned, then backed up"
+    );
+    assert!(
+        helios_gui::node::NodeJobs::wait(&*backups, Duration::from_mins(1)),
+        "the backup ended"
+    );
+    assert_eq!(
+        backed_up(vault, "uuid:backup"),
+        2,
+        "the backup on connect found the copies the scan had just set present: {:?}",
+        errors.lock().unwrap()
+    );
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The listeners of `volume.mounted` and `volume.unmounted` as the
+/// desktop registers them, in the order they run: a reviewed dump
+/// (`tests/bus/volumes.txt`). The cards first, then the scan, then
+/// whoever reads where the copies are.
+#[test]
+fn the_volume_points_listeners_run_in_a_declared_order() {
+    let dir = scratch("order");
+    let node = node(&dir);
+    let plugged = Arc::new(Plugged::default());
+    let mut shell = Shell::new(helios_panels(), None);
+    let bus = shell.app().handle().bus();
+    let watch = node.watch_volumes(plugged.clone(), bus.clone());
+    shell.follow_volumes(watch.clone());
+    let scanner = node.library().scan_volumes(
+        plugged.clone(),
+        "studio".into(),
+        Duration::from_hours(1),
+        |_| {},
+    );
+    node_volumes::listen_scan(&*bus, scanner).unwrap();
+    let jobs = Jobs::new(Arc::new(Bus::new()));
+    let backups = Backups::new(node.vault().clone(), jobs, plugged, |_| {});
+    let backups = Arc::new(backups);
+    backups.follow(&*bus);
+    node_volumes::listen_mounted(&*bus, node_volumes::MAP, "helios.map", |_| {}).unwrap();
+    let mut h = headless::harness(shell, egui::vec2(1280.0, 800.0));
+    h.run();
+    assert_eq!(
+        node_volumes::order(&*bus),
+        include_str!("../bus/volumes.txt")
+    );
+    drop(h);
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }

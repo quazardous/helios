@@ -199,6 +199,7 @@ fn a_card_set_to_import_when_plugged_in_imports_its_new_photos_with_its_choices(
         shell.follow_volumes(VolumeWatch::start(
             slot.clone(),
             Arc::new(helios_core::Bus::new()),
+            shell.app().handle().bus(),
             Duration::from_millis(50),
         ));
     });
@@ -383,6 +384,7 @@ fn card_setup(name: &str, confirmed: bool) -> CardSetup {
         shell.follow_volumes(VolumeWatch::start(
             slot.clone(),
             Arc::new(helios_core::Bus::new()),
+            shell.app().handle().bus(),
             Duration::from_millis(50),
         ));
     });
