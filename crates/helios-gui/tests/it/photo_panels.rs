@@ -1,7 +1,8 @@
 //! The panels following the photo (the scopes, the navigator) say when
 //! what they show is not current: another photo selected, they are stale
 //! at once; once that has lasted the delay, the scopes' content is dimmed
-//! with a busy mark on its corner and its tab; the new photo's data
+//! with a busy mark in its corner (the scopes float as a palette: no tab
+//! here); the new photo's data
 //! landed, the mark clears. The panels draw none of it: egui-pop's chrome
 //! does, from `panel.state` on the bus.
 
@@ -56,9 +57,9 @@ fn state(h: &Harness<'_, Shell>, panel: &str) -> PanelState {
     h.state().app().handle().panel_state(panel)
 }
 
-/// The scopes' mark (on its content, or on its tab), when shown.
-fn mark(h: &Harness<'_, Shell>, on_tab: bool) -> Option<indicator::Record> {
-    indicator::find(&h.ctx, &mark_id(SCOPES, on_tab)).filter(|r| r.shown)
+/// The scopes' mark on its content, when shown.
+fn mark(h: &Harness<'_, Shell>) -> Option<indicator::Record> {
+    indicator::find(&h.ctx, &mark_id(SCOPES, false)).filter(|r| r.shown)
 }
 
 #[test]
@@ -76,7 +77,7 @@ fn the_scopes_are_marked_stale_until_the_new_photo_s_data_lands() {
         assert_eq!(state(&h, panel), PanelState::Ready, "{panel}");
     }
     let (first, _) = h.state().preview().latest().expect("the first preview");
-    assert!(mark(&h, false).is_none());
+    assert!(mark(&h).is_none());
 
     // Another photo selected: stale at once, before any frame.
     h.state_mut().open_from_library(Some("b"));
@@ -84,7 +85,7 @@ fn the_scopes_are_marked_stale_until_the_new_photo_s_data_lands() {
         assert_eq!(state(&h, panel), PanelState::Stale, "{panel}");
     }
     h.step();
-    assert!(mark(&h, false).is_none(), "nothing within the delay");
+    assert!(mark(&h).is_none(), "nothing within the delay");
     // Its network is slow to come: past the delay, the mark shows.
     let t = Tokens::of(&h.ctx);
     let (delay, min) = (
@@ -94,9 +95,8 @@ fn the_scopes_are_marked_stale_until_the_new_photo_s_data_lands() {
     clock.set(delay + 0.05);
     h.step();
     h.step();
-    let shown = mark(&h, false).expect("the busy mark on the scopes");
+    let shown = mark(&h).expect("the busy mark on the scopes");
     assert_eq!(shown.state, "busy");
-    assert_eq!(mark(&h, true).expect("on the tab").state, "busy");
 
     // The new photo's network: its preview lands, the mark clears.
     let (graph, node) = network(0.7);
@@ -112,6 +112,5 @@ fn the_scopes_are_marked_stale_until_the_new_photo_s_data_lands() {
     clock.set(delay + 0.05 + min + 0.05);
     h.step();
     h.step();
-    assert!(mark(&h, false).is_none(), "cleared with the new data");
-    assert!(mark(&h, true).is_none(), "on the tab too");
+    assert!(mark(&h).is_none(), "cleared with the new data");
 }
