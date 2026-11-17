@@ -40,6 +40,7 @@ egui-pop in the lock: 0.11.0.
 |---|---|---|
 | a card, a framed group | `ui.card(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::card` | `add` inside the kit's `card` in a tone (`Tone::Neutral` for the plain card). |
 | a divider, a rule between two sections (separator) | `ui.divider(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::divider` | A divider: a rule across the layout between two sections, in `border.default`, one point wide on whole physical pixels, centred in a space of `Space::Group`. |
+| a list in a side panel's section, a few rows high | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 | a scrolling region | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 |  | `ui.scroll_area(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
 | collapsible sections in a panel | `Sections` (egui-pop)<br>`egui_pop::core::sections::Sections` | A stack of collapsible sections filling the room it is given (a panel's height), named for its memory and for agents. |
