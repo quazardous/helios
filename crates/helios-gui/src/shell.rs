@@ -166,6 +166,31 @@ pub const IN_LIBRARY: &str = "appWindow == 'main' || appWindow == 'library'";
 const HIDPI: f32 = 1.5;
 
 /// About's one-line description of Helios, as the README says it.
+/// The engine's notice kinds, on a subscription of their own: each is
+/// kept until the shell reads it, however many step events the engine
+/// publishes meanwhile (its journal keeps only the latest), and wakes the
+/// window (once the shell's first frame gave its context).
+fn subscribe_engine_notices(
+    engine: &helios_core::Engine,
+) -> (
+    std::sync::mpsc::Receiver<helios_core::Envelope>,
+    Arc<OnceLock<Egui>>,
+) {
+    use helios_core::Event as _;
+    use helios_core::engine::{GpuFellBack, GpuLost};
+    let wake: Arc<OnceLock<Egui>> = Arc::default();
+    let ctx = wake.clone();
+    let notices = engine.bus().subscribe_kinds(
+        &[GpuFellBack::KIND, GpuLost::KIND],
+        Some(Arc::new(move || {
+            if let Some(ctx) = ctx.get() {
+                ctx.request_repaint();
+            }
+        })),
+    );
+    (notices, wake)
+}
+
 fn about_description() -> Message {
     Message::new(
         "gui-about-description",
@@ -1106,6 +1131,7 @@ impl Shell {
         // The viewport engine and its render cache: one per process, every
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
+        let (engine_notices, engine_wake) = subscribe_engine_notices(&engine);
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
         let activity = crate::activity::Activity::default();
@@ -1186,7 +1212,8 @@ impl Shell {
             still: false,
             i18n,
             opens,
-            engine_seen: 0,
+            engine_notices,
+            engine_wake,
             fell_back: BTreeSet::new(),
             about_generation: None,
             jobs,
@@ -2012,18 +2039,54 @@ impl Shell {
         answered
     }
 
-    /// Answers what the Decisions panel asked during the last frame, and
-    /// makes its cards again from the book (an agent's answer removes
-    /// its card here).
+    /// Makes the Decisions panel's cards again from the book before it
+    /// is drawn (an agent's answer removes its card here).
     fn follow_decisions(&mut self) {
-        let requests = self.focus.decisions.borrow_mut().take_requests();
-        for r in requests {
-            if let Err(e) = self.answer_decision(r, &Origin::User) {
-                self.warn(e);
-            }
-        }
         let viewport = self.focus.viewport.borrow();
         self.focus.decisions.borrow_mut().refresh(viewport.graph());
+    }
+
+    /// Answers what was asked while the panels and windows were drawn, in
+    /// the same pass, once they are: the dialogs channel's asks (a
+    /// dialog, a menu, a notice, a command), the Decisions panel's
+    /// answers, and a toast for each snapshot restored. What an answer
+    /// asks in turn is answered too (a command that opens a dialog). A
+    /// dialog or a menu opened here is drawn at the next frame, asked
+    /// for at once.
+    fn answer_asks(&mut self, ctx: &Egui) {
+        let mut answered = false;
+        // A few rounds: an answer may ask again; more waits a frame.
+        for _ in 0..4 {
+            let requests = crate::dialogs::take_requests(ctx);
+            let decisions = self.focus.decisions.borrow_mut().take_requests();
+            let restored = !crate::edit_snapshots::lock(&self.core.snapshots).restored_none();
+            if requests.is_empty() && decisions.is_empty() && !restored {
+                break;
+            }
+            answered = true;
+            for r in requests {
+                use crate::dialogs::Request;
+                match r {
+                    Request::Confirm(c) => self.confirm(c),
+                    Request::Form(f) => self.form(f),
+                    Request::Picker(p) => self.pick(p),
+                    Request::Menu { at, items } => self.open_menu(at, items),
+                    Request::Notify(level, text) => self.notify(level, text),
+                    Request::Run(id, args, origin) => {
+                        let _ = self.run(&id, args, origin);
+                    }
+                }
+            }
+            for r in decisions {
+                if let Err(e) = self.answer_decision(r, &Origin::User) {
+                    self.warn(e);
+                }
+            }
+            self.follow_snapshots();
+        }
+        if answered {
+            ctx.request_repaint();
+        }
     }
 
     /// Gives the viewport the GPU path it draws with, on the render state
@@ -4591,10 +4654,14 @@ impl Shell {
 
     /// What the viewport's engine says a user should know: a step whose
     /// GPU version failed (once per module), a GPU lost. Shown as toasts.
-    fn engine_notices(&mut self) {
-        let engine = self.core.engine.clone();
-        for e in engine.bus().since(self.core.engine_seen) {
-            self.core.engine_seen = e.seq;
+    /// Read from the shell's own subscription to those kinds, not from the
+    /// engine bus's journal, which a burst of step events overruns.
+    fn engine_notices(&mut self, ctx: &Egui) {
+        if self.core.engine_wake.get().is_none() {
+            let _ = self.core.engine_wake.set(ctx.clone());
+        }
+        let notices: Vec<_> = self.core.engine_notices.try_iter().collect();
+        for e in notices {
             let message = || serde_json::from_value::<Message>(e.payload["message"].clone()).ok();
             match e.kind {
                 "engine.gpu_fell_back" => {
@@ -7116,20 +7183,6 @@ impl Shell {
         for image in screenshots {
             self.on_screenshot(&image);
         }
-        // What panels asked for during the last frame.
-        for r in crate::dialogs::take_requests(&ctx) {
-            use crate::dialogs::Request;
-            match r {
-                Request::Confirm(c) => self.confirm(c),
-                Request::Form(f) => self.form(f),
-                Request::Picker(p) => self.pick(p),
-                Request::Menu { at, items } => self.open_menu(at, items),
-                Request::Notify(level, text) => self.notify(level, text),
-                Request::Run(id, args, origin) => {
-                    let _ = self.run(&id, args, origin);
-                }
-            }
-        }
         self.set_context(&ctx);
         self.core.app.logic(&ctx);
         // New undo steps are made in the place the stack shows now, and
@@ -7139,8 +7192,6 @@ impl Shell {
             &mut lock(&self.core.values),
             &self.focus.subworkspaces,
         );
-        // The History panel's snapshots: a toast for each restore.
-        self.follow_snapshots();
         // The node's endpoint lists and runs the windows' commands.
         if let Some(mut asks) = self.window_asks.take() {
             crate::window_commands::answer(self, &mut asks, &ctx);
@@ -7231,7 +7282,7 @@ impl Shell {
         }
         self.workbench_refusals(&ctx);
         self.save_layout_on_change(&ctx);
-        self.engine_notices();
+        self.engine_notices(&ctx);
         self.copied_image();
         self.job_notices();
         self.library_walks_frame(&ctx);
@@ -7239,6 +7290,9 @@ impl Shell {
         self.menus_ui(&ctx);
         self.rule_editor_ui(&ctx);
         self.pointer_choice_ui(&ctx);
+        // What the panels and windows asked while drawn, answered in the
+        // pass they asked in.
+        self.answer_asks(&ctx);
 
         let named = ctx.data(|d| {
             d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique("helios.named"))

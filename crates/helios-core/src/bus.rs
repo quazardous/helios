@@ -5,10 +5,17 @@
 //! [`Envelope`] (sequence number, time, source, cause) and keeps a journal of the
 //! most recent ones, so a test or an agent can read what happened since a
 //! given point instead of sleeping.
+//!
+//! The journal is a ring: a burst of frequent events pushes the oldest out,
+//! so a reader that must not miss a rare event does not poll it. It
+//! subscribes to the kinds it needs ([`Bus::subscribe_kinds`]): each one is
+//! kept in its channel until read, whatever the journal overran, and a
+//! [`Wake`] tells it at once. A journal reader can still tell what it
+//! missed ([`Bus::missed`]).
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -44,8 +51,27 @@ pub struct Envelope {
 /// How many events the journal keeps by default.
 pub const JOURNAL: usize = 1024;
 
+/// Called after an event a subscriber asked for is published (outside
+/// the bus's lock): a window asks to be drawn again, a thread is unparked.
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+
 pub struct Bus {
     inner: Mutex<Inner>,
+}
+
+struct Subscriber {
+    to: Sender<Envelope>,
+    /// The kinds it gets; every kind when `None`.
+    kinds: Option<Vec<&'static str>>,
+    wake: Option<Wake>,
+}
+
+impl Subscriber {
+    fn wants(&self, kind: &str) -> bool {
+        self.kinds
+            .as_ref()
+            .is_none_or(|kinds| kinds.contains(&kind))
+    }
 }
 
 struct Inner {
@@ -54,7 +80,7 @@ struct Inner {
     start: Instant,
     capacity: usize,
     journal: VecDeque<Envelope>,
-    subscribers: Vec<Sender<Envelope>>,
+    subscribers: Vec<Subscriber>,
 }
 
 impl Default for Bus {
@@ -95,6 +121,7 @@ impl Bus {
         kind: &'static str,
         payload: serde_json::Value,
     ) -> u64 {
+        let mut wakes = Vec::new();
         let mut inner = self.inner.lock().expect("bus lock");
         let seq = inner.next;
         inner.next += 1;
@@ -110,21 +137,63 @@ impl Bus {
             kind,
             payload,
         };
-        inner
-            .subscribers
-            .retain(|s| s.send(envelope.clone()).is_ok());
+        inner.subscribers.retain(|s| {
+            if !s.wants(kind) {
+                return true;
+            }
+            let sent = s.to.send(envelope.clone()).is_ok();
+            if sent && let Some(wake) = &s.wake {
+                wakes.push(wake.clone());
+            }
+            sent
+        });
         if inner.journal.len() == inner.capacity {
             inner.journal.pop_front();
         }
         inner.journal.push_back(envelope);
+        drop(inner);
+        for wake in wakes {
+            wake();
+        }
         seq
     }
 
     /// Every event published from now on.
     pub fn subscribe(&self) -> Receiver<Envelope> {
-        let (tx, rx) = channel();
-        self.inner.lock().expect("bus lock").subscribers.push(tx);
-        rx
+        let (to, from) = channel();
+        self.inner
+            .lock()
+            .expect("bus lock")
+            .subscribers
+            .push(Subscriber {
+                to,
+                kinds: None,
+                wake: None,
+            });
+        from
+    }
+
+    /// The events of `kinds` published from now on, each kept in the
+    /// channel until read: what the journal overran in between does not
+    /// matter. `wake`, if any, is called after each one is published. For
+    /// rare events a reader must not miss (a GPU lost), among frequent ones
+    /// it does not read; the subscription ends when the receiver is dropped.
+    pub fn subscribe_kinds(
+        &self,
+        kinds: &[&'static str],
+        wake: Option<Wake>,
+    ) -> Receiver<Envelope> {
+        let (to, from) = channel();
+        self.inner
+            .lock()
+            .expect("bus lock")
+            .subscribers
+            .push(Subscriber {
+                to,
+                kinds: Some(kinds.to_vec()),
+                wake,
+            });
+        from
     }
 
     /// The journaled events with a sequence number above `seq`.
@@ -137,6 +206,14 @@ impl Bus {
             .filter(|e| e.seq > seq)
             .cloned()
             .collect()
+    }
+
+    /// How many events published after `seq` the journal no longer holds:
+    /// a reader whose cursor is `seq` fell that far behind and missed them.
+    pub fn missed(&self, seq: u64) -> u64 {
+        let inner = self.inner.lock().expect("bus lock");
+        let oldest = inner.journal.front().map_or(inner.next, |e| e.seq);
+        oldest.saturating_sub(seq.saturating_add(1))
     }
 
     /// How long ago `envelope`, published on this bus, was published.
@@ -197,6 +274,56 @@ mod tests {
         assert_eq!(journal[0].cause, Some(1));
         assert_eq!(journal[0].payload["n"], 2);
         assert_eq!(rx.try_iter().count(), 3, "a subscriber gets every event");
+    }
+
+    #[derive(Serialize)]
+    struct Rare;
+
+    impl Event for Rare {
+        const KIND: &'static str = "test.rare";
+    }
+
+    #[test]
+    fn a_kind_subscriber_keeps_its_events_through_any_burst_and_is_woken() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let bus = Bus::with_journal(4);
+        let woken = Arc::new(AtomicUsize::new(0));
+        let w = woken.clone();
+        let rare = bus.subscribe_kinds(
+            &[Rare::KIND],
+            Some(Arc::new(move || {
+                w.fetch_add(1, Ordering::SeqCst);
+            })),
+        );
+        let first = bus.publish("a", None, &Rare);
+        for n in 0..100 {
+            bus.publish("a", None, &Ping { n });
+        }
+        assert!(
+            bus.since(0).iter().all(|e| e.kind != Rare::KIND),
+            "the journal overran it"
+        );
+        let got: Vec<u64> = rare.try_iter().map(|e| e.seq).collect();
+        assert_eq!(got, [first], "kept until read, the pings left out");
+        assert_eq!(woken.load(Ordering::SeqCst), 1, "woken once, for it alone");
+        drop(rare);
+        bus.publish("a", None, &Rare);
+        assert_eq!(bus.describe()["subscribers"], 0, "gone with its receiver");
+    }
+
+    #[test]
+    fn a_reader_tells_what_the_journal_overran() {
+        let bus = Bus::with_journal(2);
+        assert_eq!(bus.missed(0), 0, "nothing published");
+        bus.publish("a", None, &Ping { n: 1 });
+        bus.publish("a", None, &Ping { n: 2 });
+        assert_eq!(bus.missed(0), 0, "all still journaled");
+        bus.publish("a", None, &Ping { n: 3 });
+        bus.publish("a", None, &Ping { n: 4 });
+        assert_eq!(bus.missed(0), 2, "1 and 2 are gone");
+        assert_eq!(bus.missed(1), 1);
+        assert_eq!(bus.missed(2), 0);
+        assert_eq!(bus.missed(4), 0);
     }
 
     #[test]

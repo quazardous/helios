@@ -153,9 +153,11 @@ pub(super) struct Core {
     pub(super) i18n: egui_pop::i18n::I18n,
     /// What later launches and links asked to open (`platform`).
     pub(super) opens: crate::platform::Opens,
-    /// The viewport engine's events read up to here, and the modules whose
-    /// GPU fallback was already said.
-    pub(super) engine_seen: u64,
+    /// What the viewport engine says a user should know (its notice kinds,
+    /// kept until read whatever else it published), the window woken when
+    /// one arrives, and the modules whose GPU fallback was already said.
+    pub(super) engine_notices: std::sync::mpsc::Receiver<helios_core::Envelope>,
+    pub(super) engine_wake: std::sync::Arc<std::sync::OnceLock<egui::Context>>,
     pub(super) fell_back: BTreeSet<String>,
     /// The catalogues' generation About's description was last
     /// translated for (`follow_language`).
