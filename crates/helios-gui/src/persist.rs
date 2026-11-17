@@ -2523,29 +2523,12 @@ impl<S: Store + 'static> Persist<S> {
     /// everything committed is saved and no gesture goes on, then keeps
     /// the image's pinned snapshots in the vault when they changed.
     fn pin_snapshots(&mut self, shell: &mut Shell) {
-        use crate::edit_snapshots::{Pin, head_step};
         let Some(e) = &self.editing else {
             return;
         };
-        let image = e.session.image();
-        let (step, committed, settled) = {
-            let store = shell.values().lock().expect("value store lock");
-            let settled =
-                !e.unsaved && store.open_gesture().is_none() && store.committed() == e.committed;
-            (head_step(&store), store.committed(), settled)
-        };
-        let (pinned, write) = {
-            let mut book = crate::edit_snapshots::lock(shell.snapshots());
-            if book.image() != Some(image) {
-                return;
-            }
-            let pin = e.session.head().map_or(Pin::Unedited, Pin::Version);
-            book.settle(settled.then_some((step, committed, pin)));
-            (book.pinned(), book.take_dirty())
-        };
         // Sent after the edit's steps they pin: a refusal is said once,
         // the next change writes the whole list again.
-        if write {
+        if let Some((image, pinned)) = pin_book(e, shell.values(), shell.snapshots()) {
             held(&self.writes).push_back(Write::Snapshots(image, pinned));
         }
     }
@@ -2672,19 +2655,31 @@ impl<S: Store + 'static> Persist<S> {
             return bus;
         }
         let (desk, values, node) = (self.desk.clone(), shell.values().clone(), self.node.clone());
+        let book = shell.snapshots().clone();
         let saved = io::listen_local(&*bus, io::SAVE, move |switch, switched| {
             let mut desk = held(&desk);
             let Some(e) = desk.as_mut() else {
                 return Ok(());
             };
+            let started = std::time::Instant::now();
             switched.saved = save_now(e, &values, &node, switch.at)?;
-            Ok(())
+            // The snapshots pending at the step just saved are pinned and
+            // kept now: `history.scope` clears the book next.
+            keep_snapshots_now(
+                e,
+                &values,
+                &book,
+                &node,
+                SAVE_WAIT.saturating_sub(started.elapsed()),
+            )
         });
         let (values, snapshots) = (shell.values().clone(), shell.snapshots().clone());
         let scoped = io::listen_local(&*bus, io::SCOPE, move |_, _| {
             // The next image's values take this one's paths: its steps
             // must not be undone into them, nor its snapshots restored.
-            held(&values).clear_history();
+            // The workspace's steps (graph edits) are not the image's:
+            // they stay.
+            held(&values).leave_image();
             crate::edit_snapshots::lock(&snapshots).clear();
             Ok(())
         });
@@ -3055,6 +3050,64 @@ fn next_step(
         edited,
         after: e.session.clone(),
     })
+}
+
+/// Pins the snapshots of `e`'s image taken at the step its saved edit
+/// holds (once everything committed is saved and no gesture goes on):
+/// the image and its pinned snapshots, when the vault must keep them
+/// again.
+fn pin_book(
+    e: &Editing,
+    values: &Arc<Mutex<helios_values::Store>>,
+    book: &crate::edit_snapshots::Shared,
+) -> Option<(ImageId, Vec<helios_vault::snapshots::Snapshot>)> {
+    use crate::edit_snapshots::{Pin, head_step};
+    let image = e.session.image();
+    let (step, committed, settled) = {
+        let store = held(values);
+        let settled =
+            !e.unsaved && store.open_gesture().is_none() && store.committed() == e.committed;
+        (head_step(&store), store.committed(), settled)
+    };
+    let mut book = crate::edit_snapshots::lock(book);
+    if book.image() != Some(image) {
+        return None;
+    }
+    let pin = e.session.head().map_or(Pin::Unedited, Pin::Version);
+    book.settle(settled.then_some((step, committed, pin)));
+    book.take_dirty().then(|| (image, book.pinned()))
+}
+
+/// `edit.save`, once the edit is saved: the snapshots pending at the step
+/// it holds pinned, and the image's pinned snapshots kept through `node`,
+/// its answer waited for up to `wait` (the image is about to be left, its
+/// book cleared).
+///
+/// # Errors
+/// The node refused them (or did not answer): the book stays to be kept
+/// again; the reason, in words.
+fn keep_snapshots_now(
+    e: &Editing,
+    values: &Arc<Mutex<helios_values::Store>>,
+    book: &crate::edit_snapshots::Shared,
+    node: &Client,
+    wait: std::time::Duration,
+) -> Result<(), String> {
+    let Some((image, pinned)) = pin_book(e, values, book) else {
+        return Ok(());
+    };
+    let (method, params) = Write::Snapshots(image, pinned).call();
+    let answer = node.call(method, params).wait_timeout(wait);
+    match answer {
+        Some(Ok(_)) => Ok(()),
+        failed => {
+            crate::edit_snapshots::lock(book).keep_again();
+            Err(match failed {
+                Some(Err(err)) => format!("its snapshots: {}", err.message),
+                _ => "its snapshots: the library did not answer in time".to_string(),
+            })
+        }
+    }
 }
 
 /// How long `edit.save` waits for the node to answer a step.

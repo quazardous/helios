@@ -1935,8 +1935,9 @@ impl Shell {
             let mut store = lock(&self.core.values);
             // Another image: its values take the paths of the one before,
             // so that one's steps must not be undone into them, nor its
-            // snapshots restored into them.
-            store.clear_history();
+            // snapshots restored into them. The workspace's steps (graph
+            // edits) are not the image's: they stay.
+            store.leave_image();
             crate::edit_snapshots::lock(&self.core.snapshots).clear();
             for id in graph.ids() {
                 helios_values::bind_node(&mut store, &graph, id)?;

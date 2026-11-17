@@ -7,6 +7,9 @@ command-activity-show =
 command-calibrate-open =
     .title = Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)
 
+command-compare-leave =
+    .title = Leave Compare: back to the grid, or wherever it was entered from (Escape)
+
 command-compare-next =
     .title = Compare: make the next photo active
 
