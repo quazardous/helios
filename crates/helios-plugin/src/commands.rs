@@ -129,59 +129,57 @@ fn capability_rows(broker: &Broker, only: Option<&str>) -> Json {
     json!({ "capabilities": rows })
 }
 
-/// Declares the plugin commands on a registry, over a shared broker. The
-/// answer lists the contributed commands left out, because their id was
-/// already taken.
-pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<String>, String> {
-    for (spec, handler) in admin(&broker) {
-        registry.register(spec, handler)?;
-    }
+/// The commands of the plugins' services, run in the plugins serving
+/// them: `metadata.read`, `device.list`, `device.info`, `device.capture`,
+/// `device.download`.
+pub fn services(broker: &Arc<Broker>) -> Vec<(CommandSpec, Handler)> {
+    let mut out: Vec<(CommandSpec, Handler)> = Vec::new();
     let b = broker.clone();
-    registry.register(
+    out.push((
         CommandSpec::new(
             "metadata.read",
             "Read an image's metadata through plugins (`image`)",
             "Metadata",
         ),
-        move |args, _| b.metadata_read(Path::new(text(args, "image")?)),
-    )?;
+        Box::new(move |args, _| b.metadata_read(Path::new(text(args, "image")?))),
+    ));
     let b = broker.clone();
-    registry.register(
+    out.push((
         CommandSpec::new("device.list", "List connected cameras", "Devices"),
-        move |_, _| b.device_list(),
-    )?;
+        Box::new(move |_, _| b.device_list()),
+    ));
     let b = broker.clone();
-    registry.register(
+    out.push((
         CommandSpec::new(
             "device.info",
             "Describe a camera (`plugin`, `device`)",
             "Devices",
         ),
-        move |args, _| b.device_info(optional(args, "plugin"), optional(args, "device")),
-    )?;
+        Box::new(move |args, _| b.device_info(optional(args, "plugin"), optional(args, "device"))),
+    ));
     let b = broker.clone();
-    registry.register(
+    out.push((
         CommandSpec::new(
             "device.capture",
             "Take a picture and download it (`folder`, `plugin`, `device`)",
             "Devices",
         ),
-        move |args, _| {
+        Box::new(move |args, _| {
             b.device_capture(
                 optional(args, "plugin"),
                 optional(args, "device"),
                 Path::new(text(args, "folder")?),
             )
-        },
-    )?;
+        }),
+    ));
     let b = broker.clone();
-    registry.register(
+    out.push((
         CommandSpec::new(
             "device.download",
             "Download files from a camera (`files`, `folder`, `plugin`, `device`)",
             "Devices",
         ),
-        move |args, _| {
+        Box::new(move |args, _| {
             let files: Vec<String> = args
                 .get("files")
                 .and_then(Json::as_array)
@@ -195,9 +193,24 @@ pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<Stri
                 &files,
                 Path::new(text(args, "folder")?),
             )
-        },
-    )?;
-    let mut skipped = Vec::new();
+        }),
+    ));
+    out
+}
+
+/// The commands the plugins contribute (`[[commands]]`), each run in
+/// its plugin, started on `onCommand:<id>` and held to its grants as on
+/// any call.
+pub fn contributed(broker: &Arc<Broker>) -> Vec<(CommandSpec, Handler)> {
+    by_plugin(broker)
+        .into_iter()
+        .map(|(_, spec, handler)| (spec, handler))
+        .collect()
+}
+
+/// [`contributed`], each with its plugin's id.
+fn by_plugin(broker: &Arc<Broker>) -> Vec<(String, CommandSpec, Handler)> {
+    let mut out: Vec<(String, CommandSpec, Handler)> = Vec::new();
     for plugin in broker.ids().map(String::from).collect::<Vec<_>>() {
         let manifest = broker.manifest(&plugin).expect("listed").clone();
         for c in manifest.commands {
@@ -208,13 +221,36 @@ pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<Stri
             };
             let b = broker.clone();
             let (p, id) = (plugin.clone(), c.id.clone());
-            let declared = registry.register(
+            out.push((
+                plugin.clone(),
                 CommandSpec::new(&c.id, &c.title, category),
-                move |args, _| b.execute(&p, &id, args.clone()),
-            );
-            if let Err(e) = declared {
-                skipped.push(format!("plugin `{plugin}`: {e}"));
-            }
+                Box::new(move |args, _| b.execute(&p, &id, args.clone())),
+            ));
+        }
+    }
+    out
+}
+
+/// Every plugin command: [`admin`], [`services`], [`contributed`], the
+/// ones the desktop declares on its registry.
+pub fn all(broker: &Arc<Broker>) -> Vec<(CommandSpec, Handler)> {
+    let mut out = admin(broker);
+    out.extend(services(broker));
+    out.extend(contributed(broker));
+    out
+}
+
+/// Declares the plugin commands on a registry, over a shared broker. The
+/// answer lists the contributed commands left out, because their id was
+/// already taken.
+pub fn register(registry: &mut Registry, broker: Arc<Broker>) -> Result<Vec<String>, String> {
+    for (spec, handler) in admin(&broker).into_iter().chain(services(&broker)) {
+        registry.register(spec, handler)?;
+    }
+    let mut skipped = Vec::new();
+    for (plugin, spec, handler) in by_plugin(&broker) {
+        if let Err(e) = registry.register(spec, handler) {
+            skipped.push(format!("plugin `{plugin}`: {e}"));
         }
     }
     Ok(skipped)

@@ -223,14 +223,18 @@ impl Shell {
 
     /// The plugins installed: a connector of theirs asks for the
     /// capabilities its plugin lacks before it runs (the consent dialog),
-    /// and the plugin commands (`plugin.list`, `plugin.capabilities`,
-    /// `plugin.grant`…) are declared, for Settings > Plugins and agents.
+    /// and the plugin commands are declared, for Settings > Plugins, the
+    /// palette and agents: the ones that manage them (`plugin.list`,
+    /// `plugin.capabilities`, `plugin.grant`…), their services'
+    /// (`metadata.read`, `device.*`) and the ones they contribute, each
+    /// run in its plugin. A contributed command whose id is taken is left
+    /// out, said in the log.
     pub fn set_plugins(&mut self, broker: Arc<helios_plugin::Broker>) {
         self.import.get_mut().accounts.plugins = Some(broker.clone());
         if self.has_command(helios_plugin::commands::CAPABILITIES) {
             return;
         }
-        for (spec, handler) in helios_plugin::commands::admin(&broker) {
+        for (spec, handler) in helios_plugin::commands::all(&broker) {
             if let Err(e) = self.register(spec, handler) {
                 log::warn!("plugin commands: {e}");
             }
