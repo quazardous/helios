@@ -104,6 +104,7 @@ mod settings_app;
 mod settings_plugins;
 mod settings_transfer;
 mod settings_window;
+mod shell_followers;
 mod shortcuts;
 mod shot;
 mod splash_snapshots;

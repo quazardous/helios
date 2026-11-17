@@ -5,7 +5,9 @@
 //! `vault.captures_set`), its stacks two (`vault.stack_changed`,
 //! `library.decision`), and the desktop says it once an import ended
 //! (`import.ended`'s `library.refill`) or a library step was undone or
-//! redone ([`Publisher::changed`]). [`crate::persist::Persist`] gathers
+//! redone ([`Publisher::changed`]); the node says an import through it
+//! ended (`library.imported`, its record in the import history).
+//! [`crate::persist::Persist`] gathers
 //! what one pass heard into one [`Change`] (its [`Kind`]s, and who said
 //! it) and passes it once through the hook point [`LibraryChanged`], its
 //! listeners in the order [`ORDER`] declares; once the Library read
@@ -49,6 +51,8 @@ pub const ALBUMS: &str = "library.albums";
 /// The stacks read again; after an import, the stacks it suggests to
 /// review (when the workspace asks for them).
 pub const STACKS: &str = "library.stacks";
+/// The Library's import sessions read again (its Imports section).
+pub const IMPORTS: &str = "library.imports";
 /// The photos an import brought selected, once the Library holds them
 /// (the same listener as `import.ended`'s, which names them).
 pub const SELECT: &str = crate::import_end::SELECT;
@@ -60,6 +64,7 @@ pub const ORDER: &[(&str, Option<&str>)] = &[
     (FILL, Some(VOLUMES)),
     (ALBUMS, Some(FILL)),
     (STACKS, Some(ALBUMS)),
+    (IMPORTS, Some(STACKS)),
 ];
 
 /// The listeners of [`LibraryFilled`], in order.
@@ -78,6 +83,8 @@ pub enum Kind {
     Captures,
     /// The stacks, or the suggestions waiting.
     Stacks,
+    /// An import recorded in the import history (any client's).
+    Imports,
 }
 
 impl Kind {
@@ -88,6 +95,7 @@ impl Kind {
             Kind::Locations => "locations",
             Kind::Captures => "captures",
             Kind::Stacks => "stacks",
+            Kind::Imports => "imports",
         }
     }
 
@@ -100,6 +108,7 @@ impl Kind {
             }
             helios_vault::capture::CAPTURES_SET => Some(Kind::Captures),
             "vault.stack_changed" | "library.decision" => Some(Kind::Stacks),
+            "library.imported" => Some(Kind::Imports),
             _ => None,
         }
     }
@@ -149,6 +158,7 @@ pub fn wants(id: &str, change: &Change) -> bool {
         VOLUMES | FILL => any(&[Kind::Contents, Kind::Locations, Kind::Captures]),
         ALBUMS => any(&[Kind::Contents]),
         STACKS => any(&[Kind::Stacks]) || change.by.contains(BY_IMPORT),
+        IMPORTS => any(&[Kind::Imports]),
         _ => false,
     }
 }
@@ -363,6 +373,9 @@ mod tests {
         let mut change = Change::default();
         change.add(Kind::Contents, BY_HISTORY);
         assert_eq!(pass_changed(&bus, change), [VOLUMES, FILL, ALBUMS]);
+        let mut change = Change::default();
+        change.add(Kind::Imports, BY_VAULT);
+        assert_eq!(pass_changed(&bus, change), [IMPORTS]);
     }
 
     /// Each listener does its own part inside the pass, in the declared
@@ -423,6 +436,7 @@ mod tests {
             Some(Kind::Captures)
         );
         assert_eq!(Kind::of_event("vault.stack_changed"), Some(Kind::Stacks));
+        assert_eq!(Kind::of_event("library.imported"), Some(Kind::Imports));
         assert_eq!(Kind::of_event("vault.field_changed"), None);
     }
 }

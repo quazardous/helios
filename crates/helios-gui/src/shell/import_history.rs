@@ -263,9 +263,15 @@ impl Shell {
     /// Where the import window and the history's commands read the
     /// library's import history.
     pub fn set_import_history(&mut self, reader: Reader) {
-        let mut w = self.import.get_mut();
-        w.history.reader = Some(reader);
-        w.history.read_at = None;
+        self.focus.imports.borrow_mut().sessions.reader = Some(reader.clone());
+        {
+            let mut w = self.import.get_mut();
+            w.history.reader = Some(reader);
+            w.history.read_at = None;
+        }
+        // The Library's import sessions, read once the library opens;
+        // then on events only (`shell::library_imports`).
+        self.read_import_sessions();
     }
 
     pub(super) fn history_reader(&self) -> Result<Reader, String> {

@@ -421,6 +421,12 @@ the reads through the node): they mark their place, and `Persist` (for
 `library.changed`) or the shell (for `library.filled`) does their part
 right after, in the order they ran.
 
+Since 2026-11-17 the node's `library.imported` (an import through it
+ended, its record in the import history; any client's) is a fifth kind,
+`imports`, and `library.imports` (the shell's) reads the Library's
+import sessions again on it. They were read every 10 seconds, a blocking
+node request on the interface's thread; now an idle pass reads nothing.
+
 ### Slice 2c: volumes coming and going
 
 The node's volume watch published `volume.mounted` / `volume.unmounted`

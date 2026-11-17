@@ -1221,6 +1221,13 @@ impl Shell {
         shell.listen_backup_points();
         // What follows the Library read again, once shown.
         shell.listen_library_filled();
+        // The Library's import sessions, read again once an import is
+        // recorded (`library.changed`).
+        if let Err(e) = shell.listen_import_sessions() {
+            shell
+                .notes
+                .push(format!("{}: {e}", crate::library_changed::CHANGED));
+        }
         // Files dropped on any window open the import window on them.
         shell.listen_files_dropped();
         // What follows a setting changed: the caches' budgets.
@@ -2457,23 +2464,6 @@ impl Shell {
                     .with("error", e),
                 ),
             }
-        }
-    }
-
-    /// Leaves a sub-workspace shown that is gone, with a toast. The list
-    /// is read again by `workspace.applied`'s `contexts.subworkspaces`
-    /// listener; the place shown changes on the stack.
-    fn follow_subworkspaces(&mut self) {
-        if let Some(id) =
-            crate::contexts::leave_gone(self.core.app.handle(), &self.focus.subworkspaces)
-        {
-            self.warn(
-                Message::new(
-                    "gui-subworkspace-gone",
-                    "The sub-workspace { $id } is gone: back to where it was entered from",
-                )
-                .with("id", id),
-            );
         }
     }
 
@@ -7120,8 +7110,6 @@ impl Shell {
         }
         self.set_context(&ctx);
         self.core.app.logic(&ctx);
-        // The workspace's sub-workspaces; one shown that is gone is left.
-        self.follow_subworkspaces();
         // New undo steps are made in the place the stack shows now, and
         // inside a sub-workspace only its nodes may be written.
         crate::contexts::follow_place(
@@ -7187,7 +7175,6 @@ impl Shell {
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.receive_imports();
-        self.follow_import_sessions();
         self.receive_exports();
         if asked > 0 {
             self.note(

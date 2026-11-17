@@ -306,3 +306,40 @@ fn the_import_windows_history_lists_an_import_as_it_ends() {
         vec![s.dir.join("roll")]
     );
 }
+
+/// The import sessions are read through the node only on events: once
+/// as the library opens, never on an idle pass (the reader is a
+/// blocking node request on the interface's thread), once per import
+/// recorded (`library.changed`'s `library.imports`, any client's import).
+#[test]
+fn the_sessions_are_read_on_events_never_on_an_idle_pass() {
+    use helios_gui::library_changed as lc;
+    use std::sync::atomic::AtomicUsize;
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut shell = Shell::new(helios_panels(), None);
+    let counted = reads.clone();
+    shell.set_import_history(Arc::new(move || {
+        counted.fetch_add(1, Ordering::Relaxed);
+        Ok(Vec::new())
+    }));
+    assert_eq!(
+        reads.load(Ordering::Relaxed),
+        1,
+        "read as the library opens"
+    );
+    let mut h = headless::harness(shell, egui::vec2(1280.0, 800.0));
+    h.run_steps(30);
+    assert_eq!(reads.load(Ordering::Relaxed), 1, "no read on an idle pass");
+    let bus = h.state().app().handle().bus();
+    let mut change = lc::Change::default();
+    change.add(lc::Kind::Imports, lc::BY_VAULT);
+    let ran = lc::pass_changed(&*bus, change);
+    assert_eq!(ran, [lc::IMPORTS]);
+    assert_eq!(reads.load(Ordering::Relaxed), 2, "once per import recorded");
+    // Another change of the library reads nothing.
+    let mut change = lc::Change::default();
+    change.add(lc::Kind::Contents, lc::BY_VAULT);
+    lc::pass_changed(&*bus, change);
+    h.run_steps(30);
+    assert_eq!(reads.load(Ordering::Relaxed), 2);
+}

@@ -238,3 +238,31 @@ fn a_sub_workspace_deleted_or_gone_is_left_with_a_toast() {
     assert!(toasted(&h, "mask"));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// An undo that takes away the sub-workspace shown leaves it in the
+/// pass that applies the undo (`workspace.applied`'s listener), not one
+/// pass later, with the scope on the place left to.
+#[test]
+fn a_sub_workspace_undone_while_shown_is_left_in_the_same_pass() {
+    let root = temp("undone");
+    let mut h = window(&root);
+    delegate(&mut h);
+    run(&mut h, "subworkspace.enter", json!({ "id": "mask" }));
+    assert_eq!(crumbs(&h), ["Helios", "Light & mask", "Mask"]);
+    // The nested one's delegation undone: it is gone.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    h.step();
+    assert_eq!(crumbs(&h), ["Helios", "Light & mask"], "left in one pass");
+    assert_eq!(
+        scope(&h).map(|s| s.name),
+        Some("Light & mask".to_string()),
+        "the scope follows the place left to"
+    );
+    assert!(toasted(&h, "mask"));
+    let _ = std::fs::remove_dir_all(&root);
+}
