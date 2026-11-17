@@ -25,6 +25,7 @@
 //!     --corpus <dir> --out <dir> --runs 3
 //! ```
 
+use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError};
@@ -117,7 +118,7 @@ fn main() {
             .inspect_err(|e| eprintln!("open_timing: no GPU: {e}"))
             .ok()
     };
-    let adapter = gpu.as_ref().map(|g| g.adapter.to_string());
+    let adapter = gpu.as_ref().map(|g| g.adapter.clone());
     let threads = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
     let (_listener, records) = helios_core::trace::collect();
     let jsonl = a.out.join("open-timing.jsonl");
@@ -196,9 +197,9 @@ fn open(
     let mut run = Run {
         ready,
         proxy,
-        fit,
         preview,
         histogram,
+        fit,
         ..Run::default()
     };
     // One slider, on the warm engine.
@@ -328,8 +329,9 @@ fn table(
         let ok = spread <= STABLE_SPREAD;
         stable &= ok;
         let m = |f: fn(&Run) -> f64| format!("{:.0}", median(rs, f));
-        body.push_str(&format!(
-            "| {name} | {mp:.1} | {} | {} | {} | {} | {} | {} | {} | {} | {} × {} | {} / {} | {:.0} %{} |\n",
+        let _ = writeln!(
+            body,
+            "| {name} | {mp:.1} | {} | {} | {} | {} | {} | {} | {} | {} | {} × {} | {} / {} | {:.0} %{} |",
             rs[0].algorithm,
             m(|r| r.decode),
             m(|r| r.graph),
@@ -344,13 +346,18 @@ fn table(
             m(|r| r.slider_preview),
             spread * 100.0,
             if ok { "" } else { " unstable" },
-        ));
+        );
     }
-    out.push_str(&format!(
-        "Open timing: median of {runs} runs per raw, ms from the open's start; {threads} threads; accelerator {}; runs {}.\n\n",
+    let _ = writeln!(
+        out,
+        "Open timing: median of {runs} runs per raw, ms from the open's start; {threads} threads; accelerator {}; runs {}.\n",
         adapter.unwrap_or("none"),
-        if stable { "stable (every raw within 15 %)" } else { "NOT stable (a raw spread past 15 %)" },
-    ));
+        if stable {
+            "stable (every raw within 15 %)"
+        } else {
+            "NOT stable (a raw spread past 15 %)"
+        },
+    );
     out.push_str(
         "| raw | MP | demosaic | decode | graph build | graph ready | proxy | preview | histogram | fit | demosaic calls × ms | slider fit / preview | spread |\n\
          |---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
