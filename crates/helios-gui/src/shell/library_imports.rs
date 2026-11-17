@@ -5,8 +5,12 @@
 //!
 //! - **Listed** in the Library's Imports section, newest first, read
 //!   through the node (`import.history.list`, the history reader the
-//!   import window uses), again every [`READ_EVERY`] and at once when an
-//!   import ends.
+//!   import window uses), when the library opens
+//!   ([`Shell::set_import_history`]) and again on events only: an import
+//!   of this desktop ends (`import.ended`'s `library.import-session`), or
+//!   any client's import is recorded (`library.changed`'s
+//!   `library.imports`, on the node's `library.imported`). An idle pass
+//!   reads nothing.
 //! - **Shown** by [`IMPORT_SESSION_COMMAND`] (`id`; `select`): the
 //!   Library scoped to the session's `import:` term, with the other
 //!   filters; the History entries of the import window offer it too
@@ -24,7 +28,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::PoisonError;
-use std::time::{Duration, Instant};
 
 use egui_pop::api::app::AppHandle;
 use egui_pop::api::toasts::Toast;
@@ -40,9 +43,6 @@ use crate::library::{IMPORT_SESSION_COMMAND, ImportSession, RUN_WORKSHOP_COMMAND
 /// The setting: after an import the user started, the Library shows its
 /// session with its photos selected (on by default).
 pub const SHOW_IMPORT_SETTING: &str = "import.show_in_library";
-
-/// How often the Library's import sessions are read again.
-const READ_EVERY: Duration = Duration::from_secs(10);
 
 /// The commands, with their titles (category Library).
 pub(super) const COMMANDS: &[(&str, &str)] = &[
@@ -63,8 +63,30 @@ pub(super) const RUN_WORKSHOP: (&str, &str) = (RUN_WORKSHOP_COMMAND, "Run Worksh
 /// What the shell keeps of the sessions.
 #[derive(Default)]
 pub(super) struct Sessions {
-    /// When the sessions were last read; none: at once.
-    read_at: Option<Instant>,
+    /// Where they are read (the library's import history), once a
+    /// library is open.
+    pub(super) reader: Option<super::import_history::Reader>,
+}
+
+/// Reads the sessions again through `imports`' reader, into the
+/// Library's Imports section; nothing without a library. A history that
+/// cannot be read lists nothing.
+fn read_sessions(
+    imports: &RefCell<super::import::Imports>,
+    library: &RefCell<crate::library::Library>,
+) {
+    let Some(reader) = imports.borrow().sessions.reader.clone() else {
+        return;
+    };
+    let sessions = reader().map(|r| sessions_of(&r)).unwrap_or_default();
+    match library.try_borrow_mut() {
+        Ok(mut library) => library.set_imports(sessions),
+        Err(_) => log::warn!(
+            target: "helios",
+            "{}: the Library is busy, its import sessions not read again",
+            crate::library_changed::IMPORTS
+        ),
+    }
 }
 
 /// The sessions of the history's records, newest first: those that
@@ -144,27 +166,22 @@ impl Shell {
         shows_imports_in_library(self.core.app.handle())
     }
 
-    /// Each frame: the Library's import sessions read again when they are
-    /// older than [`READ_EVERY`] (or an import ended).
-    pub(super) fn follow_import_sessions(&mut self) {
-        if self
-            .focus
-            .imports
-            .borrow()
-            .sessions
-            .read_at
-            .is_some_and(|at| at.elapsed() < READ_EVERY)
-        {
-            return;
-        }
-        // Nothing to read without a library.
-        let Ok(reader) = self.history_reader() else {
-            return;
-        };
-        self.focus.imports.borrow_mut().sessions.read_at = Some(Instant::now());
-        // A history that cannot be read lists nothing.
-        let sessions = reader().map(|r| sessions_of(&r)).unwrap_or_default();
-        self.focus.library.borrow_mut().set_imports(sessions);
+    /// The Library's import sessions read now (the library opened).
+    pub(super) fn read_import_sessions(&self) {
+        read_sessions(&self.focus.imports, &self.focus.library);
+    }
+
+    /// `library.imports`, the shell's listener of `library.changed`: an
+    /// import recorded in the history (any client's, the node's
+    /// `library.imported`), the sessions are read again, in the pass
+    /// that says it.
+    pub(super) fn listen_import_sessions(&self) -> Result<(), String> {
+        let (imports, library) = (self.focus.imports.clone(), self.focus.library.clone());
+        crate::library_changed::listen_changed(
+            &*self.core.app.handle().bus(),
+            crate::library_changed::IMPORTS,
+            move |_| read_sessions(&imports, &library),
+        )
     }
 
     /// `library.import-session`, the shell's listener of the import's
@@ -250,9 +267,10 @@ impl SessionEnded {
     /// Library, or offered while the user edits a photo. Whether its
     /// photos are to be selected.
     fn heard(&self, request: &Value, line: &Value) -> bool {
+        // Its session listed at once.
+        read_sessions(&self.imports, &self.library);
         let started_here = {
             let mut imports = self.imports.borrow_mut();
-            imports.sessions.read_at = None;
             let started = &mut imports.started;
             match started.iter().position(|r| r == request) {
                 Some(at) => {

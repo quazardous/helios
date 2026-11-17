@@ -559,6 +559,8 @@ impl Shell {
             workspace_applied::APPLIED,
             json!({ "changed": changed.names(), "ran": reactions.ran }),
         );
+        // What its listeners said (a sub-workspace shown that is gone).
+        self.absorb_said();
         for e in reactions.failed {
             self.warn(e);
         }
@@ -577,7 +579,11 @@ impl Shell {
             workspace_applied::KEYS,
             move |_, _| *keys.borrow_mut() = layer_keys(&app),
         )];
-        let list = self.focus.subworkspaces.clone();
+        let (app, list, teller) = (
+            self.core.app.handle().clone(),
+            self.focus.subworkspaces.clone(),
+            self.teller(),
+        );
         listened.push(workspace_applied::listen_local(
             &*bus,
             workspace_applied::SUBWORKSPACES,
@@ -586,6 +592,18 @@ impl Shell {
                     serde_json::from_value(w.json["template"]["subworkspaces"].clone())
                         .unwrap_or_default(),
                 ));
+                // One shown that is gone is left in the same pass, before
+                // the scope follows the place (a toast says it).
+                if let Some(id) = crate::contexts::leave_gone(&app, &list) {
+                    teller.notify(
+                        crate::dialogs::Level::Warning,
+                        helios_core::Message::new(
+                            "gui-subworkspace-gone",
+                            "The sub-workspace { $id } is gone: back to where it was entered from",
+                        )
+                        .with("id", id),
+                    );
+                }
             },
         ));
         let (app, values, list) = (
