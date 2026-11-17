@@ -3,7 +3,8 @@
 //! Opening another image, or closing the one open, passes once through a
 //! request point ([`ImageOpen`], `image.open`; [`ImageClose`],
 //! `image.close`), its listeners in the order [`ORDER`] declares: the edit
-//! of the image open saved first (`edit.save`: a save that fails refuses
+//! of the image open saved first (`edit.save`: the snapshots pending at
+//! the step it saves pinned and kept with it; a save that fails refuses
 //! the request with its reason, and the image stays open), then the edit's
 //! history leaves the image (`history.scope`: the image's steps of the
 //! value store and the snapshot book cleared, so the next image's undo
@@ -53,8 +54,9 @@ pub const REFUSED: &str = "image.refused";
 /// The owner of the desktop's listeners of both points.
 pub const BUS_OWNER: &str = "helios.darkroom";
 
-/// The edit of the image open saved, its write answered: a refused write
-/// refuses the request.
+/// The edit of the image open saved, its write answered, and the
+/// snapshots pending at its step kept: a refused write refuses the
+/// request.
 pub const SAVE: &str = "edit.save";
 /// The edit's history (the image's steps of the value store, the snapshot
 /// book) leaves the image; the workspace's steps stay.
