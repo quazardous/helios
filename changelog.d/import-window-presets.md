@@ -1,3 +1,3 @@
 kind: changed
 
-The import window is drawn through the interface kit: the column titles in the title role, the hints and the profile's summary muted, the rules between parts the kit's divider, the profile and file-type lists the kit's drop-downs with its rows, "New only" the kit's check box, the selection's "all", "none" and "day" the kit's row buttons, Import the window's primary action (in the accent) with the reason it is greyed in the kit's tooltip, Cancel and Storage the kit's buttons, a missing library or backup in the warning tone, the reading path in the status bar muted beside the kit's spinner; a source's menu items are the kit's buttons and radio buttons.
+The import window is drawn through the interface kit: its column titles, hints, dividers, drop-downs, check box, buttons and tooltips, Import as the window's primary action in the accent, a missing library or backup in the warning tone. A source's menu items are the kit's buttons and radio buttons.
