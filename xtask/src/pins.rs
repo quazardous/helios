@@ -43,11 +43,16 @@ struct Repo {
     owns: fn(&str) -> bool,
 }
 
+/// Crates named `egui-pop-*` that do not live in the egui-pop repository.
+const NOT_IN_EGUI_POP: &[&str] = &["egui-pop-phosphor"];
+
 const REPOS: &[Repo] = &[
     Repo {
         name: "egui-pop",
         workflow: "ci.yml",
-        owns: |n| n == "egui-pop" || n.starts_with("egui-pop-"),
+        // egui-pop-phosphor (the icon font) is published from its own
+        // repository: a patch to the egui-pop repo cannot hold it.
+        owns: |n| n == "egui-pop" || (n.starts_with("egui-pop-") && !NOT_IN_EGUI_POP.contains(&n)),
     },
     Repo {
         name: "egui_hud",
@@ -584,6 +589,14 @@ pub fn run_pins(root: &Path, args: &[&str]) -> Option<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_icon_font_is_not_patched_to_the_egui_pop_repository() {
+        let pop = REPOS.iter().find(|r| r.name == "egui-pop").unwrap();
+        assert!((pop.owns)("egui-pop"));
+        assert!((pop.owns)("egui-pop-core"));
+        assert!(!(pop.owns)("egui-pop-phosphor"));
+    }
 
     const MANIFEST: &str = "[workspace]\nmembers = []\n\n[patch.crates-io]\n\
         egui-pop = { git = \"https://github.com/quazardous/egui-pop\", rev = \"d76e8d22\" }\n\
