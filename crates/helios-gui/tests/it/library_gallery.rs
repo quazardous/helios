@@ -364,9 +364,16 @@ fn library_as(mode: ResultsMode) -> Rc<RefCell<Library>> {
     lib
 }
 
-/// The rect of the node named `label`.
+/// The rect of the node named `label`: a row's (its button), when its
+/// text is a node of its own too.
 fn rect_of(h: &Harness, label: &str) -> egui::Rect {
-    h.get_by_label(label).rect()
+    let nodes: Vec<_> = h.query_all_by_label(label).collect();
+    nodes
+        .iter()
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+        .or(nodes.first())
+        .unwrap_or_else(|| panic!("no node named {label}"))
+        .rect()
 }
 
 #[test]
@@ -399,7 +406,10 @@ fn details_show_the_columns_and_sort_as_the_gallery() {
     });
     let mut h = helios_gui::headless::harness(shell, egui::vec2(1600.0, 1000.0));
     h.run_steps(4);
-    h.get_by_label("Rating").click();
+    h.query_all_by_label("Rating")
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+        .expect("the Rating header")
+        .click();
     h.run_steps(4);
     assert_eq!(
         h.state().library().sort(),
@@ -449,7 +459,10 @@ fn list_and_details_open_a_photo_on_enter_and_double_click() {
     for mode in [ResultsMode::List, ResultsMode::Details] {
         let lib = library_as(mode);
         let mut h = harness(&lib, GalleryOptions::RESULTS_PANEL);
-        h.get_by_label("b.jpg").click();
+        h.query_all_by_label("b.jpg")
+            .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+            .expect("b.jpg's row")
+            .click();
         h.run();
         h.key_press(egui::Key::Enter);
         h.run();
