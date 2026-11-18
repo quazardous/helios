@@ -1399,7 +1399,7 @@ gui-library-albums-none = No album yet
 
 gui-library-all-photos = All photos
 
-gui-library-auto-advance = Auto-advance
+gui-library-auto-advance-tip = Auto-advance: after a rating, flag or reject from the keyboard, go to the next photo
 
 gui-library-badge-backed-up = backed up
 
@@ -1750,6 +1750,22 @@ gui-library-version-copy = Copy
 gui-library-version-not-changed = The photo's versions were not changed: { $error }
 
 gui-library-versions-strip = Versions
+
+gui-library-view = View as
+
+gui-library-view-custom = Thumbnails, { $size } points
+
+gui-library-view-huge = Extra large thumbnails
+
+gui-library-view-large = Large thumbnails
+
+gui-library-view-list = List
+
+gui-library-view-medium = Medium thumbnails
+
+gui-library-view-small = Small thumbnails
+
+gui-library-view-tip = Show the results as thumbnails of a size, or as a list
 
 gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 

@@ -163,9 +163,16 @@ pub struct LibraryDesc {
     /// The library opens filtered on these images (the picks only, say).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryDesc>,
-    /// Culling moves to the next image after each mark.
+    /// Culling moves to the next image after each mark: the main
+    /// window's Library view's, and every other view's that sets none
+    /// (a workspace written before each view had its own).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_advance: bool,
+    /// How the main window's Library view shows its results (thumbnails
+    /// or a list, their size); thumbnails at the default size when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<ResultsDesc>,
     /// The workspace opens in Compare: two or more photos side by side,
     /// the selection's until photos are chosen.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -208,6 +215,61 @@ pub struct ViewDesc {
     /// The album the view is scoped to (its id in the vault).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
+    /// Culling moves to the next image after each mark in this view;
+    /// the library's `auto_advance` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_advance: Option<bool>,
+    /// How the view shows its results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<ResultsDesc>,
+}
+
+/// How a Library view shows its results, as a file browser's dialog
+/// offers: thumbnails at a size, or a list.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultsDesc {
+    /// `thumbnails` (the default) or `list`.
+    #[serde(default, skip_serializing_if = "ResultsMode::is_thumbnails")]
+    pub mode: ResultsMode,
+    /// The thumbnails' size, in points (48 to 512); the default size
+    /// when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u16>,
+}
+
+/// How a Library view lays its results out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultsMode {
+    /// A grid of thumbnails.
+    #[default]
+    Thumbnails,
+    /// One row per photo: its name and marks.
+    List,
+}
+
+impl ResultsMode {
+    /// Every mode, in the order a menu offers them.
+    pub const ALL: [ResultsMode; 2] = [ResultsMode::Thumbnails, ResultsMode::List];
+
+    /// Its name in a workspace and in commands.
+    pub fn name(self) -> &'static str {
+        match self {
+            ResultsMode::Thumbnails => "thumbnails",
+            ResultsMode::List => "list",
+        }
+    }
+
+    /// The mode named `name` ([`ResultsMode::name`]).
+    pub fn parse(name: &str) -> Option<ResultsMode> {
+        Self::ALL.into_iter().find(|m| m.name() == name)
+    }
+
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if takes a reference
+    fn is_thumbnails(&self) -> bool {
+        *self == ResultsMode::Thumbnails
+    }
 }
 
 impl ViewDesc {

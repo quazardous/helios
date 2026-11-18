@@ -13,6 +13,9 @@ panel-helios-duplicates =
 panel-helios-filmstrip =
     .title = Filmstrip
 
+panel-helios-filters =
+    .title = Filters
+
 panel-helios-graph =
     .title = Graph
 

@@ -1513,7 +1513,7 @@ xmp-reason-unsupported-part = pas encore pris en charge : { $part }
 
 xmp-reason-unsupported-version = version non prise en charge (lit { $known })
 
-gui-library-auto-advance = Avance automatique
+gui-library-auto-advance-tip = Avance automatique : après une note, un drapeau ou un rejet au clavier, passer à la photo suivante
 
 gui-library-compare-hint = Sélectionnez de deux à quatre images pour les comparer
 
@@ -2983,3 +2983,19 @@ ui-empty-nothing-queued-text = Les retouches qui attendent d’être rendues s�
 ui-empty-no-source = Pas encore de source
 ui-empty-no-source-text = Ajoutez un dossier, une carte ou un compte d’où importer.
 ui-empty-no-source-action = Ajouter une source…
+
+gui-library-view = Afficher en
+
+gui-library-view-custom = Vignettes, { $size } points
+
+gui-library-view-huge = Très grandes vignettes
+
+gui-library-view-large = Grandes vignettes
+
+gui-library-view-list = Liste
+
+gui-library-view-medium = Vignettes moyennes
+
+gui-library-view-small = Petites vignettes
+
+gui-library-view-tip = Afficher les résultats en vignettes d'une taille, ou en liste
