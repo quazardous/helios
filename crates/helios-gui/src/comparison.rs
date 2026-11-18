@@ -25,6 +25,25 @@ pub const COMMAND: &str = "library.compare";
 /// (a toggle) and the Compare panel closed do.
 pub const LEAVE_COMMAND: &str = "compare.leave";
 
+/// Adds photos to the open comparison (`images`, else the gallery's
+/// selection), after those compared; at most [`MAX_PANES`] in all.
+pub const ADD_COMMAND: &str = "compare.add";
+
+/// Takes photos out of the comparison (`images`, else the active one);
+/// the last one out leaves Compare.
+pub const REMOVE_COMMAND: &str = "compare.remove";
+
+/// Compares exactly these photos (`images`, one to [`MAX_PANES`]),
+/// entering Compare when it is not shown; never a toggle.
+pub const SET_COMMAND: &str = "compare.set";
+
+/// Empties the comparison and leaves Compare.
+pub const CLEAR_COMMAND: &str = "compare.clear";
+
+/// The comparison's photos, the active one, the best and the sync;
+/// with `image`, makes that compared photo active first.
+pub const ACTIVE_COMMAND: &str = "compare.active";
+
 /// The comparison of one focus. It never writes a gallery's selection
 /// or cursor: its active photo is its own.
 #[derive(Clone, Debug)]
@@ -77,6 +96,40 @@ impl Comparison {
         self.active = 0;
         self.best = self.best.take().filter(|b| self.photos.contains(b));
         self.view.reset();
+        self.seen = None;
+    }
+
+    /// The list once `ids` are added after the photos compared, without
+    /// the ones already there, at most [`MAX_PANES`]: `(list, added)`.
+    pub fn with_added(&self, ids: &[String]) -> (Vec<String>, Vec<String>) {
+        let mut list = self.photos.clone();
+        let mut added = Vec::new();
+        for id in ids {
+            if list.len() >= MAX_PANES {
+                break;
+            }
+            if !list.contains(id) {
+                list.push(id.clone());
+                added.push(id.clone());
+            }
+        }
+        (list, added)
+    }
+
+    /// Edits the list in place (photos added or taken out): the active
+    /// photo stays active while it is compared (else the one taking its
+    /// place), the best stays while compared, the zoom and pan are kept.
+    /// The list is trusted: [`Comparison::with_added`] or a removal made
+    /// it.
+    pub fn edit(&mut self, photos: Vec<String>) {
+        let active = self.photos.get(self.active).cloned();
+        let at = self.active;
+        self.photos = photos;
+        self.photos.truncate(MAX_PANES);
+        self.active = active
+            .and_then(|a| self.photos.iter().position(|p| *p == a))
+            .unwrap_or_else(|| at.min(self.photos.len().saturating_sub(1)));
+        self.best = self.best.take().filter(|b| self.photos.contains(b));
         self.seen = None;
     }
 
@@ -182,5 +235,30 @@ mod tests {
         c.set_photos(ids(&["d", "e", "f", "g", "h"]));
         assert_eq!(c.photos().len(), MAX_PANES);
         assert_eq!(c.best(), None);
+    }
+
+    #[test]
+    fn photos_added_and_taken_out_keep_the_active_one_and_the_best() {
+        let mut c = Comparison::default();
+        c.set_photos(ids(&["a", "b"]));
+        c.set_active(1);
+        c.set_best(Some("a".into()));
+        let (list, added) = c.with_added(&ids(&["b", "c", "d", "e"]));
+        assert_eq!(list, ids(&["a", "b", "c", "d"]), "four at most");
+        assert_eq!(added, ids(&["c", "d"]), "b was already compared");
+        c.edit(list);
+        let shown = c.shown(&[]);
+        assert_eq!(c.active(&shown).map(String::as_str), Some("b"));
+        // The active photo taken out: the next one takes its place.
+        c.edit(ids(&["a", "c", "d"]));
+        let shown = c.shown(&[]);
+        assert_eq!(c.active(&shown).map(String::as_str), Some("c"));
+        assert_eq!(c.best(), Some("a"));
+        // The best taken out, down to one photo: still a list.
+        c.edit(ids(&["d"]));
+        assert_eq!(
+            (c.photos(), c.best(), c.active_index(1)),
+            (&ids(&["d"])[..], None, 0)
+        );
     }
 }

@@ -1516,6 +1516,8 @@ xmp-reason-unsupported-version = version non prise en charge (lit { $known })
 gui-library-auto-advance-tip = Avance automatique : après une note, un drapeau ou un rejet au clavier, passer à la photo suivante
 
 gui-library-compare-hint = Sélectionnez de deux à quatre images pour les comparer
+gui-library-compare-one = Ajoutez une photo pour la comparer à celle-ci (Ajouter à la comparaison)
+gui-library-compare-add = Ajouter à la comparaison
 
 gui-library-compare-leave = Retour à la grille
 
@@ -2715,6 +2717,7 @@ gui-backup-wizard-finish = Utiliser cette stratégie
 gui-backup-wizard-open = Configurer les sauvegardes…
 
 gui-compare-first = Comparer montre { $count } photos au plus : les { $count } premières sont comparées
+gui-compare-full = Comparer montre { $count } photos au plus : les autres n’ont pas été ajoutées
 
 gui-compare-rating = Note de la photo active
 

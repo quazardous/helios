@@ -4890,121 +4890,8 @@ impl Library {
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell
-        // takes the click, the grid only its focus): what acts on the
-        // images, the selection else what the library shows.
-        let area = out.response.rect;
-        if ui.rect_contains_pointer(area) && ui.input(|i| i.pointer.secondary_clicked()) {
-            let at = ui
-                .input(|i| i.pointer.interact_pos())
-                .unwrap_or(area.center());
-            crate::dialogs::request(
-                ui.ctx(),
-                crate::dialogs::Request::Menu {
-                    at,
-                    items: vec![
-                        crate::dialogs::MenuItem::command("library.export"),
-                        crate::dialogs::MenuItem::command("library.copyFiles"),
-                        crate::dialogs::MenuItem::command("library.fitCameraLook"),
-                        crate::dialogs::MenuItem::command(RUN_WORKSHOP_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-run-workshop", "Run Workshop…"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::Separator,
-                        crate::dialogs::MenuItem::command(ROTATE_LEFT_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-rotate-left", "Rotate Left"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(ROTATE_RIGHT_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-rotate-right", "Rotate Right"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(RESET_ROTATION_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-rotate-reset", "Reset Rotation"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::Separator,
-                        crate::dialogs::MenuItem::command(DUPLICATE_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-duplicate", "Duplicate"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(DUPLICATE_ORIGINAL_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new(
-                                    "gui-library-duplicate-original",
-                                    "Duplicate Original",
-                                ),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(REMOVE_VERSION_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-remove-version", "Remove Version…"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::Separator,
-                        crate::dialogs::MenuItem::command(GROUP_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-stack-group", "Group into Stack"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(UNGROUP_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-stack-ungroup", "Unstack"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(STACK_TOP_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-stack-top", "Move to Top of Stack"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::Separator,
-                        crate::dialogs::MenuItem::command(PAIR_COMMAND).labeled(crate::i18n::text(
-                            ui.ctx(),
-                            Message::new("gui-library-pair-files", "Pair RAW+JPEG Files"),
-                        )),
-                        crate::dialogs::MenuItem::command(UNPAIR_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-unpair-files", "Unpair Files"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::Separator,
-                        crate::dialogs::MenuItem::command(REMOVE_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-remove", "Remove from Library"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(TRASH_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-trash", "Move to Trash…"),
-                            ),
-                        ),
-                        crate::dialogs::MenuItem::command(DELETE_REJECTED_COMMAND).labeled(
-                            crate::i18n::text(
-                                ui.ctx(),
-                                Message::new("gui-library-delete-rejected", "Delete Rejected…"),
-                            ),
-                        ),
-                    ],
-                },
-            );
-        }
+        // takes the click, the grid only its focus).
+        self.photo_menu(ui, out.response.rect);
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
     }
@@ -5153,6 +5040,107 @@ impl Library {
         (out.response, signals)
     }
 
+    /// The photo views' context menu (the Results grid, the filmstrip),
+    /// on a secondary click anywhere over `area` (a cell takes the click,
+    /// the view only its focus): what acts on the images, the selection
+    /// else what the library shows. In Compare, "Add to comparison"
+    /// first: the selected photos join the photos compared.
+    fn photo_menu(&self, ui: &Ui, area: egui::Rect) {
+        use crate::dialogs::MenuItem;
+        if !(ui.rect_contains_pointer(area) && ui.input(|i| i.pointer.secondary_clicked())) {
+            return;
+        }
+        let ctx = ui.ctx();
+        let at = ui
+            .input(|i| i.pointer.interact_pos())
+            .unwrap_or(area.center());
+        let mut items = Vec::new();
+        if self.comparing() {
+            items.push(
+                MenuItem::command(crate::comparison::ADD_COMMAND)
+                    .labeled(crate::i18n::text(
+                        ctx,
+                        Message::new("gui-library-compare-add", "Add to comparison"),
+                    ))
+                    .enabled(!self.view.state.selection().is_empty()),
+            );
+            items.push(MenuItem::Separator);
+        }
+        items.extend(vec![
+            crate::dialogs::MenuItem::command("library.export"),
+            crate::dialogs::MenuItem::command("library.copyFiles"),
+            crate::dialogs::MenuItem::command("library.fitCameraLook"),
+            crate::dialogs::MenuItem::command(RUN_WORKSHOP_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-run-workshop", "Run Workshop…"),
+            )),
+            crate::dialogs::MenuItem::Separator,
+            crate::dialogs::MenuItem::command(ROTATE_LEFT_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-rotate-left", "Rotate Left"),
+            )),
+            crate::dialogs::MenuItem::command(ROTATE_RIGHT_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-rotate-right", "Rotate Right"),
+            )),
+            crate::dialogs::MenuItem::command(RESET_ROTATION_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-rotate-reset", "Reset Rotation"),
+            )),
+            crate::dialogs::MenuItem::Separator,
+            crate::dialogs::MenuItem::command(DUPLICATE_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-duplicate", "Duplicate"),
+            )),
+            crate::dialogs::MenuItem::command(DUPLICATE_ORIGINAL_COMMAND).labeled(
+                crate::i18n::text(
+                    ctx,
+                    Message::new("gui-library-duplicate-original", "Duplicate Original"),
+                ),
+            ),
+            crate::dialogs::MenuItem::command(REMOVE_VERSION_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-remove-version", "Remove Version…"),
+            )),
+            crate::dialogs::MenuItem::Separator,
+            crate::dialogs::MenuItem::command(GROUP_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-stack-group", "Group into Stack"),
+            )),
+            crate::dialogs::MenuItem::command(UNGROUP_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-stack-ungroup", "Unstack"),
+            )),
+            crate::dialogs::MenuItem::command(STACK_TOP_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-stack-top", "Move to Top of Stack"),
+            )),
+            crate::dialogs::MenuItem::Separator,
+            crate::dialogs::MenuItem::command(PAIR_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-pair-files", "Pair RAW+JPEG Files"),
+            )),
+            crate::dialogs::MenuItem::command(UNPAIR_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-unpair-files", "Unpair Files"),
+            )),
+            crate::dialogs::MenuItem::Separator,
+            crate::dialogs::MenuItem::command(REMOVE_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-remove", "Remove from Library"),
+            )),
+            crate::dialogs::MenuItem::command(TRASH_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-trash", "Move to Trash…"),
+            )),
+            crate::dialogs::MenuItem::command(DELETE_REJECTED_COMMAND).labeled(crate::i18n::text(
+                ctx,
+                Message::new("gui-library-delete-rejected", "Delete Rejected…"),
+            )),
+        ]);
+        crate::dialogs::request(ctx, crate::dialogs::Request::Menu { at, items });
+    }
+
     /// The Filmstrip panel: one row, the grid's selection.
     pub fn filmstrip(&mut self, ui: &mut Ui) {
         self.receive(ui.ctx());
@@ -5199,6 +5187,7 @@ impl Library {
         carry_out(ui.ctx(), &out.signals);
         crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
         self.presence_hover(ui, "strip");
+        self.photo_menu(ui, out.response.rect);
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
     }
@@ -5227,13 +5216,20 @@ impl Library {
             if comparing {
                 back_to_grid_action(ui);
             }
-            ui.muted(crate::i18n::text(
-                ui.ctx(),
+            // One photo left in the comparison: the list is kept, the
+            // next one added is compared with it.
+            let hint = if cmp.photos().len() == 1 {
+                Message::new(
+                    "gui-library-compare-one",
+                    "Add a photo to compare it with this one (Add to comparison)",
+                )
+            } else {
                 Message::new(
                     "gui-library-compare-hint",
                     "Select two to four images to compare them",
-                ),
-            ));
+                )
+            };
+            ui.muted(crate::i18n::text(ui.ctx(), hint));
             return;
         }
         let chosen = !cmp.photos().is_empty();

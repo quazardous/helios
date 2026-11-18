@@ -1036,13 +1036,14 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library | `C` | compare the selected photos (`library.compare`); in Compare, leave it |
 | Compare | `Escape` | leave Compare, back to the grid (`compare.leave`); not while a pushed mode, an overlay, a field, zen mode, a tip or a mask path being drawn wants Escape |
 | library | `Ctrl+Shift+A`, `Ctrl+I` | select none, invert the selection (`library.select.none`, `library.select.invert`, darktable); not while a text field is typed in |
-| library | `Delete` | remove the selected photos from the Library, their files untouched (`library.remove`, Lightroom, darktable); Ctrl+Z puts them back; not while a text field is typed in |
+| library | `Delete` | remove the selected photos from the Library, their files untouched (`library.remove`, Lightroom, darktable); Ctrl+Z puts them back; not while a text field is typed in, nor on the Compare panel |
 | library | `Ctrl+Alt+Shift+Delete` | Move to Trash…: the selected photos' files to the system trash, asked first (`library.trash`, Lightroom's "Remove and Delete from Disk"); not while a text field is typed in |
 | library | `Ctrl+Backspace` | Delete Rejected…: the rejected photos shown to the system trash, asked first (`library.deleteRejected`, Lightroom's "Delete Rejected Photos"); not while a text field is typed in |
 | library | `Ctrl+[`, `Ctrl+]` | Rotate Left, Rotate Right: the selected photos a quarter counter-clockwise or clockwise (`library.rotateLeft`, `library.rotateRight`, Lightroom, darktable); Ctrl+Z turns them back; not while a text field is typed in |
 | library | `Ctrl+'` | Duplicate: a new version of each selected photo from its current edit, beside the others (`library.duplicate`, Lightroom's "Create Virtual Copy"); the grid's badge counts the versions; not while a text field is typed in |
 | library | `Ctrl+Shift+K` | the recent and pinned filters and the smart albums, to apply one (`library.filter.switch`; darktable's Ctrl+K, which starts chords here); not while a text field is typed in |
 | Compare place | `Right`, `Left` | the next, previous photo active (`compare.next`, `compare.previous`) |
+| Compare place | `Delete` | on the Compare panel, the active photo out of the comparison (`compare.remove`); nothing leaves the Library |
 | culling | `Space`, `Backspace` | next, previous image (in the grid `Space` selects) |
 | image | `C`, `E`, `G`, `P`, `M` | circle, ellipse, gradient, path masks; the mask display |
 | image | `Enter`, `Escape`, `Delete` | close, stop the path; remove a point |

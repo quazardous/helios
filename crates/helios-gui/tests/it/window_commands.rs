@@ -204,3 +204,24 @@ fn a_dry_run_of_a_command_that_takes_none_is_refused_and_changes_nothing() {
         assert!(!e.message.contains("takes no `dry_run`"), "{e:?}");
     }
 }
+
+/// An agent sees the comparison's list commands and reads the list.
+#[test]
+fn the_comparison_list_commands_are_listed_and_answer_an_agent() {
+    let mut d = desktop();
+    let commands = d.list(json!({ "filter": "compare" }));
+    for id in [
+        "compare.add",
+        "compare.remove",
+        "compare.set",
+        "compare.clear",
+        "compare.active",
+    ] {
+        let c = find(&commands, id);
+        assert_eq!(c["scope"], "window", "{c}");
+    }
+    let read = d
+        .call("command.run", json!({ "id": "compare.active" }))
+        .unwrap();
+    assert_eq!(read["origin"], "agent:test", "{read}");
+}

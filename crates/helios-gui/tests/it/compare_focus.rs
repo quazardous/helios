@@ -486,3 +486,157 @@ fn compare_leaves_the_galleries_cursor_and_selection_alone() {
         "after culling in Compare and leaving it"
     );
 }
+
+/// Six photos, the filmstrip browsed to d with its keys: a gallery with
+/// a cursor of its own.
+fn six_browsed_to_d(name: &str) -> Harness<'static, Shell> {
+    const SIX: [&str; 6] = ["a", "b", "c", "d", "e", "f"];
+    let dir = temp(name);
+    let mut shell = Shell::builder(helios_panels(), Some(dir.join("ui")))
+        .workspace(&dir.join("photos"))
+        .build();
+    shell.load_layout().unwrap();
+    shell.set_library(
+        SIX.iter()
+            .enumerate()
+            .map(|(n, id)| Entry {
+                id: (*id).into(),
+                name: format!("IMG_000{}.jpg", n + 1),
+                ..Entry::default()
+            })
+            .collect(),
+    );
+    let mut h = headless::harness_at(shell, vec2(1280.0, 800.0), 1.0);
+    h.run();
+    run(&mut h, "helios.filmstrip.focus", json!(null));
+    h.run();
+    for _ in 0..4 {
+        h.key_press(Key::ArrowRight);
+        h.run();
+    }
+    assert_eq!(gallery(&h).1.as_deref(), Some("d"), "browsed to d");
+    h
+}
+
+/// A command's answer, run as the user: the shell queues it for its
+/// frame, then its history has the result.
+fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Result<Value, String> {
+    let out = h.state_mut().run(id, args, Origin::User);
+    h.run();
+    match out {
+        Ok(v) if v == json!({ "queued": true }) => {
+            h.state()
+                .history()
+                .into_iter()
+                .rev()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} never ran"))
+                .result
+        }
+        other => other,
+    }
+}
+
+/// The answer of a command that must succeed.
+fn ok(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Value {
+    answer(h, id, args).unwrap_or_else(|e| panic!("{id}: {e}"))
+}
+
+fn compared(h: &Harness<'_, Shell>) -> Vec<String> {
+    h.state().comparison().photos().to_vec()
+}
+
+/// The comparison is a list of its own: photos go in (`compare.add`,
+/// the filmstrip's "Add to comparison") and out (`compare.remove`,
+/// Delete on the Compare panel), it is replaced (`compare.set`) and
+/// emptied (`compare.clear`), its active photo read and chosen
+/// (`compare.active`); the gallery's selection and cursor never move,
+/// and the workspace's place names the photos compared.
+#[test]
+fn the_comparison_is_a_list_edited_by_command_menu_and_delete() {
+    let mut h = six_browsed_to_d("list");
+    let browsing = gallery(&h);
+    // Nothing to add to before a comparison is open.
+    let refused = answer(&mut h, "compare.add", json!({ "images": ["a"] }));
+    assert!(refused.is_err(), "{refused:?}");
+    run(&mut h, "library.compare", json!({ "images": ["a", "b"] }));
+    h.run();
+    h.run();
+    // Added by command, after those compared; one already there is not
+    // added twice. The active photo stays the first.
+    let added = ok(&mut h, "compare.add", json!({ "images": ["c", "a"] }));
+    h.run();
+    assert_eq!(added["added"], json!(["c"]));
+    assert_eq!(compared(&h), ["a", "b", "c"]);
+    assert_eq!(gallery(&h), browsing, "after compare.add");
+    // The Compare place names them: the workspace keeps the list.
+    assert_eq!(place(&h), "helios.comparison");
+    assert_eq!(
+        helios_gui::contexts::compared(h.state().app().handle()),
+        Some(compared(&h))
+    );
+    // The active photo chosen by an agent, then read.
+    ok(&mut h, "compare.active", json!({ "image": "b" }));
+    let active = ok(&mut h, "compare.active", json!({}));
+    assert_eq!(active["active"], "b");
+    assert_eq!(active["images"], json!(["a", "b", "c"]));
+    // From the filmstrip's context menu, on the gallery's selection.
+    h.state().library_mut().select_ids(&["e".to_string()]);
+    h.run();
+    let selected = gallery(&h);
+    h.query_all_by(|n| {
+        n.role() == Role::Button && n.label().is_some_and(|l| l.contains("IMG_0005.jpg"))
+    })
+    .next()
+    .expect("e's cell in the filmstrip")
+    .click_secondary();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label("Add to comparison").click();
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(compared(&h), ["a", "b", "c", "e"]);
+    assert_eq!(gallery(&h), selected, "after Add to comparison");
+    // The active photo b kept through the edits; Delete on the Compare
+    // panel takes it out, the next one active.
+    run(&mut h, "helios.compare.focus", json!(null));
+    h.run();
+    h.key_press(Key::Delete);
+    h.run();
+    h.run();
+    assert_eq!(compared(&h), ["a", "c", "e"]);
+    assert_eq!(
+        h.state().library().entries.len(),
+        6,
+        "Delete in Compare removes nothing from the Library"
+    );
+    assert_eq!(
+        ok(&mut h, "compare.active", json!({}))["active"],
+        "c",
+        "the next photo takes the active one's place"
+    );
+    // Taken out by command; the list may come down to one photo.
+    let removed = ok(&mut h, "compare.remove", json!({ "images": ["a", "e"] }));
+    h.run();
+    assert_eq!(removed["removed"], json!(["a", "e"]));
+    assert_eq!(compared(&h), ["c"]);
+    assert_eq!(place(&h), "helios.comparison", "still in Compare");
+    // Replaced, then emptied: Compare is left, back to the grid.
+    ok(&mut h, "compare.set", json!({ "images": ["f", "d"] }));
+    h.run();
+    assert_eq!(compared(&h), ["f", "d"]);
+    ok(&mut h, "compare.clear", json!(null));
+    h.run();
+    h.run();
+    assert_ne!(place(&h), "helios.comparison");
+    assert!(compared(&h).is_empty());
+    assert_eq!(gallery(&h), selected, "after every edit");
+    // compare.set enters Compare when it is not shown.
+    ok(&mut h, "compare.set", json!({ "images": ["a", "b"] }));
+    h.run();
+    assert_eq!(place(&h), "helios.comparison");
+    assert_eq!(compared(&h), ["a", "b"]);
+    assert_eq!(gallery(&h), selected, "after compare.set");
+}
