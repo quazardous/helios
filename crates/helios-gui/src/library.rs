@@ -4166,9 +4166,6 @@ impl Library {
         };
         let can_compare = comparing || self.view.state.selection().len() >= 2;
         ui.horizontal_wrapped(|ui| {
-            // A button never wraps its words: one too wide for the line
-            // goes to the next one whole.
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             self.view_menu(ui);
             self.auto_advance_toggle(ui);
             // Compare's words where they fit on the line, else its icon
@@ -4184,7 +4181,7 @@ impl Library {
                 .size()
                 .x
                 + 2.0 * ui.spacing().button_padding.x;
-            let narrow = ui.available_width() < words;
+            let narrow = ui.available_size_before_wrap().x < words;
             let clicked = ui
                 .add_enabled_ui(can_compare, |ui| {
                     if narrow {
