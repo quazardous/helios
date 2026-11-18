@@ -166,6 +166,8 @@ pub(super) struct Seed {
     pub(super) library: Rc<RefCell<crate::library::Library>>,
     pub(super) viewport: Rc<RefCell<crate::viewport::Viewport>>,
     pub(super) controls: helios_controls::commands::SharedContexts,
+    /// The image-state router on the core's engine.
+    pub(super) states: helios_node_core::image_states::ImageStates,
 }
 
 impl Focus {
@@ -175,6 +177,7 @@ impl Focus {
     pub(super) fn new(seed: Seed) -> Focus {
         let preview = Rc::new(crate::preview::Preview::new(
             seed.viewport.borrow().engine().clone(),
+            seed.states.clone(),
         ));
         Focus {
             window: seed.window,

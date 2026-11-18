@@ -24,7 +24,7 @@ mod lru;
 mod service;
 
 pub use disk::{CACHEDIR_TAG, Disk, user_cache_dir};
-pub use flight::{Flight, FlightError};
+pub use flight::{Begin, Flight, FlightError, Lead, Waiter};
 pub use lru::{Lru, Pin, Pins};
 pub use service::{
     Cost, Counters, GLANCE_UNUSED, IMPORT_GLANCE, Identity, Kind, RENDER_STEP, Scope, ScopeRule,

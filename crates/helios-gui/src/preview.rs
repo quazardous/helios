@@ -3,16 +3,22 @@
 //! space. The scopes measure it (the histogram reads the pipeline's
 //! output, not the screen) and the navigator draws it.
 //!
-//! It renders on a thread of its own, from the viewport's engine and
-//! cache, each time the graph shown changes (an edit, another image):
-//! the interface never waits on it. A newer graph asked while one renders
-//! replaces the older one, which is then never rendered.
+//! It is a state of the image-state router
+//! ([`helios_node_core::image_states`]): asked from a thread of its own
+//! each time the graph shown changes (an edit, another image), rendered
+//! from the viewport's engine and cache on the router's pool, shared with
+//! any other asker of the same state: the interface never waits on it. A
+//! newer graph asked while one renders replaces the older one, whose ask
+//! is withdrawn (its computation stops unless another asker wants it).
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use helios_core::{Engine, Image, Region};
+use helios_core::{Engine, Graph, Image, NodeId, Priority, Region};
+use helios_node_core::image_states::{
+    Compute, Handle, ImageStates, StateError, StateKey, StateKind, Value,
+};
 
 use crate::engine_source::Shown;
 
@@ -53,15 +59,16 @@ pub struct Preview {
 }
 
 impl Preview {
-    /// A preview rendering with `engine` (the viewport's: its cache is
-    /// shared) on a thread that ends with it.
-    pub fn new(engine: Arc<Engine>) -> Preview {
+    /// A preview asked of `states`, rendered with `engine` (the
+    /// viewport's: its cache is shared), followed on a thread that ends
+    /// with it.
+    pub fn new(engine: Arc<Engine>, states: ImageStates) -> Preview {
         let state: Arc<(Mutex<State>, Condvar)> = Arc::default();
         let (jobs, rx) = channel();
         let s = state.clone();
         std::thread::Builder::new()
             .name("helios-preview".into())
-            .spawn(move || work(&engine, &rx, &s))
+            .spawn(move || work(&engine, &states, &rx, &s))
             .expect("a thread for the preview");
         Preview {
             jobs,
@@ -155,29 +162,98 @@ pub fn plan(extent: Region) -> (f64, Region) {
     )
 }
 
-fn work(engine: &Engine, rx: &Receiver<(u64, Shown)>, state: &(Mutex<State>, Condvar)) {
-    while let Ok(mut job) = rx.recv() {
+/// Asks `states` for the preview of `node`'s output (`port`) in `graph`,
+/// whose extent is `extent`, rendered with `engine` at `priority`.
+///
+/// # Errors
+/// The engine's, when it cannot plan the render.
+pub fn ask(
+    states: &ImageStates,
+    engine: &Arc<Engine>,
+    graph: &Arc<Graph>,
+    node: NodeId,
+    port: &str,
+    extent: Region,
+    priority: Priority,
+) -> Result<Handle, helios_core::Error> {
+    let (scale, region) = plan(extent);
+    let key = StateKey {
+        photo: format!("graph-{}", graph.id()),
+        development: engine.key_at(graph, node, region, scale)?,
+        state: StateKind::Preview,
+        size: SIDE,
+    };
+    let (engine, graph, port) = (engine.clone(), graph.clone(), port.to_string());
+    let compute: Compute = Arc::new(move || {
+        let _span = helios_core::trace::span("preview.render", || {
+            format!("{}x{} at {scale:.4}", region.width, region.height)
+        });
+        let image = engine.render_at(&graph, node, &port, region, scale)?;
+        Ok(Arc::new(image) as Value)
+    });
+    Ok(states.ask(key, priority, compute))
+}
+
+/// A preview state's image.
+pub fn image(value: Value) -> Option<Arc<Image>> {
+    value.downcast::<Image>().ok()
+}
+
+/// How often the follower looks for a newer graph while a preview renders.
+const LOOK: Duration = Duration::from_millis(20);
+
+fn work(
+    engine: &Arc<Engine>,
+    states: &ImageStates,
+    rx: &Receiver<(u64, Shown)>,
+    state: &(Mutex<State>, Condvar),
+) {
+    let mut next = None;
+    while let Some(mut job) = next.take().or_else(|| rx.recv().ok()) {
         // Only the newest graph is worth rendering.
         while let Ok(newer) = rx.try_recv() {
             job = newer;
         }
         let (n, shown) = job;
-        let (scale, region) = plan(shown.extent);
-        let span = helios_core::trace::span("preview.render", || {
-            format!("{}x{} at {scale:.4}", region.width, region.height)
-        });
-        let image = engine
-            .render_at(&shown.graph, shown.node, &shown.port, region, scale)
-            .map_err(|e| {
-                log::warn!("preview: {e}");
-                e.to_string()
-            });
-        drop(span);
+        let asked = ask(
+            states,
+            engine,
+            &shown.graph,
+            shown.node,
+            &shown.port,
+            shown.extent,
+            Priority::Interactive,
+        );
+        let image = match asked {
+            Err(e) => Err(e.to_string()),
+            Ok(mut handle) => loop {
+                match handle.wait(LOOK) {
+                    Err(StateError::Timeout) => {
+                        // A newer graph withdraws this ask (dropping it).
+                        if let Ok(newer) = rx.try_recv() {
+                            next = Some(newer);
+                            break Err(StateError::Cancelled.to_string());
+                        }
+                    }
+                    Ok(value) => {
+                        break image(value).ok_or_else(|| "not an image".to_string());
+                    }
+                    Err(e) => break Err(e.to_string()),
+                }
+            },
+        };
+        if next.is_some() {
+            // Superseded: the newer graph's render answers for it.
+            continue;
+        }
+        if let Err(e) = &image {
+            log::warn!("preview: {e}");
+        }
         let (lock, cv) = state;
         let mut s = lock.lock().unwrap_or_else(PoisonError::into_inner);
         match image {
             Ok(image) => {
-                s.image = Some((n, Arc::new(image)));
+                s.image = Some((n, image));
                 s.failed = None;
             }
             Err(why) => s.failed = Some(why),
@@ -205,8 +281,46 @@ mod tests {
         assert_eq!((r.width, r.height), (100, 40));
     }
 
+    /// An open says the preview's state on the bus, transition by
+    /// transition, and a second window asking the same preview shares it.
+    #[test]
+    fn an_open_says_the_preview_state_in_order_and_shares_it() {
+        use helios_node_core::image_states::facts;
+        let bus = Arc::new(helios_core::Bus::new());
+        let states = ImageStates::new(bus.clone(), 2);
+        let engine = Arc::new(Engine::new(bus.clone()));
+        let mut graph = helios_core::Graph::new();
+        let image = Image::from_fn(Region::sized(600, 400), 4, |x, y, _| {
+            ((x * y) % 5) as f32 / 5.0
+        });
+        let node = graph.add_source("source", image);
+        let shown = Shown::new(Arc::new(graph), node, helios_core::graph::SOURCE_PORT)
+            .unwrap()
+            .unwrap();
+        let ctx = egui::Context::default();
+        let one = Preview::new(engine.clone(), states.clone());
+        let two = Preview::new(engine, states.clone());
+        one.follow(Some(shown.clone()), &ctx);
+        assert!(one.wait(Duration::from_secs(30)), "the preview renders");
+        two.follow(Some(shown), &ctx);
+        assert!(two.wait(Duration::from_secs(30)), "the second one too");
+        assert!(Arc::ptr_eq(
+            &one.latest().unwrap().1,
+            &two.latest().unwrap().1
+        ));
+        let kinds: Vec<&str> = bus
+            .since(0)
+            .into_iter()
+            .map(|e| e.kind)
+            .filter(|k| k.starts_with("image.state."))
+            .collect();
+        assert_eq!(kinds, [facts::REQUESTED, facts::COMPUTING, facts::READY]);
+        let c = states.counters();
+        assert_eq!((c.asks, c.computed, c.ready_hits), (2, 1, 1), "{c:?}");
+    }
+
     /// The open path's tail leaves its trace spans in order: the preview
-    /// rendered on its own thread (the engine's steps inside it), then the
+    /// rendered on the router's pool (the engine's steps inside it), then the
     /// histogram computed on it.
     #[test]
     fn the_preview_then_its_histogram_leave_trace_spans_in_order() {
@@ -219,7 +333,10 @@ mod tests {
         let shown = Shown::new(Arc::new(graph), node, helios_core::graph::SOURCE_PORT)
             .unwrap()
             .unwrap();
-        let preview = Preview::new(Arc::new(Engine::new(Arc::new(helios_core::Bus::new()))));
+        let bus = Arc::new(helios_core::Bus::new());
+        let states = ImageStates::new(bus.clone(), 1);
+        let prefix = states.threads_prefix().to_string();
+        let preview = Preview::new(Arc::new(Engine::new(bus)), states);
         preview.follow(Some(shown), &egui::Context::default());
         assert!(preview.wait(Duration::from_secs(30)), "the preview renders");
         let (_, image) = preview.latest().unwrap();
@@ -230,7 +347,7 @@ mod tests {
         let mine: Vec<_> = records
             .iter()
             .filter(|r| {
-                r.thread.as_deref() == Some("helios-preview")
+                r.thread.as_deref().is_some_and(|t| t.starts_with(&prefix))
                     || (r.thread == thread && r.name.starts_with("scopes."))
             })
             .collect();

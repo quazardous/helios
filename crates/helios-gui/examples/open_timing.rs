@@ -246,7 +246,11 @@ fn concurrent(
             ((f64::from(extent.height) * s).ceil() as u32).max(1),
         )
     };
-    let (pscale, preg) = helios_gui::preview::plan(extent);
+    // The preview is a state of the image-state router, as in the desktop.
+    let states = helios_node_core::image_states::ImageStates::new(
+        engine.bus().clone(),
+        helios_node_core::image_states::THREADS,
+    );
     let (e1, g1) = (engine.clone(), graph.clone());
     let view = std::thread::Builder::new()
         .name("open-timing-viewport".into())
@@ -264,9 +268,20 @@ fn concurrent(
     let preview = std::thread::Builder::new()
         .name("open-timing-preview".into())
         .spawn(move || {
-            let image = e2.render_at(&g2, node, "output", preg, pscale);
+            let image = helios_gui::preview::ask(
+                &states,
+                &e2,
+                &g2,
+                node,
+                "output",
+                extent,
+                helios_core::Priority::Interactive,
+            )
+            .ok()
+            .and_then(|mut h| h.wait(std::time::Duration::from_mins(10)).ok())
+            .and_then(helios_gui::preview::image);
             let at = ms(start);
-            if let Ok(image) = &image {
+            if let Some(image) = &image {
                 let _ = helios_scopes::histogram(image, 256, helios_scopes::Scale::default());
             }
             (at, ms(start))
