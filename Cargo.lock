@@ -2887,6 +2887,7 @@ dependencies = [
  "blake3",
  "bus-contract",
  "egui-pop-hooks",
+ "helios-cache",
  "helios-calibrate",
  "helios-connect",
  "helios-core",

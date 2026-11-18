@@ -26,7 +26,6 @@ use helios_core::Message;
 use helios_library::stacks::{Decision, Status};
 
 use crate::library::Library;
-use crate::request::Heard;
 
 /// The panel's id.
 pub const PANEL: &str = "helios.stacks";
@@ -41,7 +40,7 @@ pub struct StacksAnswer;
 impl Point for StacksAnswer {
     const ID: &'static str = ANSWER;
     type Input = Request;
-    type Value = Heard;
+    type Value = ();
     const KIND: PointKind = PointKind::Request;
 }
 
@@ -49,7 +48,8 @@ impl Point for StacksAnswer {
 /// declared by [`declare`].
 pub const POINTS: &[PointDecl] = &[PointDecl::of::<StacksAnswer>(
     "A stack proposal asked, accepted (all or the checked groups) or declined in the Stacks panel: heard after the drawing, sent to the node",
-)];
+)
+.fail_closed()];
 
 /// Declares [`POINTS`] on `bus` (once).
 pub fn declare(bus: &dyn Bus) {
@@ -112,7 +112,12 @@ impl Review {
     fn ask(&self, request: Request) {
         match &self.bus {
             Some(bus) => {
-                crate::request::ask::<StacksAnswer>(&**bus, request, Heard::default());
+                if let Some(defer) = bus.defer() {
+                    defer.ask::<StacksAnswer>(request, ());
+                } else if let Some(r) = bus.alter::<StacksAnswer>(request, ()).refused {
+                    // A bus without `Defer`: heard at once.
+                    log::warn!(target: "helios", "{r}");
+                }
             }
             None => log::error!(target: "helios", "{ANSWER}: no bus, {request:?} dropped"),
         }

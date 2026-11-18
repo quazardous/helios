@@ -355,10 +355,22 @@ pub fn register(
     ];
     let values = shell.values().clone();
     let off = OffFrame::new(&values);
+    // The node's commands that take `dry_run` say so here too, so the
+    // policy lets their dry runs through (`command_policy`).
+    let node_specs: Vec<_> = node::specs()
+        .into_iter()
+        .chain([node::look::spec(), node::look::defaults::spec()])
+        .collect();
     for (id, label, read_only) in specs {
         let mut spec = CommandSpec::new(id, label, "Calibration");
         if read_only {
             spec = spec.read_only();
+        }
+        if node_specs
+            .iter()
+            .any(|s| s.id == id && helios_shell::policy::declares_dry_run(&s.params))
+        {
+            spec = spec.dry_run();
         }
         let (node, history, values, off) =
             (node.clone(), history.clone(), values.clone(), off.clone());

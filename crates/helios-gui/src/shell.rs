@@ -1141,6 +1141,11 @@ impl Shell {
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
         let (engine_notices, engine_wake) = subscribe_engine_notices(&engine);
+        // The image-state router on it: the preview is one of its states.
+        let states = helios_node_core::image_states::ImageStates::new(
+            engine.bus().clone(),
+            helios_node_core::image_states::THREADS,
+        );
         let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
         let activity = crate::activity::Activity::default();
@@ -1164,6 +1169,7 @@ impl Shell {
             library,
             viewport,
             controls,
+            states,
         });
         let shell_bus = jobs.bus().clone();
         let stack_review = Rc::new(RefCell::new(crate::stack_review::Review::on(
@@ -1483,6 +1489,10 @@ impl Shell {
             .borrow_mut()
             .set_app(shell.core.app.handle().clone());
         shell.listen_decisions();
+        // Every command run passes Helios's policy first (`command.run`).
+        if let Err(e) = crate::command_policy::listen(&*shell.core.app.handle().bus()) {
+            log::error!(target: "helios", "{}: {e}", crate::command_policy::POLICY);
+        }
         if has(&shell, crate::log_panel::PANEL) {
             let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
@@ -2030,7 +2040,7 @@ impl Shell {
         let listened = bus.listen_local::<AnswerDecision>(
             crate::decisions::ANSWERED_BY,
             egui_pop::api::bus::bus_contract::ListenOpts::new().owner(crate::decisions::BUS_OWNER),
-            crate::request::listener(crate::decisions::ANSWERED_BY, move |r: &Request, _| {
+            move |r: &Request, (): &mut ()| {
                 answer_decision_on(&viewport, &decisions, r.clone(), "user")
                     .map(|_| ())
                     .inspect_err(|e| {
@@ -2042,7 +2052,8 @@ impl Shell {
                             );
                         }
                     })
-            }),
+                    .map_err(egui_pop::api::bus::bus_contract::HookError::refuse)
+            },
         );
         if let Err(e) = listened {
             log::error!(target: "helios", "{ANSWER}: {e}");

@@ -6,8 +6,8 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use helios_cache::{
-    Cost, Flight, FlightError, Lru, Pins, RENDER_STEP, Scope, Service, Store, THUMB_SMALL, Tier,
-    Usage,
+    Begin, Cost, Flight, FlightError, Lru, Pins, RENDER_STEP, Scope, Service, Store, THUMB_SMALL,
+    Tier, Usage,
 };
 
 #[test]
@@ -80,6 +80,35 @@ fn concurrent_requests_for_one_key_compute_once() {
     assert!(merged > 0, "some requests merged");
     assert_eq!(flight.merged(), merged);
     assert_eq!(flight.running(), 0);
+}
+
+#[test]
+fn a_lead_handed_to_another_thread_feeds_the_requests_that_joined_it() {
+    let flight: Arc<Flight<&str, u64>> = Arc::default();
+    let Begin::Lead(lead) = flight.begin(&"raw") else {
+        panic!("the first request leads");
+    };
+    let Begin::Join(joined) = flight.begin(&"raw") else {
+        panic!("the second joins");
+    };
+    assert_eq!(joined.try_get(), None, "still running");
+    assert_eq!(flight.merged(), 1);
+    let own = lead.waiter();
+    std::thread::spawn(move || lead.finish(Some(7)))
+        .join()
+        .unwrap();
+    assert_eq!(joined.wait(Duration::from_secs(10)), Ok(7));
+    assert_eq!(own.try_get(), Some(Ok(7)));
+    assert_eq!(flight.running(), 0);
+    // Dropped without a value, a lead abandons its waiters, and the next
+    // request leads again.
+    let Begin::Lead(lead) = flight.begin(&"raw") else {
+        panic!("leads again");
+    };
+    let waiter = lead.waiter();
+    drop(lead);
+    assert_eq!(waiter.try_get(), Some(Err(FlightError::Abandoned)));
+    assert!(matches!(flight.begin(&"raw"), Begin::Lead(_)));
 }
 
 #[test]
