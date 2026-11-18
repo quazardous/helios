@@ -341,3 +341,104 @@ fn the_metadata_section_fits_the_narrow_library_panel() {
         }
     }
 }
+
+/// One pass of the Library window's own OS window (egui's deferred
+/// viewport), as eframe runs it apart from the main window's: no input.
+fn window_pass(h: &mut Harness<'static, Shell>, window: ViewportId) -> egui::FullOutput {
+    use egui::{Pos2, RawInput, Rect, ViewportInfo};
+    let cb = h.output().viewport_output[&window]
+        .viewport_ui_cb
+        .clone()
+        .expect("the window is declared by the main window's last pass");
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+    let mut input = RawInput {
+        viewport_id: window,
+        screen_rect: Some(rect),
+        time: Some(h.ctx.input(|i| i.time) + 1.0 / 60.0),
+        ..Default::default()
+    };
+    input.viewports.insert(
+        window,
+        ViewportInfo {
+            inner_rect: Some(rect),
+            ..Default::default()
+        },
+    );
+    input
+        .viewports
+        .insert(ViewportId::ROOT, ViewportInfo::default());
+    let mut out = h.ctx.run_ui(input, |ui| cb(ui));
+    // No painter for it (as egui-pop's `MultiWindow`).
+    out.textures_delta.clear();
+    out
+}
+
+/// What a runner does after a main window's pass: the Library window's
+/// passes it asked for (a repaint of the window's viewport), and those
+/// the window asks of itself, counted (at most 8: a loop fails the test).
+fn window_passes_after_main(h: &mut Harness<'static, Shell>, window: ViewportId) -> u32 {
+    let asked = |out: &egui::FullOutput| {
+        out.viewport_output
+            .get(&window)
+            .is_some_and(|o| o.repaint_delay == std::time::Duration::ZERO)
+    };
+    let mut passes = 0;
+    let mut again = asked(h.output());
+    while again {
+        passes += 1;
+        assert!(passes <= 8, "the Library window keeps asking passes");
+        let out = window_pass(h, window);
+        again = asked(&out);
+    }
+    passes
+}
+
+/// The Library window in its own OS window draws only when something
+/// came in for it: main window passes that bring it nothing (the pointer
+/// moving over the main window) leave it idle; a mark shown on a photo
+/// (another writer's, a read answered) draws it once more.
+#[test]
+fn the_library_window_draws_only_when_something_came_in_for_it() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.ctx.set_embed_viewports(false);
+    h.state_mut().draw_frame(true);
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the focus's own window: {windows:?}");
+    let window = windows[0];
+    // Its first passes, and what they ask of the main window, settle.
+    for _ in 0..10 {
+        window_passes_after_main(&mut h, window);
+        h.step();
+        if window_passes_after_main(&mut h, window) == 0 {
+            break;
+        }
+    }
+    // The pointer moves over the main window: its passes bring the
+    // Library window nothing.
+    let mut idle = 0;
+    for i in 0..20u8 {
+        h.event(egui::Event::PointerMoved(egui::pos2(
+            200.0 + f32::from(i) * 7.0,
+            300.0,
+        )));
+        h.step();
+        idle += window_passes_after_main(&mut h, window);
+    }
+    assert_eq!(
+        idle, 0,
+        "Library window passes over 20 main passes with nothing new"
+    );
+    // A mark shown on a photo: the window draws it.
+    h.state()
+        .library_mut()
+        .show_field("b", "rating", Some(&json!(3)));
+    h.step();
+    assert!(
+        window_passes_after_main(&mut h, window) > 0,
+        "the Library window not drawn after a mark came in"
+    );
+}
