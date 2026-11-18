@@ -275,7 +275,7 @@
           }
         },
         "results": {
-          "description": "How the main window's Library view shows its results: thumbnails at a size, or a list.",
+          "description": "How the main window's Library view shows its results: thumbnails at a size, a list, or details (columns).",
           "$ref": "#/$defs/results"
         }
       }
@@ -326,8 +326,21 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mode": { "enum": ["thumbnails", "list"] },
-        "size": { "type": "integer", "minimum": 48, "maximum": 512 }
+        "mode": { "enum": ["thumbnails", "list", "details"] },
+        "size": { "type": "integer", "minimum": 48, "maximum": 512 },
+        "columns": {
+          "description": "The details' columns, in order, with their widths in points; the default columns when absent.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "width": { "type": "integer", "minimum": 8, "maximum": 4000 }
+            }
+          }
+        }
       }
     },
     "query": {

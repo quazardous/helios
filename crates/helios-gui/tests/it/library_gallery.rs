@@ -12,6 +12,10 @@
 //! parts, its Filters (no photos) and its Results (the photos as
 //! thumbnails at a size or as a list); each view has its own
 //! auto-advance, a toggle in its Results bar.
+//!
+//! #5265: a Details mode (columns sorted as the gallery, kept per view);
+//! the list and the details open a photo on Enter or a double click and
+//! carry photos out on a drag; a narrow bar keeps Compare on one line.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -21,10 +25,11 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_pop::views::library::filter::Filter;
 use helios_core::Message;
+use helios_gui::library::DraggedPhotos;
 use helios_gui::library::{
     EXPLORER, Entry, GalleryOptions, Library, MAIN_GALLERY, SearchKey, WINDOW_GALLERY, explorer_of,
 };
-use helios_template::{ResultsDesc, ResultsMode};
+use helios_template::{ResultsColumn, ResultsDesc, ResultsMode};
 
 /// The Results bar's auto-advance toggle's name (and tooltip).
 const AUTO_ADVANCE: &str =
@@ -153,6 +158,7 @@ fn the_results_mode_and_size_are_each_view_s_and_kept() {
         lib.set_results(&ResultsDesc {
             mode: ResultsMode::List,
             size: Some(192),
+            ..ResultsDesc::default()
         });
         assert!(
             lib.take_results_changes().is_empty(),
@@ -168,7 +174,8 @@ fn the_results_mode_and_size_are_each_view_s_and_kept() {
         lib.results(),
         ResultsDesc {
             mode: ResultsMode::List,
-            size: Some(192)
+            size: Some(192),
+            ..ResultsDesc::default()
         }
     );
     lib.with_gallery(WINDOW_GALLERY, |lib| {
@@ -325,4 +332,256 @@ fn a_module_s_filter_key_shows_in_the_facets_bar() {
         filter.text.contains("sharpness:high"),
         "the click adds the module's term: {filter:?}"
     );
+}
+
+/// Whether a node is named `label` (a row's text is a node of its own
+/// beside the row).
+fn any(h: &Harness, label: &str) -> bool {
+    h.query_all_by_label(label).next().is_some()
+}
+
+/// Three photos with details.
+fn detailed() -> Vec<Entry> {
+    [("a", 3, 2_000_000), ("b", 5, 1_000), ("c", 1, 30_000_000)]
+        .iter()
+        .map(|&(id, rating, bytes)| Entry {
+            id: id.into(),
+            name: format!("{id}.jpg"),
+            rating,
+            bytes: Some(bytes),
+            camera_make: Some("Fujifilm".into()),
+            camera_model: Some("X-T5".into()),
+            ..Entry::default()
+        })
+        .collect()
+}
+
+/// A library of [`detailed`] photos, shown as `mode`.
+fn library_as(mode: ResultsMode) -> Rc<RefCell<Library>> {
+    let lib = library();
+    {
+        let mut lib = lib.borrow_mut();
+        lib.set_entries(detailed());
+        lib.set_results(&ResultsDesc {
+            mode,
+            ..ResultsDesc::default()
+        });
+    }
+    lib
+}
+
+/// The rect of the node named `label`: a row's (its button), when its
+/// text is a node of its own too.
+fn rect_of(h: &Harness, label: &str) -> egui::Rect {
+    let nodes: Vec<_> = h.query_all_by_label(label).collect();
+    nodes
+        .iter()
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+        .or(nodes.first())
+        .unwrap_or_else(|| panic!("no node named {label}"))
+        .rect()
+}
+
+#[test]
+fn details_show_the_columns_and_sort_as_the_gallery() {
+    let lib = library_as(ResultsMode::Details);
+    // Wide enough for every default column (the table draws the columns
+    // in view only).
+    let shown = lib.clone();
+    let mut h = Harness::builder()
+        .allow_missing_glyphs()
+        .with_size(egui::vec2(1400.0, 640.0))
+        .build_ui(move |ui| shown.borrow_mut().show(ui, &GalleryOptions::RESULTS_PANEL));
+    h.run();
+    // The default columns' headers, named for screen readers; the
+    // gallery's sort (capture time, up) on its column.
+    assert!(any(&h, "File name"));
+    assert!(any(&h, "Rating"));
+    assert!(any(&h, "File size"));
+    assert!(any(&h, "Camera"));
+    assert!(
+        h.query_all_by_label_contains("Capture time")
+            .any(|n| n.accesskit_node().role() == egui::accesskit::Role::Button),
+        "the capture time's header"
+    );
+    assert!(any(&h, "a.jpg"), "a row per photo");
+    assert!(any(&h, "2.0 MB"), "its size");
+    assert!(any(&h, "Fujifilm X-T5"), "its camera");
+    drop(h);
+
+    // In the window: a click on the File name header (the first column, in
+    // view in the narrow panel) sorts the gallery by name, its header
+    // then says so.
+    let mut shell = helios_gui::Shell::new(helios_gui::helios_panels(), None);
+    shell.set_library(detailed());
+    shell.library_mut().set_results(&ResultsDesc {
+        mode: ResultsMode::Details,
+        ..ResultsDesc::default()
+    });
+    let mut h = helios_gui::headless::harness(shell, egui::vec2(1600.0, 1000.0));
+    h.run_steps(4);
+    h.query_all_by_label("File name")
+        .next()
+        .expect("the File name header")
+        .click();
+    h.run_steps(4);
+    assert_eq!(
+        h.state().library().sort(),
+        helios_vault::Order::asc(helios_vault::Sort::Name),
+        "the header ran the gallery's sort"
+    );
+    assert!(
+        h.query_all_by_label("File name").next().is_none()
+            && h.query_all_by_label_contains("File name").next().is_some(),
+        "the File name header says it sorts"
+    );
+}
+
+#[test]
+fn the_details_columns_are_each_view_s_and_kept() {
+    let lib = library_as(ResultsMode::Details);
+    let columns = vec![
+        ResultsColumn {
+            id: "name".into(),
+            width: Some(240),
+        },
+        ResultsColumn {
+            id: "iso".into(),
+            width: None,
+        },
+    ];
+    lib.borrow_mut().set_results(&ResultsDesc {
+        mode: ResultsMode::Details,
+        columns: columns.clone(),
+        ..ResultsDesc::default()
+    });
+    let h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+    assert!(any(&h, "ISO"), "the chosen column");
+    assert!(!any(&h, "Camera"), "a column not chosen");
+    drop(h);
+    let mut lib = lib.borrow_mut();
+    assert_eq!(lib.results().columns, columns);
+    assert_eq!(lib.results().mode, ResultsMode::Details);
+    lib.with_gallery(WINDOW_GALLERY, |lib| {
+        assert_eq!(lib.results(), ResultsDesc::default(), "the window's own");
+    });
+}
+
+/// Enter on the focused view, then a double click on a row, open a
+/// photo, in the list and in the details.
+#[test]
+fn list_and_details_open_a_photo_on_enter_and_double_click() {
+    for mode in [ResultsMode::List, ResultsMode::Details] {
+        let lib = library_as(mode);
+        // Frames a sixtieth of a second apart: kittest's default (a
+        // quarter) puts a double click's two clicks past egui's delay.
+        let shown = lib.clone();
+        let mut h = Harness::builder()
+            .allow_missing_glyphs()
+            .with_step_dt(1.0 / 60.0)
+            .with_size(egui::vec2(480.0, 640.0))
+            .build_ui(move |ui| shown.borrow_mut().show(ui, &GalleryOptions::RESULTS_PANEL));
+        h.run();
+        h.query_all_by_label("b.jpg")
+            .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+            .expect("b.jpg's row")
+            .click();
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(
+            lib.borrow_mut().take_activated().as_deref(),
+            Some("b"),
+            "{mode:?}: Enter opens the cursor's photo"
+        );
+        let at = rect_of(&h, "c.jpg").center();
+        h.event(egui::Event::PointerMoved(at));
+        for _ in 0..2 {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run();
+        assert_eq!(
+            lib.borrow_mut().take_activated().as_deref(),
+            Some("c"),
+            "{mode:?}: a double click opens the row's photo"
+        );
+    }
+}
+
+/// A drag from a row carries the photos out, as from a thumbnail: the
+/// selection when the row is in it.
+#[test]
+fn a_drag_from_a_row_carries_the_photos_out() {
+    for mode in [ResultsMode::List, ResultsMode::Details] {
+        let lib = library_as(mode);
+        lib.borrow_mut()
+            .select_ids(&["a".to_string(), "b".to_string()]);
+        let mut h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+        let from = rect_of(&h, "a.jpg").center();
+        h.event(egui::Event::PointerMoved(from));
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
+        for step in 1..=4 {
+            h.event(egui::Event::PointerMoved(
+                from + egui::vec2(0.0, 20.0 * step as f32),
+            ));
+            h.run();
+        }
+        let carried =
+            egui_pop::api::bus::drag::payload::<DraggedPhotos>(&h.ctx).map(|p| p.0.clone());
+        assert_eq!(
+            carried,
+            Some(vec!["a".to_string(), "b".to_string()]),
+            "{mode:?}: the selection goes"
+        );
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
+    }
+}
+
+/// In a narrow panel the Results bar keeps Compare on one line: its icon
+/// alone, named, beside the view menu.
+#[test]
+fn a_narrow_bar_keeps_compare_on_one_line() {
+    let lib = library();
+    lib.borrow_mut()
+        .select_ids(&["a".to_string(), "b".to_string()]);
+    let lib2 = lib.clone();
+    let options = GalleryOptions::RESULTS_PANEL;
+    let mut h = Harness::builder()
+        .allow_missing_glyphs()
+        .with_size(egui::vec2(230.0, 400.0))
+        .build_ui(move |ui| lib2.borrow_mut().show(ui, &options));
+    h.run();
+    let compare = rect_of(&h, "Compare");
+    let line = rect_of(&h, "View as").height();
+    assert!(
+        compare.height() <= line + 1.0,
+        "Compare on one line: {compare:?}, a line {line}"
+    );
+    drop(h);
+    // Wide, its words.
+    let h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+    assert!(rect_of(&h, "Compare").width() > rect_of(&h, "Compare").height() * 1.5);
 }

@@ -225,7 +225,7 @@ pub struct ViewDesc {
 }
 
 /// How a Library view shows its results, as a file browser's dialog
-/// offers: thumbnails at a size, or a list.
+/// offers: thumbnails at a size, a list, or details (columns).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResultsDesc {
@@ -236,6 +236,20 @@ pub struct ResultsDesc {
     /// when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u16>,
+    /// The details' columns, in order, with their widths; the default
+    /// columns when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<ResultsColumn>,
+}
+
+/// A column of a Library view's details: its id (`name`, `captured`,
+/// `rating`...) and its width in points (the column's own when absent).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultsColumn {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u16>,
 }
 
 /// How a Library view lays its results out.
@@ -247,17 +261,24 @@ pub enum ResultsMode {
     Thumbnails,
     /// One row per photo: its name and marks.
     List,
+    /// One row per photo, its details in columns.
+    Details,
 }
 
 impl ResultsMode {
     /// Every mode, in the order a menu offers them.
-    pub const ALL: [ResultsMode; 2] = [ResultsMode::Thumbnails, ResultsMode::List];
+    pub const ALL: [ResultsMode; 3] = [
+        ResultsMode::Thumbnails,
+        ResultsMode::List,
+        ResultsMode::Details,
+    ];
 
     /// Its name in a workspace and in commands.
     pub fn name(self) -> &'static str {
         match self {
             ResultsMode::Thumbnails => "thumbnails",
             ResultsMode::List => "list",
+            ResultsMode::Details => "details",
         }
     }
 

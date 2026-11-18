@@ -1524,6 +1524,14 @@ gui-library-compare-leave = Retour à la grille
 gui-library-compare-leave-tip = Quitter la comparaison, retour à la grille (C ou Échap)
 
 gui-library-count = { $shown } sur { $total }
+
+gui-library-column-flag = Drapeau
+
+gui-library-column-iso = ISO
+
+gui-library-column-labels = Étiquettes
+
+gui-library-column-modified = Modifiée
 gui-library-facet-rating = Note
 gui-library-facet-label = Étiquette
 gui-library-facet-flag = Marque
@@ -2991,6 +2999,8 @@ gui-library-view = Afficher en
 
 gui-library-view-custom = Vignettes, { $size } points
 
+gui-library-view-details = Détails
+
 gui-library-view-huge = Très grandes vignettes
 
 gui-library-view-large = Grandes vignettes
@@ -3001,4 +3011,4 @@ gui-library-view-medium = Vignettes moyennes
 
 gui-library-view-small = Petites vignettes
 
-gui-library-view-tip = Afficher les résultats en vignettes d'une taille, ou en liste
+gui-library-view-tip = Afficher les résultats en vignettes d'une taille, en liste, ou en détails par colonnes
