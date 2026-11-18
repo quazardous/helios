@@ -1131,6 +1131,28 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# what egui-pop costs an application, per feature set of its facade
+# (egui-pop's tools/cost/cost.py): dependencies, release builds of its
+# cost_probe example (the compile cache off; clean for none and default,
+# then what each set adds on top of none's build, then incremental), the
+# stripped binary, and the headless start to the first frame over
+# MinimalPlugins and DefaultPlugins. Its build trees sit under the
+# branch's target and are removed at the end. Judged against egui-pop's
+# tools/cost/budget.json: over budget is reported, never a failure.
+# /out/cost.json, /out/cost.md, and /out/budget.json (this run as a
+# budget, to commit when meant); `sets=` (comma-separated) and `runs=`
+[jobs.egui-pop-cost]
+about = "egui-pop's cost per feature set: dependencies, build times, binary size, first frame, against a budget"
+checkouts = ["egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+python3 -I tools/cost/cost.py --out /out --targets /target/cost --runs ${runs:-10} ${sets:+--sets ${sets}}"""
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "5" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "2h"
+
 # ---------------------------------------------------------------- raw corpus
 # The decoder and camera-name regression corpus (docs/raw-corpus.md): the
 # "core" raws of tests/raw-corpus.toml, CC0 files from raw.pixls.us checked
