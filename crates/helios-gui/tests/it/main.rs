@@ -21,6 +21,7 @@ mod calibrate;
 mod calibrate_focus;
 mod chrome_snapshots;
 mod clipboard;
+mod command_policy;
 mod compare_focus;
 mod compare_heads;
 mod contexts;
