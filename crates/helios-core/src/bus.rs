@@ -181,15 +181,29 @@ pub const JOURNAL: usize = 1024;
 /// the bus's lock): a window asks to be drawn again, a thread is unparked.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+/// Hands each event of the kinds it asked for to another bus as it is
+/// published (outside the bus's lock, on the publisher's thread): see
+/// [`crate::journal::relay_points`]. `false` once it has nowhere left to
+/// hand them, and it is dropped.
+pub(crate) type Tap = Arc<dyn Fn(&Envelope) -> bool + Send + Sync>;
+
 pub struct Bus {
     inner: Mutex<Inner>,
 }
 
 struct Subscriber {
-    to: Sender<Envelope>,
+    to: To,
     /// The kinds it gets; every kind when `None`.
     kinds: Option<Vec<&'static str>>,
     wake: Option<Wake>,
+}
+
+/// Where a subscriber's events go.
+enum To {
+    /// Kept in a channel until read.
+    Channel(Sender<Envelope>),
+    /// Handed on as published.
+    Tap(Tap),
 }
 
 impl Subscriber {
@@ -297,6 +311,7 @@ impl Bus {
         check: bool,
     ) -> u64 {
         let mut wakes = Vec::new();
+        let mut taps = Vec::new();
         let mut inner = self.inner.lock().expect("bus lock");
         if check
             && inner
@@ -328,17 +343,34 @@ impl Bus {
             if !s.wants(kind) {
                 return true;
             }
-            let sent = s.to.send(envelope.clone()).is_ok();
+            let sent = match &s.to {
+                To::Channel(to) => to.send(envelope.clone()).is_ok(),
+                To::Tap(tap) => {
+                    taps.push(tap.clone());
+                    true
+                }
+            };
             if sent && let Some(wake) = &s.wake {
                 wakes.push(wake.clone());
             }
             sent
         });
+        let tapped = (!taps.is_empty()).then(|| envelope.clone());
         if inner.journal.len() == inner.capacity {
             inner.journal.pop_front();
         }
         inner.journal.push_back(envelope);
         drop(inner);
+        if let Some(envelope) = tapped {
+            let done: Vec<&Tap> = taps.iter().filter(|tap| !tap(&envelope)).collect();
+            if !done.is_empty() {
+                let mut inner = self.inner.lock().expect("bus lock");
+                inner.subscribers.retain(|s| match &s.to {
+                    To::Tap(tap) => !done.iter().any(|d| Arc::ptr_eq(d, tap)),
+                    To::Channel(_) => true,
+                });
+            }
+        }
         for wake in wakes {
             wake();
         }
@@ -353,7 +385,7 @@ impl Bus {
             .expect("bus lock")
             .subscribers
             .push(Subscriber {
-                to,
+                to: To::Channel(to),
                 kinds: None,
                 wake: None,
             });
@@ -376,11 +408,25 @@ impl Bus {
             .expect("bus lock")
             .subscribers
             .push(Subscriber {
-                to,
+                to: To::Channel(to),
                 kinds: Some(kinds.to_vec()),
                 wake,
             });
         from
+    }
+
+    /// Hands the events of `kinds` published from now on to `tap`, as
+    /// each is published, until it returns `false`.
+    pub(crate) fn tap_kinds(&self, kinds: &[&'static str], tap: Tap) {
+        self.inner
+            .lock()
+            .expect("bus lock")
+            .subscribers
+            .push(Subscriber {
+                to: To::Tap(tap),
+                kinds: Some(kinds.to_vec()),
+                wake: None,
+            });
     }
 
     /// The journaled events with a sequence number above `seq`.

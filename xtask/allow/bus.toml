@@ -12,16 +12,8 @@ reason = "the window's waker: any fact on the shell bus that the interface did n
 
 [[allow]]
 path = "crates/helios-gui/src/node_events.rs"
-reason = "LocalRelay: the desktop's in-process node, followed on its own bus for its untyped kinds (storage.*, cache.*, volume.*), which have no point to listen on yet"
+reason = "LocalRelay: the desktop's in-process node, followed on its own bus for the node listener table, whose listeners ask for kinds by prefix (storage.*, library.*, volume.*, cache.*): most of them JSON with no type, volume.* with typed points of their own crate, none a fact point to listen on"
 
 [[allow]]
 path = "crates/helios-gui/src/persist.rs"
 reason = "the vault's events, process-local and high rate: the read cache hears them on its own thread so no read shows a value older than a change announced, and the frame applies them in order"
-
-[[allow]]
-path = "crates/helios-gui/src/main.rs"
-reason = "the settings stores follow the local node's layers from before the settings are read, so no change between the read and the shell's build is missed"
-
-[[allow]]
-path = "crates/helios-gui/src/shell.rs"
-reason = "the engine's notices (a GPU fell back, a GPU lost): the viewport engine's own bus, at render rate, read for two kinds with a wake; its per-render kinds stay off the journal"

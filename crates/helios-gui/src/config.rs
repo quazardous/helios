@@ -1699,13 +1699,47 @@ pub fn connect_plugins(app: &AppHandle, broker: &Arc<helios_plugin::Broker>) {
     }
 }
 
-/// Follows the node's bus (`heard`, from `Bus::subscribe`) for every
-/// store [`install`] made that keeps values in the node's layers:
-/// Helios's settings and the plugins'. A layer another client changes is
-/// read again by each, and what moved reaches the Settings app, so every
-/// `settings.changed` listener hears it. One subscription for all of
-/// them, so none is left out. After [`install`]; ends with the bus.
-pub fn follow(app: &AppHandle, heard: std::sync::mpsc::Receiver<helios_core::Envelope>) {
+/// The listener of the local node's layers changed
+/// ([`listen_layers`]).
+pub const LAYERS_LISTENER: &str = "helios.settings-layers";
+
+/// The owner of the settings' listeners on the application's bus.
+pub const BUS_OWNER: &str = "helios.settings";
+
+/// Listens, as [`LAYERS_LISTENER`], to the layers the desktop's node says
+/// changed (`settings.layerChanged`, on the application's bus `bus`); a
+/// remote node's (`relayed:<name>`) are its own layers, left out. Each
+/// layer's name is kept in the receiver until [`follow`] reads it:
+/// registered before the settings are read, no change made between the
+/// read and the shell's build is missed.
+pub fn listen_layers(
+    bus: &dyn egui_pop::api::bus::bus_contract::Bus,
+) -> Result<std::sync::mpsc::Receiver<String>, egui_pop::api::bus::bus_contract::Refused> {
+    use helios_core::FactPoint;
+    use helios_node_core::settings::LayerChanged;
+    let (tx, rx) = std::sync::mpsc::channel();
+    bus.listen::<FactPoint<LayerChanged>>(
+        LAYERS_LISTENER,
+        egui_pop::api::bus::bus_contract::ListenOpts::new().owner(BUS_OWNER),
+        move |fact, ()| {
+            if !fact.source.starts_with(crate::relay::RELAYED)
+                && let Some(name) = fact.payload["layer"].as_str()
+            {
+                let _ = tx.send(name.to_string());
+            }
+            Ok(())
+        },
+    )?;
+    Ok(rx)
+}
+
+/// Follows the layers the node says changed (`heard`, from
+/// [`listen_layers`]) for every store [`install`] made that keeps values
+/// in the node's layers: Helios's settings and the plugins'. A layer
+/// another client changes is read again by each, and what moved reaches
+/// the Settings app, so every `settings.changed` listener hears it. One
+/// listener for all of them, so none is left out. After [`install`].
+pub fn follow(app: &AppHandle, heard: std::sync::mpsc::Receiver<String>) {
     let Some(bridge) = app.service(&BRIDGE) else {
         return;
     };

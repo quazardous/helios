@@ -369,3 +369,72 @@ fn the_codec_reads_a_payload_of_an_older_or_newer_node() {
     // each other do not echo.
     assert!(j.resume(Cursor::START, 10).entries.is_empty());
 }
+
+/// Another process-local bus (the viewport engine's), its journaled kinds
+/// relayed to the application's bus: each reaches its listeners once,
+/// whatever burst of its other kinds came between, and those stay on it.
+#[test]
+fn a_relayed_bus_hands_its_point_kinds_on_and_keeps_the_others() {
+    let (k, j) = kernel();
+    let heard: Heard = Arc::default();
+    listen::<Moved>(&k, "notices", ListenOpts::new(), &heard);
+    let engine = Bus::with_journal(16);
+    engine.declare([FACTS]);
+    let into: std::sync::Weak<dyn bus_contract::Bus> = Arc::downgrade(&k) as _;
+    let kinds = helios_core::journal::relay_points(&engine, [FACTS], into);
+    assert_eq!(kinds, [Moved::KIND, Saved::KIND]);
+    let before = j.bus().last_seq();
+    engine.publish(
+        "engine",
+        None,
+        &Moved {
+            photo: 1,
+            to: "gpu".into(),
+        },
+    );
+    for n in 0..100 {
+        engine.publish("engine", None, &Local { n });
+    }
+    assert!(Journal::flush(&*j, SOON));
+    assert_eq!(heard.lock().unwrap().len(), 1, "heard once");
+    let on_bus = j.bus().since(before);
+    assert_eq!(
+        on_bus
+            .iter()
+            .map(|e| (e.kind, e.source.as_str()))
+            .collect::<Vec<_>>(),
+        [(Moved::KIND, "engine")],
+        "the other kinds stay on the engine's bus"
+    );
+    // The application's bus gone, the relay ends with it.
+    drop(k);
+    engine.publish(
+        "engine",
+        None,
+        &Moved {
+            photo: 2,
+            to: "gone".into(),
+        },
+    );
+}
+
+/// An application bus without a journal (a test's, a tool's): the
+/// relayed kinds are emitted to their listeners at once.
+#[test]
+fn without_a_journal_a_relayed_kind_is_emitted_at_once() {
+    let k = Arc::new(Kernel::new());
+    let heard: Heard = Arc::default();
+    listen::<Moved>(&k, "notices", ListenOpts::new(), &heard);
+    let engine = Bus::new();
+    let into: std::sync::Weak<dyn bus_contract::Bus> = Arc::downgrade(&k) as _;
+    helios_core::journal::relay_points(&engine, [FACTS], into);
+    let seq = engine.publish(
+        "engine",
+        None,
+        &Moved {
+            photo: 1,
+            to: "gpu".into(),
+        },
+    );
+    assert_eq!(*heard.lock().unwrap(), [(seq, "notices".to_string())]);
+}

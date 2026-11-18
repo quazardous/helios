@@ -123,6 +123,59 @@ pub fn points<'a>(tables: impl IntoIterator<Item = &'a [FactDecl]>) -> Vec<Point
         .collect()
 }
 
+/// Relays the facts of `from`'s journaled kinds among `tables` (a typed
+/// kind with its event point, [`FactDecl::of`]; the `fact_only` ones
+/// stay on `from`) to the listeners of their [`FactPoint`] on the
+/// application's bus `into`: recorded in its journal, delivered by its
+/// pump, when it has one; emitted to them at once otherwise. Each is
+/// handed on as it is published on `from`, so no burst of other kinds
+/// there pushes one out unread. Ends once `into` is gone. The kinds
+/// relayed.
+///
+/// For a bus of its own whose rare facts the application listens to
+/// (the viewport engine's notices), its per-render kinds left on it.
+pub fn relay_points<'a>(
+    from: &Bus,
+    tables: impl IntoIterator<Item = &'a [FactDecl]>,
+    into: Weak<dyn bus_contract::Bus>,
+) -> Vec<&'static str> {
+    let keys: BTreeMap<&'static str, PointKey> = tables
+        .into_iter()
+        .flatten()
+        .filter_map(|d| Some((d.kind, d.point?.key())))
+        .collect();
+    let kinds: Vec<&'static str> = keys.keys().copied().collect();
+    if kinds.is_empty() {
+        return kinds;
+    }
+    from.tap_kinds(
+        &kinds,
+        Arc::new(move |e: &Envelope| {
+            let Some(bus) = into.upgrade() else {
+                return false;
+            };
+            let Some(&key) = keys.get(e.kind) else {
+                return true;
+            };
+            let mut fact = Fact::of(e);
+            fact.cause = None;
+            match bus.journal() {
+                Some(journal) => {
+                    if let Err(refused) = journal.publish_any(key, Arc::new(fact), fresh_unit, None)
+                    {
+                        log::warn!(target: "helios", "bus: `{}` not relayed: {refused}", e.kind);
+                    }
+                }
+                None => {
+                    let _ = bus.collect_any(key, Arc::new(fact), fresh_unit);
+                }
+            }
+            true
+        }),
+    );
+    kinds
+}
+
 /// A kind as the bus names it (`&'static`): each distinct kind is kept
 /// once for the process.
 pub fn intern(kind: &str) -> &'static str {

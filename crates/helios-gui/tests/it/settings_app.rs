@@ -354,7 +354,23 @@ fn a_layer_another_client_of_the_node_changes_is_read_again() {
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     let app = h.state().app().handle().clone();
-    let heard = bus.subscribe();
+    // The application's bus with the node's bus as its journal, as
+    // `main` builds it; the layers listened to before they are read.
+    let (kernel, journal) = helios_core::BusJournal::attach(
+        bus.clone(),
+        |j| {
+            egui_pop::api::bus::egui_pop_hooks::Kernel::new()
+                .with_journal(j.clone())
+                .with_relay(j)
+        },
+        egui_pop::api::bus::egui_pop_hooks::Kernel::declaration,
+    );
+    assert!(
+        journal
+            .declare(&*kernel, helios_gui::FACTS.iter().copied())
+            .is_empty()
+    );
+    let heard = config::listen_layers(&*kernel).unwrap();
     let mine = node.settings();
     let (sources, problems) = config::read(&dir, &|n| mine.read(n), Some(project.into()), &[]);
     assert!(problems.is_empty(), "{problems:?}");
@@ -518,4 +534,55 @@ fn only_a_setting_that_opts_into_a_scope_offers_set_for_and_a_stray_value_moves_
     assert!(h.query_all_by_label("This library").count() >= 2);
     assert!(h.query_by_label("This workspace").is_none());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The settings' layers are followed by a named listener of the
+/// application's bus, registered before the settings are read: a layer
+/// the desktop's node says changed before anyone reads the listener is
+/// kept for it, once; a remote node's layer (relayed in) is left out.
+#[test]
+fn a_layer_changed_before_the_first_read_is_not_missed() {
+    use egui_pop::api::bus::bus_contract::Journal;
+    use egui_pop::api::bus::egui_pop_hooks::Kernel;
+    use helios_core::{BusJournal, Event};
+    use helios_node_core::settings::LayerChanged;
+
+    let facts = helios_gui::bus();
+    let (kernel, journal) = BusJournal::attach(
+        facts.clone(),
+        |j| Kernel::new().with_journal(j.clone()).with_relay(j),
+        Kernel::declaration,
+    );
+    assert!(
+        journal
+            .declare(&*kernel, helios_gui::FACTS.iter().copied())
+            .is_empty()
+    );
+    // As `main` does, before the settings are read.
+    let heard = config::listen_layers(&*kernel).unwrap();
+    let listeners: Vec<String> = kernel
+        .listeners(LayerChanged::KIND)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| l.id)
+        .collect();
+    assert_eq!(listeners, [config::LAYERS_LISTENER]);
+    // Changed between the read and the shell's build: nobody follows yet.
+    facts.publish(
+        "settings",
+        None,
+        &LayerChanged {
+            layer: "user".into(),
+        },
+    );
+    facts.republish_value(
+        "relayed:box",
+        None,
+        LayerChanged::KIND,
+        json!({ "layer": "library" }),
+    );
+    assert!(Journal::flush(&*journal, Duration::from_secs(10)));
+    // Read once the follower starts: the local change, once.
+    let got: Vec<String> = heard.try_iter().collect();
+    assert_eq!(got, ["user"]);
 }

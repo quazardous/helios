@@ -279,24 +279,16 @@ pub fn composite(
     }
 }
 
-/// Calls `changed` with each node layer the node's bus (`heard`, from
-/// `Bus::subscribe`) says changed, on a thread of its own; ends with the
-/// bus. Used by [`super::follow`], which hands every store keeping values
-/// in the node's layers the one subscription.
-pub(super) fn on_layers_changed(
-    heard: Receiver<helios_core::Envelope>,
-    changed: impl Fn(&str) + Send + 'static,
-) {
+/// Calls `changed` with each node layer `heard` says changed (from
+/// [`super::listen_layers`]), on a thread of its own; ends with the
+/// listener. Used by [`super::follow`], which hands every store keeping
+/// values in the node's layers the one listener.
+pub(super) fn on_layers_changed(heard: Receiver<String>, changed: impl Fn(&str) + Send + 'static) {
     let picked = std::thread::Builder::new()
         .name("helios-settings-follow".into())
         .spawn(move || {
-            let kind = <helios_node_core::settings::LayerChanged as helios_core::Event>::KIND;
-            while let Ok(e) = heard.recv() {
-                if e.kind == kind
-                    && let Some(name) = e.payload["layer"].as_str()
-                {
-                    changed(name);
-                }
+            while let Ok(name) = heard.recv() {
+                changed(&name);
             }
         });
     if let Err(e) = picked {
@@ -392,6 +384,7 @@ mod tests {
     /// change another client makes there is told to the watcher.
     #[test]
     fn a_library_setting_round_trips_through_the_node_and_its_changes_are_watched() {
+        use egui_pop::api::bus::egui_pop_hooks::Kernel;
         use helios_node_core::node::LocalNode;
         use helios_vault_sqlite::SqliteStore;
 
@@ -399,6 +392,18 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let sqlite = SqliteStore::open(&dir.join("vault.db")).unwrap();
         let bus = Arc::new(helios_core::Bus::new());
+        // The application's bus with the node's bus as its journal, as
+        // the desktop's `main` builds it.
+        let (kernel, journal) = helios_core::BusJournal::attach(
+            bus.clone(),
+            |j| Kernel::new().with_journal(j.clone()).with_relay(j),
+            Kernel::declaration,
+        );
+        assert!(
+            journal
+                .declare(&*kernel, crate::FACTS.iter().copied())
+                .is_empty()
+        );
         let node = LocalNode::open(sqlite, bus.clone(), Duration::from_hours(1));
         let project = "project//photos";
         let sources = |node: &LocalNode<SqliteStore>| {
@@ -442,7 +447,8 @@ mod tests {
         // write does not.
         {
             let mine = mine.clone();
-            on_layers_changed(bus.subscribe(), move |name| mine.layer_changed(name));
+            let heard = crate::config::listen_layers(&*kernel).unwrap();
+            on_layers_changed(heard, move |name| mine.layer_changed(name));
         }
         let (tell, heard) = std::sync::mpsc::channel();
         let tell = Mutex::new(tell);
