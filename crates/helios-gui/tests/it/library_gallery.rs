@@ -379,7 +379,14 @@ fn rect_of(h: &Harness, label: &str) -> egui::Rect {
 #[test]
 fn details_show_the_columns_and_sort_as_the_gallery() {
     let lib = library_as(ResultsMode::Details);
-    let h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+    // Wide enough for every default column (the table draws the columns
+    // in view only).
+    let shown = lib.clone();
+    let mut h = Harness::builder()
+        .allow_missing_glyphs()
+        .with_size(egui::vec2(1400.0, 640.0))
+        .build_ui(move |ui| shown.borrow_mut().show(ui, &GalleryOptions::RESULTS_PANEL));
+    h.run();
     // The default columns' headers, named for screen readers; the
     // gallery's sort (capture time, up) on its column.
     assert!(has(&h, "File name"));
@@ -396,8 +403,9 @@ fn details_show_the_columns_and_sort_as_the_gallery() {
     assert!(has(&h, "Fujifilm X-T5"), "its camera");
     drop(h);
 
-    // In the window: a click on the Rating header sorts the gallery by
-    // rating, its header then says so.
+    // In the window: a click on the File name header (the first column, in
+    // view in the narrow panel) sorts the gallery by name, its header
+    // then says so.
     let mut shell = helios_gui::Shell::new(helios_gui::helios_panels(), None);
     shell.set_library(detailed());
     shell.library_mut().set_results(&ResultsDesc {
@@ -406,19 +414,19 @@ fn details_show_the_columns_and_sort_as_the_gallery() {
     });
     let mut h = helios_gui::headless::harness(shell, egui::vec2(1600.0, 1000.0));
     h.run_steps(4);
-    h.query_all_by_label("Rating")
-        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
-        .expect("the Rating header")
+    h.query_all_by_label("File name")
+        .next()
+        .expect("the File name header")
         .click();
     h.run_steps(4);
     assert_eq!(
         h.state().library().sort(),
-        helios_vault::Order::asc(helios_vault::Sort::Rating),
+        helios_vault::Order::asc(helios_vault::Sort::Name),
         "the header ran the gallery's sort"
     );
     assert!(
-        h.query_by_label("Rating").is_none() && h.query_by_label_contains("Rating").is_some(),
-        "the Rating header says it sorts"
+        h.query_by_label("File name").is_none() && h.query_by_label_contains("File name").is_some(),
+        "the File name header says it sorts"
     );
 }
 
@@ -472,6 +480,9 @@ fn list_and_details_open_a_photo_on_enter_and_double_click() {
             "{mode:?}: Enter opens the cursor's photo"
         );
         let at = rect_of(&h, "c.jpg").center();
+        // The two clicks in one frame: each run moves the harness's clock
+        // on, past egui's double click delay.
+        h.event(egui::Event::PointerMoved(at));
         for _ in 0..2 {
             h.event(egui::Event::PointerButton {
                 pos: at,
@@ -485,8 +496,8 @@ fn list_and_details_open_a_photo_on_enter_and_double_click() {
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
             });
-            h.run();
         }
+        h.run();
         assert_eq!(
             lib.borrow_mut().take_activated().as_deref(),
             Some("c"),
