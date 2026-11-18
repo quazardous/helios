@@ -16,6 +16,7 @@ pub mod cursor;
 pub mod desktop;
 pub mod endpoint;
 pub mod health;
+pub mod image_states;
 pub mod import_profiles;
 pub mod import_promise;
 pub mod init;
