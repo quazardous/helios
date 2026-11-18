@@ -610,6 +610,21 @@ impl Cache {
             .map(|(_, key, content)| (key, content))
     }
 
+    /// The region of the smallest entry of `lineage` over a region
+    /// holding `region`, ready or being computed (not failed): asking for
+    /// that region reads its content, or joins its computation.
+    fn holding(&self, lineage: ContentHash, region: Region) -> Option<Region> {
+        self.lineages
+            .get(&lineage)?
+            .iter()
+            .map(|key| &self.entries[key])
+            .filter(|entry| {
+                entry.region.contains(&region) && !matches!(entry.cell.get(), Some(Err(_)))
+            })
+            .map(|entry| entry.region)
+            .min_by_key(Region::area)
+    }
+
     /// One render less needs `key`.
     fn unpin(&mut self, key: ContentHash) {
         if let Some(n) = self.pins.get_mut(&key) {
@@ -1414,10 +1429,21 @@ impl Engine {
                     ShapeKind::Reduce { input, scale } => {
                         let full = r.full_resolution(*scale);
                         let extent = graph.extent(input.node).ok().flatten();
-                        asked
-                            .entry(*input)
-                            .or_default()
-                            .push(whole_image_ask(full, extent));
+                        let canonical = whole_image_ask(full, extent);
+                        // Content already there (ready, or being computed)
+                        // that holds the exact region serves it as is:
+                        // growing past it would compute it again.
+                        let ask = if canonical == full {
+                            full
+                        } else {
+                            let lineage = shapes[input].lineage;
+                            self.cache
+                                .lock()
+                                .expect("engine cache lock")
+                                .holding(lineage, full)
+                                .unwrap_or(canonical)
+                        };
+                        asked.entry(*input).or_default().push(ask);
                     }
                     ShapeKind::Pending { inputs } => {
                         for (src, _) in inputs {
@@ -2173,6 +2199,10 @@ impl Engine {
 /// rounding at each scale. Each side is rounded out to this many pixels.
 const WHOLE_IMAGE_MARGIN: i64 = 64;
 
+/// The shortest side an image has for its whole-image asks to be grown:
+/// there the margin adds at most a few percent of its pixels.
+const WHOLE_IMAGE_MIN_SIDE: u32 = 1024;
+
 /// The full-resolution region a reduce asks for (`full`): grown to the
 /// canonical whole-image region when it holds the whole `extent` but for
 /// less than a margin on each side, as is for a part of the image (a
@@ -2184,10 +2214,15 @@ const WHOLE_IMAGE_MARGIN: i64 = 64;
 /// rounded up to the margin; the right and bottom always by one margin at
 /// least, since rounding a size up at a scale nearly always runs past
 /// them, while the left and top start on the image's own grid.
+///
+/// A small image (a side under [`WHOLE_IMAGE_MIN_SIDE`]) is asked as is:
+/// the margin would be several times its work, and a second computation
+/// of it costs little.
 fn whole_image_ask(full: Region, extent: Option<Region>) -> Region {
     const M: i64 = WHOLE_IMAGE_MARGIN;
     let Some(e) = extent.filter(|e| {
         !e.is_empty()
+            && e.width.min(e.height) >= WHOLE_IMAGE_MIN_SIDE
             && full.x <= e.x + M
             && full.y <= e.y + M
             && full.right() >= e.right() - M

@@ -152,3 +152,22 @@ fn an_open_runs_one_full_size_computation_for_proxy_preview_and_fit() {
         );
     }
 }
+
+#[test]
+fn a_ready_full_size_render_serves_a_later_reduce_without_growing_it() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (g, node) = graph(&calls);
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let [_, preview, _] = scales();
+    let r = at(preview);
+    let full = engine
+        .render(&g, node, "output", r.full_resolution(preview))
+        .unwrap();
+    let shown = engine.render_at(&g, node, "output", r, preview).unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the ready full-size render serves the preview"
+    );
+    assert!(shown.data() == full.sample_at(r, preview).data());
+}
