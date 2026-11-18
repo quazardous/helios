@@ -636,6 +636,13 @@ Every agent follows them.
   serves what CI cannot: a fix loop's narrow runs and snapshots regenerated
   to commit (`egui-pop-snapshots`). `egui-pop-gate` stays for a release or a
   by-hand check, not for each branch.
+- **Per egui-pop branch** (2026-11-18): the narrow `egui-pop-test` runs of
+  the crates and test targets the change touches, plus `egui-pop-snapshots`
+  when something visible or listed changes (a page drawn differently, a
+  page or a story added, a snapshot's subject moved). Nothing more: next's
+  CI runs the rest. The gate is for releases; it runs every test and every
+  step even after a failure (`--no-fail-fast`), so one run shows all that
+  fails.
 - The GPU and timing jobs (`gpu`, `gpu-intel`, `egui-pop-gpu-tiles`,
   `egui-pop-threading`, `egui-pop-perf`, `start-timing`, `quit-timing`, `test-times`, `thumb-bench`, `open-timing`, the
   parity and bench jobs) run before a release only, queued by one agent

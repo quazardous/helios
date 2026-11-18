@@ -881,7 +881,10 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
-# egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
+# egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs.
+# Past fmt and clippy, every step runs and every test too (`--no-fail-fast`):
+# one failure or timeout does not hide the rest; the job fails if any did.
+# For a release or a by-hand check, not for each branch (docs/bench.md)
 [jobs.egui-pop-gate]
 about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, the docs build, and the docs site's links"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
@@ -891,10 +894,11 @@ memory = "5g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
- && cargo nextest run --workspace --locked --profile ci --test-threads 12 --fail-fast \
- && cargo test --workspace --locked --doc \
- && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked \
- && python3 tools/book/summary.py && mdbook build && python3 tools/book/links.py target/book"""
+ && { rc=0; cargo nextest run --workspace --locked --profile ci --test-threads 12 --no-fail-fast || rc=$?; \
+ cargo test --workspace --locked --doc || rc=$?; \
+ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked || rc=$?; \
+ { python3 tools/book/summary.py && mdbook build && python3 tools/book/links.py target/book; } || rc=$?; \
+ exit $rc; }"""
 # parallelism capped: the peak is the links, one rust-lld of a test
 # binary at about 1.5 GB each (docs/bench.md, "Capacity and the queue");
 # two cargo jobs keep it to two links at once
