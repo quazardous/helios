@@ -199,7 +199,8 @@ impl Point for LibraryFilled {
 /// The library's points, this crate's contract with the application's
 /// bus: declared by [`declare`].
 pub const POINTS: &[PointDecl] = &[
-    PointDecl::of::<LibraryChanged>("The library changed: what the desktop reads again"),
+    PointDecl::of::<LibraryChanged>("The library changed: what the desktop reads again")
+        .budget(crate::INTERFACE_PASS_BUDGET),
     PointDecl::of::<LibraryFilled>("The Library read again is shown: what follows it"),
 ];
 

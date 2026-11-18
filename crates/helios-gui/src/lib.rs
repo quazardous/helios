@@ -2,6 +2,12 @@
 //! egui-pop's workbench), its commands run by Helios's kernel, and the
 //! framework's own pictures and recordings of it.
 
+/// The time one pass of an interface-thread point's listeners should take
+/// (bus-contract's `PointDecl::budget`): a pass over it is said as
+/// `bus.overBudget` and logged, never failed. 4 ms leaves most of a
+/// 60 Hz frame to drawing.
+pub const INTERFACE_PASS_BUDGET: std::time::Duration = std::time::Duration::from_millis(4);
+
 pub mod account_gone;
 pub mod activity;
 pub mod agent_state;
