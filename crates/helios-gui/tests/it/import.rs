@@ -4155,3 +4155,61 @@ fn nothing_in_helios_reads_the_files_dropped_itself() {
     }
     assert!(found.is_empty(), "read outside egui-pop's bus: {found:#?}");
 }
+
+/// What comes in for the import window off the interface's thread (a
+/// scan, a card, an account read) is said on the bus
+/// (`import.window.news`); its listener is registered for the window, so
+/// the main window's pass that runs it asks for the import window's pass:
+/// no hand repaint of its viewport.
+#[test]
+fn news_for_the_import_window_from_another_thread_wake_its_own_window() {
+    use helios_gui::shell::ImportNews;
+    let dir = temp("news");
+    let folder = dir.join("Shoot");
+    photos(&folder, 2, 64, 48);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.run();
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "source": folder.display().to_string() }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run_steps(3);
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the import window's own: {windows:?}");
+    let window = windows[0];
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !h.state().import_read() {
+        assert!(Instant::now() < deadline, "the sources not read in 20 s");
+        window_pass(&mut h, window, false);
+        h.step();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    window_pass(&mut h, window, false);
+    h.step();
+
+    let bus = h.state().app().handle().bus();
+    let out = std::thread::spawn(move || bus.alter::<ImportNews>((), ()))
+        .join()
+        .unwrap();
+    assert_eq!(
+        out.deferred,
+        ["helios.import.window"],
+        "queued for the interface's thread"
+    );
+    // The main window's pass runs it, and asks for the window's.
+    h.step();
+    let asked = h
+        .output()
+        .viewport_output
+        .get(&window)
+        .map(|o| o.repaint_delay);
+    assert_eq!(
+        asked,
+        Some(Duration::ZERO),
+        "the import window's pass asked for"
+    );
+}
