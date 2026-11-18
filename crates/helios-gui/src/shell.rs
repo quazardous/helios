@@ -1293,6 +1293,16 @@ impl Shell {
         // The workspace's copy of the layout follows egui-pop's save of
         // each change (`layout.changed`).
         shell.listen_layout_changed();
+        // The nodes' relayable facts reach the node listeners from the
+        // application bus's relay, once (`crate::node_events`).
+        let bus = shell.core.app.handle().bus();
+        for refused in shell
+            .core
+            .node_events
+            .attach(&*bus, crate::FACTS.iter().copied())
+        {
+            shell.notes.push(format!("node events: {refused}"));
+        }
         // The Settings app reads the Storage page's values through the
         // read kernel, away from the frame.
         shell.attach_reads();
@@ -7633,6 +7643,12 @@ impl Shell {
         self.copied_image();
         self.job_notices();
         self.library_walks_frame(&ctx);
+        if !self.core.node_events.wakes() {
+            let ctx = ctx.clone();
+            self.core
+                .node_events
+                .set_wake(Arc::new(move || ctx.request_repaint()));
+        }
         self.follow_queue(&ctx);
         self.menus_ui(&ctx);
         self.rule_editor_ui(&ctx);

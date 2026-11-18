@@ -1,26 +1,39 @@
-//! The events of the nodes the desktop is connected to, on the shell bus.
+//! The events of the nodes the desktop is connected to, in one
+//! listener table.
 //!
 //! Every node runs one bus for its whole process. The desktop follows
 //! each node it is connected to through **one relay**: a remote node's
 //! [`crate::relay::Relay`] (one `events.subscribe` on its inspect
 //! endpoint, all kinds, resumed from the last sequence number), the
-//! desktop's own in-process node through a [`LocalRelay`]. A relay
-//! republishes the events listeners want on the shell bus, with source
-//! `node:<name>` and the node's own envelope in the payload
-//! (`{"node", "event"}`): its `seq`, `cause`, `source`, `kind` and
-//! `payload`, in the node's numbering.
+//! desktop's own in-process node through a [`LocalRelay`]. A node's facts
+//! reach the listeners of [`NodeEvents`] by one of two paths, never both:
+//!
+//! - **Relayable kinds** (`FactDecl::relayable`: the decisions, the
+//!   library's imports, a settings layer changed, an export written),
+//!   when the desktop's application bus has a relay: the relay link takes
+//!   them in once, on the desktop's fact bus, with source
+//!   `relayed:<name>` (`bus_contract::Relay::ingest`). [`NodeEvents`]
+//!   hears them as one named listener (`helios.node-events`) of each
+//!   relayable fact point ([`NodeEvents::attach`]), beside the points'
+//!   other listeners; the event stream leaves them out.
+//! - **Every other kind** (untyped, or a desktop without a relay): the
+//!   event stream republishes the kinds listeners want on the shell bus,
+//!   with source `node:<name>` and the node's own envelope in the payload
+//!   (`{"node", "event"}`), as the shell's record, and hands them to the
+//!   listeners.
 //!
 //! Windows, panels and services never subscribe to a node themselves:
 //! they ask [`NodeEvents::listen`], under an id of their own, for the
 //! kinds they need by pattern (`volume.*`, `settings.layerChanged`,
 //! `storage.*`, `*`), and read [`NodeEvent`]s from their [`Listener`].
-//! [`NodeEvents::listeners`] says who listens to what (agents, the
-//! inspector); a listener dropped stops being listed and asked for.
+//! [`NodeEvents::listeners`] is the one table of who listens to what
+//! (agents, the inspector); a listener dropped stops being listed and
+//! asked for. No listener holds a subscription of its own to a bus.
 //!
 //! - **Resume and resync.** A relay that loses its link resumes from the
 //!   last event it relayed, so a listener sees no event twice and misses
 //!   none. When it cannot (the node restarted, or its journal no longer
-//!   holds what was missed), every listener gets a [`RESYNC`] event for
+//!   holds what was missed), every listener gets one [`RESYNC`] event for
 //!   that node: read the state again.
 //! - **Round trip.** A window sends a command to the node; the facts come
 //!   back as events. [`NodeEvent::event`] keeps the node's `cause` (the
@@ -32,13 +45,14 @@
 //!   own vault and viewport events stay on their buses (process-local,
 //!   high rate): a [`LocalRelay`] never forwards [`INTERNAL`] kinds.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use helios_core::{Bus, Envelope};
+use egui_pop::api::bus::bus_contract::{self, ListenOpts};
+use helios_core::{Bus, Envelope, Fact, FactDecl};
 use serde_json::{Value, json};
 
 /// What a node's source starts with on the shell bus: `node:<name>`.
@@ -51,6 +65,8 @@ pub const RESYNC: &str = "node.resync";
 pub const INTERNAL: [&str; 3] = ["vault.", "edit.", "engine."];
 /// The kinds the jobs relay carries, never relayed here.
 const JOBS: &str = "job.";
+/// The id of [`NodeEvents`]' listener on each relayable fact point.
+pub const LISTENER: &str = "helios.node-events";
 
 /// A kind as the bus names it (`&'static`): each distinct kind is kept
 /// once for the process.
@@ -65,25 +81,103 @@ pub fn intern(kind: &str) -> &'static str {
     k
 }
 
-/// The nodes' events on the shell bus: where relays publish and
-/// listeners listen. Cloned, it is the same.
+/// What wakes the window when a listener has something to read.
+type Wake = Arc<dyn Fn() + Send + Sync>;
+
+/// The nodes' events: where relays hand them and listeners listen.
+/// Cloned, it is the same.
 #[derive(Clone)]
 pub struct NodeEvents {
+    /// The shell's bus: the record of what the event stream handed on.
     bus: Arc<Bus>,
     /// Who listens to what, by a number of the listener's own.
     listening: Arc<Mutex<Listening>>,
+    /// The kinds the application bus's relay takes in
+    /// ([`NodeEvents::attach`]): the event stream leaves them out.
+    relayed: Arc<Mutex<BTreeSet<&'static str>>>,
+    /// Wakes the window once a listener has something to read.
+    wake: Arc<Mutex<Option<Wake>>>,
     /// The desktop's own node, followed in process (one relay per bus).
     local: Arc<Mutex<Vec<LocalRelay>>>,
 }
 
 impl NodeEvents {
-    /// Republishing on `bus` (the shell's).
+    /// Recording on `bus` (the shell's).
     pub fn new(bus: Arc<Bus>) -> Self {
         Self {
             bus,
             listening: Arc::default(),
+            relayed: Arc::default(),
+            wake: Arc::default(),
             local: Arc::default(),
         }
+    }
+
+    /// Hears the relayable kinds of `tables` taken in by `app`'s relay
+    /// (the desktop's application bus): one listener ([`LISTENER`]) on
+    /// each relayable fact point, which hands a fact relayed from a node
+    /// (source `relayed:<name>`) to the listeners that want it. From
+    /// then on the event stream leaves those kinds out, so each fact
+    /// comes once. Nothing on a bus without a relay. What the bus
+    /// refused, as text.
+    pub fn attach<'a>(
+        &self,
+        app: &dyn bus_contract::Bus,
+        tables: impl IntoIterator<Item = &'a [FactDecl]>,
+    ) -> Vec<String> {
+        if app.relay().is_none() {
+            return Vec::new();
+        }
+        let mut refused = Vec::new();
+        for point in tables
+            .into_iter()
+            .flatten()
+            .filter_map(|d| d.point)
+            .filter(|p| p.relay.is_some())
+        {
+            let me = self.clone();
+            let run: bus_contract::AnyListener = Arc::new(move |input, _| {
+                if let Some(fact) = input.downcast_ref::<Fact>() {
+                    me.heard(fact);
+                }
+                Ok(())
+            });
+            let opts = ListenOpts::new().owner("helios.node-events");
+            match app.listen_any(point.key(), LISTENER.to_string(), opts, run) {
+                Ok(()) => {
+                    self.relayed
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(point.id);
+                }
+                Err(e) => refused.push(format!("{}: {e}", point.id)),
+            }
+        }
+        refused
+    }
+
+    /// Whether facts of `kind` reach the listeners through the
+    /// application bus's relay ([`NodeEvents::attach`]), not the event
+    /// stream.
+    pub fn taken_in(&self, kind: &str) -> bool {
+        self.relayed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(kind)
+    }
+
+    /// Wakes the window with `wake` once a listener has something to
+    /// read (the shell's first frame gives it).
+    pub fn set_wake(&self, wake: Wake) {
+        *self.wake.lock().unwrap_or_else(PoisonError::into_inner) = Some(wake);
+    }
+
+    /// Whether the window is woken already ([`NodeEvents::set_wake`]).
+    pub fn wakes(&self) -> bool {
+        self.wake
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
     }
 
     /// The events of every node whose kind matches one of `patterns`
@@ -91,18 +185,23 @@ impl NodeEvents {
     /// listener ([`NodeEvents::listeners`]).
     pub fn listen(&self, id: &str, patterns: &[&str]) -> Listener {
         let patterns: Vec<String> = patterns.iter().map(|p| (*p).to_string()).collect();
+        let (tx, rx) = channel();
         let mut listening = self
             .listening
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         listening.next += 1;
         let number = listening.next;
-        listening
-            .by_number
-            .insert(number, (id.to_string(), patterns.clone()));
+        listening.by_number.insert(
+            number,
+            Entry {
+                id: id.to_string(),
+                patterns,
+                tx,
+            },
+        );
         Listener {
-            rx: self.bus.subscribe(),
-            patterns,
+            rx,
             number,
             listening: self.listening.clone(),
         }
@@ -116,7 +215,7 @@ impl NodeEvents {
             .unwrap_or_else(PoisonError::into_inner)
             .by_number
             .values()
-            .cloned()
+            .map(|e| (e.id.clone(), e.patterns.clone()))
             .collect()
     }
 
@@ -129,22 +228,26 @@ impl NodeEvents {
                 .unwrap_or_else(PoisonError::into_inner)
                 .by_number
                 .values()
-                .any(|(_, patterns)| patterns.iter().any(|p| matches(p, kind)))
+                .any(|e| e.wants(kind))
     }
 
-    /// Republishes `event` (a node's envelope, as its bus or its inspect
-    /// stream gives it) of node `node`, when a listener wants it.
+    /// Hands `event` (a node's envelope, as its bus or its inspect
+    /// stream gives it) of node `node` to the listeners that want it,
+    /// recorded on the shell bus; its number there.
     pub fn publish(&self, node: &str, event: &Value) -> Option<u64> {
         let kind = event["kind"].as_str()?;
         if !self.wants(kind) {
             return None;
         }
-        Some(self.bus.republish_value(
+        let kind = intern(kind);
+        let seq = self.bus.republish_value(
             &format!("{SOURCE}{node}"),
             None,
-            intern(kind),
+            kind,
             json!({ "node": node, "event": event }),
-        ))
+        );
+        self.deliver(&NodeEvent::of_value(node, kind, event));
+        Some(seq)
     }
 
     /// Tells every listener that node `node`'s events have a hole.
@@ -155,12 +258,63 @@ impl NodeEvents {
             "kind": RESYNC,
             "payload": { "node": node, "reason": reason },
         });
-        self.bus.publish_value(
+        let seq = self.bus.publish_value(
             &format!("{SOURCE}{node}"),
             None,
             RESYNC,
             json!({ "node": node, "event": event }),
-        )
+        );
+        self.deliver(&NodeEvent::of_value(node, RESYNC, &event));
+        seq
+    }
+
+    /// A fact of a relayable point, as its listener hears it: handed on
+    /// when a node's relay took it in.
+    fn heard(&self, fact: &Fact) {
+        let Some(node) = fact.source.strip_prefix(crate::relay::RELAYED) else {
+            return;
+        };
+        let event = NodeEvent {
+            node: node.to_string(),
+            event: Envelope {
+                seq: fact.seq,
+                mono_us: 0,
+                wall_ms: now_ms(),
+                source: fact.source.clone(),
+                cause: fact.cause,
+                kind: intern(&fact.kind),
+                payload: fact.payload.clone(),
+            },
+        };
+        self.deliver(&event);
+    }
+
+    /// Hands `event` to each listener that wants it (a [`RESYNC`] to
+    /// all), then wakes the window.
+    fn deliver(&self, event: &NodeEvent) {
+        let resync = event.is_resync();
+        let mut any = false;
+        {
+            let listening = self
+                .listening
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            for e in listening.by_number.values() {
+                if resync || e.wants(event.event.kind) {
+                    any |= e.tx.send(event.clone()).is_ok();
+                }
+            }
+        }
+        if any {
+            let wake = self
+                .wake
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if let Some(wake) = wake {
+                wake();
+            }
+        }
     }
 
     /// Follows the desktop's own node, in process, on its bus `bus`
@@ -174,6 +328,12 @@ impl NodeEvents {
     }
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
 /// Whether `kind` matches `pattern`: `*` every kind, `storage.*` (or
 /// `storage.`) every kind starting with `storage.`, else that kind alone.
 pub fn matches(pattern: &str, kind: &str) -> bool {
@@ -184,11 +344,25 @@ pub fn matches(pattern: &str, kind: &str) -> bool {
     }
 }
 
+/// One listener of the table: its id, its patterns and where its events
+/// go.
+struct Entry {
+    id: String,
+    patterns: Vec<String>,
+    tx: Sender<NodeEvent>,
+}
+
+impl Entry {
+    fn wants(&self, kind: &str) -> bool {
+        self.patterns.iter().any(|p| matches(p, kind))
+    }
+}
+
 /// The listeners, by a number of their own.
 #[derive(Default)]
 struct Listening {
     next: u64,
-    by_number: std::collections::BTreeMap<u64, (String, Vec<String>)>,
+    by_number: BTreeMap<u64, Entry>,
 }
 
 /// The desktop's own node's name on the shell bus.
@@ -200,28 +374,27 @@ pub struct NodeEvent {
     /// The node's name on the desktop.
     pub node: String,
     /// The node's envelope: `seq` and `cause` in the node's numbering
-    /// (`mono_us` means nothing outside the node).
+    /// (`mono_us` means nothing outside the node). A fact taken in by the
+    /// relay keeps the node's `cause`; its `seq` is the desktop fact
+    /// bus's, and its source `relayed:<name>`.
     pub event: Envelope,
 }
 
 impl NodeEvent {
-    /// The node's event of a shell bus envelope a relay published.
-    pub fn of(envelope: &Envelope) -> Option<NodeEvent> {
-        envelope.source.strip_prefix(SOURCE)?;
-        let node = envelope.payload["node"].as_str()?.to_string();
-        let e = &envelope.payload["event"];
-        Some(NodeEvent {
-            node,
+    /// Node `node`'s event of kind `kind`, from its envelope as JSON.
+    fn of_value(node: &str, kind: &'static str, e: &Value) -> NodeEvent {
+        NodeEvent {
+            node: node.to_string(),
             event: Envelope {
                 seq: e["seq"].as_u64().unwrap_or(0),
                 mono_us: e["mono_us"].as_u64().unwrap_or(0),
-                wall_ms: e["wall_ms"].as_u64().unwrap_or(envelope.wall_ms),
+                wall_ms: e["wall_ms"].as_u64().unwrap_or_else(now_ms),
                 source: e["source"].as_str().unwrap_or_default().to_string(),
                 cause: e["cause"].as_u64(),
-                kind: envelope.kind,
+                kind,
                 payload: e["payload"].clone(),
             },
-        })
+        }
     }
 
     /// Whether it says the node's events have a hole ([`RESYNC`]).
@@ -233,8 +406,7 @@ impl NodeEvent {
 /// The nodes' events of the kinds asked for ([`NodeEvents::listen`]).
 /// Dropped, it stops listening.
 pub struct Listener {
-    rx: Receiver<Envelope>,
-    patterns: Vec<String>,
+    rx: Receiver<NodeEvent>,
     number: u64,
     listening: Arc<Mutex<Listening>>,
 }
@@ -250,41 +422,19 @@ impl Drop for Listener {
 }
 
 impl Listener {
-    fn keep(&self, envelope: &Envelope) -> Option<NodeEvent> {
-        let wanted =
-            envelope.kind == RESYNC || self.patterns.iter().any(|p| matches(p, envelope.kind));
-        if wanted {
-            NodeEvent::of(envelope)
-        } else {
-            None
-        }
-    }
-
     /// The events heard so far, without waiting.
     pub fn try_iter(&self) -> impl Iterator<Item = NodeEvent> + '_ {
-        self.rx.try_iter().filter_map(|e| self.keep(&e))
+        self.rx.try_iter()
     }
 
-    /// The next event, waiting for it; `None` once the shell is gone.
+    /// The next event, waiting for it; `None` once nothing can come.
     pub fn recv(&self) -> Option<NodeEvent> {
-        loop {
-            let e = self.rx.recv().ok()?;
-            if let Some(n) = self.keep(&e) {
-                return Some(n);
-            }
-        }
+        self.rx.recv().ok()
     }
 
     /// The next event, waiting at most `timeout`.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<NodeEvent, RecvTimeoutError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            let e = self.rx.recv_timeout(left)?;
-            if let Some(n) = self.keep(&e) {
-                return Ok(n);
-            }
-        }
+        self.rx.recv_timeout(timeout)
     }
 }
 

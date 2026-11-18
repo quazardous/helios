@@ -5,13 +5,14 @@
 //! about, [`NodeLink`]) on a thread of its own, off the UI thread, with
 //! one subscription to all its events:
 //!
-//! - every event that is not a job's goes to
-//!   [`crate::node_events::NodeEvents`], which republishes the kinds
-//!   listeners want with source `node:<name>`. Once the link is back, the
-//!   relay resumes after the last event it read, so none is relayed
-//!   twice; when the node restarted or its journal no longer holds what
-//!   was missed, it starts over from the node's present and says
-//!   `node.resync` to the listeners;
+//! - every event that is not a job's, nor of a kind the second link
+//!   below takes in, goes to [`crate::node_events::NodeEvents`], which
+//!   hands the kinds listeners want to them, with source `node:<name>`.
+//!   Once the link is back, the relay resumes after the last event it
+//!   read, so none is relayed twice; when the node restarted or its
+//!   journal no longer holds what was missed, it starts over from the
+//!   node's present and says `node.resync` to the listeners (the second
+//!   link says it instead, when there is one: one resync per hole);
 //! - it reads the node's jobs whole (`describe jobs`), then follows its
 //!   `job.*` events after that point (`subscribe`, pushed by the node,
 //!   see `helios_inspect`), and republishes each on the shell's bus with
@@ -40,10 +41,13 @@
 //! `helios_inspect::Inspector::stream_relay`): each one `ingest`ed with
 //! source `relayed:<name>`, decoded by the codec the desktop declares for
 //! its point, and heard by that point's listeners as a fact published
-//! here. It resumes from its cursor; a node restarted (`restarted`) or a
-//! cursor the node's journal no longer holds (`gap`) says `node.resync`
-//! to the listeners, then goes on from the node's facts.
+//! here (`NodeEvents` among them, for its own listeners: those kinds
+//! come by this link only). It resumes from its cursor; a node restarted
+//! (`restarted`) or a cursor the node's journal no longer holds (`gap`)
+//! says `node.resync` to the listeners, then goes on from the node's
+//! facts.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -201,6 +205,7 @@ impl Relay {
     ) -> Result<Relay, String> {
         link.check()?;
         let closer_in: Arc<Mutex<Option<Closer>>> = Arc::default();
+        let taken_after = Arc::new(AtomicU64::new(NOT_TAKEN));
         let stop_in = match hooks.filter(|h| h.relay().is_some()) {
             None => None,
             Some(hooks) => {
@@ -213,6 +218,7 @@ impl Relay {
                     stop,
                     closer: closer_in.clone(),
                     cursor: None,
+                    taken_after: taken_after.clone(),
                 };
                 std::thread::Builder::new()
                     .name(format!("helios-relay-in-{}", link.name))
@@ -235,6 +241,7 @@ impl Relay {
             jobs: Vec::new(),
             lost_at: None,
             up: false,
+            takes_in: stop_in.as_ref().map(|_| taken_after),
         };
         std::thread::Builder::new()
             .name(format!("helios-relay-{}", link.name))
@@ -325,6 +332,11 @@ struct Follow {
     /// When the link dropped with jobs running.
     lost_at: Option<Instant>,
     up: bool,
+    /// When a second link takes in the node's relayable facts
+    /// ([`TakeIn`]): the node's `seq` after which their kinds are its
+    /// own ([`NOT_TAKEN`] until it is linked: an older node serves no
+    /// relay). Once linked, the resyncs are its own.
+    takes_in: Option<Arc<AtomicU64>>,
 }
 
 impl Follow {
@@ -389,6 +401,13 @@ impl Follow {
             .filter(|(i, last)| *i == instance && *last <= seq)
             .map(|(_, last)| *last);
         let mut resync = self.resume.is_some() && resume.is_none();
+        if resync && let Some(after) = &self.takes_in {
+            // Another run: the second link takes in its facts from its
+            // first.
+            let _ = after.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |a| {
+                (a != NOT_TAKEN).then_some(0)
+            });
+        }
         let (mut ack, mut client) = self.subscribe(resume.unwrap_or(seq))?;
         if resume.is_some() && ack["gap"] == true && ack["instance"] == jobs["instance"] {
             // What was missed is gone: start over from the jobs' point.
@@ -415,7 +434,13 @@ impl Follow {
                 json!({ "node": self.link.name, "up": true }),
             );
         }
-        if resync {
+        // With a second link up, a hole shows there too: it says the one
+        // resync.
+        let linked = self
+            .takes_in
+            .as_ref()
+            .is_some_and(|a| a.load(Ordering::SeqCst) != NOT_TAKEN);
+        if resync && !linked {
             self.events
                 .resync(&self.link.name, "the node's events were missed");
         }
@@ -437,11 +462,25 @@ impl Follow {
                     if event["seq"].as_u64().is_none_or(|n| n > seq) {
                         self.relay(event);
                     }
-                } else {
+                } else if !self.taken_in(event) {
                     self.events.publish(&self.link.name, event);
                 }
             }
         }
+    }
+
+    /// Whether `event`'s kind comes by the second link ([`TakeIn`]),
+    /// so the listeners hear it once.
+    fn taken_in(&self, event: &Value) -> bool {
+        let Some(after) = &self.takes_in else {
+            return false;
+        };
+        let after = after.load(Ordering::SeqCst);
+        after != NOT_TAKEN
+            && event["seq"].as_u64().is_some_and(|n| n > after)
+            && event["kind"]
+                .as_str()
+                .is_some_and(|k| self.events.taken_in(k))
     }
 
     /// Every event of the node after `since`, on a connection of its own.
@@ -602,6 +641,9 @@ impl Follow {
 /// The source of a node's facts taken in: `relayed:<name>`.
 pub const RELAYED: &str = "relayed:";
 
+/// [`TakeIn`] not linked yet: the event stream hands on every kind.
+const NOT_TAKEN: u64 = u64::MAX;
+
 /// The thread taking in a node's relayable facts.
 struct TakeIn {
     link: NodeLink,
@@ -615,6 +657,9 @@ struct TakeIn {
     /// taken in. `None` before the first link, which starts from the
     /// node's present.
     cursor: Option<helios_inspect::RelayCursor>,
+    /// The node's `seq` after which the relayable kinds come by this
+    /// link, shared with the event stream ([`Follow::taken_in`]).
+    taken_after: Arc<AtomicU64>,
 }
 
 impl TakeIn {
@@ -656,6 +701,14 @@ impl TakeIn {
         let run = cursor_of(&ack["next"]).run;
         if self.cursor.is_some() && ack["lost"].is_string() {
             self.resync(&ack["lost"]);
+        }
+        match skip_to {
+            // From the node's present on: what came before went by the
+            // event stream.
+            Some(present) => self.taken_after.store(present, Ordering::SeqCst),
+            // Another run, read from its first fact.
+            None if ack["lost"] == "restarted" => self.taken_after.store(0, Ordering::SeqCst),
+            None => {}
         }
         self.cursor = Some(match (self.cursor, skip_to) {
             (Some(c), None) if c.run == run => c,
