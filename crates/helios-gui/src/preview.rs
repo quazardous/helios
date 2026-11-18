@@ -559,7 +559,7 @@ mod tests {
             .unwrap();
     }
 
-    /// #5256 S4: under memory pressure, the shown photo's full-size step
+    /// Under memory pressure, the shown photo's full-size step
     /// is kept, so fitting it again demosaics nothing; once another photo
     /// is shown and the router lets it go, the pressure evicts it.
     #[test]
