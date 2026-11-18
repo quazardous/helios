@@ -177,6 +177,13 @@ their networks differ), `preview` (7), `thumb.256` and `thumb.1024` (8),
 in egui-pop, which is a library: Helios feeds it a budget from the
 service and reads its usage (see "egui-pop" below).
 
+`image.state` (in place): the image-state router's ready states
+(`helios-node-core`'s `image_states`), within their own RAM budget
+(`system.cache.states`). A state that keeps engine steps (a photo's
+full-size step) holds pins on them, not copies: its bytes count against
+the router's budget and stay in `render.step`'s usage, once. The shown
+photo's full-size step is pinned while shown.
+
 ### Scopes: shared pools and silos
 
 One service does not mean one pool. Entries live in a **scope**; the

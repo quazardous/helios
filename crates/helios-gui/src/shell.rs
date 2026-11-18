@@ -1170,7 +1170,7 @@ impl Shell {
             library,
             viewport,
             controls,
-            states,
+            states: states.clone(),
         });
         let shell_bus = jobs.bus().clone();
         let stack_review = Rc::new(RefCell::new(crate::stack_review::Review::on(
@@ -1220,6 +1220,7 @@ impl Shell {
             said: Rc::default(),
             now: 0.0,
             engine,
+            states,
             gpu: None,
             gpu_info: None,
             clip,
@@ -1892,12 +1893,21 @@ impl Shell {
     }
 
     /// The library's state, to show what it holds.
+    /// The image-state router every window's preview asks.
+    pub fn image_states(&self) -> &helios_node_core::image_states::ImageStates {
+        &self.core.states
+    }
+
     /// Registers Helios's listeners of `settings.changed` on the
     /// application's bus: `caches.budget` and `thumbs.budget`
     /// ([`crate::settings_changed`]).
     fn listen_settings_changed(&self) {
         let bus = self.core.app.handle().bus();
-        crate::settings_changed::listen_caches(&*bus, self.core.engine.clone());
+        crate::settings_changed::listen_caches(
+            &*bus,
+            self.core.engine.clone(),
+            self.core.states.clone(),
+        );
         crate::settings_changed::listen_thumbs(
             &*bus,
             self.focus.library.clone(),

@@ -126,6 +126,8 @@ pub(super) struct Core {
     /// The viewport engine and its render cache, shared by every window's
     /// viewport ([`crate::viewport::Viewport::on_engine`]).
     pub(super) engine: Arc<Engine>,
+    /// The image-state router on it, shared by every window's preview.
+    pub(super) states: helios_node_core::image_states::ImageStates,
     /// The render state the viewport's GPU path waits to be installed on
     /// (the process's one device).
     pub(super) gpu: Option<eframe::egui_wgpu::RenderState>,

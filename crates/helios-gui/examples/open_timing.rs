@@ -17,6 +17,12 @@
 //! own conditions (throttling, other tenants) are in the job's
 //! `conditions.json`.
 //!
+//! Then one return: two mid-sized raws opened in turn on one engine
+//! within a budget (1 GiB, the router's 1 GiB too), as the desktop holds
+//! the shown photo's full-size step (`preview::hold`, pinned while shown,
+//! kept after), then the first opened again: its fit should read the kept
+//! step, with no demosaic.
+//!
 //! Writes `<out>/open-timing.jsonl` (one line per run) and
 //! `<out>/open-timing.md` (the table).
 //!
@@ -173,10 +179,106 @@ fn main() {
             rows.push((name, mp, runs));
         }
     }
-    let table = table(&rows, a.runs, adapter.as_deref(), threads);
+    let mut table = table(&rows, a.runs, adapter.as_deref(), threads);
+    if files.len() >= 2 {
+        let mid = files.len() / 2;
+        let (first, second) = (&files[mid - 1], &files[mid]);
+        let line = match back_to_first(first, second, &bundle, gpu.as_ref(), &records) {
+            Ok(line) => line,
+            Err(e) => json!({"scenario": "back_to_first", "error": e}),
+        };
+        eprintln!("{line}");
+        writeln!(lines, "{line}").expect("the results file");
+        let _ = writeln!(
+            table,
+            "\nBack to the first photo ({} then {}, 1 GiB budgets): first fit {} ms, its fit again {} ms with {} demosaic call(s).",
+            line["first"].as_str().unwrap_or("?"),
+            line["second"].as_str().unwrap_or("?"),
+            line["first_fit_ms"],
+            line["back_fit_ms"],
+            line["back_demosaic_calls"],
+        );
+    }
     print!("{table}");
     let md = a.out.join("open-timing.md");
     std::fs::write(&md, table).unwrap_or_else(|e| panic!("{}: {e}", md.display()));
+}
+
+/// Opens `first`, then `second`, then `first` again on one engine, the
+/// shown photo's full-size step held as the desktop's preview follower
+/// holds it: the return's fit time and demosaic calls.
+fn back_to_first(
+    first: &Path,
+    second: &Path,
+    bundle: &helios_template::Bundle,
+    gpu: Option<&Arc<helios_gpu::Gpu>>,
+    records: &std::sync::Mutex<Vec<Record>>,
+) -> Result<serde_json::Value, String> {
+    use helios_node_core::image_states::ImageStates;
+    const GIB: u64 = 1 << 30;
+    let engine = Arc::new(Engine::with_budget(
+        Arc::new(Bus::new()),
+        Some(GIB as usize),
+    ));
+    if let Some(g) = gpu {
+        engine.attach_accelerator(g.clone());
+    }
+    let states = ImageStates::new(
+        engine.bus().clone(),
+        helios_node_core::image_states::THREADS,
+    );
+    states.set_budget(Some(GIB));
+    let mut pin = None;
+    let mut show = |path: &Path| -> Result<(Arc<Graph>, NodeId, Region, f64), String> {
+        let start = Instant::now();
+        let (graph, node) = helios_gui::templates::develop_file(path, bundle)?;
+        let extent = graph
+            .extent(node)
+            .map_err(|e| e.to_string())?
+            .ok_or("no extent")?;
+        let graph = Arc::new(graph);
+        let held = helios_gui::preview::hold(
+            &states,
+            &engine,
+            &graph,
+            node,
+            "output",
+            extent,
+            helios_core::Priority::Interactive,
+        )
+        .map_err(|e| e.to_string())?;
+        let (_, fit, _, _) = concurrent(&engine, &graph, node, extent, true, start);
+        if let Some(mut held) = held {
+            held.wait(std::time::Duration::from_mins(10))
+                .map_err(|e| e.to_string())?;
+            // The new pin first, then the old one goes.
+            pin = Some(states.pin(held.key()));
+        }
+        Ok((graph, node, extent, fit))
+    };
+    let (graph, node, extent, first_fit) = show(first)?;
+    show(second)?;
+    records
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    let start = Instant::now();
+    let (_, back_fit, _, _) = concurrent(&engine, &graph, node, extent, true, start);
+    let mut run = Run::default();
+    from_spans(
+        &mut run,
+        &records.lock().unwrap_or_else(PoisonError::into_inner),
+    );
+    let name = |p: &Path| {
+        p.file_name()
+            .map_or_else(String::new, |f| f.to_string_lossy().into_owned())
+    };
+    Ok(json!({
+        "scenario": "back_to_first", "first": name(first), "second": name(second),
+        "first_fit_ms": first_fit, "back_fit_ms": back_fit,
+        "back_demosaic_calls": run.demosaics, "states": states.usage(),
+        "evicted_states": states.counters().evicted,
+    }))
 }
 
 /// Opens `path` on `engine` as the desktop does, and times it.

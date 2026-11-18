@@ -45,7 +45,7 @@ pub use brick::{
 pub use bus::{Bus, Envelope, Event};
 pub use curve::Curve;
 pub use describe::Describe;
-pub use engine::{Counters, Engine, FaultKind};
+pub use engine::{Counters, Engine, FaultKind, Hold};
 pub use error::Error;
 pub use graph::{Graph, LayoutHint, NodeId, passed_input};
 pub use image::{ContentHash, Image, Region};

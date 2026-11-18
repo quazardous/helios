@@ -131,13 +131,30 @@ pub fn render_budget(settings: &crate::config::Settings) -> Option<usize> {
         .cache_budget(helios_cache::physical_memory())
 }
 
+/// The setting of the image-state router's budget, in MiB (0: the default).
+pub const STATES_BUDGET: &str = "system.cache.states";
+
+/// The image-state router's budget in bytes from `mib`, the value of
+/// [`STATES_BUDGET`]: 0 for the default
+/// ([`helios_node_core::image_states::default_budget`]).
+pub fn states_budget(mib: f64) -> u64 {
+    match mib.max(0.0) as u64 {
+        0 => helios_node_core::image_states::default_budget(helios_cache::physical_memory()),
+        mib => mib << 20,
+    }
+}
+
 /// Applies the cache settings to the desktop: the RAM tier's budget
 /// (`system.cache.budget` / `share`) to the cache service and to the
-/// engine the viewport, previews and exports render with.
+/// engine the viewport, previews and exports render with; the photos'
+/// kept states' budget (`system.cache.states`) to the image-state router.
 pub fn apply_settings(shell: &Shell, settings: &crate::config::Settings) {
     let budget = render_budget(settings);
     Service::global().set_budget(helios_cache::Tier::Ram, budget.map(|b| b as u64));
     shell.viewport().engine().set_budget(budget);
+    shell
+        .image_states()
+        .set_budget(Some(states_budget(settings.config().number(STATES_BUDGET))));
 }
 
 #[cfg(test)]

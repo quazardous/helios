@@ -496,6 +496,7 @@ pub const PLACES: &[(&str, &[&str])] = &[
         &[
             "system.cache.budget",
             "system.cache.share",
+            "system.cache.states",
             "system.cache.thumbnails",
             "system.cache.textures",
         ],
